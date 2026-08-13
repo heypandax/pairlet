@@ -465,6 +465,17 @@ interface DesktopModel {
      *  daemon hasn't answered with SessionLive yet (issue #82). ChatPane shows a loading transition for the
      *  target session instead of the blank "No session open" empty state, which read as "didn't respond". */
     val opening: Boolean get() = false
+
+    /** True when the last open never landed — the daemon didn't answer inside the repo's 8s window (issue
+     *  #235). The phone shows this as a slim banner over its own screens; the desktop's main pane had no
+     *  consumer at all, so a timed-out open dropped straight back to the blank "No session open" state,
+     *  which reads as "your click never happened". Distinct from [opening] and from an ordinary empty pane. */
+    val openFailed: Boolean get() = false
+
+    /** Re-send the open that failed — the failure pane's retry. Replays the same request (same workdir,
+     *  session, agent/mode/model), so a retry can't land under different flags than the click that failed. */
+    fun retryOpen() {}
+
     val chatTitle: String
     val chatAgent: AgentKind
     val chatWorkdir: String

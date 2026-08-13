@@ -24,6 +24,8 @@ import dev.ccpocket.app.ui.fleet.MachineOs
 import dev.ccpocket.app.ui.fleet.osFromName
 import dev.ccpocket.app.ui.folderName
 import dev.ccpocket.app.ui.modelLabelForAgent
+import dev.ccpocket.app.ui.normalizedDirKey
+import dev.ccpocket.app.ui.sameDirPath
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.app.ui.trimTrailingSep
 import dev.ccpocket.protocol.ActiveSession
@@ -505,19 +507,12 @@ class RepoDesktopModel(
     private var navGen = 0
     private val refilled = HashSet<String>() // accounts whose restored visits were already swept this run
 
-    /** Canonical identity of a workdir for RECENT-group dedup. Collapses $HOME → ~ (so the daemon's
-     *  absolute cwd like /Users/x/P and the new-session popover's tilde reseed ~/P name the SAME project
-     *  instead of splitting into two groups — issue #58), unifies separators, drops a trailing one, and
-     *  squeezes repeats. [tilde] is structural (matches /Users|/home layouts), so it converges even against
-     *  a REMOTE daemon whose $HOME the client can't expand. Comparison-only — never stored, so case is left
-     *  intact (a remote FS's case sensitivity is unknown, and the daemon already toRealPath()-canonicalizes). */
-    private val repeatSlash = Regex("/{2,}") // compiled once, not per normCwd call
-
-    private fun normCwd(path: String): String =
-        tilde(trimTrailingSep(path)).replace('\\', '/').replace(repeatSlash, "/")
+    /** Canonical identity of a workdir for RECENT-group dedup (issue #58) — see [normalizedDirKey], which
+     *  the repo's already-open guard (issue #235) reads too, so the two can't drift apart. */
+    private fun normCwd(path: String): String = normalizedDirKey(path)
 
     /** Whether two paths name the same project — the RECENT-group dedup identity (issue #58). */
-    private fun sameDir(a: String, b: String): Boolean = normCwd(a) == normCwd(b)
+    private fun sameDir(a: String, b: String): Boolean = sameDirPath(a, b)
 
     /** Upsert the live list under its dir before [openProject] points the repo somewhere else — this is
      *  also how a dir listed outside openProject (e.g. a restored chat's) enters RECENT. Converges the stored
@@ -864,6 +859,11 @@ class RepoDesktopModel(
 
     override val hasChat: Boolean get() = repo.convoId.value != null
     override val opening: Boolean get() = repo.opening.value // OpenSession in flight — ChatPane shows a loading transition (#82)
+    // #235: deliberately NOT auto-dismissed the way the phone's banner is — on the desktop this IS the main
+    // pane's content, and fading it out would put the user back on the blank empty state the report is about.
+    // It clears when the next open is asked for (openSession) or lands (SessionLive).
+    override val openFailed: Boolean get() = repo.openTimedOut.value
+    override fun retryOpen() { repo.retryOpen() }
     override val chatTitle: String get() = repo.chatTitle.value ?: "Chat"
     override val chatAgent: AgentKind get() = repo.sessionAgent.value ?: AgentKind.CLAUDE
     override val chatWorkdir: String get() = repo.workdir.value?.let { tilde(it) } ?: ""

@@ -121,8 +121,12 @@ import dev.ccpocket.app.resources.autorun_tighten
 import dev.ccpocket.app.resources.attach_menu
 import dev.ccpocket.app.resources.cancel
 import dev.ccpocket.app.resources.cancel_upload
+import dev.ccpocket.app.resources.action_retry
 import dev.ccpocket.app.resources.chat_no_session
 import dev.ccpocket.app.resources.chat_no_session_hint
+import dev.ccpocket.app.resources.chat_open_failed
+import dev.ccpocket.app.resources.chat_open_failed_hint
+import dev.ccpocket.app.resources.chat_open_failed_named
 import dev.ccpocket.app.resources.chat_opening
 import dev.ccpocket.app.resources.chat_opening_named
 import dev.ccpocket.app.resources.chat_you
@@ -236,9 +240,14 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         // transition for the TARGET session instead of the blank "No session open" state: that empty state
         // read as "the newly-opened session didn't respond" when ⌘K-switching (issue #82). `opening` clears
         // atomically with convoId on SessionLive, so this hands straight off to the live transcript — no
-        // EmptyChat flash in between.
+        // EmptyChat flash in between. And when the open never lands at all, say THAT (issue #235) instead
+        // of falling back to the same empty state a user who clicked nothing would see.
         Column(modifier.fillMaxSize().background(Tok.base)) {
-            if (model.opening) OpeningChat(model.chatTitle) else EmptyChat()
+            when {
+                model.opening -> OpeningChat(model.chatTitle)
+                model.openFailed -> FailedChat(model.chatTitle) { model.retryOpen() }
+                else -> EmptyChat()
+            }
         }
         return
     }
@@ -642,6 +651,34 @@ private fun OpeningChat(title: String) {
                 if (title.isBlank()) stringResource(Res.string.chat_opening) else stringResource(Res.string.chat_opening_named, title),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
                 textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** The open that never landed (issue #235). Same two-line shape as [EmptyChat] — this replaces it, it does
+ *  not add a layer — but it names the session the user actually asked for and offers the one action that
+ *  can help. Sticky by design: the desktop has nowhere else to put this, so it stays until the user retries
+ *  or opens something else. */
+@Composable
+private fun FailedChat(title: String, onRetry: () -> Unit) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                if (title.isBlank()) stringResource(Res.string.chat_open_failed) else stringResource(Res.string.chat_open_failed_named, title),
+                color = Tok.tx, fontFamily = Dk.ui, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                stringResource(Res.string.chat_open_failed_hint),
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, textAlign = TextAlign.Center,
+            )
+            Text(
+                stringResource(Res.string.action_retry),
+                color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(7.dp))
+                    .hoverFill(RoundedCornerShape(7.dp))
+                    .clickable(onClick = onRetry).padding(horizontal = 10.dp, vertical = 5.dp),
             )
         }
     }

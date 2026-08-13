@@ -14,6 +14,8 @@ import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.switcher_current
 import dev.ccpocket.app.resources.switcher_empty
+import dev.ccpocket.app.resources.switcher_open_idle
+import dev.ccpocket.app.resources.st_running
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.DirectoryEntry
@@ -61,8 +63,23 @@ class SessionSwitcherUiTest {
         assertPresent(runBlocking { getString(Res.string.switcher_current) })
         assertPresent("Fix flaky retry backoff")                       // …a live session in another project…
         assertPresent("relay")
+        assertPresent(runBlocking { getString(Res.string.st_running) }) // #229: explicit, not a color-only dot
         assertPresent("Wire up usage endpoint")                        // …and one only this device remembers,
         assertPresent("billing")                                       // whose project the daemon never listed
+    }
+
+    @Test
+    fun executingAndIdleOpenSessionsAreNamedDifferently() = runComposeUiTest {
+        setContent {
+            val repo = PocketRepository(rememberCoroutineScope(), account("acct-state-labels")).apply {
+                directories.add(liveDir("/w/running", "s-running", "Build release", executing = true))
+                directories.add(liveDir("/w/idle", "s-idle", "Review notes", executing = false))
+            }
+            PocketTheme { SessionSwitcherSheet(repo.workingSet(), onSelect = {}, onAllProjects = {}, onDismiss = {}) }
+        }
+        waitForIdle()
+        assertPresent(runBlocking { getString(Res.string.st_running) })
+        assertPresent(runBlocking { getString(Res.string.switcher_open_idle) })
     }
     /**
      * Demo mode answers the resulting OpenSession locally, so this exercises the real send path without a

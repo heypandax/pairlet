@@ -38,6 +38,23 @@ fun tilde(path: String): String =
  *  "C:\") intact — shared by the two new-session inputs (mobile NewPathSheet, desktop popover). */
 fun trimTrailingSep(s: String): String = s.trimEnd('/', '\\').ifEmpty { s }
 
+private val REPEAT_SLASH = Regex("/{2,}") // compiled once, not per normalizedDirKey call
+
+/** Canonical COMPARISON form of a workdir. Collapses $HOME → ~ (so a daemon's absolute cwd /Users/x/P and
+ *  the new-session popover's tilde reseed ~/P name the SAME directory instead of splitting — issue #58),
+ *  unifies separators, drops a trailing one, and squeezes repeats. [tilde] is structural (it matches
+ *  /Users|/home layouts), so it converges even against a REMOTE daemon whose $HOME this client can't
+ *  expand. Comparison-only — never stored, so case is left intact (a remote FS's case sensitivity is
+ *  unknown, and the daemon already toRealPath()-canonicalizes). */
+fun normalizedDirKey(path: String): String =
+    tilde(trimTrailingSep(path)).replace('\\', '/').replace(REPEAT_SLASH, "/")
+
+/** Whether two paths name the same directory (issue #58's identity, shared so the desktop's RECENT dedup
+ *  and the repo's already-open guard can never drift apart). A null is "no directory", which matches
+ *  nothing — not even another null. */
+fun sameDirPath(a: String?, b: String?): Boolean =
+    a != null && b != null && normalizedDirKey(a) == normalizedDirKey(b)
+
 /** Just the project folder ("cc-pocket") — for tight surfaces like the chat header's meta line, where
  *  even a tail-truncated path is noise. Handles both host separators and trailing slashes; a bare
  *  root ("/", "C:\") falls back to the path itself. */

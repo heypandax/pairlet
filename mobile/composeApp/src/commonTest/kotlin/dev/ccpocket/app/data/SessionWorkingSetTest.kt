@@ -85,6 +85,22 @@ class SessionWorkingSetTest {
         assertNull(r.first { it.sessionId == "s9" }.agent, "an older daemon's live row has no known backend")
     }
 
+    @Test
+    fun executingStateIsPreservedForEveryDaemonBackedAgentAndNeverInferredFromHistoryAlone() {
+        val agents = listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI)
+        val dirs = agents.mapIndexed { i, agent ->
+            dir("/w/${agent.name.lowercase()}", ActiveSession("s$i", agent = agent, executing = true))
+        } + DirectoryEntry(
+            path = "/w/history-only", name = "history-only", isDir = true,
+            open = false, hasSessions = true, sessionAgents = listOf(AgentKind.CODEX),
+        )
+
+        val running = runningSessions(dirs)
+        assertEquals(agents, running.mapNotNull { it.agent })
+        assertTrue(running.all { it.executing })
+        assertTrue(running.none { it.dirKey == "/w/history-only" }, "unknown process state must stay unlabelled")
+    }
+
     /**
      * "The session I just came from is the top row" must hold whether or not that session is still
      * working. Ordering only `recent` by visit made it conditional on something invisible to the user:

@@ -25,6 +25,7 @@ import dev.ccpocket.app.lock.AppLockController
 import dev.ccpocket.app.lock.createBiometrics
 import dev.ccpocket.app.theme.AccentTheme
 import dev.ccpocket.app.theme.ThemeMode
+import dev.ccpocket.app.ui.sameDirPath
 import dev.ccpocket.app.push.PushToken
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.telemetry.TelEvent
@@ -1043,12 +1044,48 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val switchingSession = mutableStateOf(false)
     val openTimedOut = mutableStateOf(false)                 // the daemon never answered an OpenSession within 8s — slim banner, auto-dismissed (issue #41)
     private var openGen = 0                                  // generation counter matching each openSession call to its own safety-net timer
+    private var openDispatchedGen = 0                        // current generation has reached its OpenSession send (#235 identity handoff)
+    /**
+     * Explicit navigation fence (issue #226). [sessionKey] intentionally survives [backToBrowse] so a
+     * draft keeps its durable key, but it therefore cannot also prove that the user still wants a chat
+     * route. Once the user backs out, late SessionLive re-announces from that same session are background
+     * state and must not bind [convoId] again. A later explicit [openSession] lowers the fence.
+     *
+     * Default false preserves the cold/test bootstrap seam where a first SessionLive establishes an
+     * otherwise-unbound view; every real browse action raises it before any late frame can arrive.
+     */
+    private var sessionNavigationFenced = false
     /** The workdir of an in-flight BRAND-NEW OpenSession (resumeId == null), armed by [openSession] and
      *  disarmed when its SessionLive answer lands (or the open fails / times out). A brand-new session has
      *  no sessionId to recognize its announce by, so the #219 identity guard in the SessionLive handler
      *  matches the answer on this workdir instead. Resume opens never need it — their announce carries the
      *  resumed sessionId, which [sessionKey] already pins. */
     private var pendingNewOpenWd: String? = null
+
+    /** One open request's full identity: everything [openSession] needs to REPLAY it (the desktop's retry)
+     *  and enough to tell two requests apart (the no-op guard). Issue #235. */
+    private data class OpenAttempt(
+        val wd: String,
+        val resumeId: String?,
+        val startMode: PermissionMode,
+        val title: String?,
+        val agent: AgentKind,
+        val startPermissionMode: String?,
+        val startModel: String?,
+    )
+
+    /** The open currently in flight, claimed SYNCHRONOUSLY by [openSession] before it launches (issue #235).
+     *  [opening] alone could not gate a double-click: it was raised inside the coroutine, so two clicks in
+     *  the same frame both got past it and the second one's CloseSession+OpenSession tore down the session
+     *  the first had just landed. Released on every terminal path — the SessionLive answer, a PocketError,
+     *  the 8s net, disconnect/demote — exactly where [pendingNewOpenWd] is, so a claim can never outlive
+     *  the request that made it. (The wire carries no request id; releasing on any of those is the
+     *  provably safe direction — an early release only re-enables a retry, it never opens anything.) */
+    private var openInFlight: OpenAttempt? = null
+
+    /** The last open asked for, kept PAST its terminal path so [retryOpen] can replay the same request —
+     *  the desktop's open-failed pane offers a retry and must not silently re-open under other flags. */
+    private var lastOpenAttempt: OpenAttempt? = null
     val autoFocusComposer = mutableStateOf(false)            // brand-new session: ChatScreen raises the keyboard once on landing (consumed there)
     val streaming = mutableStateOf(false)
     val observing = mutableStateOf(false) // viewing a session running outside the daemon (read-only tail)
@@ -1969,6 +2006,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         connected.value = false
         phase.value = ConnPhase.Connecting
         pendingOpen = null // a queued push-tap target is moot once the user drops the connection
+        // #235: so is the open claim — carrying it across a reconnect would make the same row's next click
+        // a permanent no-op, and its retry target names a machine we may never come back to
+        openInFlight = null; lastOpenAttempt = null
         attachedThisSession = false; daemonOffline = false; pairingInvalid = false
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
         handoffsLoaded.value = false // inbox mode's readiness proof dies with the link, same as the list
@@ -2124,6 +2164,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sessionsDir.value = null; sessions.clear()
         chatTitle.value = null; observing.value = false; streaming.value = false
         opening.value = false; openTimedOut.value = false; switching.value = false; switchingSession.value = false
+        openInFlight = null; lastOpenAttempt = null // #235: the claim + its retry target belong to the machine we're leaving
         autoFocusComposer.value = false
         clearAskQueue()
         messages.clear(); pendingImages.clear()
@@ -2366,11 +2407,32 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  - a fully unbound client (no view, no open in flight): nothing to protect, keep today's behavior
      *    (cold-start seams and a background announce while browsing both land here harmlessly).
      */
-    private fun acceptsSessionLive(f: SessionLive): Boolean =
-        f.convoId == convoId.value ||
+    private fun acceptsSessionLive(f: SessionLive): Boolean {
+        // #226: BACK is an authoritative navigation decision. The daemon may already have queued a
+        // SessionLive for the chat we just left (turn-state reannounce, close race, reconnect replay).
+        // sessionKey still names that chat for draft durability, so reject before consulting identity.
+        // An explicit open owns openInFlight and is allowed through; openSession also lowers the fence.
+        if (sessionNavigationFenced && openInFlight == null) return false
+        // #235: openSession claims this target synchronously, while sessionKey/pendingNewOpenWd are still
+        // assigned by the launched worker. During that narrow gap the previous chat can re-announce; the
+        // old guard would accept it by convoId, clear the new claim/opening state, and leave the worker's
+        // eventual open waiting behind an EmptyChat pane. No SessionLive can answer until THIS generation
+        // has actually sent OpenSession; after that, only its target may answer. Resume opens keep #219's
+        // session-id authority (the daemon may canonicalize the cwd beyond what the client can prove),
+        // while new sessions retain the existing workdir match (demo mode assigns their id immediately).
+        openInFlight?.let { target ->
+            if (openDispatchedGen != openGen) return false
+            return if (target.resumeId != null) {
+                f.sessionId == target.resumeId
+            } else {
+                sameDirPath(f.workdir, target.wd)
+            }
+        }
+        return f.convoId == convoId.value ||
             (f.sessionId != null && f.sessionId == sessionKey.value) ||
             (pendingNewOpenWd != null && f.workdir == pendingNewOpenWd) ||
             (!opening.value && convoId.value == null && sessionKey.value == null)
+    }
 
     // control-plane counterpart: Attached/PeerPresence/AuthError flow through handleControl, not handle.
     // Lets a test drive a (re)attach edge without a live transport — e.g. that Attached bumps connGen so
@@ -2531,6 +2593,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // session's live turn into the open transcript. Not our view's session → no state touched.
             is SessionLive -> if (acceptsSessionLive(f)) {
                 pendingNewOpenWd = null // the in-flight open (if any) is answered by this announce
+                openInFlight = null // …and so is its #235 claim — the next click on this row is a real request again
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
                 f.sessionId?.let { sessionKey.value = it }
@@ -2773,6 +2836,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // …and a failed switch must release the router, or the chat would hold an empty screen
                 opening.value = false; switchingSession.value = false // a failed open re-enables the one-tap entries right away
                 pendingNewOpenWd = null // #219: the failed open's marker must not admit a later background announce
+                openInFlight = null // #235: release the claim on the same edge — a refused open must stay retryable
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
                 // a dead claude process never sends TurnDone — clear the streaming state here
                 if (f.code == "process_exited" && (f.convoId == null || f.convoId == convoId.value)) {
@@ -4234,8 +4298,25 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Dismiss the inline rename-refusal feedback (Esc on the sidebar's rename row). */
     fun dismissRenameError() { renameError.value = null }
+    /** Whether ([wd], [resumeId]) names the conversation the chat is ALREADY showing (issue #235). Demands a
+     *  materialized identity on both sides: a brand-new open (resumeId == null) has none, so it must never
+     *  fold into "already open" just because the workdir agrees — that would make ⌘N in the current project
+     *  a permanent no-op. [convoId] (not [sessionKey] alone) is what proves a chat is open: sessionKey
+     *  deliberately survives [backToBrowse] as the draft key. Workdir compared under the shared [sameDirPath]
+     *  identity, so the daemon's absolute cwd and a raw `~/…` request (or a trailing separator) still name
+     *  the same directory. */
+    private fun alreadyOpen(wd: String, resumeId: String?): Boolean =
+        resumeId != null && convoId.value != null && sessionKey.value == resumeId && sameDirPath(workdir.value, wd)
+
+    /** Whether an open for the SAME target is already on the wire (issue #235). Keyed on the target's
+     *  identity only — not the whole [OpenAttempt] — because a second click is a duplicate however the row
+     *  spells the workdir or whatever title/flags the list happens to carry by then. */
+    private fun openInFlightFor(wd: String, resumeId: String?): Boolean =
+        openInFlight?.let { it.resumeId == resumeId && sameDirPath(it.wd, wd) } == true
+
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
     // the list applies it too — not just the new-session picker.
+    /** @return whether this request was actually sent — false means it was refused as a duplicate (#235). */
     fun openSession(
         wd: String,
         resumeId: String? = null,
@@ -4247,14 +4328,42 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // ladder (the session's remembered model, else the per-agent Settings default). Deliberately not
         // persisted anywhere: the pick is part of creating one session, not a new default.
         startModel: String? = null,
-    ) = scope.launch {
+    ): Boolean {
+        val attempt = OpenAttempt(wd, resumeId, startMode, title, agent, startPermissionMode, startModel)
+        // #235: the two refusals, both decided SYNCHRONOUSLY — the defect they fix is two clicks landing in
+        // the same frame, so any check that only ran inside the coroutine below was already too late.
+        //  (a) the same target is in flight: a second OpenSession restarts the very session the first is
+        //      about to land (observed: a resume re-Closed+re-Opened ~600ms after it landed, new convo).
+        //  (b) it IS the open conversation: the CloseSession+OpenSession pair below would tear down and
+        //      rebuild a session the user is looking at, blanking the transcript and the composer.
+        // A DIFFERENT target still goes through — latest-wins switching is unchanged (#165), and the losing
+        // open's late SessionLive is still refused by the #219 identity guard.
+        if (openInFlightFor(wd, resumeId) || alreadyOpen(wd, resumeId)) return false
+        sessionNavigationFenced = false // an explicit tap/push is the only way out of #226's browse fence
+        openInFlight = attempt
+        lastOpenAttempt = attempt
         opening.value = true // held until the daemon answers (SessionLive/PocketError) — 8s net below
         openTimedOut.value = false
+        val gen = ++openGen // ties the 8s safety net below to THIS open — a quick second open isn't cleared by the first one's timer
+        scope.launch { runOpen(attempt, gen) }
+        return true
+    }
+
+    /** Re-send the open that just failed (issue #235) — the desktop's open-failed pane's retry. Replays the
+     *  SAME request, so a retry can never land under different flags than the click that failed. */
+    fun retryOpen(): Boolean {
+        val a = lastOpenAttempt ?: return false
+        return openSession(a.wd, a.resumeId, a.startMode, a.title, a.agent, a.startPermissionMode, a.startModel)
+    }
+
+    /** The state switch + send of one accepted [openSession]. Split out only so the claim above stays
+     *  synchronous; everything here runs on [scope] exactly as it always did. */
+    private suspend fun runOpen(attempt: OpenAttempt, gen: Int) {
+        val (wd, resumeId, startMode, title, agent, startPermissionMode, startModel) = attempt
         promptPending = false // the pending marker belongs to the previous conversation's transcript
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // and so does its receipt deadline
         turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false; turnQueued.value = false // (issue #104) new session clears any ack→turn stall
         sessionDegraded.value = false; degradedSendArmed = false // per-session — SessionLive re-announces the truth
-        val gen = ++openGen // ties the 8s safety net below to THIS open — a quick second open isn't cleared by the first one's timer
         // Reclaim the current session ONLY if it's idle (or a read-only observe): a RUNNING turn stays
         // alive in the background — same rule as backToBrowse. Desktop switches sessions directly
         // (sidebar click → here, no backToBrowse in between), so an unconditional close was killing
@@ -4317,6 +4426,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
         // lastEventSeq = 0 (never null, via lastEventSeqFor after the reset above): full replay, but it
         // declares this client delta-capable so an observe view tails with deltas (issue #147)
+        if (gen == openGen) openDispatchedGen = gen // the matching SessionLive may own the view from here
         send(
             OpenSession(
                 wd,
@@ -4338,6 +4448,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             switchingSession.value = false
             openTimedOut.value = true // surfaced as a slim banner instead of the old silent spinner reset (issue #41)
             pendingNewOpenWd = null // #219: the open is dead — a later background announce must not claim it
+            openInFlight = null // #235: …and the claim dies with it, so the same row can be clicked again
         }
     }
 
@@ -5280,13 +5391,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     fun backToBrowse() {
+        fenceSessionNavigation()
         val c = convoId.value
         val dir = sessionsDir.value // non-null = we land on the session list: re-pull it so the rows reflect this session's run
         // observing or idle -> reclaim; still executing -> leave it running in the background.
         // One coroutine for both sends: the re-list must see the close, not race it.
-        val close = c != null && (observing.value || !streaming.value)
+        val closeConvo = c?.takeIf { observing.value || !streaming.value }
         scope.launch {
-            if (close && c != null) send(CloseSession(c))
+            closeConvo?.let { send(CloseSession(it)) }
             dir?.let { send(ListSessions(it)) }
         }
         convoId.value = null
@@ -5366,6 +5478,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Explicitly end the session now (force-reclaim the claude process), even if it is still running. */
     fun stopSession() {
+        fenceSessionNavigation()
         convoId.value?.let { c -> scope.launch { send(CloseSession(c)) } }
         streaming.value = false
         convoId.value = null
@@ -5379,8 +5492,23 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     fun backToDirectories() {
+        fenceSessionNavigation()
         sessionsDir.value = null
         sessions.clear()
+    }
+
+    /** Raise the #226 browse fence and abandon an open transition the user explicitly backed out of. */
+    private fun fenceSessionNavigation() {
+        sessionNavigationFenced = true
+        if (openInFlight != null || opening.value || switchingSession.value) {
+            openGen++ // invalidates the abandoned request's 8s safety-net coroutine
+            openInFlight = null
+            lastOpenAttempt = null
+            pendingNewOpenWd = null
+            opening.value = false
+            switchingSession.value = false
+            openTimedOut.value = false
+        }
     }
 
     internal companion object {

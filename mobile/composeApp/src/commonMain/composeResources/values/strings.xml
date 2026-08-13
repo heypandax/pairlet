@@ -82,6 +82,7 @@
     <string name="switcher_all_projects">All projects</string>
     <string name="switcher_empty">No other sessions yet</string>
     <string name="switcher_open">Switch session</string>
+    <string name="switcher_open_idle">Open</string>
     <string name="new_session_cta">＋ New session</string>
 
     <!-- ── Mobile UI 2.0 · session/chat state grammar ─────────────── -->
@@ -1026,6 +1027,9 @@
     <string name="chat_no_session_hint">Pick a project on the left, then open or start a session.</string>
     <string name="chat_opening">Opening session…</string>
     <string name="chat_opening_named">Opening %1$s…</string>
+    <string name="chat_open_failed">Couldn\'t open the session</string>
+    <string name="chat_open_failed_named">Couldn\'t open %1$s</string>
+    <string name="chat_open_failed_hint">The computer didn\'t respond.</string>
     <string name="chat_you">You</string>
     <string name="msg_no_response_click">no response yet — click to resend</string>
     <string name="msg_undelivered_reconnecting">not delivered yet — reconnecting…</string>

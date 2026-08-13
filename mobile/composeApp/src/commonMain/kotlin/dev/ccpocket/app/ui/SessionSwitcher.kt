@@ -248,9 +248,20 @@ private fun SwitcherRow(s: SessionSwitcherItem, onClick: (() -> Unit)?) {
                 Text(stringResource(Res.string.switcher_current), color = Tok.muted, fontSize = 12.sp)
                 Icon(Icons.Rounded.Check, null, tint = Tok.accent, modifier = Modifier.size(17.dp))
             }
-            // accent while mid-turn, calm green when merely alive — the same two-tone rule the chat header's
-            // connection dot follows, so "working" reads the same everywhere
-            s.running -> PulseDot(if (s.executing) Tok.accent else Tok.ok, size = 7.dp)
+            // #229: color alone was too easy to miss (and inaccessible), so name the exact distinction the
+            // daemon reports. Accent + “Running” means a real turn/background job; calm green + “Open” means
+            // the process is alive but idle. Unknown/external sessions render neither — never guess.
+            s.running -> Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PulseDot(if (s.executing) Tok.accent else Tok.ok, size = 7.dp)
+                Text(
+                    stringResource(if (s.executing) Res.string.st_running else Res.string.switcher_open_idle),
+                    color = if (s.executing) Tok.accent else Tok.muted,
+                    fontSize = 12.sp,
+                )
+            }
         }
     }
 }
