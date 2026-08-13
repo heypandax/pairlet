@@ -89,10 +89,10 @@ fun daemonHostName(): String? {
  * boot with claude missing (and vice versa) — but with NEITHER resolvable the daemon has nothing to drive,
  * so refuse to start with an actionable message. Null = at least one agent found, start normally.
  */
-internal fun missingAgentsMessage(claudeExe: java.nio.file.Path?, codexExe: java.nio.file.Path?, opencodeExe: java.nio.file.Path?, kimiExe: java.nio.file.Path? = null): String? =
-    if (claudeExe == null && codexExe == null && opencodeExe == null && kimiExe == null) {
-        "none of claude, codex, opencode, or kimi was found — install Claude Code, the Codex CLI, OpenCode, " +
-            "or the Kimi Code CLI, or point the daemon at one with --claude-bin / --codex-bin / --opencode-bin / --kimi-bin."
+internal fun missingAgentsMessage(claudeExe: java.nio.file.Path?, codexExe: java.nio.file.Path?, opencodeExe: java.nio.file.Path?, kimiExe: java.nio.file.Path? = null, zcodeExe: java.nio.file.Path? = null): String? =
+    if (claudeExe == null && codexExe == null && opencodeExe == null && kimiExe == null && zcodeExe == null) {
+        "none of claude, codex, opencode, kimi, or zcode was found — install a supported agent CLI or ZCode, " +
+            "or point the daemon at one with --claude-bin / --codex-bin / --opencode-bin / --kimi-bin / --zcode-bin."
     } else {
         null
     }
@@ -154,6 +154,7 @@ private class RunCmd : CliktCommand(name = "run") {
     private val codexBin by option("--codex-bin", help = "codex executable (default: auto-detect the installed Codex CLI)")
     private val opencodeBin by option("--opencode-bin", help = "opencode executable (default: auto-detect the installed OpenCode)")
     private val kimiBin by option("--kimi-bin", help = "kimi executable (default: auto-detect the installed Kimi Code CLI)")
+    private val zcodeBin by option("--zcode-bin", help = "zcode executable (default: auto-detect the official ZCode app/CLI)")
     private val relay by option("--relay", help = "relay wss base").default(DEFAULT_RELAY)
     private val local by option("--local", help = "run a LAN-only WebSocket server instead of dialing the relay").flag()
     private val directBind by option(
@@ -174,7 +175,8 @@ private class RunCmd : CliktCommand(name = "run") {
         val codexExe = runCatching { CodexLauncher.resolveExecutable(codexBin) }.getOrNull()
         val opencodeExe = runCatching { dev.ccpocket.daemon.opencode.OpenCodeLauncher.resolveExecutable(opencodeBin) }.getOrNull()
         val kimiExe = runCatching { dev.ccpocket.daemon.kimi.KimiLauncher.resolveExecutable(kimiBin) }.getOrNull()
-        missingAgentsMessage(exe, codexExe, opencodeExe, kimiExe)?.let { throw com.github.ajalt.clikt.core.CliktError(it) }
+        val zcodeExe = runCatching { dev.ccpocket.daemon.zcode.ZCodeLauncher.resolveExecutable(zcodeBin) }.getOrNull()
+        missingAgentsMessage(exe, codexExe, opencodeExe, kimiExe, zcodeExe)?.let { throw com.github.ajalt.clikt.core.CliktError(it) }
         // credential isolation (issue #69, opt-in via `config --isolated-claude-auth on` or the env
         // toggle): the daemon's claude gets its own CLAUDE_CONFIG_DIR — its OAuth token refreshes can't
         // log out a terminal claude sharing the machine. History/settings stay shared (symlinks).
@@ -193,6 +195,7 @@ private class RunCmd : CliktCommand(name = "run") {
                 AgentKind.CODEX to AgentBackendFactory { CodexBackend(codexBin) }, // resolves the binary lazily on first launch
                 AgentKind.OPENCODE to AgentBackendFactory { dev.ccpocket.daemon.opencode.OpenCodeBackend(opencodeBin) }, // resolves the binary lazily on first launch
                 AgentKind.KIMI to AgentBackendFactory { dev.ccpocket.daemon.kimi.KimiBackend(kimiBin) }, // resolves the binary lazily on first launch
+                AgentKind.ZCODE to AgentBackendFactory { dev.ccpocket.daemon.zcode.ZCodeBackend(zcodeBin) },
             ),
             prefs = prefs,
             claudeConfigDir = claudeHome,
@@ -200,6 +203,7 @@ private class RunCmd : CliktCommand(name = "run") {
             presetStore = presetStore,
             openCodeModels = dev.ccpocket.daemon.opencode.OpenCodeModelService(opencodeBin),
             kimiModels = dev.ccpocket.daemon.kimi.KimiModelService(kimiBin),
+            zcodeModels = dev.ccpocket.daemon.zcode.ZCodeModelService(),
             reviews = dev.ccpocket.daemon.review.ReviewService(),
             peerInboxFactory = { dev.ccpocket.daemon.review.PeerInboxService(it) },
         )
@@ -239,7 +243,7 @@ private class RunCmd : CliktCommand(name = "run") {
                 }.getOrNull()
             }
             val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl, hostname = hostName, gatewayBaseUrl = gatewayUrl)
-            echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — relay=$relay")
+            echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"} — relay=$relay")
             echo("account id: ${identity.accountId}")
             echo("(run `cc-pocket-daemon pair` in another terminal to add a phone)")
             // E2E-gated direct listener beside the relay: paired devices on this machine/LAN connect
@@ -260,6 +264,7 @@ private class RunCmd : CliktCommand(name = "run") {
                     add("run"); add("--relay"); add(relay)
                     claudeBin?.let { add("--claude-bin"); add(it) }
                     codexBin?.let { add("--codex-bin"); add(it) }
+                    zcodeBin?.let { add("--zcode-bin"); add(it) }
                 },
             )?.let { echo(it) }
             // A daemon is a singleton (owns the pair port + one relay identity). If another instance is
@@ -279,7 +284,7 @@ private class RunCmd : CliktCommand(name = "run") {
             // phone can only reach us once the user explicitly binds beyond loopback — show the
             // pairing URL/QR only then, never for a loopback bind the phone can't connect to.
             val lan = lanIp()
-            echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"}")
+            echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"}")
             echo("")
             if (host == "127.0.0.1") {
                 echo("  Bound to 127.0.0.1 (loopback only) — not reachable from your phone.")
@@ -764,6 +769,7 @@ private class ServiceInstallCmd : CliktCommand(name = "service-install") {
     private val relay by option("--relay").default(DEFAULT_RELAY)
     private val claudeBin by option("--claude-bin")
     private val codexBin by option("--codex-bin")
+    private val zcodeBin by option("--zcode-bin")
     private val apply by option("--apply", help = "actually write + load the service (default: print only)").flag()
 
     override fun run() {
@@ -773,6 +779,7 @@ private class ServiceInstallCmd : CliktCommand(name = "service-install") {
             add("--relay"); add(relay)
             claudeBin?.let { add("--claude-bin"); add(it) }
             codexBin?.let { add("--codex-bin"); add(it) }
+            zcodeBin?.let { add("--zcode-bin"); add(it) }
         }
         echo(ServiceInstaller.install(launcher, runArgs, apply))
     }

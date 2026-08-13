@@ -407,6 +407,7 @@ object SessionFilesService {
             AgentKind.CODEX -> codexScan(file, ::touch, ::record)
             AgentKind.OPENCODE -> { /* OpenCode uses SQLite, not file scanning */ }
             AgentKind.KIMI -> { /* KIMI Changes preview is P1 no-op (like OPENCODE); ACP transcript scan is P2 */ }
+            AgentKind.ZCODE -> { /* ZCode's session-store schema is not a stable public file contract */ }
         }
         return seen
     }
@@ -421,6 +422,7 @@ object SessionFilesService {
             AgentKind.CODEX -> CodexPaths.findSession(sessionId)
             AgentKind.OPENCODE -> null // OpenCode sessions are in SQLite, not individual files
             AgentKind.KIMI -> null // KIMI file-preview is P1 no-op (transcript format unverified pre-auth)
+            AgentKind.ZCODE -> null // fail-safe: never guess a transcript path from an opaque session id
         }
         return file?.takeIf { it.exists() }
     }

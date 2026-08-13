@@ -302,7 +302,8 @@ open class SeedDesktopModel : DesktopModel {
     override val chatModel: String get() = when (selected.agent) {
         AgentKind.CODEX -> "gpt-5.1-codex"
         AgentKind.OPENCODE -> "auto"
-        else -> "sonnet"
+        AgentKind.ZCODE -> "zai/glm-5"
+        AgentKind.CLAUDE, AgentKind.KIMI -> "sonnet"
     }
     override val chatMode = PermissionMode.DEFAULT
     override val streaming = true

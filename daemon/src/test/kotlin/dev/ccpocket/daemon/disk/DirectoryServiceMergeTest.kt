@@ -46,12 +46,15 @@ class DirectoryServiceMergeTest {
     private fun service(
         codex: Map<String, Long> = emptyMap(),
         opencode: Map<String, Long> = emptyMap(),
+        zcode: Map<String, Long> = emptyMap(),
         liveClaudeCwds: () -> Set<String> = { emptySet() },
         nowMillis: () -> Long = System::currentTimeMillis,
     ) = DirectoryService(
         projectsRoot = { projects },
         codexCwds = { codex },
         opencodeCwds = { opencode },
+        kimiCwds = { emptyMap() },
+        zcodeCwds = { zcode },
         liveClaudeCwds = liveClaudeCwds,
         nowMillis = nowMillis,
     )

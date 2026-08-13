@@ -80,6 +80,7 @@ import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
+import dev.ccpocket.protocol.PermissionMode
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -96,7 +97,7 @@ internal fun settingsDefaultModelOptions(
     val available = when (agent) {
         AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { it.second }
         AgentKind.CODEX -> discovered.ifEmpty { CODEX_MODEL_OPTIONS }
-        AgentKind.OPENCODE, AgentKind.KIMI -> discovered
+        AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE -> discovered
     }
     return (listOf<String?>(null) + listOfNotNull(selected) + available.filter { it.isNotBlank() }).distinct()
 }
@@ -135,7 +136,7 @@ private val FONT_SCALE_STEPS: List<Float> = listOf(0.85f, 1.0f, 1.15f, 1.3f, 1.4
 fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     // Capability rows come from the installed CLI/model cache. A recomposition after the reply replaces
     // the loading/empty state; no global max/ultra list is guessed in the client.
-    LaunchedEffect(repo.defaultAgent.value) { repo.fetchModels(repo.defaultAgent.value) }
+    LaunchedEffect(repo.sessionDefaultAgent) { repo.fetchModels(repo.sessionDefaultAgent) }
     // Approvals (issue #201). Daemon truth: the Security page shows the preference only once an
     // ApprovalPrefs reply proves this daemon can honor it. Asked HERE rather than on that page, so the
     // answer has already arrived by the time it is opened.
@@ -380,14 +381,14 @@ private fun GeneralPage(repo: PocketRepository) {
 /** What a NEW session starts with, plus the two windows that decide how its usage is measured. */
 @Composable
 private fun AgentDefaultsPage(repo: PocketRepository) {
-    val defaultAgent = repo.defaultAgent.value
+    val defaultAgent = repo.sessionDefaultAgent
     // Claude Auto is a native Claude-only mode. Keep the stored value when the user merely inspects
     // another backend, but render that backend's real launch mode (the shared PermissionMode fallback).
     val effectivePermissionMode = repo.defaultPermissionMode.value.takeIf { defaultAgent == AgentKind.CLAUDE }
     AgentDefaultsSummary(repo, defaultAgent)
     SectionLabel(stringResource(Res.string.settings_default_agent))
     SettingsChoiceRows(
-        options = listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI),
+        options = repo.availableAgents,
         selected = defaultAgent,
         label = ::agentName,
     ) { repo.setDefaultAgent(it) }
@@ -509,7 +510,9 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
             Triple("claude", stringResource(Res.string.af_claude_only), Tok.accent),
             Triple("codex", stringResource(Res.string.af_codex_only), Tok.codex),
             Triple("opencode", stringResource(Res.string.af_opencode_only), Tok.opencode),
-        )
+        ) + if (repo.supportsAgent(AgentKind.ZCODE)) {
+            listOf(Triple("zcode", stringResource(Res.string.af_zcode_only), Tok.zcode))
+        } else emptyList()
         afOpts.forEach { (key, label, dot) ->
             val sel = repo.agentFilter.value == key
             // same thumb as SegmentedRow: selected fills Tok.accent (was a near-invisible Tok.raised).

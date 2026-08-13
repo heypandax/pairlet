@@ -26,6 +26,7 @@ class DirectoryService(
     private val codexCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.codex.CodexTranscriptScanner.cwdsByNewest() },
     private val opencodeCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.cwdsByNewest() },
     private val kimiCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.kimi.KimiTranscriptScanner.cwdsByNewest() },
+    private val zcodeCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.zcode.ZCodeTranscriptScanner.cwdsByNewest() },
     private val liveClaudeCwds: () -> Set<String> = LiveProcesses::claudeCwds,
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
@@ -68,6 +69,7 @@ class DirectoryService(
         liveByCwd: Map<String, List<ActiveSession>> = emptyMap(),
         includeOpencode: Boolean = true,
         includeKimi: Boolean = true,
+        includeZcode: Boolean = true,
     ): List<DirectoryEntry> {
         // canonical-keyed so ANY spelling mismatch (tilde, symlink, separators) between OpenSession's
         // workdir and a transcript's recorded cwd still matches
@@ -80,6 +82,7 @@ class DirectoryService(
         val codex = runCatching(codexCwds).getOrDefault(emptyMap())
         val opencode = if (includeOpencode) runCatching(opencodeCwds).getOrDefault(emptyMap()) else emptyMap()
         val kimi = if (includeKimi) runCatching(kimiCwds).getOrDefault(emptyMap()) else emptyMap()
+        val zcode = if (includeZcode) runCatching(zcodeCwds).getOrDefault(emptyMap()) else emptyMap()
         // issue #188: the App's agent filter needs PROJECT-level provenance, not just the backend of any
         // currently-live session. Keep it additive on DirectoryEntry so each client can apply its own
         // persisted filter without turning that preference into daemon-global state.
@@ -93,11 +96,15 @@ class DirectoryService(
         kimi.keys.forEach { cwd ->
             externalAgentsByKey.getOrPut(ProjectPaths.canonicalKey(cwd)) { linkedSetOf() }.add(AgentKind.KIMI)
         }
+        zcode.keys.forEach { cwd ->
+            externalAgentsByKey.getOrPut(ProjectPaths.canonicalKey(cwd)) { linkedSetOf() }.add(AgentKind.ZCODE)
+        }
         // merge every external source; keys keep each source's raw spelling here — grouped canonically below
         val allExternal = HashMap<String, Long>()
         codex.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
         opencode.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
         kimi.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
+        zcode.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
         if (allExternal.isEmpty()) return claude
         val known = claude.mapTo(HashSet()) { ProjectPaths.canonicalKey(it.path) }
         // spelling variants of one dir collapse into a group; the group's mtime is its max

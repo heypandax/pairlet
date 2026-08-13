@@ -10,6 +10,7 @@ import kotlin.test.assertTrue
 class MainStartupGateTest {
     private val claude = Path.of("/some/claude")
     private val codex = Path.of("/some/codex")
+    private val zcode = Path.of("/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs")
 
     @Test
     fun both_missing_refuses_startup_with_actionable_message() {
@@ -20,6 +21,8 @@ class MainStartupGateTest {
         assertTrue("--claude-bin" in msg, msg)
         assertTrue("--codex-bin" in msg, msg)
         assertTrue("opencode" in msg, msg)
+        assertTrue("zcode" in msg, msg)
+        assertTrue("--zcode-bin" in msg, msg)
     }
 
     @Test
@@ -27,6 +30,9 @@ class MainStartupGateTest {
 
     @Test
     fun claude_only_machine_starts() = assertNull(missingAgentsMessage(claude, null, null))
+
+    @Test
+    fun zcode_only_machine_starts() = assertNull(missingAgentsMessage(null, null, null, null, zcode))
 
     @Test
     fun both_present_starts() = assertNull(missingAgentsMessage(claude, codex, null))

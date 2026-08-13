@@ -132,6 +132,16 @@ class EntryUiTest {
             agentModeChoices(AgentKind.KIMI).any { it.mode == PermissionMode.ACCEPT_EDITS },
             "Kimi has no Accept edits",
         )
+        assertEquals(
+            listOf(
+                PermissionMode.DEFAULT,
+                PermissionMode.ACCEPT_EDITS,
+                PermissionMode.PLAN,
+                PermissionMode.BYPASS_PERMISSIONS,
+            ),
+            agentModeChoices(AgentKind.ZCODE).map { it.mode },
+            "ZCode build/edit/plan/yolo map onto the existing shared ladder",
+        )
         // OpenCode is not a ladder with rows disabled: it is one statement of what already happens
         val opencode = agentModeChoices(AgentKind.OPENCODE)
         assertEquals(1, opencode.size, "OpenCode has no ladder to choose from")
@@ -172,7 +182,7 @@ class EntryUiTest {
 
     @Test
     fun fullAccessAlwaysRoutesThroughTheConfirmation() {
-        for (agent in listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.KIMI)) {
+        for (agent in listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.KIMI, AgentKind.ZCODE)) {
             val full = agentModeChoices(agent, autoAvailable = true)
                 .single { it.mode == PermissionMode.BYPASS_PERMISSIONS }
             assertTrue(full.needsFullAccessConfirm(agent), "$agent full access must confirm before it starts")
@@ -187,9 +197,9 @@ class EntryUiTest {
 
     @Test
     fun everyAgentHasExactlyOneModeChoiceSet() {
-        // the four supported agents, and nothing invented alongside them
+        // the five supported agents, and nothing invented alongside them
         assertEquals(
-            setOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI),
+            setOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE),
             AgentKind.entries.toSet(),
         )
         AgentKind.entries.forEach { a ->

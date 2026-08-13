@@ -198,6 +198,7 @@ import dev.ccpocket.app.ui.handoff.HandoffRibbon
 import dev.ccpocket.app.ui.handoff.HandoffStatusChip
 import dev.ccpocket.app.ui.handoff.HandoffUiStatus
 import dev.ccpocket.app.ui.handoff.HandoffWatchBar
+import dev.ccpocket.app.ui.handoff.canInitiateSessionHandoff
 import dev.ccpocket.app.ui.handoff.elapsedLabel
 import dev.ccpocket.app.ui.handoff.expiresCountdown
 import dev.ccpocket.app.ui.handoff.inviteBlob
@@ -1197,7 +1198,7 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
         if (showNewPath) NewPathSheet(
             // drilled into a folder → seed it as the parent so the user types only the new project's name (issue #7)
             parent = base.takeIf { it.length > 1 }, // seed the current location (root prefix or a drilled folder) so "type the rest of the path" is obvious (#32/#7)
-            agent = repo.defaultAgent.value,
+            agent = repo.sessionDefaultAgent,
             mode = repo.defaultMode.value,
             onDismiss = { showNewPath = false },
             onOptions = { p -> showNewPath = false; newPathTarget = p },
@@ -1219,9 +1220,10 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                 workdir = path,
                 selected = repo.defaultMode.value,
                 selectedNativeMode = repo.defaultPermissionMode.value,
-                agent = repo.defaultAgent.value,
+                agent = repo.sessionDefaultAgent,
                 computer = repo.paired.value?.displayName(),
                 autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+                availableAgents = repo.availableAgents,
                 modelsFor = { a -> repo.newSessionModelChoices(a) },
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
                 onAgentPicked = { a -> repo.fetchModels(a) },
@@ -1695,12 +1697,14 @@ private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
     val color = when (filter) {
         "codex" -> Tok.codex
         "opencode" -> Tok.opencode
+        "zcode" -> Tok.zcode
         else -> Tok.accent
     }
     val label = stringResource(
         when (filter) {
             "codex" -> Res.string.af_codex_only
             "opencode" -> Res.string.af_opencode_only
+            "zcode" -> Res.string.af_zcode_only
             else -> Res.string.af_claude_only
         }
     )
@@ -1717,6 +1721,18 @@ private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
         Text("✕", color = color, fontSize = 12.sp)
     }
 }
+
+internal fun filterSessionsByAgent(sessions: List<SessionSummary>, filter: String): List<SessionSummary> =
+    sessions.filter { session ->
+        when (filter) {
+            "claude" -> (session.agent ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
+            "codex" -> session.agent == AgentKind.CODEX
+            "opencode" -> session.agent == AgentKind.OPENCODE
+            "kimi" -> session.agent == AgentKind.KIMI
+            "zcode" -> session.agent == AgentKind.ZCODE
+            else -> true
+        }
+    }
 
 @OptIn(ExperimentalMaterial3Api::class) // PullToRefreshBox
 @Composable
@@ -1791,15 +1807,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 modifier = Modifier.padding(top = 4.dp),
             )
             val af = repo.agentFilter.value
-            val filtered = repo.sessions.filter {
-                when (af) {
-                    "claude" -> (it.agent ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
-                    "codex" -> it.agent == AgentKind.CODEX
-                    "opencode" -> it.agent == AgentKind.OPENCODE
-                    "kimi" -> it.agent == AgentKind.KIMI
-                    else -> true
-                }
-            }
+            val filtered = filterSessionsByAgent(repo.sessions, af)
             val split = splitSessions(
                 sessionRows(
                     filtered,
@@ -1901,7 +1909,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
             // one tap starts right away with the persisted defaults (openSession's own fallbacks); the
             // trailing chip shows those defaults and opens the full agent+mode picker instead
             NewSessionDock(starting = starting, onStart = { repo.openSession(dir) }) {
-                SessionDefaultsChip(repo.defaultAgent.value, repo.defaultMode.value, enabled = !starting) { pickMode = true }
+                SessionDefaultsChip(repo.sessionDefaultAgent, repo.defaultMode.value, enabled = !starting) { pickMode = true }
             }
         }
         if (pickMode) {
@@ -1910,9 +1918,10 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 workdir = dir,
                 selected = repo.defaultMode.value,
                 selectedNativeMode = repo.defaultPermissionMode.value,
-                agent = repo.defaultAgent.value,
+                agent = repo.sessionDefaultAgent,
                 computer = repo.paired.value?.displayName(),
                 autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+                availableAgents = repo.availableAgents,
                 modelsFor = { a -> repo.newSessionModelChoices(a) },
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
                 onAgentPicked = { a -> repo.fetchModels(a) },
@@ -2000,7 +2009,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     val activeHandoff = repo.activeHandoff.value
     val hoStatus = activeHandoff?.status
     val hoIsRecipient = activeHandoff?.let { repo.isHandoffRecipient(it) } == true
+    val canInitiateHandoff = (repo.sessionAgent.value ?: AgentKind.CLAUDE).canInitiateSessionHandoff()
     LaunchedEffect(repo.convoId.value) { if (repo.convoId.value != null) repo.listHandoffs() }
+    LaunchedEffect(canInitiateHandoff) { if (!canInitiateHandoff) showHandoffDraft = false }
     // a fresh invite closes the draft sheet and opens the invite sheet (lastHandoffInvite drives it)
     LaunchedEffect(repo.lastHandoffInvite.value) { if (repo.lastHandoffInvite.value != null) showHandoffDraft = false }
     // the recipient's return lands → their sheet closes on the daemon's state flip
@@ -2737,7 +2748,11 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 onDismiss = { showScheduleSheet = false },
             )
         }
-        if (showSessionInfo) SessionInfoSheet(repo, onDismiss = { showSessionInfo = false }, onHandoff = { showHandoffDraft = true })
+        if (showSessionInfo) SessionInfoSheet(
+            repo,
+            onDismiss = { showSessionInfo = false },
+            onHandoff = if (canInitiateHandoff) ({ showHandoffDraft = true }) else null,
+        )
         if (showQuickActions) {
             QuickActionsSheet(
                 repo,
@@ -2746,11 +2761,11 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 onFiles = { repo.fetchChangedFiles(); showChangedFiles = true },
                 onHelp = { showHelp = true },
                 // entry only while the session is handoff-free — one non-terminal handoff per session
-                onHandoff = if (activeHandoff == null) ({ showHandoffDraft = true }) else null,
+                onHandoff = if (canInitiateHandoff && activeHandoff == null) ({ showHandoffDraft = true }) else null,
             ) { showQuickActions = false }
         }
         // ── session handoff sheets (design Frames 2 / 3a / 8; contacts increment Frames 1/2) ──
-        if (showHandoffDraft) {
+        if (showHandoffDraft && canInitiateHandoff) {
             val hoDefaultRequest = stringResource(Res.string.ho_default_request)
             LaunchedEffect(Unit) { repo.listCollaborators() }
             HandoffDraftSheet(

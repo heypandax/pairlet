@@ -45,6 +45,7 @@ enum class AgentKind {
     @SerialName("codex") CODEX,
     @SerialName("opencode") OPENCODE,
     @SerialName("kimi") KIMI,
+    @SerialName("zcode") ZCODE,
 }
 
 /** OPENCODE's wire name, shared by [ClientCaps.supportsAgents] declarations on both ends — the
@@ -55,6 +56,22 @@ const val AGENT_WIRE_OPENCODE = "opencode"
  *  baseline vocabulary, so the daemon must not emit `agent:"kimi"` to a peer whose [ClientCaps.supportsAgents]
  *  never listed it (an already-shipped client hard-fails the whole Envelope on the unknown enum). */
 const val AGENT_WIRE_KIMI = "kimi"
+
+/** ZCode's wire name (issue #228). Like other post-baseline agents, this must be declared in
+ * [ClientCaps.supportsAgents] before the daemon can safely emit `agent:"zcode"` to an App. */
+const val AGENT_WIRE_ZCODE = "zcode"
+
+/** Agent backends this daemon build knows how to route. Unlike [ClientCaps] (app -> daemon), this
+ * list is advertised in [DaemonInfo] so a newer app never sends a post-baseline enum value to an
+ * older daemon that would coerce it to Claude. Keep the baseline names too: the field is an honest
+ * complete capability list even though current apps only need its ZCode bit for compatibility. */
+val DAEMON_SUPPORTED_AGENT_WIRES = listOf(
+    "claude",
+    "codex",
+    AGENT_WIRE_OPENCODE,
+    AGENT_WIRE_KIMI,
+    AGENT_WIRE_ZCODE,
+)
 
 /** Codex model ids the app exposes as first-class presets. */
 val CODEX_MODEL_IDS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex")
@@ -81,7 +98,7 @@ fun isOpenCodeModelId(model: String?): Boolean = model?.trim()?.let { '/' in it 
  * gateway "vendor/model" that no shape heuristic can place), and an over-eager guard here rejected
  * daemon-reported models and locked the picker. Only two facts are hard:
  *  - OpenCode hangs silently on anything that isn't provider/model;
- *  - Claude aliases (opus/sonnet/...) are meaningless to the other two backends.
+ *  - Claude aliases (opus/sonnet/...) are meaningless to the non-Claude backends.
  * Everything else passes — a genuinely wrong id fails loudly on the daemon side instead.
  */
 fun isModelCompatibleWithAgent(agent: AgentKind, model: String?): Boolean {
@@ -94,6 +111,9 @@ fun isModelCompatibleWithAgent(agent: AgentKind, model: String?): Boolean {
         // claude default (opus/sonnet/…) is meaningless to kimi and would launch it against a bad --model.
         // V8 can tighten this once the real `kimi provider catalog list` id shape is known.
         AgentKind.KIMI -> m.lowercase() !in CLAUDE_MODEL_ALIAS_IDS
+        // ZCode's app-server takes a strict {providerId, modelId} reference. The daemon exposes that
+        // as "provider/model", so a bare/stale id must fall back to ZCode's configured main model.
+        AgentKind.ZCODE -> m.indexOf('/').let { it > 0 && it < m.lastIndex }
         AgentKind.CLAUDE -> true // gateway users run arbitrary ids, slashed OpenRouter-style included
     }
 }

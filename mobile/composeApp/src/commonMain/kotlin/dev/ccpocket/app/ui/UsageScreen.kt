@@ -491,7 +491,8 @@ private fun ModelRow(m: UsageModel, max: Long) {
     val color = when (m.agent) {
         AgentKind.CODEX -> Tok.codex
         AgentKind.OPENCODE -> Tok.opencode
-        else -> Tok.accent
+        AgentKind.ZCODE -> Tok.zcode
+        AgentKind.CLAUDE, AgentKind.KIMI -> Tok.accent
     }
     Column(Modifier.padding(vertical = 9.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
