@@ -1,5 +1,6 @@
 package dev.ccpocket.app.ui.session
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -11,7 +12,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.resources.Res
@@ -67,20 +71,35 @@ fun stateActionLabel(action: StateAction): String = stringResource(
 )
 
 /**
- * The state's mark. Diamond = intervention, square = failure, filled dot = running, ring = settled —
- * distinguishable with no colour at all, which is the point (Proofs · "legible in greyscale").
+ * The state's mark. Diamond = intervention, square = failure, filled dot = running, half-filled dot =
+ * settled but unseen, ring = settled — distinguishable with no colour at all, which is the point
+ * (Proofs · "legible in greyscale").
  */
 @Composable
-fun StateMarkGlyph(mark: StateMark, color: Color, size: Dp = 8.dp) {
+fun StateMarkGlyph(mark: StateMark, color: Color, size: Dp = 8.dp, strokeWidth: Dp = 1.5.dp) {
     when (mark) {
         // rotate() only turns the drawn square; the 8dp box keeps its layout footprint, so a diamond and a
         // dot sit on the same optical baseline instead of nudging the title beside them
         StateMark.DIAMOND -> Box(Modifier.size(size).rotate(45f).background(color))
         StateMark.SQUARE -> Box(Modifier.size(size).background(color))
         StateMark.DOT -> Box(Modifier.size(size).clip(CircleShape).background(color))
-        StateMark.RING -> Box(Modifier.size(size).clip(CircleShape).border(1.5.dp, color, CircleShape))
+        // one Canvas, not two overlapping Boxes: a layered half would show its seam at odd densities.
+        // Same box, same stroke and same footprint as RING — only the leading half is filled, so the two
+        // settled states differ by FILL rather than by colour (#239).
+        StateMark.HALF_DOT -> Canvas(Modifier.size(size)) {
+            val stroke = strokeWidth.toPx()
+            val d = this.size.minDimension - stroke
+            drawArc(color, 90f, 180f, useCenter = true, topLeft = Offset(stroke / 2, stroke / 2), size = Size(d, d))
+            drawCircle(color, radius = d / 2, style = Stroke(stroke))
+        }
+        StateMark.RING -> Box(Modifier.size(size).clip(CircleShape).border(strokeWidth, color, CircleShape))
     }
 }
+
+/** Sessions-master geometry: written state scales with type, and its decorative mark remains discernible. */
+internal fun sessionStateMarkSize(fontScale: Float): Dp = if (fontScale >= 1.5f) 14.dp else 10.dp
+
+internal val SessionStateMarkStroke: Dp = 2.dp
 
 /** A hairline rule — the only separator the low-container layout uses between list rows and turns. */
 @Composable

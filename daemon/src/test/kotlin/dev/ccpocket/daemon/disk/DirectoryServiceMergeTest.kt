@@ -3,6 +3,7 @@ package dev.ccpocket.daemon.disk
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
 import java.nio.file.Files
+import java.nio.file.attribute.FileTime
 import kotlin.io.path.createDirectories
 import kotlin.io.path.writeText
 import kotlin.test.AfterTest
@@ -42,11 +43,21 @@ class DirectoryServiceMergeTest {
         dir.resolve("s1.jsonl").writeText("""{"cwd":"$cwd"}""" + "\n")
     }
 
-    private fun service(codex: Map<String, Long> = emptyMap(), opencode: Map<String, Long> = emptyMap()) =
-        DirectoryService(
-            projectsRoot = { projects }, codexCwds = { codex }, opencodeCwds = { opencode },
-            kimiCwds = { emptyMap() }, zcodeCwds = { emptyMap() },
-        )
+    private fun service(
+        codex: Map<String, Long> = emptyMap(),
+        opencode: Map<String, Long> = emptyMap(),
+        zcode: Map<String, Long> = emptyMap(),
+        liveClaudeCwds: () -> Set<String> = { emptySet() },
+        nowMillis: () -> Long = System::currentTimeMillis,
+    ) = DirectoryService(
+        projectsRoot = { projects },
+        codexCwds = { codex },
+        opencodeCwds = { opencode },
+        kimiCwds = { emptyMap() },
+        zcodeCwds = { zcode },
+        liveClaudeCwds = liveClaudeCwds,
+        nowMillis = nowMillis,
+    )
 
     @Test
     fun variant_spellings_across_backends_merge_into_one_row() {
@@ -102,11 +113,61 @@ class DirectoryServiceMergeTest {
     @Test
     fun live_enrichment_lands_on_the_merged_row_across_spellings() {
         claudeProject(link.toString()) // claude recorded the SYMLINK spelling…
-        val live = ActiveSession("sid-1", executing = true, agent = AgentKind.OPENCODE)
+        val live = ActiveSession(
+            "sid-1", executing = true, agent = AgentKind.OPENCODE, executingAuthoritative = true,
+        )
         // …while the daemon conversation's workdir is the realpath (OpenSession canonicalizes on open)
         val rows = service().listDirectories(null, liveByCwd = mapOf(work.toRealPath().toString() to listOf(live)))
         val row = rows.single()
         assertTrue(row.open, "the live conversation must enrich the variant-spelled row")
         assertEquals("sid-1", row.activeSessionId)
+        assertTrue(row.activeSessions.single().executingAuthoritative, "daemon-owned turn truth survives enrichment")
+    }
+
+    @Test
+    fun claudeHistoryBusyScalarMatchesCanonicalWorkdirAcrossSymlinkSpellings() {
+        claudeProject(link.toString())
+
+        val row = service().listDirectories(
+            null,
+            busyCwds = setOf(work.toRealPath().toString()),
+        ).single()
+
+        assertTrue(row.busy, "project-level busy must use the same canonical identity as live sessions")
+    }
+
+    @Test
+    fun externalOnlyBusyScalarMatchesCanonicalWorkdirAcrossSymlinkSpellings() {
+        val row = service(codex = mapOf(link.toString() to future)).listDirectories(
+            null,
+            busyCwds = setOf(work.toRealPath().toString()),
+        ).single()
+
+        assertTrue(row.busy, "external-only rows must not lose daemon background work at a symlink boundary")
+    }
+
+    @Test
+    fun terminalTranscriptRecencyIsVisibleButExplicitlyNonAuthoritative() {
+        val transcript = projects.resolve("terminal").also { it.createDirectories() }.resolve("terminal-sid.jsonl")
+        transcript.writeText(
+            """{"type":"user","cwd":"$link","message":{"content":"run tests"}}""" + "\n",
+        )
+        val writtenAt = 1_000_000L
+        Files.setLastModifiedTime(transcript, FileTime.fromMillis(writtenAt))
+        var now = writtenAt + 1
+        val svc = service(
+            // Real lsof output is canonical even when Claude was launched through [link].
+            liveClaudeCwds = { setOf(work.toRealPath().toString()) },
+            nowMillis = { now },
+        )
+
+        val fresh = svc.listDirectories(null).single().activeSessions.single()
+        assertTrue(fresh.executing, "the terminal mtime heuristic keeps its existing Running affordance")
+        assertEquals(false, fresh.executingAuthoritative, "mtime is never completion evidence")
+
+        now = writtenAt + 30_001
+        val expired = svc.listDirectories(null).single().activeSessions.single()
+        assertEquals(false, expired.executing)
+        assertEquals(false, expired.executingAuthoritative, "expiry remains explicitly non-authoritative")
     }
 }

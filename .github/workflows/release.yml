@@ -27,9 +27,19 @@ on:
         description: "Only rebuild & re-attach the macOS DESKTOP app (.dmg, both arches) + regenerate SHA256SUMS, leaving the daemon tarballs / Windows / Android untouched. For a desktop-only hotfix onto an existing release WITHOUT changing the daemon sha256 (which would break the published Homebrew cask / Scoop manifest)."
         type: boolean
         default: false
+      include_harmony:
+        description: "Also build and attach the signed HarmonyOS HAP on the dedicated self-hosted macOS/ARM64/harmony runner. Off by default: GitHub-hosted runners do not provide DevEco Studio."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+
+# A second dispatch for the same version must wait. Otherwise one run can replace a platform asset while
+# the other is rebuilding SHA256SUMS, leaving the release with a checksum for the losing artifact set.
+concurrency:
+  group: release-${{ github.repository }}-${{ inputs.version }}
+  cancel-in-progress: false
 
 jobs:
   macos:
@@ -353,6 +363,163 @@ jobs:
           cp "$MSI" cc-pocket-desktop-windows-x86_64.msi
           gh release upload "v${{ inputs.version }}" cc-pocket-desktop-windows-x86_64.msi --clobber
 
+  harmony:
+    # DevEco Studio is not available on GitHub-hosted macOS runners. This job is deliberately opt-in and
+    # targets only the trusted ephemeral/JIT runner documented in harmony/README.md. A normal release
+    # keeps include_harmony=false, so it neither queues for that runner nor fails when the runner is offline.
+    if: ${{ inputs.include_harmony && !inputs.only_android && !inputs.only_macos_desktop }}
+    runs-on: [self-hosted, macOS, ARM64, harmony]
+    environment: harmony-release
+    timeout-minutes: 90
+    env:
+      # Keep workflow inputs out of generated shell source. Every run step reads the literal value
+      # from this environment variable and validates it before any signing secret is restored.
+      RELEASE_VERSION: ${{ inputs.version }}
+      # Optional repository variable; an empty value falls back to /Applications/DevEco-Studio.app/Contents.
+      DEVECO_HOME: ${{ vars.HARMONY_DEVECO_HOME }}
+    steps:
+      - name: Validate runner, version and immutable release source
+        id: release_target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Harmony release version must be strict x.y.z without leading zeroes"
+            exit 1
+          fi
+          TAG="v${RELEASE_VERSION}"
+          TAG_REF="refs/tags/${TAG}"
+          [ "$GITHUB_REF" = "$TAG_REF" ] || {
+            echo "::error::Harmony release must be dispatched with --ref ${TAG}; got ${GITHUB_REF}"
+            exit 1
+          }
+          [ "$GITHUB_REF_PROTECTED" = "true" ] || {
+            echo "::error::Harmony release tag must be protected by a GitHub tag ruleset"
+            exit 1
+          }
+          [ "$(uname -s)" = "Darwin" ] || { echo "::error::Harmony release requires macOS"; exit 1; }
+          [ "$(uname -m)" = "arm64" ] || { echo "::error::Harmony release requires an ARM64 runner"; exit 1; }
+          DEVECO="${DEVECO_HOME:-/Applications/DevEco-Studio.app/Contents}"
+          [ -d "$DEVECO" ] || { echo "::error::DevEco Studio not found at $DEVECO"; exit 1; }
+          command -v gh >/dev/null || { echo "::error::GitHub CLI (gh) is required on the Harmony runner"; exit 1; }
+          command -v unzip >/dev/null || { echo "::error::unzip is required on the Harmony runner"; exit 1; }
+          command -v openssl >/dev/null || { echo "::error::openssl is required on the Harmony runner"; exit 1; }
+          [ -x /usr/bin/plutil ] || { echo "::error::macOS plutil is required on the Harmony runner"; exit 1; }
+
+          RELEASE_TAG=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          RELEASE_TARGET=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq .targetCommitish)
+          [ "$RELEASE_TAG" = "$TAG" ] || {
+            echo "::error::Release tag mismatch: expected ${TAG}, got ${RELEASE_TAG}"
+            exit 1
+          }
+          [ -n "$RELEASE_TARGET" ] || { echo "::error::Release targetCommitish is empty"; exit 1; }
+
+          # The release's tag ref is the immutable build source. Resolve it to a commit, then prove
+          # targetCommitish still resolves to that commit or to a descendant (for the usual `main`
+          # target after later releases). This rejects unrelated/retargeted release branches while
+          # keeping safe re-runs of an older tag possible.
+          gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null
+          TAG_COMMIT=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/commits" \
+            -f sha="$TAG" -F per_page=1 --jq '.[0].sha')
+          TARGET_COMMIT=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/commits" \
+            -f sha="$RELEASE_TARGET" -F per_page=1 --jq '.[0].sha')
+          [[ "$TAG_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Could not resolve ${TAG} to a commit"; exit 1; }
+          [[ "$TARGET_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Could not resolve targetCommitish ${RELEASE_TARGET}"; exit 1; }
+
+          if [[ "$RELEASE_TARGET" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            NORMALIZED_RELEASE_TARGET=$(printf '%s' "$RELEASE_TARGET" | tr '[:upper:]' '[:lower:]')
+            [ "$NORMALIZED_RELEASE_TARGET" = "$TAG_COMMIT" ] || {
+              echo "::error::Release target commit ${RELEASE_TARGET} does not equal tag commit ${TAG_COMMIT}"
+              exit 1
+            }
+          else
+            TARGET_STATUS=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TAG_COMMIT}...${TARGET_COMMIT}" --jq .status)
+            case "$TARGET_STATUS" in
+              identical|ahead) ;;
+              *)
+                echo "::error::Release target ${RELEASE_TARGET} is not the tag commit or its descendant (status=${TARGET_STATUS})"
+                exit 1
+                ;;
+            esac
+          fi
+          [ "$GITHUB_SHA" = "$TAG_COMMIT" ] || {
+            echo "::error::Workflow ref resolved to ${GITHUB_SHA}, but ${TAG} resolves to ${TAG_COMMIT}"
+            exit 1
+          }
+          printf 'tag_ref=%s\ncommit_sha=%s\n' "$TAG_REF" "$TAG_COMMIT" >> "$GITHUB_OUTPUT"
+
+      # Pin the high-value signing boundary, rather than trusting the mutable v4 tag.
+      # actions/checkout releases-v4, verified commit (queried 2026-08-12).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ steps.release_target.outputs.tag_ref }}
+          persist-credentials: false
+
+      - name: Verify tag checkout and Harmony release build contract
+        env:
+          EXPECTED_COMMIT_SHA: ${{ steps.release_target.outputs.commit_sha }}
+        run: |
+          [ "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT_SHA" ] || {
+            echo "::error::Checked-out commit does not match the validated release tag"
+            exit 1
+          }
+          bash scripts/check-harmony-release.sh
+
+      - name: Restore Harmony signing material into runner temp
+        env:
+          HARMONY_P12_BASE64: ${{ secrets.HARMONY_P12_BASE64 }}
+          HARMONY_CER_BASE64: ${{ secrets.HARMONY_CER_BASE64 }}
+          HARMONY_P7B_BASE64: ${{ secrets.HARMONY_P7B_BASE64 }}
+        run: |
+          if [ -z "$HARMONY_P12_BASE64" ] || [ -z "$HARMONY_CER_BASE64" ] || [ -z "$HARMONY_P7B_BASE64" ]; then
+            echo "::error::HARMONY_P12_BASE64, HARMONY_CER_BASE64 and HARMONY_P7B_BASE64 must all be set"
+            exit 1
+          fi
+          SIGNING_DIR="$RUNNER_TEMP/cc-pocket-harmony-signing"
+          mkdir -p "$SIGNING_DIR"
+          chmod 700 "$SIGNING_DIR"
+          rm -f "$SIGNING_DIR/cc-pocket-harmony.p12" "$SIGNING_DIR/cc-pocket-harmony-release.cer" "$SIGNING_DIR/cc-pocket-harmony-release.p7b"
+          umask 077
+          printf '%s' "$HARMONY_P12_BASE64" | base64 --decode > "$SIGNING_DIR/cc-pocket-harmony.p12"
+          printf '%s' "$HARMONY_CER_BASE64" | base64 --decode > "$SIGNING_DIR/cc-pocket-harmony-release.cer"
+          printf '%s' "$HARMONY_P7B_BASE64" | base64 --decode > "$SIGNING_DIR/cc-pocket-harmony-release.p7b"
+
+      - name: Build, sign and verify HarmonyOS packages
+        env:
+          # CI must use only the injected secrets above, never a persistent .env from a self-hosted machine.
+          HARMONY_LOAD_ENV: "0"
+          HARMONY_P12: ${{ runner.temp }}/cc-pocket-harmony-signing/cc-pocket-harmony.p12
+          HARMONY_CER: ${{ runner.temp }}/cc-pocket-harmony-signing/cc-pocket-harmony-release.cer
+          HARMONY_P7B: ${{ runner.temp }}/cc-pocket-harmony-signing/cc-pocket-harmony-release.p7b
+          Harmony_Keystore_Password: ${{ secrets.HARMONY_KEYSTORE_PASSWORD }}
+          Harmony_Key_Alias: ${{ secrets.HARMONY_KEY_ALIAS }}
+          Harmony_Key_Password: ${{ secrets.HARMONY_KEY_PASSWORD }}
+        run: |
+          bash scripts/release-harmony.sh "$RELEASE_VERSION"
+
+      - name: Upload signed HAP to the validated release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_COMMIT_SHA: ${{ steps.release_target.outputs.commit_sha }}
+        run: |
+          CURRENT_TAG_COMMIT=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/commits" \
+            -f sha="v${RELEASE_VERSION}" -F per_page=1 --jq '.[0].sha')
+          [ "$CURRENT_TAG_COMMIT" = "$EXPECTED_COMMIT_SHA" ] || {
+            echo "::error::Release tag moved during the job; refusing to upload"
+            exit 1
+          }
+          HAP="harmony/release/cc-pocket-harmony-${RELEASE_VERSION}-signed.hap"
+          [ -f "$HAP" ] || { echo "::error::signed Harmony HAP not found: $HAP"; exit 1; }
+          echo "sha256: $(shasum -a 256 "$HAP" | awk '{print $1}')"
+          gh release upload "v${RELEASE_VERSION}" "$HAP" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Remove Harmony signing material
+        if: ${{ always() }}
+        run: |
+          SIGNING_DIR="$RUNNER_TEMP/cc-pocket-harmony-signing"
+          rm -f "$SIGNING_DIR/cc-pocket-harmony.p12" "$SIGNING_DIR/cc-pocket-harmony-release.cer" "$SIGNING_DIR/cc-pocket-harmony-release.p7b"
+          rmdir "$SIGNING_DIR" 2>/dev/null || true
+
   # Keep the Scoop bucket (heypandax/scoop-bucket) on the release we just published: without this the
   # manifest stays pinned to an old version forever (its checkver/autoupdate fields are inert — no
   # excavator runs on a personal bucket), which stranded every Windows user on 1.1.9 (issue #25).
@@ -399,7 +566,7 @@ jobs:
     # !cancelled() (not the default success()) so this still runs when the daemon/windows/android jobs
     # are SKIPPED in only_macos_desktop mode — it re-sums whatever assets are on the release now.
     if: ${{ !cancelled() && !inputs.only_android }}
-    needs: [macos, windows, linux, android, macos-desktop, windows-desktop]
+    needs: [macos, windows, linux, android, macos-desktop, windows-desktop, harmony]
     runs-on: ubuntu-latest
     steps:
       - name: Generate + upload SHA256SUMS for v${{ inputs.version }}

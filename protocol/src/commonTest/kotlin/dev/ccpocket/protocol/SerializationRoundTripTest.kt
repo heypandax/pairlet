@@ -1220,18 +1220,23 @@ class SerializationRoundTripTest {
             path = "/p", name = "p", isDir = true, open = true, executing = true,
             activeSessionId = "s1", activeSessionTitle = "fix bug",
             activeSessions = listOf(
-                ActiveSession("s1", "fix bug", executing = true, gitBranch = "main"),
+                ActiveSession("s1", "fix bug", executing = true, gitBranch = "main", executingAuthoritative = true),
                 ActiveSession("s2", "write docs", busy = true, agent = AgentKind.CODEX),
             ),
         )
         val json = PocketJson.encodeToString(entry)
         assertEquals(entry, PocketJson.decodeFromString<DirectoryEntry>(json))
+        assertTrue(PocketJson.decodeFromString<DirectoryEntry>(json).activeSessions.first().executingAuthoritative)
 
         // old daemon → new app: no activeSessions key at all → empty list, legacy single fields intact
         val old = """{"path":"/p","name":"p","isDir":true,"open":true,"activeSessionId":"s1","activeSessionTitle":"fix bug"}"""
         val back = PocketJson.decodeFromString<DirectoryEntry>(old)
         assertEquals(emptyList(), back.activeSessions)
         assertEquals("s1", back.activeSessionId)
+
+        val oldActive = PocketJson.decodeFromString<ActiveSession>("""{"sessionId":"terminal","executing":true}""")
+        assertTrue(oldActive.executing)
+        assertFalse(oldActive.executingAuthoritative, "old daemons fail closed for completion inference")
     }
 
     @Test

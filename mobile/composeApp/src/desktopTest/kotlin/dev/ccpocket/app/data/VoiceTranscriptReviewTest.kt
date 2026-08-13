@@ -1,5 +1,6 @@
 package dev.ccpocket.app.data
 
+import dev.ccpocket.app.ui.appendVoiceTranscript
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.Transcript
@@ -52,5 +53,13 @@ class VoiceTranscriptReviewTest {
 
         assertNull(r.pendingVoiceText.value, "an empty transcript stages nothing for the composer")
         assertTrue(sent.isEmpty(), "and certainly sends nothing")
+    }
+
+    /** #238 keeps the existing review-first append contract when Mic starts beside an existing draft. */
+    @Test
+    fun aReviewedTranscriptAppendsWithoutDamagingTheExistingDraft() {
+        assertEquals("keep this draft add a regression test", appendVoiceTranscript("keep this draft", "add a regression test"))
+        assertEquals("keep this draft\nadd a regression test", appendVoiceTranscript("keep this draft\n", "add a regression test"))
+        assertEquals("add a regression test", appendVoiceTranscript("", "add a regression test"))
     }
 }

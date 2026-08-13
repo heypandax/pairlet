@@ -165,6 +165,30 @@ class ConversationContinuationGraceTest {
     }
 
     @Test
+    fun backgroundContinuationStartConsumesGraceAndItsResultSettlesImmediately() {
+        if (isWindows()) return
+        val lines = listOf(
+            init,
+            bgToolUse,
+            taskStarted,
+            result,          // enclosing user turn settles
+            taskCompleted,   // arms the unprompted-continuation grace
+            init,            // continuation starts: grace becomes real executing work
+            result,          // DEFAULT-mode continuation genuinely settles
+        )
+        harness(
+            lines,
+            PermissionMode.DEFAULT,
+            graceMs = 60_000,
+            until = { frames -> frames.count { it is TurnDone } == 2 },
+        ) { convo ->
+            assertFalse(convo.isExecuting())
+            assertFalse(convo.expectsContinuation(), "the continuation's start must consume the old grace")
+            assertFalse(convo.isBusy(), "its own result must settle immediately, not wait out the old grace")
+        }
+    }
+
+    @Test
     fun dead_process_voids_the_grace() {
         if (isWindows()) return
         // no process = no continuation can ever arrive; a fresh grace must not shield a corpse

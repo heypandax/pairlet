@@ -88,6 +88,12 @@ class SessionRegistryReattachModeTest {
         """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"./gradlew build"}}]}}"""
     private val result =
         """{"type":"result","subtype":"success","is_error":false,"result":"done","usage":{"input_tokens":1,"output_tokens":1}}"""
+    private val bgToolUse =
+        """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"bg1","name":"Bash","input":{"command":"make","run_in_background":true}}]}}"""
+    private val taskStarted =
+        """{"type":"system","subtype":"task_started","task_id":"bzt1","tool_use_id":"bg1","description":"make","task_type":"local_bash"}"""
+    private val taskCompleted =
+        """{"type":"system","subtype":"task_notification","task_id":"bzt1","tool_use_id":"bg1","status":"completed","output_file":"/tmp/o","summary":"done"}"""
 
     private fun isWindows() = System.getProperty("os.name").lowercase().contains("win")
 
@@ -123,12 +129,64 @@ class SessionRegistryReattachModeTest {
             val convoId = registry.open(OpenSession(workdir = dir.toString(), mode = PermissionMode.DEFAULT), sink)
             registry.sendPrompt(SendPrompt(convoId = convoId, text = "run"))
             awaitFrame(frames) { it is TurnDone }
+            val settled = registry.liveByCwd().getValue(dir.toString()).single()
+            assertFalse(settled.executing)
+            assertTrue(
+                settled.executingAuthoritative,
+                "daemon ownership remains authoritative after TurnDone so clients can observe settlement",
+            )
             val again = registry.open(
                 OpenSession(workdir = dir.toString(), resumeId = "s-remode", mode = PermissionMode.BYPASS_PERMISSIONS),
                 sink,
             )
             assertEquals(convoId, again, "a live session must reattach, not fork a second conversation")
             assertEquals(PermissionMode.BYPASS_PERMISSIONS, registry.modeOf(convoId), "an idle reattach must apply the caller's mode")
+        }
+    }
+
+    @Test
+    fun continuationGraceRemainsAuthoritativelyWorkingUntilItExpiresOrContinues() {
+        if (isWindows()) return
+        val script = Files.createTempDirectory("ccp-authority-grace-fx").resolve("stream.jsonl")
+            .apply { writeText(listOf(init, result).joinToString("\n") + "\n") }
+        withRegistry(ScriptedBackend(script)) { registry, dir, frames ->
+            val sink = OutboundSink { f -> synchronized(frames) { frames.add(f) } }
+            val convoId = registry.open(
+                OpenSession(workdir = dir.toString(), mode = PermissionMode.PLAN),
+                sink,
+            )
+            registry.sendPrompt(SendPrompt(convoId = convoId, text = "make a plan"))
+            awaitFrame(frames) { it is TurnDone }
+
+            val row = registry.liveByCwd().getValue(dir.toString()).single()
+            assertTrue(row.executing, "the stdout-silent continuation grace is still unfinished work")
+            assertTrue(row.executingAuthoritative, "the daemon owns this work-state observation")
+            assertFalse(row.busy, "continuation grace is not a running background shell")
+        }
+    }
+
+    @Test
+    fun completedBackgroundContinuationPublishesAuthoritativeSettlementWithoutGraceDelay() {
+        if (isWindows()) return
+        val script = Files.createTempDirectory("ccp-authority-bg-cont-fx").resolve("stream.jsonl")
+            .apply {
+                writeText(
+                    listOf(init, bgToolUse, taskStarted, result, taskCompleted, init, result)
+                        .joinToString("\n") + "\n",
+                )
+            }
+        withRegistry(ScriptedBackend(script)) { registry, dir, frames ->
+            val sink = OutboundSink { f -> synchronized(frames) { frames.add(f) } }
+            val convoId = registry.open(OpenSession(workdir = dir.toString()), sink)
+            registry.sendPrompt(SendPrompt(convoId = convoId, text = "run in background"))
+            withTimeout(10_000) {
+                while (synchronized(frames) { frames.count { it is TurnDone } < 2 }) delay(20)
+            }
+
+            val row = registry.liveByCwd().getValue(dir.toString()).single()
+            assertFalse(row.executing, "the continuation's result consumes the old grace and settles now")
+            assertTrue(row.executingAuthoritative)
+            assertFalse(row.busy)
         }
     }
 
@@ -151,6 +209,24 @@ class SessionRegistryReattachModeTest {
                 PermissionMode.DEFAULT, registry.modeOf(convoId),
                 "peeking at a running task must not change the mode it executes under",
             )
+        }
+    }
+
+    @Test
+    fun liveByCwdMarksDaemonOwnedTurnStateAuthoritative() {
+        if (isWindows()) return
+        val script = Files.createTempDirectory("ccp-authority-fx").resolve("stream.jsonl")
+            .apply { writeText(listOf(init, toolUse).joinToString("\n") + "\n") }
+        withRegistry(ScriptedBackend(script)) { registry, dir, frames ->
+            val sink = OutboundSink { f -> synchronized(frames) { frames.add(f) } }
+            val convoId = registry.open(OpenSession(workdir = dir.toString()), sink)
+            registry.sendPrompt(SendPrompt(convoId = convoId, text = "run"))
+            awaitFrame(frames) { it is ToolEvent }
+
+            val row = registry.liveByCwd().getValue(dir.toString()).single()
+            assertEquals("s-remode", row.sessionId)
+            assertTrue(row.executing)
+            assertTrue(row.executingAuthoritative, "SessionRegistry is the authoritative producer for daemon-owned work")
         }
     }
 

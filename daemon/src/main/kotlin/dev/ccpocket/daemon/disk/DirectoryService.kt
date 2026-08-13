@@ -27,6 +27,8 @@ class DirectoryService(
     private val opencodeCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.cwdsByNewest() },
     private val kimiCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.kimi.KimiTranscriptScanner.cwdsByNewest() },
     private val zcodeCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.zcode.ZCodeTranscriptScanner.cwdsByNewest() },
+    private val liveClaudeCwds: () -> Set<String> = LiveProcesses::claudeCwds,
+    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val recents = LinkedHashSet<String>()
@@ -72,7 +74,11 @@ class DirectoryService(
         // canonical-keyed so ANY spelling mismatch (tilde, symlink, separators) between OpenSession's
         // workdir and a transcript's recorded cwd still matches
         val liveNorm = liveByCwd.entries.groupBy({ ProjectPaths.canonicalKey(it.key) }, { it.value }).mapValues { (_, v) -> v.flatten() }
-        val claude = claudeDirectories(busyCwds, liveNorm)
+        // SessionRegistry keys background work by its canonical OpenSession path, while transcript/index
+        // sources may retain a symlink spelling. Busy is project identity, so normalize it at the same merge
+        // boundary as live sessions; otherwise ActiveSession.busy=true can coexist with a false project scalar.
+        val busyNorm = busyCwds.mapTo(HashSet()) { ProjectPaths.canonicalKey(it) }
+        val claude = claudeDirectories(busyNorm, liveNorm)
         val codex = runCatching(codexCwds).getOrDefault(emptyMap())
         val opencode = if (includeOpencode) runCatching(opencodeCwds).getOrDefault(emptyMap()) else emptyMap()
         val kimi = if (includeKimi) runCatching(kimiCwds).getOrDefault(emptyMap()) else emptyMap()
@@ -119,7 +125,7 @@ class DirectoryService(
                     lastModified = externalByKey[key]?.max() ?: 0L,
                     open = live.isNotEmpty(),
                     executing = live.any { it.executing },
-                    busy = cwd in busyCwds,
+                    busy = key in busyNorm,
                     activeSessionId = live.firstOrNull()?.sessionId,
                     activeSessionTitle = live.firstOrNull()?.title,
                     activeSessions = live,
@@ -146,13 +152,16 @@ class DirectoryService(
         val projects = projectsRoot()
         if (!projects.isDirectory()) return emptyList()
         val dirs = Files.newDirectoryStream(projects).use { it.toList() }.filter { it.isDirectory() }
-        val now = System.currentTimeMillis()
+        val now = nowMillis()
         // open = a claude process is alive here (idle or active); executing = a session here is mid-turn;
         // busy = a daemon conversation here has running background work (keep it "active" even when idle).
-        val liveCwds = LiveProcesses.claudeCwds()
+        // lsof reports resolved real paths while a transcript may record a symlink spelling. Match by the
+        // same canonical identity the cross-backend merge uses, or a real terminal Claude can disappear
+        // from the Active section solely because it was launched through a symlink.
+        val liveCwdKeys = liveClaudeCwds().mapTo(HashSet()) { ProjectPaths.canonicalKey(it) }
         return dirs.mapNotNull { dir -> scanProject(dir) }
             .map { (cwd, mtime, newest) ->
-                val osOpen = cwd in liveCwds
+                val osOpen = ProjectPaths.canonicalKey(cwd) in liveCwdKeys
                 // the daemon's own conversations here carry EXACT turn state (isExecuting) — the mtime window
                 // below can't see turn boundaries, which kept "running" on for ~30s after a turn finished.
                 // Claude ones get their title/branch from their own transcript; Codex rollouts live outside
@@ -171,7 +180,15 @@ class DirectoryService(
                 val external = if (osOpen && daemonLive.none { it.sessionId == newestSid }) {
                     runCatching { TranscriptScanner.summarize(newest) }.getOrNull()
                         ?.takeIf { s -> daemonLive.none { it.sessionId == s.sessionId } }
-                        ?.let { ActiveSession(it.sessionId, it.title, executing = now - mtime < ACTIVE_WINDOW_MS, gitBranch = it.gitBranch) }
+                        ?.let {
+                            ActiveSession(
+                                it.sessionId,
+                                it.title,
+                                executing = now - mtime < ACTIVE_WINDOW_MS,
+                                gitBranch = it.gitBranch,
+                                executingAuthoritative = false,
+                            )
+                        }
                 } else null
                 val active = (daemonLive + listOfNotNull(external)).sortedByDescending { it.executing }
                 val first = active.firstOrNull()
@@ -184,7 +201,7 @@ class DirectoryService(
                     lastModified = mtime,
                     open = osOpen || daemonLive.isNotEmpty(),
                     executing = active.any { it.executing },
-                    busy = cwd in busyCwds,
+                    busy = ProjectPaths.canonicalKey(cwd) in busyCwds,
                     activeSessionId = first?.sessionId,
                     activeSessionTitle = first?.title,
                     gitBranch = first?.gitBranch,

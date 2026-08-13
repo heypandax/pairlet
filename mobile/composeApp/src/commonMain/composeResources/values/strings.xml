@@ -142,6 +142,7 @@
     <string name="add_message_hint">Add a message…</string>
     <string name="send">Send</string>
     <string name="dictate">Dictate</string>
+    <string name="retry_voice_input">Retry voice input</string>
     <string name="attach_image">Attach image</string>
     <string name="attach_menu">Attach</string>
     <string name="attach_sheet_photo">Photo</string>

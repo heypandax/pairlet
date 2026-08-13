@@ -85,7 +85,95 @@ cryptoFramework 的 `AsyKeySpec` 系列（ECCKeyPairSpec / getAsyKeySpecBigInt�
 未签名 HAP 挂在 GitHub Release（pre-release，如 `harmony-preview-20260804`），**二进制不进
 git**（`harmony/release/` 已 gitignore）。无 DevEco 环境的协作者可用小白调试助手等工具自签
 安装；自签指纹与 AGC 项目不一致时 Push Kit 自动关闭，其余功能不受影响。本机构建：
-`bash scripts/build-harmony.sh`（macOS，需 DevEco Studio）。
+`bash scripts/build-harmony.sh`（macOS，需 DevEco Studio）。普通构建保持 DevEco 的默认
+buildMode；需要单独验证 Release 编译时可传
+`bash scripts/build-harmony.sh -p buildMode=release`，额外参数会原样透传给 hvigor。
+
+## 正式 GitHub Release（显式启用）
+
+`.github/workflows/release.yml` 的 Harmony job **不跑在 GitHub-hosted runner**：hosted macOS
+没有 DevEco Studio，也不能凭空获得 Harmony 签名材料。它只在发版人显式传
+`include_harmony=true` 时，调度一台受信任的、单任务 ephemeral/JIT self-hosted Apple Silicon
+Mac；普通发版默认值为 `false`，不会排队等这台机器，也不会因为它离线而失败。
+
+### 强制安全边界（首次配置）
+
+1. 在 Settings → Environments 创建 **`harmony-release`**，配置至少一名 required reviewer，
+   禁止发起人自审，并把允许部署的 ref 限制为 release tag（`v*`）。下述签名 secrets 必须只放
+   在这个 environment，不能保留同名 repository secrets。workflow 已声明该 environment，未审批
+   时 job 不会被派发到 runner，也不会取得 secrets。
+2. 给 `v*` 建 GitHub tag ruleset，禁止非发布管理员更新或删除已推送的 release tag，避免验证后
+   tag 被移动；workflow 会检查 `GITHUB_REF_PROTECTED=true`，未受保护的 tag 直接失败。Harmony
+   runner 必须是每个 job 新建、job 后销毁的专用 ephemeral/JIT runner。注册时保留默认标签
+   `self-hosted`、`macOS`、`ARM64`，再加唯一标签 `harmony`；只能服务本仓库，不能让其他仓库或
+   fork 共用宿主机、账号、work 目录或 DevEco 用户数据。使用 Actions Runner 的
+   `config.sh --ephemeral` 或 REST API 生成的 JIT 配置，并在 job 结束后销毁 VM/主机和注册记录。
+
+   GitHub 当前没有向 job 暴露可移植、受支持的“本 runner 确由 `--ephemeral` 注册”证明，因此
+   workflow 不能靠仓库内 marker 自证这一点；**ephemeral/JIT provisioner 与销毁检查是仓库外的
+   必要发布门禁**，不能用一台长期在线的个人 Mac 替代。
+3. runner 上安装 DevEco Studio（当前验证 6.1.1.290）。默认路径是
+   `/Applications/DevEco-Studio.app/Contents`；若 runner 安装在别处，在仓库 Actions variables
+   增加 `HARMONY_DEVECO_HOME`，值为 DevEco app 内的 `Contents` 绝对路径。
+4. runner 镜像预装可执行的 GitHub CLI `gh`，以及 macOS 自带的 `unzip`、`plutil`、`openssl`。
+   `gh` 由 job 的 `GITHUB_TOKEN` 临时认证，不在 runner 上持久登录或保存个人 PAT。
+
+### `harmony-release` environment secrets
+
+签名文件以 base64 文本保存为 `harmony-release` environment secrets，job 通过 required reviewer
+审批后才还原到
+`$RUNNER_TEMP/cc-pocket-harmony-signing/`，权限为 `0700/0600`，结束时（成功或失败）删除。
+不要把文件、密码或 signingConfigs 写进仓库，也不要在 runner 镜像或 DevEco 用户目录保留 `.env`。
+
+| Secret | 内容 |
+|---|---|
+| `HARMONY_P12_BASE64` | `cc-pocket-harmony.p12` 的 base64 |
+| `HARMONY_CER_BASE64` | release `.cer` 的 base64 |
+| `HARMONY_P7B_BASE64` | release profile `.p7b` 的 base64 |
+| `HARMONY_KEYSTORE_PASSWORD` | p12 密钥库密码 |
+| `HARMONY_KEY_ALIAS` | 密钥别名 |
+| `HARMONY_KEY_PASSWORD` | 密钥密码；与库密码相同时可留空 |
+
+在持有材料的 Mac 上，通过 GitHub Settings 写入 environment secrets；CLI 操作时必须显式指定
+environment，例如 `base64 < file | gh secret set SECRET_NAME --env harmony-release`。runner 不得
+持久化：工作流的 `always()` 清理只覆盖正常 job 生命周期，不能替代 ephemeral 主机销毁。
+当前 DevEco `hap-sign-tool` 的非交互模式只接受命令行密码参数；`pwdInputMode=1` 要求真实 Console，
+不能用 CI pipe 安全替代，也不得用会回显输入的伪终端包装。这也是 runner 必须单任务、无其他本机
+用户且 job 后整机销毁的原因。
+
+### 每次发布
+
+先把审核过的 commit 打成 tag 并推送，再从该 tag 创建目标 GitHub Release。Harmony job 必须以
+同一个 tag 作为 workflow ref；从 `main` 或其他分支触发会 fail closed：
+
+```bash
+git tag v1.7.7 <reviewed-commit-sha>
+git push origin refs/tags/v1.7.7
+gh release create v1.7.7 --verify-tag --generate-notes
+gh workflow run release.yml --ref v1.7.7 -f version=1.7.7 -f include_harmony=true
+```
+
+job 在 checkout 前严格校验 `x.y.z`，解析 `refs/tags/v<version>` 的实际 commit，检查 Release 的
+`tagName`、`targetCommitish` 与 tag 谱系，再 checkout 已验证 tag；因此不能用功能分支代码覆盖正式
+Release 资产。`harmony-release` environment 的部署 ref 规则也必须只允许 `v*` tag。
+
+job 调用 `bash scripts/release-harmony.sh 1.7.7`，构建期间临时把包内 `versionName` 设为
+`1.7.7`，把 `versionCode` 确定性映射为 `major*1,000,000 + minor*1,000 + patch`，退出时恢复
+tracked `app.json5`。正式脚本在 HAP 的 `assembleHap` 与 App Pack 的 `assembleApp` 两步都
+显式传 `-p buildMode=release`；签名只发生在 Release 编译产物上，不能用“已签名”替代
+Release buildMode。签名和 `verify-app` 均成功后，上传
+`cc-pocket-harmony-1.7.7-signed.hap` 到同一个 `v1.7.7` Release，并由总任务重新生成
+`SHA256SUMS`。脚本同时产出的 `.app` 是 AGC 上传包，不作为 GitHub 用户下载资产上传。
+签名前会从 HAP 与 `.app` 构建中间产物的 `pack.info` 校验 `bundleName`、`versionName`、
+`versionCode`；`verify-app` 后还会把导出证书的 SHA-256 fingerprint 与输入 CER 比对，避免把
+错误身份或错误版本包装成正确文件名上传。
+workflow 在接触签名材料前先运行 `bash scripts/check-harmony-release.sh`：静态断言
+`release` build option 仍存在、普通构建脚本仍透传可选参数，且正式脚本恰好在 HAP 与 APP
+两个入口使用同一条 `buildMode=release` 属性。本地不安装 DevEco 也能运行这项检查。
+
+`only_android=true` 或 `only_macos_desktop=true` 仍保持原来的“只发该平台”语义，即使误传
+`include_harmony=true` 也会跳过 Harmony。没有 `include_harmony=true` 时，现有各平台 job 行为
+完全不变。
 
 启用步骤（一次性，AGC 控制台操作为主）：
 

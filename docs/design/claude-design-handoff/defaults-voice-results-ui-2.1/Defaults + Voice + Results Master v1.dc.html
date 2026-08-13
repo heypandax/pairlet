@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+  a { color: #B4522F; text-decoration: none; }
+  a:hover { color: #8E3F23; }
+</style>
+</helmet>
+
+<div style="position:fixed;inset:0;z-index:-1;background:{{ boardBg }}"></div>
+
+<div style="width:1920px;margin:0 auto;padding:64px 72px 96px;font-family:'Public Sans',system-ui,sans-serif;color:#1B1A18">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:900px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · ui 2.1 · defaults + voice + results · master</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">Defaults + Voice + Results Master v1</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">S3 + V3 + R3, built. Every frame below is the same live component under different props, so the geometry in the handoff tables is measured from what you are looking at rather than described beside it. Visible copy is the existing resource text in both locales; every catalogue value is the inspected fixture. Three Compose surfaces change; nothing else does.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div>
+        <div style="color:#1B1A18">3 surfaces</div>
+        <div>Settings · Composer · Sessions</div>
+      </div>
+      <div>
+        <div style="color:#1B1A18">402 · 390 · 320 · 280</div>
+        <div>+ 200% · EN/ZH · dark/light</div>
+      </div>
+      <div>
+        <div style="color:#1B1A18">no protocol change</div>
+        <div>no daemon · relay · desktop</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 1 · SETTINGS ═══════════ -->
+  <div style="padding-top:46px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:14px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">1</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Agent &amp; session defaults · S3</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">One unlabeled summary container is added. Order, controls and callbacks are untouched.</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 40px;border-top:1px solid #C9C5BD;border-bottom:1px solid #C9C5BD;padding:16px 0 18px;margin-bottom:30px">
+      <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The page keeps its exact sequence: default agent, new-session permission mode, default model scoped to the selected agent, default effort scoped to the selected agent, conditional Fast, context window presets and custom, per-model windows, agent filter. Every existing callback fires from the same row it fires from today.</p>
+      <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The addition is one read-only low container directly under the title. It prints existing group labels against currently stored values and owns no string of its own — no heading, no framing sentence, no derived text. It is not focusable and consumes no target budget.</p>
+      <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Fast appears in the summary only while a <span style="font:400 12px/1 'JetBrains Mono',monospace">priority</span> model is selected, matching the row's own visibility rule. Omitting it under priority would let the summary imply a complete launch configuration while hiding one of its defaults.</p>
+    </div>
+
+    <div style="display:flex;gap:40px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">01 · top · dark · EN · 402</div>
+        <dc-import name="DVRDevice" surface="settings" hint-size="402px,874px"></dc-import>
+        <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Summary, then agent, then mode, then model — the existing order, with the answer to “what runs next” resolved above the fold. Codex is the stored agent, so model and effort below carry <span style="font:400 12px/1 'JetBrains Mono',monospace">for Codex</span>.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">02 · model + effort + Fast · scrolled</div>
+        <dc-import name="DVRDevice" surface="settings" region="model" hint-size="402px,874px"></dc-import>
+        <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The inspected catalogue in full: <span style="font:400 12px/1 'JetBrains Mono',monospace">gpt-5.6-sol</span> selected, then <span style="font:400 12px/1 'JetBrains Mono',monospace">gpt-5.5</span> and the specialized long-context id. Efforts run Default, low, medium, high, xhigh, max, ultra with ultra stored. Fast follows because this model advertises priority.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">03 · later groups · scrolled</div>
+        <dc-import name="DVRDevice" surface="settings" region="later" hint-size="402px,874px"></dc-import>
+        <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Context window presets with its custom escape, per-model windows keyed by the real ids, then the agent filter — all unchanged in structure, order and behaviour. Preset and window values remain daemon-owned and are not enumerated here.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">04 · 中文 · light · 390</div>
+        <dc-import name="DVRDevice" surface="settings" locale="zh" theme="light" w="390px" h="844px" hint-size="390px,844px"></dc-import>
+        <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Exact ZH resource copy: title <span style="font:400 12px/1 'JetBrains Mono',monospace">Agent 与会话默认项</span>, labels 默认智能体 · 新会话默认模式 · 默认模型 · 默认推理强度 · 快速模式. Model ids and effort values stay literal in both locales because they are data, not copy.</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:40px;align-items:flex-start;flex-wrap:wrap;margin-top:40px">
+      <div style="width:320px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">05 · long id · 320</div>
+        <dc-import name="DVRDevice" surface="settings" region="model" long-id="{{ true }}" w="320px" h="720px" hint-size="320px,720px"></dc-import>
+        <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The specialized id is selected and wraps on characters in the row. No ellipsis, no shrink, no sideways scroll.</div>
+      </div>
+      <div style="width:280px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">06 · long id in summary · 280</div>
+        <dc-import name="DVRDevice" surface="settings" long-id="{{ true }}" w="280px" h="700px" hint-size="280px,700px"></dc-import>
+        <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">At the narrowest supported width the summary's label column and its value stack rather than compress, and the id wraps to three lines fully readable.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">07 · 200% · EN</div>
+        <dc-import name="DVRDevice" surface="settings" big="{{ true }}" hint-size="402px,874px"></dc-import>
+        <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">At double type the title wraps and the lists grow; the summary keeps the five stored values on the first screen instead of stopping inside the agent list. Radio targets rise to 58 dp.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">08 · 200% · 中文 · light</div>
+        <dc-import name="DVRDevice" surface="settings" big="{{ true }}" locale="zh" theme="light" hint-size="402px,874px"></dc-import>
+        <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The hardest settings combination on the board. Label and value wrap independently inside the summary; nothing clips against the container's 14 dp padding.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 2 · COMPOSER ═══════════ -->
+  <div style="padding-top:58px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:14px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">2</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Voice-aware composer · V3</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">All eight states. Ribbon above the field, one wrapping accessory lane below it.</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 40px;border-top:1px solid #C9C5BD;border-bottom:1px solid #C9C5BD;padding:16px 0 18px;margin-bottom:30px">
+      <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The two-layer composer is unchanged: full-width multiline field above an accessory row. What moves is the written state — the existing queue, upload and transcription-failure strings now sit in one ribbon slot above the field, so the reason a control behaves unusually arrives before the control.</p>
+      <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">One restrained mark separates informational from failure by shape — a small dot against a square — so the distinction survives greyscale. The ribbon is a live region; it announces on change and never on every recomposition.</p>
+      <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Transcript, context disclosure, Quick Actions, Model Picker, recording behaviour and the desktop composer are all untouched. No predicate changes: the same conditions that produce each control today produce it here.</p>
+    </div>
+
+    <div style="display:flex;gap:36px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">09 · idle · empty</div>
+        <dc-import name="DVRDevice" surface="composer" state="idle" h="560px" hint-size="402px,560px"></dc-import>
+        <div style="margin-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">No ribbon, no actions. Mic is the accessory action and lives in the field's trailing slot; attach, model, switcher and context sit in the lane.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">10 · staged draft</div>
+        <dc-import name="DVRDevice" surface="composer" state="staged" h="560px" hint-size="402px,560px"></dc-import>
+        <div style="margin-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Field keeps Mic; Send is independently reachable in the lane. Still no ribbon — nothing unusual is happening.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">11 · streaming · empty</div>
+        <dc-import name="DVRDevice" surface="composer" state="streamingEmpty" h="560px" hint-size="402px,560px"></dc-import>
+        <div style="margin-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Stop only. No Mic and no Send exist in this state. The ribbon carries <span style="font:400 12px/1 'JetBrains Mono',monospace">Working… — sends will queue</span>.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">12 · streaming · staged</div>
+        <dc-import name="DVRDevice" surface="composer" state="streamingStaged" h="560px" hint-size="402px,560px"></dc-import>
+        <div style="margin-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Mic returns to the field; Stop and Send are independently reachable. Send queues into the running turn, which is what the ribbon already said.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">13 · upload in flight</div>
+        <dc-import name="DVRDevice" surface="composer" state="upload" h="560px" hint-size="402px,560px"></dc-import>
+        <div style="margin-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Mic stays in the field. The action slot holds progress with <span style="font:400 12px/1 'JetBrains Mono',monospace">role=status</span> — there is no Send composable and nothing announces a disabled Send.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">14 · recording + streaming</div>
+        <dc-import name="DVRDevice" surface="composer" state="recStreaming" h="560px" hint-size="402px,560px"></dc-import>
+        <div style="margin-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">RecordingBar replaces the ordinary composer entirely. Cancel, waveform, timer, Done — nothing added. The separate Stop row below is the only agent-turn action that survives.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">15 · transcribing + streaming</div>
+        <dc-import name="DVRDevice" surface="composer" state="transStreaming" h="560px" hint-size="402px,560px"></dc-import>
+        <div style="margin-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Same bar, spinner in place of the waveform, <span style="font:400 12px/1 'JetBrains Mono',monospace">Transcribing…</span> written beside it. Stop remains reachable throughout both capture phases.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">16 · voice failure + draft</div>
+        <dc-import name="DVRDevice" surface="composer" state="failure" h="560px" hint-size="402px,560px"></dc-import>
+        <div style="margin-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Square mark, failure chip, and the field's trailing action becomes Retry voice input in place of Mic. Send stays separately reachable for the staged draft; no third retry button is added.</div>
+      </div>
+    </div>
+
+    <div style="margin-top:40px">
+      <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:14px">Wrapping proof · full accessory set incl. switcher · streaming + staged</div>
+      <div style="display:flex;gap:36px;align-items:flex-start;flex-wrap:wrap">
+        <div style="width:390px;flex:none">
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#8A857C;padding-bottom:9px">17 · 390 · 中文</div>
+          <dc-import name="DVRDevice" surface="composer" state="streamingStaged" locale="zh" w="390px" h="560px" hint-size="390px,560px"></dc-import>
+          <div style="margin-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Exact ZH: <span style="font:400 12px/1 'JetBrains Mono',monospace">正在运行 — 发送将排队</span>. Actions take their own row from 390 down once the switcher is present.</div>
+        </div>
+        <div style="width:320px;flex:none">
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#8A857C;padding-bottom:9px">18 · 320 · light</div>
+          <dc-import name="DVRDevice" surface="composer" state="streamingStaged" theme="light" w="320px" h="560px" hint-size="320px,560px"></dc-import>
+          <div style="margin-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Stop and Send wrap as whole controls onto a full-width second line, each keeping 48 dp of height and an equal share of the width.</div>
+        </div>
+        <div style="width:280px;flex:none">
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#8A857C;padding-bottom:9px">19 · 280 · stress</div>
+          <dc-import name="DVRDevice" surface="composer" state="streamingStaged" w="280px" h="560px" hint-size="280px,560px"></dc-import>
+          <div style="margin-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The lane's leading group wraps internally too: context drops beneath attach, model and switcher rather than overflowing them.</div>
+        </div>
+        <div style="width:402px;flex:none">
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#8A857C;padding-bottom:9px">20 · 200% · 中文 · upload</div>
+          <dc-import name="DVRDevice" surface="composer" state="upload" locale="zh" big="{{ true }}" h="620px" hint-size="402px,620px"></dc-import>
+          <div style="margin-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">At double type every accessory keeps 58 dp and the lane fully destacks. The ZH upload string wraps across two lines in the ribbon without clipping the field below.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 3 · SESSIONS ═══════════ -->
+  <div style="padding-top:58px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:14px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">3</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">New Result in Sessions · R3</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">One mark changes. Precedence, derivation, persistence and ordering do not.</span>
+    </div>
+
+    <div style="display:flex;gap:40px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">21 · two New Results · dark · 402</div>
+        <dc-import name="DVRDevice" surface="sessions" hint-size="402px,874px"></dc-import>
+        <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Two independent New Result rows sit in Active above one Running; Complete is in Recent. Each row clears on its own authoritative open — they are not a single grouped notice.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">22 · precedence ladder · light</div>
+        <dc-import name="DVRDevice" surface="sessions" fixture="precedence" theme="light" hint-size="402px,874px"></dc-import>
+        <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">All six rungs adjacent, in fixed order: filled diamond, hollow diamond, square, filled dot, half dot, hollow dot. Ordering shown is the daemon's; this proves only that the marks stay separable when neighbours.</div>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">23 · 中文 · 200%</div>
+        <dc-import name="DVRDevice" surface="sessions" locale="zh" big="{{ true }}" hint-size="402px,874px"></dc-import>
+        <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">有新结果 stays load-bearing at double type; the mark scales to 14 dp and the row grows rather than truncating. The written label, not the mark, is what a screen reader reports.</div>
+      </div>
+      <div style="width:320px;flex:none">
+        <div style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">24 · 320 · light · ladder</div>
+        <dc-import name="DVRDevice" surface="sessions" fixture="precedence" theme="light" w="320px" h="720px" hint-size="320px,720px"></dc-import>
+        <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">At the narrow width state word and metadata wrap onto separate lines within the same row; the mark column never moves.</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start;margin-top:34px">
+      <div style="width:520px;flex:none;background:#E4E1DA;border-radius:12px;padding:18px 20px">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Half-filled mark · exact geometry</div>
+        <div style="font:400 12.5px/1.95 'JetBrains Mono',monospace;color:#3A3730;margin-top:11px">size            10.dp  (14.dp at fontScale ≥ 1.5)<br />stroke          2.dp, colour = state tone<br />fill            leading 50% of the circle, same tone<br />divide          vertical, through the centre<br />shape           CircleShape, drawn not layered</div>
+        <div style="font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;margin-top:12px;text-wrap:pretty">Compose: one <span style="font:400 12px/1 'JetBrains Mono',monospace">Canvas(Modifier.size(markSize))</span> — <span style="font:400 12px/1 'JetBrains Mono',monospace">drawArc(tone, startAngle = 90f, sweepAngle = 180f, useCenter = true)</span> for the fill, then <span style="font:400 12px/1 'JetBrains Mono',monospace">drawCircle(tone, style = Stroke(2.dp.toPx()))</span> for the ring. Do not build it from two overlapping Boxes; the seam shows at odd densities.</div>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Mark vocabulary · fill is the ladder</div>
+        <div style="border-top:1px solid #C9C5BD;font:400 13px/1.55 'Public Sans',sans-serif">
+          <div style="display:grid;grid-template-columns:130px 150px 1fr;gap:20px;padding:9px 0;border-bottom:1px solid #DAD6CE;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C"><div>State</div><div>Mark</div><div>Rule</div></div>
+          <div style="display:grid;grid-template-columns:130px 150px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div>Approval</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">filled diamond</div><div style="color:#6E695F;text-wrap:pretty">Unchanged. Highest precedence; diamonds stay reserved for the two states that block the user.</div></div>
+          <div style="display:grid;grid-template-columns:130px 150px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div>Answer</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">hollow diamond</div><div style="color:#6E695F;text-wrap:pretty">Unchanged.</div></div>
+          <div style="display:grid;grid-template-columns:130px 150px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div>Failure</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">square</div><div style="color:#6E695F;text-wrap:pretty">Unchanged. The only square in the vocabulary.</div></div>
+          <div style="display:grid;grid-template-columns:130px 150px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div>Running</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">solid dot</div><div style="color:#6E695F;text-wrap:pretty">Unchanged.</div></div>
+          <div style="display:grid;grid-template-columns:130px 150px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font-weight:600">New Result</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">half-filled dot</div><div style="color:#6E695F;text-wrap:pretty"><b style="font-weight:600">The one change.</b> Was a ring, which collided with Complete under greyscale. Attention tone and the written label are unchanged.</div></div>
+          <div style="display:grid;grid-template-columns:130px 150px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #C9C5BD"><div>Complete</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">hollow ring</div><div style="color:#6E695F;text-wrap:pretty">Unchanged.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 4 · HANDOFF ═══════════ -->
+  <div style="padding-top:58px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:22px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">4</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Handoff</h2>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:600px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Geometry · measured from these frames</div>
+        <div style="background:#E4E1DA;border-radius:12px;padding:18px 20px;font:400 12.5px/1.95 'JetBrains Mono',monospace;color:#3A3730">
+          gutter               20.dp both edges, all three surfaces<br />
+          summary container    RoundedCornerShape(14.dp), pad 13/14.dp<br />
+          summary row gap      8.dp · label column min 118.dp<br />
+          group label          10.5sp · .13em tracking · uppercase<br />
+          group top gap        24.dp between groups · 22.dp under summary<br />
+          list divider         1.dp hairline, bottom of every row<br />
+          radio / switch row   min 48.dp · pad 10.dp vertical · mark 10.dp<br />
+          field                min 46.dp · radius 12.dp · border 1.dp<br />
+          ribbon               pad-bottom 9.dp · mark 8.dp · gap 8.dp<br />
+          lane                 FlowRow · gap 8.dp · pad-top 9.dp<br />
+          action               min-width 84.dp · height 48.dp · radius 12.dp<br />
+          session mark col     fixed · gap 11.dp · row pad 12.dp vertical<br />
+          target floor         48.dp normal · 58.dp at fontScale ≥ 1.5<br />
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;field keeps its existing 46.dp minimum
+        </div>
+
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding:22px 0 12px">Wrapping rule · one predicate</div>
+        <div style="background:#E4E1DA;border-radius:12px;padding:18px 20px;font:400 12.5px/1.85 'JetBrains Mono',monospace;color:#3A3730">
+          leadNeed = 196.dp + if (switcherVisible) 82.dp else 0.dp<br />
+          actNeed  = actionCount * 92.dp<br />
+          inline   = fontScale &lt; 1.5 &amp;&amp; (width - 40.dp) &gt;= leadNeed + actNeed<br /><br />
+          inline  → lead weight(1f), actions Arrangement.End<br />
+          stacked → lead fillMaxWidth(), actions fillMaxWidth()<br />
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;each action weight(1f), height 48.dp
+        </div>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Both groups are FlowRows, so the leading group re-wraps internally at 280 dp before the outer rule fires. Controls never shrink below their minimum; the lane grows in height instead.</p>
+      </div>
+
+      <div style="flex:1;min-width:0">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">State → UI matrix</div>
+        <div style="border-top:1px solid #C9C5BD;font:400 12.5px/1.5 'Public Sans',sans-serif">
+          <div style="display:grid;grid-template-columns:132px 1fr 118px 1fr;gap:16px;padding:9px 0;border-bottom:1px solid #DAD6CE;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.13em;text-transform:uppercase;color:#8A857C"><div>State</div><div>Ribbon</div><div>Field trailing</div><div>Actions</div></div>
+          <div style="display:grid;grid-template-columns:132px 1fr 118px 1fr;gap:16px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12px/1.5 'JetBrains Mono',monospace">idle</div><div style="color:#6E695F">—</div><div style="color:#6E695F">Mic</div><div style="color:#6E695F">—</div></div>
+          <div style="display:grid;grid-template-columns:132px 1fr 118px 1fr;gap:16px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12px/1.5 'JetBrains Mono',monospace">staged</div><div style="color:#6E695F">—</div><div style="color:#6E695F">Mic</div><div style="color:#6E695F">Send</div></div>
+          <div style="display:grid;grid-template-columns:132px 1fr 118px 1fr;gap:16px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12px/1.5 'JetBrains Mono',monospace">streaming · empty</div><div style="color:#6E695F">Working… — sends will queue</div><div style="color:#6E695F">none</div><div style="color:#6E695F">Stop</div></div>
+          <div style="display:grid;grid-template-columns:132px 1fr 118px 1fr;gap:16px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12px/1.5 'JetBrains Mono',monospace">streaming · staged</div><div style="color:#6E695F">Working… — sends will queue</div><div style="color:#6E695F">Mic</div><div style="color:#6E695F">Stop · Send</div></div>
+          <div style="display:grid;grid-template-columns:132px 1fr 118px 1fr;gap:16px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12px/1.5 'JetBrains Mono',monospace">upload</div><div style="color:#6E695F">uploading 1 of 1 — send waits</div><div style="color:#6E695F">Mic</div><div style="color:#6E695F">progress · status only, no Send</div></div>
+          <div style="display:grid;grid-template-columns:132px 1fr 118px 1fr;gap:16px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12px/1.5 'JetBrains Mono',monospace">recording</div><div style="color:#6E695F">—</div><div style="color:#6E695F">bar replaces composer</div><div style="color:#6E695F">Stop only if streaming</div></div>
+          <div style="display:grid;grid-template-columns:132px 1fr 118px 1fr;gap:16px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12px/1.5 'JetBrains Mono',monospace">transcribing</div><div style="color:#6E695F">Transcribing… (in bar)</div><div style="color:#6E695F">bar replaces composer</div><div style="color:#6E695F">Stop only if streaming</div></div>
+          <div style="display:grid;grid-template-columns:132px 1fr 118px 1fr;gap:16px;padding:10px 0;border-bottom:1px solid #C9C5BD"><div style="font:400 12px/1.5 'JetBrains Mono',monospace">voice failure</div><div style="color:#6E695F">Couldn't transcribe — try again</div><div style="color:#6E695F">Retry voice input</div><div style="color:#6E695F">Send if draft</div></div>
+        </div>
+
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding:22px 0 12px">Accessibility</div>
+        <div style="border-top:1px solid #C9C5BD;font:400 12.5px/1.5 'Public Sans',sans-serif">
+          <div style="display:grid;grid-template-columns:180px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">summary container</div><div style="color:#6E695F;text-wrap:pretty">Not focusable, not a heading. Each pair reads as “label, value”; the model id is spoken character-grouped, not as a word.</div></div>
+          <div style="display:grid;grid-template-columns:180px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">radio / switch rows</div><div style="color:#6E695F;text-wrap:pretty">Role Radio or Switch with selected/checked state; group labels are the list heading, unchanged.</div></div>
+          <div style="display:grid;grid-template-columns:180px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">ribbon</div><div style="color:#6E695F;text-wrap:pretty">liveRegion = Polite, announcing on text change only. The mark is decorative and excluded from semantics; the sentence carries the state.</div></div>
+          <div style="display:grid;grid-template-columns:180px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">upload slot</div><div style="color:#6E695F;text-wrap:pretty">Role status, labelled with the existing upload string. It is never a Button and never announces disabled.</div></div>
+          <div style="display:grid;grid-template-columns:180px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">RecordingBar</div><div style="color:#6E695F;text-wrap:pretty">Cancel recording, Done and the timer are named; the waveform is decorative. Transcribing announces once via the same live region.</div></div>
+          <div style="display:grid;grid-template-columns:180px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #C9C5BD"><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">session rows</div><div style="color:#6E695F;text-wrap:pretty">“title, state, metadata”. The written state is what is spoken; the mark is decorative, so New Result and Complete are already distinct without it.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start;margin-top:38px;flex-wrap:wrap">
+      <div style="flex:1;min-width:460px">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Implementation checklist</div>
+        <div style="border-top:1px solid #C9C5BD;font:400 13px/1.5 'Public Sans',sans-serif;color:#3A3730">
+          <div style="display:grid;grid-template-columns:22px 128px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.4 'JetBrains Mono',monospace;color:#8A857C">01</span><span style="font:400 12px/1.4 'JetBrains Mono',monospace;color:#54504A">Settings.kt</span><span style="text-wrap:pretty">Insert the summary container between title and the first group. Read the same state the groups read; render Fast only under a priority model. Add no string resource.</span></div>
+          <div style="display:grid;grid-template-columns:22px 128px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.4 'JetBrains Mono',monospace;color:#8A857C">02</span><span style="font:400 12px/1.4 'JetBrains Mono',monospace;color:#54504A">Settings.kt</span><span style="text-wrap:pretty">Append the existing agent-scope string to the model and effort group labels. Order, callbacks and capability gates unchanged.</span></div>
+          <div style="display:grid;grid-template-columns:22px 128px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.4 'JetBrains Mono',monospace;color:#8A857C">03</span><span style="font:400 12px/1.4 'JetBrains Mono',monospace;color:#54504A">VoiceComposer.kt</span><span style="text-wrap:pretty">Hoist the queue and upload notes into one ribbon slot above the field and route the failure chip through it. Same strings, same predicates.</span></div>
+          <div style="display:grid;grid-template-columns:22px 128px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.4 'JetBrains Mono',monospace;color:#8A857C">04</span><span style="font:400 12px/1.4 'JetBrains Mono',monospace;color:#54504A">VoiceComposer.kt</span><span style="text-wrap:pretty">Collapse the accessory bands into one FlowRow pair and apply the wrapping predicate. Delete the disabled-Send branch in the upload state; emit the status slot instead.</span></div>
+          <div style="display:grid;grid-template-columns:22px 128px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.4 'JetBrains Mono',monospace;color:#8A857C">05</span><span style="font:400 12px/1.4 'JetBrains Mono',monospace;color:#54504A">App.kt</span><span style="text-wrap:pretty">Confirm capture hides the ordinary composer wholesale and that the separate Stop row is the only survivor while streaming.</span></div>
+          <div style="display:grid;grid-template-columns:22px 128px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.4 'JetBrains Mono',monospace;color:#8A857C">06</span><span style="font:400 12px/1.4 'JetBrains Mono',monospace;color:#54504A">SessionStateUi.kt</span><span style="text-wrap:pretty">Replace the New Result ring with the half-filled Canvas mark. Tone, label, precedence and derivation untouched.</span></div>
+          <div style="display:grid;grid-template-columns:22px 128px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.4 'JetBrains Mono',monospace;color:#8A857C">07</span><span style="font:400 12px/1.4 'JetBrains Mono',monospace;color:#54504A">StateChrome.kt</span><span style="text-wrap:pretty">Add the half-fill to the shared mark vocabulary so every consumer draws it identically.</span></div>
+          <div style="display:grid;grid-template-columns:22px 128px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #C9C5BD"><span style="font:500 11.5px/1.4 'JetBrains Mono',monospace;color:#8A857C">08</span><span style="font:400 12px/1.4 'JetBrains Mono',monospace;color:#54504A">UiRefinementShots</span><span style="text-wrap:pretty">Add renders for the four widths, both locales, both themes and 200%; extend SettingsIaTest, ChatMasterV2UiTest, MobileUi20ChromeTest and SessionStateUiTest rather than adding new suites.</span></div>
+        </div>
+      </div>
+
+      <div style="width:560px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Acceptance matrix</div>
+        <div style="border-top:1px solid #C9C5BD;font:400 12.5px/1.5 'Public Sans',sans-serif;color:#3A3730">
+          <div style="display:grid;grid-template-columns:1fr 108px;gap:16px;padding:9px 0;border-bottom:1px solid #DAD6CE;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.13em;text-transform:uppercase;color:#8A857C"><div>Criterion</div><div>Proof</div></div>
+          <div style="display:grid;grid-template-columns:1fr 108px;gap:16px;padding:9px 0;border-bottom:1px solid #DAD6CE"><div>402/390/320/280 usable, nothing clipped or overlapping</div><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">01–08 · 17–19</div></div>
+          <div style="display:grid;grid-template-columns:1fr 108px;gap:16px;padding:9px 0;border-bottom:1px solid #DAD6CE"><div>200% text usable on all three surfaces</div><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">07 · 08 · 20 · 23</div></div>
+          <div style="display:grid;grid-template-columns:1fr 108px;gap:16px;padding:9px 0;border-bottom:1px solid #DAD6CE"><div>Every interactive control ≥ 48 dp; the field keeps its existing 46 dp, above the 44 dp floor</div><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">all frames</div></div>
+          <div style="display:grid;grid-template-columns:1fr 108px;gap:16px;padding:9px 0;border-bottom:1px solid #DAD6CE"><div>Eight composer states reachable and distinct</div><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">09–16</div></div>
+          <div style="display:grid;grid-template-columns:1fr 108px;gap:16px;padding:9px 0;border-bottom:1px solid #DAD6CE"><div>Multiple New Results independently discoverable</div><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">21</div></div>
+          <div style="display:grid;grid-template-columns:1fr 108px;gap:16px;padding:9px 0;border-bottom:1px solid #DAD6CE"><div>Precedence unchanged</div><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">22 · 24</div></div>
+          <div style="display:grid;grid-template-columns:1fr 108px;gap:16px;padding:9px 0;border-bottom:1px solid #DAD6CE"><div>Long and custom ids fully readable and selectable</div><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">05 · 06</div></div>
+          <div style="display:grid;grid-template-columns:1fr 108px;gap:16px;padding:9px 0;border-bottom:1px solid #C9C5BD"><div>Mobile Compose + UI tests only; no backend change</div><div style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A">checklist 01–08</div></div>
+        </div>
+
+        <div style="margin-top:20px;background:#E4E1DA;border-radius:12px;padding:16px 18px">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Forbidden by this master</div>
+          <div style="font:400 12.5px/1.85 'JetBrains Mono',monospace;color:#54504A;margin-top:10px">protocol · daemon · relay · desktop app<br />routes · persistence · notification behaviour<br />data, server facts or visible copy<br />Settings landing IA · transcript · context disclosure<br />Quick Actions · Model Picker · recording behaviour<br />New Result derivation, ordering or open-to-clear<br />#232 · #233 · #216 · #228</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;boardBg&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#EDEBE6&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#EDEBE6&quot;,&quot;#E4E1DA&quot;,&quot;#F4F2EF&quot;,&quot;#D9D5CC&quot;]},&quot;showNotes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      boardBg: this.props.boardBg ?? '#EDEBE6',
+      showNotes: this.props.showNotes ?? true
+    };
+  }
+}
+</script>
+</body>
+</html>

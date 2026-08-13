@@ -27,6 +27,7 @@ import kotlin.io.path.absolutePathString
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -75,6 +76,17 @@ class ConversationPromptLedgerTest {
         val f = Files.createTempDirectory("ccp-ledger-fx").resolve("stream.jsonl")
             .apply { writeText(lines.joinToString("\n") + "\n") }
         return { ProcessBuilder("sh", "-c", "cat '${f.absolutePathString()}'; sleep 30") }
+    }
+
+    /** Emit each phase, then wait before the next one. Lets tests inspect the real Conversation state in
+     *  the otherwise stdout-silent gap between one TurnResult and a queued turn's consumption replay. */
+    private fun phasedFixtureProcess(phases: List<Pair<List<String>, Long>>): () -> ProcessBuilder {
+        val root = Files.createTempDirectory("ccp-ledger-phases")
+        val command = phases.mapIndexed { index, (lines, delayMs) ->
+            val file = root.resolve("$index.jsonl").apply { writeText(lines.joinToString("\n") + "\n") }
+            "cat '${file.absolutePathString()}'; sleep ${delayMs / 1000.0}"
+        }.joinToString("; ") + "; sleep 30"
+        return { ProcessBuilder("sh", "-c", command) }
     }
 
     private fun withConvo(backend: ScriptedBackend, body: suspend (Conversation, () -> List<Frame>) -> Unit) =
@@ -187,6 +199,46 @@ class ConversationPromptLedgerTest {
             delay(100)
             assertEquals(listOf("P1"), backend.prompts.toList()) // one run, two receipts
             assertEquals(1, backend.specs.size)
+        }
+    }
+
+    @Test
+    fun queuedPromptKeepsAuthoritativeWorkAcrossThePriorTurnsResult() {
+        if (win()) return
+        val init = """{"type":"system","subtype":"init","session_id":"s-queued","cwd":"/tmp","model":"claude-sonnet-5"}"""
+        val firstReplay = """{"type":"user","message":{"role":"user","content":"P1"}}"""
+        val firstChunk = """{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}"""
+        val firstResult = """{"type":"result","subtype":"success","is_error":false,"result":"first","usage":{"input_tokens":1,"output_tokens":1}}"""
+        val secondReplay = """{"type":"user","message":{"role":"user","content":"P2"}}"""
+        val secondChunk = """{"type":"assistant","message":{"content":[{"type":"text","text":"second"}]}}"""
+        val secondResult = """{"type":"result","subtype":"success","is_error":false,"result":"second","usage":{"input_tokens":1,"output_tokens":1}}"""
+        val backend = ScriptedBackend(
+            listOf(
+                phasedFixtureProcess(
+                    listOf(
+                        listOf(init, firstReplay, firstChunk) to 500L,
+                        listOf(firstResult) to 1_000L,
+                        listOf(secondReplay, secondChunk, secondResult) to 0L,
+                    ),
+                ),
+            ),
+        )
+
+        withConvo(backend) { convo, frames ->
+            convo.sendPrompt("P1", promptId = "p1")
+            await(frames) { fs -> fs.any { it is dev.ccpocket.protocol.AssistantChunk } }
+            convo.sendPrompt("P2", promptId = "p2")
+            await(frames) { fs -> fs.count { it is TurnDone } == 1 }
+
+            assertTrue(
+                convo.hasAuthoritativeTurnWork(),
+                "the queued prompt shields the gap after the previous turn result",
+            )
+            delay(300)
+            assertTrue(convo.hasAuthoritativeTurnWork(), "stdout silence before queued consumption is still work")
+
+            await(frames) { fs -> fs.count { it is TurnDone } == 2 }
+            assertFalse(convo.hasAuthoritativeTurnWork(), "the queued turn's own result settles immediately")
         }
     }
 

@@ -220,6 +220,7 @@ import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.Usage
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.StopBackgroundJob
+import dev.ccpocket.protocol.JobStatus
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.SwitchServiceTier
@@ -548,9 +549,43 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.getString(K_DEFAULT_PERMISSION_MODE)?.takeIf { it == CLAUDE_PERMISSION_MODE_AUTO },
     )
 
-    /** Persisted default reasoning effort for NEW sessions (null = the model's own default). Resumed sessions
-     *  keep their own. Stored as "" for the null/default choice (SecureStore can't hold null). */
+    /** Persisted default reasoning effort for NEW Claude sessions (null = the model's own default). Resumed
+     *  sessions keep their own. Before per-agent defaults this key was shared by every backend; construction
+     *  migrates that historical value to each new scoped key, then this original key remains Claude's source
+     *  of truth. Stored as "" for the null/default choice (SecureStore can't hold null). */
     val defaultEffort = mutableStateOf(SecureStore.getString(K_DEFAULT_EFFORT)?.takeIf { it.isNotEmpty() })
+    /** Every non-Claude backend owns a separate effort value, just like its model. Kept private so old call
+     *  sites that bind [defaultEffort] continue to mean Claude until they explicitly become agent-aware. */
+    private val defaultCodexEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_CODEX_EFFORT))
+    private val defaultOpenCodeEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_OPENCODE_EFFORT))
+    private val defaultKimiEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_KIMI_EFFORT))
+    private val defaultZCodeEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_ZCODE_EFFORT))
+
+    /**
+     * One-time compatibility migration from the build where every backend read the same effort preference.
+     * Each absent scoped key copies that value regardless of which agent happened to be selected at upgrade:
+     * changing the selected agent did not change the old preference's scope. Absence and an explicit empty
+     * value remain intentionally different: only an ABSENT scoped key may copy the legacy value; `""` means
+     * the user explicitly chose the CLI default and must never be repopulated. The legacy key remains untouched
+     * because it becomes Claude's source of truth after the split.
+     */
+    private fun loadScopedDefaultEffort(key: String): String? {
+        SecureStore.getString(key)?.let { return it.takeIf(String::isNotEmpty) }
+        // Key absence is the one-shot migration gate. Close it during THIS construction even when there is
+        // nothing to copy: otherwise a user who starts this build on Claude, later switches to Codex, and
+        // relaunches would make the then-current Claude value look like pre-split Codex history.
+        val migrated = SecureStore.getString(K_DEFAULT_EFFORT)
+        SecureStore.putString(key, migrated ?: "")
+        return migrated?.takeIf(String::isNotEmpty)
+    }
+
+    fun defaultEffortFor(agent: AgentKind): String? = when (agent) {
+        AgentKind.CLAUDE -> defaultEffort.value
+        AgentKind.CODEX -> defaultCodexEffort.value
+        AgentKind.OPENCODE -> defaultOpenCodeEffort.value
+        AgentKind.KIMI -> defaultKimiEffort.value
+        AgentKind.ZCODE -> defaultZCodeEffort.value
+    }
     /** Default Codex service tier for new sessions (`priority` = Fast); null follows the account default. */
     val defaultServiceTier = mutableStateOf(SecureStore.getString(K_DEFAULT_SERVICE_TIER)?.takeIf { it.isNotEmpty() })
 
@@ -709,12 +744,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         workingSetKey(accountId)?.let { decodeWorkingSet(SecureStore.getString(it)) } ?: emptyList(),
     )
 
-    /** Sessions that finished while the user was looking at something ELSE — the switcher's attention
-     *  dot. Cleared per-session on open; per-machine (a disconnect/switch drops them, see [disconnect]). */
+    /** Sessions whose real work (`executing || busy`) settled while the user was looking at something
+     *  ELSE. Cleared per-session only after an authoritative open; per-machine and in-memory by design. */
     val unseenSessions = mutableStateOf<Set<String>>(emptySet())
 
-    /** Session ids the LAST project list reported as working — the busy→idle edge detector's other half. */
+    /** Session ids the LAST project list reported as actually working — the work→idle edge detector. */
     private var lastWorkingSessions: Set<String> = emptySet()
+    /** Directory for each prior working id, retained across the edge so the visible project can re-list. */
+    private var lastWorkingDirectories: Map<String, String> = emptyMap()
 
     /** The session identity the chat is actually showing, or null when no chat is open. [sessionKey] alone
      *  can't say this: it deliberately survives [backToBrowse] as the draft key, and a switcher opened from
@@ -738,13 +775,27 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // fleetAttention). The seam is here for when asks go account-wide — no other change needed.
     )
 
+    /** Current work for display from the latest directory snapshot. This intentionally includes the
+     * terminal-Claude mtime heuristic so its existing Running affordance remains visible; only
+     * [noteWorkingSessions] uses the stricter authoritative subset to infer completion edges. */
+    fun currentlyWorkingSessionIds(): Set<String> =
+        runningSessions(directories.toList()).filterTo(mutableListOf()) { it.executing }
+            .mapTo(mutableSetOf()) { it.sessionId }
+
     /**
      * Record an open at the head of the MRU and clear that session's unseen mark. Called from the daemon's
      * [SessionLive] announce (authoritative identity), from the first prompt of a brand-new session (which
      * is when its title finally exists), and optimistically by [switchToSession] so the sheet re-orders on
-     * the tap rather than a round-trip later. Idempotent — a re-touch just refreshes labels.
+     * the tap rather than a round-trip later. The optimistic touch passes [markSeen]=false: a failed open
+     * must not erase a result the user never saw. Idempotent — a re-touch just refreshes labels.
      */
-    internal fun rememberOpenedSession(dirKey: String?, sessionId: String?, title: String?, agent: AgentKind?) {
+    internal fun rememberOpenedSession(
+        dirKey: String?,
+        sessionId: String?,
+        title: String?,
+        agent: AgentKind?,
+        markSeen: Boolean = true,
+    ) {
         if (dirKey.isNullOrBlank() || sessionId.isNullOrBlank()) return
         val known = workingSetMru.firstOrNull { it.sessionId == sessionId }
         val project = directories.firstOrNull { it.path == dirKey }?.name?.takeIf { it.isNotBlank() }
@@ -756,18 +807,40 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // the demo walks fake projects — it may drive the switcher, but it must never write them into
         // the real store (same rule the rest of demo mode follows: no persistence, no network)
         if (!demoMode.value) workingSetKey()?.let { SecureStore.putString(it, encodeWorkingSet(workingSetMru.toList())) }
-        if (sessionId in unseenSessions.value) unseenSessions.value = unseenSessions.value - sessionId
+        if (markSeen && sessionId in unseenSessions.value) unseenSessions.value = unseenSessions.value - sessionId
     }
 
-    /** Fold a fresh project list into the finished-while-away marks. Marks are pruned to sessions the
-     *  switcher can actually SHOW (running or remembered) — a badge with no row behind it is a lie. */
+    /** Fold a fresh project list into the finished-while-away marks. Only daemon-reported work
+     *  (`executing || busy`) participates; a merely live/idle process is not a running task. Marks are
+     *  retained even for sessions never opened on this client so a later Sessions list can surface them.
+     *  The set is process-local and reset on disconnect, so this does not create a durable notification log. */
     private fun noteWorkingSessions() {
-        val now = runningSessions(directories.toList()).map { it.sessionId }.toSet()
-        val marked = markFinishedAway(lastWorkingSessions, now, openSessionId(), unseenSessions.value)
-        val visible = now + workingSetMru.map { it.sessionId }
-        val pruned = marked.filterTo(mutableSetOf()) { it in visible }
-        if (pruned != unseenSessions.value) unseenSessions.value = pruned
+        val observedRows = runningSessions(directories.toList())
+        val nowRows = observedRows.filter { it.executing && it.workStateAuthoritative }
+        val now = nowRows.map { it.sessionId }.toSet()
+        val settled = observedRows.filterTo(mutableListOf()) { !it.executing && it.workStateAuthoritative }
+            .mapTo(mutableSetOf()) { it.sessionId }
+        val before = unseenSessions.value
+        val marked = markFinishedAway(lastWorkingSessions, settled, openSessionId(), unseenSessions.value)
+        if (marked != before) unseenSessions.value = marked
+        val newlyFinished = marked - before
+        val listedDir = sessionsDir.value
+        if (listedDir != null && newlyFinished.any { sameDirPath(lastWorkingDirectories[it], listedDir) }) {
+            // A session started on another client may not exist in our stale Sessions snapshot yet.
+            // Refresh exactly on a completion edge so its NEW_RESULT row becomes renderable immediately.
+            scope.launch { runCatching { send(ListSessions(listedDir)) } }
+        }
         lastWorkingSessions = now
+        lastWorkingDirectories = nowRows.associate { it.sessionId to it.dirKey }
+    }
+
+    /** The current surface has already shown this session settling, so a delayed directory snapshot must
+     * not relabel it as unseen after a quick Back. If background work is still live, its next snapshot
+     * re-enters the baseline and a later away-from-screen completion remains discoverable. */
+    private fun noteCurrentSettledSeen(sessionId: String?) {
+        sessionId ?: return
+        lastWorkingSessions = lastWorkingSessions - sessionId
+        lastWorkingDirectories = lastWorkingDirectories - sessionId
     }
 
     /** Composer draft persisted per conversation. Keyed most-durable-first: the real sessionId (stable across
@@ -1617,12 +1690,31 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.putString(K_VIEW_MODE, if (on) "tree" else "flat")
     }
 
-    /** Settings: persist the default reasoning effort for new sessions (null = model default). */
+    /** Legacy Claude entry point retained for source/storage compatibility. */
     fun setDefaultEffort(level: String?) {
         val v = level?.takeIf { it.isNotEmpty() }
         if (v == defaultEffort.value) return
         defaultEffort.value = v
         SecureStore.putString(K_DEFAULT_EFFORT, v ?: "")
+    }
+
+    /** Settings: persist an agent-scoped default effort. No backend may overwrite another one's choice. */
+    fun setDefaultEffortFor(agent: AgentKind, level: String?) {
+        if (agent == AgentKind.CLAUDE) {
+            setDefaultEffort(level)
+            return
+        }
+        val v = level?.takeIf { it.isNotEmpty() }
+        val (state, key) = when (agent) {
+            AgentKind.CLAUDE -> error("handled above")
+            AgentKind.CODEX -> defaultCodexEffort to K_DEFAULT_CODEX_EFFORT
+            AgentKind.OPENCODE -> defaultOpenCodeEffort to K_DEFAULT_OPENCODE_EFFORT
+            AgentKind.KIMI -> defaultKimiEffort to K_DEFAULT_KIMI_EFFORT
+            AgentKind.ZCODE -> defaultZCodeEffort to K_DEFAULT_ZCODE_EFFORT
+        }
+        if (v == state.value) return
+        state.value = v
+        SecureStore.putString(key, v ?: "")
     }
 
     fun setDefaultServiceTier(tier: String?) {
@@ -1650,16 +1742,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
         if (v == state.value) return
         state.value = v
-        if (agent == AgentKind.CODEX) {
-            modelCapabilities(agent, v)?.let { caps ->
-                if (defaultEffort.value != null && defaultEffort.value !in caps.reasoningEfforts) {
-                    setDefaultEffort(null)
-                }
-                if (defaultServiceTier.value != null && caps.serviceTiers.none { it.id == defaultServiceTier.value }) {
-                    setDefaultServiceTier(null)
-                }
-            }
-        }
+        reconcileDefaultCapabilities(agent)
         SecureStore.putString(
             when (agent) {
                 AgentKind.CLAUDE -> K_DEFAULT_MODEL
@@ -2040,6 +2123,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // store it". authState clears for the same reason — the next daemon's account is a fresh fetch.
         authState.value = null
         presetsState.value = null; presetsStateRev.value = 0
+        agentModels.clear() // model/effort capabilities belong to the daemon we just left; UNKNOWN on the next one until it replies
         gatewayBaseUrl.value = null // per-daemon truth (issue #139): the next machine re-announces via DaemonInfo
         bridgeControl.value = null  // per-daemon truth too — the next daemon re-advertises via DaemonInfo (issue #91)
         daemonSupportedAgents.value = emptySet() // reverse agent capability: no stale ZCode across machines
@@ -2052,9 +2136,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
         clearAskQueue()
         pendingApprovals.clear()
-        // #165: the busy→idle detector is per-MACHINE state. Carrying this machine's working ids into the
+        // #165/#239: the work→idle detector is per-MACHINE state. Carrying this machine's ids into the
         // next one's first project list would mark every one of them "finished while you were away".
-        lastWorkingSessions = emptySet(); unseenSessions.value = emptySet()
+        lastWorkingSessions = emptySet(); lastWorkingDirectories = emptyMap(); unseenSessions.value = emptySet()
         directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear(); clearFileUploads(); clearBackgroundJobs()
         resetHistoryPaging() // #147: the transcript left with messages — so must its cursor
         demoMode.value = false // leaving the demo returns to real pairing
@@ -2135,12 +2219,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         defaultMode.value = from.defaultMode.value
         defaultPermissionMode.value = from.defaultPermissionMode.value
         defaultEffort.value = from.defaultEffort.value
+        defaultCodexEffort.value = from.defaultCodexEffort.value
+        defaultOpenCodeEffort.value = from.defaultOpenCodeEffort.value
+        defaultKimiEffort.value = from.defaultKimiEffort.value
+        defaultZCodeEffort.value = from.defaultZCodeEffort.value
         defaultServiceTier.value = from.defaultServiceTier.value
         defaultModel.value = from.defaultModel.value
         defaultCodexModel.value = from.defaultCodexModel.value
         defaultOpenCodeModel.value = from.defaultOpenCodeModel.value
         defaultKimiModel.value = from.defaultKimiModel.value
         defaultZCodeModel.value = from.defaultZCodeModel.value
+        // This repository keeps the promoted MACHINE's capability catalog. Reconcile the shell defaults
+        // copied from the outgoing machine against that truth now, so Settings and the next OpenSession
+        // cannot disagree until another ModelsList happens to arrive.
+        AgentKind.entries.forEach(::reconcileDefaultCapabilities)
         contextWindowOverride.value = from.contextWindowOverride.value
         contextWindowOverrides.clear(); contextWindowOverrides.putAll(from.contextWindowOverrides) // #169: per-model table travels with the rest of Settings
         defaultAgent.value = from.defaultAgent.value
@@ -2575,14 +2667,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                         )
                     } else merged
                 agentModels[f.agent] = accepted
-                if (f.agent == AgentKind.CODEX) {
-                    modelCapabilities(AgentKind.CODEX, defaultModelFor(AgentKind.CODEX))?.let { caps ->
-                        if (defaultEffort.value != null && defaultEffort.value !in caps.reasoningEfforts) setDefaultEffort(null)
-                        if (defaultServiceTier.value != null && caps.serviceTiers.none { it.id == defaultServiceTier.value }) {
-                            setDefaultServiceTier(null)
-                        }
-                    }
-                }
+                reconcileDefaultCapabilities(f.agent)
             }
             is PushPrefs -> pushPrefs.value = f.enabled
             is ApprovalPrefs -> {
@@ -2828,6 +2913,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // the listed snapshot said `live` at listing time — correct it locally so sidebar/list
                 // dots stop pulsing the moment the turn ends instead of waiting for a manual re-list
                 sessionKey.value?.let { sid ->
+                    // #239: this TurnDone was delivered while the session was on screen, so it is already
+                    // seen. If the user backs out before the next directory poll, do not reinterpret the
+                    // delayed executing→idle snapshot as a result completed while away. Real background
+                    // work will re-enter the baseline on that poll and can still finish unseen later.
+                    if (backgroundJobs.none { it.status == JobStatus.RUNNING }) noteCurrentSettledSeen(sid)
                     val i = sessions.indexOfFirst { it.sessionId == sid }
                     if (i >= 0 && sessions[i].live) sessions[i] = sessions[i].copy(live = false)
                 }
@@ -2838,7 +2928,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 f.usage?.takeIf { it.contextTokens > 0 }?.let { contextUsed.value = it.contextTokens }
                 upgradeWindowIfProven()
             }
-            is BackgroundJobs -> if (f.convoId == convoId.value) replace(backgroundJobs, f.jobs)
+            is BackgroundJobs -> if (f.convoId == convoId.value) {
+                replace(backgroundJobs, f.jobs)
+                if (!streaming.value && f.jobs.none { it.status == JobStatus.RUNNING }) {
+                    noteCurrentSettledSeen(sessionKey.value ?: currentSessionId)
+                }
+            }
             // Workflow orchestration (issue #106): whole-run snapshots keyed by runId; a re-push of the
             // same run reconciles in place. finalResult arrives only on the explicit terminal patch —
             // never let a later plain snapshot blank an already-received final return.
@@ -2880,6 +2975,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 if (f.code == "process_exited" && (f.convoId == null || f.convoId == convoId.value)) {
                     promptEvidence()
                     finishThinking(); streaming.value = false
+                    noteCurrentSettledSeen(sessionKey.value ?: currentSessionId)
                 }
             }
             // The daemon no longer holds this conversation (idle-reaped during a link drop / daemon restart).
@@ -3373,9 +3469,38 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     fun modelCapabilities(agent: AgentKind, modelId: String? = model.value): dev.ccpocket.protocol.ModelCapabilities? {
         val listed = agentModels[agent] ?: return null
-        val id = modelId ?: listed.models.firstOrNull()
-        return id?.let { wanted ->
-            listed.modelCapabilities.firstOrNull { it.model.equals(wanted, ignoreCase = true) }
+        // null is the CLI's real "Default" selection, not an alias for the first advertised model. The
+        // daemon cannot know which concrete model that default will resolve to for this account/session, so
+        // its capabilities are UNKNOWN and persisted launch options must pass through unchanged.
+        val id = modelId ?: return null
+        return listed.modelCapabilities.firstOrNull { it.model.equals(id, ignoreCase = true) }
+    }
+
+    /** The authoritative reasoning levels for one launch, when the daemon knows them. A matching
+     * per-model row wins even when its list is empty; otherwise a non-empty backend-wide advertisement
+     * (Claude CLI) applies. Null means an old daemon or an unknown/custom model, so callers preserve the
+     * legacy pass-through behaviour instead of guessing that a persisted value is invalid. */
+    private fun supportedReasoningEfforts(agent: AgentKind, modelId: String?): List<String>? {
+        val listed = agentModels[agent] ?: return null
+        modelCapabilities(agent, modelId)?.let { return it.reasoningEfforts }
+        return listed.supportedEfforts.takeIf { it.isNotEmpty() }
+    }
+
+    /** Keep persisted Settings defaults honest whenever either half changes: the selected model, a fresh
+     * daemon catalog, or the shell moving onto a hot machine with a different installed CLI. Unknown
+     * capability remains pass-through; known incompatibility is cleared only for its owning backend. */
+    private fun reconcileDefaultCapabilities(agent: AgentKind) {
+        val modelId = defaultModelFor(agent)
+        supportedReasoningEfforts(agent, modelId)?.let { supported ->
+            val scopedEffort = defaultEffortFor(agent)
+            if (scopedEffort != null && scopedEffort !in supported) setDefaultEffortFor(agent, null)
+        }
+        modelCapabilities(agent, modelId)?.let { caps ->
+            if (agent == AgentKind.CODEX &&
+                defaultServiceTier.value != null && caps.serviceTiers.none { it.id == defaultServiceTier.value }
+            ) {
+                setDefaultServiceTier(null)
+            }
         }
     }
 
@@ -3383,9 +3508,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  advertises a backend-wide set. A present per-model row is authoritative even when empty. If both
      *  capability fields are absent, the daemon predates #183, so retain the picker it already supported. */
     fun effortOptions(agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE, modelId: String? = model.value): List<String> {
-        val listed = agentModels[agent] ?: return emptyList()
-        modelCapabilities(agent, modelId)?.let { return it.reasoningEfforts }
-        return listed.supportedEfforts.ifEmpty { LEGACY_EFFORT_OPTIONS }
+        if (agentModels[agent] == null) return emptyList()
+        return supportedReasoningEfforts(agent, modelId) ?: LEGACY_EFFORT_OPTIONS
     }
 
     fun serviceTierOptions(
@@ -4378,8 +4502,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         agent: AgentKind = sessionDefaultAgent,
         startPermissionMode: String? = defaultPermissionMode.value,
         // issue #199: a model picked in the new-session step, for THIS session only. Null = the usual
-        // ladder (the session's remembered model, else the per-agent Settings default). Deliberately not
-        // persisted anywhere: the pick is part of creating one session, not a new default.
+        // ladder (an existing session's remembered nullable value; a NEW session's per-agent Settings
+        // default). Deliberately not persisted anywhere: the pick is part of creating one session, not a
+        // new default.
         startModel: String? = null,
     ): Boolean {
         // A resumed session keeps its recorded backend, so gate that effective agent rather than only the
@@ -4470,12 +4595,25 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // the session's remembered model and the Settings default. Same compatibility guard as the rest.
         val openModel = compatibleModelForAgent(openAgent, startModel)
             ?: compatibleModelForAgent(openAgent, savedModel)
-            ?: compatibleModelForAgent(openAgent, defaultModelFor(openAgent))
+            // #237 adds Codex defaults for NEW sessions only. Every other backend keeps the pre-#237
+            // resume behavior: a missing/null local row falls through to its Settings default. In
+            // particular, changing that fallback for Claude would be an unrelated behavioral regression.
+            ?: if (resumeId == null || openAgent != AgentKind.CODEX) {
+                compatibleModelForAgent(openAgent, defaultModelFor(openAgent))
+            } else {
+                null
+        }
         val knownCapabilities = modelCapabilities(openAgent, openModel)
-        val openEffort = (saved?.effort ?: defaultEffort.value).takeIf { candidate ->
-            candidate == null ||
-                candidate in knownCapabilities?.reasoningEfforts.orEmpty() ||
-                (openAgent != AgentKind.ZCODE && knownCapabilities == null)
+        val knownEfforts = supportedReasoningEfforts(openAgent, openModel)
+        // Same boundary for effort. A Codex resume never inherits a newly-selected default, while Claude
+        // and the other existing backends retain their historical null/missing-row fallback.
+        val requestedEffort = saved?.effort ?: if (resumeId == null || openAgent != AgentKind.CODEX) {
+            defaultEffortFor(openAgent)
+        } else {
+            null
+        }
+        val openEffort = requestedEffort.takeIf { candidate ->
+            candidate == null || knownEfforts == null || candidate in knownEfforts
         }
         val openServiceTier = (saved?.serviceTier ?: defaultServiceTier.value).takeIf { candidate ->
             openAgent == AgentKind.CODEX &&
@@ -5373,9 +5511,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         switchViaCommand("/model $target")
         // Reasoning and Fast are model capabilities, not global Codex switches. Clear a choice the
         // target model explicitly does not advertise before the next real turn can be rejected.
-        val caps = modelCapabilities(sessionAgent.value ?: AgentKind.CLAUDE, target)
+        val activeAgent = sessionAgent.value ?: AgentKind.CLAUDE
+        val caps = modelCapabilities(activeAgent, target)
+        val supportedEfforts = supportedReasoningEfforts(activeAgent, target)
+        if (supportedEfforts != null && effort.value != null && effort.value !in supportedEfforts) switchEffort(null)
         if (caps != null) {
-            if (effort.value != null && effort.value !in caps.reasoningEfforts) switchEffort(null)
             if (serviceTier.value != null && caps.serviceTiers.none { it.id == serviceTier.value }) switchServiceTier(null)
         }
     }
@@ -5501,7 +5641,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // Optimistic touch so the sheet re-orders under the tap. The daemon's SessionLive re-touches with
         // the authoritative id right after (a fork or lock-heal can hand back a different one), so a
         // wrong guess self-corrects instead of sticking in the MRU.
-        rememberOpenedSession(item.dirKey, item.sessionId, item.title, item.agent)
+        rememberOpenedSession(item.dirKey, item.sessionId, item.title, item.agent, markSeen = false)
         openSession(item.dirKey, item.sessionId, title = item.title, agent = item.agent ?: sessionDefaultAgent)
     }
 
@@ -5526,12 +5666,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // still restore per-session, same as openSession.
             val saved = sessionParams[sid]
             val agent = saved?.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
-            val takeOverModel = compatibleModelForAgent(agent, saved?.model)
-            val takeOverCapabilities = modelCapabilities(agent, takeOverModel)
-            val takeOverEffort = (saved?.effort ?: defaultEffort.value).takeIf { candidate ->
-                candidate == null ||
-                    candidate in takeOverCapabilities?.reasoningEfforts.orEmpty() ||
-                    (agent != AgentKind.ZCODE && takeOverCapabilities == null)
+            val takeoverModel = compatibleModelForAgent(agent, saved?.model)
+            val requestedEffort = saved?.effort ?: if (agent == AgentKind.CODEX) null else defaultEffortFor(agent)
+            val supportedEfforts = supportedReasoningEfforts(agent, takeoverModel)
+            val takeoverEffort = requestedEffort.takeIf { candidate ->
+                candidate == null || supportedEfforts == null || candidate in supportedEfforts
             }
             mode.value = defaultMode.value
             permissionMode.value = defaultPermissionMode.value.takeIf { agent == AgentKind.CLAUDE }
@@ -5540,12 +5679,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 OpenSession(
                     wd,
                     sid,
-                    model = takeOverModel,
+                    model = takeoverModel,
                     mode = defaultMode.value,
-                    effort = takeOverEffort,
-                    agent = agent,
+                    // A Codex takeover is an existing session and must not inherit #237's new-session
+                    // default. Other backends keep their established fallback to the Settings effort.
+                    effort = takeoverEffort,
                     takeOver = true,
                     lastEventSeq = lastEventSeqFor(sid),
+                    agent = agent,
                     permissionMode = permissionMode.value,
                     serviceTier = serviceTier.value,
                 ),
@@ -5663,6 +5804,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
         const val K_DEFAULT_PERMISSION_MODE = "default_session_permission_mode" // backend-native mode (`auto`), "" = legacy mode
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
+        const val K_DEFAULT_CODEX_EFFORT = "default_session_effort_codex" // SecureStore: Codex-only effort; never overwrites Claude
+        const val K_DEFAULT_OPENCODE_EFFORT = "default_session_effort_opencode" // SecureStore: OpenCode-only effort
+        const val K_DEFAULT_KIMI_EFFORT = "default_session_effort_kimi" // SecureStore: Kimi-only effort
+        const val K_DEFAULT_ZCODE_EFFORT = "default_session_effort_zcode" // SecureStore: ZCode-only thought level
         const val K_DEFAULT_SERVICE_TIER = "default_session_service_tier" // Codex `priority` = Fast; "" = account default
         const val K_DEFAULT_MODEL = "default_session_model"   // SecureStore: Claude model id for new sessions ("" = CLI default)
         const val K_DEFAULT_CODEX_MODEL = "default_session_model_codex" // SecureStore: Codex model id for new sessions
