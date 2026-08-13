@@ -45,7 +45,7 @@ jobs:
   preflight:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Verify immutable release source and version lockstep
         env:
@@ -84,14 +84,14 @@ jobs:
             jdk_arch: x64       # cross-build via Rosetta
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rosetta (for the x86_64 JDK)
         if: matrix.arch == 'x86_64'
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
       - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -141,10 +141,10 @@ jobs:
     if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17 (with jpackage)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -175,10 +175,10 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17 (with jpackage)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -205,10 +205,10 @@ jobs:
     if: ${{ !inputs.only_macos_desktop }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -292,21 +292,21 @@ jobs:
             jdk_arch: x64       # cross-build via Rosetta
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rosetta (for the x86_64 JDK)
         if: matrix.arch == 'x86_64'
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
       - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
           architecture: ${{ matrix.jdk_arch }}
 
       - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
         run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
@@ -357,16 +357,16 @@ jobs:
     if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17 (with jpackage)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
         shell: bash
@@ -484,9 +484,9 @@ jobs:
           }
           printf 'tag_ref=%s\ncommit_sha=%s\n' "$TAG_REF" "$TAG_COMMIT" >> "$GITHUB_OUTPUT"
 
-      # Pin the high-value signing boundary, rather than trusting the mutable v4 tag.
-      # actions/checkout releases-v4, verified commit (queried 2026-08-12).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # Pin the high-value signing boundary, rather than trusting the mutable v7 tag.
+      # actions/checkout v7.0.1, verified commit (queried 2026-08-14).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ steps.release_target.outputs.tag_ref }}
           persist-credentials: false
@@ -568,7 +568,7 @@ jobs:
     needs: [checksums]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Update scoop manifest to v${{ inputs.version }}
         env:
           GH_TOKEN: ${{ github.token }}

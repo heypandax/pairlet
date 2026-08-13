@@ -46,7 +46,7 @@ jobs:
     outputs:
       version: ${{ steps.stamp.outputs.version }} # resolved marketing version (repo lockstep unless overridden)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate store metadata (fail fast, before the 20-minute archive)
         # ASC rejects certain characters in What's New with "attribute value has invalid characters" —
@@ -63,7 +63,7 @@ jobs:
       - name: Set up JDK 17
         # Exports JAVA_HOME for later steps; the Xcode "Compile Kotlin Framework" build phase reads
         # ${JAVA_HOME:-...} to find java, and (with the pin removed below) gradle uses it too.
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -188,7 +188,7 @@ jobs:
     needs: ios
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Ruby + fastlane
         uses: ruby/setup-ruby@v1
