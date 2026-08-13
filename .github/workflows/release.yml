@@ -264,25 +264,8 @@ jobs:
       - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
         uses: android-actions/setup-android@v3
 
-      - name: Write placeholder google-services.json (gitignored; desktop target never uses Firebase)
-        run: |
-          cat > mobile/composeApp/google-services.json <<'JSON'
-          {
-            "project_info": { "project_number": "000000000000", "project_id": "ccpocket-ci-placeholder" },
-            "client": [
-              {
-                "client_info": {
-                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
-                  "android_client_info": { "package_name": "com.panda.ccpocket" }
-                },
-                "api_key": [ { "current_key": "AIzaPlaceholderKeyForCiDesktopBuildOnly0000" } ],
-                "oauth_client": [],
-                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
-              }
-            ],
-            "configuration_version": "1"
-          }
-          JSON
+      - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
+        run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
 
       - name: Import Developer ID signing certificate
         env:
@@ -340,26 +323,9 @@ jobs:
       - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
         uses: android-actions/setup-android@v3
 
-      - name: Write placeholder google-services.json (gitignored; desktop target never uses Firebase)
+      - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
         shell: bash
-        run: |
-          cat > mobile/composeApp/google-services.json <<'JSON'
-          {
-            "project_info": { "project_number": "000000000000", "project_id": "ccpocket-ci-placeholder" },
-            "client": [
-              {
-                "client_info": {
-                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
-                  "android_client_info": { "package_name": "com.panda.ccpocket" }
-                },
-                "api_key": [ { "current_key": "AIzaPlaceholderKeyForCiDesktopBuildOnly0000" } ],
-                "oauth_client": [],
-                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
-              }
-            ],
-            "configuration_version": "1"
-          }
-          JSON
+        run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
 
       - name: Unpin the macOS-only JDK path (gradle.properties pins it for local dev; CI uses the runner JDK)
         shell: bash

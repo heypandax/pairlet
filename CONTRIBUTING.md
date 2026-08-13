@@ -27,6 +27,7 @@ Issues and PRs are welcome, in English or Chinese. This file collects everything
 
 ```bash
 bash scripts/check-all.sh      # protocol + daemon + relay + mobile desktop suites — run before a PR
+CHECK_IOS=1 bash scripts/check-all.sh  # additionally run iOS Simulator tests on Apple Silicon macOS; boot a Simulator first
 bash scripts/relay-smoke.sh    # optional: in-memory relay E2E smoke (fake claude, no network)
 ./gradlew :protocol:jvmTest --tests "dev.ccpocket.protocol.e2e.*"   # crypto channel proofs
 ```

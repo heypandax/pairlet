@@ -27,7 +27,8 @@ jobs:
 
       - name: Verify support knowledge and generated manual
         run: |
-          python3 -m unittest support.tests.test_support_kb
+          python3 scripts/check-firebase-placeholders.py
+          python3 -m unittest discover -s support/tests -v
           node --test support/openclaw/plugins/cc-pocket-support-guard/index.test.js
           bash -n scripts/activate-openclaw-support-channel.sh
           bash scripts/activate-openclaw-support-channel.sh --help
