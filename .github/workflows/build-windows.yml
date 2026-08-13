@@ -40,7 +40,7 @@ jobs:
         run: pwsh scripts/release-windows.ps1 "${{ inputs.version }}"
 
       - name: Upload zip as a downloadable workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cc-pocket-daemon-${{ inputs.version }}-windows-x86_64
           path: cc-pocket-daemon-${{ inputs.version }}-windows-x86_64.zip
@@ -94,7 +94,7 @@ jobs:
           ls -la out
 
       - name: Upload desktop app artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cc-pocket-desktop-${{ inputs.version }}-windows
           path: out/*
