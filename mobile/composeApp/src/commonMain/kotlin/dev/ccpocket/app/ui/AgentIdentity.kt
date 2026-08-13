@@ -48,26 +48,31 @@ fun agentColor(agent: AgentKind): Color = when (agent) {
     AgentKind.CODEX -> Tok.codex
     AgentKind.OPENCODE -> Tok.opencode
     AgentKind.KIMI -> Tok.kimi
-    else -> Tok.accent
+    AgentKind.ZCODE -> Tok.zcode
+    AgentKind.CLAUDE -> Tok.accent
 }
 fun agentName(agent: AgentKind): String = when (agent) {
     AgentKind.CODEX -> "Codex"
     AgentKind.OPENCODE -> "OpenCode"
     AgentKind.KIMI -> "Kimi"
-    else -> "Claude"
+    AgentKind.ZCODE -> "ZCode"
+    AgentKind.CLAUDE -> "Claude"
 }
 /** A 2-letter code for the compact list-row badge (#211) — keeps the agent legible where the full
  *  name-pill ("OpenCode") crowded the session title out. Color still carries the identity. */
 fun agentAbbrev(agent: AgentKind): String = when (agent) {
     AgentKind.CODEX -> "CX"
     AgentKind.OPENCODE -> "OC"
-    else -> "CC"
+    AgentKind.KIMI -> "CC"
+    AgentKind.ZCODE -> "ZC"
+    AgentKind.CLAUDE -> "CC"
 }
 fun agentTagline(agent: AgentKind): String = when (agent) {
     AgentKind.CODEX -> "Codex · OpenAI"
     AgentKind.OPENCODE -> "OpenCode · Open Source"
     AgentKind.KIMI -> "Kimi Code · Moonshot"
-    else -> "Claude Code · Anthropic"
+    AgentKind.ZCODE -> "ZCode · Z.ai"
+    AgentKind.CLAUDE -> "Claude Code · Anthropic"
 }
 
 /** The two standard agent-color tints — a 12% fill + a 42% border — shared by the chip and the selection cards. */
@@ -109,6 +114,12 @@ fun AgentGlyph(agent: AgentKind, color: Color = agentColor(agent), size: Int = 1
             val ibox = Offset(7f * s, 3.5f * s)
             val id = Size(12f * s, 12f * s)
             drawArc(color, startAngle = 60f, sweepAngle = 240f, useCenter = false, topLeft = ibox, size = id, style = Stroke(width = w, cap = StrokeCap.Round))
+        } else if (agent == AgentKind.ZCODE) {
+            val w = 1.7f * s
+            // A quiet geometric Z: recognizable at list-row size without importing a brand asset.
+            drawLine(color, p(4f, 5f), p(16f, 5f), strokeWidth = w, cap = StrokeCap.Round)
+            drawLine(color, p(16f, 5f), p(4f, 15f), strokeWidth = w, cap = StrokeCap.Round)
+            drawLine(color, p(4f, 15f), p(16f, 15f), strokeWidth = w, cap = StrokeCap.Round)
         } else {
             val w = 1.8f * s
             // chevron ">"

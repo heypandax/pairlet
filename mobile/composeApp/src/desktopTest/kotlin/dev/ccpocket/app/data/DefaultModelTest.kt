@@ -1,6 +1,8 @@
 package dev.ccpocket.app.data
 
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AGENT_WIRE_ZCODE
+import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.OpenSession
 import kotlinx.coroutines.CoroutineScope
@@ -72,6 +74,31 @@ class DefaultModelTest {
             assertEquals("gpt-5.1-codex", open.model)
             assertEquals("gpt-5.1-codex", repo.model.value)
         } finally {
+            repo.setDefaultModelFor(AgentKind.CODEX, null)
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun zcodeDefaultIsBackendScopedAndSeedsNewZcodeSessions() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val repo = PocketRepository(scope)
+        val sent = mutableListOf<Frame>()
+        try {
+            repo.receiveForTest(DaemonInfo(supportedAgents = listOf(AGENT_WIRE_ZCODE)))
+            repo.setDefaultModelFor(AgentKind.CODEX, "gpt-5.1-codex")
+            repo.setDefaultModelFor(AgentKind.ZCODE, "zai/glm-5")
+            repo.onSendForTest = { sent += it }
+
+            repo.openSession("/tmp/zcode-project", agent = AgentKind.ZCODE)
+
+            val open = sent.filterIsInstance<OpenSession>().single()
+            assertEquals(AgentKind.ZCODE, open.agent)
+            assertEquals("zai/glm-5", open.model)
+            assertEquals("zai/glm-5", repo.defaultModelFor(AgentKind.ZCODE))
+            assertEquals("gpt-5.1-codex", repo.defaultModelFor(AgentKind.CODEX), "ZCode must not share another backend's storage key")
+        } finally {
+            repo.setDefaultModelFor(AgentKind.ZCODE, null)
             repo.setDefaultModelFor(AgentKind.CODEX, null)
             scope.cancel()
         }

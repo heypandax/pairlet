@@ -276,10 +276,13 @@ private fun GeneralPane(model: DesktopModel) {
             ChatAlignRow(model)
         }
         Group(stringResource(Res.string.settings_default_agent), stringResource(Res.string.settings_default_agent_sub)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                AgentCardRow(AgentKind.CLAUDE, model.defaultAgent == AgentKind.CLAUDE, Modifier.weight(1f)) { model.defaultAgent = AgentKind.CLAUDE }
-                AgentCardRow(AgentKind.CODEX, model.defaultAgent == AgentKind.CODEX, Modifier.weight(1f)) { model.defaultAgent = AgentKind.CODEX }
-                AgentCardRow(AgentKind.OPENCODE, model.defaultAgent == AgentKind.OPENCODE, Modifier.weight(1f)) { model.defaultAgent = AgentKind.OPENCODE }
+            model.availableAgents.chunked(3).forEach { rowAgents ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    rowAgents.forEach { agent ->
+                        AgentCardRow(agent, model.defaultAgent == agent, Modifier.weight(1f)) { model.defaultAgent = agent }
+                    }
+                    repeat(3 - rowAgents.size) { Spacer(Modifier.weight(1f)) }
+                }
             }
         }
         val defaultAgent = model.defaultAgent
@@ -304,6 +307,8 @@ private fun GeneralPane(model: DesktopModel) {
                 AgentKind.OPENCODE -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
                 // KIMI (issue #206): daemon-reported aliases (from `kimi provider list --json`)
                 AgentKind.KIMI -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
+                // ZCode (issue #228): daemon-reported ids only, the same contract as Kimi.
+                AgentKind.ZCODE -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
             }
             options.forEach { (label, id) ->
                 PrefRow(label, id, selected = defaultModel == id) { model.setDefaultModelFor(defaultAgent, id) }
@@ -353,10 +358,11 @@ private fun GeneralPane(model: DesktopModel) {
             }
         }
         Group(stringResource(Res.string.settings_default_mode), stringResource(Res.string.settings_default_mode_sub)) {
-            val modes = CLAUDE_MODES + if (
+            val modes = desktopModeChoices(
+                defaultAgent,
                 defaultAgent == AgentKind.CLAUDE &&
-                model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO)
-            ) listOf(CLAUDE_AUTO_MODE) else emptyList()
+                    model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+            )
             modes.forEach { m ->
                 ModeRow(
                     m,

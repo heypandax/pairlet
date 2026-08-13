@@ -4,7 +4,9 @@ import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.AuthorizedActionRecorded
+import dev.ccpocket.protocol.HandoffUpdated
 import dev.ccpocket.protocol.PermissionRiskUpdated
+import dev.ccpocket.protocol.SessionHandoff
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -31,7 +33,7 @@ class ClientCapsFilterTest {
     private fun undeclared() = RequestRouter.ClientCapsHolder() // default: supportsOpencode = false
     private fun declared() = RequestRouter.ClientCapsHolder().apply { supportsOpencode = true }
 
-    private fun entry(vararg live: ActiveSession) = DirectoryEntry(
+    private fun entry(vararg live: ActiveSession, sessionAgents: List<AgentKind> = live.map { it.agent }) = DirectoryEntry(
         path = "/w/proj", name = "proj", isDir = true, hasSessions = true,
         open = live.isNotEmpty(),
         executing = live.any { it.executing },
@@ -39,10 +41,14 @@ class ClientCapsFilterTest {
         activeSessionTitle = live.firstOrNull()?.title,
         gitBranch = live.firstOrNull()?.gitBranch,
         activeSessions = live.toList(),
+        sessionAgents = sessionAgents,
     )
 
     private fun oc(id: String, executing: Boolean = false) =
         ActiveSession(sessionId = id, title = "oc", agent = AgentKind.OPENCODE, executing = executing, gitBranch = "main")
+
+    private fun zcode(id: String, executing: Boolean = false) =
+        ActiveSession(sessionId = id, title = "zc", agent = AgentKind.ZCODE, executing = executing, gitBranch = "zcode")
 
     private fun claude(id: String, executing: Boolean = false) =
         ActiveSession(sessionId = id, title = "cl", agent = AgentKind.CLAUDE, executing = executing, gitBranch = "dev")
@@ -82,6 +88,27 @@ class ClientCapsFilterTest {
         assertEquals(input, RequestRouter.filterDirs(input, declared()))
     }
 
+    @Test
+    fun `zcode live rows require the independent zcode capability`() {
+        val input = listOf(entry(zcode("zc-sid", executing = true), claude("cl-sid")))
+        val undeclared = RequestRouter.filterDirs(input, RequestRouter.ClientCapsHolder()).single()
+        assertEquals(listOf("cl-sid"), undeclared.activeSessions.map { it.sessionId })
+        assertEquals(listOf(AgentKind.CLAUDE), undeclared.sessionAgents)
+        assertEquals("cl-sid", undeclared.activeSessionId)
+        assertFalse(undeclared.executing)
+
+        val declared = RequestRouter.ClientCapsHolder().apply { supportsZcode = true }
+        assertEquals(input, RequestRouter.filterDirs(input, declared))
+    }
+
+    @Test
+    fun `zcode history provenance is stripped even when there is no live zcode row`() {
+        val input = listOf(entry(claude("cl-sid"), sessionAgents = listOf(AgentKind.CLAUDE, AgentKind.ZCODE)))
+        val out = RequestRouter.filterDirs(input, RequestRouter.ClientCapsHolder()).single()
+        assertEquals(listOf(AgentKind.CLAUDE), out.sessionAgents)
+        assertEquals(listOf("cl-sid"), out.activeSessions.map { it.sessionId })
+    }
+
     /** No opencode anywhere = identity, so ordinary fleets pay nothing for this. */
     @Test
     fun `projects without opencode pass through untouched`() {
@@ -111,5 +138,42 @@ class ClientCapsFilterTest {
             assertFalse(RequestRouter.allowedForCaps(frame, legacy), "legacy sibling must not receive ${frame::class.simpleName}")
             assertTrue(RequestRouter.allowedForCaps(frame, modern), "modern sibling should receive ${frame::class.simpleName}")
         }
+    }
+
+    @Test
+    fun `handoff listings strip only zcode rows for an undeclared client`() {
+        val claude = SessionHandoff(id = "h-claude", sourceSessionId = "s-claude", agent = AgentKind.CLAUDE)
+        val zcode = SessionHandoff(id = "h-zcode", sourceSessionId = "s-zcode", agent = AgentKind.ZCODE)
+
+        assertEquals(
+            listOf(claude),
+            RequestRouter.filterHandoffs(listOf(zcode, claude), RequestRouter.ClientCapsHolder()),
+        )
+        assertEquals(
+            listOf(claude),
+            RequestRouter.filterHandoffs(listOf(zcode, claude), null),
+            "no caps holder is a legacy client and must fail closed",
+        )
+
+        val modern = RequestRouter.ClientCapsHolder().apply { supportsZcode = true }
+        assertEquals(listOf(zcode, claude), RequestRouter.filterHandoffs(listOf(zcode, claude), modern))
+    }
+
+    @Test
+    fun `zcode handoff updates are gated independently per connection`() {
+        val update = HandoffUpdated(SessionHandoff(id = "h-zcode", sourceSessionId = "s-zcode", agent = AgentKind.ZCODE))
+        val legacy = RequestRouter.ClientCapsHolder()
+        val modern = RequestRouter.ClientCapsHolder().apply { supportsZcode = true }
+
+        assertFalse(RequestRouter.allowedForCaps(update, legacy))
+        assertFalse(RequestRouter.allowedForCaps(update, null), "a legacy ingress without a holder must fail closed")
+        assertTrue(RequestRouter.allowedForCaps(update, modern))
+        assertTrue(
+            RequestRouter.allowedForCaps(
+                HandoffUpdated(SessionHandoff(id = "h-claude", sourceSessionId = "s-claude", agent = AgentKind.CLAUDE)),
+                legacy,
+            ),
+            "baseline-agent handoffs remain compatible",
+        )
     }
 }

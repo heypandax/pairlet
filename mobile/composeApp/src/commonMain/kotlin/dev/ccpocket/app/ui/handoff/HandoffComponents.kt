@@ -441,7 +441,7 @@ fun HandoffHistoryRow(item: HandoffHistoryItemUi, onOpen: () -> Unit) {
 
 /** The "Handoffs" group inside the session info sheet — rows in a bordered group box, or the empty hint. */
 @Composable
-fun HandoffHistorySection(items: List<HandoffHistoryItemUi>, onOpen: (HandoffHistoryItemUi) -> Unit, onHandoff: () -> Unit) {
+fun HandoffHistorySection(items: List<HandoffHistoryItemUi>, onOpen: (HandoffHistoryItemUi) -> Unit, onHandoff: (() -> Unit)?) {
     Column(Modifier.padding(top = 14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
@@ -462,11 +462,13 @@ fun HandoffHistorySection(items: List<HandoffHistoryItemUi>, onOpen: (HandoffHis
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(stringResource(Res.string.ho_history_empty), color = Tok.muted, fontSize = 13.sp, lineHeight = 20.sp)
-                    Text(
-                        stringResource(Res.string.ho_handoff_action), color = Tok.tx2, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
-                            .clickable(onClick = onHandoff).padding(horizontal = 13.dp, vertical = 10.dp),
-                    )
+                    if (onHandoff != null) {
+                        Text(
+                            stringResource(Res.string.ho_handoff_action), color = Tok.tx2, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
+                                .clickable(onClick = onHandoff).padding(horizontal = 13.dp, vertical = 10.dp),
+                        )
+                    }
                 }
             } else {
                 items.forEachIndexed { i, item ->

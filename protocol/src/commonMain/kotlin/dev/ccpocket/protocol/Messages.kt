@@ -1161,6 +1161,10 @@ data class LanHello(val deviceId: String) : ToDaemon
  * Releases ship in lockstep, so the app also compares [latestVersion] against ITS own version — that
  * is how a phone with no GitHub access of its own learns it is behind. All three are trailing optional:
  * an older daemon omits them (the app shows "unknown" and skips the nudge), an older app ignores them.
+ * [supportedAgents] is the reverse of [ClientCaps.supportsAgents]: a new daemon advertises the agent
+ * enum values it can accept, while an old daemon's missing field decodes to an empty list. Clients use
+ * that deny-by-omission default only for newly-added agents whose enum an older daemon could coerce;
+ * baseline agents retain their existing compatibility behavior. An old app ignores the added key.
  */
 @Serializable
 @SerialName("pocket/daemon.info")
@@ -1175,6 +1179,7 @@ data class DaemonInfo(
     val daemonVersion: String? = null,
     val latestVersion: String? = null,
     val updateCommand: String? = null,
+    val supportedAgents: List<String> = emptyList(),
 ) : ToPhone
 
 @Serializable

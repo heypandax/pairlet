@@ -257,6 +257,7 @@ class SessionRegistry(
         pathScope: List<String>? = null,
         peerSupportsOpencode: Boolean = true,
         peerSupportsKimi: Boolean = true,
+        peerSupportsZcode: Boolean = true,
         bridgeAllowedCommands: List<String> = emptyList(),
         // issue #91 OWNER BYPASS: this session is the bridge owner's OWN dedicated session → its whole
         // PermissionBridge auto-allows. Passed ONLY by trusted in-process code (the built-in engine).
@@ -322,7 +323,8 @@ class SessionRegistry(
                 // instead — and refuse HERE, so any future path that hands such a client an opencode
                 // session id is covered too.
                 if ((attach.kind == AgentKind.OPENCODE && !peerSupportsOpencode) ||
-                    (attach.kind == AgentKind.KIMI && !peerSupportsKimi)
+                    (attach.kind == AgentKind.KIMI && !peerSupportsKimi) ||
+                    (attach.kind == AgentKind.ZCODE && !peerSupportsZcode)
                 ) {
                     log.info("open ${resume.take(8)}… → refused: ${attach.kind} session, peer never declared support")
                     sink.emit(PocketError("agent_unavailable", "update the app to open ${attach.kind} sessions"))

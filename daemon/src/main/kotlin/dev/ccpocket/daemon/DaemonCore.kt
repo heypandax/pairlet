@@ -45,6 +45,7 @@ class DaemonCore(
     scheduleStore: ScheduleStore = ScheduleStore.load(),
     openCodeModels: OpenCodeModelService = OpenCodeModelService(),
     kimiModels: dev.ccpocket.daemon.kimi.KimiModelService = dev.ccpocket.daemon.kimi.KimiModelService(),
+    zcodeModels: dev.ccpocket.daemon.zcode.ZCodeModelService = dev.ccpocket.daemon.zcode.ZCodeModelService(),
     codexModels: CodexModelService = CodexModelService(),
     /** Session Handoff (SESSION-HANDOFF.md): registry + guard + fan-out, shared by both transports.
      *  Installed onto [SessionRegistry.handoffs] below so the router's drive gate, the §4.1 create
@@ -196,8 +197,11 @@ class DaemonCore(
         registry, dirs, transcribe, inbox, shell, exports, scope, auth, prefs, presets, scheduler,
         // presetEnv shares PresetStore with the DaemonInfo gateway pill (Main.kt): the host we ask for a
         // model list must be the host the client is showing, with that layer's own credential (#167 ②).
-        openCodeModels, kimiModels, codexModels,
-        ClaudeModelService(claudeConfigDir, presetEnv = { runCatching { presetStore.activeEnv() }.getOrNull() }),
+        openCodeModels = openCodeModels,
+        kimiModels = kimiModels,
+        zcodeModels = zcodeModels,
+        codexModels = codexModels,
+        claudeModels = ClaudeModelService(claudeConfigDir, presetEnv = { runCatching { presetStore.activeEnv() }.getOrNull() }),
         approvals = approvals,
         grants = grants,
         approvalHistory = approvalHistory,

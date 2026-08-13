@@ -42,6 +42,7 @@ import dev.ccpocket.app.resources.your_computer
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.handoff.canInitiateSessionHandoff
 import dev.ccpocket.protocol.isQuestion
 import org.jetbrains.compose.resources.stringResource
 
@@ -70,6 +71,11 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
     LaunchedEffect(Unit) {
         delay(STARTUP_UPDATE_CHECK_DELAY_MS)
         if (model.updateState is DkUpdateState.Idle) model.checkForUpdates()
+    }
+    // A session switch can change the backend while the draft modal is open. Clear the stale state as
+    // well as hiding the surface, otherwise anyOverlay would keep treating an invisible modal as active.
+    LaunchedEffect(model.chatAgent) {
+        if (!model.chatAgent.canInitiateSessionHandoff()) model.showHandoff = false
     }
     Box(Modifier.fillMaxSize().background(Tok.base)) {
         Row(Modifier.fillMaxSize()) {
@@ -113,6 +119,7 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 NewSessionPopover(
                     model.newSessionSeed ?: "~/",
                     model.defaultAgent,
+                    model.availableAgents,
                     model.defaultMode,
                     model.defaultPermissionMode,
                     model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
@@ -189,7 +196,7 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 SettingsModal(model) { model.showSettings = false }
             }
         }
-        if (model.showHandoff && model.handoffInvite == null) {
+        if (model.showHandoff && model.handoffInvite == null && model.chatAgent.canInitiateSessionHandoff()) {
             // session-handoff draft dialog (design Frame 11) — centered scrim, two-column trust layout.
             // A fresh invite yields to the QR card below (the draft's job is done once the invite exists).
             Overlay(onDismiss = { model.showHandoff = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {

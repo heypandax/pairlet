@@ -684,6 +684,23 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun zcode_agent_kind_and_caps_pin_wire_names() {
+        val list = ModelsList(agent = AgentKind.ZCODE, models = listOf("zai/glm-5"))
+        val listJson = PocketJson.encodeToString(list)
+        assertTrue("\"agent\":\"zcode\"" in listJson, listJson)
+        assertEquals(list, PocketJson.decodeFromString<ModelsList>(listJson))
+
+        assertEquals("zcode", AGENT_WIRE_ZCODE)
+        val caps = ClientCaps(
+            supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE),
+        )
+        assertEquals(caps, PocketJson.decodeFromString<ClientCaps>(PocketJson.encodeToString(caps)))
+
+        val row = SessionSummary("s1", "t", "p", 1, "/w", 1, agent = AgentKind.ZCODE)
+        assertEquals(row, PocketJson.decodeFromString<SessionSummary>(PocketJson.encodeToString(row)))
+    }
+
+    @Test
     fun unknown_agent_kind_value_degrades_to_default_instead_of_failing_the_frame() {
         // THE wire hazard of adding an AgentKind constant: a peer built before it receives
         // `"agent":"<new>"` inside frames it already understands. coerceInputValues + the per-field

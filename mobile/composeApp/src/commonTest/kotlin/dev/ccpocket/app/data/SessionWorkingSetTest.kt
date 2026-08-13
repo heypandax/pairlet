@@ -87,7 +87,7 @@ class SessionWorkingSetTest {
 
     @Test
     fun executingStateIsPreservedForEveryDaemonBackedAgentAndNeverInferredFromHistoryAlone() {
-        val agents = listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI)
+        val agents = AgentKind.entries.toList()
         val dirs = agents.mapIndexed { i, agent ->
             dir("/w/${agent.name.lowercase()}", ActiveSession("s$i", agent = agent, executing = true))
         } + DirectoryEntry(

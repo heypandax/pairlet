@@ -23,6 +23,7 @@ import dev.ccpocket.protocol.DetachBridgeRunner
 import dev.ccpocket.protocol.ListBridges
 import dev.ccpocket.protocol.RevokeBridge
 import dev.ccpocket.protocol.DaemonInfo
+import dev.ccpocket.protocol.DAEMON_SUPPORTED_AGENT_WIRES
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ListShares
@@ -321,7 +322,12 @@ class DeviceSessions(
     /** What every device learns about this daemon after a handshake — version-stamped (issue #200) in one
      *  place so the handshake, the #161 twin re-send and the update re-announce can't drift apart. */
     private fun daemonInfo(): DaemonInfo =
-        dev.ccpocket.daemon.update.UpdateState.stamp(DaemonInfo(lanUrl(), hostname(), gatewayBaseUrl(), bridgeControl = true))
+        dev.ccpocket.daemon.update.UpdateState.stamp(
+            DaemonInfo(
+                lanUrl(), hostname(), gatewayBaseUrl(), bridgeControl = true,
+                supportedAgents = DAEMON_SUPPORTED_AGENT_WIRES,
+            ),
+        )
 
     /**
      * Re-announce [DaemonInfo] to every device with a live RELAY session — called when the daily check

@@ -105,6 +105,7 @@ fun modeChoiceSet(agent: AgentKind): ModeChoiceSet = when (agent) {
     AgentKind.CLAUDE -> ModeChoiceSet.CLAUDE_LADDER
     AgentKind.CODEX -> ModeChoiceSet.CODEX_PRESETS
     AgentKind.KIMI -> ModeChoiceSet.KIMI_LADDER
+    AgentKind.ZCODE -> ModeChoiceSet.CLAUDE_LADDER
     AgentKind.OPENCODE -> ModeChoiceSet.OPENCODE_AUTOMATIC
 }
 
@@ -125,6 +126,7 @@ data class ModeChoice(
  * Codex: the four `CODEX_PRESETS` rows — same order, same modes (pinned by `EntryUiTest`, because the two
  * lists drifting apart would silently mislabel an approval × sandbox pair).
  * Kimi: the same ladder minus Accept edits, which has no Kimi equivalent.
+ * ZCode: the four shared modes map directly to build / edit / plan / yolo.
  * OpenCode: one row, and it is a STATEMENT rather than a choice — the daemon runs it `--auto`.
  */
 fun agentModeChoices(agent: AgentKind, autoAvailable: Boolean = false): List<ModeChoice> = when (agent) {
@@ -137,6 +139,12 @@ fun agentModeChoices(agent: AgentKind, autoAvailable: Boolean = false): List<Mod
     }
     AgentKind.KIMI -> listOf(
         ModeChoice(PermissionMode.DEFAULT),
+        ModeChoice(PermissionMode.PLAN),
+        ModeChoice(PermissionMode.BYPASS_PERMISSIONS, danger = true),
+    )
+    AgentKind.ZCODE -> listOf(
+        ModeChoice(PermissionMode.DEFAULT),
+        ModeChoice(PermissionMode.ACCEPT_EDITS),
         ModeChoice(PermissionMode.PLAN),
         ModeChoice(PermissionMode.BYPASS_PERMISSIONS, danger = true),
     )

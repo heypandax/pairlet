@@ -470,11 +470,14 @@
     <string name="af_claude_only">Claude</string>
     <string name="af_codex_only">Codex</string>
     <string name="af_opencode_only">OpenCode</string>
+    <string name="af_zcode_only">ZCode</string>
     <string name="opencode_mode_short">Full access</string>
     <string name="opencode_mode_title">Full access (auto-approved)</string>
     <string name="opencode_mode_note">OpenCode runs with auto-approval: every tool call (file edits, shell commands) is approved by the CLI itself. Remote approvals and permission modes don\'t apply to OpenCode sessions.</string>
     <string name="opencode_mode_start">Start with full access</string>
     <string name="opencode_models_loading">Loading models from opencode…</string>
+    <string name="model_models_loading">Loading models from %1$s…</string>
+    <string name="model_models_empty">%1$s reported no models.</string>
     <string name="af_hint">Choose which agents\' projects and sessions appear. Claude, Codex, and OpenCode stay tagged in their own colors.</string>
     <string name="settings_usage">Token usage</string>
     <string name="usage_title">Usage</string>

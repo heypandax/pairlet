@@ -43,7 +43,10 @@ class DirectoryServiceMergeTest {
     }
 
     private fun service(codex: Map<String, Long> = emptyMap(), opencode: Map<String, Long> = emptyMap()) =
-        DirectoryService(projectsRoot = { projects }, codexCwds = { codex }, opencodeCwds = { opencode })
+        DirectoryService(
+            projectsRoot = { projects }, codexCwds = { codex }, opencodeCwds = { opencode },
+            kimiCwds = { emptyMap() }, zcodeCwds = { emptyMap() },
+        )
 
     @Test
     fun variant_spellings_across_backends_merge_into_one_row() {

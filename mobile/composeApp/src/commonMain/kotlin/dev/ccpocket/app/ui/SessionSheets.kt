@@ -77,6 +77,7 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.CLAUDE_OPUS_5
 import dev.ccpocket.protocol.CODEX_MODEL_IDS
+import dev.ccpocket.protocol.ModelsList
 import dev.ccpocket.protocol.isModelCompatibleWithAgent
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.draw.alpha
@@ -100,6 +101,23 @@ internal val CLAUDE_MODEL_OPTIONS = listOf("Fable" to "fable", "Opus" to CLAUDE_
 internal fun claudeRowPick(pick: String, gatewayUrl: String?): String =
     if (gatewayUrl != null && pick == CLAUDE_OPUS_5) "opus" else pick
 
+/** A daemon-wide gateway hint belongs exclusively to Claude's Anthropic-compatible transport.
+ * Keeping this decision outside composition prevents a newly added backend from accidentally
+ * inheriting Claude aliases or one-tap gateway ids. */
+internal fun modelPickerGatewayUrl(agent: AgentKind, gatewayUrl: String?): String? =
+    gatewayUrl?.takeIf { agent == AgentKind.CLAUDE }
+
+/** Dynamic catalogs have no safe static fallback. In particular, [LOADING] means that no reply has
+ * arrived yet; a completed empty reply is [EMPTY], not a perpetual pretend-loading state. */
+internal enum class ModelCatalogNotice { LOADING, EMPTY, ERROR }
+
+internal fun modelCatalogNotice(agent: AgentKind, result: ModelsList?, hasSelectableModels: Boolean): ModelCatalogNotice? {
+    if (agent != AgentKind.ZCODE) return null
+    if (result == null) return ModelCatalogNotice.LOADING
+    if (result.error != null) return ModelCatalogNotice.ERROR
+    return ModelCatalogNotice.EMPTY.takeUnless { hasSelectableModels }
+}
+
 /** Short header alias for a model id: "claude-opus-4-8[1m]" -> "opus". */
 fun modelAlias(model: String?): String {
     val m = model?.trim().orEmpty()
@@ -115,7 +133,7 @@ fun modelLabelForAgent(agent: AgentKind?, model: String?): String {
     if (m.isEmpty()) return ""
     return when (agent ?: AgentKind.CLAUDE) {
         AgentKind.CLAUDE -> modelAlias(m)
-        AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI -> m
+        AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE -> m
     }
 }
 
@@ -198,7 +216,7 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit, onHandoff: (
             dev.ccpocket.app.ui.handoff.HandoffHistorySection(
                 historyItems,
                 onOpen = { /* v1: rows are a record; the RETURNED result docks in the chat itself */ },
-                onHandoff = { onDismiss(); onHandoff?.invoke() },
+                onHandoff = onHandoff?.let { action -> { onDismiss(); action() } },
             )
         }
     }
@@ -582,6 +600,12 @@ internal fun modelChoicesFor(agent: AgentKind, daemonModels: List<String>?, gate
     AgentKind.OPENCODE -> (daemonModels ?: emptyList()).map { ModelChoice(it, it, it, "", false) }
     // KIMI (issue #206): daemon-fed aliases from `kimi provider list --json` (FetchModels channel)
     AgentKind.KIMI -> (daemonModels ?: emptyList()).map { ModelChoice(it, it, it, "", false) }
+    // ZCode (issue #228): app-server takes provider/model references. Do not create clickable rows
+    // for a stale Claude alias or bare gateway id: PocketRepository would reject it, leaving a fake
+    // switch spinner for a command that was never sent.
+    AgentKind.ZCODE -> (daemonModels ?: emptyList())
+        .filter { isModelCompatibleWithAgent(AgentKind.ZCODE, it) }
+        .map { ModelChoice(it, it, it, "", false) }
     // window pill derives from the protocol table, so registering a new alias THERE is the only edit
     AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { (name, alias) ->
         val pick = claudeRowPick(alias, gatewayUrl)
@@ -618,23 +642,23 @@ internal fun CtxPill(ctx: String, big: Boolean) {
  */
 @Composable
 internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: () -> Unit) { // internal (was private) so desktopTest's ShowcaseRender can compose it — SessionsScreen/ChatScreen precedent
-    val codex = repo.sessionAgent.value == AgentKind.CODEX
-    val opencode = repo.sessionAgent.value == AgentKind.OPENCODE
     val agent = repo.sessionAgent.value ?: AgentKind.CLAUDE
+    val claude = agent == AgentKind.CLAUDE
     // Fetch dynamic model list from the daemon when any agent picker opens.
     LaunchedEffect(agent) { repo.fetchModels(agent) }
     val agentModels = repo.agentModels[agent]
-    // gateway state up front: the Claude rows' effective picks depend on it (claudeRowPick)
-    val gatewayUrl = if (codex || opencode) null else repo.gatewayBaseUrl.value
+    // Only Claude uses ANTHROPIC_BASE_URL. ZCode may share a GLM vendor with a configured Claude
+    // gateway, but its app-server accepts provider/model references, never Claude gateway presets.
+    val gatewayUrl = modelPickerGatewayUrl(agent, repo.gatewayBaseUrl.value)
     // daemon list first for codex (real cache: configured default leads, includes ids the static trio
     // lacks); a list may ride WITH an error (last-good + failed refresh). See [modelChoicesFor].
     val choices = modelChoicesFor(agent, agentModels?.models, gatewayUrl)
-    val selected = if (codex || opencode) repo.model.value else modelAlias(repo.model.value)
+    val selected = if (claude) modelAlias(repo.model.value) else repo.model.value
     var switchingTo by remember { mutableStateOf<String?>(null) }
     // close once the daemon confirms the switch (model re-announced through SessionLive)…
     LaunchedEffect(switchingTo, repo.model.value) {
         val target = switchingTo ?: return@LaunchedEffect
-        val now = if (codex || opencode) repo.model.value else modelAlias(repo.model.value)
+        val now = if (claude) modelAlias(repo.model.value) else repo.model.value
         // raw compare too: a custom id ("kimi-k2…") never alias-matches, but the daemon echoes it verbatim
         if (now.equals(target, ignoreCase = true) || repo.model.value?.equals(target, ignoreCase = true) == true) onDone()
     }
@@ -653,13 +677,31 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
     // model routing doesn't go through ANTHROPIC_BASE_URL, and OpenCode has its own model format
     // (provider/name) — gateway presets would send bare ids like "deepseek-chat" that cause hangs.
     val pickPreset: (String) -> Unit = { switchingTo = it; repo.switchModel(it) }
-    // opencode has NO static fallback rows: surface the fetch error / loading state explicitly
-    // instead of a silent blank (or worse, a catalog of models this user's providers can't run)
-    if (opencode && (agentModels?.error != null || choices.isEmpty())) {
+    // Preserve OpenCode's existing surface; its provider catalog predates ZCode and is independent.
+    if (agent == AgentKind.OPENCODE && (agentModels?.error != null || choices.isEmpty())) {
         Column(Modifier.padding(top = 10.dp)) {
             agentModels?.error?.let { Text(it, color = Tok.danger, fontSize = 12.sp, lineHeight = 16.sp) }
             if (choices.isEmpty() && agentModels?.error == null) {
                 Text(stringResource(Res.string.opencode_models_loading), color = Tok.muted, fontSize = 12.5.sp)
+            }
+        }
+    }
+    // ZCode has no static fallback: distinguish an in-flight fetch from a completed empty answer,
+    // and preserve a refresh error even when last-good provider/model rows remain visible.
+    modelCatalogNotice(agent, agentModels, choices.isNotEmpty())?.let { notice ->
+        Column(Modifier.padding(top = 10.dp)) {
+            when (notice) {
+                ModelCatalogNotice.ERROR -> Text(agentModels?.error.orEmpty(), color = Tok.danger, fontSize = 12.sp, lineHeight = 16.sp)
+                ModelCatalogNotice.LOADING -> Text(
+                    stringResource(Res.string.model_models_loading, agentName(agent)),
+                    color = Tok.muted,
+                    fontSize = 12.5.sp,
+                )
+                ModelCatalogNotice.EMPTY -> Text(
+                    stringResource(Res.string.model_models_empty, agentName(agent)),
+                    color = Tok.muted,
+                    fontSize = 12.5.sp,
+                )
             }
         }
     }
@@ -768,7 +810,7 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
     // no gateway detected: the same preset rows wait behind ONE quiet disclosure row at the very end
     // (0714 design) — official-endpoint users keep today's picker, no gateway chrome above it.
     // Claude only: gateway presets are bare vendor ids, meaningless to codex and a hang for opencode.
-    if (!codex && !opencode && gatewayUrl == null) {
+    if (claude && gatewayUrl == null) {
         var showGateway by remember { mutableStateOf(false) }
         Column(Modifier.padding(top = 14.dp)) {
             Hairline()

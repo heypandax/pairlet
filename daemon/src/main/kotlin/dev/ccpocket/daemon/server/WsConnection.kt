@@ -7,6 +7,7 @@ import dev.ccpocket.daemon.identity.PairedDevices
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.DaemonInfo
+import dev.ccpocket.protocol.DAEMON_SUPPORTED_AGENT_WIRES
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.LanHello
 import dev.ccpocket.protocol.PocketError
@@ -154,7 +155,10 @@ class WsConnection(
                     // stored it). outbox is buffered, so this queues until pump()'s writer starts draining.
                     sink.emit(
                         dev.ccpocket.daemon.update.UpdateState.stamp( // version visibility (issue #200)
-                            DaemonInfo(gate.lanUrl(), gate.hostname(), gate.gatewayBaseUrl(), bridgeControl = true),
+                            DaemonInfo(
+                                gate.lanUrl(), gate.hostname(), gate.gatewayBaseUrl(), bridgeControl = true,
+                                supportedAgents = DAEMON_SUPPORTED_AGENT_WIRES,
+                            ),
                         ),
                     )
                     log.info("direct E2E session established with ${id.take(8)}…")
