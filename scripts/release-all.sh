@@ -42,4 +42,5 @@ esac
 
 echo; echo "=== done · artifacts produced on this host ==="
 ls -1 "$ROOT"/cc-pocket-*"$VERSION"*.{dmg,tar.gz} 2>/dev/null || echo "(none at repo root)"
-echo "Cross-platform (windows/linux/intel-mac) come from CI:  gh workflow run release.yml -f version=$VERSION"
+echo "Cross-platform assets come from the immutable release tag:"
+echo "  gh workflow run release.yml --ref v$VERSION -f version=$VERSION"

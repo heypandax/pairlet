@@ -4,8 +4,9 @@ name: ios-release
 # the build to App Store Connect — fully unattended. The local flow in docs/RELEASE.md relies on an
 # interactive Xcode-account session; CI instead authenticates with an App Store Connect API key (.p8 +
 # Key ID + Issuer ID) for BOTH cloud-managed signing (-allowProvisioningUpdates creates the distribution
-# cert/profile on the fly) and the upload. iOS ships on its own version line (CFBundleShortVersionString),
-# independent of the daemon's release.yml — hence a separate workflow.
+# cert/profile on the fly) and the upload. It is a separate workflow because App Store delivery has a
+# different lifecycle, while coordinated releases still keep CFBundleShortVersionString lockstepped with
+# daemon/Android/desktop. The explicit override remains only for attaching a build to another open train.
 #
 # Required repo secrets (one-time setup):
 #   APPSTORE_API_KEY_P8        base64 of the App Store Connect API key .p8
@@ -52,6 +53,7 @@ jobs:
         # but only at the deliver step, AFTER build+upload. ✕ actually burned a run (1.3.0); extend the
         # blocklist when ASC teaches us a new one.
         run: |
+          bash scripts/check-release-version.sh
           BAD='✕'
           if grep -rn "[$BAD]" fastlane/metadata/*/release_notes.txt; then
             echo "::error::release_notes.txt contains characters App Store Connect rejects ($BAD) — fix fastlane/metadata before dispatching."

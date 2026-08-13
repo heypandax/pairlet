@@ -42,7 +42,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify immutable release source and version lockstep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          ONLY_ANDROID: ${{ inputs.only_android }}
+          ONLY_MACOS_DESKTOP: ${{ inputs.only_macos_desktop }}
+        run: |
+          bash scripts/check-release-version.sh "$RELEASE_VERSION"
+          [ "$ONLY_ANDROID" != "true" ] || [ "$ONLY_MACOS_DESKTOP" != "true" ] || {
+            echo "::error::only_android and only_macos_desktop cannot both be true"
+            exit 1
+          }
+          TAG="v${RELEASE_VERSION}"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null || {
+            echo "::error::GitHub Release ${TAG} must exist before the artifact workflow starts"
+            exit 1
+          }
+          if [ "$ONLY_ANDROID" != "true" ] && [ "$ONLY_MACOS_DESKTOP" != "true" ]; then
+            [ "$GITHUB_REF" = "refs/tags/${TAG}" ] || {
+              echo "::error::full releases must run from immutable tag ${TAG}; got ${GITHUB_REF}"
+              exit 1
+            }
+          fi
+
   macos:
+    needs: preflight
     if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
     strategy:
       fail-fast: false
@@ -107,6 +137,7 @@ jobs:
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
 
   windows:
+    needs: preflight
     if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
     runs-on: windows-latest
     steps:
@@ -131,6 +162,7 @@ jobs:
           gh release upload "v${{ inputs.version }}" $artifact --clobber
 
   linux:
+    needs: preflight
     if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -165,6 +197,7 @@ jobs:
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
 
   android:
+    needs: preflight
     # Builds the signed phone app (:mobile:composeApp) and attaches the APK to the release, so the
     # website's "newest .apk" link always resolves to a current, release-signed build. The signing
     # key is injected from repo secrets; if any are missing the build.gradle signing config is
@@ -240,6 +273,7 @@ jobs:
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
 
   macos-desktop:
+    needs: preflight
     # The Compose Desktop APP (.dmg) for macOS — signed + notarized, attached to the release under a stable
     # version-less name (so releases/latest/download/cc-pocket-desktop-macos-<arch>.dmg is a permanent link).
     # BOTH arches build on Apple Silicon (macos-14): an x86_64 Temurin JDK under Rosetta makes packageDmg
@@ -316,6 +350,7 @@ jobs:
           gh release upload "v${VER}" "$VERSIONED" "cc-pocket-desktop-macos-${ARCH}.dmg" --clobber
 
   windows-desktop:
+    needs: preflight
     # The Compose Desktop APP (.msi installer) for Windows, attached to the release under a stable version-less
     # name. jpackage can't cross-compile, so this runs on windows-latest (which ships WiX, so the MSI builds).
     # Mirrors build-windows.yml's windows-app job but uploads to the release instead of a workflow artifact.
@@ -364,6 +399,7 @@ jobs:
           gh release upload "v${{ inputs.version }}" cc-pocket-desktop-windows-x86_64.msi --clobber
 
   harmony:
+    needs: preflight
     # DevEco Studio is not available on GitHub-hosted macOS runners. This job is deliberately opt-in and
     # targets only the trusted ephemeral/JIT runner documented in harmony/README.md. A normal release
     # keeps include_harmony=false, so it neither queues for that runner nor fails when the runner is offline.
@@ -527,7 +563,9 @@ jobs:
   # heypandax/scoop-bucket. Skips gracefully (with a warning) when the secret is absent.
   bump-scoop:
     if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
-    needs: [windows]
+    # Do not publish a package-manager pointer until every requested artifact and the
+    # aggregate checksum manifest have completed successfully.
+    needs: [checksums]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -563,9 +601,9 @@ jobs:
   # (the Claude Code pattern: manifest + per-platform checksum). Runs after all uploads so the sums
   # cover the final artifacts; --clobber makes re-runs safe.
   checksums:
-    # !cancelled() (not the default success()) so this still runs when the daemon/windows/android jobs
-    # are SKIPPED in only_macos_desktop mode — it re-sums whatever assets are on the release now.
-    if: ${{ !cancelled() && !inputs.only_android }}
+    # The explicit status condition lets this run past intentionally SKIPPED jobs in
+    # only_macos_desktop mode, but never rewrite SHA256SUMS for a partially failed release.
+    if: ${{ !cancelled() && !failure() && !inputs.only_android }}
     needs: [macos, windows, linux, android, macos-desktop, windows-desktop, harmony]
     runs-on: ubuntu-latest
     steps:

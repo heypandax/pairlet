@@ -32,6 +32,8 @@ import urllib.request
 
 import jwt
 
+from testflight_group_access import BuildGroupAccessError, ensure_build_group_access
+
 API = "https://api.appstoreconnect.apple.com"
 BUNDLE_ID = "com.panda.ccpocket"
 LOCALES = ["en-US", "zh-Hans"]
@@ -207,7 +209,8 @@ if group is None:
     st, body = call("POST", "/v1/betaGroups",
                     {"data": {"type": "betaGroups",
                               "attributes": {"name": GROUP_NAME, "publicLinkEnabled": True,
-                                             "publicLinkLimitEnabled": True, "publicLinkLimit": 10000},
+                                             "publicLinkLimitEnabled": True, "publicLinkLimit": 10000,
+                                             "hasAccessToAllBuilds": False},
                               "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})
     if st != 201:
         die(f"creating beta group failed ({st}): {errors(body)}")
@@ -235,14 +238,11 @@ if not public_link:
 
 # ---- 5. attach the build, submit for Beta App Review ---------------------------------------------
 
-st, body = call("POST", f"/v1/betaGroups/{group['id']}/relationships/builds",
-                {"data": [{"type": "builds", "id": build_id}]})
-if st in (200, 204):
-    print(f"build {VERSION} ({build_no}): attached to the group")
-elif "already" in errors(body).lower():
-    print(f"build {VERSION} ({build_no}): already in the group")
-else:
-    die(f"attaching the build failed ({st}): {errors(body)}")
+try:
+    access = ensure_build_group_access(call, group, build_id, errors)
+except BuildGroupAccessError as exc:
+    die(str(exc))
+print(f"build {VERSION} ({build_no}): {access}")
 
 st, body = call("GET", f"/v1/betaAppReviewSubmissions?{urllib.parse.urlencode({'filter[build]': build_id})}")
 subs = body.get("data", [])

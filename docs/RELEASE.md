@@ -1,3 +1,39 @@
+# cc-pocket 发布手册
+
+## 当前全平台主流程
+
+协调发布使用同一个 `x.y.z` 版本，覆盖 daemon（macOS 双架构、Windows、Linux 双架构）、
+桌面 App（macOS 双架构、Windows）、Android 和 iOS。HarmonyOS 是显式 opt-in，依赖独立的
+受保护 environment 与临时自托管 runner，不属于默认全平台任务。
+
+1. 同步版本、商店说明并跑发布门禁：
+
+   ```bash
+   bash scripts/check-release-version.sh 1.7.7
+   bash scripts/check-harmony-release.sh
+   bash scripts/check-all.sh
+   ```
+
+2. 提交并推送通过验证的 `main`，等待主 CI 成功；再从该提交创建并推送不可变 tag。
+3. 创建同名 GitHub Release 后，从 tag 触发资产工作流；完整发布不允许从可移动的 `main` 构建：
+
+   ```bash
+   git tag -a v1.7.7 -m "v1.7.7"
+   git push origin refs/tags/v1.7.7
+   gh release create v1.7.7 --verify-tag --generate-notes
+   gh workflow run release.yml --ref v1.7.7 -f version=1.7.7
+   gh workflow run ios-release.yml --ref v1.7.7
+   ```
+
+4. 所有请求的平台 job 成功后才允许生成 `SHA256SUMS` 和更新 Scoop。取得两份 macOS daemon
+   的最终 SHA-256 后，更新 `heypandax/homebrew-tap`；不要把仓库模板里的上一版 hash 发布出去。
+5. 按本文各平台章节完成安装、进程、商店/TestFlight 与下载链接验收。工作流启动不等于发布完成。
+
+版本源由 `scripts/check-release-version.sh` 强制锁步：daemon fallback、Android/桌面版本、iOS
+marketing version、桌面 seed 与 Homebrew 模板必须一致；Android `versionCode` 另行递增。
+
+---
+
 # 发布电脑端（cc-pocket daemon）
 
 电脑端发布的**只有 daemon**（用户 Mac 上跑、连本地 `claude` CLI、外拨到你托管的 relay）。relay（`wss://pocket.ark-nexus.cc`）是你的服务，用户不部署。分发走 **Homebrew tap**，artifact **自带 JRE**（用户不用装 Java）并经 **Apple 公证**（双击零警告）。
@@ -61,7 +97,9 @@ security find-identity -v -p codesigning
 
 ## 每次发布
 
-1. **定版本**：更新 `daemon/build.gradle.kts` 的 `packageDaemon` 任务里 `--app-version`，以及 cask（`packaging/homebrew/Casks/cc-pocket.rb`）的 `version`。（移动端 app 是**独立版本线**——改 `mobile/composeApp/build.gradle.kts` 的 `versionName/versionCode` + `iosApp/iosApp/Info.plist`，随 App 发版单独走，不必和 daemon 对齐。）
+1. **定版本**：协调发布按文首清单锁步更新；不要只改 daemon 或只改移动端。运行
+   `bash scripts/check-release-version.sh <version>` 后再提交。Homebrew 的最终 SHA-256 只能在
+   公证资产产出后填写。
 
 2. **打包 + 签名 + 公证**（在 Apple Silicon Mac 上）：
 
@@ -166,19 +204,35 @@ MSI 在 `windows-latest` runner 上构建（jpackage 不能跨平台出包，且
 
 # 发布 iOS App（App Store）
 
-移动端 iOS app（`com.panda.ccpocket`）走 **App Store**，与 daemon 完全独立。**关键结论：不需要 App Store Connect API key / Issuer ID**——签名和上传都靠 Xcode 已登录账号的自动签名（cloud-managed distribution）。
+移动端 iOS app（`com.panda.ccpocket`）走 **App Store**，由独立的 `ios-release.yml` 构建，
+但协调发布仍与 daemon 使用同一 marketing version。CI 使用 App Store Connect API key 做
+cloud-managed signing、上传、提交审核及 TestFlight 公测；本机 Xcode 登录流程只作为兜底。
 
 ## 前提（一次性）
 
 - Apple Developer 账号，Team `SC9S2SJ42G`（Account Holder 的个人 Apple ID；`dev.ccpocket.app` 被旧账号占用，故 bundle id 改用 `com.panda.ccpocket`）。
-- **Xcode 登录该账号**：Settings（⌘,）→ Accounts → 加 Apple ID。自动签名 + 上传都依赖这个会话。
+- CI 仓库 secrets：`APPSTORE_API_KEY_P8`、`APPSTORE_API_KEY_ID`、
+  `APPSTORE_API_ISSUER_ID` 与 `GOOGLE_SERVICE_INFO_PLIST`。
+- 本地兜底时，Xcode → Settings（⌘,）→ Accounts 登录该账号；本地自动签名依赖这个会话。
 - 自动签名已写进 `iosApp/project.yml`（`CODE_SIGN_STYLE: Automatic`、`DEVELOPMENT_TEAM: SC9S2SJ42G`）。
 - 发布证书是 **Apple 云端托管**，**不会**出现在本机 `security find-identity -v -p codesigning` 里——看不到属正常，不代表缺证书。
 - `build/ios/ExportOptions.plist` 已在仓库里：`method=app-store-connect`、`destination=upload`、`teamID=SC9S2SJ42G`、`uploadSymbols`。
 
 > `.env` 里的 `APPLE_ID` / `APPLE_APP_PASSWORD` 是给 **daemon 公证**（notarytool）用的，与 App Store iOS 上传**无关**，别混。
 
-## 每次发布
+## CI（常规路径）
+
+从同名 release tag 触发，不传 `marketing_version`，让 workflow 读取并校验仓库中的锁步版本：
+
+```bash
+gh workflow run ios-release.yml --ref v1.7.7
+```
+
+workflow 会归档、上传、等待处理、同步 metadata、提交 App Review，并把同一 build 挂到稳定的
+TestFlight 公测链接。只有要把新 build 附到另一个仍开放的版本列车时，才显式传
+`marketing_version`。
+
+## 本地手动兜底
 
 1. **定版本（两处保持 lockstep）**：
    - `iosApp/iosApp/Info.plist`：`CFBundleShortVersionString`（营销版本，如 `1.0`）+ `CFBundleVersion`（构建号）。
@@ -217,7 +271,8 @@ MSI 在 `windows-latest` runner 上构建（jpackage 不能跨平台出包，且
 
 ## 注意事项 / 坑
 
-- **不需要 issuer / API key**：`1.0(1)` 和 `1.0(2)` 都是 Xcode 账号自动签名 + `-allowProvisioningUpdates`。若哪天要做无人值守 CI，才需要 App Store Connect API key（`.p8` + Key ID + **Issuer ID** + key 角色 ≥ App Manager）。
+- CI 需要 App Store Connect API key（`.p8` + Key ID + Issuer ID，角色至少 App Manager）；
+  本地兜底仍可使用 Xcode 账号自动签名与 `-allowProvisioningUpdates`。
 - **本机看不到发布证书是正常的**（云端托管），别误判为缺证书去乱建。
 - **CLI `tail` 吞退出码**：`xcodebuild ... | tail` 的退出码是 `tail` 的，会把失败误判成成功；要判结果就 `> log 2>&1` 后单独看 `$?` 或 grep `** EXPORT SUCCEEDED/FAILED **`。
 - **伴侣 App 审核**：本 app 主功能需配对桌面 daemon，审核员进不去 → 触发 2.1a。已内置免配对 **Demo 模式**（配对页底部 “Try Demo”）供审核；详见提交时的 App Review Notes。
