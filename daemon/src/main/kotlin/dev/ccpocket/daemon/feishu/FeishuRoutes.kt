@@ -18,7 +18,7 @@ import java.nio.file.attribute.PosixFilePermissions
  * behaviour. Projects are named by basename so nobody in a chat sees an absolute path.
  */
 class FeishuRoutes(private val path: File) {
-    private val map = LinkedHashMap<String, String>() // chat_id -> absolute workdir
+    private val map = LinkedHashMap<String, String>() // chat_id -> absolute workdir, or AUTO
 
     init {
         if (path.exists()) {
@@ -29,15 +29,39 @@ class FeishuRoutes(private val path: File) {
         }
     }
 
-    @Synchronized fun workdirFor(chatId: String): String? = map[chatId]
+    /** The CONCRETE workdir this chat is bound to — null for an unbound chat AND for an auto-routing one
+     *  (a caller that can handle auto checks [isAuto] explicitly; anything else must treat auto as "no
+     *  single project", never as a path). */
+    @Synchronized fun workdirFor(chatId: String): String? = map[chatId]?.takeIf { it != AUTO }
+    /** Is this chat in auto-routing mode (/bind auto): each topic picks its own allow-listed project. */
+    @Synchronized fun isAuto(chatId: String): Boolean = map[chatId] == AUTO
+    /** Bound at all — to a concrete project or to auto? The "may this chat talk to us" gate. */
+    @Synchronized fun isBound(chatId: String): Boolean = map.containsKey(chatId)
     @Synchronized fun bind(chatId: String, workdir: String) { map[chatId] = workdir; flush() }
+    @Synchronized fun bindAuto(chatId: String) { map[chatId] = AUTO; flush() }
     @Synchronized fun unbind(chatId: String): Boolean = (map.remove(chatId) != null).also { if (it) flush() }
     @Synchronized fun chatsFor(workdir: String): Int = map.values.count { it == workdir }
     @Synchronized fun size(): Int = map.size
 
+    /** Does this chat's CURRENT binding still cover running in [workdir]? A concrete binding covers exactly
+     *  itself; auto covers any workdir still on the bridge's allow-list. The post-decision revalidation for
+     *  auto-routed turns — the auto twin of `workdirFor(chatId) == workdir`. */
+    @Synchronized fun coversWorkdir(chatId: String, workdir: String, workdirs: List<String>): Boolean =
+        map[chatId] == workdir || (map[chatId] == AUTO && workdir in workdirs)
+
     private fun flush() = writeOwnerOnly(path, PocketJson.encodeToString(map.toMap()))
 
     companion object {
+        /**
+         * The routes-table (and trust-record) sentinel for "/bind auto": never a valid absolute path on any
+         * OS, so it cannot collide with a real binding — and an OLDER daemon reading it treats it as a
+         * workdir that BridgeGuard then denies (BAD_WORKDIR), which fails closed instead of misrouting.
+         */
+        const val AUTO = "::auto"
+
+        /** The chat-facing display name for the auto binding — the sentinel itself must never be shown. */
+        const val AUTO_DISPLAY = "自动路由（按消息内容选择项目）"
+
         /** The chat-facing name of a workdir: its basename. /bind uses this, never the full path. */
         fun projectName(workdir: String): String = workdir.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
 
@@ -76,6 +100,11 @@ sealed interface ChatAction {
      *  carried here verbatim: the daemon's session intercepts the ones it owns and the CLI resolves the
      *  rest, exactly as the phone/desktop app does — the tool-level guard still gates any tool a skill runs. */
     data class Ask(val workdir: String, val prompt: String, val note: String? = null) : ChatAction
+    /** Run [prompt] in an AUTO-routing chat: the engine resolves WHICH allow-listed project this topic
+     *  belongs to (sticky per topic, else deterministic name match, else the router model, else ask the
+     *  user to name one) and then proceeds exactly as [Ask] — same guard, same trust rules, same single
+     *  owner approval. The command layer stays IO-free, so resolution lives in the engine. */
+    data class AskAuto(val prompt: String) : ChatAction
     /** Drop this chat's conversation so the next message opens a FRESH session ("/new"). [note] confirms it. */
     data class Reset(val note: String) : ChatAction
     /** Move this chat to [mode] (`/trust confirm`, `/review [purpose]`, `/untrust`)
@@ -109,15 +138,25 @@ class FeishuCommands(
      *  revocable by /untrust and visible to /trust-status. */
     private val trustRecordOf: (chatId: String) -> FeishuTrustRecord? = { null },
 ) {
-    fun handle(text: String, chatId: String, senderOpenId: String): ChatAction {
+    fun handle(text: String, chatId: String, senderOpenId: String, isDirect: Boolean = false): ChatAction {
+        // In a DIRECT chat the sender is the chat: /bind authority falls back to them (an explicit admin
+        // still wins), a binding only selects an allow-listed project, and every action still hits the
+        // owner's approval — the exact trust argument that admits a group's OWN owner as bind authority.
+        val bindAuthority = adminOpenId?.takeIf { it.isNotBlank() }
+            ?: (if (isDirect) senderOpenId else chatOwnerOf(chatId))
         if (!text.startsWith("/")) {
             routes.workdirFor(chatId)?.let { return ChatAction.Ask(it, text) }
+            if (routes.isAuto(chatId)) return ChatAction.AskAuto(text)
+            // a DIRECT chat that isn't pinned to a project IS the unified inbox: no /bind ceremony, the
+            // engine routes each request to an allow-listed project (approvals unchanged — the owner's
+            // card still gates every non-owner request)
+            if (isDirect) return ChatAction.AskAuto(text)
             // Unbound chat. The bridge allows exactly one project AND the binding AUTHORITY is the one
             // talking → bind automatically and answer: for the by-far-common single-project setup, the
             // owner's first message just works, no ceremony. Authority = the designated admin, or (when no
             // admin is set) the Feishu group owner. A stranger's message in a random group stays inert, and
             // if neither is known yet it stays inert too (binding is privileged; nobody's proven ownership).
-            val authority = adminOpenId?.takeIf { it.isNotBlank() } ?: chatOwnerOf(chatId)
+            val authority = bindAuthority
             val only = workdirs.singleOrNull()
             if (only != null && authority != null && senderOpenId == authority) {
                 routes.bind(chatId, only)
@@ -141,16 +180,18 @@ class FeishuCommands(
             "help", "?" -> ChatAction.Reply(HELP)
             "projects" -> ChatAction.Reply(projectsText())
             "new", "reset" -> {
-                if (routes.workdirFor(chatId) == null) ChatAction.Reply("本群还没有绑定项目。\n\n$HELP")
+                if (!routes.isBound(chatId) && !isDirect) ChatAction.Reply("本群还没有绑定项目。\n\n$HELP")
+                else if (routes.isAuto(chatId) || (isDirect && !routes.isBound(chatId)))
+                    ChatAction.Reset("🆕 已开新会话，之前的上下文已清空；下一条消息会重新选择项目。")
                 else ChatAction.Reset("🆕 已开新会话，之前的上下文已清空。")
             }
             "bind", "unbind" -> ChatAction.Reply(
                 run {
                     // authority to bind = the designated admin if set, else the Feishu GROUP OWNER (looked up
-                    // live, no env / no restart). Binding only points a chat at an ALREADY allow-listed
-                    // workdir and every action still hits owner approval, so the group's own owner is a sound
-                    // low-privilege authority; an explicit admin still WINS when configured.
-                    val authority = adminOpenId?.takeIf { it.isNotBlank() } ?: chatOwnerOf(chatId)
+                    // live, no env / no restart) — or the DIRECT chat's own user. Binding only points a chat
+                    // at an ALREADY allow-listed workdir and every action still hits owner approval, so both
+                    // are sound low-privilege authorities; an explicit admin still WINS when configured.
+                    val authority = bindAuthority
                     when {
                         authority == null ->
                             "还没法确认谁能绑定：没设管理员，也还没查到群主。\n你的 open_id 是：$senderOpenId\n" +
@@ -158,6 +199,15 @@ class FeishuCommands(
                         senderOpenId != authority -> "只有管理员或群主可以绑定 / 解绑本群。"
                         cmd == "unbind" ->
                             if (routes.unbind(chatId)) "已解绑，本群不再响应。" else "本群本来就没有绑定项目。"
+                        // "/bind auto": route each topic by its content instead of pinning one project. A
+                        // REAL project whose basename is literally "auto" wins the name — resolveProject
+                        // first — so no existing binding silently changes meaning.
+                        arg.equals("auto", ignoreCase = true) && FeishuRoutes.resolveProject(arg, workdirs) == null -> {
+                            routes.bindAuto(chatId)
+                            "✅ 本群已开启自动路由：@我 说需求时会按内容自动选择项目，同一话题内延续同一个项目。\n" +
+                                "点名项目可直达（如「${workdirs.firstOrNull()?.let { FeishuRoutes.projectName(it) } ?: "项目名"}：帮我看下…」）；" +
+                                "/bind <项目名> 可改回固定绑定。\n\n${projectsText()}"
+                        }
                         else -> {
                             val wd = FeishuRoutes.resolveProject(arg, workdirs)
                             if (wd == null) "找不到项目「$arg」。\n\n${projectsText()}"
@@ -178,7 +228,12 @@ class FeishuCommands(
             "trust", "untrust", "review", "full-auto" -> {
                 val admin = adminOpenId?.takeIf { it.isNotBlank() }
                 val record = trustRecordOf(chatId)
+                // the trust-record key this chat's binding maps to: the concrete workdir, or the AUTO
+                // sentinel for an auto-routing chat (explicit /bind auto, or a direct chat's implicit
+                // unified inbox) — where a grant covers every allow-listed project a topic can be routed
+                // to (the engine still re-checks the allow-list per turn)
                 val bound = routes.workdirFor(chatId)
+                    ?: FeishuRoutes.AUTO.takeIf { routes.isAuto(chatId) || (isDirect && !routes.isBound(chatId)) }
                 val trustConfirmed = cmd == "trust" && arg.equals("confirm", ignoreCase = true)
                 when {
                     admin == null -> ChatAction.Reply(
@@ -226,16 +281,20 @@ class FeishuCommands(
             }
             // read-only status — open to any member on purpose: it shows nothing but the mode, the bound
             // project's display name and the owner's declared contract, all of which the group already lives
-            "trust-status" -> ChatAction.Reply(trustStatusText(chatId))
-            // a non-bridge slash → run it in the bound session (or teach if this chat has none yet)
+            "trust-status" -> ChatAction.Reply(trustStatusText(chatId, isDirect))
+            // a non-bridge slash → run it in the bound session (or teach if this chat has none yet). In an
+            // auto chat the engine runs it in the topic's/conversation's ALREADY-routed session — a bare
+            // slash carries no content to route by, so a not-yet-routed one gets told to state the need first.
             else -> routes.workdirFor(chatId)?.let { ChatAction.Ask(it, text) }
-                ?: ChatAction.Reply("本群还没有绑定项目，无法执行 /$cmd。\n\n$HELP")
+                ?: if (routes.isAuto(chatId) || isDirect) ChatAction.AskAuto(text)
+                else ChatAction.Reply("本群还没有绑定项目，无法执行 /$cmd。\n\n$HELP")
         }
     }
 
     /** The /trust-status answer: mode + bound project + contract summary — never internal paths. */
-    private fun trustStatusText(chatId: String): String {
+    private fun trustStatusText(chatId: String, isDirect: Boolean = false): String {
         val bound = routes.workdirFor(chatId)
+            ?: FeishuRoutes.AUTO.takeIf { routes.isAuto(chatId) || (isDirect && !routes.isBound(chatId)) }
         val record = trustRecordOf(chatId)
         if (bound == null) {
             return "本群还没有绑定项目，当前所有请求都不会执行。先 /bind 绑定项目。"
@@ -245,7 +304,8 @@ class FeishuCommands(
             effective.mode in setOf(FeishuTrustMode.TRUSTED, FeishuTrustMode.FULL_AUTO) &&
             !effective.fullAuthorityConfirmed
         return buildString {
-            appendLine("绑定项目：${FeishuRoutes.projectName(bound)}")
+            // never show the sentinel — the auto binding reads as its display name
+            appendLine("绑定项目：${if (bound == FeishuRoutes.AUTO) FeishuRoutes.AUTO_DISPLAY else FeishuRoutes.projectName(bound)}")
             when {
                 legacyNeedsConfirmation -> {
                     appendLine("模式：每次审批（旧信任待重新确认）—— 历史授权不会被静默扩大为 full 权限。")
@@ -278,6 +338,7 @@ class FeishuCommands(
             appendLine()
         }
         append("\n绑定：@机器人 /bind <项目名>")
+        if (workdirs.size > 1) append("\n自动路由（按消息内容选项目）：@机器人 /bind auto")
     }
 
     companion object {
@@ -286,6 +347,7 @@ class FeishuCommands(
               @机器人 <你的需求>      在本群绑定的项目下干活
               @机器人 /projects       列出可绑定的项目
               @机器人 /bind <项目>    把本群绑到某个项目（仅管理员）
+              @机器人 /bind auto      自动路由：按消息内容选择项目，话题内延续（仅管理员）
               @机器人 /unbind         解绑本群（仅管理员）
               @机器人 /trust          查看完全信任的权限说明（只读）
               @机器人 /trust confirm  完全信任本群：每条请求整轮 full 权限直接执行（仅机主，需电脑上先允许）

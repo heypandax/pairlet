@@ -126,6 +126,14 @@ class FeishuEngine(
             allowedCommands = spec.allowedCommands,
         )
     }
+    // one-shot claude -p per auto-routing decision (/bind auto), same clean-room posture as the reviewer:
+    // cwd'd into the bridge's own state dir, no tools, no MCP. Lazy: a bridge with no auto chat never pays.
+    private val projectRouter: FeishuProjectRouter by lazy {
+        ClaudeFeishuProjectRouter(File(stateDir, "router"), core.claudeRuntime)
+    }
+    // bounded per-project summaries (CLAUDE.md/README head) fed to the router as candidate descriptions —
+    // cached for the engine's lifetime; a restart or reconfigure re-reads them.
+    private val projectSummaries = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val commands = FeishuCommands(
         routes, spec.workdirs, adminOpenId,
         chatOwnerOf = { chatOwners[it] },
@@ -153,6 +161,10 @@ class FeishuEngine(
     // prompts to the old workdir (the "rebind took no effect until restart/​/new" bug). openOrReuse compares
     // this against the now-requested workdir and, on a mismatch, opens CLEAN instead of reusing or resuming.
     private val keyWorkdir = HashMap<String, String>()
+    // a DIRECT unified-inbox chat's CURRENT project (chatId -> workdir) — the continuation bias: a
+    // follow-up with no routing signal stays here, an explicit/clear other-project request switches. /new
+    // clears it. In-memory like keyWorkdir: a daemon restart just means the next message re-routes.
+    private val activeProject = HashMap<String, String>()
     private val sessionOf = HashMap<String, String>()
     private val turnWaiters = HashMap<String, CompletableDeferred<TurnDone>>()
     private val openWaiters = HashMap<String, CompletableDeferred<String>>() // openId -> convoId
@@ -419,12 +431,18 @@ class FeishuEngine(
         if (!running) return
         val data = event.event ?: return
         val msg = data.message ?: return
-        val mentions = msg.mentions ?: return
-        if (mentions.isEmpty()) return
-        // precise when we know who we are: the BOT must be among the mentioned, or the message isn't for
-        // us — "@colleague look at this" in our chat must stay none of our business
-        val self = botOpenId
-        if (self != null && mentions.none { it.id?.openId == self }) return
+        val isGroup = FeishuThreading.isGroup(msg.chatType)
+        // a DIRECT chat needs no @ — every message there IS addressed to the bot (the unified-inbox
+        // entrance). GROUPS keep the strict mention gate: without it the bot would answer every line in
+        // every chat the app subscribes to.
+        val mentions = msg.mentions?.toList().orEmpty()
+        if (isGroup) {
+            if (mentions.isEmpty()) return
+            // precise when we know who we are: the BOT must be among the mentioned, or the message isn't for
+            // us — "@colleague look at this" in our chat must stay none of our business
+            val self = botOpenId
+            if (self != null && mentions.none { it.id?.openId == self }) return
+        }
         val chatId = msg.chatId ?: return
         // requirement 2: when this message REPLIES to an earlier one, parentId is the quoted message and
         // rootId the thread root — read here rather than below because a mention-only message has to know
@@ -455,15 +473,16 @@ class FeishuEngine(
         if (!firstSeen(replyMessageId)) return
 
         val replyTo = FeishuThreading.replyTarget(replyMessageId, msg.chatType)
-        val isGroup = FeishuThreading.isGroup(msg.chatType)
-        // #234: acknowledge a valid group request immediately, independently of the work it starts. A
+        // #234: acknowledge a valid request immediately, independently of the work it starts — groups AND
+        // direct chats (the unified inbox has no other "I heard you" signal before the routing receipt). A
         // missing reaction scope or a transient Feishu error is cosmetic and must never block the command.
-        if (replyTo.inThread) scope.launch {
+        scope.launch {
             runCatching { api?.reactTyping(replyMessageId) }
                 .onFailure { logLine("[chat] typing receipt failed") }
         }
-        // warm the group-owner cache for the /bind fallback — only when no admin is set (else it's unused)
-        if (adminOpenId.isNullOrBlank() && !chatOwners.containsKey(chatId)) fetchChatOwner(chatId)
+        // warm the group-owner cache for the /bind fallback — groups only (a direct chat's bind authority
+        // is its own user), and only when no admin is set (else it's unused)
+        if (isGroup && adminOpenId.isNullOrBlank() && !chatOwners.containsKey(chatId)) fetchChatOwner(chatId)
         // warm the group-name fetch for the context preamble (#242) — groups only; a direct chat has no name
         // to state. Independent of the owner fetch above: different trigger, different consumer.
         if (isGroup) fetchChatName(chatId)
@@ -479,8 +498,8 @@ class FeishuEngine(
         // auto-bind synchronously, so evaluating it under this mutex covers every route mutation too.
         scope.launch {
             val dispatch = policyGate.withPolicy(chatId) {
-                val resolved = commands.handle(text, chatId, sender)
-                if (resolved is ChatAction.SetTrust) applyTrustMutation(resolved, chatId)
+                val resolved = commands.handle(text, chatId, sender, isDirect = !isGroup)
+                if (resolved is ChatAction.SetTrust) applyTrustMutation(resolved, chatId, isDirect = !isGroup)
                 else PolicyDispatch(resolved)
             }
             dispatch.trustAudit?.let { what ->
@@ -499,6 +518,19 @@ class FeishuEngine(
                     convoByKey.remove(convoKey)?.let { sessionOf.remove(it); replySlots.remove(it); pendingAsk.remove(it) }
                     keyWorkdir.remove(convoKey)
                 } }
+                // a DIRECT unified inbox keeps one conversation per (chat, project): /new drops the CURRENT
+                // project's conversation and clears the continuation anchor so the next message re-routes
+                if (!isGroup) {
+                    val active = mutex.withLock { activeProject.remove(chatId) }
+                    if (active != null) {
+                        val k = FeishuThreading.directProjectKey(chatId, active, ownerTurn)
+                        val plock = mutex.withLock { chatLocks.getOrPut(k) { Mutex() } }
+                        plock.withLock { mutex.withLock {
+                            convoByKey.remove(k)?.let { sessionOf.remove(it); replySlots.remove(it); pendingAsk.remove(it) }
+                            keyWorkdir.remove(k)
+                        } }
+                    }
+                }
                 reply(replyTo, action.note)
             }
             is ChatAction.SetTrust -> error("trust mutation escaped the per-chat policy gate")
@@ -506,25 +538,9 @@ class FeishuEngine(
                 // an auto-bind's feedback posts NOW — the turn behind it can take minutes
                 action.note?.let { reply(replyTo, it) }
                 logLine("[chat] ${FeishuRoutes.projectName(action.workdir)} ← $chatId: ${text.take(80)}")
-                // requirement 2: a natural-language reply carries the QUOTED message (+ thread root) into the
-                // prompt. Skipped for slash pass-throughs ("/clear" etc.) — those act on the user's own line,
-                // not the quoted one. Network fetch here, safely inside the coroutine (never the lark thread).
                 val slashPassThrough = text.startsWith("/")
-                val quoted = if (!slashPassThrough) withQuotedContext(action.prompt, parentId, rootId) else action.prompt
-                // "did the quote actually resolve?" is decided HERE, on the quoted value alone. The sender
-                // line below always changes the string, so a comparison made after prepending it would
-                // report every unreadable quote as resolved.
-                val quotedResolved = quoted != action.prompt
-                // a quote-only request whose quote couldn't be read has NO instruction left in it — running
-                // the turn would burn a session on the placeholder note alone. Say so instead of pretending.
-                if (quoteOnly && !quotedResolved) {
-                    return@launch reply(replyTo, "⚠️ 读不到你引用的那条消息，请把要处理的内容直接 @我 发出来。")
-                }
-                // #242: WHO asked is the only per-turn context — a topic's session outlives the message that
-                // opened it, so a later turn can come from someone else. Where the session is and what it
-                // cannot see are session-stable and ride the system prompt instead (see openOrReuse), keeping
-                // the transcript and the owner's approval card clean. Slash pass-throughs stay verbatim.
-                val prompt = if (slashPassThrough) quoted else senderLine(sender, ownerTurn) + "\n\n" + quoted
+                val prompt = buildTurnPrompt(action.prompt, slashPassThrough, parentId, rootId, quoteOnly, sender, ownerTurn)
+                    ?: return@launch reply(replyTo, UNREADABLE_QUOTE_REPLY)
                 // ONE conversation per group topic (or per direct chat), one turn at a time per conversation
                 // (see chatLocks) — a second message queues instead of clobbering the first's waiter.
                 // ask() posts its OWN reply (inline, or late via onFrame after an approval) so the result
@@ -538,15 +554,239 @@ class FeishuEngine(
                         }
                 }
             }
+            is ChatAction.AskAuto -> {
+                // AUTO-routing chat: decide WHICH allow-listed project this request belongs to, then
+                // proceed exactly as Ask — same guard, same trust rules, the same single owner card. The
+                // quote is fetched BEFORE routing so a "deal with THIS one" reply routes on the quoted
+                // content, not on a bare placeholder line.
+                val slashPassThrough = text.startsWith("/")
+                val prompt = buildTurnPrompt(action.prompt, slashPassThrough, parentId, rootId, quoteOnly, sender, ownerTurn)
+                    ?: return@launch reply(replyTo, UNREADABLE_QUOTE_REPLY)
+                if (isGroup) {
+                    // a GROUP topic routes once and stays put: route + run under the topic's lock, so two
+                    // racing first messages cannot route it twice (the loser sees the winner's sticky pick)
+                    val lock = mutex.withLock { chatLocks.getOrPut(convoKey) { Mutex() } }
+                    lock.withLock {
+                        when (val route = resolveAutoRoute(convoKey, chatId, prompt, slashPassThrough)) {
+                            is AutoRoute.Unrouted -> reply(replyTo, route.hint)
+                            is AutoRoute.Routed -> runAutoTurn(convoKey, chatId, isGroup = true, route, prompt, replyTo, sender, ownerTurn, text)
+                        }
+                    }
+                } else {
+                    // the DIRECT unified inbox: every message routes (with a continuation bias toward the
+                    // chat's current project), and each project keeps its OWN conversation, so switching
+                    // projects switches contexts without destroying either
+                    when (val route = resolveDirectRoute(chatId, text, slashPassThrough)) {
+                        is AutoRoute.Unrouted -> reply(replyTo, route.hint)
+                        is AutoRoute.Routed -> {
+                            val key = FeishuThreading.directProjectKey(chatId, route.workdir, ownerTurn)
+                            val lock = mutex.withLock { chatLocks.getOrPut(key) { Mutex() } }
+                            lock.withLock {
+                                runAutoTurn(key, chatId, isGroup = false, route, prompt, replyTo, sender, ownerTurn, text)
+                            }
+                        }
+                    }
+                }
+            }
             }
         }
     }
 
+    /**
+     * The turn's final prompt: quoted context (requirement 2) + the per-turn sender line (#242), or the
+     * verbatim line for a slash pass-through. Null when a quote-ONLY request's quote couldn't be read —
+     * there is no instruction left to run, and the caller replies [UNREADABLE_QUOTE_REPLY] instead.
+     */
+    private suspend fun buildTurnPrompt(
+        rawPrompt: String,
+        slashPassThrough: Boolean,
+        parentId: String?,
+        rootId: String?,
+        quoteOnly: Boolean,
+        sender: String,
+        ownerTurn: Boolean,
+    ): String? {
+        // a natural-language reply carries the QUOTED message (+ thread root) into the prompt; slash
+        // pass-throughs ("/clear" etc.) act on the user's own line, not the quoted one
+        val quoted = if (!slashPassThrough) withQuotedContext(rawPrompt, parentId, rootId) else rawPrompt
+        // "did the quote actually resolve?" is decided HERE, on the quoted value alone — the sender line
+        // below always changes the string, so a later comparison would report every quote as resolved
+        if (quoteOnly && quoted == rawPrompt) return null
+        return if (slashPassThrough) quoted else senderLine(sender, ownerTurn) + "\n\n" + quoted
+    }
+
+    /** An auto chat's per-topic routing decision (see [resolveAutoRoute]). */
+    private sealed interface AutoRoute {
+        /** Run in [workdir]; non-null [note] is the routing receipt, posted before the turn starts. */
+        data class Routed(val workdir: String, val note: String?) : AutoRoute
+        /** Nothing to run — [hint] tells the topic how to get routed. */
+        data class Unrouted(val hint: String) : AutoRoute
+    }
+
+    /**
+     * Which project does this topic's request belong to? Resolution ladder, cheapest first:
+     *  1. STICKY — the topic already picked a project (keyWorkdir survives idle-reap); keep it while the
+     *     chat's binding still covers it. /new clears the key, so the next message re-routes.
+     *  2. a bare slash pass-through carries no content to route by → teach instead of guessing;
+     *  3. DETERMINISTIC — the message names exactly one allow-listed project;
+     *  4. the router MODEL, honored only above the confidence floor;
+     *  5. otherwise ask the user to name the project — a wrong guess costs minutes of misdirected work
+     *     plus a misleading receipt, so "not sure" degrades to a question, never a pick.
+     */
+    /** The shared tail of an auto-routed request: routing receipt, log line, and the turn itself —
+     *  identical for a group topic and a direct-inbox conversation once the workdir is decided. */
+    private suspend fun runAutoTurn(
+        key: String,
+        chatId: String,
+        isGroup: Boolean,
+        route: AutoRoute.Routed,
+        prompt: String,
+        replyTo: FeishuReplyTarget,
+        sender: String,
+        ownerTurn: Boolean,
+        text: String,
+    ) {
+        // the routing receipt posts NOW — a wrong pick must be visible before minutes of work
+        route.note?.let { reply(replyTo, it) }
+        logLine("[chat] ${FeishuRoutes.projectName(route.workdir)}（自动路由）← $chatId: ${text.take(80)}")
+        runCatching {
+            ask(key, chatId, isGroup, route.workdir, prompt, replyTo, sender, ownerTurn, autoRouted = true)
+        }.onFailure { e ->
+            log.warn("feishu turn failed: ${e.message}")
+            reply(replyTo, "⚠️ 出错了：${e.message}")
+        }
+    }
+
+    private suspend fun resolveAutoRoute(
+        convoKey: String,
+        chatId: String,
+        prompt: String,
+        slashPassThrough: Boolean,
+    ): AutoRoute {
+        mutex.withLock { keyWorkdir[convoKey] }
+            ?.takeIf { routes.coversWorkdir(chatId, it, spec.workdirs) }
+            ?.let { return AutoRoute.Routed(it, note = null) }
+        if (slashPassThrough) {
+            return AutoRoute.Unrouted(
+                "本话题还没有路由到项目，无法直接执行斜杠命令。先 @我 说一句需求（我会自动选择项目），" +
+                    "或让管理员 /bind <项目名> 固定绑定本群。",
+            )
+        }
+        ProjectRoutePolicy.mentionedProject(prompt, spec.workdirs)?.let { wd ->
+            return AutoRoute.Routed(wd, note = "📌 已路由到「${FeishuRoutes.projectName(wd)}」（本话题内延续；/new 可重新选择）")
+        }
+        spec.workdirs.singleOrNull()?.let { return AutoRoute.Routed(it, note = null) }
+        val candidates = spec.workdirs.map { ProjectCandidate(FeishuRoutes.projectName(it), projectSummary(it)) }
+        val result = projectRouter.route(
+            ProjectRouteInput(prompt = prompt, candidates = candidates, chatName = chatNameOrNull(chatId)),
+        )
+        val picked = result?.takeIf { it.confidence >= ProjectRoutePolicy.CONFIDENCE_FLOOR }?.project
+        val wd = picked?.let { FeishuRoutes.resolveProject(it, spec.workdirs) }
+        if (wd != null) {
+            logLine("[route] ${FeishuRoutes.projectName(wd)} ← $chatId（${"%.2f".format(result.confidence)}：${result.reason.take(60)}）")
+            return AutoRoute.Routed(
+                wd,
+                note = "📌 已自动路由到「${FeishuRoutes.projectName(wd)}」（本话题内延续；选错了发 /new 后点名项目重试）",
+            )
+        }
+        return AutoRoute.Unrouted(unroutableHint())
+    }
+
+    /**
+     * The DIRECT unified inbox's per-message routing, biased to CONTINUE the chat's current project:
+     *  1. explicit unique project name in the message → that project (switch receipt when it changes);
+     *  2. a single-project bridge has nothing to choose;
+     *  3. a short line with an active project is a follow-up ("继续", "对，就这样改") — no model call;
+     *  4. the router model, with `current_project` as the continuation anchor;
+     *  5. an unsure verdict CONTINUES the active project (the receipt named it; /new + naming corrects)
+     *     — only a chat with no active project yet asks the user to name one.
+     * Routes on the RAW text, not the built prompt: quoted bot replies and the sender line are noise here.
+     */
+    private suspend fun resolveDirectRoute(chatId: String, text: String, slashPassThrough: Boolean): AutoRoute {
+        val active = mutex.withLock { activeProject[chatId] }?.takeIf { it in spec.workdirs }
+        if (slashPassThrough) {
+            return active?.let { AutoRoute.Routed(it, note = null) } ?: AutoRoute.Unrouted(
+                "还没有正在进行的项目会话，无法直接执行斜杠命令。先说一句需求（我会自动选择项目），或 /bind <项目名> 固定。",
+            )
+        }
+        ProjectRoutePolicy.mentionedProject(text, spec.workdirs)?.let { return directRouted(chatId, it, active) }
+        spec.workdirs.singleOrNull()?.let { return directRouted(chatId, it, active) }
+        if (active != null && text.length <= DIRECT_FOLLOWUP_MAX_CHARS) return AutoRoute.Routed(active, note = null)
+        val candidates = spec.workdirs.map { ProjectCandidate(FeishuRoutes.projectName(it), projectSummary(it)) }
+        val result = projectRouter.route(
+            ProjectRouteInput(
+                prompt = text,
+                candidates = candidates,
+                currentProject = active?.let { FeishuRoutes.projectName(it) },
+            ),
+        )
+        val wd = result?.takeIf { it.confidence >= ProjectRoutePolicy.CONFIDENCE_FLOOR }?.project
+            ?.let { FeishuRoutes.resolveProject(it, spec.workdirs) }
+        if (wd != null) {
+            logLine("[route] ${FeishuRoutes.projectName(wd)} ← $chatId（${"%.2f".format(result.confidence)}：${result.reason.take(60)}）")
+            return directRouted(chatId, wd, active)
+        }
+        if (active != null) return AutoRoute.Routed(active, note = null)
+        return AutoRoute.Unrouted(unroutableHint())
+    }
+
+    /** Record [wd] as the direct chat's current project and word the receipt by what changed. */
+    private suspend fun directRouted(chatId: String, wd: String, active: String?): AutoRoute.Routed {
+        mutex.withLock { activeProject[chatId] = wd }
+        val name = FeishuRoutes.projectName(wd)
+        return AutoRoute.Routed(
+            wd,
+            note = when (active) {
+                wd -> null
+                null -> "📌 已路由到「$name」（后续消息默认延续该项目；点名其他项目可切换，/new 重置）"
+                else -> "📌 已切到「$name」（原「${FeishuRoutes.projectName(active)}」的会话保留，点名即可切回）"
+            },
+        )
+    }
+
+    private fun unroutableHint(): String =
+        "🤔 没能确定这条需求属于哪个项目，请点名项目重发，例如「${
+            spec.workdirs.firstOrNull()?.let { FeishuRoutes.projectName(it) } ?: "项目名"
+        }：<需求>」。\n可选项目：${spec.workdirs.joinToString("、") { FeishuRoutes.projectName(it) }}"
+
+    /** A project's bounded router summary: the head of its CLAUDE.md (else README.md), whitespace-collapsed.
+     *  Local, read-only, and fed to a TOOL-LESS classifier only — never echoed to the chat. */
+    private fun projectSummary(workdir: String): String = projectSummaries.computeIfAbsent(workdir) { wd ->
+        val dir = File(wd)
+        listOf("CLAUDE.md", "README.md")
+            .map { File(dir, it) }
+            .firstOrNull { it.isFile }
+            ?.let { f -> runCatching { f.readText(Charsets.UTF_8) }.getOrNull() }
+            ?.replace(Regex("\\s+"), " ")
+            ?.trim()
+            ?.take(ProjectRoutePolicy.MAX_SUMMARY_CHARS)
+            .orEmpty()
+    }
+
+    /** Post-decision revalidation of the chat's binding for THIS turn's workdir — the auto-aware twin of
+     *  the literal `routes.workdirFor(chatId) == workdir` check. Auto additionally re-checks the allow-list,
+     *  the same list BridgeGuard vets, so a reconfigured spec can't be outrun by a sticky topic. A DIRECT
+     *  chat is implicitly auto while unbound — the same condition FeishuCommands routes on. */
+    private fun bindingStillCovers(chatId: String, workdir: String, autoRouted: Boolean, isDirect: Boolean): Boolean =
+        if (autoRouted) {
+            (routes.isAuto(chatId) || (isDirect && !routes.isBound(chatId))) && workdir in spec.workdirs
+        } else {
+            routes.workdirFor(chatId) == workdir
+        }
+
     /** Resolve-and-persist half of a trust command. Called only inside [policyGate], in the SAME critical
      *  section as [FeishuCommands.handle], so `/untrust` cannot be resolved and then overtaken by a stale
      *  reviewed/trusted claim before its disk state changes. Replies/audit IO happen after the gate. */
-    private fun applyTrustMutation(action: ChatAction.SetTrust, chatId: String): PolicyDispatch {
+    /** The chat-facing name of a trust grant's target — the AUTO sentinel must read as what it covers. */
+    private fun trustProjectDisplay(wd: String): String =
+        if (wd == FeishuRoutes.AUTO) "自动路由的全部项目" else FeishuRoutes.projectName(wd)
+
+    private fun applyTrustMutation(action: ChatAction.SetTrust, chatId: String, isDirect: Boolean = false): PolicyDispatch {
+        // the trust-record key: the concrete binding, or the AUTO sentinel for an auto-routing chat
+        // (explicit /bind auto, or a direct chat's implicit unified inbox) — the same key FeishuCommands
+        // gated the command on, so the two can't disagree about which grant is being written
         val wd = routes.workdirFor(chatId)
+            ?: FeishuRoutes.AUTO.takeIf { routes.isAuto(chatId) || (isDirect && !routes.isBound(chatId)) }
         if (action.mode != FeishuTrustMode.UNTRUSTED && wd == null) {
             return PolicyDispatch(ChatAction.Ignore, trustReply = "本群还没有绑定项目，先 /bind 再设置信任模式。")
         }
@@ -583,16 +823,16 @@ class FeishuEngine(
             TrustWrite.CHANGED -> {
                 val what = when (action.mode) {
                     FeishuTrustMode.TRUSTED, FeishuTrustMode.FULL_AUTO ->
-                        "机主开启了完全信任：$chatId → ${FeishuRoutes.projectName(wd!!)}（每条请求获得整轮 full 权限）"
-                    FeishuTrustMode.REVIEWED -> "机主开启了智能审核：$chatId → ${FeishuRoutes.projectName(wd!!)}" +
+                        "机主开启了完全信任：$chatId → ${trustProjectDisplay(wd!!)}（每条请求获得整轮 full 权限）"
+                    FeishuTrustMode.REVIEWED -> "机主开启了智能审核：$chatId → ${trustProjectDisplay(wd!!)}" +
                         (if (action.purpose != null) "（自定义契约）" else "（默认契约）")
                     FeishuTrustMode.UNTRUSTED -> "机主关闭了信任模式：$chatId（恢复逐请求审批）"
                 }
                 val confirmation = when (action.mode) {
                     FeishuTrustMode.TRUSTED, FeishuTrustMode.FULL_AUTO ->
-                        trustedEnabledReply(FeishuRoutes.projectName(wd!!))
+                        trustedEnabledReply(trustProjectDisplay(wd!!))
                     FeishuTrustMode.REVIEWED ->
-                        "✅ 本群已对「${FeishuRoutes.projectName(wd!!)}」开启智能审核：每条请求先由 AI 判断是否符合群用途且低风险，" +
+                        "✅ 本群已对「${trustProjectDisplay(wd!!)}」开启智能审核：每条请求先由 AI 判断是否符合群用途且低风险，" +
                             "通过的直接执行（仅限项目内的受限工具），其余仍会发机主审批。\n" +
                             "契约：${action.purpose ?: FeishuTrust.DEFAULT_CONTRACT}\n" +
                             "换绑到别的项目会自动失效；/trust-status 查看，/untrust 收回。"
@@ -639,6 +879,9 @@ class FeishuEngine(
         replyTo: FeishuReplyTarget,
         senderOpenId: String,
         ownerBypass: Boolean = false,
+        /** True when [workdir] was picked by auto-routing rather than a concrete /bind — trust then keys on
+         *  the AUTO sentinel (a grant for the whole allow-list) and revalidation re-checks the allow-list. */
+        autoRouted: Boolean = false,
     ) {
         val convoId = when (val opened = openOrReuse(key, chatId, isGroup, workdir, ownerBypass)) {
             is OpenResult.Opened -> opened.convoId
@@ -673,7 +916,10 @@ class FeishuEngine(
             // member can type reaches this. The snapshot keys on the workdir this turn actually runs in, so a
             // chat rebound since the grant is NOT trusted for its new project (FeishuTrust keys on the pair,
             // no bind/unbind hook to keep in sync).
-            val snapshot = trust.snapshot(chatId, workdir)
+            // an auto-routed turn's trust grant is the chat-wide AUTO record, never the per-project one —
+            // one key per binding shape, exactly what /trust wrote (see applyTrustMutation)
+            val trustKey = if (autoRouted) FeishuRoutes.AUTO else workdir
+            val snapshot = trust.snapshot(chatId, trustKey)
             val trusted = !ownerBypass && noApprovalEnabled && snapshot.mode == FeishuTrustMode.TRUSTED
             // REVIEWED: the Guardian classifies the vetted prompt BEFORE it reaches the agent.
             // The preflight audits itself; a non-pass (risk, low confidence, prescreen hit, timeout, CLI
@@ -686,8 +932,8 @@ class FeishuEngine(
                 ) {
                     // §21.4: the trust record alone can't see a mid-review /bind — the routes table is the
                     // half a rebind actually mutates, so the final check reads BOTH: the policy must be
-                    // unchanged AND the chat must still be bound to the very project this review ran against.
-                    trust.stillMatches(chatId, workdir, snapshot) && routes.workdirFor(chatId) == workdir
+                    // unchanged AND the chat's binding must still cover the very project this review ran against.
+                    trust.stillMatches(chatId, trustKey, snapshot) && bindingStillCovers(chatId, workdir, autoRouted, isDirect = !isGroup)
                 }.also {
                     logLine(
                         "[review] ${if (it.autoRun) "自动通过" else "转机主审批"}" +
@@ -731,7 +977,8 @@ class FeishuEngine(
                     chatId = chatId,
                     validate = {
                         noApprovalEnabled && snapshot.mode == expectedMode &&
-                            trust.stillMatches(chatId, workdir, snapshot) && routes.workdirFor(chatId) == workdir
+                            trust.stillMatches(chatId, trustKey, snapshot) &&
+                            bindingStillCovers(chatId, workdir, autoRouted, isDirect = !isGroup)
                     },
                 ) {
                     // The gate stays held only through arming this ONE turn's grant. Any /untrust or /bind
@@ -1005,5 +1252,9 @@ class FeishuEngine(
         // a note ABOUT the request rather than as words the user didn't type, so the model isn't misled about
         // who said what — the actual content arrives above it as the quoted context.
         const val QUOTE_ONLY_PROMPT = "（用户只 @ 了机器人并引用了上面这条消息，没有另外写文字——请针对被引用的内容处理。）"
+        const val UNREADABLE_QUOTE_REPLY = "⚠️ 读不到你引用的那条消息，请把要处理的内容直接发出来。"
+        // a direct-inbox line at or under this length with an active project is a follow-up ("继续"、"对，
+        // 就这样改") — sticks without a router call; longer lines get the model's read
+        const val DIRECT_FOLLOWUP_MAX_CHARS = 24
     }
 }

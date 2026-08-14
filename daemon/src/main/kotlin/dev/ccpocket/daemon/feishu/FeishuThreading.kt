@@ -34,6 +34,16 @@ internal object FeishuThreading {
         return if (ownerTurn) "$base\u0000owner" else base
     }
 
+    /**
+     * An AUTO-routing DIRECT chat (the unified inbox) runs ONE conversation per (chat, project): switching
+     * projects switches conversations without destroying either, so「问完 A 再问 B」round-trips keep both
+     * contexts. A pinned (/bind <project>) direct chat keeps the historical [conversationKey] shape instead.
+     */
+    fun directProjectKey(chatId: String, workdir: String, ownerTurn: Boolean): String {
+        val base = "$chatId\u0000proj\u0000$workdir"
+        return if (ownerTurn) "$base\u0000owner" else base
+    }
+
     /** Group vs. direct chat — also read by the engine, which fetches a chat NAME and says 「飞书群」 in the
      *  injected session header only for groups (#242). One definition, so the two can never disagree. */
     fun isGroup(chatType: String?): Boolean = chatType.equals("group", ignoreCase = true)

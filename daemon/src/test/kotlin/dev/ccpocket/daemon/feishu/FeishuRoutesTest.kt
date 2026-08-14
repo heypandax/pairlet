@@ -411,6 +411,106 @@ class FeishuRoutesTest {
         assertTrue(File(tmp, "trust.log.1").exists())
     }
 
+    // ── AUTO routing (/bind auto) + the direct-chat unified inbox ──
+
+    @Test
+    fun bind_auto_is_admin_only_persists_a_sentinel_and_survives_reload() {
+        val (r, c) = commands()
+        assertTrue("只有管理员" in assertIs<ChatAction.Reply>(c.handle("/bind auto", "oc_1", "ou_other")).text)
+        assertFalse(r.isAuto("oc_1"))
+        assertTrue("自动路由" in assertIs<ChatAction.Reply>(c.handle("/bind auto", "oc_1", "ou_admin")).text)
+        assertTrue(r.isAuto("oc_1"))
+        assertNull(r.workdirFor("oc_1"), "auto is not a concrete workdir — nothing may treat it as a path")
+        assertTrue(r.isBound("oc_1"))
+        // survives reload; /bind <project> and /unbind take it back over
+        assertTrue(FeishuRoutes(routesFile).isAuto("oc_1"))
+        c.handle("/bind alpha", "oc_1", "ou_admin")
+        assertEquals("/p/alpha", r.workdirFor("oc_1"))
+        assertFalse(r.isAuto("oc_1"))
+        c.handle("/bind auto", "oc_1", "ou_admin")
+        assertTrue(r.unbind("oc_1"))
+        assertFalse(FeishuRoutes(routesFile).isAuto("oc_1"))
+    }
+
+    @Test
+    fun a_real_project_named_auto_wins_over_auto_mode() {
+        val r = FeishuRoutes(routesFile)
+        val c = FeishuCommands(r, listOf("/p/auto", "/p/beta"), "ou_admin")
+        assertTrue("已绑定" in assertIs<ChatAction.Reply>(c.handle("/bind auto", "oc_1", "ou_admin")).text)
+        assertEquals("/p/auto", r.workdirFor("oc_1"))
+        assertFalse(r.isAuto("oc_1"))
+    }
+
+    @Test
+    fun an_auto_chat_asks_auto_for_prompts_and_slash_passthroughs_and_can_reset() {
+        val (r, c) = commands()
+        r.bindAuto("oc_1")
+        assertEquals("帮我修个 bug", assertIs<ChatAction.AskAuto>(c.handle("帮我修个 bug", "oc_1", "ou_x")).prompt)
+        assertEquals("/compact", assertIs<ChatAction.AskAuto>(c.handle("/compact", "oc_1", "ou_x")).prompt)
+        assertTrue("重新选择项目" in assertIs<ChatAction.Reset>(c.handle("/new", "oc_1", "ou_x")).note)
+        // binding survives the reset — /new clears context, not the auto mode
+        assertTrue(r.isAuto("oc_1"))
+    }
+
+    @Test
+    fun covers_workdir_is_exact_for_concrete_bindings_and_allowlist_wide_for_auto() {
+        val r = FeishuRoutes(routesFile)
+        r.bind("oc_1", "/p/alpha")
+        assertTrue(r.coversWorkdir("oc_1", "/p/alpha", workdirs))
+        assertFalse(r.coversWorkdir("oc_1", "/p/Beta", workdirs))
+        r.bindAuto("oc_2")
+        assertTrue(r.coversWorkdir("oc_2", "/p/alpha", workdirs))
+        assertTrue(r.coversWorkdir("oc_2", "/p/Beta", workdirs))
+        assertFalse(r.coversWorkdir("oc_2", "/p/other", workdirs), "auto still may not leave the allow-list")
+        assertFalse(r.coversWorkdir("oc_unbound", "/p/alpha", workdirs))
+    }
+
+    @Test
+    fun a_direct_chat_is_an_implicit_unified_inbox_and_its_user_may_bind() {
+        val (r, c) = commands()
+        // unbound direct chat: prompts and slash pass-throughs route automatically, /new resets
+        assertIs<ChatAction.AskAuto>(c.handle("帮我查下 relay 的日志", "p2p_1", "ou_someone", isDirect = true))
+        assertIs<ChatAction.AskAuto>(c.handle("/compact", "p2p_1", "ou_someone", isDirect = true))
+        assertIs<ChatAction.Reset>(c.handle("/new", "p2p_1", "ou_someone", isDirect = true))
+        // the DM user can pin their own chat (admin unset ⇒ the direct user is the bind authority)…
+        val c2 = FeishuCommands(FeishuRoutes(File(tmp, "r-direct.json")).also { it.size() }, workdirs, null)
+        assertTrue("已绑定" in assertIs<ChatAction.Reply>(c2.handle("/bind alpha", "p2p_2", "ou_someone", isDirect = true)).text)
+        // …and an explicit admin still wins over the DM user
+        val (r3, c3) = commands()
+        assertTrue("只有管理员" in assertIs<ChatAction.Reply>(c3.handle("/bind alpha", "p2p_3", "ou_someone", isDirect = true)).text)
+        assertNull(r3.workdirFor("p2p_3"))
+        // a PINNED direct chat behaves like a bound chat again
+        r.bind("p2p_1", "/p/alpha")
+        assertEquals("/p/alpha", assertIs<ChatAction.Ask>(c.handle("继续", "p2p_1", "ou_someone", isDirect = true)).workdir)
+    }
+
+    @Test
+    fun trust_in_an_auto_chat_keys_on_the_auto_sentinel_and_status_never_leaks_it() {
+        val (r, c, records) = trustCommands()
+        r.bindAuto("oc_1")
+        // /trust confirm works without a concrete binding — the grant covers the routed allow-list
+        assertIs<ChatAction.SetTrust>(c.handle("/trust confirm", "oc_1", "ou_admin")).let {
+            assertEquals(FeishuTrustMode.TRUSTED, it.mode)
+        }
+        records["oc_1"] = record(FeishuTrustMode.TRUSTED, workdir = FeishuRoutes.AUTO)
+        assertTrue("已经是完全信任" in assertIs<ChatAction.Reply>(c.handle("/trust confirm", "oc_1", "ou_admin")).text)
+        val status = assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_1", "ou_stranger")).text
+        assertTrue("完全信任" in status, status)
+        assertTrue("自动路由" in status, status)
+        assertFalse("::auto" in status, "the sentinel must never be user-visible: $status")
+        // a stale record for a CONCRETE project grants nothing in auto mode (and vice versa)
+        records["oc_1"] = record(FeishuTrustMode.TRUSTED, workdir = "/p/alpha")
+        val stale = assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_1", "ou_stranger")).text
+        assertTrue("每次审批" in stale && "不生效" in stale, stale)
+    }
+
+    @Test
+    fun projects_and_help_teach_bind_auto() {
+        val (_, c) = commands()
+        assertTrue("/bind auto" in assertIs<ChatAction.Reply>(c.handle("/projects", "oc_1", "ou_x")).text)
+        assertTrue("/bind auto" in assertIs<ChatAction.Reply>(c.handle("/help", "oc_1", "ou_x")).text)
+    }
+
     @Test
     fun new_resets_the_chat_conversation() {
         val (r, c) = commands()
