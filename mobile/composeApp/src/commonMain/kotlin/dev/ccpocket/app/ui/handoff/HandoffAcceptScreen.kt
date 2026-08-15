@@ -134,6 +134,11 @@ fun HandoffAcceptScreen(
     val expired = expiredNote != null
     // v1 ships exactly one authorization combination; anything else is honestly unusable here (§6)
     val supported = kind == HandoffKind.REVIEW && access == HandoffAccess.REVIEW_READ_ONLY
+    // #257: this screen is drawn full-screen OVER whatever hosts it (the chat, or the incoming-offer
+    // list), so Android back must close it rather than fall through. [onClose] is what ✕ does, and in
+    // the offer-list host it is that list's own "back to the offers" — so both hosts stay correct
+    // without a mount-point handler. Registered here, i.e. later than the host's, so LIFO picks it.
+    dev.ccpocket.app.SystemBackHandler(enabled = true) { onClose() }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         // top bar: ✕ + title + INVITE / EXPIRED chip
         Row(
