@@ -14,7 +14,11 @@
 set -euo pipefail
 
 DEVECO="${DEVECO_HOME:-/Applications/DevEco-Studio.app/Contents}"
-[ -d "$DEVECO" ] || { echo "未找到 DevEco Studio（$DEVECO）"; exit 1; }
+# Braces are mandatory before a full-width closing paren. Under a UTF-8 locale, bash 3.2 (macOS
+# /bin/bash) scans an unbraced variable reference that is immediately followed by a full-width paren
+# and swallows that paren's first byte into the variable name, so `set -u` aborts with
+# `DEVECO?: unbound variable` instead of printing the message below. Same rule for any 全角 punctuation.
+[ -d "$DEVECO" ] || { echo "未找到 DevEco Studio（${DEVECO}）"; exit 1; }
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HV="$ROOT/harmony/tools/hvigor"

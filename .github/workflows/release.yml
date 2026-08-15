@@ -556,6 +556,21 @@ jobs:
           rm -f "$SIGNING_DIR/cc-pocket-harmony.p12" "$SIGNING_DIR/cc-pocket-harmony-release.cer" "$SIGNING_DIR/cc-pocket-harmony-release.p7b"
           rmdir "$SIGNING_DIR" 2>/dev/null || true
 
+      # The signed .app is the ONLY artifact AppGallery Connect accepts, and it is not attached to the
+      # public release (users cannot sideload it — HarmonyOS NEXT has no sideloading, so the .hap above
+      # is for debugging/install only). Without this step the App Pack dies with the ephemeral runner and
+      # AGC has to be fed a locally re-signed package, i.e. NOT the one this job built and verified.
+      # Runs after the secrets are wiped so no third-party action executes while key material is on disk.
+      - name: Retain signed AGC App Pack
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # Read through RELEASE_VERSION, never `inputs.version` again: the job pins the workflow input
+          # to exactly one interpolation site (enforced by scripts/check-harmony-release.sh).
+          name: cc-pocket-harmony-${{ env.RELEASE_VERSION }}-agc-app-pack
+          path: harmony/release/cc-pocket-harmony-${{ env.RELEASE_VERSION }}-signed.app
+          if-no-files-found: error
+          retention-days: 90
+
   # Keep the Scoop bucket (heypandax/scoop-bucket) on the release we just published: without this the
   # manifest stays pinned to an old version forever (its checkver/autoupdate fields are inert — no
   # excavator runs on a personal bucket), which stranded every Windows user on 1.1.9 (issue #25).

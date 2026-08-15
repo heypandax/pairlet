@@ -149,25 +149,91 @@ certificate_fingerprint() {
   printf '%s' "$output" | tr -d ':' | tr '[:lower:]' '[:upper:]'
 }
 
+# ⚠️ 签名身份只认叶证书。verify-app 导出的链和输入 CER 都是多证书 PEM 束，且都以同一张
+# `Huawei CBG Root CA G2` 开头——`openssl x509 -in <束>` 只读第一张证书，于是「比对」比的是两边
+# 共有的华为根：任何一张华为签发的证书（含 debug 证书）都能打出「fingerprint 一致」。叶证书在两个
+# 束里的下标还不同，所以必须按 basicConstraints 定位，绝不能按第 N 张取。
+split_pem_bundle() {
+  local source="$1"
+  local dest_dir="$2"
+  awk -v dir="$dest_dir" '
+    /-----BEGIN CERTIFICATE-----/ { n += 1; out = sprintf("%s/cert-%03d.pem", dir, n) }
+    out != "" { print > out }
+    /-----END CERTIFICATE-----/ { if (out != "") { close(out); out = "" } }
+  ' "$source"
+}
+
+# 0 = 该证书是 CA（链上的签发者，不可能是签名身份）；1 = end-entity 候选。
+certificate_is_ca() {
+  local cert="$1"
+  local subject issuer
+  openssl x509 -in "$cert" -noout -text 2>/dev/null | awk '
+    /X509v3 Basic Constraints/ { in_bc = 1; next }
+    in_bc && /CA:TRUE/ { is_ca = 1; exit }
+    in_bc && /CA:FALSE/ { exit }
+    in_bc && /X509v3 / { exit }
+    END { exit(is_ca ? 0 : 1) }
+  ' && return 0
+  # 没有 basicConstraints 扩展的老式根证书兜底：自签（subject == issuer）一律当 CA 排除。
+  subject=$(openssl x509 -in "$cert" -noout -subject 2>/dev/null) || return 1
+  issuer=$(openssl x509 -in "$cert" -noout -issuer 2>/dev/null) || return 1
+  [ "${subject#*=}" = "${issuer#*=}" ]
+}
+
+leaf_certificate_fingerprint() {
+  local source="$1"
+  local work bundle cert leaf count status
+  work=$(mktemp -d /tmp/hap-leaf-cert.XXXXXX) || return 1
+  bundle="$work/bundle.pem"
+  if grep -q -- '-----BEGIN CERTIFICATE-----' "$source" 2>/dev/null; then
+    cat "$source" > "$bundle" || { rm -rf "$work"; return 1; }
+  elif ! openssl x509 -inform DER -in "$source" -out "$bundle" 2>/dev/null; then
+    rm -rf "$work"
+    return 1
+  fi
+  split_pem_bundle "$bundle" "$work"
+
+  leaf=""
+  count=0
+  for cert in "$work"/cert-*.pem; do
+    [ -f "$cert" ] || continue
+    if certificate_is_ca "$cert"; then
+      continue
+    fi
+    leaf="$cert"
+    count=$((count + 1))
+  done
+  # 定位不到唯一叶证书时必须报错退出：退回「取第一张」正是这个门禁空转的根因。
+  if [ "$count" -ne 1 ]; then
+    rm -rf "$work"
+    return 2
+  fi
+
+  certificate_fingerprint "$leaf"
+  status=$?
+  rm -rf "$work"
+  return "$status"
+}
+
 assert_certificate_matches() {
   local verified_certificate="$1"
   local label="$2"
   local expected_fingerprint actual_fingerprint
 
   [ -s "$verified_certificate" ] || { echo "$label 未导出验证证书：$verified_certificate"; exit 1; }
-  expected_fingerprint=$(certificate_fingerprint "$CER") || {
-    echo "无法读取输入 CER 的 SHA-256 fingerprint：$CER"
+  expected_fingerprint=$(leaf_certificate_fingerprint "$CER") || {
+    echo "无法在输入 CER 中定位唯一的 end-entity 证书并取 SHA-256 fingerprint：$CER"
     exit 1
   }
-  actual_fingerprint=$(certificate_fingerprint "$verified_certificate") || {
-    echo "无法读取 $label 导出证书的 SHA-256 fingerprint：$verified_certificate"
+  actual_fingerprint=$(leaf_certificate_fingerprint "$verified_certificate") || {
+    echo "无法在 $label 导出证书链中定位唯一的 end-entity 证书并取 SHA-256 fingerprint：$verified_certificate"
     exit 1
   }
   [ "$actual_fingerprint" = "$expected_fingerprint" ] || {
-    echo "$label 签名证书与输入 CER 不一致"
+    echo "$label 叶证书与输入 CER 的叶证书不一致（签名身份不匹配）"
     exit 1
   }
-  echo "==> $label 签名证书 fingerprint 与输入 CER 一致"
+  echo "==> $label 叶证书 fingerprint 与输入 CER 一致：$actual_fingerprint"
 }
 
 # ---- 秘钥与材料 ----
