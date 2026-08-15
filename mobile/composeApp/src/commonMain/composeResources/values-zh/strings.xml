@@ -1027,8 +1027,16 @@
     <string name="notify_turn_complete">回复完成</string>
 
     <!-- 对话面板 -->
-    <string name="chat_no_session">没有打开的会话</string>
-    <string name="chat_no_session_hint">在左侧选择项目，然后打开或新建一个会话。</string>
+    <string name="chat_no_session">开始一个新会话</string>
+    <string name="chat_no_session_hint">在左侧选择项目，然后从这里开始新会话。</string>
+    <string name="chat_start_in">在「%1$s」新建会话，第一条提示词从这里直接发出。</string>
+    <string name="chat_start_placeholder">写下第一条提示词…</string>
+    <string name="chat_start_pick_project">请先在左侧选中项目。</string>
+    <string name="chat_start_choose">选择文件夹…</string>
+    <string name="chat_start_opening">正在新建会话，就绪后立刻发出你的提示词…</string>
+    <string name="chat_start_failed">没能新建会话，你的提示词还在。</string>
+    <string name="chat_start_timeout">会话没能及时就绪，你的提示词还在。</string>
+    <string name="chat_start_send_failed">会话已打开，但提示词没发出去，请在输入框里发送。</string>
     <string name="chat_opening">正在打开会话…</string>
     <string name="chat_opening_named">正在打开 %1$s…</string>
     <string name="chat_open_failed">没能打开会话</string>
