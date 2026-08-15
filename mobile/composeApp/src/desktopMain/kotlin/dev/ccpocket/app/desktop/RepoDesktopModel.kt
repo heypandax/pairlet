@@ -915,7 +915,6 @@ class RepoDesktopModel(
             // past the point the repo has already declared failure. The wait itself moved to the repository
             // with issue #260, so the phone's new-task sheet queues against exactly this logic.
             val live = repo.awaitOpenedConvo(previousConvo, firstPromptTimeoutMs)
-            startingSession = false
             when {
                 live == null -> newSessionPromptError = NewSessionPromptError.TIMEOUT
                 !live -> newSessionPromptError = NewSessionPromptError.OPEN_REFUSED
@@ -926,6 +925,10 @@ class RepoDesktopModel(
                 // gone — but the text is still held here, and re-entering an empty pane shows it again
                 else -> newSessionPromptError = NewSessionPromptError.SEND_REFUSED
             }
+            // Published LAST (same ordering as the repo's startTaskWithPrompt, same lesson as #245): the
+            // outcome must be readable before "starting" flips, or an observer sees "finished, no error"
+            // for a queue that actually failed.
+            startingSession = false
         }
     }
 

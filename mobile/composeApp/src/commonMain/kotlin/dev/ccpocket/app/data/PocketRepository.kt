@@ -3581,7 +3581,6 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         newTaskStarting.value = true
         scope.launch {
             val live = awaitOpenedConvo(previousConvo)
-            newTaskStarting.value = false
             when {
                 live == null -> newTaskError.value = NewTaskError.TIMEOUT
                 !live -> newTaskError.value = NewTaskError.OPEN_REFUSED
@@ -3590,6 +3589,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // held here rather than silently dropped into a turn that never happened
                 else -> newTaskError.value = NewTaskError.SEND_REFUSED
             }
+            // Published LAST: "starting is over" is the signal observers key on, so the outcome above must
+            // already be readable when it flips — clearing it first opened a window where the sheet (and the
+            // test) saw "finished, no error" for a queued prompt that actually failed (same lesson as #245:
+            // the transient flag must not be the last word).
+            newTaskStarting.value = false
         }
         return true
     }
