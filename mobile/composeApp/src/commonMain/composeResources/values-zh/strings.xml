@@ -1727,4 +1727,28 @@
     <string name="cfm_reach_body_local">从这个目录能触达的一切，包括命令能碰到的目录之外的文件。</string>
     <string name="cfm_note">这个会话里不会再问你第二次。想换回来，就用别的模式重开一个会话。</string>
     <string name="cfm_cta">以完全放权开始</string>
+
+    <!-- 新任务 composer（issue #260）——项目页的 FAB 与它打开的弹窗 -->
+    <string name="new_task">新任务</string>
+    <string name="new_task_placeholder">让智能体做什么？</string>
+    <string name="new_task_send">发送</string>
+    <string name="new_task_close">关闭</string>
+    <string name="new_task_project">项目</string>
+    <string name="new_task_agent">智能体</string>
+    <string name="new_task_pick_project">选择项目</string>
+    <string name="new_task_pick_agent">选择智能体</string>
+    <string name="new_task_recent">最近使用</string>
+    <string name="new_task_all_projects">全部项目</string>
+    <string name="new_task_search_projects">搜索全部项目</string>
+    <string name="new_task_browse_other">浏览其他文件夹…</string>
+    <string name="new_task_agent_unavailable">不可用</string>
+    <string name="new_task_opening">正在打开会话……</string>
+    <string name="new_task_no_projects">先选一个项目——这台电脑还没报上来任何项目。</string>
+    <string name="new_task_timeout">会话没能打开，你写的提示词还在。</string>
+    <string name="new_task_send_failed">会话开起来了，但这条提示词没发出去，它还在。</string>
+    <string name="new_task_failed">任务没能开始，你写的提示词还在。</string>
+    <string name="chat_start_defaults_note">模式与模型沿用默认</string>
+    <string name="proj_search">搜索项目</string>
+    <string name="proj_search_cancel">取消</string>
+    <string name="proj_view_mode">列表形态</string>
 </resources>

@@ -701,12 +701,12 @@ class ShowcaseRender {
                     it, recovery = connRecovery(ConnPhase.ComputerOffline), onSwitch = {}, onAdd = {},
                 )
             },
-            // 03/04 · Projects in both palettes (header v2): title + Computers/overflow, then the machine
-            // state + Review, then the work — and exactly one open-folder row
+            // 03/04 · Projects in both palettes (header v2 + #260): title + Search/Computers/overflow, then
+            // the machine state + Review, then the work full-height — and the new-task FAB over its scrim
             EntryFrame("projects-dark", seed = { receiveForTest(directories) }) { DirectoryScreen(it) },
             EntryFrame("projects-light", dark = false, seed = { receiveForTest(directories) }) { DirectoryScreen(it) },
             // 04b · the header at 200% type: row 2 reflows (Review drops under the state sentence) rather
-            // than crushing either side, and Open any folder… is still reachable without scrolling
+            // than crushing either side, and the FAB is still reachable without scrolling
             EntryFrame("projects-type200", fontScale = 2f, seed = { receiveForTest(directories) }) { DirectoryScreen(it) },
             // 05 · Directory picker: header and decision region pinned, only the middle list scrolls
             EntryFrame("picker", seed = { enterDemo() }) {

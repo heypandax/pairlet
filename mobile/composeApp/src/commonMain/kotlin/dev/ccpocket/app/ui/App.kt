@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.ColumnScope
@@ -49,6 +50,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -73,6 +75,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material3.AlertDialog
@@ -109,13 +112,17 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -660,6 +667,16 @@ private fun ProjectsHeader(
     onReviews: () -> Unit,
     onHelp: () -> Unit,
     onSettings: () -> Unit,
+    // ── inline search (issue #260) ──
+    // The always-on filter field is gone from under the header: it cost a permanent row for a control most
+    // sessions never touch, and the list is what the screen is for. It lives here now as a 48dp icon that
+    // EXPANDS IN PLACE over the title row — search is a mode of this screen, not a second surface.
+    searchOpen: Boolean = false,
+    searchEnabled: Boolean = true,
+    query: String = "",
+    onQueryChange: (String) -> Unit = {},
+    onOpenSearch: () -> Unit = {},
+    onCloseSearch: () -> Unit = {},
     body: @Composable ColumnScope.() -> Unit,
 ) {
     val recovery = connRecovery(phase)
@@ -676,14 +693,33 @@ private fun ProjectsHeader(
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxWidth().padding(horizontal = Metric.gutter).padding(top = Metric.gapS)) {
-                // ── row 1: the screen's name, and the two page-level controls it leaves room for ──
+                // ── row 1: the screen's name, and the page-level controls it leaves room for ──
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = Metric.touch).onSizeChanged { titleRowPx = it.height },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    if (searchOpen) {
+                        // the field takes the whole row: while searching, the list below IS the answer, so
+                        // nothing else on this row can compete for the space
+                        HeaderSearchField(query, onQueryChange, Modifier.weight(1f))
+                        Spacer(Modifier.width(Metric.gapS))
+                        Text(
+                            stringResource(Res.string.proj_search_cancel), color = Tok.accent, style = TypeRole.action,
+                            maxLines = 1,
+                            modifier = Modifier.heightIn(min = Metric.touch).clip(RoundedCornerShape(Metric.radiusS))
+                                .clickable(role = Role.Button, onClick = onCloseSearch)
+                                .padding(horizontal = Metric.gapS)
+                                .wrapContentHeight(Alignment.CenterVertically),
+                        )
+                        return@Row
+                    }
                     Text(
                         title, color = Tok.tx, style = TypeRole.screenTitle,
                         maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
+                    HeaderIconAction(
+                        Icons.Rounded.Search, stringResource(Res.string.proj_search),
+                        enabled = searchEnabled, onClick = onOpenSearch,
                     )
                     HeaderIconAction(
                         Icons.Outlined.Computer, stringResource(Res.string.proj_open_computers),
@@ -742,25 +778,63 @@ private fun ProjectsHeader(
     }
 }
 
-/** A 48 dp page-level control in the header: an icon, its localized name, and room for one real mark. */
+/** A 48 dp page-level control in the header: an icon, its localized name, and room for one real mark.
+ *  [enabled] = false keeps the control's BOX (the connecting skeleton must place the same geometry the
+ *  loaded list does — EntryFlowUiTest pins exactly that) while making it inert and dimmed. */
 @Composable
 private fun HeaderIconAction(
     icon: ImageVector,
     label: String,
     expanded: Boolean? = null,
+    enabled: Boolean = true,
     onClick: () -> Unit,
     badge: @Composable BoxScope.() -> Unit = {},
 ) {
     Box(
         Modifier.size(Metric.touch).clip(RoundedCornerShape(Metric.radiusS))
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             // a disclosure announces whether it is already open, so a screen reader is never told to
             // "activate" a menu that is on screen in front of it
             .semantics { if (expanded == true) collapse { onClick(); true } else if (expanded == false) expand { onClick(); true } },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, label, tint = Tok.tx2, modifier = Modifier.size(21.dp))
+        Icon(icon, label, tint = if (enabled) Tok.tx2 else Tok.muted, modifier = Modifier.size(21.dp))
         badge()
+    }
+}
+
+/**
+ * The expanded search field (issue #260) — the title row, in its other mode.
+ *
+ * It lands focused, because expanding it IS the request to type; the caller clears the query when it
+ * collapses, so leaving search can never strand the list under a filter nobody can see.
+ */
+@Composable
+private fun HeaderSearchField(query: String, onQueryChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val shape = RoundedCornerShape(11.dp)
+    Row(
+        modifier.heightIn(min = 44.dp).clip(shape).background(Tok.surface)
+            .border(Metric.hairline, Tok.accent, shape)
+            .padding(horizontal = Metric.gap),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.Search, null, tint = Tok.tx2, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(9.dp))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text(stringResource(Res.string.filter_hint), color = Tok.muted, style = TypeRole.preview)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = TypeRole.preview.copy(color = Tok.tx),
+                cursorBrush = SolidColor(Tok.accent),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus).testTag("projects-search"),
+            )
+        }
     }
 }
 
@@ -881,25 +955,40 @@ private fun ReflowRow(
     }
 }
 
-/** The single canonical "open any folder" entry — the one doorway to the picker, in the content hierarchy. */
+/**
+ * The new-task FAB (issue #260) — the Projects screen's one and only way to start work.
+ *
+ * A filled 56 dp accent circle: deliberately the loudest thing on the screen, because everything else here
+ * is a way back INTO existing work and this is the way to make new work. It is the only control on Projects
+ * that is accent-filled, so "create" is never confused with "resume".
+ *
+ * The scrim it sits on is drawn by the caller (it has to span the whole frame, not just this circle).
+ */
 @Composable
-private fun OpenAnyFolderRow(onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth()) {
-        Hairline()
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 52.dp)
-                .clickable(role = Role.Button, onClick = onClick)
-                .padding(horizontal = Metric.gutter, vertical = Metric.gap),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(Metric.gap))
-            Text(stringResource(Res.string.proj_open_any), color = Tok.tx, style = TypeRole.body, modifier = Modifier.weight(1f))
-            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(18.dp))
-        }
-        Hairline()
+private fun NewTaskFab(onClick: () -> Unit) {
+    val label = stringResource(Res.string.new_task)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    Box(
+        Modifier.size(56.dp)
+            // lifts the circle off the rows it overlaps — the shadow, not a border, is what separates it
+            .shadow(10.dp, CircleShape, ambientColor = Tok.accent, spotColor = Tok.accent)
+            .clip(CircleShape)
+            .background(if (pressed) Tok.accentPressed else Tok.accent)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label }
+            .testTag("new-task-fab"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Rounded.Add, null, tint = Tok.base, modifier = Modifier.size(26.dp))
     }
 }
+
+// The standalone "open any folder" ROW is gone from Projects (issue #260). Its capability did not go with
+// it: the new-task sheet's project picker pins "Browse other folders…" to its bottom and triggers the very
+// same [openFolderEntry] flow, and the empty-list state (#250) keeps its own anchor — with no projects, that
+// is still the action that ends the state. What the row cost was a permanent band of chrome above the list
+// for a doorway that belongs INSIDE the moment you are choosing a project.
 
 /** Connect/switch placeholder: the REAL Projects header over shimmering rows — so landing on a machine
  *  only swaps skeleton→list, instead of flashing a differently-shaped screen first. It claims nothing:
@@ -931,6 +1020,9 @@ internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header aga
         onReviews = onOpenReviews,
         onHelp = { showHelp = true },
         onSettings = { showSettings = true },
+        // the search control keeps its BOX here so skeleton → list never shifts the header (EntryFlowUiTest
+        // pins exactly that), but it is inert: there is no list yet for a filter to act on
+        searchEnabled = false,
     ) {
         Column(Modifier.fillMaxSize().padding(Metric.gutter), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             repeat(4) {
@@ -1039,7 +1131,12 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     onOpenInbox: () -> Unit = {},
     onOpenReviews: () -> Unit = {},
 ) {
-    var query by remember { mutableStateOf("") }
+    // Search is a MODE of this screen now (issue #260): the field lives in the title row while it is open,
+    // and collapsing it clears the query — so the filtered-empty state can only ever be reached from a
+    // search that is visibly on screen, never inherited from a field nobody can see. The transitions live
+    // in [ProjectSearch] so that invariant is pinned without a screen.
+    var search by remember { mutableStateOf(ProjectSearch()) }
+    val query = search.query
     var showHelp by remember { mutableStateOf(false) }
     if (showHelp) {
         HelpCenterScreen(HelpEntryPoint.PROJECTS, onBack = { showHelp = false })
@@ -1098,6 +1195,8 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     // keeps the manual path sheet (its browse anchor "~" is outside the share and daemon-denied anyway)
     var showDirPicker by remember { mutableStateOf(false) }
     val openFolderEntry = { if (isGuestDirView(dirsSnapshot)) showNewPath = true else showDirPicker = true }
+    // the FAB's sheet (issue #260) — the screen's one new-task entry
+    var showNewTask by remember { mutableStateOf(false) }
 
     // typing in the filter then scrolling the list dismisses the keyboard (fires once per scroll gesture)
     val focus = LocalFocusManager.current
@@ -1105,7 +1204,11 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) focus.clearFocus() }
     val approvalCount = repo.fleetAttention().size
     val approvalsRefreshing = repo.fleetMachines().any { it.pending > 0 && it.status != MachineStatus.ONLINE }
-    val approvalClearance = if (approvalCount > 0) 72.dp else 0.dp
+    // Bottom clearance is now the sum of two stacked controls: the approval pill (when anything waits) and
+    // the new-task FAB. Without this the last project row sits UNDER the FAB and its gradient — reachable
+    // only by over-scrolling, which on a short list is not possible at all.
+    val fabClearance = 92.dp
+    val approvalClearance = (if (approvalCount > 0) 72.dp else 0.dp) + fabClearance
 
     Box(Modifier.fillMaxSize()) {
     // ── the header (Master v2): title + Computers/overflow, then the machine state + Review ──
@@ -1122,23 +1225,12 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
         onReviews = onOpenReviews,
         onHelp = { showHelp = true },
         onSettings = { showSettings = true },
+        searchOpen = search.open,
+        query = query,
+        onQueryChange = { search = search.typed(it) },
+        onOpenSearch = { search = search.expanded() },
+        onCloseSearch = { search = search.collapsed() },
     ) {
-        // ── the search row: filter beside the view mode ──
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Metric.gutter).padding(top = Metric.gapS, bottom = Metric.gapS),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedTextField(
-                query, { query = it }, placeholder = { Text(stringResource(Res.string.filter_hint)) }, singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(Metric.gap))
-            ViewToggle(tree) { repo.setTreeView(!tree) }
-        }
-        // THE open-folder entry. Exactly one, in the content hierarchy — the old top-bar "+" duplicated it
-        // at equal weight, which left two controls competing to mean the same thing (#32/#152 route intact:
-        // owners land in the browser, guests keep the manual path sheet).
-        OpenAnyFolderRow(openFolderEntry)
         // NOTE: the "was ready and dropped → keep the list under a slim warning" banner is NOT repeated
         // here. The root already renders exactly one Reconnecting strip above every content screen, and a
         // second copy on Projects would be the same sentence twice. Computer offline never reaches this
@@ -1171,20 +1263,29 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                 emptyKind == DirEmptyKind.AGENT_FILTERED ->
                     NoAgentMatches(agentFilter, onClear = { repo.clearAgentFilter() }, onOpenFolder = openFolderEntry)
                 emptyKind == DirEmptyKind.NO_QUERY_MATCH ->
-                    NoMatches(query, onClear = { query = "" }, onOpenFolder = openFolderEntry)
+                    NoMatches(query, onClear = { search = search.collapsed() }, onOpenFolder = openFolderEntry)
                 treeMode -> LazyColumn(
                     Modifier.fillMaxSize().padding(horizontal = 16.dp),
                     state = listState,
                     contentPadding = PaddingValues(bottom = approvalClearance),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
+                    // The view-mode toggle rides the FIRST section label (issue #260): it used to sit in the
+                    // search row, which no longer exists. `firstLabel` is claimed at list-BUILD time (this
+                    // lambda runs top-to-bottom on every rebuild), never from inside an item's composable —
+                    // item bodies compose lazily and out of order, so a flag flipped there would land on
+                    // whichever row scrolled into view first.
+                    var toggleFree = true
+                    fun claimToggle(): Boolean = toggleFree.also { toggleFree = false }
                     if (base == root) { // PINNED + ACTIVE pinned on top at root
                         if (pinned.isNotEmpty()) {
-                            item { Label(pinnedLabel) }
+                            val withToggle = claimToggle()
+                            item { SectionLabel(pinnedLabel, withToggle, tree) { repo.setTreeView(!tree) } }
                             items(pinned, key = { "p:" + it.path }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) }
                         }
                         if (live.isNotEmpty()) {
-                            item { Label(activeLabel) }
+                            val withToggle = claimToggle()
+                            item { SectionLabel(activeLabel, withToggle, tree) { repo.setTreeView(!tree) } }
                             // key carries the session too — expansion can put the same project here several times
                             items(live, key = { "a:" + it.path + ":" + (it.activeSessionId ?: "") }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) }
                         }
@@ -1192,13 +1293,17 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                     }
                     // drilled into a folder that is itself a project → its own sessions lead as "current project"
                     if (currentLeaf != null) {
-                        item { Label(currentProjectLabel) }
+                        val withToggle = claimToggle()
+                        item { SectionLabel(currentProjectLabel, withToggle, tree) { repo.setTreeView(!tree) } }
                         item(key = "cur:" + currentLeaf.entry.path) {
                             val e = currentLeaf.entry
                             LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) { repo.openProject(e) }
                         }
                         item { Label(projectsLabel) }
                     }
+                    // a root with neither pins nor live sessions prints no label at all — the toggle still
+                    // needs a home, or the only way back to the flat list would be to pin something first
+                    if (claimToggle()) item { SectionLabel(null, true, tree) { repo.setTreeView(!tree) } }
                     items(childRows, key = { r -> when (r) { is TreeRow.Folder -> "f:" + r.path; is TreeRow.Leaf -> "l:" + r.entry.path } }) { r ->
                         when (r) {
                             is TreeRow.Folder -> {
@@ -1223,9 +1328,13 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                     contentPadding = PaddingValues(bottom = approvalClearance),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    items(flatRows) { row ->
+                    // same rule as the tree list: the toggle rides the first header, and gets a bare row of
+                    // its own when the flat list leads straight into project rows (no pins, no live sessions)
+                    val leadingHeader = flatRows.firstOrNull() is DirRow.Header
+                    if (!leadingHeader) item { SectionLabel(null, true, tree) { repo.setTreeView(!tree) } }
+                    itemsIndexed(flatRows) { i, row ->
                         when (row) {
-                            is DirRow.Header -> Label(row.label)
+                            is DirRow.Header -> SectionLabel(row.label, leadingHeader && i == 0, tree) { repo.setTreeView(!tree) }
                             is DirRow.Dir -> ProjectCell(
                                 repo, row.entry, showPath = row.showPath, direct = row.direct,
                                 onLongPress = { actionTarget = row.entry },
@@ -1237,12 +1346,40 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
             }
         }
     }
-        ApprovalQueueFab(
-            count = approvalCount,
-            refreshing = approvalsRefreshing,
-            onClick = onOpenInbox,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+        // ── the bottom-right stack: the approval pill above the new-task FAB ──
+        // Both want the same corner. The FAB anchors it (it is always there and always means the same
+        // thing); the pill stacks above, so a growing approval queue never displaces the primary action.
+        // Hidden while searching: the field owns the screen then, and the list under it is the answer.
+        if (!search.open) {
+            // The scrim under the stack. Not decoration: the list scrolls beneath the FAB, and without it
+            // the last row reads as struck through by the circle. Fading the rows out is also what says
+            // there is more list down there. Untouchable, so it never steals a row's tap.
+            Box(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(96.dp)
+                    .background(Brush.verticalGradient(0f to Color.Transparent, 0.62f to Tok.base, 1f to Tok.base)),
+            )
+            Column(
+                Modifier.align(Alignment.BottomEnd).padding(end = Metric.gutter, bottom = Metric.gutter),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(Metric.gap),
+            ) {
+                ApprovalQueueFab(count = approvalCount, refreshing = approvalsRefreshing, onClick = onOpenInbox)
+                NewTaskFab { showNewTask = true }
+            }
+        }
+        if (showNewTask) NewTaskSheet(
+            repo = repo,
+            dirs = visibleDirs,
+            // the picker's pinned bottom row is the SAME doorway the removed standalone row used, guest
+            // fork included — one implementation, reached from where the choice is actually being made
+            onBrowseOther = { showNewTask = false; openFolderEntry() },
+            onDismiss = { showNewTask = false },
         )
+        // Entering the new conversation needs no navigation call: the root router renders ChatScreen the
+        // moment convoId lands, and the sheet closed on send — so a delivered prompt IS the chat opening.
+        // The FAILURE direction is the one that needs wiring: nothing opened, so this screen is still here
+        // and the sheet has to come back carrying the draft and one inline line saying what happened.
+        LaunchedEffect(repo.newTaskError.value) { if (repo.newTaskError.value != null) showNewTask = true }
         actionTarget?.let { t -> ProjectActionsSheet(repo, t, onShare = { shareTarget = t }) { actionTarget = null } }
         if (showNewPath) NewPathSheet(
             // drilled into a folder → seed it as the parent so the user types only the new project's name (issue #7)
@@ -3191,6 +3328,26 @@ private fun VoiceActionButton(failed: Boolean, onClick: () -> Unit) {
 @Composable
 private fun Label(text: String) =
     Text(text, color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+
+/**
+ * A section label that can carry the list's view-mode toggle on its trailing edge (issue #260).
+ *
+ * The toggle used to live in the search row above the list; with that row gone it rides the FIRST group
+ * label instead — beside the thing it reshapes, rather than in chrome of its own. [label] may be null for
+ * the case where the list leads straight into rows and there is no group to name: the control still needs
+ * a home, and a bare 44 dp row is a smaller price than an invented heading.
+ */
+@Composable
+private fun SectionLabel(label: String?, showToggle: Boolean, tree: Boolean, onToggle: () -> Unit) {
+    if (!showToggle) { label?.let { Label(it) }; return }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 44.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f)) { label?.let { Label(it) } }
+        ViewToggle(tree, onToggle)
+    }
+}
 
 /**
  * "Thinking…" activity row: a pulsing dot + label shown while a turn is running but nothing live is on

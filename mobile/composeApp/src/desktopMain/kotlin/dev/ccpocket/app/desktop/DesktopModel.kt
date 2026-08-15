@@ -468,9 +468,11 @@ interface DesktopModel {
      *  [newSessionPrompt] (or, for [NewSessionPromptError.SEND_REFUSED], in the live composer). */
     val newSessionPromptError: NewSessionPromptError? get() = null
 
-    /** Open a session at [dir] with the default agent/mode and send [prompt] as its first turn once the
-     *  session is live. Blank prompts and re-entry while one is already queued are no-ops. */
-    fun startSessionWithPrompt(dir: String, prompt: String) {}
+    /** Open a session at [dir] on [agent] and send [prompt] as its first turn once the session is live.
+     *  Blank prompts and re-entry while one is already queued are no-ops. [agent] became explicit with
+     *  issue #260 — the empty state now shows WHICH backend it is about to use and lets you change it, so
+     *  the pick has to reach the open. It defaults to [defaultAgent], the pre-#260 behavior. */
+    fun startSessionWithPrompt(dir: String, prompt: String, agent: AgentKind = defaultAgent) {}
 
     /** Clear the inline failure line (the user edited the prompt / picked another project). */
     fun dismissNewSessionPromptError() {}

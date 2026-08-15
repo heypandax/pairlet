@@ -106,12 +106,16 @@ val MODE_BY = MODES.associateBy { it.key }
 
 // ── bottom-sheet shell (scrim + raised card, radius-20 top) ─────
 @Composable
-fun PocketSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+fun PocketSheet(onDismiss: () -> Unit, dropKeyboard: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
     // a sheet has no text input — drop the keyboard if the composer still held focus. Otherwise the open
     // keyboard + the sheet's imePadding fight over the bottom inset and (on iOS) wedge the layout, so a
     // nested confirm popup can't lay out and the keyboard won't dismiss — the "stuck sheet" symptom.
+    //
+    // [dropKeyboard] = false is for the one sheet that IS a text input: the new-task composer (issue #260)
+    // opens focused on purpose, and a blanket clearFocus here would race its own focus request. That sheet
+    // owns the keyboard from the first frame, so the inset fight above never starts.
     val focus = LocalFocusManager.current
-    LaunchedEffect(Unit) { focus.clearFocus() }
+    LaunchedEffect(dropKeyboard) { if (dropKeyboard) focus.clearFocus() }
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onDismiss() } // Android back = scrim tap
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color(0x94000000)).pointerInput(Unit) { detectTapGestures { onDismiss() } })

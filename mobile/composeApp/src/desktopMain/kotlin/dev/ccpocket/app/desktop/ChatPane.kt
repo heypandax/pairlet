@@ -37,6 +37,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Check
@@ -131,6 +132,7 @@ import dev.ccpocket.app.resources.chat_open_failed_named
 import dev.ccpocket.app.resources.chat_opening
 import dev.ccpocket.app.resources.chat_opening_named
 import dev.ccpocket.app.resources.chat_start_choose
+import dev.ccpocket.app.resources.chat_start_defaults_note
 import dev.ccpocket.app.resources.chat_start_failed
 import dev.ccpocket.app.resources.chat_start_in
 import dev.ccpocket.app.resources.chat_start_opening
@@ -198,7 +200,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dev.ccpocket.app.ui.AgentBadge
 import dev.ccpocket.app.ui.AgentTag
+import dev.ccpocket.app.ui.agentColor
 import dev.ccpocket.app.ui.agentName
+import dev.ccpocket.app.ui.tilde
+import dev.ccpocket.app.resources.new_task_agent
+import dev.ccpocket.app.resources.new_task_browse_other
+import dev.ccpocket.app.resources.new_task_project
+import dev.ccpocket.app.resources.new_task_recent
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import dev.ccpocket.app.ui.AttachImageIcon
 import dev.ccpocket.app.ui.EarlierMessagesSeam
 import dev.ccpocket.app.ui.LoadEarlierRow
@@ -655,13 +665,23 @@ private fun CenteredStreamRow(content: @Composable () -> Unit) {
  */
 @Composable
 private fun EmptyChat(model: DesktopModel) {
-    val dir = model.newSessionDir
+    // Issue #260: the two decisions creating a session actually makes — WHICH project, WHICH agent — are
+    // shown here as chips instead of being implied by "the current project, the default agent". They start
+    // at exactly those defaults, so the pre-#260 one-keystroke path is unchanged; they are just legible now,
+    // and changeable without leaving the pane. Mode and model deliberately stay implicit (the line beside
+    // the chips says so) — those belong to the full new-session popover.
+    var pickedDir by remember { mutableStateOf<String?>(null) }
+    var pickedAgent by remember { mutableStateOf<AgentKind?>(null) }
+    var projectPop by remember { mutableStateOf(false) }
+    var agentPop by remember { mutableStateOf(false) }
+    val dir = pickedDir ?: model.newSessionDir
+    val agent = pickedAgent ?: model.defaultAgent
     val busy = model.startingSession
     var pickHint by remember { mutableStateOf(false) } // "select a project first", shown only after a submit
     val submit = {
         val text = model.newSessionPrompt
         if (text.isNotBlank() && !model.startingSession) {
-            if (dir == null) pickHint = true else { pickHint = false; model.startSessionWithPrompt(dir, text) }
+            if (dir == null) pickHint = true else { pickHint = false; model.startSessionWithPrompt(dir, text, agent) }
         }
     }
     val fieldFocus = remember { FocusRequester() }
@@ -682,10 +702,14 @@ private fun EmptyChat(model: DesktopModel) {
             )
             Spacer(Modifier.height(6.dp))
             // the Composer's own shape (surface + hairline + 12dp radius + 34dp send circle), so this reads
-            // as the same input the session will hand over to
-            Row(
+            // as the same input the session will hand over to. The card is a COLUMN since #260: the field
+            // row on top, the attachment row (project · agent · defaults note) beneath it.
+            Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
                     .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(start = 12.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+            ) {
+            Row(
+                Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
@@ -729,6 +753,62 @@ private fun EmptyChat(model: DesktopModel) {
                     ) { Icon(Icons.Rounded.ArrowUpward, null, tint = Tok.base, modifier = Modifier.size(16.dp)) }
                 }
             }
+            // ── attachment row (issue #260): the two picks, then what stays implicit ──
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box {
+                    StarterChip(
+                        label = dir?.let { folderName(it) } ?: stringResource(Res.string.chat_start_pick_project),
+                        contentDescription = stringResource(Res.string.new_task_project),
+                        open = projectPop, mono = true,
+                        leading = { Icon(Icons.Outlined.Folder, null, tint = it, modifier = Modifier.size(13.dp)) },
+                    ) { projectPop = !projectPop }
+                    if (projectPop) {
+                        val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
+                        Popup(
+                            popupPositionProvider = remember(gap) { AboveAnchorEndPopupPositionProvider(gap) },
+                            onDismissRequest = { projectPop = false },
+                            properties = PopupProperties(focusable = true),
+                        ) {
+                            StarterProjectPopover(
+                                projects = model.projects,
+                                selected = dir,
+                                onPick = { pickedDir = it; projectPop = false },
+                                // the existing typed-path popover — one implementation of "some other folder"
+                                onBrowse = { projectPop = false; model.openNewSession("~/") },
+                            )
+                        }
+                    }
+                }
+                Box {
+                    StarterChip(
+                        label = agentName(agent),
+                        contentDescription = stringResource(Res.string.new_task_agent),
+                        open = agentPop, mono = false,
+                        leading = { Box(Modifier.size(9.dp).clip(RoundedCornerShape(999.dp)).background(agentColor(agent))) },
+                    ) { agentPop = !agentPop }
+                    if (agentPop) {
+                        val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
+                        Popup(
+                            popupPositionProvider = remember(gap) { AboveAnchorEndPopupPositionProvider(gap) },
+                            onDismissRequest = { agentPop = false },
+                            properties = PopupProperties(focusable = true),
+                        ) {
+                            StarterAgentPopover(model.availableAgents, agent) { pickedAgent = it; agentPop = false }
+                        }
+                    }
+                }
+                // says out loud what the quick path decides FOR you, so nothing here is a silent default
+                Text(
+                    stringResource(Res.string.chat_start_defaults_note),
+                    color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                )
+            }
+            }
             Row(Modifier.fillMaxWidth().padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Key("⏎"); Text(stringResource(Res.string.key_send), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
                 Key("⇧⏎"); Text(stringResource(Res.string.key_newline), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
@@ -755,6 +835,126 @@ private fun EmptyChat(model: DesktopModel) {
                         .hoverFill(RoundedCornerShape(7.dp))
                         .clickable { model.openNewSession() }.padding(horizontal = 10.dp, vertical = 5.dp),
                 )
+            }
+        }
+    }
+}
+
+/**
+ * The empty pane's project / agent chip (issue #260) — the #157 model-chip language with a leading mark.
+ *
+ * Same hairline pill that warms to accent while its popover is open, so the chips a user meets in the empty
+ * pane and in a live composer read as one control. Never accent-FILLED: send stays the loudest thing here.
+ */
+@Composable
+private fun StarterChip(
+    label: String,
+    contentDescription: String,
+    open: Boolean,
+    mono: Boolean,
+    leading: @Composable (Color) -> Unit,
+    onClick: () -> Unit,
+) {
+    val ink = if (open) Tok.accent else Tok.tx2
+    val cd = contentDescription
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        Modifier.height(30.dp).clip(shape).background(Tok.raised)
+            .border(1.dp, if (open) Tok.accent else Tok.hair, shape)
+            .clickable(onClick = onClick)
+            .semantics { this.contentDescription = cd }
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        leading(ink)
+        Text(
+            label, color = ink, fontFamily = if (mono) Dk.mono else Dk.ui, fontSize = 12.sp,
+            fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 132.dp),
+        )
+        Text(if (open) "▴" else "▾", color = ink, fontFamily = Dk.ui, fontSize = 10.sp)
+    }
+}
+
+/** Recent projects, the current one ticked, over the existing typed-path popover for anything else. */
+@Composable
+private fun StarterProjectPopover(
+    projects: List<DkProject>,
+    selected: String?,
+    onPick: (String) -> Unit,
+    onBrowse: () -> Unit,
+) {
+    // "recent" on the desktop shell is the sidebar's own project order (running first) — the same list the
+    // user is looking at, capped so the popover stays a shortcut rather than a second project browser.
+    val rows = remember(projects) { projects.take(5) }
+    Column(
+        Modifier.width(328.dp).clip(RoundedCornerShape(12.dp)).background(Tok.raised)
+            .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)),
+    ) {
+        Text(
+            stringResource(Res.string.new_task_recent).uppercase(), color = Tok.muted, fontFamily = Dk.ui,
+            fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
+            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 11.dp, bottom = 9.dp),
+        )
+        rows.forEach { p ->
+            val checked = p.path == selected
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable { onPick(p.path) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        p.name, color = if (checked) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 14.5.sp,
+                        fontWeight = if (checked) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        tilde(p.path), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
+                if (checked) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 14.sp)
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).background(Tok.surface).clickable { onBrowse() }
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(Res.string.new_task_browse_other), color = Tok.tx, fontFamily = Dk.ui,
+                fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f),
+            )
+            Text("›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 17.sp)
+        }
+    }
+}
+
+/** The agents this daemon actually advertises — the desktop's picker has always been availability-filtered
+ *  (DesktopAgentChoicesTest pins that it reads the shared projection), so it stays a list of real choices. */
+@Composable
+private fun StarterAgentPopover(available: List<AgentKind>, selected: AgentKind, onPick: (AgentKind) -> Unit) {
+    Column(
+        Modifier.width(220.dp).clip(RoundedCornerShape(12.dp)).background(Tok.raised)
+            .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(vertical = 6.dp),
+    ) {
+        available.forEach { a ->
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable { onPick(a) }
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(Modifier.size(9.dp).clip(RoundedCornerShape(999.dp)).background(agentColor(a)))
+                Text(
+                    agentName(a), color = if (a == selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui,
+                    fontSize = 13.5.sp, fontWeight = if (a == selected) FontWeight.SemiBold else FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (a == selected) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp)
             }
         }
     }

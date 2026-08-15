@@ -13,6 +13,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SkikoComposeUiTest
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
@@ -27,6 +28,9 @@ import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.cancel
+import dev.ccpocket.app.resources.proj_search_cancel
+import dev.ccpocket.app.resources.proj_search
+import dev.ccpocket.app.resources.new_task
 import dev.ccpocket.app.resources.cfg_mode_default
 import dev.ccpocket.app.resources.cfg_mode_full
 import dev.ccpocket.app.resources.cfg_mode_plan
@@ -77,8 +81,9 @@ import kotlin.test.assertTrue
  * The entry flow as it actually reaches the screen, at the release baseline (iPhone 17, 402 × 874 pt).
  *
  * `EntryUiTest` pins the rules; this file pins the CONSEQUENCES: that the camera is never mounted by
- * default, that exactly one open-folder entry exists, that `Options` and a mode row start nothing, and that
- * `Start` starts exactly once. Every one of those is a behaviour a visual pass can silently invert.
+ * default, that Projects creates work through exactly one control (the #260 FAB) and no longer carries a
+ * standalone open-folder row, that `Options` and a mode row start nothing, and that `Start` starts exactly
+ * once. Every one of those is a behaviour a visual pass can silently invert.
  */
 @OptIn(ExperimentalTestApi::class)
 class EntryFlowUiTest {
@@ -187,41 +192,99 @@ class EntryFlowUiTest {
     private fun SkikoComposeUiTest.target(description: String) =
         onAllNodes(hasContentDescription(description)).onFirst().getUnclippedBoundsInRoot()
 
+    /**
+     * Issue #260 replaced the standalone open-folder ROW with the new-task FAB. What used to be pinned here
+     * — "exactly one doorway, in the content hierarchy" — is now pinned in the other direction: the row is
+     * GONE from this screen (its capability moved into the new-task sheet's project picker), and the FAB is
+     * the one thing on Projects that creates anything.
+     */
     @Test
-    fun projectsOffersExactlyOneOpenFolderEntry() = baseline(
+    fun projectsCreatesOnlyThroughTheFabAndNoLongerCarriesAnOpenFolderRow() = baseline(
         seed = { enterDemo() },
         content = { DirectoryScreen(it) },
     ) {
-        // exactly ONE canonical doorway to the picker. The old top-bar "+" duplicated this row at equal
-        // weight, leaving two controls competing to mean the same thing — and Header v2 did NOT bring it
-        // back as a plus beside the title.
+        assertEquals(
+            0,
+            onAllNodes(hasText(str(Res.string.proj_open_any))).fetchSemanticsNodes().size,
+            "the standalone open-folder row is gone from Projects — it lives in the new-task project picker",
+        )
         assertEquals(
             1,
-            onAllNodes(hasText(str(Res.string.proj_open_any))).fetchSemanticsNodes().size,
-            "Projects has one open-folder entry, not two",
+            onAllNodes(hasContentDescription(str(Res.string.new_task))).fetchSemanticsNodes().size,
+            "…and exactly one control on this screen creates work",
         )
-        // the hierarchy: title, then the written machine state, then the work
+        // the hierarchy: title, then the written machine state, then the work — and the FAB below all of it
         assertTrue(present(str(Res.string.dir_projects)), "the screen names itself")
         assertTrue(present("alex-macbook", substring = true), "the machine row names the computer")
         val title = onAllNodes(hasText(str(Res.string.dir_projects))).onFirst().getUnclippedBoundsInRoot()
         val machine = onAllNodes(hasText("alex-macbook", substring = true)).onFirst().getUnclippedBoundsInRoot()
-        val openFolder = onAllNodes(hasText(str(Res.string.proj_open_any))).onFirst().getUnclippedBoundsInRoot()
+        val fab = target(str(Res.string.new_task))
         assertTrue(machine.top >= title.top, "the machine state sits under the title")
-        assertTrue(openFolder.top > machine.bottom, "…and the work entry sits below both")
-        assertWithinViewport(str(Res.string.proj_open_any))
+        assertTrue(fab.top > machine.bottom, "…and the create action sits below both")
+        assertTrue(fab.width.value >= 47.5f && fab.height.value >= 47.5f, "the FAB is below the 48dp floor: $fab")
+        assertTrue(fab.right.value <= W + 0.5f, "the FAB overflows the ${W}pt viewport at ${fab.right}")
+    }
+
+    /**
+     * Search is a MODE of this screen (issue #260): the icon expands a field in place of the title, and the
+     * FAB steps out of the way while it is open — the field and the primary action never share the frame.
+     *
+     * The other half of the rule — collapsing CLEARS the query — is pinned in `DirListTest` against
+     * [dev.ccpocket.app.ui.ProjectSearch], not here: asserting it through the list would depend on which
+     * rows a LazyColumn happens to have composed at this viewport, which is not what the rule is about.
+     */
+    @Test
+    fun searchExpandsInPlaceAndTheFabStepsAside() = baseline(
+        seed = { enterDemo() },
+        content = { DirectoryScreen(it) },
+    ) {
+        assertEquals(1, onAllNodes(hasContentDescription(str(Res.string.new_task))).fetchSemanticsNodes().size)
+        assertTrue(present(str(Res.string.dir_projects)), "the title owns row 1 while search is collapsed")
+
+        onAllNodes(hasContentDescription(str(Res.string.proj_search))).onFirst().performClick()
+        waitForIdle()
+
+        assertEquals(
+            1,
+            onAllNodes(hasTestTag("projects-search")).fetchSemanticsNodes().size,
+            "the field expands in the title row itself, not on a second surface",
+        )
+        assertTrue(present(str(Res.string.proj_search_cancel)), "…with the way back out beside it")
+        assertEquals(
+            0,
+            onAllNodes(hasContentDescription(str(Res.string.new_task))).fetchSemanticsNodes().size,
+            "the FAB hides while the search field owns the screen",
+        )
+
+        onAllNodes(hasText(str(Res.string.proj_search_cancel))).onFirst().performClick()
+        waitForIdle()
+
+        assertEquals(
+            0,
+            onAllNodes(hasTestTag("projects-search")).fetchSemanticsNodes().size,
+            "cancelling puts the field away",
+        )
+        assertEquals(
+            1,
+            onAllNodes(hasContentDescription(str(Res.string.new_task))).fetchSemanticsNodes().size,
+            "…and the FAB comes back",
+        )
     }
 
     @Test
-    fun theHeaderTrailingEdgeCarriesTwoRealControls() {
+    fun theHeaderTrailingEdgeCarriesThreeRealControls() {
         var fleet = 0
         baseline(seed = { enterDemo() }, content = { DirectoryScreen(it, onOpenFleet = { fleet++ }) }) {
-            // row 1 ends in exactly two page-level controls — the computer doorway and the overflow
+            // row 1 ends in three page-level controls — search (issue #260, where the always-on filter row
+            // went), the computer doorway, and the overflow, in that order out to the edge
+            val search = target(str(Res.string.proj_search))
             val computers = target(str(Res.string.proj_open_computers))
             val more = target(str(Res.string.proj_more))
             val title = onAllNodes(hasText(str(Res.string.dir_projects))).onFirst().getUnclippedBoundsInRoot()
-            assertTrue(computers.left > title.left, "the computer doorway is on the TRAILING edge, not under the title")
+            assertTrue(search.left > title.left, "search is on the TRAILING edge, not under the title")
+            assertTrue(computers.left.value >= search.right.value - 0.5f, "the computer doorway follows search")
             assertTrue(more.left.value >= computers.right.value - 0.5f, "the overflow is the outermost control")
-            for ((name, b) in listOf("Computers" to computers, "More options" to more)) {
+            for ((name, b) in listOf("Search" to search, "Computers" to computers, "More options" to more)) {
                 assertTrue(b.width.value >= 47.5f && b.height.value >= 47.5f, "$name is below the 48dp floor: $b")
                 assertTrue(b.right.value <= W + 0.5f, "$name overflows the ${W}pt viewport at ${b.right}")
             }
@@ -277,8 +340,11 @@ class EntryFlowUiTest {
     ) {
         onAllNodes(hasContentDescription(str(Res.string.proj_more))).onFirst().performClick()
         waitForIdle()
-        // an outside tap is a dismissal, not a decision: the menu closes and no route opened
-        onAllNodes(hasText(str(Res.string.proj_open_any))).onFirst().performClick()
+        // An outside tap is a dismissal, not a decision. The target is the screen TITLE: it has no action of
+        // its own, and it is the one thing in the header that sits ABOVE the menu panel — the panel hangs
+        // from below the title row and reaches ~280dp back across the frame, so a target on row 2 (the
+        // machine sentence, Review) can land on a menu row instead of the scrim depending on text metrics.
+        onAllNodes(hasText(str(Res.string.dir_projects))).onFirst().performClick()
         waitForIdle()
         assertFalse(present(str(Res.string.proj_settings)), "an outside tap closes the overflow")
         // a category row of the Settings LANDING — unique to that screen, so it proves a route opened
@@ -319,10 +385,10 @@ class EntryFlowUiTest {
         content = { DirectoryScreen(it) },
     ) {
         // everything the header promises is still inside the release frame, just taller
-        for (text in listOf(str(Res.string.dir_projects), str(Res.string.proj_review), str(Res.string.proj_open_any))) {
+        for (text in listOf(str(Res.string.dir_projects), str(Res.string.proj_review))) {
             assertWithinViewport(text)
         }
-        for (cd in listOf(str(Res.string.proj_open_computers), str(Res.string.proj_more))) {
+        for (cd in listOf(str(Res.string.proj_search), str(Res.string.proj_open_computers), str(Res.string.proj_more))) {
             val b = target(cd)
             assertTrue(b.right.value <= W + 0.5f, "\"$cd\" overflows the ${W}pt viewport at ${b.right}")
             assertTrue(b.width.value >= 47.5f && b.height.value >= 47.5f, "\"$cd\" lost its 48dp floor: $b")
@@ -331,9 +397,11 @@ class EntryFlowUiTest {
         val machine = onAllNodes(hasText("alex-macbook", substring = true)).onFirst().getUnclippedBoundsInRoot()
         val review = onAllNodes(hasText(str(Res.string.proj_review))).onFirst().getUnclippedBoundsInRoot()
         assertTrue(review.top >= machine.top, "Review reflows below the state sentence, it does not shrink it")
-        // …and the one canonical content action is still on screen without scrolling
-        val openFolder = onAllNodes(hasText(str(Res.string.proj_open_any))).onFirst().getUnclippedBoundsInRoot()
-        assertTrue(openFolder.bottom.value <= H + 0.5f, "Open any folder… must stay reachable at 200% type")
+        // …and the one canonical create action is still on screen without scrolling. The FAB is anchored to
+        // the frame rather than the type ramp, so 200% type must not push it out of reach.
+        val fab = target(str(Res.string.new_task))
+        assertTrue(fab.bottom.value <= H + 0.5f, "the new-task FAB must stay reachable at 200% type")
+        assertTrue(fab.right.value <= W + 0.5f, "…and inside the ${W}pt viewport")
     }
 
     // ══ directory picker ═══════════════════════════════════════════════════════════════════════════

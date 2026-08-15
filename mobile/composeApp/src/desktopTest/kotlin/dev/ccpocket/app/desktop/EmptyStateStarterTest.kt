@@ -15,12 +15,14 @@ import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.chat_no_session
 import dev.ccpocket.app.resources.chat_start_choose
+import dev.ccpocket.app.resources.chat_start_defaults_note
 import dev.ccpocket.app.resources.chat_start_in
 import dev.ccpocket.app.resources.chat_start_pick_project
 import dev.ccpocket.app.resources.chat_start_placeholder
 import dev.ccpocket.app.resources.chat_start_timeout
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.SendPrompt
@@ -165,8 +167,11 @@ class EmptyStateStarterTest {
     /** Seed model with no chat, so [ChatPane] renders the empty branch; records what the starter dispatches. */
     private open class StarterModel(override val newSessionDir: String? = "~/code/cc-pocket") : SeedDesktopModel() {
         override val hasChat = false
-        val started = mutableListOf<Pair<String, String>>()
-        override fun startSessionWithPrompt(dir: String, prompt: String) { started += dir to prompt }
+        val started = mutableListOf<Triple<String, String, AgentKind>>()
+        // #260 made the agent explicit on this call — the pane now SHOWS which backend it is about to use
+        override fun startSessionWithPrompt(dir: String, prompt: String, agent: AgentKind) {
+            started += Triple(dir, prompt, agent)
+        }
         var popovers = 0
             private set
         override fun openNewSession(seed: String?) { popovers++ }
@@ -195,7 +200,25 @@ class EmptyStateStarterTest {
         onNodeWithTag("new-session-send").performClick()
         waitForIdle()
 
-        assertEquals(listOf("~/code/cc-pocket" to "summarize the diff"), model.started)
+        // the chips' defaults are the pre-#260 ladder: the project in context, the default agent
+        assertEquals(
+            listOf(Triple("~/code/cc-pocket", "summarize the diff", model.defaultAgent)),
+            model.started,
+        )
+    }
+
+    /** Issue #260: the two chips are on the empty pane, naming what a send is about to do, and the row says
+     *  out loud what it is NOT deciding for you. */
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun theEmptyPaneNamesTheProjectAndAgentItIsAboutToUse() = runComposeUiTest {
+        val model = StarterModel()
+        setContent { PocketTheme { ChatPane(model) } }
+        waitForIdle()
+
+        assertPresent("cc-pocket")                                      // the project chip
+        assertPresent(dev.ccpocket.app.ui.agentName(model.defaultAgent)) // the agent chip
+        assertPresent(str(Res.string.chat_start_defaults_note))          // mode + model stay implicit, and say so
     }
 
     /** No project in context: the field still takes text (refusing keystrokes IS the dead end this replaces),
