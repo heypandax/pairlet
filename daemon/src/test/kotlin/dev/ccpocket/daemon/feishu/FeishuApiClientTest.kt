@@ -75,6 +75,31 @@ class FeishuApiClientTest {
     }
 
     @Test
+    fun `a menu card is sent as an interactive message and reports its own id`() {
+        FakeFeishuServer().use { server ->
+            val client = FeishuApiClient(
+                appId = "cli_${UUID.randomUUID()}",
+                appSecret = "test-secret",
+                bridgeName = "card-bridge",
+                baseUrl = server.baseUrl,
+                callTimeoutMs = 2_000,
+                connectTimeoutMs = 500,
+            )
+            try {
+                // the posted card's id is the anchor a later card.action.trigger callback resolves against,
+                // so losing it would make every button press unresolvable
+                assertEquals("om_done", client.replyCard("om_reply", FeishuCards.menuCard(), inThread = true))
+
+                val request = server.requests.single { it.path == "/open-apis/im/v1/messages/om_reply/reply" }
+                assertTrue(request.body.contains("\"msg_type\":\"interactive\""), request.body)
+                assertTrue(request.body.contains("\"reply_in_thread\":true"), request.body)
+            } finally {
+                client.close()
+            }
+        }
+    }
+
+    @Test
     fun `whole-call deadline aborts a stalled response and records timeout`() {
         FakeFeishuServer(botDelayMs = 2_000).use { server ->
             val health = CopyOnWriteArrayList<String>()
