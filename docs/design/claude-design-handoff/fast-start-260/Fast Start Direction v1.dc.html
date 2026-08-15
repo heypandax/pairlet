@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+  a { color: #B4522F; text-decoration: none; }
+  a:hover { color: #8E3F23; }
+</style>
+</helmet>
+
+<div style="position:fixed;inset:0;z-index:-1;background:#EDEBE6"></div>
+
+<div style="width:1920px;margin:0 auto;padding:64px 72px 96px;font-family:'Public Sans',system-ui,sans-serif;color:#1B1A18">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:900px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · design system 2.0 · fast start · v1</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">新建任务快速通道</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The settled interaction spec, re-skinned onto the 2.0 tokens: search collapses to an icon, a single accent FAB owns starting something new, and 项目 and 智能体 become two visible chips in the sheet it opens instead of two invisible defaults. Every frame is the same live component at 402 × 874 — tap the FAB, tap a chip, pick a project, switch the agent. The full mode/model/native configuration sheet is untouched; this is the fast lane beside it.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div><div style="color:#1B1A18">live prototype</div><div>402 × 874 · dark · zh</div></div>
+      <div><div style="color:#1B1A18">form final</div><div>FAB + bottom sheet</div></div>
+      <div><div style="color:#1B1A18">rows untouched</div><div>list · sessions · chat</div></div>
+    </div>
+  </div>
+
+  <!-- ═══════════ DECISION ═══════════ -->
+  <div style="padding-top:44px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:16px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">最终</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">The mobile form: FAB into a bottom sheet</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Owner decision · the in-place entry row is gone and the list has that height back</span>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.35fr 1fr;gap:0 48px;border-top:1px solid #C9C5BD;border-bottom:1px solid #C9C5BD;padding:20px 0 22px">
+      <p style="margin:0;font:400 14px/1.7 'Public Sans',sans-serif;color:#403C37;text-wrap:pretty">Idle Projects is now only Projects: nav, machine state, list. The single accent circle at the bottom right is the whole new-task affordance, and it reads as one thing rather than as a row of chrome the eye has to parse — an icon-only ＋ at 56 dp on the accent, with real elevation and a short scrim gradient beneath it so it stays legible over a scrolling row. Tapping it raises the sheet that was designed in the earlier round, unchanged: multiline field on top, accessory row below with 项目 and 智能体 on the left and 发送 on the right. The two creation-time decisions are still visible before a word is typed; they simply live in the surface that creation happens in, not on the surface that supervision happens on. Dismissal is a scrim tap or a swipe on the grabber, and the draft survives it — the sheet is a place you can leave and come back to, which is what makes covering the list acceptable here where it was not acceptable for a permanent bar.</p>
+      <div>
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">What this changed</div>
+        <div style="margin-top:14px">
+          <sc-for list="{{ scores }}" as="s" hint-placeholder-count="4">
+            <div style="display:grid;grid-template-columns:150px 1fr;gap:16px;padding:11px 0;border-bottom:1px solid #D5D1C8">
+              <span style="font:500 12.5px/1.4 'Public Sans',sans-serif;color:#1B1A18;text-wrap:pretty">{{ s.axis }}</span>
+              <span style="font:400 12.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">{{ s.note }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ A–D ═══════════ -->
+  <div style="padding-top:46px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">A–D</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">The mobile path</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">One component, four states. Idle → search → composing → picking.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start;flex-wrap:wrap">
+      <sc-for list="{{ mobile }}" as="m" hint-placeholder-count="4">
+        <div style="width:402px;flex:none">
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">{{ m.label }}</div>
+          <dc-import name="FastStartDevice" screen="{{ m.screen }}" hint-size="402px,874px"></dc-import>
+          <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">{{ m.note }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- ═══════════ E–F ═══════════ -->
+  <div style="padding-top:52px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">E–F</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Six agents, and the same two chips on the desktop</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Unavailable backends stay visible. Popovers replace panels off the phone.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">E · 智能体 picker · six backends</div>
+        <dc-import name="FastStartDevice" screen="agents" hint-size="402px,874px"></dc-import>
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Identity dot plus name, single-select, checkmark on the current one. DeepSeek is dimmed and carries a quiet 不可用 — the backend a computer did not report is a fact worth showing, not a row worth hiding. Six rows at 56 pt fit without scrolling.</div>
+      </div>
+
+      <div style="width:600px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">F · desktop empty state · 600 dp</div>
+        <dc-import name="FastStartDevice" screen="desktop" hint-size="600px,412px"></dc-import>
+        <div style="margin-top:20px">
+          <dc-import name="FastStartDevice" screen="desktop" pop="{{ true }}" hint-size="600px,412px"></dc-import>
+        </div>
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The same accessory row, inline: 项目 chip, 智能体 chip, then the quiet 模式与模型沿用默认 hint that says out loud what the desktop composer used to keep to itself. The chip opens a popover anchored to itself rather than a panel that moves the page, because a pointer can afford to overlap. Send stays disabled until there is text, as on the phone.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ NOTES ═══════════ -->
+  <div style="padding-top:52px">
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 48px;border-top:1px solid #C9C5BD;padding-top:18px">
+      <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">Kept from the settled spec.</span> Search collapses to an icon and clears its filter on the way out; the FAB hides while filtering. Chips carry a folder glyph with a mid-truncated name and an identity dot with an agent name, always visible, never implicit. Pickers highlight their chip and flip its chevron while open.</p>
+      <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">Consequence worth naming.</span> Freeing the filter row leaves 树形 / 平铺 without a home, so it rides the first section label at 44 pt instead of taking a row of its own. Project rows, the session list and chat are untouched, and 打开任意文件夹 is gone from this screen — it is the pinned 浏览其他文件夹… at the foot of the project picker.</p>
+      <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">Open for the build.</span> Whether the FAB should shrink or hide on scroll-down, and whether 最近使用 should list three or five. Both are cheap to change and neither affects the structure above.</p>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      scores: [
+        { axis: 'Idle screen', note: 'Nav, state, list. The entry row is gone and the list keeps that height.' },
+        { axis: 'New-task affordance', note: 'One icon-only ＋ at 56 dp, bottom right, accent fill with elevation. Nothing else on the screen creates.' },
+        { axis: 'While searching', note: 'The FAB hides. Filtering and creating never share the screen.' },
+        { axis: 'Composer', note: 'Bottom sheet: field on top, 项目 and 智能体 chips left, 发送 right. Unchanged from the earlier round.' },
+        { axis: 'Dismissal', note: 'Scrim tap or swipe on the grabber. The draft is still there next time the sheet opens.' }
+      ],
+      mobile: [
+        { label: 'A · Projects idle · FAB', screen: 'projects', note: 'The list runs the full height of the screen again. The accent circle sits over it at the bottom right, with a short gradient beneath so it never has to compete with a row of mono path text. Search is an icon in the nav; nothing else on this screen starts work.' },
+        { label: 'B · search expanded · filtering', screen: 'search', note: 'The icon becomes an inline field with the caret in it, and 取消 collapses it and clears the filter. The FAB is hidden for the duration — filtering and creating are different intents, and the results own the screen.' },
+        { label: 'C · composer sheet · keyboard up', screen: 'composer', note: 'The FAB raises the sheet: multiline field, then the accessory row with both chips and 发送. The list stays visible above the sheet, and the scrim says plainly that this is a place you can leave. Dismissing keeps the draft.' },
+        { label: 'D · 项目 picker · inside the sheet', screen: 'picker', note: '最近使用 with the current project checked, then a searchable 全部项目, then the pinned 浏览其他文件夹… that used to be a row on the Projects screen. Rows are name plus mono path. The chip is outlined and its chevron is flipped.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
