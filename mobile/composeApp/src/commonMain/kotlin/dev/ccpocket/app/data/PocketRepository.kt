@@ -318,13 +318,20 @@ sealed interface ChatItem {
      *  when that ack lands — the explicit "the computer has it" marker (issue #66). */
     data class User(
         val text: String,
+        /** Decoded attachment bytes. Filled on send from this device, and — since issue #254 — also
+         *  from a replayed transcript, so a prompt typed AT THE COMPUTER shows its images here too
+         *  (before, every replayed user row was text-only and an image-only prompt read as blank). */
         val images: List<ByteArray> = emptyList(),
         val pending: Boolean = false,
         val promptId: String? = null,
         val delivered: Boolean = false,
         /** Files uploaded to the session's workspace inbox and referenced by this turn (issue #90) —
-         *  rendered as file chips with their `@` landing path. Client-side only, like [images]. */
+         *  rendered as file chips with their `@` landing path. Client-side only (unlike [images],
+         *  the transcript has no record of them). */
         val files: List<SentFile> = emptyList(),
+        /** The replay budget shed some of this turn's images to keep the history frame under the relay
+         *  cap (issue #254) — the renderers say so in place instead of showing fewer tiles silently. */
+        val imagesTruncated: Boolean = false,
     ) : ChatItem
     data class Assistant(val text: String) : ChatItem
 
@@ -3287,8 +3294,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
+    @OptIn(ExperimentalEncodingApi::class)
     private fun historyItem(h: HistoryMessage): ChatItem = when (h.role) {
-        ChatRole.USER -> ChatItem.User(h.text)
+        // images the prompt carried replay as real tiles (issue #254) — a turn composed at the computer
+        // is no longer text-only here, and an image-ONLY turn is no longer a blank bubble. A base64 blob
+        // the platform can't decode is dropped rather than rendered as a broken tile; the renderer's own
+        // decode-failure card covers bytes that only fail later (on the image decoder).
+        ChatRole.USER -> ChatItem.User(
+            h.text,
+            images = h.images.mapNotNull { runCatching { Base64.Default.decode(it.base64) }.getOrNull() },
+            imagesTruncated = h.imagesTruncated,
+        )
         // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65).
         // Attribution follows the placeholder text so the replay reads the same as the daemon live prompt:
         // an upstream gateway/5xx signal stops blaming context (issue #208).

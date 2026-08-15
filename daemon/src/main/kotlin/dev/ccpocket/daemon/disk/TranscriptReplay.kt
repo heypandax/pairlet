@@ -2,6 +2,7 @@ package dev.ccpocket.daemon.disk
 
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
+import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.QuestionAnswer
 import dev.ccpocket.protocol.isSubagentTool
 import dev.ccpocket.protocol.isWorkflowTool
@@ -23,6 +24,7 @@ object TranscriptReplay {
     // 2.1.206 via scripts/probe-claude-wire.py `ask`); one pair per question, comma-joined for multiSelect
     private val QA_PAIR = Regex("\"([^\"]+)\"=\"([^\"]*)\"")
     private const val MAX_TOOL_TEXT = 1000 // tool label / input preview cap (display-on-tap, not the reply body)
+    private val EMPTY_USER = UserContent("", emptyList())
 
     /** Count-capped, then byte-budgeted (issue #81) so one ConvoHistory frame stays under the relay's 4 MiB cap. */
     fun read(file: Path, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> =
@@ -81,9 +83,11 @@ object TranscriptReplay {
                         "user" -> {
                             attachSubagentResults(obj, out, taskIdx, lineNo)
                             attachQuestionAnswers(obj, out, questionIdx, lineNo)
-                            if (isRealUserTurn(obj)) userText(obj)
-                                .takeIf { it.isNotBlank() && !TranscriptNoise.isNoiseUserText(it) }
-                                ?.let { out += MutableRow(HistoryMessage(ChatRole.USER, it), lineNo) }
+                            if (isRealUserTurn(obj)) userContent(obj)
+                                // an IMAGE-ONLY prompt has no text at all (issue #254) — keeping the row
+                                // on its attachments is why this is no longer a bare isNotBlank() gate
+                                .takeIf { (it.text.isNotBlank() || it.images.isNotEmpty()) && !TranscriptNoise.isNoiseUserText(it.text) }
+                                ?.let { out += MutableRow(HistoryMessage(ChatRole.USER, it.text, images = it.images), lineNo) }
                         }
                         // the id keys the AskUserQuestion row (issue #110) or the sub-agent card (issue #77);
                         // the tool name says which map so its later tool_result patches the right one
@@ -234,15 +238,44 @@ object TranscriptReplay {
         return true
     }
 
-    private fun userText(obj: JsonObject): String {
-        val content = (obj["message"] as? JsonObject)?.get("content") ?: return ""
+    /** What a user turn carries: the bubble text plus any inline images (issue #254). */
+    private class UserContent(val text: String, val images: List<ImageData>)
+
+    /**
+     * A user record's content is either a bare string or a block array. [UserContent.text] keeps the
+     * long-standing "the FIRST text block" semantics deliberately — the phone's [TranscriptMerge]
+     * pairs a replayed user row against its live bubble by EXACT text equality, so concatenating
+     * blocks here would silently stop those rows matching and duplicate every prompt on reattach.
+     * Image blocks are collected in file order (the CLI writes them BEFORE the text block).
+     */
+    private fun userContent(obj: JsonObject): UserContent {
+        val content = (obj["message"] as? JsonObject)?.get("content") ?: return EMPTY_USER
         return when (content) {
-            is JsonPrimitive -> content.contentOrNull ?: ""
-            is JsonArray -> content.firstNotNullOfOrNull { el ->
-                (el as? JsonObject)?.takeIf { it.str("type") == "text" }?.str("text")
-            } ?: ""
-            else -> ""
+            is JsonPrimitive -> UserContent(content.contentOrNull ?: "", emptyList())
+            is JsonArray -> {
+                var text: String? = null
+                val images = ArrayList<ImageData>()
+                for (el in content) {
+                    val block = el as? JsonObject ?: continue
+                    when (block.str("type")) {
+                        "text" -> if (text == null) text = block.str("text")
+                        "image" -> imageBlock(block)?.let { images += it }
+                    }
+                }
+                UserContent(text ?: "", images)
+            }
+            else -> EMPTY_USER
         }
+    }
+
+    /** `{"type":"image","source":{"type":"base64","media_type":…,"data":…}}` — the one shape both the
+     *  CLI's own paste path and this daemon's uplink write (`ClaudeBackend.sendPrompt`). A `url` source
+     *  carries no bytes to replay, so it is skipped rather than sent as an un-renderable tile. */
+    private fun imageBlock(block: JsonObject): ImageData? {
+        val src = block["source"] as? JsonObject ?: return null
+        if (src.str("type") != "base64") return null
+        val data = src.str("data")?.takeIf { it.isNotBlank() } ?: return null
+        return ImageData(src.str("media_type")?.takeIf { it.isNotBlank() } ?: "image/jpeg", data)
     }
 
     private fun JsonObject?.str(key: String): String? = (this?.get(key) as? JsonPrimitive)?.contentOrNull

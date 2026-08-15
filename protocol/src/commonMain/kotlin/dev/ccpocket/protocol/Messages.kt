@@ -1234,6 +1234,19 @@ data class HistoryMessage(
      *  [WorkflowRun] pushed separately via [WorkflowUpdate]. Trailing optional both ways:
      *  old daemons omit it (the card renders as a plain tool row), old clients ignore it. */
     val workflowRunId: String? = null,
+    /** Images the prompt carried, on a USER row only (issue #254). The transcript stores them inline as
+     *  base64 (`{"type":"image","source":{"type":"base64",…}}`) — whether they were pasted at the
+     *  computer or uplinked by this daemon — so the phone can render the same turn the computer sees
+     *  instead of a text-only (or entirely empty) bubble. Same [ImageData] shape the uplink
+     *  [SendPrompt] uses, so the client decodes it with the code it already has. Trailing optional both
+     *  ways: an old daemon omits the key (decodes to an empty list — today's text-only replay), an old
+     *  client ignores it. Byte-capped by the replay budget, NOT by the sender — see [imagesTruncated]. */
+    val images: List<ImageData> = emptyList(),
+    /** True when the replay budget dropped some (or all) of this row's images to keep the `ConvoHistory`
+     *  frame under the relay's 4 MiB cap — the client says so in place rather than silently showing
+     *  fewer tiles than the computer has. Trailing optional both ways: old daemons omit it (false = no
+     *  claim either way, which is what a daemon that never carried images means), old clients ignore it. */
+    val imagesTruncated: Boolean = false,
 )
 
 /**

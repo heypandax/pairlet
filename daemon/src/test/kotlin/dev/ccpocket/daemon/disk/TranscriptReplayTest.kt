@@ -6,6 +6,7 @@ import java.nio.file.Files
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class TranscriptReplayTest {
@@ -303,6 +304,96 @@ class TranscriptReplayTest {
         assertEquals(3, msgs.size) // newest two whole + one truncated straddling row; older dropped
         assertEquals("m9-$big", msgs.last().text) // newest kept whole, chronological order preserved
         assertTrue(msgs.first().text.length < 3 + big.length) // oldest kept row is the truncated one
+    }
+
+    // ---- issue #254: a prompt's inline images must survive the replay to the phone ----
+
+    @Test
+    fun prompt_images_replay_alongside_their_text() {
+        // the on-disk shape (verified against both the CLI's own paste path and ClaudeBackend's
+        // uplink): image blocks FIRST, the text block after them, all in one user record
+        val f = tmpFile("img.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAA"}},{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"BBB"}},{"type":"text","text":"what is wrong here?"}]}}""",
+                """{"type":"assistant","message":{"content":[{"type":"text","text":"the padding"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(2, msgs.size)
+        assertEquals("what is wrong here?", msgs[0].text) // text semantics unchanged: the first text block
+        assertEquals(2, msgs[0].images.size)
+        assertEquals("image/png", msgs[0].images[0].mediaType)
+        assertEquals("AAA", msgs[0].images[0].base64)
+        assertEquals("image/jpeg", msgs[0].images[1].mediaType) // file order preserved
+        assertFalse(msgs[0].imagesTruncated)
+        assertTrue(msgs[1].images.isEmpty()) // assistant rows never gain images
+    }
+
+    @Test
+    fun image_only_prompt_is_no_longer_dropped_as_a_blank_row() {
+        // the reported bug's worst shape: nothing but a pasted screenshot. The old isNotBlank() gate
+        // threw the whole row away, so the phone showed no turn at all where the computer showed one.
+        val f = tmpFile("imgonly.jsonl")
+        f.writeText(
+            """{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"ZZZ"}}]}}""",
+        )
+
+        val msg = TranscriptReplay.read(f).single()
+
+        assertEquals(ChatRole.USER, msg.role)
+        assertEquals("", msg.text)
+        assertEquals(listOf("ZZZ"), msg.images.map { it.base64 })
+    }
+
+    @Test
+    fun non_base64_image_sources_are_skipped_not_replayed_as_empty_tiles() {
+        val f = tmpFile("imgurl.jsonl")
+        f.writeText(
+            """{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"url","url":"https://x/y.png"}},{"type":"text","text":"look"}]}}""",
+        )
+
+        val msg = TranscriptReplay.read(f).single()
+
+        assertEquals("look", msg.text)
+        assertTrue(msg.images.isEmpty()) // no bytes to render — a tile here would just be blank
+    }
+
+    @Test
+    fun oversized_image_is_shed_and_the_row_says_so() {
+        // one image past the per-image ceiling: it must not ride the frame, the SMALL one must still
+        // arrive, the text must be untouched, and the loss must be announced (never silent)
+        val f = tmpFile("imgbig.jsonl")
+        val huge = "A".repeat((ReplayBudget.MAX_IMAGE_BASE64_BYTES + 1).toInt())
+        f.writeText(
+            """{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"$huge"}},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"ok"}},{"type":"text","text":"see this"}]}}""",
+        )
+
+        val msg = TranscriptReplay.read(f).single()
+
+        assertEquals("see this", msg.text) // images are shed BEFORE text, never the other way round
+        assertEquals(listOf("ok"), msg.images.map { it.base64 })
+        assertTrue(msg.imagesTruncated)
+    }
+
+    @Test
+    fun images_are_shed_before_the_text_of_the_row_they_ride_on() {
+        // a budget too small for the image but big enough for the words: the words win. (Under the
+        // old payloadSize the image wasn't counted at all and would have blown the frame outright.)
+        val f = tmpFile("imgbudget.jsonl")
+        val img = "A".repeat(5000)
+        f.writeText(
+            """{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"$img"}},{"type":"text","text":"keep my words"}]}}""",
+        )
+
+        val msg = TranscriptReplay.read(f, maxFrameTextBytes = 100).single()
+
+        assertEquals("keep my words", msg.text)
+        assertTrue(msg.images.isEmpty())
+        assertTrue(msg.imagesTruncated)
+        assertTrue(ReplayBudget.payloadSize(msg) <= 100)
     }
 
     @Test

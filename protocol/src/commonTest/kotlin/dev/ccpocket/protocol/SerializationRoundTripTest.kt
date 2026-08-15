@@ -1467,6 +1467,35 @@ class SerializationRoundTripTest {
         assertFalse(isWorkflowTool("Agent"))
     }
 
+    @Test
+    fun historyMessage_prompt_images_trail_and_old_peers_stay_compatible() {
+        // issue #254. new daemon → new app: a replayed USER turn carries its attachments plus the
+        // "some were shed by the frame budget" flag, both surviving a full round trip
+        val row = HistoryMessage(
+            ChatRole.USER, "what is wrong here?",
+            images = listOf(ImageData("image/png", "AAA"), ImageData("image/jpeg", "BBB")),
+            imagesTruncated = true,
+        )
+        assertEquals(row, PocketJson.decodeFromString<HistoryMessage>(PocketJson.encodeToString(row)))
+
+        // old daemon → new app: neither key is on the wire, so the app sees today's text-only replay.
+        // (encodeDefaults means OUR encoder always writes images:[] — this pins the DECODE direction,
+        // which is the one an old peer exercises.)
+        val legacy = PocketJson.decodeFromString<HistoryMessage>("""{"role":"user","text":"hi"}""")
+        assertTrue(legacy.images.isEmpty())
+        assertFalse(legacy.imagesTruncated)
+
+        // new daemon → old app: an unknown key is skipped without throwing — including a structured
+        // ARRAY-OF-OBJECTS shape, the form a future attachment field would most likely take, since
+        // that is what a naive skipper is most likely to choke on
+        val skipped = PocketJson.decodeFromString<HistoryMessage>(
+            """{"role":"user","text":"hi","images":[{"mediaType":"image/png","base64":"AAA"}],""" +
+                """"imagesTruncated":true,"futureAttachments":[{"k":1},{"k":2}]}""",
+        )
+        assertEquals(listOf(ImageData("image/png", "AAA")), skipped.images)
+        assertTrue(skipped.imagesTruncated)
+    }
+
     // ── API presets (issue #113) ─────────────────────────────────────────
 
     @Test

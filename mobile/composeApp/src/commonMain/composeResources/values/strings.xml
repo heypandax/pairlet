@@ -575,6 +575,7 @@
     <string name="img_excluded">· %1$d excluded</string>
     <string name="img_too_large">too large · %1$dKB</string>
     <string name="viewer_hint">Swipe down to close · tap to zoom</string>
+    <string name="img_replay_truncated">· some images weren\'t synced (too large or too many)</string>
 
     <!-- ── session info + quick actions ──────────────────────────── -->
     <string name="session_info_title">Session</string>
