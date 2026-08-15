@@ -504,6 +504,7 @@
     <string name="usage_vs_prev_days">对比前 %1$d 天</string>
     <string name="usage_selected">%1$s · %2$s tokens</string>
     <string name="usage_na">暂无数据</string>
+    <string name="usage_agent_all">全部</string>
     <string name="terminal_open">终端</string>
     <string name="terminal_title">终端</string>
     <string name="terminal_hint">git status</string>

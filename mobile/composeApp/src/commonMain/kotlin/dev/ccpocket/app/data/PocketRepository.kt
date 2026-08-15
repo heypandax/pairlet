@@ -2132,6 +2132,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         gatewayBaseUrl.value = null // per-daemon truth (issue #139): the next machine re-announces via DaemonInfo
         bridgeControl.value = null  // per-daemon truth too — the next daemon re-advertises via DaemonInfo (issue #91)
         daemonSupportedAgents.value = emptySet() // reverse agent capability: no stale ZCode across machines
+        daemonUsageAgentFilter.value = false // ditto (issue #258): the next machine re-advertises its own
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
@@ -2378,6 +2379,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // Demo has no handshake, so explicitly emulate a current daemon rather than inheriting the
         // disconnected socket's deny-by-default capability state.
         daemonSupportedAgents.value = DAEMON_SUPPORTED_AGENT_WIRES.toSet()
+        daemonUsageAgentFilter.value = true // a current daemon honors the usage filter (issue #258)
         demoAsked = false
         sessionActive.value = true
         replace(slashCommands, DemoData.commands())
@@ -2699,6 +2701,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 gatewayBaseUrl.value = f.gatewayBaseUrl
                 bridgeControl.value = f.bridgeControl // capability advertisement (issue #91): false = daemon too old
                 daemonSupportedAgents.value = f.supportedAgents.toSet()
+                daemonUsageAgentFilter.value = f.supportsUsageAgentFilter // issue #258: false = daemon ignores the filter
                 // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
                 // the fields — "unknown" must not be shown as the previous machine's numbers
                 versionStatus.value = VersionStatus(
@@ -3453,6 +3456,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      * use it as a hard gate; see [agentAvailableFromDaemon]. */
     val daemonSupportedAgents = mutableStateOf<Set<String>>(emptySet())
 
+    /** Whether the connected daemon honors [FetchUsage.agent] (issue #258). Deliberately NOT inferred from
+     * [daemonSupportedAgents]: that advertisement shipped a release EARLIER, so a v1.7.7 daemon advertises
+     * every agent while silently ignoring the filter — the usage page would then label a full-machine total
+     * as one agent's. False (the pre-handshake and old-daemon value) hides the filter row entirely. */
+    val daemonUsageAgentFilter = mutableStateOf(false)
+
     fun supportsAgent(agent: AgentKind): Boolean = agentAvailableFromDaemon(agent, daemonSupportedAgents.value)
 
     /** Persisted ZCode remains the user's preference across machine switches, but an older daemon gets a
@@ -3574,10 +3583,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val usage = mutableStateOf<Usage?>(null)
     val usageLoading = mutableStateOf(false)
 
-    /** Ask the daemon to aggregate usage over the last [days] local days; the reply lands in [usage]. */
-    fun fetchUsage(days: Int = 7) {
+    /** Ask the daemon to aggregate usage over the last [days] local days; the reply lands in [usage].
+     *  [agent] non-null narrows it to one backend (issue #258); null is the all-backends total. */
+    fun fetchUsage(days: Int = 7, agent: AgentKind? = null) {
         usageLoading.value = true
-        scope.launch { send(FetchUsage(days)) }
+        scope.launch { send(FetchUsage(days, agent)) }
     }
 
     // ── installed skills/plugins catalog (issue #132): the desktop browse page ──
