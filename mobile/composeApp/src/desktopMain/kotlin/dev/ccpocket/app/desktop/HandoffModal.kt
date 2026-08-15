@@ -56,7 +56,6 @@ import dev.ccpocket.app.ui.handoff.inviteBlob
 import dev.ccpocket.app.ui.handoff.shortCode
 import dev.ccpocket.app.ui.handoff.toUi
 import org.jetbrains.compose.resources.stringResource
-import qrgenerator.QRCodeImage
 
 /**
  * Frame 11's centered draft dialog: the mobile sheet's information order split two-up —
@@ -243,7 +242,15 @@ fun HandoffInviteModal(model: DesktopModel, onDismiss: () -> Unit) {
         Box(
             Modifier.padding(top = 16.dp).size(188.dp).clip(RoundedCornerShape(10.dp)).background(Color.White).padding(10.dp),
             contentAlignment = Alignment.Center,
-        ) { QRCodeImage(url = inv.inviteBlob(), contentDescription = "handoff QR", modifier = Modifier.size(168.dp)) }
+        ) {
+            // same containment as the collaborator QR below (#251) — the sibling dialog, same generator
+            SafeQrImage(
+                payloadKey = inv.id,
+                contentDescription = "handoff QR",
+                modifier = Modifier.size(168.dp),
+                payload = { inv.inviteBlob() },
+            )
+        }
         Text(inv.shortCode(), color = Tok.tx, fontFamily = Dk.mono, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.6.sp, modifier = Modifier.padding(top = 14.dp))
         Text(stringResource(Res.string.ho_expires_in, inv.expiresCountdown()), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
         Text(
@@ -347,7 +354,16 @@ fun HandoffConnectModal(model: DesktopModel, onBack: () -> Unit) {
             Modifier.size(188.dp).clip(RoundedCornerShape(10.dp)).background(Color.White).padding(10.dp),
             contentAlignment = Alignment.Center,
         ) {
-            inv?.let { QRCodeImage(url = it.encode(), contentDescription = "collaborator QR", modifier = Modifier.size(168.dp)) }
+            // #251: encode() + QR rasterization are BOTH contained — a ticket that cannot be drawn
+            // leaves a placeholder here and the short code below still connects the colleague.
+            inv?.let {
+                SafeQrImage(
+                    payloadKey = it.ticket,
+                    contentDescription = "collaborator QR",
+                    modifier = Modifier.size(168.dp),
+                    payload = { it.encode() },
+                )
+            }
         }
         Text(
             inv?.ticket?.let { dev.ccpocket.app.ui.handoff.collabShortCode(it) } ?: "····-····",

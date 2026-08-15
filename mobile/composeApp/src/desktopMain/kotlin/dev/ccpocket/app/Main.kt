@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,7 +26,11 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.ApplicationScope
+import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowExceptionHandler
+import androidx.compose.ui.window.WindowExceptionHandlerFactory
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
@@ -32,6 +38,7 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.desktop.AddComputerModal
 import dev.ccpocket.app.desktop.ConnectPanel
 import dev.ccpocket.app.desktop.DesktopApp
+import dev.ccpocket.app.desktop.DesktopCrashGuard
 import dev.ccpocket.app.desktop.openFolderAction
 import dev.ccpocket.app.desktop.DesktopNotify
 import dev.ccpocket.app.desktop.DkTitleBar
@@ -82,7 +89,56 @@ internal fun shouldPollDirectories(windowVisible: Boolean, minimized: Boolean): 
  * then the [DesktopApp] shell. Undecorated so the app paints its own title bar. ⌘K / Ctrl+K opens the
  * command palette (Esc closes it) — handled at the window level so it works regardless of focus.
  */
-fun main() = application {
+fun main() {
+    // #251 FIRST, before anything can throw: without it an escape from composition took the default AWT
+    // path — a native box reading only "Unknown error" on the packaged Windows launcher — after which the
+    // window was gone but the non-daemon SystemTray thread kept the process alive as an unquittable
+    // zombie. Installed outside application{} so a failure during Compose start-up is covered too.
+    DesktopCrashGuard.install()
+    application { PocketApplication() }
+}
+
+/**
+ * The second net, one layer in from [DesktopCrashGuard.install] (#251). Compose Desktop routes anything
+ * thrown out of a window's composition / layout / draw through [LocalWindowExceptionHandlerFactory];
+ * the DEFAULT factory is what produced the contentless native error dialog and then left the window
+ * dead but the process alive. Replacing it means such an escape is logged with a code, named to the
+ * user, and followed by a real exit.
+ *
+ * Kept as its own composable so the shell below keeps its shape — the provider must simply be an
+ * ancestor of the `Window` call, which is where the local is read.
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+@Composable
+private fun ApplicationScope.PocketApplication() {
+    val factory = remember {
+        object : WindowExceptionHandlerFactory {
+            override fun exceptionHandler(window: java.awt.Window) = WindowExceptionHandler { t ->
+                DesktopCrashGuard.note(DesktopCrashGuard.ERR_WINDOW, t)
+                // Tell the user WHICH failure and WHERE the log is before leaving — the whole complaint
+                // in #251 is that the old dialog said neither. Best-effort: never let the notice itself
+                // become the crash, and never let a wedged dialog stop the exit.
+                runCatching {
+                    javax.swing.JOptionPane.showMessageDialog(
+                        window,
+                        "CC Pocket hit an unexpected error and has to close.\n\n" +
+                            DesktopCrashGuard.oneLineSummary(DesktopCrashGuard.ERR_WINDOW, t) + "\n\n" +
+                            "Details were written to:\n" + DesktopCrashGuard.logFile.path,
+                        "CC Pocket",
+                        javax.swing.JOptionPane.ERROR_MESSAGE,
+                    )
+                }
+                DesktopCrashGuard.exitCrashed(DesktopCrashGuard.ERR_WINDOW, t)
+            }
+        }
+    }
+    CompositionLocalProvider(LocalWindowExceptionHandlerFactory provides factory) {
+        PocketShell()
+    }
+}
+
+@Composable
+private fun ApplicationScope.PocketShell() {
     // GA4 Measurement Protocol backend for desktop analytics — resolves credentials (env / ga4.properties)
     // up front so a missing config logs at launch. No-op when unconfigured. Every PocketRepository event
     // (pair / connect / conn_failed / session / prompt / approval) fires automatically since desktop drives
