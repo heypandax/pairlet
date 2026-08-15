@@ -57,6 +57,9 @@ import org.jetbrains.compose.resources.stringResource
 internal fun ArchivedSessionsScreen(repo: PocketRepository, onBack: () -> Unit) {
     LaunchedEffect(Unit) { repo.listArchivedSessions() }
     val rows = repo.archivedSessions.toList()
+    // #257: a full-screen route off Sessions — without its own handler the Android back gesture fell
+    // through to the app-level navigation. Same target as the ‹.
+    dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
 
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         Row(
