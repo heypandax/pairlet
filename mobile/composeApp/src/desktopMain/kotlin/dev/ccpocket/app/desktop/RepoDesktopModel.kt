@@ -1041,8 +1041,10 @@ class RepoDesktopModel(
     override var defaultAgent: AgentKind
         get() = repo.sessionDefaultAgent
         set(v) { repo.setDefaultAgent(v) }
+    // Single source of truth with mobile (issue #252): the full AgentKind enum minus what this daemon
+    // can't take. No desktop-side whitelist — a new backend reaches both pickers the day it lands.
     override val availableAgents: List<AgentKind>
-        get() = DESKTOP_AGENT_CHOICES.filter(repo::supportsAgent)
+        get() = repo.availableAgents
     override var defaultMode: PermissionMode
         get() = repo.defaultMode.value
         set(v) { repo.setDefaultMode(v) }
