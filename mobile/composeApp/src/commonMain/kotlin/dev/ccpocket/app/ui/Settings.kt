@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -64,6 +66,8 @@ import dev.ccpocket.app.USER_MANUAL_TROUBLESHOOTING_URL
 import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.appUpdateRoute
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.data.agentFilterIsAll
+import dev.ccpocket.app.data.toggleAgentFilter
 import dev.ccpocket.app.update.VersionStatus
 import dev.ccpocket.app.lock.AppLockController
 import dev.ccpocket.app.lock.AutoLockDelay
@@ -500,47 +504,72 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
     PerModelWindows(repo)
 
     SectionLabel(stringResource(Res.string.af_show_from))
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
-            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    AgentFilterPicker(repo)
+    Text(stringResource(Res.string.af_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
+}
+
+/**
+ * "Show projects & sessions from" — a MULTI-select over the agent backends (issue #248).
+ *
+ * Two things were wrong with the segmented radio this replaces. It could only ever express one agent, so
+ * "Claude and Codex, but not the rest" was unaskable; and it packed every option into one fixed-width row,
+ * which squeezed the labels until they read "Open…" — and each new backend (Kimi, ZCode) made it worse.
+ *
+ * So: wrapping chips sized by their own text (no squeeze, no truncation, every chip its own >=44dp target),
+ * plus a leading "All" chip. The interaction rules live in [toggleAgentFilter], not here — tapping an agent
+ * while All is active narrows to that one, and turning the last one off returns to All, so the control can
+ * never reach the empty selection (a list with nothing in it and no way back).
+ *
+ * Kimi and ZCode appear exactly when the paired computer advertises them, same gate as everywhere else; an
+ * agent that isn't offered keeps whatever membership it has, so a stored "all" stays all when the user
+ * switches to a computer that DOES run it.
+ */
+@OptIn(ExperimentalLayoutApi::class) // FlowRow: the options wrap instead of squeezing (that was the bug)
+@Composable
+private fun AgentFilterPicker(repo: PocketRepository) {
+    val selected = repo.agentFilter.value
+    val all = agentFilterIsAll(selected)
+    val options = AgentKind.entries.filter {
+        it == AgentKind.CLAUDE || it == AgentKind.CODEX || it == AgentKind.OPENCODE || repo.supportsAgent(it)
+    }
+    FlowRow(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        val afOpts = listOf(
-            Triple("both", stringResource(Res.string.af_both), null as Color?),
-            Triple("claude", stringResource(Res.string.af_claude_only), Tok.accent),
-            Triple("codex", stringResource(Res.string.af_codex_only), Tok.codex),
-            Triple("opencode", stringResource(Res.string.af_opencode_only), Tok.opencode),
-        ) + if (repo.supportsAgent(AgentKind.ZCODE)) {
-            listOf(Triple("zcode", stringResource(Res.string.af_zcode_only), Tok.zcode))
-        } else emptyList()
-        afOpts.forEach { (key, label, dot) ->
-            val sel = repo.agentFilter.value == key
-            // same thumb as SegmentedRow: selected fills Tok.accent (was a near-invisible Tok.raised).
-            // Labels dropped their "only/仅 " prefix so all four read in full at the default size; the
-            // colored dot already carries the "which agent" meaning. Ellipsis is the large-font fallback.
-            Box(
-                Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(7.dp))
-                    .then(if (sel) Modifier.background(Tok.accent) else Modifier)
-                    .semantics { selected = sel }
-                    .clickable { repo.setAgentFilter(key) }.padding(vertical = 9.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    dot?.let {
-                        // dot inverts to Tok.base on the accent thumb so the Claude dot (itself accent) stays visible
-                        Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(if (sel) Tok.base else it))
-                        Spacer(Modifier.width(5.dp))
-                    }
-                    Text(
-                        label, color = if (sel) Tok.base else Tok.tx2, fontSize = 12.sp,
-                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
-                }
+        AgentFilterChoice(stringResource(Res.string.af_both), null, all) { repo.clearAgentFilter() }
+        options.forEach { agent ->
+            // while All is on, the individual chips read UNselected: "All" is the one carrying the state,
+            // and lighting every chip too would leave "tap Claude" looking like a no-op
+            AgentFilterChoice(agentName(agent), agentColor(agent), !all && agent in selected) {
+                repo.setAgentFilter(toggleAgentFilter(selected, agent))
             }
         }
     }
-    Text(stringResource(Res.string.af_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
+}
+
+/** One chip in [AgentFilterPicker]: dot + label, sized by its own text so nothing ever truncates. */
+@Composable
+private fun AgentFilterChoice(label: String, dot: Color?, sel: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(999.dp))
+            .background(if (sel) Tok.accent else Tok.surface)
+            .border(1.dp, if (sel) Tok.accent else Tok.hair, RoundedCornerShape(999.dp))
+            .semantics { selected = sel }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        dot?.let {
+            // the dot inverts to Tok.base on the accent fill so the Claude dot (itself accent) stays visible
+            Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(if (sel) Tok.base else it))
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(
+            label, color = if (sel) Tok.base else Tok.tx2, fontSize = 13.sp,
+            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
+        )
+    }
 }
 
 /**

@@ -1,5 +1,6 @@
 package dev.ccpocket.app.ui
 
+import dev.ccpocket.app.data.ALL_AGENTS
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
@@ -81,9 +82,9 @@ class DirListTest {
 
         assertEquals(
             listOf("/p/opencode", "/p/mixed", "/p/old-daemon", "/shared/new"),
-            filterDirectoriesByAgent(dirs, "opencode").map { it.path },
+            filterDirectoriesByAgent(dirs, setOf(AgentKind.OPENCODE)).map { it.path },
         )
-        assertEquals(dirs, filterDirectoriesByAgent(dirs, "both"))
+        assertEquals(dirs, filterDirectoriesByAgent(dirs, ALL_AGENTS))
     }
 
     @Test
@@ -97,7 +98,7 @@ class DirListTest {
             activeSessions = listOf(claude, opencode),
         )
 
-        val filtered = filterDirectoriesByAgent(listOf(row), "opencode").single()
+        val filtered = filterDirectoriesByAgent(listOf(row), setOf(AgentKind.OPENCODE)).single()
         assertEquals(listOf(opencode), filtered.activeSessions)
         assertEquals("o1", filtered.activeSessionId)
         assertEquals("OpenCode turn", filtered.activeSessionTitle)

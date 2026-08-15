@@ -149,6 +149,7 @@ import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.StatusMsg
 import dev.ccpocket.app.data.VoiceState
+import dev.ccpocket.app.data.agentFilterIsAll
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.ui.chat.ChatHeader
 import dev.ccpocket.app.ui.chat.ChatStateBlock
@@ -943,9 +944,14 @@ internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header aga
     }
 }
 
-/** Real empty-list state — connected, but the computer has no projects open yet (not a blank screen). */
+/**
+ * Real empty-list state — connected, but the computer has no projects to report yet (not a blank screen).
+ *
+ * It carries the open-folder doorway, not just Refresh (#250): with nothing in the list, "open a folder" is
+ * the action that ends this state, and refreshing an empty computer forever is the dead end it replaced.
+ */
 @Composable
-private fun EmptyDirectories(onRefresh: () -> Unit) {
+private fun EmptyDirectories(onRefresh: () -> Unit, onOpenFolder: () -> Unit) {
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
@@ -954,7 +960,40 @@ private fun EmptyDirectories(onRefresh: () -> Unit) {
         Spacer(Modifier.height(8.dp))
         Text(stringResource(Res.string.dir_empty_body), color = Tok.tx2, fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 19.sp)
         Spacer(Modifier.height(20.dp))
+        OutlinedButton(onOpenFolder) { Text(stringResource(Res.string.proj_open_any)) }
+        Spacer(Modifier.height(10.dp))
         OutlinedButton(onRefresh) { Text(stringResource(Res.string.dir_refresh)) }
+    }
+}
+
+/**
+ * The agent filter — not a search term — emptied the list (issue #250).
+ *
+ * The old screen sent this case to [NoMatches], which read «No projects match ""» and offered a Clear
+ * filter button wired to the (empty) query: a button that did nothing, blaming a search nobody ran. Here
+ * the cause is named and the button clears the thing that is actually hiding the rows.
+ */
+@Composable
+private fun NoAgentMatches(filter: Set<AgentKind>, onClear: () -> Unit, onOpenFolder: () -> Unit) {
+    val shown = remember(filter) { AgentKind.entries.filter { it in filter } }
+    val names = remember(shown) { shown.joinToString(" · ") { agentName(it) } }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = Metric.gutter).padding(top = 32.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
+            StateMarkGlyph(StateMark.RING, Tok.muted)
+            Text(
+                stringResource(Res.string.proj_agent_filtered_title), color = Tok.tx, style = TypeRole.rowTitle,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Text(
+            stringResource(Res.string.proj_agent_filtered_body, names), color = Tok.tx2, style = TypeRole.preview,
+            modifier = Modifier.padding(top = Metric.gapS),
+        )
+        EntrySecondaryButton(stringResource(Res.string.proj_clear_agent_filter), Modifier.padding(top = Metric.gapL), onClick = onClear)
+        EntrySecondaryButton(stringResource(Res.string.proj_open_any), Modifier.padding(top = Metric.gap), onClick = onOpenFolder)
     }
 }
 
@@ -1116,12 +1155,22 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
             )
         }
         PullToRefreshBox(isRefreshing = repo.refreshing.value, onRefresh = { repo.refreshDirectories() }, modifier = Modifier.fillMaxSize()) {
+            // #250: one classifier decides WHICH empty state, so no branch can print «matched ""» or offer a
+            // button that clears a filter the user never set. `nothingToShow` keeps both old conditions.
+            val nothingToShow = visibleDirs.isEmpty() || (!treeMode && flatRows.isEmpty())
+            val emptyKind = dirEmptyKind(
+                loaded = repo.directoriesLoaded.value,
+                reportedCount = repo.directories.size,
+                nothingToShow = nothingToShow,
+                query = query,
+                agentFiltered = !agentFilterIsAll(agentFilter),
+            )
             when {
-                repo.directories.isEmpty() && repo.directoriesLoaded.value && query.isBlank() ->
-                    EmptyDirectories { repo.refreshDirectories() }
-                visibleDirs.isEmpty() && repo.directoriesLoaded.value ->
-                    NoMatches(query, onClear = { query = "" }, onOpenFolder = openFolderEntry)
-                !treeMode && flatRows.isEmpty() && repo.directoriesLoaded.value ->
+                emptyKind == DirEmptyKind.NO_PROJECTS ->
+                    EmptyDirectories({ repo.refreshDirectories() }, openFolderEntry)
+                emptyKind == DirEmptyKind.AGENT_FILTERED ->
+                    NoAgentMatches(agentFilter, onClear = { repo.clearAgentFilter() }, onOpenFolder = openFolderEntry)
+                emptyKind == DirEmptyKind.NO_QUERY_MATCH ->
                     NoMatches(query, onClear = { query = "" }, onOpenFolder = openFolderEntry)
                 treeMode -> LazyColumn(
                     Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -1690,24 +1739,14 @@ private fun LiveProjectCell(
     }
 }
 
-/** Removable filter chip pinned atop the Sessions list when a single agent is selected (issue #31). */
+/** Removable filter chip pinned atop the Sessions list whenever the agent filter hides something (#31/#248). */
 @Composable
-private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
-    // one arm per non-"both" filter: opencode used to fall through to the Claude label + accent (mislabeled)
-    val color = when (filter) {
-        "codex" -> Tok.codex
-        "opencode" -> Tok.opencode
-        "zcode" -> Tok.zcode
-        else -> Tok.accent
-    }
-    val label = stringResource(
-        when (filter) {
-            "codex" -> Res.string.af_codex_only
-            "opencode" -> Res.string.af_opencode_only
-            "zcode" -> Res.string.af_zcode_only
-            else -> Res.string.af_claude_only
-        }
-    )
+private fun AgentFilterChip(filter: Set<AgentKind>, onClear: () -> Unit) {
+    val shown = remember(filter) { AgentKind.entries.filter { it in filter } }
+    // one agent keeps its own identity color; a multi-agent selection has no single owner, so it reads in
+    // the neutral secondary ink rather than borrowing (and mislabeling) one member's color
+    val color = shown.singleOrNull()?.let(::agentColor) ?: Tok.tx2
+    val label = remember(shown) { shown.joinToString(" · ") { agentName(it) } }
     Row(
         Modifier.clip(RoundedCornerShape(999.dp)).background(color.copy(alpha = 0.12f))
             .border(1.dp, color.copy(alpha = 0.4f), RoundedCornerShape(999.dp))
@@ -1716,23 +1755,17 @@ private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
     ) {
         Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(color))
         Spacer(Modifier.width(7.dp))
-        Text(label, color = color, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = color, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         Spacer(Modifier.width(6.dp))
         Text("✕", color = color, fontSize = 12.sp)
     }
 }
 
-internal fun filterSessionsByAgent(sessions: List<SessionSummary>, filter: String): List<SessionSummary> =
-    sessions.filter { session ->
-        when (filter) {
-            "claude" -> (session.agent ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
-            "codex" -> session.agent == AgentKind.CODEX
-            "opencode" -> session.agent == AgentKind.OPENCODE
-            "kimi" -> session.agent == AgentKind.KIMI
-            "zcode" -> session.agent == AgentKind.ZCODE
-            else -> true
-        }
-    }
+/** A session with no stamped backend is a Claude one (the field postdates Claude-only builds), so the
+ *  Claude arm of the filter must own the nulls — same rule as before, now expressed against a set. */
+internal fun filterSessionsByAgent(sessions: List<SessionSummary>, filter: Set<AgentKind>): List<SessionSummary> =
+    if (agentFilterIsAll(filter)) sessions
+    else sessions.filter { (it.agent ?: AgentKind.CLAUDE) in filter }
 
 @OptIn(ExperimentalMaterial3Api::class) // PullToRefreshBox
 @Composable
@@ -1826,7 +1859,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 Modifier.fillMaxSize().padding(horizontal = Metric.gutter),
                 contentPadding = PaddingValues(top = Metric.gapL, bottom = if (approvalCount > 0) 88.dp else Metric.gapL),
             ) {
-                if (af != "both") item { Box(Modifier.padding(bottom = Metric.gap)) { AgentFilterChip(af) { repo.setAgentFilter("both") } } }
+                if (!agentFilterIsAll(af)) item { Box(Modifier.padding(bottom = Metric.gap)) { AgentFilterChip(af) { repo.clearAgentFilter() } } }
                 if (filtered.isEmpty()) item { SessionsEmptyState() }
                 // ── Active: everything that is not finished, flat. Group HEADERS are deliberately absent
                 // here (a session that needs a decision is not filed away first), but each row keeps its

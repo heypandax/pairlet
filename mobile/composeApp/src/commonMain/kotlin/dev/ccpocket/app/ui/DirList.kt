@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.data.agentFilterIsAll
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
@@ -145,19 +146,15 @@ fun liveOrigin(e: DirectoryEntry): String? =
  * Shared/bare roots with no history stay reachable: the filter governs existing sessions, not whether the
  * user may start a new one in an explicitly shared folder.
  */
-internal fun filterDirectoriesByAgent(dirs: List<DirectoryEntry>, filter: String): List<DirectoryEntry> {
-    val target = when (filter) {
-        "claude" -> AgentKind.CLAUDE
-        "codex" -> AgentKind.CODEX
-        "opencode" -> AgentKind.OPENCODE
-        "kimi" -> AgentKind.KIMI
-        "zcode" -> AgentKind.ZCODE
-        else -> return dirs
-    }
+internal fun filterDirectoriesByAgent(dirs: List<DirectoryEntry>, filter: Set<AgentKind>): List<DirectoryEntry> {
+    // "every agent" returns the list UNTOUCHED rather than rebuilding each row through the copy() below —
+    // that rebuild re-picks activeSessionId from the first surviving session, which must not happen when
+    // nothing is being filtered out.
+    if (agentFilterIsAll(filter)) return dirs
     return dirs.mapNotNull { entry ->
-        val visibleLive = entry.activeSessions.filter { it.agent == target }
+        val visibleLive = entry.activeSessions.filter { it.agent in filter }
         val historyKnown = entry.sessionAgents.isNotEmpty()
-        val hasVisibleHistory = !entry.hasSessions || !historyKnown || target in entry.sessionAgents
+        val hasVisibleHistory = !entry.hasSessions || !historyKnown || entry.sessionAgents.any { it in filter }
         if (!hasVisibleHistory && visibleLive.isEmpty()) return@mapNotNull null
 
         // A pre-activeSessions daemon may expose only the legacy scalar fields. With no provenance either,
@@ -175,6 +172,44 @@ internal fun filterDirectoriesByAgent(dirs: List<DirectoryEntry>, filter: String
             gitBranch = first?.gitBranch,
         )
     }
+}
+
+/**
+ * Which empty state the Projects list owes the user (issue #250) — computed here so the three cases can be
+ * asserted without a screen.
+ *
+ * The bug this replaces: an agent filter that emptied the list fell into the text-search empty state, which
+ * printed «No projects match ""» and offered a "Clear filter" button that cleared the (already empty) query
+ * — a dead end naming a filter the user never typed. The kinds are therefore distinguished by WHAT is
+ * hiding the rows, and each one owns the action that can actually undo it.
+ */
+internal enum class DirEmptyKind {
+    /** Rows to show — no empty state at all. */
+    NONE,
+
+    /** The computer reported no projects (or none survive with nothing filtering): nothing to clear. */
+    NO_PROJECTS,
+
+    /** Projects exist, the agent filter hid them all, and no search text is involved. */
+    AGENT_FILTERED,
+
+    /** A search term matched nothing. Only here does "clear the search" mean anything. */
+    NO_QUERY_MATCH,
+}
+
+internal fun dirEmptyKind(
+    loaded: Boolean,
+    reportedCount: Int,
+    nothingToShow: Boolean,
+    query: String,
+    agentFiltered: Boolean,
+): DirEmptyKind = when {
+    !loaded -> DirEmptyKind.NONE // still loading: the skeleton owns the screen, never an empty state
+    reportedCount == 0 && query.isBlank() -> DirEmptyKind.NO_PROJECTS
+    !nothingToShow -> DirEmptyKind.NONE
+    query.isNotBlank() -> DirEmptyKind.NO_QUERY_MATCH
+    agentFiltered -> DirEmptyKind.AGENT_FILTERED
+    else -> DirEmptyKind.NO_PROJECTS // no query, no agent filter, still nothing renderable
 }
 
 fun buildDirRows(

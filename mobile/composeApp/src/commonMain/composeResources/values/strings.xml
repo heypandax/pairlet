@@ -53,7 +53,7 @@
     <string name="open_session_timeout">Couldn\'t open the session — the computer didn\'t respond</string>
     <string name="turn_done_marker">done</string>
     <string name="dir_empty_title">No projects yet</string>
-    <string name="dir_empty_body">Open a folder with the cc-pocket CLI on your computer, then pull to refresh.</string>
+    <string name="dir_empty_body">This computer has no projects to open yet. Pick a folder to start your first session here.</string>
     <string name="dir_refresh">Refresh</string>
     <string name="dir_no_matches">No matches</string>
 
@@ -479,7 +479,7 @@
     <string name="opencode_models_loading">Loading models from opencode…</string>
     <string name="model_models_loading">Loading models from %1$s…</string>
     <string name="model_models_empty">%1$s reported no models.</string>
-    <string name="af_hint">Choose which agents\' projects and sessions appear. Claude, Codex, and OpenCode stay tagged in their own colors.</string>
+    <string name="af_hint">Pick any combination — only the checked agents show their projects and sessions, and “All” means no filter. Each agent stays tagged in its own color.</string>
     <string name="settings_usage">Token usage</string>
     <string name="usage_title">Usage</string>
     <string name="usage_tokens_today">Tokens today</string>
@@ -1665,6 +1665,9 @@
     <string name="proj_no_match_title">No projects match “%1$s”</string>
     <string name="proj_no_match_body">The filter searches the names and paths this computer reported. Nothing here matched.</string>
     <string name="proj_clear_filter">Clear filter</string>
+    <string name="proj_agent_filtered_title">The agent filter is hiding every project</string>
+    <string name="proj_agent_filtered_body">Only %1$s projects are shown right now. The rest are still on this computer — clear the filter to bring them back.</string>
+    <string name="proj_clear_agent_filter">Clear agent filter</string>
 
     <!-- ── directory picker ─────────────────────────────────────────────────── -->
     <string name="dir_picker_on_computer">on %1$s</string>

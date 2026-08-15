@@ -121,7 +121,7 @@ class ZCodeUiLogicTest {
     fun zcodeFiltersSessionAndProjectRows() {
         val zcodeSession = SessionSummary("z", "Z", "", 0, "/z", 1, agent = AgentKind.ZCODE)
         val kimiSession = SessionSummary("k", "K", "", 0, "/k", 1, agent = AgentKind.KIMI)
-        assertEquals(listOf(zcodeSession), filterSessionsByAgent(listOf(kimiSession, zcodeSession), "zcode"))
+        assertEquals(listOf(zcodeSession), filterSessionsByAgent(listOf(kimiSession, zcodeSession), setOf(AgentKind.ZCODE)))
 
         val zcodeDir = DirectoryEntry(
             path = "/z", name = "z", isDir = true, hasSessions = true,
@@ -131,6 +131,6 @@ class ZCodeUiLogicTest {
             path = "/k", name = "k", isDir = true, hasSessions = true,
             sessionAgents = listOf(AgentKind.KIMI),
         )
-        assertEquals(listOf(zcodeDir), filterDirectoriesByAgent(listOf(kimiDir, zcodeDir), "zcode"))
+        assertEquals(listOf(zcodeDir), filterDirectoriesByAgent(listOf(kimiDir, zcodeDir), setOf(AgentKind.ZCODE)))
     }
 }

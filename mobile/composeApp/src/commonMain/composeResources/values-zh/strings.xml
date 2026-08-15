@@ -53,7 +53,7 @@
     <string name="open_session_timeout">会话没有打开——电脑未响应</string>
     <string name="turn_done_marker">已完成</string>
     <string name="dir_empty_title">还没有项目</string>
-    <string name="dir_empty_body">在电脑上用 cc-pocket 命令行打开一个文件夹，然后下拉刷新。</string>
+    <string name="dir_empty_body">这台电脑还没有可打开的项目。挑一个文件夹，就能在这里开第一个会话。</string>
     <string name="dir_refresh">刷新</string>
     <string name="dir_no_matches">没有匹配项</string>
 
@@ -479,7 +479,7 @@
     <string name="opencode_models_loading">正在从 opencode 读取模型…</string>
     <string name="model_models_loading">正在从 %1$s 读取模型…</string>
     <string name="model_models_empty">%1$s 没有报可用模型。</string>
-    <string name="af_hint">选择列表里显示哪些 agent 的项目与会话。Claude、Codex 与 OpenCode 仍以各自颜色标注。</string>
+    <string name="af_hint">可以多选：勾几个就只显示哪几个 agent 的项目与会话，「全部」＝不筛选。各 agent 在列表里仍以各自颜色标注。</string>
     <string name="settings_usage">Token 用量</string>
     <string name="usage_title">用量</string>
     <string name="usage_tokens_today">今日 tokens</string>
@@ -1665,6 +1665,9 @@
     <string name="proj_no_match_title">没有项目匹配“%1$s”</string>
     <string name="proj_no_match_body">筛选只匹配这台电脑报上来的名称和路径，这里没有匹配到。</string>
     <string name="proj_clear_filter">清除筛选</string>
+    <string name="proj_agent_filtered_title">agent 筛选把项目都藏起来了</string>
+    <string name="proj_agent_filtered_body">现在只显示 %1$s 的项目。这台电脑上的其它项目还在，清除筛选就能看到。</string>
+    <string name="proj_clear_agent_filter">清除 agent 筛选</string>
 
     <!-- ── 目录选择器 ─────────────────────────────────────────────────── -->
     <string name="dir_picker_on_computer">在 %1$s 上</string>
