@@ -23,6 +23,30 @@ object UpdateChecker {
     private val log = logger("Update")
     private val noticeFile: Path = Path.of(System.getProperty("user.home"), ".cc-pocket", "update-notice")
 
+    /**
+     * Issue #244: is auto-apply on for this daemon? Highest wins:
+     *  1. `--auto-update` on the `run` command (a flag can only be present, so only ever forces ON),
+     *  2. the `CC_POCKET_AUTO_UPDATE` env toggle — "1"/"true"/"on" forces ON, "0"/"false"/"off" forces
+     *     OFF (an unrecognized value is ignored rather than silently meaning "off"),
+     *  3. the persisted preference from `config --auto-update on|off`,
+     *  4. otherwise the default: ON. Curl-installed daemons keep themselves current the way Claude Code
+     *     does. This is safe to default because [checkOnce]'s `canAuto` still requires a managed install
+     *     whose service points at the stable launcher, and never fires on Windows — brew/scoop/dev
+     *     layouts have no managed install and stay notify-only no matter what this returns.
+     */
+    fun resolveAutoApply(flag: Boolean, env: String?, pref: Boolean?): Boolean {
+        if (flag) return true
+        when (env?.trim()?.lowercase()) {
+            "1", "true", "on", "yes" -> return true
+            "0", "false", "off", "no" -> return false
+            else -> {} // unset or unrecognized: fall through
+        }
+        return pref ?: DEFAULT_AUTO_APPLY
+    }
+
+    /** What a fresh install gets: keep itself current (see [resolveAutoApply]). */
+    const val DEFAULT_AUTO_APPLY = true
+
     fun start(relay: RelayClient, autoApply: Boolean) {
         thread(isDaemon = true, name = "update-checker") {
             Thread.sleep(FIRST_CHECK_DELAY_MS) // let boot + relay attach settle first

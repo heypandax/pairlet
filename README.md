@@ -96,7 +96,7 @@ Open the app and **scan the QR** (or type the 6-digit code) that `cc-pocket-daem
 
 `cc-pocket-daemon version` tells you what's running, how it was installed, and the one command that updates *this* install — it works offline and whether or not the daemon is up. The app shows the same thing under Settings ▸ Versions, and nudges you when either side falls behind.
 
-Upgrade anytime with `cc-pocket-daemon update` — the daemon also checks daily and notifies your phone (add `--auto-update` to `run` to apply silently). Homebrew: `brew upgrade --cask heypandax/tap/cc-pocket` · Scoop: `scoop update cc-pocket-daemon`. Other architectures: [build from source](#building-from-source).
+Upgrade anytime with `cc-pocket-daemon update`. Installs from the curl one-liner **keep themselves current**: the daemon checks daily and applies the new version in the background — turn that off with `cc-pocket-daemon config --auto-update off` and you'll just get a phone notification instead. Homebrew, Scoop and Windows installs never self-apply; update them through their own package manager. Homebrew: `brew upgrade --cask heypandax/tap/cc-pocket` · Scoop: `scoop update cc-pocket-daemon`. Other architectures: [build from source](#building-from-source).
 
 ## Security
 
