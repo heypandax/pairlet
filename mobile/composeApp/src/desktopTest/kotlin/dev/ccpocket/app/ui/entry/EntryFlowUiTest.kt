@@ -296,18 +296,15 @@ class EntryFlowUiTest {
     }
 
     @Test
-    fun reviewIsDirectlyReachableOnTheSecondRow() = baseline(
+    fun reviewStaysOffTheProjectsHeader() = baseline(
         seed = { enterDemo() },
         content = { DirectoryScreen(it) },
     ) {
-        assertTrue(present(str(Res.string.proj_review)), "Review is one tap from Projects, not inside a menu")
-        val review = onAllNodes(hasText(str(Res.string.proj_review))).onFirst().getUnclippedBoundsInRoot()
-        val machine = onAllNodes(hasText("alex-macbook", substring = true)).onFirst().getUnclippedBoundsInRoot()
-        assertTrue(review.left > machine.left, "Review sits on the trailing edge of the state row")
-        assertTrue(review.height.value >= 47.5f, "Review is below the 48dp floor: $review")
-        assertTrue(review.right.value <= W + 0.5f, "Review overflows the ${W}pt viewport at ${review.right}")
-        // nothing waiting → the WORD, never "Review 0": a printed zero reads as a broken badge
-        assertFalse(present(str(Res.string.proj_review_n, 0)), "an empty queue prints no count")
+        // Demoted 08-16: the P2P review surface saw no real use, so its home doorway came off — the
+        // Review Center is reachable from Settings only. This pins the DEMOTION so it cannot quietly
+        // creep back onto the header while the feature's future form is still undecided.
+        assertFalse(present(str(Res.string.proj_review)), "the Projects header advertises no Review entry")
+        assertFalse(present(str(Res.string.proj_review_n, 0)), "…and prints no review count in any form")
     }
 
     @Test
@@ -385,18 +382,15 @@ class EntryFlowUiTest {
         content = { DirectoryScreen(it) },
     ) {
         // everything the header promises is still inside the release frame, just taller
-        for (text in listOf(str(Res.string.dir_projects), str(Res.string.proj_review))) {
-            assertWithinViewport(text)
-        }
+        assertWithinViewport(str(Res.string.dir_projects))
         for (cd in listOf(str(Res.string.proj_search), str(Res.string.proj_open_computers), str(Res.string.proj_more))) {
             val b = target(cd)
             assertTrue(b.right.value <= W + 0.5f, "\"$cd\" overflows the ${W}pt viewport at ${b.right}")
             assertTrue(b.width.value >= 47.5f && b.height.value >= 47.5f, "\"$cd\" lost its 48dp floor: $b")
         }
-        // row 2 REFLOWS: Review drops beneath the state sentence rather than crushing it
+        // row 2 is the state sentence alone (the review entry was demoted 08-16): it wraps rather than clips
         val machine = onAllNodes(hasText("alex-macbook", substring = true)).onFirst().getUnclippedBoundsInRoot()
-        val review = onAllNodes(hasText(str(Res.string.proj_review))).onFirst().getUnclippedBoundsInRoot()
-        assertTrue(review.top >= machine.top, "Review reflows below the state sentence, it does not shrink it")
+        assertTrue(machine.right.value <= W + 0.5f, "the state sentence overflows the ${W}pt viewport at ${machine.right}")
         // …and the one canonical create action is still on screen without scrolling. The FAB is anchored to
         // the frame rather than the type ramp, so 200% type must not push it out of reach.
         val fab = target(str(Res.string.new_task))

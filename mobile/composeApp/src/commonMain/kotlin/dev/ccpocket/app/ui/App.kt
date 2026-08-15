@@ -118,7 +118,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -364,7 +363,6 @@ fun App(scope: CoroutineScope) {
                             ConnectionGate(
                                 repo,
                                 onOpenComputers = { fleetOpen = true },
-                                onOpenReviews = { reviewsOpen = true },
                             ) {
                                 when {
                                     // switchingSession keeps the chat mounted across a chat→chat switch:
@@ -375,7 +373,6 @@ fun App(scope: CoroutineScope) {
                                     repo.sessionsDir.value != null -> SessionsScreen(repo, onOpenInbox = { inboxOpen = true })
                                     else -> DirectoryScreen(
                                         repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true },
-                                        onOpenReviews = { reviewsOpen = true },
                                     )
                                 }
                             }
@@ -383,7 +380,9 @@ fun App(scope: CoroutineScope) {
                             // want to be while this machine is reconnecting or another one has news
                             if (fleetOpen) dev.ccpocket.app.ui.fleet.FleetHomeScreen(repo, onBack = { fleetOpen = false }, onOpenInbox = { inboxOpen = true })
                             if (inboxOpen) dev.ccpocket.app.ui.fleet.AttentionInboxScreen(repo) { inboxOpen = false }
-                            // registered after the fleet surfaces, so its back handler wins while it is up
+                            // registered after the fleet surfaces, so its back handler wins while it is up.
+                            // Demoted (08-16): no header entry sets this any more — the only openers left
+                            // are the review-contact deep link above and the Settings row's own mount.
                             if (reviewsOpen) dev.ccpocket.app.ui.review.ReviewCenterRoute(repo) { reviewsOpen = false }
                         }
                     }
@@ -582,10 +581,9 @@ private fun DemoConnectScreen(onDone: () -> Unit) {
 @Composable
 private fun ConnectionGate(
     repo: PocketRepository,
-    // the skeleton wears the real Projects header, so it needs the same two routes the list has. Passed
-    // through rather than invented here: these are the app root's existing overlays, not new destinations.
+    // the skeleton wears the real Projects header, so it needs the same route the list has. Passed
+    // through rather than invented here: this is the app root's existing overlay, not a new destination.
     onOpenComputers: () -> Unit = {},
-    onOpenReviews: () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
     val recovery = connRecovery(repo.phase.value)
@@ -617,7 +615,7 @@ private fun ConnectionGate(
             else RecoverySurface(repo, recovery)
         ConnPhase.Connecting ->
             if (repo.directoriesLoaded.value || repo.convoId.value != null) content()
-            else DirectorySkeleton(repo, onOpenComputers, onOpenReviews)
+            else DirectorySkeleton(repo, onOpenComputers)
         ConnPhase.Reconnecting, ConnPhase.Ready -> content()
     }
 }
@@ -636,18 +634,19 @@ private fun RecoverySurface(repo: PocketRepository, recovery: dev.ccpocket.app.u
 /**
  * The Projects header (Entry Flow UI 2.0 · Master **v2** — the confirmed header amendment).
  *
- * Two rows, and BOTH of them are two-sided, so the top-right of the 402 pt release frame carries page-level
- * actions instead of the empty band the first pass left there:
+ * Two rows, so the top-right of the 402 pt release frame carries page-level actions instead of the empty
+ * band the first pass left there:
  *
  * ```
  *   Projects                                          [🖵] [⋯]
- *   ● alex-macbook · online                       ◆ Review 2
+ *   ● alex-macbook · online
  * ```
  *
  * Row 1 is the screen's name plus exactly two 48 dp controls: the computer doorway (an outlined display,
  * not a plus — it SWITCHES machines rather than creating anything) carrying the fleet's real waiting count,
  * and the overflow carrying the version-update dot. Row 2 keeps the state MARK beside the state WORD, so
- * the connection is legible in greyscale, and puts the review queue within one tap.
+ * the connection is legible in greyscale. (The review queue used to ride row 2's trailing edge; demoted
+ * 08-16 with the whole P2P review surface — the Review Center now lives behind Settings only.)
  *
  * Help and Settings moved into the overflow: they are doorways to specialist surfaces, and as a leading
  * text band they competed with the machine state and the work below it.
@@ -661,11 +660,9 @@ private fun ProjectsHeader(
     title: String,
     phase: ConnPhase,
     machine: String?,
-    reviewCount: Int,
     fleetWaiting: Int,
     updateAvailable: Boolean,
     onOpenComputers: () -> Unit,
-    onReviews: () -> Unit,
     onHelp: () -> Unit,
     onSettings: () -> Unit,
     // ── inline search (issue #260) ──
@@ -744,28 +741,25 @@ private fun ProjectsHeader(
                         )
                     }
                 }
-                // ── row 2: the written machine state, and the review queue on the trailing edge ──
-                ReflowRow(
+                // ── row 2: the written machine state ──
+                Row(
                     Modifier.fillMaxWidth().padding(bottom = Metric.gapXs),
-                    gap = Metric.gapS,
-                    leading = {
-                        Row(verticalAlignment = Alignment.Top) {
-                            // the mark rides the FIRST line of the sentence: centred against a wrapped
-                            // block it drifts into the gutter between lines and stops reading as its mark
-                            Box(
-                                Modifier.height(with(LocalDensity.current) { TypeRole.preview.lineHeight.toDp() }),
-                                contentAlignment = Alignment.Center,
-                            ) { StateMarkGlyph(recovery.mark, stateColor(recovery.tone)) }
-                            Spacer(Modifier.width(Metric.gapS))
-                            Text(
-                                machine?.takeIf { it.isNotBlank() }
-                                    ?.let { stringResource(Res.string.proj_machine_line, it, state) } ?: state,
-                                color = Tok.tx2, style = TypeRole.preview,
-                                maxLines = 3, overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    },
-                ) { ReviewAction(reviewCount, onReviews) }
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    // the mark rides the FIRST line of the sentence: centred against a wrapped
+                    // block it drifts into the gutter between lines and stops reading as its mark
+                    Box(
+                        Modifier.height(with(LocalDensity.current) { TypeRole.preview.lineHeight.toDp() }),
+                        contentAlignment = Alignment.Center,
+                    ) { StateMarkGlyph(recovery.mark, stateColor(recovery.tone)) }
+                    Spacer(Modifier.width(Metric.gapS))
+                    Text(
+                        machine?.takeIf { it.isNotBlank() }
+                            ?.let { stringResource(Res.string.proj_machine_line, it, state) } ?: state,
+                        color = Tok.tx2, style = TypeRole.preview,
+                        maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             body()
         }
@@ -840,33 +834,6 @@ private fun HeaderSearchField(query: String, onQueryChange: (String) -> Unit, mo
 }
 
 /**
- * The review queue, on row 2's trailing edge. The DIAMOND says somebody is waiting and the count is
- * written rather than merely tinted — but a zero is never printed: "Review 0" reads as a broken badge.
- */
-@Composable
-private fun ReviewAction(count: Int, onClick: () -> Unit) {
-    Row(
-        Modifier.heightIn(min = Metric.touch).widthIn(min = Metric.touch)
-            .clip(RoundedCornerShape(Metric.radiusS))
-            .clickable(role = Role.Button, onClick = onClick)
-            // the ink lands on the same optical line as the icon controls above it, which sit 13 dp inside
-            // their own 48 dp boxes — a target wider than its label must not ragged-edge the gutter
-            .padding(start = Metric.gapS, end = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.End,
-    ) {
-        if (count > 0) {
-            StateMarkGlyph(StateMark.DIAMOND, Tok.warn, size = 7.dp)
-            Spacer(Modifier.width(6.dp))
-        }
-        Text(
-            if (count > 0) stringResource(Res.string.proj_review_n, count) else stringResource(Res.string.proj_review),
-            color = Tok.tx2, style = TypeRole.body,
-        )
-    }
-}
-
-/**
  * The overflow: Help and Settings, one tap under the title row.
  *
  * A low container — hairline and raised fill, no glass and no card stack — with 48 dp rows that grow with
@@ -921,42 +888,6 @@ private fun OverflowMenuRow(label: String, note: String? = null, onClick: () -> 
 }
 
 /**
- * A two-sided row that REFLOWS instead of shrinking.
- *
- * At the release frame the state sentence and the review queue share one line. The moment the sentence can
- * no longer sit on ONE line beside the action — 200% Dynamic Type, a long localization, a long machine
- * name, a narrow window — they stop competing for it: the leading block takes the whole row and the action
- * drops beneath it, still trailing. The trailing action is always measured first and keeps its own width,
- * so neither side is ever clipped to make the other fit. Requires a bounded width.
- */
-@Composable
-private fun ReflowRow(
-    modifier: Modifier = Modifier,
-    gap: Dp,
-    leading: @Composable () -> Unit,
-    trailing: @Composable () -> Unit,
-) {
-    Layout({ leading(); trailing() }, modifier) { measurables, constraints ->
-        val gapPx = gap.roundToPx()
-        val width = constraints.maxWidth
-        val trail = measurables[1].measure(Constraints(maxWidth = width))
-        val beside = width - trail.width - gapPx
-        val stacked = beside <= 0 || measurables[0].maxIntrinsicWidth(constraints.maxHeight) > beside
-        val lead = measurables[0].measure(Constraints(maxWidth = if (stacked) width else beside))
-        val height = if (stacked) lead.height + trail.height else maxOf(lead.height, trail.height)
-        layout(width, height) {
-            if (stacked) {
-                lead.place(0, 0)
-                trail.place(width - trail.width, lead.height)
-            } else {
-                lead.place(0, (height - lead.height) / 2)
-                trail.place(width - trail.width, (height - trail.height) / 2)
-            }
-        }
-    }
-}
-
-/**
  * The new-task FAB (issue #260) — the Projects screen's one and only way to start work.
  *
  * A filled 56 dp accent circle: deliberately the loudest thing on the screen, because everything else here
@@ -999,7 +930,6 @@ private fun NewTaskFab(onClick: () -> Unit) {
 internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header against the Ready list's
     repo: PocketRepository,
     onOpenComputers: () -> Unit = {},
-    onOpenReviews: () -> Unit = {},
 ) {
     var showHelp by remember { mutableStateOf(false) }
     if (showHelp) { HelpCenterScreen(HelpEntryPoint.PROJECTS, onBack = { showHelp = false }); return }
@@ -1013,12 +943,10 @@ internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header aga
         title = stringResource(Res.string.dir_projects),
         phase = repo.phase.value,
         machine = repo.paired.value?.displayName(),
-        // this machine has told us NOTHING yet: the labels without counts, rather than a stale number
-        reviewCount = 0,
+        // this machine has told us NOTHING yet: the label without a count, rather than a stale number
         fleetWaiting = 0,
         updateAvailable = repo.versionStatus.value.anyBehind, // a local fact — true with or without a link
         onOpenComputers = onOpenComputers,
-        onReviews = onOpenReviews,
         onHelp = { showHelp = true },
         onSettings = { showSettings = true },
         // the search control keeps its BOX here so skeleton → list never shifts the header (EntryFlowUiTest
@@ -1130,7 +1058,6 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     repo: PocketRepository,
     onOpenFleet: () -> Unit = {},
     onOpenInbox: () -> Unit = {},
-    onOpenReviews: () -> Unit = {},
 ) {
     // Search is a MODE of this screen now (issue #260): the field lives in the title row while it is open,
     // and collapsing it clears the query — so the filtered-empty state can only ever be reached from a
@@ -1212,18 +1139,16 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     val approvalClearance = (if (approvalCount > 0) 72.dp else 0.dp) + fabClearance
 
     Box(Modifier.fillMaxSize()) {
-    // ── the header (Master v2): title + Computers/overflow, then the machine state + Review ──
+    // ── the header (Master v2): title + Computers/overflow, then the machine state ──
     // The machine line is no longer its own tap target: the Computers control beside the title is THE
     // fleet doorway now, and it carries the same real waiting count the old chevron did.
     ProjectsHeader(
         title = headerTitle,
         phase = repo.phase.value,
         machine = repo.paired.value?.displayName(),
-        reviewCount = repo.reviewPendingCount, // the Review Center (REVIEW-REQUEST.md §12)
         fleetWaiting = approvalCount,
         updateAvailable = repo.versionStatus.value.anyBehind,
         onOpenComputers = onOpenFleet,
-        onReviews = onOpenReviews,
         onHelp = { showHelp = true },
         onSettings = { showSettings = true },
         searchOpen = search.open,

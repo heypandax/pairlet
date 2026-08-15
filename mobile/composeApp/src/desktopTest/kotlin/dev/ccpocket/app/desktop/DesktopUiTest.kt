@@ -948,15 +948,13 @@ class DesktopUiTest {
     }
 
     @Test
-    fun sidebarReviewsRowOpensTheCenter() = runComposeUiTest {
+    fun sidebarCarriesNoReviewsRow() = runComposeUiTest {
         val model = SeedDesktopModel()
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
+        // Demoted 08-16: the P2P review flow saw no real use, so its sidebar row came off — the Center
+        // stays reachable via ⌘⇧R only. This pins the demotion so the row cannot quietly creep back.
         assertTrue(!model.showReviewCenter, "the Center is closed until asked for")
-        // docked beside Archived rather than buried in ⌘K: a colleague's review lands in the daemon
-        // whether or not this window is open, and a count you go looking for is a count you miss
-        onAllNodes(hasText(str(Res.string.rv_title))).onFirst().performClick()
-        waitForIdle()
-        assertTrue(model.showReviewCenter)
+        assertTrue(!present(str(Res.string.rv_title)), "no sidebar row advertises the Review Center")
     }
 }
