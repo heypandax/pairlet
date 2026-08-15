@@ -2,7 +2,8 @@ package dev.ccpocket.app.ui
 
 import dev.ccpocket.app.desktop.desktopModeChoices
 import dev.ccpocket.app.desktop.desktopDefaultModeIndex
-import dev.ccpocket.app.desktop.DESKTOP_AGENT_CHOICES
+import dev.ccpocket.app.data.availableAgentsFromDaemon
+import dev.ccpocket.protocol.AGENT_WIRE_ZCODE
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.PermissionMode
@@ -24,10 +25,11 @@ class ZCodeUiLogicTest {
 
     @Test
     fun desktopNewSessionAndDefaultAgentChoicesExposeZcode() {
-        assertEquals(
-            listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.ZCODE),
-            DESKTOP_AGENT_CHOICES,
-        )
+        // Desktop no longer keeps its own list (issue #252); it reads the shared projection, which
+        // surfaces ZCode as soon as the daemon advertises it. Coverage of the full enum on the real
+        // desktop seam lives in DesktopAgentChoicesTest.
+        assertEquals(false, AgentKind.ZCODE in availableAgentsFromDaemon(emptySet()))
+        assertEquals(true, AgentKind.ZCODE in availableAgentsFromDaemon(setOf(AGENT_WIRE_ZCODE)))
     }
 
     @Test

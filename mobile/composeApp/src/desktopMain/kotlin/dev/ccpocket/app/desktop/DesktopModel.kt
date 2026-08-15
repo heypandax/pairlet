@@ -694,8 +694,9 @@ interface DesktopModel {
     val updateCommand: String? get() = null
     /** Releases page for the "can't self-update from here" fallback (brew/scoop/unknown). */
     val updateReleasesUrl: String get() = DesktopUpdater.RELEASES_URL
-    /** Agent choices accepted by the active daemon. Seed/preview models emulate a current daemon. */
-    val availableAgents: List<AgentKind> get() = DESKTOP_AGENT_CHOICES
+    /** Agent choices accepted by the active daemon. Seed/preview models emulate a current daemon, so they
+     *  offer the full enum — the live adapter narrows it through the same projection mobile uses. */
+    val availableAgents: List<AgentKind> get() = AgentKind.entries
     var defaultAgent: AgentKind
     var defaultMode: PermissionMode
     val defaultPermissionMode: String? get() = null

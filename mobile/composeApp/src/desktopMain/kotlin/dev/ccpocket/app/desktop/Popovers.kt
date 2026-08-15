@@ -136,9 +136,6 @@ internal val CLAUDE_MODES = listOf(
 internal val CLAUDE_AUTO_MODE =
     DkMode(Res.string.mode_auto_short, CLAUDE_PERMISSION_MODE_AUTO, PermissionMode.DEFAULT, Tok.accent, nativeMode = CLAUDE_PERMISSION_MODE_AUTO)
 
-/** Agents exposed by both desktop entry points: New session and Settings > Default agent. */
-internal val DESKTOP_AGENT_CHOICES = listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.ZCODE)
-
 /** Desktop's rendering model for the shared permission contract. */
 internal fun desktopModeChoices(agent: AgentKind, autoAvailable: Boolean = false): List<DkMode> = when (agent) {
     AgentKind.CLAUDE -> CLAUDE_MODES + if (autoAvailable) listOf(CLAUDE_AUTO_MODE) else emptyList()
@@ -168,7 +165,9 @@ internal fun desktopDefaultModeIndex(
 fun NewSessionPopover(
     initialPath: String,
     defaultAgent: AgentKind = AgentKind.CLAUDE,
-    availableAgents: List<AgentKind> = DESKTOP_AGENT_CHOICES,
+    // Same default as mobile's ConfigureSessionSheet: the full enum, narrowed by the host to what the
+    // connected daemon accepts (issue #252 — a desktop-only whitelist here silently dropped Kimi).
+    availableAgents: List<AgentKind> = AgentKind.entries,
     defaultMode: PermissionMode = PermissionMode.DEFAULT,
     defaultPermissionMode: String? = null,
     autoAvailable: Boolean = false,
