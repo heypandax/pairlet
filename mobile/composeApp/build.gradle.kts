@@ -186,5 +186,9 @@ tasks.withType(org.gradle.api.tasks.testing.Test::class.java).configureEach {
     systemProperty("ccpocket.live", providers.gradleProperty("ccpocketLive").getOrElse("0"))
     val testStore = temporaryDir.resolve("secure-store.properties")
     systemProperty("ccpocket.secureStore.file", testStore.absolutePath)
-    doFirst { testStore.delete() }
+    // Same reasoning for DesktopCrashGuard (#251): its `note()` path is exercised by tests, and it must
+    // not append to the developer's real ~/Library/Logs/cc-pocket/desktop.err.log while doing so.
+    val testCrashLog = temporaryDir.resolve("desktop.err.log")
+    systemProperty("ccpocket.desktopLog.file", testCrashLog.absolutePath)
+    doFirst { testStore.delete(); testCrashLog.delete() }
 }

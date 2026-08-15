@@ -2486,8 +2486,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             val preview = isPreviewMode()
             val cmd = if (preview) DemoData.PREVIEW_ASK_PREVIEW else DemoData.ASK_PREVIEW
             val rule = if (preview) DemoData.PREVIEW_ASK_RULE else DemoData.ASK_RULE
-            val title = if (preview) getString(Res.string.preview_cmd_title) else DemoData.ASK_TITLE
-            val note = if (preview) getString(Res.string.preview_cmd_note) else null
+            // #251: same containment as daemonTooOldText() — a demo/App-Review script must never be
+            // the thing that kills the process it is demonstrating.
+            val title = if (preview) safeString("Run command") { getString(Res.string.preview_cmd_title) } else DemoData.ASK_TITLE
+            val note = if (preview) safeString("delete files") { getString(Res.string.preview_cmd_note) } else null
             delay(500)
             handle(AssistantChunk(convoId, demoSeq++, StreamPiece.Thinking(DemoData.THINKING)))
             delay(700)
@@ -3959,6 +3961,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         else -> Res.string.ho_accept_taken
     }
 
+    /**
+     * The "update the daemon" copy every handoff / collaborator / review timeout below reaches for.
+     *
+     * Issue #251: these all run inside a detached `scope.launch { delay(8000); … }`, where a throwing
+     * resource lookup has no handler and takes the desktop window down with an unnamed native error
+     * box. Losing a translation on an error path is a cosmetic regression; losing the app is not — so
+     * the lookup is contained and falls back to the English literal, tagged with a reportable code.
+     * Keep the literal in sync with `ho_daemon_too_old` in strings.xml.
+     */
+    private suspend fun daemonTooOldText(): String =
+        safeString(DAEMON_TOO_OLD_FALLBACK) { getString(Res.string.ho_daemon_too_old) }
+
     /** Owner: create a Handoff on the open session (v1: REVIEW read-only). [recipientDeviceId] non-null
      *  binds the Grant to that collaborator's device — only it may accept, and the daemon delivers the
      *  offer over the existing link (no invite artefact). The daemon replies with [HandoffCreated]; an
@@ -3985,7 +3999,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(8000)
             if (handoffCreating.value) {
                 handoffCreating.value = false
-                handoffError.value = getString(Res.string.ho_daemon_too_old)
+                handoffError.value = daemonTooOldText()
             }
         }
     }
@@ -4014,7 +4028,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             runCatching { send(ListCollaborators) }
             delay(8000)
             if (!collaboratorsLoaded.value && collaboratorError.value == null) {
-                collaboratorError.value = getString(Res.string.ho_daemon_too_old)
+                collaboratorError.value = daemonTooOldText()
             }
         }
     }
@@ -4027,7 +4041,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(8000)
             if (collaboratorTicketCreating.value) {
                 collaboratorTicketCreating.value = false
-                collaboratorError.value = getString(Res.string.ho_daemon_too_old)
+                collaboratorError.value = daemonTooOldText()
             }
         }
     }
@@ -4188,7 +4202,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(REVIEW_REPLY_TIMEOUT_MS)
             if (reviewInviteCreating.value) {
                 reviewInviteCreating.value = false
-                reviewError.value = getString(Res.string.ho_daemon_too_old)
+                reviewError.value = daemonTooOldText()
             }
         }
     }
@@ -4205,7 +4219,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(REVIEW_REPLY_TIMEOUT_MS)
             if (reviewJoining.value) {
                 reviewJoining.value = false
-                reviewError.value = getString(Res.string.ho_daemon_too_old)
+                reviewError.value = daemonTooOldText()
             }
         }
     }
@@ -4231,7 +4245,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(REVIEW_REPLY_TIMEOUT_MS)
             if (reviewSending.value) {
                 reviewSending.value = false
-                reviewError.value = getString(Res.string.ho_daemon_too_old)
+                reviewError.value = daemonTooOldText()
             }
         }
     }
@@ -4245,7 +4259,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(REVIEW_REPLY_TIMEOUT_MS)
             if (reviewPreparing.value == requestId) {
                 reviewPreparing.value = null
-                reviewError.value = getString(Res.string.ho_daemon_too_old)
+                reviewError.value = daemonTooOldText()
             }
         }
     }
@@ -4266,7 +4280,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(REVIEW_REPLY_TIMEOUT_MS)
             if (reviewActing.value == requestId) {
                 reviewActing.value = null
-                reviewError.value = getString(Res.string.ho_daemon_too_old)
+                reviewError.value = daemonTooOldText()
             }
         }
     }
@@ -5844,6 +5858,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 }
 
 private const val REFRESH_SPINNER_SAFETY_MS = 4_000L // spinner never outlives a lost reply by more than this
+
+/** Degraded-mode copy for [PocketRepository.daemonTooOldText] (#251). Mirrors `ho_daemon_too_old`. */
+private const val DAEMON_TOO_OLD_FALLBACK =
+    "This computer's daemon doesn't support handoff yet — update it to use this."
 
 /** #142: cancel the previous connection's job and WAIT (bounded) until it has actually finished — its
  *  socket closed and its writers off the shared outboxes — before the next connection dials. cancel()

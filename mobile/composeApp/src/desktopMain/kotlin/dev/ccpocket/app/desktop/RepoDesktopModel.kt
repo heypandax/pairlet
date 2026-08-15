@@ -1016,8 +1016,13 @@ class RepoDesktopModel(
             val rel = DesktopUpdater.latest()
             updateStateInternal = when {
                 // suspend getString: the model isn't composable, but the failure line IS user-facing UI copy
-                // (same non-composable localization route PocketRepository already uses for preview asks)
-                rel == null -> DkUpdateState.Failed(getString(Res.string.update_reach_failed))
+                // (same non-composable localization route PocketRepository already uses for preview asks).
+                // #251: contained — this runs detached, where a throwing lookup would take the window down.
+                rel == null -> DkUpdateState.Failed(
+                    dev.ccpocket.app.data.safeString("Couldn't reach GitHub releases — check your network.") {
+                        getString(Res.string.update_reach_failed)
+                    },
+                )
                 ReleaseVersions.isNewer(rel.version, APP_VERSION) -> {
                     pendingRelease = rel
                     DkUpdateState.Available(rel.version, DesktopUpdater.currentSource())
@@ -1035,7 +1040,11 @@ class RepoDesktopModel(
         updateScope.launch {
             // applyStandalone() does not return on success — it exits so the swap helper / installer can proceed
             runCatching { DesktopUpdater.applyStandalone(rel) }
-                .onFailure { updateStateInternal = DkUpdateState.Failed(it.message ?: getString(Res.string.update_failed)) }
+                .onFailure {
+                    updateStateInternal = DkUpdateState.Failed(
+                        it.message ?: dev.ccpocket.app.data.safeString("Update failed.") { getString(Res.string.update_failed) },
+                    )
+                }
         }
     }
     override var defaultAgent: AgentKind
