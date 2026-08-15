@@ -560,9 +560,14 @@ jobs:
   # manifest stays pinned to an old version forever (its checkver/autoupdate fields are inert — no
   # excavator runs on a personal bucket), which stranded every Windows user on 1.1.9 (issue #25).
   # Needs a repo secret SCOOP_BUCKET_TOKEN: a fine-grained PAT with contents:write on
-  # heypandax/scoop-bucket. Skips gracefully (with a warning) when the secret is absent.
+  # heypandax/scoop-bucket. Fails loudly when the secret is absent — a silent green here stranded
+  # Windows users on a stale manifest four separate releases in a row (issue #243).
   bump-scoop:
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
+    # Explicit status functions are required: without them the implicit success() makes this job
+    # inherit SKIPPED from anything upstream of `checksums` (harmony is skipped on normal releases),
+    # which is exactly how the scoop bump silently vanished from green release runs (issue #243).
+    # `needs.checksums.result == 'success'` keeps the "never point at a partial release" guarantee.
+    if: ${{ !cancelled() && !failure() && needs.checksums.result == 'success' && !inputs.only_android && !inputs.only_macos_desktop }}
     # Do not publish a package-manager pointer until every requested artifact and the
     # aggregate checksum manifest have completed successfully.
     needs: [checksums]
@@ -575,8 +580,8 @@ jobs:
           BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
         run: |
           if [ -z "$BUCKET_TOKEN" ]; then
-            echo "::warning::SCOOP_BUCKET_TOKEN not set — scoop bucket NOT bumped. Update heypandax/scoop-bucket by hand (bucket/cc-pocket-daemon.json: version/url/hash)."
-            exit 0
+            echo "::error::SCOOP_BUCKET_TOKEN not set — scoop bucket NOT bumped, Windows users stay on the previous version. Configure the secret (fine-grained PAT, contents:write on heypandax/scoop-bucket), or update bucket/cc-pocket-daemon.json by hand (version/url/hash) and re-run this job."
+            exit 1
           fi
           VER="${{ inputs.version }}"
           ZIP="cc-pocket-daemon-$VER-windows-x86_64.zip"
