@@ -147,4 +147,39 @@ class AgentFilterTest {
             dirEmptyKind(loaded = false, reportedCount = 0, nothingToShow = true, query = "", agentFiltered = false),
         )
     }
+
+    /**
+     * Issue #260 narrowed which of the three #250 states are REACHABLE without changing any of them.
+     *
+     * Search is now a mode of the Projects screen: the field only exists while it is expanded, and
+     * collapsing it clears the query. So [DirEmptyKind.NO_QUERY_MATCH] is reachable only with the field on
+     * screen — a blank query is the only thing the collapsed screen can ever ask about, which is exactly
+     * the input that routes to the other two states. The classifier is unchanged; this pins the consequence
+     * so nobody "simplifies" the query parameter away on the grounds that the search box moved.
+     */
+    @Test
+    fun collapsing_search_can_only_reach_the_two_states_that_are_not_about_a_query() {
+        // whatever else is true, a cleared query never lands in the text-search state…
+        for (filtered in listOf(true, false)) {
+            for (reported in listOf(0, 4)) {
+                val kind = dirEmptyKind(
+                    loaded = true, reportedCount = reported, nothingToShow = true,
+                    query = "", agentFiltered = filtered,
+                )
+                assertTrue(
+                    kind != DirEmptyKind.NO_QUERY_MATCH,
+                    "a collapsed search cannot blame a query it no longer holds (reported=$reported, filtered=$filtered)",
+                )
+            }
+        }
+        // …and the state it DOES reach still names the real cause
+        assertEquals(
+            DirEmptyKind.AGENT_FILTERED,
+            dirEmptyKind(loaded = true, reportedCount = 4, nothingToShow = true, query = "", agentFiltered = true),
+        )
+        assertEquals(
+            DirEmptyKind.NO_PROJECTS,
+            dirEmptyKind(loaded = true, reportedCount = 0, nothingToShow = true, query = "", agentFiltered = false),
+        )
+    }
 }

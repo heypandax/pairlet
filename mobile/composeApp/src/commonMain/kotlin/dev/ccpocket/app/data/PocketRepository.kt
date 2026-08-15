@@ -4,6 +4,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.ensureLocalNetworkAccess
 import dev.ccpocket.app.epochMillis
@@ -14,6 +15,8 @@ import dev.ccpocket.app.net.RelayAuthException
 import dev.ccpocket.app.net.RelayConnection
 import dev.ccpocket.app.net.RelayControlDial
 import dev.ccpocket.app.net.RelayE2EConnection
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.merge
 import dev.ccpocket.app.pairing.BindingRole
 import dev.ccpocket.app.pairing.IncomingLink
@@ -3499,6 +3502,97 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     val availableAgents: List<AgentKind>
         get() = availableAgentsFromDaemon(daemonSupportedAgents.value)
+
+    // ── "open a session carrying a first prompt" (issues #256 / #260) ────────────────────────────────
+    // There is no protocol frame for it and this deliberately doesn't invent one: the queue is a wait for
+    // the SAME convoId the chat surfaces wait for, followed by the ordinary [sendPrompt] path — so the
+    // prompt passes every gate a typed prompt passes and a daemon of any vintage works unchanged.
+    //
+    // The WAIT lives here, in commonMain, because both shells need exactly it: the desktop empty pane
+    // (#256) and the phone's new-task sheet (#260). Only the wait is shared — each shell keeps its own
+    // orchestration, because "where does the text go when it fails" is a different answer per surface
+    // (the desktop pane re-renders with it; the phone re-opens its sheet with it).
+
+    /** How long a queued first prompt waits for its session to go live. Generous on purpose — a cold agent
+     *  start on a big repo is seconds, and the alternative to waiting is throwing the prompt back at a user
+     *  whose session is about to open anyway. Tests shrink it. */
+    internal var firstPromptTimeoutMs: Long = 30_000L
+
+    /**
+     * Suspend until the session opened after [previousConvo] is live enough to take a prompt.
+     *
+     * @return true = a NEW convoId landed (SessionLive), false = the repo's own open watchdog gave up,
+     *   null = [timeoutMs] elapsed with neither. Callers must treat all three as distinct: only `true`
+     *   may send, and the two failures owe the user their text back.
+     *
+     * [previousConvo] must be captured BEFORE the open: [openSession] nulls convoId from a coroutine that
+     * can suspend on the outgoing CloseSession first, so "convoId is non-null" alone could still be the
+     * PREVIOUS session — and would send this prompt into it.
+     */
+    internal suspend fun awaitOpenedConvo(previousConvo: String?, timeoutMs: Long = firstPromptTimeoutMs): Boolean? =
+        withTimeoutOrNull(timeoutMs) {
+            snapshotFlow {
+                val id = convoId.value
+                when {
+                    id != null && id != previousConvo -> true
+                    openTimedOut.value -> false
+                    else -> null
+                }
+            }.filterNotNull().first()
+        }
+
+    /** Why a queued first prompt didn't become a turn; the text is always still held by the caller. */
+    enum class NewTaskError { OPEN_REFUSED, TIMEOUT, SEND_REFUSED }
+
+    // The phone's new-task sheet state (#260). REPOSITORY-owned, not `remember`ed in the sheet, for two
+    // reasons: a dismissed-and-reopened sheet must show the same draft and the same two chips, and a queue
+    // that fails has to hand the text back to a sheet that no longer exists at the moment it fails. (This
+    // deliberately stays OUT of the composer draft collector — see the #256 note on startSessionWithPrompt:
+    // a queued prompt landing in a live composer races the target session's own draft restore.)
+    val newTaskDraft = mutableStateOf("")
+    /** Chip pick: the project to start in. Null = "not chosen yet", so the sheet prefills from recents. */
+    val newTaskDir = mutableStateOf<String?>(null)
+    /** Chip pick: the backend. Null = "not chosen yet", so the sheet prefills from [sessionDefaultAgent]. */
+    val newTaskAgent = mutableStateOf<AgentKind?>(null)
+    val newTaskError = mutableStateOf<NewTaskError?>(null)
+    /** A first prompt is queued and its session hasn't landed — the sheet is closed and the list waits. */
+    val newTaskStarting = mutableStateOf(false)
+
+    /**
+     * Open a session at [wd] on [agent] and send [prompt] as its first turn (issue #260).
+     *
+     * [onDelivered] runs only when the prompt actually became a turn — that is the phone's cue to route
+     * into the chat. Every failure path instead leaves [newTaskDraft] / the two chip picks exactly as the
+     * user left them and sets [newTaskError], so re-opening the sheet shows the draft and one inline line.
+     *
+     * @return false when nothing was started at all (blank prompt, or one already queued).
+     */
+    fun startTaskWithPrompt(wd: String, prompt: String, agent: AgentKind, onDelivered: () -> Unit = {}): Boolean {
+        if (prompt.isBlank() || newTaskStarting.value) return false
+        newTaskError.value = null
+        newTaskDraft.value = prompt // held until a send actually succeeds; only then is it cleared
+        val previousConvo = convoId.value
+        // A backend this daemon never advertised must be refused BEFORE the sheet closes — openSession
+        // would return false anyway, but saying so while the picks are still on screen is the honest order.
+        if (!supportsAgent(agent) || !openSession(wd, agent = agent)) {
+            newTaskError.value = NewTaskError.OPEN_REFUSED
+            return false
+        }
+        newTaskStarting.value = true
+        scope.launch {
+            val live = awaitOpenedConvo(previousConvo)
+            newTaskStarting.value = false
+            when {
+                live == null -> newTaskError.value = NewTaskError.TIMEOUT
+                !live -> newTaskError.value = NewTaskError.OPEN_REFUSED
+                sendPrompt(prompt) -> { newTaskDraft.value = ""; newTaskError.value = null; onDelivered() }
+                // gated (degraded session / uploads in flight): the session IS open, but the text is still
+                // held here rather than silently dropped into a turn that never happened
+                else -> newTaskError.value = NewTaskError.SEND_REFUSED
+            }
+        }
+        return true
+    }
 
     /** App / daemon / newest-release versions (issue #200), refreshed from every [DaemonInfo]. Starts as
      *  "only our own version known"; a daemon too old to report leaves the other fields null, which reads

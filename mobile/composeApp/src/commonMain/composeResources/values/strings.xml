@@ -1730,4 +1730,28 @@
     <string name="cfm_reach_body_local">Anything reachable from that directory, including files outside it that a command can touch.</string>
     <string name="cfm_note">You will not be asked again during this session. Change it by starting a new session in another mode.</string>
     <string name="cfm_cta">Start full access</string>
+
+    <!-- new-task composer (issue #260) — the Projects FAB and the sheet it opens -->
+    <string name="new_task">New task</string>
+    <string name="new_task_placeholder">What should the agent do?</string>
+    <string name="new_task_send">Send</string>
+    <string name="new_task_close">Close</string>
+    <string name="new_task_project">Project</string>
+    <string name="new_task_agent">Agent</string>
+    <string name="new_task_pick_project">Choose a project</string>
+    <string name="new_task_pick_agent">Choose an agent</string>
+    <string name="new_task_recent">Recent</string>
+    <string name="new_task_all_projects">All projects</string>
+    <string name="new_task_search_projects">Search all projects</string>
+    <string name="new_task_browse_other">Browse other folders…</string>
+    <string name="new_task_agent_unavailable">Unavailable</string>
+    <string name="new_task_opening">Opening the session…</string>
+    <string name="new_task_no_projects">Choose a project first — this computer hasn\'t reported one yet.</string>
+    <string name="new_task_timeout">The session never opened. Your prompt is still here.</string>
+    <string name="new_task_send_failed">The session opened but wouldn\'t take the prompt. It is still here.</string>
+    <string name="new_task_failed">Couldn\'t start the task. Your prompt is still here.</string>
+    <string name="chat_start_defaults_note">Mode and model follow your defaults</string>
+    <string name="proj_search">Search projects</string>
+    <string name="proj_search_cancel">Cancel</string>
+    <string name="proj_view_mode">List style</string>
 </resources>

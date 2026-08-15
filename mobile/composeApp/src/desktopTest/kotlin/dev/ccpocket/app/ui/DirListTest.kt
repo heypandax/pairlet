@@ -105,4 +105,30 @@ class DirListTest {
         assertEquals(false, filtered.executing)
         assertEquals(true, filtered.busy)
     }
+
+    // ── search as a mode of the Projects screen (issue #260) ─────────────────────────────────────────
+
+    /**
+     * Collapsing the search field CLEARS the query. This is the invariant that keeps the #250 empty states
+     * honest: a collapsed field holding a live term would filter the list from a control that is not on
+     * screen, and would be the one way to reach «no project matches "…"» with no search to explain it.
+     */
+    @Test
+    fun collapsing_the_search_field_always_clears_the_query() {
+        val typed = ProjectSearch().expanded().typed("relay")
+        assertEquals(true, typed.open)
+        assertEquals("relay", typed.query)
+
+        val collapsed = typed.collapsed()
+        assertEquals(false, collapsed.open)
+        assertEquals("", collapsed.query, "a closed field never keeps a term the user cannot see")
+
+        // …and re-opening starts clean rather than restoring the last search
+        assertEquals("", collapsed.expanded().query)
+    }
+
+    @Test
+    fun the_collapsed_default_is_closed_and_empty() {
+        assertEquals(ProjectSearch(open = false, query = ""), ProjectSearch())
+    }
 }

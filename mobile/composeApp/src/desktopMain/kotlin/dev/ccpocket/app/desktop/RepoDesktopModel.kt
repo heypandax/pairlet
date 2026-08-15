@@ -894,7 +894,7 @@ class RepoDesktopModel(
      * saved away under the previous key on the very next flip. Staying out of it keeps a restored draft (#88)
      * untouched by construction, in the success case as much as the failure one.
      */
-    override fun startSessionWithPrompt(dir: String, prompt: String) {
+    override fun startSessionWithPrompt(dir: String, prompt: String, agent: AgentKind) {
         if (prompt.isBlank() || startingSession) return
         newSessionPromptError = null
         newSessionPrompt = prompt // keep it visible through the open; cleared only once it is actually sent
@@ -903,7 +903,7 @@ class RepoDesktopModel(
         // and would send this prompt into it. (The empty state can only be on screen with no conversation,
         // so this is belt-and-braces — but it is what makes the wait safe for any future caller.)
         val previousConvo = repo.convoId.value
-        if (!startSession(dir, defaultAgent, defaultMode, defaultPermissionMode, defaultModelFor(defaultAgent))) {
+        if (!startSession(dir, agent, defaultMode, defaultPermissionMode, defaultModelFor(agent))) {
             newSessionPromptError = NewSessionPromptError.OPEN_REFUSED
             return
         }
@@ -912,17 +912,9 @@ class RepoDesktopModel(
             // Both outcomes come off the same repo state the pane renders: convoId non-null = SessionLive
             // landed, openTimedOut = the repo's own 8s net already gave up. Waiting on anything else (a
             // fixed delay, `opening` alone) would either fire before the session can take a prompt or hang
-            // past the point the repo has already declared failure.
-            val live = withTimeoutOrNull(firstPromptTimeoutMs) {
-                snapshotFlow {
-                    val id = repo.convoId.value
-                    when {
-                        id != null && id != previousConvo -> true
-                        repo.openTimedOut.value -> false
-                        else -> null
-                    }
-                }.filterNotNull().first()
-            }
+            // past the point the repo has already declared failure. The wait itself moved to the repository
+            // with issue #260, so the phone's new-task sheet queues against exactly this logic.
+            val live = repo.awaitOpenedConvo(previousConvo, firstPromptTimeoutMs)
             startingSession = false
             when {
                 live == null -> newSessionPromptError = NewSessionPromptError.TIMEOUT

@@ -175,6 +175,43 @@ internal fun filterDirectoriesByAgent(dirs: List<DirectoryEntry>, filter: Set<Ag
 }
 
 /**
+ * The Projects screen's search MODE (issue #260) — the always-on filter field became an icon that expands
+ * in the title row, and this is the rule that makes that safe.
+ *
+ * The whole state is (is the field on screen, what does it hold), and it moves only through the three
+ * transitions below. [collapsed] clears the query BY CONSTRUCTION rather than by a caller remembering to:
+ * a collapsed field with a live query would filter the list from a control nobody can see — and would also
+ * be the one way to reach the text-search empty state (#250) without a search on screen to explain it.
+ */
+internal data class ProjectSearch(val open: Boolean = false, val query: String = "") {
+    fun expanded(): ProjectSearch = copy(open = true)
+    fun collapsed(): ProjectSearch = ProjectSearch(open = false, query = "")
+    fun typed(text: String): ProjectSearch = copy(query = text)
+}
+
+/**
+ * The "recently used" projects the new-task sheet prefills and lists (issue #260).
+ *
+ * There is no recent-PROJECTS store on the phone — the desktop's RECENT zone is a shell-local visit list and
+ * the repo's MRU is session-scoped — so recency is DERIVED from what the daemon already reports per project:
+ * [DirectoryEntry.recent] (the daemon's own recents flag) or any resumable history, ordered live-first and
+ * then by [DirectoryEntry.lastModified], the newest-transcript mtime the flat list is already sorted on.
+ *
+ * Live-first because a project with a session running right now is the one "recent" that is not a guess; the
+ * mtime ordering below it is the same signal the Projects list itself uses, so the sheet's top row and the
+ * list's top row agree by construction. Bare shared roots with no history are excluded: the sheet is a
+ * shortcut to work already under way, and "浏览其他文件夹…" is how anything else gets picked.
+ */
+internal fun recentProjects(dirs: List<DirectoryEntry>, limit: Int = 5): List<DirectoryEntry> =
+    dirs.filter { it.recent || it.hasSessions || it.open || it.busy }
+        .sortedWith(
+            compareByDescending<DirectoryEntry> { it.open || it.busy }
+                .thenByDescending { it.lastModified }
+                .thenBy { it.name },
+        )
+        .take(limit)
+
+/**
  * Which empty state the Projects list owes the user (issue #250) — computed here so the three cases can be
  * asserted without a screen.
  *
