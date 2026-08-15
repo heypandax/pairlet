@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.zcode
 
 import dev.ccpocket.daemon.disk.ProjectPaths
+import dev.ccpocket.daemon.disk.TranscriptNoise
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.SessionSummary
 import kotlinx.serialization.json.Json
@@ -79,8 +80,12 @@ object ZCodeTranscriptScanner {
         return null
     }
 
+    /** Text parts of [role]'s messages, oldest first. User rows are screened through the shared noise
+     *  judgement so a harness injection (system-reminder / task-notification) never becomes the list
+     *  preview — the same filter the replay applies (issue #253). */
     internal fun messageParts(conn: Connection, sid: String, role: String): List<String> {
         val out = mutableListOf<String>()
+        val user = role == "user"
         conn.prepareStatement("SELECT m.id,m.data FROM message m WHERE m.session_id=? ORDER BY m.sequence,m.time_created").use { ms ->
             ms.setString(1, sid)
             ms.executeQuery().use { mr -> while (mr.next()) {
@@ -89,7 +94,9 @@ object ZCodeTranscriptScanner {
                     ps.setString(1, sid); ps.setString(2, mr.getString("id"))
                     ps.executeQuery().use { pr -> while (pr.next()) {
                         val p = parse(pr.getString(1)) ?: continue
-                        if (p.str("type") == "text") p.str("text")?.let(out::add)
+                        if (p.str("type") == "text") p.str("text")
+                            ?.takeUnless { user && TranscriptNoise.isNoiseUserText(it) }
+                            ?.let(out::add)
                     } }
                 }
             } }

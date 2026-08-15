@@ -65,6 +65,35 @@ class TranscriptReplayTest {
     }
 
     @Test
+    fun pure_system_reminder_user_rows_never_replay_as_user_input() {
+        // issue #253: a user row whose whole text is a CLI `<system-reminder>` (TodoWrite nudge, skill
+        // listing …) was rendered under the "你" header. The leaking shapes: a plain-string content, and
+        // a content array pairing a tool_result with the reminder text block (that array is not "all
+        // tool_result", so isRealUserTurn lets it through and the text block became the bubble).
+        val f = tmpFile("reminder.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"跑一下测试"}}""",
+                """{"type":"user","message":{"role":"user","content":"<system-reminder>\nYour todo list has changed. DO NOT mention this explicitly.\n</system-reminder>"}}""",
+                """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"},{"type":"text","text":"<system-reminder>\nPlan mode is active.\n</system-reminder>"}]}}""",
+                """{"type":"assistant","message":{"content":[{"type":"text","text":"全绿"}]}}""",
+                // a reminder PREPENDED to real input keeps the turn — genuine text is never eaten
+                """{"type":"user","message":{"role":"user","content":"<system-reminder>\nnudge\n</system-reminder>\n顺手提交一下"}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(3, msgs.size) // the ask, the reply, and the prepended real turn
+        assertEquals("跑一下测试", msgs[0].text)
+        assertEquals(ChatRole.ASSISTANT, msgs[1].role)
+        assertEquals(ChatRole.USER, msgs[2].role)
+        assertTrue(msgs[2].text.contains("顺手提交一下"))
+        assertTrue(msgs.none { it.role == ChatRole.USER && it.text.contains("todo list has changed") })
+        assertTrue(msgs.none { it.role == ChatRole.USER && it.text.contains("Plan mode is active") })
+    }
+
+    @Test
     fun skill_injection_without_isMeta_is_still_dropped_by_fingerprint() {
         // an older CLI (or a variant) may omit isMeta — the "Base directory for this skill:" opening is
         // the fallback fingerprint; slash-command wrapper records are filtered the same way (issue #126)

@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.zcode
 
 import dev.ccpocket.daemon.disk.ReplayBudget
+import dev.ccpocket.daemon.disk.TranscriptNoise
 import dev.ccpocket.daemon.opencode.ToolNameMapper
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
@@ -25,7 +26,15 @@ object ZCodeTranscriptReplay {
                 val msg = parse(mr.getString("data")) ?: continue
                 val role = when (msg.str("role")) { "user" -> ChatRole.USER; "assistant" -> ChatRole.ASSISTANT; else -> continue }
                 val text = StringBuilder()
-                fun flush() { if (text.isNotBlank()) out += HistoryMessage(role, text.toString()); text.setLength(0) }
+                // harness injections (system-reminder / task-notification blocks, the resume nudge)
+                // are plumbing, not the user talking — same judgement the claude replay uses (#253)
+                fun flush() {
+                    val body = text.toString()
+                    text.setLength(0)
+                    if (body.isBlank()) return
+                    if (role == ChatRole.USER && TranscriptNoise.isNoiseUserText(body)) return
+                    out += HistoryMessage(role, body)
+                }
                 conn.prepareStatement("SELECT data FROM part WHERE session_id=? AND message_id=? ORDER BY sequence,time_created,id").use { ps ->
                     ps.setString(1, sid); ps.setString(2, mr.getString("id"))
                     ps.executeQuery().use { pr -> while (pr.next()) {
