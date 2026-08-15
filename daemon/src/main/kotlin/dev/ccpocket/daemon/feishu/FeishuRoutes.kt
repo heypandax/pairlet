@@ -94,6 +94,11 @@ internal fun writeOwnerOnly(path: File, text: String) {
 sealed interface ChatAction {
     /** Reply [text] to the message (a /command's answer, or a refusal). */
     data class Reply(val text: String) : ChatAction
+    /** Reply an INTERACTIVE card ([json] is a Feishu message-card payload) — the `/menu` control panel.
+     *  [fallbackText] is posted as plain text instead when the card can't be delivered, so the command
+     *  still answers on a tenant that blocks interactive messages. Clicking a button posts the button's
+     *  command back through [FeishuCommands.handle]; the card grants nothing by existing. */
+    data class Card(val json: String, val fallbackText: String) : ChatAction
     /** Run [prompt] as a turn in [workdir] and reply with the final text. Non-null [note] is replied
      *  IMMEDIATELY, before the turn runs — feedback for a side effect (an auto-bind) that must not wait
      *  the minutes a turn can take. A NON-bridge slash command ("/clear", "/compact", "/skill-name") is
@@ -178,6 +183,11 @@ class FeishuCommands(
         // command and skill report "unknown command".
         return when (cmd) {
             "help", "?" -> ChatAction.Reply(HELP)
+            // /menu (#247): the same three quick actions the hand-configured bottom menu offers
+            // (docs/FEISHU-BOT-MENU.md), as a card that needs no developer-console setup. Deliberately NOT
+            // gated on a binding and NOT special-cased per chat type — like /help it only shows buttons,
+            // and each button's command faces exactly the checks it faces when typed.
+            "menu" -> ChatAction.Card(FeishuCards.menuCard(), FeishuCards.MENU_FALLBACK)
             "projects" -> ChatAction.Reply(projectsText())
             "new", "reset" -> {
                 if (!routes.isBound(chatId) && !isDirect) ChatAction.Reply("本群还没有绑定项目。\n\n$HELP")
@@ -345,6 +355,7 @@ class FeishuCommands(
         val HELP = """
             用法：
               @机器人 <你的需求>      在本群绑定的项目下干活
+              @机器人 /menu           快捷操作卡片（新会话 / 项目列表 / 状态）
               @机器人 /projects       列出可绑定的项目
               @机器人 /bind <项目>    把本群绑到某个项目（仅管理员）
               @机器人 /bind auto      自动路由：按消息内容选择项目，话题内延续（仅管理员）

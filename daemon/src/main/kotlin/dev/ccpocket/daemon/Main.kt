@@ -165,7 +165,12 @@ private class RunCmd : CliktCommand(name = "run") {
     ).default("127.0.0.1")
     private val pairPort by option("--pair-port", help = "loopback port for the `pair` command").int().default(8799)
     private val takeover by option("--takeover", help = "if another cc-pocket daemon is already running, stop it and run this one instead (default: exit and leave it running)").flag()
-    private val autoUpdate by option("--auto-update", help = "apply daemon updates automatically (installer-managed macOS/Linux installs; others get a notification)").flag()
+    private val autoUpdate by option(
+        "--auto-update",
+        help = "force automatic daemon updates on — already the default for installer-managed macOS/Linux " +
+            "installs (Homebrew/Scoop/dev builds and Windows always just get a notification). " +
+            "Opt out with `cc-pocket-daemon config --auto-update off`",
+    ).flag()
 
     override fun run() {
         // Both agent CLIs are optional individually (issue #130): probe each for the banner, but resolve
@@ -275,9 +280,14 @@ private class RunCmd : CliktCommand(name = "run") {
             // duplicate that fights it on the relay; exit cleanly (or --takeover to replace it).
             SingleInstance.ensureSolo(pairPort, takeover) { echo(it) }
             PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort, core).start()
-            // daily new-version check: log + one phone push per version; --auto-update (or the env
-            // toggle, so the flag survives service reinstalls) hot-swaps installer-managed installs
-            val auto = autoUpdate || System.getenv("CC_POCKET_AUTO_UPDATE") == "1"
+            // daily new-version check: log + one phone push per version, and — for installer-managed
+            // installs — a hot-swap to the new version. On by default (issue #244); --auto-update / the
+            // env toggle / `config --auto-update off` override, see UpdateChecker.resolveAutoApply.
+            val auto = dev.ccpocket.daemon.update.UpdateChecker.resolveAutoApply(
+                flag = autoUpdate,
+                env = System.getenv("CC_POCKET_AUTO_UPDATE"),
+                pref = prefs.autoUpdate,
+            )
             dev.ccpocket.daemon.update.UpdateChecker.start(relayClient, auto)
             Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
             runBlocking { relayClient.run() }
@@ -751,6 +761,13 @@ private class ConfigCmd : CliktCommand(name = "config") {
             "from the app afterwards (macOS — file-based credentials elsewhere migrate automatically).",
     )
 
+    private val autoUpdate by option(
+        "--auto-update",
+        help = "on|off — apply new daemon versions automatically (issue #244). ON by default for " +
+            "installer-managed installs; turn it off to pick your own upgrade moment. Homebrew/Scoop/dev " +
+            "builds and Windows never auto-apply regardless. Takes effect on daemon restart.",
+    )
+
     override fun run() {
         val prefs = DaemonPrefs.load()
         when (isolatedClaudeAuth?.lowercase()) {
@@ -759,8 +776,21 @@ private class ConfigCmd : CliktCommand(name = "config") {
             "off", "false", "0" -> prefs.setIsolatedClaudeAuth(false)
             else -> throw com.github.ajalt.clikt.core.CliktError("--isolated-claude-auth takes on|off")
         }
+        when (autoUpdate?.lowercase()) {
+            null -> {}
+            "on", "true", "1" -> prefs.setAutoUpdate(true)
+            "off", "false", "0" -> prefs.setAutoUpdate(false)
+            "default", "unset" -> prefs.setAutoUpdate(null)
+            else -> throw com.github.ajalt.clikt.core.CliktError("--auto-update takes on|off")
+        }
         echo("isolated-claude-auth: ${if (prefs.isolatedClaudeAuth) "on" else "off"}")
-        if (isolatedClaudeAuth != null) {
+        val autoEffective = dev.ccpocket.daemon.update.UpdateChecker.resolveAutoApply(
+            flag = false, // the `run` flag isn't in scope here; show what a plain `run` would resolve to
+            env = System.getenv("CC_POCKET_AUTO_UPDATE"),
+            pref = prefs.autoUpdate,
+        )
+        echo("auto-update: ${if (autoEffective) "on" else "off"}${if (prefs.autoUpdate == null) " (default)" else ""}")
+        if (isolatedClaudeAuth != null || autoUpdate != null) {
             echo("restart the daemon for this to take effect — e.g.:")
             echo("  ${daemonStartHint().substringAfter("start it:  ")}")
         }

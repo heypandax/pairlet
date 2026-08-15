@@ -21,7 +21,7 @@ import kotlin.io.path.bufferedReader
 import kotlin.io.path.isDirectory
 
 /**
- * Aggregates token usage from BOTH agents' on-disk records (issue #26):
+ * Aggregates token usage from EVERY backend's on-disk records (issue #26, extended by #217 and #258):
  *  - Claude transcripts under ~/.claude/projects — the same files ccusage reads. Per assistant turn it sums
  *    `message.usage` (input + output + cache) and reads the transcript's OWN `costUSD` (no fragile price
  *    table). Turns are deduped by `message.id` + `requestId` so a turn duplicated across resumed/forked
@@ -29,20 +29,32 @@ import kotlin.io.path.isDirectory
  *  - Codex rollouts under ~/.codex/sessions — `event_msg`/`token_count` records carry the turn's delta
  *    (`last_token_usage`) with a timestamp, and `turn_context` carries the model. Codex stamps no cost, so
  *    `costUsdToday`/`costUsdWindow` stay Claude-only.
+ *  - OpenCode turns from its SQLite store (issue #217).
+ *  - ZCode requests from `~/.zcode/cli/db/db.sqlite`'s `model_usage` table and Kimi Code `usage.record`
+ *    lines from each session's `agents/main/wire.jsonl` (issue #258). Neither backend records a cost.
+ *
+ * [aggregate] can be scoped to ONE backend ([AgentKind] filter, issue #258); the default null keeps the
+ * all-backends total. A filtered run doesn't even touch the other backends' disks.
  */
 object UsageService {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val zone: ZoneId = ZoneId.systemDefault()
 
     /** [projectsRoot]/[codexFiles] default to the real on-disk roots; tests inject temp ones.
-     *  [openCodeTurns] reads assistant token spend from the OpenCode DB since a cutoff (issue #217) —
-     *  a function seam so tests can feed a fixture without a real db. */
+     *  [openCodeTurns]/[zcodeTurns]/[kimiRecords] read token spend from each backend's own store since a
+     *  cutoff (issues #217, #258) — function seams so tests can feed fixtures without a real db/home.
+     *  [agent] non-null narrows the whole aggregation to that backend. */
     fun aggregate(
         days: Int,
         projectsRoot: Path = ProjectPaths.projectsRoot(),
         codexFiles: List<Path> = runCatching { dev.ccpocket.daemon.codex.CodexPaths.sessionFiles() }.getOrDefault(emptyList()),
         openCodeTurns: (sinceEpochMs: Long) -> List<dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.UsageTurn> =
             { since -> runCatching { dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.usageTurns(since) }.getOrDefault(emptyList()) },
+        zcodeTurns: (sinceEpochMs: Long) -> List<dev.ccpocket.daemon.zcode.ZCodeTranscriptScanner.UsageTurn> =
+            { since -> runCatching { dev.ccpocket.daemon.zcode.ZCodeTranscriptScanner.usageTurns(since) }.getOrDefault(emptyList()) },
+        kimiRecords: (sinceEpochMs: Long) -> List<dev.ccpocket.daemon.kimi.KimiUsageScanner.UsageRecord> =
+            { since -> runCatching { dev.ccpocket.daemon.kimi.KimiUsageScanner.usageRecords(since) }.getOrDefault(emptyList()) },
+        agent: AgentKind? = null,
     ): Usage {
         val span = days.coerceIn(1, 90)
         val today = LocalDate.now(zone)
@@ -75,7 +87,35 @@ object UsageService {
         var costWindow = 0.0
         var costWindowSeen = false
 
-        if (projectsRoot.isDirectory()) Files.newDirectoryStream(projectsRoot).use { dirs ->
+        // issue #258: one shared accumulator for the "turn already parsed into columns" backends, so a new
+        // one costs a call, not another copy of the bucketing rules. [dedupKey] is skipped when blank.
+        fun add(
+            dedupKey: String, whenEpochMs: Long, model: String, kind: AgentKind,
+            input: Long, output: Long, cacheCreation: Long, cacheRead: Long,
+        ) {
+            val total = input + output + cacheCreation + cacheRead
+            if (total <= 0L) return
+            if (dedupKey.isNotBlank() && !seen.add("${kind.name}:$dedupKey")) return
+            val when_ = Instant.ofEpochMilli(whenEpochMs).atZone(zone)
+            val date = when_.toLocalDate()
+            if (date.isBefore(prevStart)) return
+            if (date.isBefore(start)) { prevWindowTokens += total; return } // prev-window turn: baseline only
+            perDay[date] = (perDay[date] ?: 0) + total
+            perModel[model] = (perModel[model] ?: 0) + total
+            modelAgent[model] = kind
+            requestsWindow++
+            inputWindow += input
+            cacheReadWindow += cacheRead
+            if (date == today) {
+                perHour[when_.hour] += total
+                tokensToday += total
+                requestsToday++
+                inputToday += input
+                cacheReadToday += cacheRead
+            }
+        }
+
+        if (projectsRoot.isDirectory() && (agent == null || agent == AgentKind.CLAUDE)) Files.newDirectoryStream(projectsRoot).use { dirs ->
             for (dir in dirs) {
                 if (!dir.isDirectory()) continue
                 val files = runCatching { Files.newDirectoryStream(dir, "*.jsonl").use { it.toList() } }.getOrNull() ?: continue
@@ -124,7 +164,7 @@ object UsageService {
         // dead path before this). Dedup by timestamp+total — a resumed thread's rollout can carry
         // copied history. OpenAI counts cached ⊂ input, Claude splits them; normalize to Claude's
         // split so the shared cache-hit formula (cacheRead / (input + cacheRead)) stays correct.
-        for (file in codexFiles) runCatching {
+        for (file in if (agent == null || agent == AgentKind.CODEX) codexFiles else emptyList()) runCatching {
             val mtime = runCatching { Files.getLastModifiedTime(file).toMillis() }.getOrNull() ?: return@runCatching
             if (Instant.ofEpochMilli(mtime).atZone(zone).toLocalDate().isBefore(prevStart)) return@runCatching // whole file predates both windows
             var model = "codex"
@@ -175,7 +215,7 @@ object UsageService {
         // (like Claude), so the shared cache-hit formula stays correct. OpenCode stamps cost per model
         // in its own tables, but we don't price here — token counts only, per the issue's scope.
         val prevStartEpochMs = prevStart.atStartOfDay(zone).toInstant().toEpochMilli()
-        for (turn in openCodeTurns(prevStartEpochMs)) {
+        for (turn in if (agent == null || agent == AgentKind.OPENCODE) openCodeTurns(prevStartEpochMs) else emptyList()) {
             val total = turn.input + turn.output + turn.cacheRead
             if (total <= 0L) continue
             if (turn.id.isNotBlank() && !seen.add("oc:${turn.id}")) continue
@@ -196,6 +236,20 @@ object UsageService {
                 inputToday += turn.input
                 cacheReadToday += turn.cacheRead
             }
+        }
+
+        // ── ZCode requests: one row per model call from `model_usage` (issue #258). Its four token columns
+        // are disjoint (ZCode's own computed_total is their sum), so cache read stays split out of input
+        // exactly like Claude/OpenCode. Dedup rides `model_usage.id`, the table's primary key.
+        if (agent == null || agent == AgentKind.ZCODE) for (t in zcodeTurns(prevStartEpochMs)) {
+            add(t.id, t.whenEpochMs, t.model, AgentKind.ZCODE, t.input, t.output, t.cacheCreation, t.cacheRead)
+        }
+
+        // ── Kimi Code records: `usage.record` lines off each session's wire.jsonl (issue #258). Only the
+        // `usage.output` spelling is probe-confirmed, so KimiUsageScanner parses defensively and a shape
+        // mismatch simply yields no records — Kimi then contributes nothing rather than wrong numbers.
+        if (agent == null || agent == AgentKind.KIMI) for (r in kimiRecords(prevStartEpochMs)) {
+            add(r.id, r.whenEpochMs, r.model, AgentKind.KIMI, r.input, r.output, r.cacheCreation, r.cacheRead)
         }
 
         val trend = (0 until span).map { i ->

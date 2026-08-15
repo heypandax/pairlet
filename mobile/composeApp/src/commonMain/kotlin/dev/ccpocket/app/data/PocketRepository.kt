@@ -319,13 +319,20 @@ sealed interface ChatItem {
      *  when that ack lands — the explicit "the computer has it" marker (issue #66). */
     data class User(
         val text: String,
+        /** Decoded attachment bytes. Filled on send from this device, and — since issue #254 — also
+         *  from a replayed transcript, so a prompt typed AT THE COMPUTER shows its images here too
+         *  (before, every replayed user row was text-only and an image-only prompt read as blank). */
         val images: List<ByteArray> = emptyList(),
         val pending: Boolean = false,
         val promptId: String? = null,
         val delivered: Boolean = false,
         /** Files uploaded to the session's workspace inbox and referenced by this turn (issue #90) —
-         *  rendered as file chips with their `@` landing path. Client-side only, like [images]. */
+         *  rendered as file chips with their `@` landing path. Client-side only (unlike [images],
+         *  the transcript has no record of them). */
         val files: List<SentFile> = emptyList(),
+        /** The replay budget shed some of this turn's images to keep the history frame under the relay
+         *  cap (issue #254) — the renderers say so in place instead of showing fewer tiles silently. */
+        val imagesTruncated: Boolean = false,
     ) : ChatItem
     data class Assistant(val text: String) : ChatItem
 
@@ -670,9 +677,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.getString(K_DEFAULT_AGENT)?.let { s -> AgentKind.entries.firstOrNull { it.name == s } } ?: AgentKind.CLAUDE,
     )
 
-    /** Project + session agent filter: "both" | "claude" | "codex" | "opencode" (persisted). Session rows
-     *  were covered by #31; project rows consume DirectoryEntry.sessionAgents as of issue #188. */
-    val agentFilter = mutableStateOf(SecureStore.getString(K_AGENT_FILTER)?.takeIf { it.isNotEmpty() } ?: "both")
+    /** Project + session agent filter: the SET of backends whose rows are shown; the full set = no filter
+     *  (persisted, migrating the pre-#248 single value — see [parseAgentFilter]). Session rows were covered
+     *  by #31; project rows consume DirectoryEntry.sessionAgents as of issue #188. */
+    val agentFilter = mutableStateOf(parseAgentFilter(SecureStore.getString(K_AGENT_FILTER)))
 
     /** Projects screen: tree (drill-down) vs flat. Persisted (default tree). */
     val treeView = mutableStateOf(SecureStore.getString(K_VIEW_MODE) != "flat")
@@ -1800,12 +1808,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.putString(K_DEFAULT_AGENT, a.name)
     }
 
-    /** Settings: persist the project/session agent filter ("both" | "claude" | "codex" | "opencode"). */
-    fun setAgentFilter(v: String) {
+    /** Settings: persist the project/session agent filter (the set of backends to show; #248). */
+    fun setAgentFilter(selected: Set<AgentKind>) {
+        val v = if (selected.isEmpty()) ALL_AGENTS else selected.toSet() // empty would hide everything with no way back
         if (v == agentFilter.value) return
         agentFilter.value = v
-        SecureStore.putString(K_AGENT_FILTER, v)
+        SecureStore.putString(K_AGENT_FILTER, encodeAgentFilter(v))
     }
+
+    /** Back to "show every agent" — the one call the removable chip and the Projects empty state share. */
+    fun clearAgentFilter() = setAgentFilter(ALL_AGENTS)
 
     /** Settings: persist the chat text scale (clamped to the slider range). Applies live to every message. */
     fun setFontScale(scale: Float) {
@@ -2137,6 +2149,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         gatewayBaseUrl.value = null // per-daemon truth (issue #139): the next machine re-announces via DaemonInfo
         bridgeControl.value = null  // per-daemon truth too — the next daemon re-advertises via DaemonInfo (issue #91)
         daemonSupportedAgents.value = emptySet() // reverse agent capability: no stale ZCode across machines
+        daemonUsageAgentFilter.value = false // ditto (issue #258): the next machine re-advertises its own
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
@@ -2385,6 +2398,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // Demo has no handshake, so explicitly emulate a current daemon rather than inheriting the
         // disconnected socket's deny-by-default capability state.
         daemonSupportedAgents.value = DAEMON_SUPPORTED_AGENT_WIRES.toSet()
+        daemonUsageAgentFilter.value = true // a current daemon honors the usage filter (issue #258)
         demoAsked = false
         sessionActive.value = true
         replace(slashCommands, DemoData.commands())
@@ -2498,8 +2512,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             val preview = isPreviewMode()
             val cmd = if (preview) DemoData.PREVIEW_ASK_PREVIEW else DemoData.ASK_PREVIEW
             val rule = if (preview) DemoData.PREVIEW_ASK_RULE else DemoData.ASK_RULE
-            val title = if (preview) getString(Res.string.preview_cmd_title) else DemoData.ASK_TITLE
-            val note = if (preview) getString(Res.string.preview_cmd_note) else null
+            // #251: same containment as daemonTooOldText() — a demo/App-Review script must never be
+            // the thing that kills the process it is demonstrating.
+            val title = if (preview) safeString("Run command") { getString(Res.string.preview_cmd_title) } else DemoData.ASK_TITLE
+            val note = if (preview) safeString("delete files") { getString(Res.string.preview_cmd_note) } else null
             delay(500)
             handle(AssistantChunk(convoId, demoSeq++, StreamPiece.Thinking(DemoData.THINKING)))
             delay(700)
@@ -2704,6 +2720,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 gatewayBaseUrl.value = f.gatewayBaseUrl
                 bridgeControl.value = f.bridgeControl // capability advertisement (issue #91): false = daemon too old
                 daemonSupportedAgents.value = f.supportedAgents.toSet()
+                daemonUsageAgentFilter.value = f.supportsUsageAgentFilter // issue #258: false = daemon ignores the filter
                 // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
                 // the fields — "unknown" must not be shown as the previous machine's numbers
                 versionStatus.value = VersionStatus(
@@ -3289,8 +3306,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
+    @OptIn(ExperimentalEncodingApi::class)
     private fun historyItem(h: HistoryMessage): ChatItem = when (h.role) {
-        ChatRole.USER -> ChatItem.User(h.text)
+        // images the prompt carried replay as real tiles (issue #254) — a turn composed at the computer
+        // is no longer text-only here, and an image-ONLY turn is no longer a blank bubble. A base64 blob
+        // the platform can't decode is dropped rather than rendered as a broken tile; the renderer's own
+        // decode-failure card covers bytes that only fail later (on the image decoder).
+        ChatRole.USER -> ChatItem.User(
+            h.text,
+            images = h.images.mapNotNull { runCatching { Base64.Default.decode(it.base64) }.getOrNull() },
+            imagesTruncated = h.imagesTruncated,
+        )
         // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65).
         // Attribution follows the placeholder text so the replay reads the same as the daemon live prompt:
         // an upstream gateway/5xx signal stops blaming context (issue #208).
@@ -3458,6 +3484,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      * use it as a hard gate; see [agentAvailableFromDaemon]. */
     val daemonSupportedAgents = mutableStateOf<Set<String>>(emptySet())
 
+    /** Whether the connected daemon honors [FetchUsage.agent] (issue #258). Deliberately NOT inferred from
+     * [daemonSupportedAgents]: that advertisement shipped a release EARLIER, so a v1.7.7 daemon advertises
+     * every agent while silently ignoring the filter — the usage page would then label a full-machine total
+     * as one agent's. False (the pre-handshake and old-daemon value) hides the filter row entirely. */
+    val daemonUsageAgentFilter = mutableStateOf(false)
+
     fun supportsAgent(agent: AgentKind): Boolean = agentAvailableFromDaemon(agent, daemonSupportedAgents.value)
 
     /** Persisted ZCode remains the user's preference across machine switches, but an older daemon gets a
@@ -3579,10 +3611,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val usage = mutableStateOf<Usage?>(null)
     val usageLoading = mutableStateOf(false)
 
-    /** Ask the daemon to aggregate usage over the last [days] local days; the reply lands in [usage]. */
-    fun fetchUsage(days: Int = 7) {
+    /** Ask the daemon to aggregate usage over the last [days] local days; the reply lands in [usage].
+     *  [agent] non-null narrows it to one backend (issue #258); null is the all-backends total. */
+    fun fetchUsage(days: Int = 7, agent: AgentKind? = null) {
         usageLoading.value = true
-        scope.launch { send(FetchUsage(days)) }
+        scope.launch { send(FetchUsage(days, agent)) }
     }
 
     // ── installed skills/plugins catalog (issue #132): the desktop browse page ──
@@ -3971,6 +4004,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         else -> Res.string.ho_accept_taken
     }
 
+    /**
+     * The "update the daemon" copy every handoff / collaborator / review timeout below reaches for.
+     *
+     * Issue #251: these all run inside a detached `scope.launch { delay(8000); … }`, where a throwing
+     * resource lookup has no handler and takes the desktop window down with an unnamed native error
+     * box. Losing a translation on an error path is a cosmetic regression; losing the app is not — so
+     * the lookup is contained and falls back to the English literal, tagged with a reportable code.
+     * Keep the literal in sync with `ho_daemon_too_old` in strings.xml.
+     */
+    private suspend fun daemonTooOldText(): String =
+        safeString(DAEMON_TOO_OLD_FALLBACK) { getString(Res.string.ho_daemon_too_old) }
+
     /** Owner: create a Handoff on the open session (v1: REVIEW read-only). [recipientDeviceId] non-null
      *  binds the Grant to that collaborator's device — only it may accept, and the daemon delivers the
      *  offer over the existing link (no invite artefact). The daemon replies with [HandoffCreated]; an
@@ -3997,7 +4042,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(8000)
             if (handoffCreating.value) {
                 handoffCreating.value = false
-                handoffError.value = getString(Res.string.ho_daemon_too_old)
+                handoffError.value = daemonTooOldText()
             }
         }
     }
@@ -4026,7 +4071,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             runCatching { send(ListCollaborators) }
             delay(8000)
             if (!collaboratorsLoaded.value && collaboratorError.value == null) {
-                collaboratorError.value = getString(Res.string.ho_daemon_too_old)
+                collaboratorError.value = daemonTooOldText()
             }
         }
     }
@@ -4039,7 +4084,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(8000)
             if (collaboratorTicketCreating.value) {
                 collaboratorTicketCreating.value = false
-                collaboratorError.value = getString(Res.string.ho_daemon_too_old)
+                collaboratorError.value = daemonTooOldText()
             }
         }
     }
@@ -4200,7 +4245,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(REVIEW_REPLY_TIMEOUT_MS)
             if (reviewInviteCreating.value) {
                 reviewInviteCreating.value = false
-                reviewError.value = getString(Res.string.ho_daemon_too_old)
+                reviewError.value = daemonTooOldText()
             }
         }
     }
@@ -4217,7 +4262,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(REVIEW_REPLY_TIMEOUT_MS)
             if (reviewJoining.value) {
                 reviewJoining.value = false
-                reviewError.value = getString(Res.string.ho_daemon_too_old)
+                reviewError.value = daemonTooOldText()
             }
         }
     }
@@ -4243,7 +4288,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(REVIEW_REPLY_TIMEOUT_MS)
             if (reviewSending.value) {
                 reviewSending.value = false
-                reviewError.value = getString(Res.string.ho_daemon_too_old)
+                reviewError.value = daemonTooOldText()
             }
         }
     }
@@ -4257,7 +4302,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(REVIEW_REPLY_TIMEOUT_MS)
             if (reviewPreparing.value == requestId) {
                 reviewPreparing.value = null
-                reviewError.value = getString(Res.string.ho_daemon_too_old)
+                reviewError.value = daemonTooOldText()
             }
         }
     }
@@ -4278,7 +4323,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(REVIEW_REPLY_TIMEOUT_MS)
             if (reviewActing.value == requestId) {
                 reviewActing.value = null
-                reviewError.value = getString(Res.string.ho_daemon_too_old)
+                reviewError.value = daemonTooOldText()
             }
         }
     }
@@ -5838,7 +5883,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_CONTEXT_WINDOW_OVERRIDE = "context_window_override" // SecureStore: LEGACY global statusline denominator in tokens ("" = follow derived window); now the fallback tier under K_CONTEXT_WINDOW_OVERRIDES
         const val K_CONTEXT_WINDOW_OVERRIDES = "context_window_overrides" // SecureStore: TSV modelId\ttokens per line — per-model denominators (issue #169)
         const val K_DEFAULT_AGENT = "default_session_agent"   // SecureStore: AgentKind.name new sessions start under (default CLAUDE)
-        const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | "claude" | "codex" | "opencode" — project/session filter (#31/#188)
+        const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | one agent key | comma-joined keys — project/session filter (#31/#188/#248, see AgentFilter.kt)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
         const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
         const val K_WORKING_SET_PREFIX = "working_set_mru:"    // SecureStore: "working_set_mru:<accountId>" → TSV dirKey\tsessionId\ttitle\tproject\tat\tagent — that computer's switcher MRU (issue #165)
@@ -5858,6 +5903,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 }
 
 private const val REFRESH_SPINNER_SAFETY_MS = 4_000L // spinner never outlives a lost reply by more than this
+
+/** Degraded-mode copy for [PocketRepository.daemonTooOldText] (#251). Mirrors `ho_daemon_too_old`. */
+private const val DAEMON_TOO_OLD_FALLBACK =
+    "This computer's daemon doesn't support handoff yet — update it to use this."
 
 /** #142: cancel the previous connection's job and WAIT (bounded) until it has actually finished — its
  *  socket closed and its writers off the shared outboxes — before the next connection dials. cancel()

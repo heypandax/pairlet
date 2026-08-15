@@ -34,6 +34,8 @@ import dev.ccpocket.app.resources.bridge_projects
 import dev.ccpocket.app.resources.bridge_runner_restart
 import dev.ccpocket.app.resources.bridge_runner_start
 import dev.ccpocket.app.resources.bridge_runner_stop
+import dev.ccpocket.app.resources.bridge_runner_unmanaged
+import dev.ccpocket.app.resources.bridge_unbind
 import dev.ccpocket.app.resources.bridge_waiting_adapter
 import dev.ccpocket.app.resources.bridges_title
 import dev.ccpocket.app.resources.settings_connected_to
@@ -64,8 +66,13 @@ import kotlin.test.assertTrue
  *
  * So this file asserts the LAYOUT MODEL rather than a literal width: at every stress width and text scale
  * an action label stays one horizontal line, the whole control wraps to a later row instead of shrinking,
- * and the target keeps its floor. The three geometries are the design's own proofs — 390 dp Chinese wraps
- * 3 + 1, 320 dp wraps 2 + 2, 200% type wraps 2 + 2 at the larger floor.
+ * and the target keeps its floor. The three geometries are the design's own proofs — 390 dp Chinese fits
+ * the three process chips on one row, 320 dp wraps them 2 + 1, 200% type wraps at the larger floor.
+ *
+ * Issue #259 then split that row in two, and the file now asserts the TIER as well: the process chips keep
+ * every guarantee above, while the one destructive action leaves the chip species entirely — below the
+ * hairline, right-aligned in a footer that sits in the same corner in all three states, and renamed from
+ * 「撤销」 (the share feature's word, which promises an undo) to 「解除桥接…」, ellipsis and all.
  *
  * The Chinese cases really render Chinese: the defect is a CJK line-break, and an English label would
  * "pass" this file while `编辑` still stacked on a phone.
@@ -167,6 +174,8 @@ class BridgesUiTest {
     private fun SemanticsNodeInteraction.width(): Dp = getUnclippedBoundsInRoot().width
     private fun SemanticsNodeInteraction.height(): Dp = getUnclippedBoundsInRoot().height
     private fun SemanticsNodeInteraction.top(): Dp = getUnclippedBoundsInRoot().top
+    private fun SemanticsNodeInteraction.bottom(): Dp = getUnclippedBoundsInRoot().bottom
+    private fun SemanticsNodeInteraction.left(): Dp = getUnclippedBoundsInRoot().left
     private fun SemanticsNodeInteraction.right(): Dp = getUnclippedBoundsInRoot().right
 
     /**
@@ -218,42 +227,58 @@ class BridgesUiTest {
         assertTrue(action("编辑").right() <= 390.dp, "the action must stay inside the viewport")
     }
 
-    /** 390 dp Chinese: four whole controls, wrapped 3 + 1. Restart · Stop · Edit, then Revoke below. */
+    /**
+     * 390 dp Chinese: the three PROCESS controls share one row, and the destructive action is not among
+     * them (issue #259).
+     *
+     * The tier break is what this asserts: 重启 · 停止 · 编辑 on one FlowRow line, then a gap wide enough
+     * for the hairline, then 解除桥接… alone in a footer, pushed to the right edge past where the chip
+     * grid ends. A fourth chip would have shared their left margin; this one cannot.
+     */
     @Test
-    fun fourActionsWrapThreePlusOneAt390dp() = zhScene(390, items = listOf(runningBridge())) {
-        val restart = action(str(Res.string.bridge_runner_restart))
-        val stop = action(str(Res.string.bridge_runner_stop))
-        val edit = action(str(Res.string.bridge_edit))
-        val revoke = action(str(Res.string.share_revoke))
+    fun threeProcessChipsShareOneRowAndTheUnbindActionSitsInTheFooterAt390dp() =
+        zhScene(390, items = listOf(runningBridge())) {
+            val restart = action(str(Res.string.bridge_runner_restart))
+            val stop = action(str(Res.string.bridge_runner_stop))
+            val edit = action(str(Res.string.bridge_edit))
+            val unbind = action(str(Res.string.bridge_unbind))
 
-        assertEquals(restart.top(), stop.top(), "Restart and Stop share a row")
-        assertEquals(restart.top(), edit.top(), "…and so does Edit")
-        assertTrue(revoke.top() > restart.top(), "Revoke wraps to the next row rather than squeezing the other three")
-        listOf(restart, stop, edit, revoke).forEach {
-            assertTrue(it.height() >= 48.dp, "every action keeps its 48 dp floor")
-            assertTrue(it.right() <= 390.dp, "no action is pushed out of the viewport")
+            assertEquals(restart.top(), stop.top(), "Restart and Stop share a row")
+            assertEquals(restart.top(), edit.top(), "…and so does Edit")
+            assertTrue(
+                unbind.top() >= restart.bottom(),
+                "the destructive action is BELOW the chip row, not a fourth member of it",
+            )
+            assertTrue(unbind.left() > edit.left(), "…and it is right-aligned, not sharing the chip grid")
+            assertTrue(unbind.right() >= edit.right(), "…flush with the card's content edge")
+            listOf(restart, stop, edit).forEach {
+                assertTrue(it.height() >= 48.dp, "every process chip keeps its 48 dp floor")
+                assertTrue(it.right() <= 390.dp, "no chip is pushed out of the viewport")
+            }
+            assertTrue(unbind.height() >= 44.dp, "the destructive action keeps a 44 dp target")
+            assertTrue(unbind.right() <= 390.dp, "…and stays inside the viewport")
         }
-    }
 
-    /** 320 dp stress width: the same four controls, wrapped 2 + 2. Still no compression. */
+    /** 320 dp stress width: the process chips wrap 2 + 1 as WHOLE controls; the footer is unaffected. */
     @Test
-    fun fourActionsWrapTwoPlusTwoAt320dp() = zhScene(320, items = listOf(runningBridge())) {
+    fun processChipsWrapWholeAt320dpAndTheFooterStaysPut() = zhScene(320, items = listOf(runningBridge())) {
         val restart = action(str(Res.string.bridge_runner_restart))
         val stop = action(str(Res.string.bridge_runner_stop))
         val edit = action(str(Res.string.bridge_edit))
-        val revoke = action(str(Res.string.share_revoke))
+        val unbind = action(str(Res.string.bridge_unbind))
 
         assertEquals(restart.top(), stop.top(), "Restart and Stop share the first row")
         assertTrue(edit.top() > restart.top(), "Edit drops to the second row instead of being squeezed")
-        assertEquals(edit.top(), revoke.top(), "…where Revoke joins it")
         assertOneHorizontalLine("编辑")
-        listOf(restart, stop, edit, revoke).forEach {
-            assertTrue(it.width() >= 96.dp, "every action keeps its 96 dp width floor")
-            assertTrue(it.right() <= 320.dp, "no action is pushed out of the viewport")
+        listOf(restart, stop, edit).forEach {
+            assertTrue(it.width() >= 96.dp, "every process chip keeps its 96 dp width floor")
+            assertTrue(it.right() <= 320.dp, "no chip is pushed out of the viewport")
         }
+        assertTrue(unbind.top() >= edit.bottom(), "the destructive action stays below the whole chip block")
+        assertTrue(unbind.right() <= 320.dp, "…and inside the viewport at the stress width")
     }
 
-    /** 200% type: the floor GROWS with the text. Labels stay whole, controls wrap 2 + 2. */
+    /** 200% type: the chip floor GROWS with the text, labels stay whole, and the footer still holds. */
     @Test
     fun atTwoHundredPercentTypeActionsGrowAndWrap() =
         zhScene(390, fontScale = 2f, items = listOf(runningBridge())) {
@@ -261,16 +286,33 @@ class BridgesUiTest {
             assertOneHorizontalLine("重启")
             listOf(
                 str(Res.string.bridge_runner_restart), str(Res.string.bridge_runner_stop),
-                str(Res.string.bridge_edit), str(Res.string.share_revoke),
+                str(Res.string.bridge_edit),
             ).forEach { assertTargetFloor(it, minWidth = 150.dp, minHeight = 60.dp) }
 
             val restart = action(str(Res.string.bridge_runner_restart))
             val stop = action(str(Res.string.bridge_runner_stop))
             val edit = action(str(Res.string.bridge_edit))
-            val revoke = action(str(Res.string.share_revoke))
-            assertEquals(restart.top(), stop.top(), "two actions share the first row at 200% type")
-            assertTrue(edit.top() > restart.top(), "the other two wrap")
-            assertEquals(edit.top(), revoke.top(), "…onto one second row")
+            val unbind = action(str(Res.string.bridge_unbind))
+            assertEquals(restart.top(), stop.top(), "two chips share the first row at 200% type")
+            assertTrue(edit.top() > restart.top(), "the third wraps whole")
+            assertTrue(unbind.top() >= edit.bottom(), "the destructive action is still the footer, not a chip")
+            assertTrue(unbind.right() <= 390.dp, "…and doubled type does not push it off the screen")
+        }
+
+    /**
+     * The label is the promise: 「解除桥接…」 / “Disconnect…”, ellipsis included.
+     *
+     * The trailing U+2026 is the system's "this opens a sheet" mark — the reason the confirm sheet reads as
+     * the answer to the tap rather than a surprise interrogation. And 「撤销」 ("undo my last step") is gone
+     * from this card for good: it is the share feature's word, on a control that deletes a credential.
+     */
+    @Test
+    fun theDestructiveActionIsNamedForWhatItDoesAndPromisesTheSheet() =
+        zhScene(390, items = listOf(runningBridge())) {
+            assertEquals("解除桥接…", str(Res.string.bridge_unbind))
+            assertTrue(str(Res.string.bridge_unbind).endsWith("…"), "the ellipsis is part of the spec")
+            action(str(Res.string.bridge_unbind)).assertExists()
+            assertFalse(present(str(Res.string.share_revoke)), "the bridge card no longer borrows 撤销")
         }
 
     // ── the product truths the new shape must not have changed ────────────────────────────────────
@@ -283,12 +325,12 @@ class BridgesUiTest {
             assertPresent(str(Res.string.share_tier_review))
         }
 
-    /** A running managed adapter offers Restart · Stop · Edit — never Start — plus Revoke. */
+    /** A running managed adapter offers Restart · Stop · Edit — never Start — plus the unbind footer. */
     @Test
-    fun aRunningManagedBridgeOffersRestartStopEditAndRevoke() = scene(390, items = listOf(runningBridge())) {
+    fun aRunningManagedBridgeOffersRestartStopEditAndUnbind() = scene(390, items = listOf(runningBridge())) {
         listOf(
             str(Res.string.bridge_runner_restart), str(Res.string.bridge_runner_stop),
-            str(Res.string.bridge_edit), str(Res.string.share_revoke),
+            str(Res.string.bridge_edit), str(Res.string.bridge_unbind),
         ).forEach { action(it).assertExists() }
         assertFalse(present(str(Res.string.bridge_runner_start)), "a running adapter cannot be started")
         // the facts that share the card with them, and the tag's REAL wording
@@ -297,12 +339,12 @@ class BridgesUiTest {
         assertPresent(str(Res.string.share_sessions_live, 2))
     }
 
-    /** A stopped managed adapter offers Start · Edit · Revoke, and nothing that would fail. */
+    /** A stopped managed adapter offers Start · Edit · unbind, and nothing that would fail. */
     @Test
-    fun aStoppedManagedBridgeOffersStartEditAndRevoke() = scene(390, items = listOf(stoppedBridge())) {
+    fun aStoppedManagedBridgeOffersStartEditAndUnbind() = scene(390, items = listOf(stoppedBridge())) {
         action(str(Res.string.bridge_runner_start)).assertExists()
         action(str(Res.string.bridge_edit)).assertExists()
-        action(str(Res.string.share_revoke)).assertExists()
+        action(str(Res.string.bridge_unbind)).assertExists()
         assertFalse(present(str(Res.string.bridge_runner_stop)), "a stopped adapter cannot be stopped")
         assertFalse(present(str(Res.string.bridge_runner_restart)), "…nor restarted")
         // no trust tag was configured on this one, so none is claimed
@@ -310,14 +352,27 @@ class BridgesUiTest {
         assertFalse(present(str(Res.string.share_sessions_live, 0)), "zero live sessions is not a fact worth a line")
     }
 
-    /** An adapter the owner runs themselves has no process to control — only the plug to pull. */
+    /**
+     * An adapter the owner runs themselves has no process to control — only the plug to pull.
+     *
+     * Tier 1 is empty here, so the hint that explains WHY takes its slot above the hairline — visible
+     * without expanding the card, because it answers a question the owner is asking while looking at the
+     * controls. The footer is then the card's only control, which is exactly when it must not look like a
+     * chip you can casually poke.
+     */
     @Test
-    fun anUnmanagedBridgeOffersNoRunnerActions() = scene(390, items = listOf(unmanagedBridge())) {
+    fun anUnmanagedBridgeOffersNoRunnerActionsAndSaysWhy() = scene(390, items = listOf(unmanagedBridge())) {
         listOf(
             str(Res.string.bridge_runner_start), str(Res.string.bridge_runner_stop),
             str(Res.string.bridge_runner_restart), str(Res.string.bridge_edit),
         ).forEach { assertFalse(present(it), "\"$it\" cannot be offered for an adapter we do not run") }
-        action(str(Res.string.share_revoke)).assertExists()
+        assertPresent(str(Res.string.bridge_runner_unmanaged))
+        val unbind = action(str(Res.string.bridge_unbind))
+        unbind.assertExists()
+        assertTrue(
+            unbind.top() > label(str(Res.string.bridge_runner_unmanaged)).top(),
+            "the hint sits ABOVE the divider, the destructive action below it",
+        )
     }
 
     /**

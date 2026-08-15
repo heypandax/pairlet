@@ -2,7 +2,8 @@ package dev.ccpocket.app.ui
 
 import dev.ccpocket.app.desktop.desktopModeChoices
 import dev.ccpocket.app.desktop.desktopDefaultModeIndex
-import dev.ccpocket.app.desktop.DESKTOP_AGENT_CHOICES
+import dev.ccpocket.app.data.availableAgentsFromDaemon
+import dev.ccpocket.protocol.AGENT_WIRE_ZCODE
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.PermissionMode
@@ -24,10 +25,11 @@ class ZCodeUiLogicTest {
 
     @Test
     fun desktopNewSessionAndDefaultAgentChoicesExposeZcode() {
-        assertEquals(
-            listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.ZCODE, AgentKind.DSH),
-            DESKTOP_AGENT_CHOICES,
-        )
+        // Desktop no longer keeps its own list (issue #252); it reads the shared projection, which
+        // surfaces ZCode as soon as the daemon advertises it. Coverage of the full enum on the real
+        // desktop seam lives in DesktopAgentChoicesTest.
+        assertEquals(false, AgentKind.ZCODE in availableAgentsFromDaemon(emptySet()))
+        assertEquals(true, AgentKind.ZCODE in availableAgentsFromDaemon(setOf(AGENT_WIRE_ZCODE)))
     }
 
     @Test
@@ -121,7 +123,7 @@ class ZCodeUiLogicTest {
     fun zcodeFiltersSessionAndProjectRows() {
         val zcodeSession = SessionSummary("z", "Z", "", 0, "/z", 1, agent = AgentKind.ZCODE)
         val kimiSession = SessionSummary("k", "K", "", 0, "/k", 1, agent = AgentKind.KIMI)
-        assertEquals(listOf(zcodeSession), filterSessionsByAgent(listOf(kimiSession, zcodeSession), "zcode"))
+        assertEquals(listOf(zcodeSession), filterSessionsByAgent(listOf(kimiSession, zcodeSession), setOf(AgentKind.ZCODE)))
 
         val zcodeDir = DirectoryEntry(
             path = "/z", name = "z", isDir = true, hasSessions = true,
@@ -131,6 +133,6 @@ class ZCodeUiLogicTest {
             path = "/k", name = "k", isDir = true, hasSessions = true,
             sessionAgents = listOf(AgentKind.KIMI),
         )
-        assertEquals(listOf(zcodeDir), filterDirectoriesByAgent(listOf(kimiDir, zcodeDir), "zcode"))
+        assertEquals(listOf(zcodeDir), filterDirectoriesByAgent(listOf(kimiDir, zcodeDir), setOf(AgentKind.ZCODE)))
     }
 }

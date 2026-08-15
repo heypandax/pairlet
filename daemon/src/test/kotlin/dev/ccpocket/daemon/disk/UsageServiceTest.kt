@@ -9,12 +9,31 @@ import kotlin.io.path.createDirectories
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** Exercises the aggregation against a temp projects tree via the injectable roots (never the real ~/.claude|~/.codex). */
 class UsageServiceTest {
+
+    /**
+     * [UsageService.aggregate] with EVERY disk seam defaulted to empty.
+     *
+     * The seams' production defaults read the developer's real stores (~/.zcode, ~/.kimi-code, the
+     * OpenCode db), so calling `aggregate` directly makes a test's numbers depend on whoever runs it —
+     * exactly how the local ZCode store started inflating the request counts here (issue #258). Tests
+     * opt IN to a backend by passing its fixture; everything else stays silent.
+     */
+    private fun hermetic(
+        days: Int,
+        projectsRoot: Path,
+        codexFiles: List<Path> = emptyList(),
+        openCodeTurns: (Long) -> List<dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.UsageTurn> = { emptyList() },
+        zcodeTurns: (Long) -> List<dev.ccpocket.daemon.zcode.ZCodeTranscriptScanner.UsageTurn> = { emptyList() },
+        kimiRecords: (Long) -> List<dev.ccpocket.daemon.kimi.KimiUsageScanner.UsageRecord> = { emptyList() },
+        agent: AgentKind? = null,
+    ) = UsageService.aggregate(days, projectsRoot, codexFiles, openCodeTurns, zcodeTurns, kimiRecords, agent)
 
     private fun withProjects(block: (Path) -> Unit) {
         val root = Files.createTempDirectory("ccp-usage-projects")
@@ -45,7 +64,7 @@ class UsageServiceTest {
                 ).joinToString("\n") + "\n",
             )
 
-            val u = UsageService.aggregate(1, projectsRoot = root, codexFiles = emptyList())
+            val u = hermetic(1, projectsRoot = root, codexFiles = emptyList())
 
             val hours = assertNotNull(u.hours, "Today range must carry 24 hourly buckets")
             assertEquals(24, hours.size)
@@ -66,7 +85,7 @@ class UsageServiceTest {
     fun week_range_has_no_hours_and_dates_every_day_bucket() {
         withProjects { root ->
             val today = LocalDate.now(ZoneId.systemDefault())
-            val u = UsageService.aggregate(7, projectsRoot = root, codexFiles = emptyList())
+            val u = hermetic(7, projectsRoot = root, codexFiles = emptyList())
             assertNull(u.hours, "only the Today range fills hours")
             assertEquals(7, u.days.size)
             assertTrue(u.days.all { it.date != null }, "every day bucket carries an ISO date")
@@ -91,7 +110,7 @@ class UsageServiceTest {
                     turn(2, 700, "c"),  // the day before → outside both, ignored
                 ).joinToString("\n") + "\n",
             )
-            val u = UsageService.aggregate(1, projectsRoot = root, codexFiles = emptyList())
+            val u = hermetic(1, projectsRoot = root, codexFiles = emptyList())
             assertEquals(300L, u.tokensToday)
             assertEquals(500L, u.prevWindowTokens, "span 1 compares against yesterday only")
             // prev-window turns must NOT leak into the trend or the by-model bars
@@ -113,7 +132,7 @@ class UsageServiceTest {
                     turn(14, 1600, "e"), // outside both windows, ignored
                 ).joinToString("\n") + "\n",
             )
-            val u = UsageService.aggregate(7, projectsRoot = root, codexFiles = emptyList())
+            val u = hermetic(7, projectsRoot = root, codexFiles = emptyList())
             assertEquals(300L, u.days.sumOf { it.tokens })
             assertEquals(1200L, u.prevWindowTokens, "prev window = the 7 days right before the visible 7")
             assertEquals(300L, u.models.single().tokens, "prev-window turns never feed the model bars")
@@ -140,7 +159,7 @@ class UsageServiceTest {
                     richTurn(8, 999, 999, 9.90, "d"),  // prev window — must NOT feed either window/today set
                 ).joinToString("\n") + "\n",
             )
-            val u = UsageService.aggregate(7, projectsRoot = root, codexFiles = emptyList())
+            val u = hermetic(7, projectsRoot = root, codexFiles = emptyList())
             // the today sub-metrics stay today-only (unchanged behaviour)
             assertEquals(1L, u.requestsToday)
             assertEquals(50, u.cacheHitPct, "today cache-hit = 100 / (100 + 100)")
@@ -162,7 +181,7 @@ class UsageServiceTest {
                     richTurn(1, 999, 999, 9.90, "b"),  // yesterday → prev window for span 1, excluded
                 ).joinToString("\n") + "\n",
             )
-            val u = UsageService.aggregate(1, projectsRoot = root, codexFiles = emptyList())
+            val u = hermetic(1, projectsRoot = root, codexFiles = emptyList())
             // for the Today range the window IS today, so the window fields are filled and equal the today ones
             assertEquals(1L, u.requestsWindow)
             assertEquals(u.requestsToday, u.requestsWindow)
@@ -179,7 +198,7 @@ class UsageServiceTest {
             proj.resolve("s1.jsonl").writeText(
                 listOf(turn(0, 200, "a"), turn(2, 400, "b")).joinToString("\n") + "\n",
             )
-            val u = UsageService.aggregate(7, projectsRoot = root, codexFiles = emptyList())
+            val u = hermetic(7, projectsRoot = root, codexFiles = emptyList())
             assertNull(u.costUsdToday, "no costUSD recorded → today cost stays null")
             assertNull(u.costUsdWindow, "no costUSD recorded → window cost stays null too")
             assertEquals(2L, u.requestsWindow, "requests still count even when cost is unknown")
@@ -205,7 +224,7 @@ class UsageServiceTest {
                     input = 10, output = 10, cacheRead = 0,
                 ),
             )
-            val u = UsageService.aggregate(1, projectsRoot = root, codexFiles = emptyList(), openCodeTurns = { turns })
+            val u = hermetic(1, projectsRoot = root, codexFiles = emptyList(), openCodeTurns = { turns })
 
             assertEquals(220L, u.tokensToday, "100+40+60 + 10+10")
             assertEquals(2L, u.requestsToday)
@@ -229,9 +248,114 @@ class UsageServiceTest {
                 id = "dup", whenEpochMs = ms, model = "anthropic/claude-sonnet-4-5",
                 input = 50, output = 50, cacheRead = 0,
             )
-            val u = UsageService.aggregate(1, projectsRoot = root, codexFiles = emptyList(), openCodeTurns = { listOf(one, one) })
+            val u = hermetic(1, projectsRoot = root, codexFiles = emptyList(), openCodeTurns = { listOf(one, one) })
             assertEquals(100L, u.tokensToday, "duplicate id counted once")
             assertEquals(1L, u.requestsToday)
+        }
+    }
+
+    // ── issue #258: ZCode + Kimi join the total, and one agent can be viewed alone ──────────────
+
+    private fun msToday(hour: Int): Long =
+        LocalDate.now(ZoneId.systemDefault()).atTime(hour, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+    private fun zTurn(id: String, hour: Int, model: String, input: Long, output: Long, cacheCreation: Long = 0, cacheRead: Long = 0) =
+        dev.ccpocket.daemon.zcode.ZCodeTranscriptScanner.UsageTurn(id, msToday(hour), model, input, output, cacheCreation, cacheRead)
+
+    private fun kRecord(id: String, hour: Int, model: String, input: Long, output: Long, cacheCreation: Long = 0, cacheRead: Long = 0) =
+        dev.ccpocket.daemon.kimi.KimiUsageScanner.UsageRecord(id, msToday(hour), model, input, output, cacheCreation, cacheRead)
+
+    @Test
+    fun zcode_requests_count_and_classify_as_zcode() {
+        withProjects { root ->
+            val turns = listOf(
+                zTurn("u1", 6, "anthropic/glm-5", input = 100, output = 40, cacheCreation = 10, cacheRead = 50),
+                // a ZCode session on an anthropic-hosted model must NOT fall into the claude/codex heuristic
+                zTurn("u2", 6, "anthropic/claude-sonnet-4-5", input = 10, output = 10),
+            )
+            val u = hermetic(1, projectsRoot = root, codexFiles = emptyList(), zcodeTurns = { turns })
+
+            assertEquals(220L, u.tokensToday, "100+40+10+50 + 10+10 — cache CREATION counts in the total")
+            assertEquals(2L, u.requestsToday)
+            assertEquals(220L, u.hours!![6].tokens)
+            val glm = u.models.single { it.model == "anthropic/glm-5" }
+            assertEquals(200L, glm.tokens)
+            assertEquals(AgentKind.ZCODE, glm.agent)
+            assertEquals(AgentKind.ZCODE, u.models.single { it.model == "anthropic/claude-sonnet-4-5" }.agent)
+            // cache read splits out of input, so the shared cache-hit formula sees 50 / (110 + 50)
+            assertEquals(31, u.cacheHitPct)
+        }
+    }
+
+    @Test
+    fun kimi_records_count_and_classify_as_kimi() {
+        withProjects { root ->
+            val records = listOf(
+                kRecord("k1", 8, "kimi-code/k3", input = 0, output = 76),
+                kRecord("k2", 8, "kimi-code/k3", input = 100, output = 20, cacheRead = 30),
+            )
+            val u = hermetic(1, projectsRoot = root, codexFiles = emptyList(), kimiRecords = { records })
+
+            assertEquals(226L, u.tokensToday, "76 + (100+20+30)")
+            assertEquals(2L, u.requestsToday)
+            val m = u.models.single()
+            assertEquals("kimi-code/k3", m.model)
+            assertEquals(AgentKind.KIMI, m.agent)
+            assertEquals(226L, m.tokens)
+        }
+    }
+
+    @Test
+    fun zcode_and_kimi_dedup_by_their_own_ids() {
+        withProjects { root ->
+            val z = zTurn("dup", 9, "anthropic/glm-5", input = 50, output = 50)
+            val k = kRecord("dup", 9, "kimi-code/k3", input = 5, output = 5)
+            val u = hermetic(
+                1, projectsRoot = root, codexFiles = emptyList(),
+                zcodeTurns = { listOf(z, z) }, kimiRecords = { listOf(k, k) },
+            )
+            // each duplicate is collapsed, and the two backends' identical ids do NOT collide with each other
+            assertEquals(110L, u.tokensToday)
+            assertEquals(2L, u.requestsToday)
+        }
+    }
+
+    // The by-agent view (issue #258): a filtered aggregate reports ONLY that backend — and never even
+    // touches the others' seams, so the scan cost drops with the scope.
+    @Test
+    fun agent_filter_scopes_the_whole_aggregation_to_one_backend() {
+        withProjects { root ->
+            val zone = ZoneId.systemDefault()
+            val today = LocalDate.now(zone)
+            val proj = root.resolve("-Users-x-proj").also { it.createDirectories() }
+            proj.resolve("s1.jsonl").writeText(
+                """{"type":"assistant","timestamp":"${today.atTime(7, 0).atZone(zone).toInstant()}","requestId":"r1","message":{"id":"m1","model":"claude-opus-4-8","usage":{"input_tokens":500,"output_tokens":0}}}""" + "\n",
+            )
+            var openCodeScanned = false
+            fun aggregate(agent: AgentKind?) = hermetic(
+                1, projectsRoot = root, codexFiles = emptyList(),
+                openCodeTurns = { openCodeScanned = true; emptyList() },
+                zcodeTurns = { listOf(zTurn("u1", 6, "anthropic/glm-5", input = 100, output = 0)) },
+                kimiRecords = { listOf(kRecord("k1", 8, "kimi-code/k3", input = 0, output = 76)) },
+                agent = agent,
+            )
+
+            val all = aggregate(null)
+            assertEquals(676L, all.tokensToday, "unfiltered stays the sum of every backend")
+            assertEquals(3, all.models.size)
+            assertTrue(openCodeScanned, "the unfiltered pass reads every backend")
+
+            openCodeScanned = false
+            val zcodeOnly = aggregate(AgentKind.ZCODE)
+            assertEquals(100L, zcodeOnly.tokensToday)
+            assertEquals(1L, zcodeOnly.requestsToday)
+            assertEquals(AgentKind.ZCODE, zcodeOnly.models.single().agent)
+            assertEquals(100L, zcodeOnly.days.last().tokens, "the trend follows the filter too")
+            assertFalse(openCodeScanned, "a narrowed request must not scan the other backends' stores")
+
+            assertEquals(76L, aggregate(AgentKind.KIMI).tokensToday)
+            assertEquals(500L, aggregate(AgentKind.CLAUDE).tokensToday)
+            assertEquals(0L, aggregate(AgentKind.CODEX).tokensToday, "a backend with no records reads as empty, not as everything")
         }
     }
 }

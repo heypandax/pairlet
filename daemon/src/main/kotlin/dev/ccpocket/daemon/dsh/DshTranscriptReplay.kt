@@ -3,6 +3,7 @@ package dev.ccpocket.daemon.dsh
 import dev.ccpocket.daemon.disk.ReplayBudget
 import dev.ccpocket.daemon.disk.ReplaySlice
 import dev.ccpocket.daemon.disk.ReplaySlicer
+import dev.ccpocket.daemon.disk.TranscriptNoise
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
 import java.nio.file.Path
@@ -78,9 +79,14 @@ object DshTranscriptReplay {
             if (root["ignorable"]?.toString() == "true") continue
             when (root.str("type")) {
                 DshTranscript.EVENT_USER ->
-                    DshTranscript.messageText(root.obj("data"))?.takeIf { it.isNotBlank() }?.let {
-                        out += ReplaySlicer.Row(HistoryMessage(ChatRole.USER, it), lineNo)
-                    }
+                    DshTranscript.messageText(root.obj("data"))
+                        ?.takeIf { it.isNotBlank() }
+                        // Same judgement every other replay path uses (issue #253): a user turn that is
+                        // nothing but harness plumbing must not render under a "你" header as if it were
+                        // typed. dsh's own `ignorable` flag (checked above) covers what IT marks; this
+                        // covers injected wrapper blocks, which no flag distinguishes.
+                        ?.takeUnless { TranscriptNoise.isNoiseUserText(it) }
+                        ?.let { out += ReplaySlicer.Row(HistoryMessage(ChatRole.USER, it), lineNo) }
                 DshTranscript.EVENT_ASSISTANT ->
                     DshTranscript.messageText(root.obj("data"))?.takeIf { it.isNotBlank() }?.let {
                         out += ReplaySlicer.Row(HistoryMessage(ChatRole.ASSISTANT, it), lineNo)

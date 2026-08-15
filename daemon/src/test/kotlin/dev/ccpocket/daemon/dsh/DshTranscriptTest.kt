@@ -205,6 +205,17 @@ class DshTranscriptTest {
         assertEquals(listOf("the answer"), DshTranscriptReplay.read(file).map { it.text })
     }
 
+    /** Issue #253's judgement is backend-agnostic; dsh's replay routes its user rows through it too, so a
+     *  turn that is nothing but an injected wrapper block never renders as something the user typed. */
+    @Test
+    fun harness_plumbing_user_turns_are_not_replayed_as_user_input() {
+        val noise = """{"type":"user/message","seq":2,"time":1,"data":{"id":"m2","role":"user",""" +
+            """"content":[{"type":"text","text":"<system-reminder>internal nudge</system-reminder>"}],""" +
+            """"source":"user"}}""" + "\n"
+        val file = writeFrames(tmp(), header(), userMsg("real question", 1), noise, assistantMsg("answer", 3))
+        assertEquals(listOf("real question", "answer"), DshTranscriptReplay.read(file).map { it.text })
+    }
+
     @Test
     fun a_missing_file_reads_as_empty() {
         assertTrue(DshTranscript.lines(tmp().resolve("nope.jsonl.zstd")).isEmpty())

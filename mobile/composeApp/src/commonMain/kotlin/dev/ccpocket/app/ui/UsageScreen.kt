@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -44,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.usage_agent_all
 import dev.ccpocket.app.resources.usage_by_model
 import dev.ccpocket.app.resources.usage_cache
 import dev.ccpocket.app.resources.usage_cost
@@ -88,16 +90,25 @@ private fun money(v: Double): String {
  * cost / cache hit) FOLLOW the same window (issue #174) — labeled "· 7d"/"· 30d" — falling back to the today
  * values under "· today" only for an old daemon; est. cost hides entirely when no cost is recorded.
  * All views branch on the reply's own shape (u.days.size), so a stale reply keeps rendering coherently while
- * the next fetch is in flight. Data is aggregated by the daemon from Claude/Codex transcripts.
+ * the next fetch is in flight. Data is aggregated by the daemon from EVERY backend's own records — Claude
+ * and Codex transcripts, the OpenCode and ZCode databases, and Kimi Code's wire logs (issue #258).
+ * A second header row filters that total to ONE agent; "All" (the default) is the unfiltered view.
  */
 @Composable
 fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     var days by remember { mutableStateOf(1) } // default to "Today"
+    var agent by remember { mutableStateOf<AgentKind?>(null) } // null = All (issue #258)
     var timedOut by remember { mutableStateOf(false) }
-    LaunchedEffect(days) {
+    // A selection can outlive the capability: reconnecting to a daemon that ignores the filter (or losing
+    // the handshake) must fall back to the honest all-backends request, not keep asking for one agent and
+    // render the whole machine under its label. Keying the fetch on the EFFECTIVE agent re-fetches on that
+    // transition too, so the page can't sit on a mislabeled reply.
+    val filterable = repo.daemonUsageAgentFilter.value
+    val effectiveAgent = agent.takeIf { filterable }
+    LaunchedEffect(days, effectiveAgent) {
         timedOut = false
-        repo.fetchUsage(days)
+        repo.fetchUsage(days, effectiveAgent)
         kotlinx.coroutines.delay(10_000)
         // no reply after the deadline → most likely an older daemon that can't aggregate usage yet (or a huge scan)
         if (repo.usage.value == null) timedOut = true
@@ -121,6 +132,21 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
                                 .clickable { days = d }.padding(horizontal = 10.dp, vertical = 4.dp),
                         ) { Text(label, color = if (on) Tok.base else Tok.tx2, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold) }
                     }
+                }
+            }
+            // Per-agent filter (issue #258). Gated on the daemon's OWN filter capability, never on the
+            // agent-vocabulary advertisement: that one shipped a release earlier, so a v1.7.7 daemon would
+            // pass an `isNotEmpty` gate while silently ignoring FetchUsage.agent — and a filter that
+            // answers with the whole machine under one agent's label is worse than no filter. Chips follow
+            // the same availability projection as the session pickers, each in its own agent color.
+            val agents = repo.availableAgents
+            if (filterable && agents.size > 1) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    AgentChip(stringResource(Res.string.usage_agent_all), Tok.accent, agent == null) { agent = null }
+                    for (a in agents) AgentChip(agentName(a), agentColor(a), agent == a) { agent = a }
                 }
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -485,6 +511,28 @@ internal fun quartile(tokens: Long, max: Long): Int {
 
 /** The peak day's caption label: ISO [UsageDay.date] "2026-07-05" → "07-05"; falls back to the weekday [UsageDay.label]. */
 internal fun peakLabel(day: UsageDay): String = day.date?.substringAfter('-') ?: day.label
+
+/**
+ * One filter pill in the per-agent row (issue #258). Deliberately the SAME pill language as the page's
+ * Today/7d/30d segmented control — selected fills, unselected is a hairline outline — so the header reads
+ * as one control surface. The only addition is the agent's own [color], which ties a selected chip to the
+ * bar color its rows will wear below.
+ */
+@Composable
+private fun AgentChip(label: String, color: Color, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(999.dp))
+            .background(if (selected) color.agentTintFill() else Tok.surface)
+            .border(1.dp, if (selected) color.agentTintBorder() else Tok.hair, RoundedCornerShape(999.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Text(
+            label, color = if (selected) color else Tok.tx2,
+            fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+        )
+    }
+}
 
 @Composable
 private fun ModelRow(m: UsageModel, max: Long) {

@@ -1489,6 +1489,35 @@ class SerializationRoundTripTest {
         assertFalse(isWorkflowTool("Agent"))
     }
 
+    @Test
+    fun historyMessage_prompt_images_trail_and_old_peers_stay_compatible() {
+        // issue #254. new daemon → new app: a replayed USER turn carries its attachments plus the
+        // "some were shed by the frame budget" flag, both surviving a full round trip
+        val row = HistoryMessage(
+            ChatRole.USER, "what is wrong here?",
+            images = listOf(ImageData("image/png", "AAA"), ImageData("image/jpeg", "BBB")),
+            imagesTruncated = true,
+        )
+        assertEquals(row, PocketJson.decodeFromString<HistoryMessage>(PocketJson.encodeToString(row)))
+
+        // old daemon → new app: neither key is on the wire, so the app sees today's text-only replay.
+        // (encodeDefaults means OUR encoder always writes images:[] — this pins the DECODE direction,
+        // which is the one an old peer exercises.)
+        val legacy = PocketJson.decodeFromString<HistoryMessage>("""{"role":"user","text":"hi"}""")
+        assertTrue(legacy.images.isEmpty())
+        assertFalse(legacy.imagesTruncated)
+
+        // new daemon → old app: an unknown key is skipped without throwing — including a structured
+        // ARRAY-OF-OBJECTS shape, the form a future attachment field would most likely take, since
+        // that is what a naive skipper is most likely to choke on
+        val skipped = PocketJson.decodeFromString<HistoryMessage>(
+            """{"role":"user","text":"hi","images":[{"mediaType":"image/png","base64":"AAA"}],""" +
+                """"imagesTruncated":true,"futureAttachments":[{"k":1},{"k":2}]}""",
+        )
+        assertEquals(listOf(ImageData("image/png", "AAA")), skipped.images)
+        assertTrue(skipped.imagesTruncated)
+    }
+
     // ── API presets (issue #113) ─────────────────────────────────────────
 
     @Test
@@ -2424,5 +2453,59 @@ class SerializationRoundTripTest {
         val old = PocketJson.encodeToString(Envelope(id = "cap2", ts = 0, body = ClientCaps(supportsAgents = listOf("opencode"))))
         val decoded = PocketJson.decodeFromString<Envelope>(old).body as ClientCaps
         assertFalse(decoded.supportsApprovalV2)
+    }
+
+    /** issue #258: FetchUsage.agent is a trailing optional — an OLD App's frame (no key) must still decode
+     *  as the unfiltered "All" request, and a new App's narrowed frame must round-trip. */
+    @Test
+    fun fetchUsage_agent_filter_is_additive() {
+        val old = """{"id":"fu1","ts":0,"body":{"t":"pocket/usage.fetch","days":7}}"""
+        assertNull((PocketJson.decodeFromString<Envelope>(old).body as FetchUsage).agent, "no agent key = every backend")
+
+        val narrowed = FetchUsage(days = 30, agent = AgentKind.ZCODE)
+        val json = PocketJson.encodeToString(Envelope(id = "fu2", ts = 0, body = narrowed))
+        assertEquals(narrowed, PocketJson.decodeFromString<Envelope>(json).body)
+
+        // The BYTES of an unfiltered request must stay identical to the pre-#258 frame (explicitNulls=false
+        // omits the null): a new App asking for "All" is indistinguishable from an old App to any daemon.
+        val unfiltered = PocketJson.encodeToString(Envelope(id = "fu4", ts = 0, body = FetchUsage(days = 7)))
+        assertFalse("agent" in unfiltered, "an unfiltered request must not put an agent key on the wire")
+
+        // a FUTURE agent this build has no name for coerces to null (= All) instead of failing the Envelope
+        val future = """{"id":"fu3","ts":0,"body":{"t":"pocket/usage.fetch","days":7,"agent":"someagent"}}"""
+        assertNull((PocketJson.decodeFromString<Envelope>(future).body as FetchUsage).agent)
+    }
+
+    /**
+     * issue #258: [DaemonInfo.supportsUsageAgentFilter] is a trailing capability field with the same
+     * deny-by-omission contract as bridgeControl. The old-shape case is the POINT of the field: a v1.7.7
+     * daemon already advertises a full supportedAgents list, so its DaemonInfo must still decode to
+     * `false` here — that is what stops the App from offering a filter that daemon silently ignores.
+     */
+    @Test
+    fun daemonInfo_usageAgentFilter_flag_is_additive() {
+        val info = DaemonInfo(hostname = "mac", supportedAgents = listOf("opencode", "kimi", "zcode"), supportsUsageAgentFilter = true)
+        val json = PocketJson.encodeToString(Envelope(id = "di1", ts = 0, body = info))
+        assertEquals(info, PocketJson.decodeFromString<Envelope>(json).body)
+
+        val v177 = """{"id":"di2","ts":0,"body":{"t":"pocket/daemon.info","hostname":"mac","supportedAgents":["opencode","kimi","zcode"]}}"""
+        val decoded = PocketJson.decodeFromString<Envelope>(v177).body as DaemonInfo
+        assertEquals(3, decoded.supportedAgents.size, "the older advertisement still decodes")
+        assertFalse(decoded.supportsUsageAgentFilter, "a daemon that predates the filter must never look capable")
+    }
+
+    /** The by-model rows can now carry KIMI/ZCODE (issue #258); both must survive a round trip so the
+     *  App's badge colors are the daemon's classification, not a re-guess from the model string. */
+    @Test
+    fun usage_models_round_trip_every_agent_badge() {
+        val usage = Usage(
+            models = listOf(
+                UsageModel("claude-opus-5", 10, AgentKind.CLAUDE),
+                UsageModel("anthropic/glm-5", 20, AgentKind.ZCODE),
+                UsageModel("kimi-code/k3", 30, AgentKind.KIMI),
+            ),
+        )
+        val json = PocketJson.encodeToString(Envelope(id = "us1", ts = 0, body = usage))
+        assertEquals(usage, PocketJson.decodeFromString<Envelope>(json).body)
     }
 }

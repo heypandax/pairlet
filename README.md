@@ -96,7 +96,7 @@ Open the app and **scan the QR** (or type the 6-digit code) that `cc-pocket-daem
 
 `cc-pocket-daemon version` tells you what's running, how it was installed, and the one command that updates *this* install — it works offline and whether or not the daemon is up. The app shows the same thing under Settings ▸ Versions, and nudges you when either side falls behind.
 
-Upgrade anytime with `cc-pocket-daemon update` — the daemon also checks daily and notifies your phone (add `--auto-update` to `run` to apply silently). Homebrew: `brew upgrade --cask heypandax/tap/cc-pocket` · Scoop: `scoop update cc-pocket-daemon`. Other architectures: [build from source](#building-from-source).
+Upgrade anytime with `cc-pocket-daemon update`. Installs from the curl one-liner **keep themselves current**: the daemon checks daily and applies the new version in the background — turn that off with `cc-pocket-daemon config --auto-update off` and you'll just get a phone notification instead. Homebrew, Scoop and Windows installs never self-apply; update them through their own package manager. Homebrew: `brew upgrade --cask heypandax/tap/cc-pocket` · Scoop: `scoop update cc-pocket-daemon`. Other architectures: [build from source](#building-from-source).
 
 ## Security
 
@@ -147,6 +147,7 @@ Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via
 - Public user manual (shareable with AI assistants) — <https://pocket.ark-nexus.cc/manual/en/>
 - Full feature list — <https://heypandax.github.io/cc-pocket/features.html>
 - User guide (中文使用文档) — [`docs/USAGE.md`](docs/USAGE.md)
+- Feishu bot direct-chat menu setup (飞书机器人单聊底部菜单) — [`docs/FEISHU-BOT-MENU.md`](docs/FEISHU-BOT-MENU.md)
 - Runtime-context handoff guide (运行时上下文协作接力) — [`docs/COLLABORATION-HANDOFF.md`](docs/COLLABORATION-HANDOFF.md)
 - Task-context review (ReviewRequest, preview) — [`docs/design/REVIEW-REQUEST.md`](docs/design/REVIEW-REQUEST.md); the Claude Code skill ships at [`packaging/skills/review-request/SKILL.md`](packaging/skills/review-request/SKILL.md) — copy it to `~/.claude/skills/review-request/` to use it
 - Run / operate the daemon — [`docs/RUN.md`](docs/RUN.md)

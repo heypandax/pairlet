@@ -53,7 +53,7 @@
     <string name="open_session_timeout">会话没有打开——电脑未响应</string>
     <string name="turn_done_marker">已完成</string>
     <string name="dir_empty_title">还没有项目</string>
-    <string name="dir_empty_body">在电脑上用 cc-pocket 命令行打开一个文件夹，然后下拉刷新。</string>
+    <string name="dir_empty_body">这台电脑还没有可打开的项目。挑一个文件夹，就能在这里开第一个会话。</string>
     <string name="dir_refresh">刷新</string>
     <string name="dir_no_matches">没有匹配项</string>
 
@@ -472,7 +472,6 @@
     <string name="af_codex_only">Codex</string>
     <string name="af_opencode_only">OpenCode</string>
     <string name="af_zcode_only">ZCode</string>
-    <string name="af_dsh_only">DSH</string>
     <string name="opencode_mode_short">完全访问</string>
     <string name="opencode_mode_title">完全访问（自动批准）</string>
     <string name="opencode_mode_note">OpenCode 以自动批准方式运行：所有工具调用（文件编辑、终端命令）由 CLI 自行放行，远程审批与权限模式对 OpenCode 会话不生效。</string>
@@ -480,7 +479,7 @@
     <string name="opencode_models_loading">正在从 opencode 读取模型…</string>
     <string name="model_models_loading">正在从 %1$s 读取模型…</string>
     <string name="model_models_empty">%1$s 没有报可用模型。</string>
-    <string name="af_hint">选择列表里显示哪些 agent 的项目与会话。Claude、Codex 与 OpenCode 仍以各自颜色标注。</string>
+    <string name="af_hint">可以多选：勾几个就只显示哪几个 agent 的项目与会话，「全部」＝不筛选。各 agent 在列表里仍以各自颜色标注。</string>
     <string name="settings_usage">Token 用量</string>
     <string name="usage_title">用量</string>
     <string name="usage_tokens_today">今日 tokens</string>
@@ -505,6 +504,7 @@
     <string name="usage_vs_prev_days">对比前 %1$d 天</string>
     <string name="usage_selected">%1$s · %2$s tokens</string>
     <string name="usage_na">暂无数据</string>
+    <string name="usage_agent_all">全部</string>
     <string name="terminal_open">终端</string>
     <string name="terminal_title">终端</string>
     <string name="terminal_hint">git status</string>
@@ -575,6 +575,7 @@
     <string name="img_excluded">· 已排除 %1$d 张</string>
     <string name="img_too_large">过大 · %1$dKB</string>
     <string name="viewer_hint">下滑关闭 · 点按缩放</string>
+    <string name="img_replay_truncated">· 部分图片过大或过多，未同步</string>
 
     <!-- ── 会话信息 + 快捷操作 ───────────────────────────────────── -->
     <string name="session_info_title">会话</string>
@@ -731,6 +732,7 @@
     <string name="bridge_exited_code">已退出（代码 %1$d）</string>
     <string name="bridge_last_error">最近错误</string>
     <string name="bridge_projects">项目</string>
+    <string name="bridge_unbind">解除桥接…</string>
     <string name="bridge_revoke_title">撤销此桥接？</string>
     <string name="bridge_revoke_c1">它进行中的会话会立即结束。</string>
     <string name="bridge_revoke_c2">凭证会被删除；若有托管适配器，会一并停止。</string>
@@ -1028,8 +1030,16 @@
     <string name="notify_turn_complete">回复完成</string>
 
     <!-- 对话面板 -->
-    <string name="chat_no_session">没有打开的会话</string>
-    <string name="chat_no_session_hint">在左侧选择项目，然后打开或新建一个会话。</string>
+    <string name="chat_no_session">开始一个新会话</string>
+    <string name="chat_no_session_hint">在左侧选择项目，然后从这里开始新会话。</string>
+    <string name="chat_start_in">在「%1$s」新建会话，第一条提示词从这里直接发出。</string>
+    <string name="chat_start_placeholder">写下第一条提示词…</string>
+    <string name="chat_start_pick_project">请先在左侧选中项目。</string>
+    <string name="chat_start_choose">选择文件夹…</string>
+    <string name="chat_start_opening">正在新建会话，就绪后立刻发出你的提示词…</string>
+    <string name="chat_start_failed">没能新建会话，你的提示词还在。</string>
+    <string name="chat_start_timeout">会话没能及时就绪，你的提示词还在。</string>
+    <string name="chat_start_send_failed">会话已打开，但提示词没发出去，请在输入框里发送。</string>
     <string name="chat_opening">正在打开会话…</string>
     <string name="chat_opening_named">正在打开 %1$s…</string>
     <string name="chat_open_failed">没能打开会话</string>
@@ -1666,6 +1676,9 @@
     <string name="proj_no_match_title">没有项目匹配“%1$s”</string>
     <string name="proj_no_match_body">筛选只匹配这台电脑报上来的名称和路径，这里没有匹配到。</string>
     <string name="proj_clear_filter">清除筛选</string>
+    <string name="proj_agent_filtered_title">agent 筛选把项目都藏起来了</string>
+    <string name="proj_agent_filtered_body">现在只显示 %1$s 的项目。这台电脑上的其它项目还在，清除筛选就能看到。</string>
+    <string name="proj_clear_agent_filter">清除 agent 筛选</string>
 
     <!-- ── 目录选择器 ─────────────────────────────────────────────────── -->
     <string name="dir_picker_on_computer">在 %1$s 上</string>

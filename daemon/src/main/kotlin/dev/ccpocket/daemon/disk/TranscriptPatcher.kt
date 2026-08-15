@@ -21,9 +21,15 @@ import java.nio.file.attribute.PosixFilePermissions
  *     injection turns (root-level isMeta:true, or their text fingerprints — issue #126). parentUuid
  *     links are re-stitched across dropped turns so the chain stays intact.
  *
- * We deliberately do NOT drop `<system-reminder>` turns: those are routinely PREPENDED to a real user
- * message, so removing by prefix would eat genuine input. A `<task-notification>` turn is only dropped
- * when nothing but notification blocks remain — any real text after them keeps the turn.
+ * A `<task-notification>` turn is only dropped when nothing but notification blocks remain — any real
+ * text after them keeps the turn, since reminders and notifications are routinely PREPENDED to a real
+ * user message and removing by prefix would eat genuine input.
+ *
+ * `<system-reminder>` turns are NOT dropped here even though the phone's replay now hides the pure ones
+ * (issue #253). Two reasons this layer stays put: this rewrites the file claude itself resumes from, so
+ * deleting reminders would take context away from the CLI (replay only changes what the phone renders);
+ * and `<system-reminder>` occurs in almost every transcript (inside tool_results), which would defeat
+ * the cheap substring prefilter below and force a full JSON parse of every file on every scan.
  *
  * Only safe once the writing claude process has exited (replacing the file under a live process drops its
  * appends). In place, atomic replace, 0600 like claude's own. Never throws.

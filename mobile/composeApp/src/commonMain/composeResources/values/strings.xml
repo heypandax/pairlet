@@ -53,7 +53,7 @@
     <string name="open_session_timeout">Couldn\'t open the session — the computer didn\'t respond</string>
     <string name="turn_done_marker">done</string>
     <string name="dir_empty_title">No projects yet</string>
-    <string name="dir_empty_body">Open a folder with the cc-pocket CLI on your computer, then pull to refresh.</string>
+    <string name="dir_empty_body">This computer has no projects to open yet. Pick a folder to start your first session here.</string>
     <string name="dir_refresh">Refresh</string>
     <string name="dir_no_matches">No matches</string>
 
@@ -472,7 +472,6 @@
     <string name="af_codex_only">Codex</string>
     <string name="af_opencode_only">OpenCode</string>
     <string name="af_zcode_only">ZCode</string>
-    <string name="af_dsh_only">DSH</string>
     <string name="opencode_mode_short">Full access</string>
     <string name="opencode_mode_title">Full access (auto-approved)</string>
     <string name="opencode_mode_note">OpenCode runs with auto-approval: every tool call (file edits, shell commands) is approved by the CLI itself. Remote approvals and permission modes don\'t apply to OpenCode sessions.</string>
@@ -480,7 +479,7 @@
     <string name="opencode_models_loading">Loading models from opencode…</string>
     <string name="model_models_loading">Loading models from %1$s…</string>
     <string name="model_models_empty">%1$s reported no models.</string>
-    <string name="af_hint">Choose which agents\' projects and sessions appear. Claude, Codex, and OpenCode stay tagged in their own colors.</string>
+    <string name="af_hint">Pick any combination — only the checked agents show their projects and sessions, and “All” means no filter. Each agent stays tagged in its own color.</string>
     <string name="settings_usage">Token usage</string>
     <string name="usage_title">Usage</string>
     <string name="usage_tokens_today">Tokens today</string>
@@ -505,6 +504,7 @@
     <string name="usage_vs_prev_days">vs prev %1$dd</string>
     <string name="usage_selected">%1$s · %2$s tokens</string>
     <string name="usage_na">not available yet</string>
+    <string name="usage_agent_all">All</string>
     <string name="terminal_open">Terminal</string>
     <string name="terminal_title">Terminal</string>
     <string name="terminal_hint">git status</string>
@@ -575,6 +575,7 @@
     <string name="img_excluded">· %1$d excluded</string>
     <string name="img_too_large">too large · %1$dKB</string>
     <string name="viewer_hint">Swipe down to close · tap to zoom</string>
+    <string name="img_replay_truncated">· some images weren\'t synced (too large or too many)</string>
 
     <!-- ── session info + quick actions ──────────────────────────── -->
     <string name="session_info_title">Session</string>
@@ -731,6 +732,10 @@
     <string name="bridge_exited_code">Exited (code %1$d)</string>
     <string name="bridge_last_error">Last error</string>
     <string name="bridge_projects">Projects</string>
+    <!-- the card's one destructive action (issue #259). NOT share_revoke: "Revoke" reads as "undo my last
+         step" on a control that deletes a credential, and the trailing ellipsis (U+2026) is part of the
+         spec — it is the promise that a confirm sheet comes first, on phone and desktop alike. -->
+    <string name="bridge_unbind">Disconnect…</string>
     <string name="bridge_revoke_title">Revoke this bridge?</string>
     <string name="bridge_revoke_c1">Its live sessions end immediately.</string>
     <string name="bridge_revoke_c2">The credential is deleted; a managed adapter is stopped too.</string>
@@ -1028,8 +1033,16 @@
     <string name="notify_turn_complete">Turn complete</string>
 
     <!-- chat pane -->
-    <string name="chat_no_session">No session open</string>
-    <string name="chat_no_session_hint">Pick a project on the left, then open or start a session.</string>
+    <string name="chat_no_session">Start a new session</string>
+    <string name="chat_no_session_hint">Pick a project on the left, then start a session here.</string>
+    <string name="chat_start_in">New session in %1$s — your first prompt goes straight in.</string>
+    <string name="chat_start_placeholder">Write the first prompt…</string>
+    <string name="chat_start_pick_project">Pick a project on the left first.</string>
+    <string name="chat_start_choose">Choose a folder…</string>
+    <string name="chat_start_opening">Starting the session — your prompt goes out the moment it is ready…</string>
+    <string name="chat_start_failed">Couldn\'t start the session. Your prompt is still here.</string>
+    <string name="chat_start_timeout">The session wasn\'t ready in time. Your prompt is still here.</string>
+    <string name="chat_start_send_failed">The session opened but the prompt wasn\'t sent — send it from the composer.</string>
     <string name="chat_opening">Opening session…</string>
     <string name="chat_opening_named">Opening %1$s…</string>
     <string name="chat_open_failed">Couldn\'t open the session</string>
@@ -1666,6 +1679,9 @@
     <string name="proj_no_match_title">No projects match “%1$s”</string>
     <string name="proj_no_match_body">The filter searches the names and paths this computer reported. Nothing here matched.</string>
     <string name="proj_clear_filter">Clear filter</string>
+    <string name="proj_agent_filtered_title">The agent filter is hiding every project</string>
+    <string name="proj_agent_filtered_body">Only %1$s projects are shown right now. The rest are still on this computer — clear the filter to bring them back.</string>
+    <string name="proj_clear_agent_filter">Clear agent filter</string>
 
     <!-- ── directory picker ─────────────────────────────────────────────────── -->
     <string name="dir_picker_on_computer">on %1$s</string>

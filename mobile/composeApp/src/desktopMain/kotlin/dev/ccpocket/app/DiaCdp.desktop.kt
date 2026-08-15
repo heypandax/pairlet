@@ -21,7 +21,16 @@ actual fun diaCdpSupported(): Boolean = isMac && diaApp.isDirectory
 actual suspend fun launchDiaCdp(port: Int): DiaCdpResult = withContext(Dispatchers.IO) {
     // messages surface in the composer hint row — resolved via suspend getString (non-composable context,
     // same pattern as RepoDesktopModel's update failures)
-    if (!diaCdpSupported()) return@withContext DiaCdpResult(false, getString(Res.string.dia_not_supported))
+    // #251: every lookup here is contained — this runs detached, and a throwing resource read on a
+    // coroutine with no handler is what took the desktop window down with an unnamed native error box.
+    if (!diaCdpSupported()) {
+        return@withContext DiaCdpResult(
+            false,
+            dev.ccpocket.app.data.safeString("Dia isn't installed (or this isn't macOS)") {
+                getString(Res.string.dia_not_supported)
+            },
+        )
+    }
     runCatching {
         // 1. QUIT any running Dia first. A flag-carrying launch is IGNORED while an instance is alive
         //    (Chromium forwards it to the existing process and the debug port never opens) — the key trap.
@@ -49,10 +58,29 @@ actual suspend fun launchDiaCdp(port: Int): DiaCdpResult = withContext(Dispatche
                 val code = try { conn.responseCode } finally { conn.disconnect() }
                 code == 200
             }.getOrDefault(false)
-            if (up) return@withContext DiaCdpResult(true, getString(Res.string.dia_ready, port))
+            if (up) {
+                return@withContext DiaCdpResult(
+                    true,
+                    dev.ccpocket.app.data.safeString("Dia debug port :$port is ready") {
+                        getString(Res.string.dia_ready, port)
+                    },
+                )
+            }
         }
-        DiaCdpResult(false, getString(Res.string.dia_no_answer, port))
-    }.getOrElse { DiaCdpResult(false, getString(Res.string.dia_launch_failed, it.message ?: "?")) }
+        DiaCdpResult(
+            false,
+            dev.ccpocket.app.data.safeString("Dia relaunched, but :$port never answered (timeout)") {
+                getString(Res.string.dia_no_answer, port)
+            },
+        )
+    }.getOrElse { e ->
+        DiaCdpResult(
+            false,
+            dev.ccpocket.app.data.safeString("Launch failed: ${e.message ?: "?"}") {
+                getString(Res.string.dia_launch_failed, e.message ?: "?")
+            },
+        )
+    }
 }
 
 /** True if a process named exactly "Dia" (the app's main process) is alive. */

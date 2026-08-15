@@ -342,6 +342,7 @@ class DeviceSessions(
             DaemonInfo(
                 lanUrl(), hostname(), gatewayBaseUrl(), bridgeControl = true,
                 supportedAgents = DAEMON_SUPPORTED_AGENT_WIRES,
+                supportsUsageAgentFilter = true, // issue #258: this build honors FetchUsage.agent
             ),
         )
 

@@ -97,10 +97,18 @@ data object ListArchivedSessions : ToDaemon
 @SerialName("pocket/session.rename")
 data class RenameSession(val workdir: String, val sessionId: String, val title: String) : ToDaemon
 
-/** Fetch aggregated token usage over the last [days] local days (reads transcripts; no launch). Issue #26. */
+/**
+ * Fetch aggregated token usage over the last [days] local days (reads transcripts; no launch). Issue #26.
+ *
+ * [agent] narrows the whole aggregation to ONE backend (issue #258); null (the default) keeps the
+ * all-backends total, i.e. exactly the pre-#258 behavior. Trailing optional with a default, so an old App
+ * omits it and an old daemon drops the unknown key and answers with everything — the App's "All" chip.
+ * A daemon predating this field silently ignores a narrowed request; there is no reverse capability for
+ * it, so the App only offers the filter to a daemon new enough to advertise its agent vocabulary.
+ */
 @Serializable
 @SerialName("pocket/usage.fetch")
-data class FetchUsage(val days: Int = 7) : ToDaemon
+data class FetchUsage(val days: Int = 7, val agent: AgentKind? = null) : ToDaemon
 
 /** Open a session: resume (resumeId != null) or start new (resumeId == null). */
 @Serializable
@@ -1165,6 +1173,13 @@ data class LanHello(val deviceId: String) : ToDaemon
  * enum values it can accept, while an old daemon's missing field decodes to an empty list. Clients use
  * that deny-by-omission default only for newly-added agents whose enum an older daemon could coerce;
  * baseline agents retain their existing compatibility behavior. An old app ignores the added key.
+ *
+ * [supportsUsageAgentFilter] (issue #258) is its OWN flag rather than something inferred from
+ * [supportedAgents], because the two shipped in different releases: [supportedAgents] went out with
+ * v1.7.7, [FetchUsage.agent] came after it. A v1.7.7 daemon therefore advertises the full agent
+ * vocabulary AND silently drops the agent key — inferring the filter from a non-empty [supportedAgents]
+ * would show the App a Kimi chip that answers with every backend's tokens under a Kimi label. Same
+ * deny-by-omission contract as [bridgeControl]: absent → false → the App hides the filter entirely.
  */
 @Serializable
 @SerialName("pocket/daemon.info")
@@ -1180,6 +1195,7 @@ data class DaemonInfo(
     val latestVersion: String? = null,
     val updateCommand: String? = null,
     val supportedAgents: List<String> = emptyList(),
+    val supportsUsageAgentFilter: Boolean = false,
 ) : ToPhone
 
 @Serializable
@@ -1218,6 +1234,19 @@ data class HistoryMessage(
      *  [WorkflowRun] pushed separately via [WorkflowUpdate]. Trailing optional both ways:
      *  old daemons omit it (the card renders as a plain tool row), old clients ignore it. */
     val workflowRunId: String? = null,
+    /** Images the prompt carried, on a USER row only (issue #254). The transcript stores them inline as
+     *  base64 (`{"type":"image","source":{"type":"base64",…}}`) — whether they were pasted at the
+     *  computer or uplinked by this daemon — so the phone can render the same turn the computer sees
+     *  instead of a text-only (or entirely empty) bubble. Same [ImageData] shape the uplink
+     *  [SendPrompt] uses, so the client decodes it with the code it already has. Trailing optional both
+     *  ways: an old daemon omits the key (decodes to an empty list — today's text-only replay), an old
+     *  client ignores it. Byte-capped by the replay budget, NOT by the sender — see [imagesTruncated]. */
+    val images: List<ImageData> = emptyList(),
+    /** True when the replay budget dropped some (or all) of this row's images to keep the `ConvoHistory`
+     *  frame under the relay's 4 MiB cap — the client says so in place rather than silently showing
+     *  fewer tiles than the computer has. Trailing optional both ways: old daemons omit it (false = no
+     *  claim either way, which is what a daemon that never carried images means), old clients ignore it. */
+    val imagesTruncated: Boolean = false,
 )
 
 /**

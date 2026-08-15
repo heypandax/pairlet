@@ -5,50 +5,118 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
+import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.bridge_revoke_c1
+import dev.ccpocket.app.resources.bridge_revoke_c2
+import dev.ccpocket.app.resources.bridge_revoke_confirm
+import dev.ccpocket.app.resources.bridge_revoke_title
 import dev.ccpocket.app.resources.bridge_runner_stop
-import dev.ccpocket.app.resources.share_revoke
+import dev.ccpocket.app.resources.bridge_unbind
+import dev.ccpocket.app.resources.cancel
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.protocol.BridgeInfo
 import dev.ccpocket.protocol.BridgeRunnerState
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class BridgesPaneUiTest {
 
-    @Test
-    fun bridgeActionsStayInsideSettingsPane() = runComposeUiTest {
-        val model = object : DesktopModel by SeedDesktopModel() {
-            override val bridgesLoaded = true
-            override val bridges = listOf(
-                BridgeInfo(
-                    name = "feishu-bot",
-                    workdirs = listOf("/Users/test/app-test", "/Users/test/cc-pocket"),
-                    online = true,
-                    maxSessions = 2,
-                    runner = BridgeRunnerState(kind = "feishu", scriptPath = "", running = true),
-                ),
-            )
-        }
+    /** Records what the pane actually asked the daemon to do — a revoke is not a rendering detail. */
+    private class RecordingModel(val revoked: MutableList<String> = mutableListOf()) :
+        DesktopModel by SeedDesktopModel() {
+        override val bridgesLoaded = true
+        override val bridges = listOf(
+            BridgeInfo(
+                name = "feishu-bot",
+                workdirs = listOf("/Users/test/app-test", "/Users/test/cc-pocket"),
+                online = true,
+                maxSessions = 2,
+                runner = BridgeRunnerState(kind = "feishu", scriptPath = "", running = true),
+            ),
+        )
 
-        // 475dp is the usable Bridges pane width inside the 700dp Settings modal.
-        setContent { PocketTheme { Box(Modifier.width(475.dp)) { BridgesPane(model) } } }
+        override fun revokeBridge(name: String) { revoked += name }
+    }
+
+    /** 475dp is the usable Bridges pane width inside the 700dp Settings modal. */
+    private fun pane(model: DesktopModel): @androidx.compose.runtime.Composable () -> Unit = {
+        PocketTheme { Box(Modifier.width(475.dp)) { BridgesPane(model) } }
+    }
+
+    /**
+     * The two tiers survive the pane's real width (issue #259 keeps the old containment proof).
+     *
+     * The process chips still start at the row's left padding, and the destructive action — no longer one
+     * of them — sits in the footer below, right-aligned and fully inside the pane.
+     */
+    @Test
+    fun bridgeActionsStayInsideSettingsPaneInTwoTiers() = runComposeUiTest {
+        setContent(pane(RecordingModel()))
         waitForIdle()
 
-        val revokeBounds = onNodeWithText(str(Res.string.share_revoke)).getUnclippedBoundsInRoot()
+        val stop = onAllNodes(hasClickAction() and hasText(str(Res.string.bridge_runner_stop))).onFirst()
+            .getUnclippedBoundsInRoot()
         assertTrue(
-            revokeBounds.right <= 475.dp,
-            "Revoke must be fully inside the pane, but its right edge was ${revokeBounds.right}",
+            stop.left <= 20.dp,
+            "The process chips must start at the pane's left padding, but Stop began at ${stop.left}",
         )
-        val stopBounds = onNodeWithText(str(Res.string.bridge_runner_stop)).getUnclippedBoundsInRoot()
+        val unbind = onAllNodes(hasClickAction() and hasText(str(Res.string.bridge_unbind))).onFirst()
+            .getUnclippedBoundsInRoot()
         assertTrue(
-            stopBounds.left <= 20.dp,
-            "The second-row actions must start at the pane's left padding, but Stop began at ${stopBounds.left}",
+            unbind.right <= 475.dp,
+            "The destructive action must be fully inside the pane, but its right edge was ${unbind.right}",
         )
+        assertTrue(unbind.top >= stop.bottom, "…and below the chip row, not beside it")
+        assertTrue(unbind.left > stop.right, "…right-aligned in its own footer")
+    }
+
+    /**
+     * The desktop asks first, like the phone always did.
+     *
+     * Before this the pointer platform revoked on the naked click: one stray click on a 「撤销」 pill and the
+     * credential was gone. The 「…」 in the new label is a promise, and these three moves are the promise
+     * being kept — nothing happens on the click, nothing happens on Cancel, and only the dialog's own
+     * filled-danger button reaches `revokeBridge`.
+     */
+    @Test
+    fun unbindOpensAConfirmDialogAndOnlyTheConfirmButtonRevokes() = runComposeUiTest {
+        val model = RecordingModel()
+        setContent(pane(model))
+        waitForIdle()
+
+        // 1 · the click opens the dialog and does NOT revoke
+        onAllNodes(hasClickAction() and hasText(str(Res.string.bridge_unbind))).onFirst().performClick()
+        waitForIdle()
+        assertTrue(present(str(Res.string.bridge_revoke_title)), "the confirm dialog must appear")
+        assertTrue(present("feishu-bot"), "…naming WHICH bridge is at stake")
+        assertTrue(present(str(Res.string.bridge_revoke_c1)), "…and both consequences")
+        assertTrue(present(str(Res.string.bridge_revoke_c2)))
+        assertEquals(emptyList(), model.revoked, "opening the question must not answer it")
+
+        // 2 · Cancel backs out, still without revoking
+        onNodeWithText(str(Res.string.cancel)).performClick()
+        waitForIdle()
+        assertFalse(present(str(Res.string.bridge_revoke_title)), "Cancel closes the dialog")
+        assertEquals(emptyList(), model.revoked, "Cancel must not revoke")
+
+        // 3 · only the deliberate second move does it
+        onAllNodes(hasClickAction() and hasText(str(Res.string.bridge_unbind))).onFirst().performClick()
+        waitForIdle()
+        onNodeWithText(str(Res.string.bridge_revoke_confirm)).performClick()
+        waitForIdle()
+        assertEquals(listOf("feishu-bot"), model.revoked, "the confirm button is the only path to revoke")
+        assertFalse(present(str(Res.string.bridge_revoke_title)), "…and it closes the dialog behind it")
     }
 }

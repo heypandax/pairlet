@@ -293,6 +293,22 @@ class RequestRouter(
                 )
             }
 
+        /**
+         * Make a [Usage] reply safe for [caps]' vocabulary (issue #258). The by-model rows carry an
+         * [AgentKind], and since #217/#258 that can be OPENCODE/KIMI/ZCODE — an undeclared peer would
+         * hard-fail the WHOLE Envelope on the unknown enum, losing the dashboard entirely.
+         *
+         * Undeclared rows are DOWNGRADED to the baseline CLAUDE rather than dropped: their tokens are
+         * already inside the hero total and the trend, so dropping the bar would make the page contradict
+         * itself. The old client loses only the badge color — the model id it renders stays honest.
+         */
+        internal fun gateUsageAgents(usage: dev.ccpocket.protocol.Usage, caps: ClientCapsHolder?): dev.ccpocket.protocol.Usage {
+            if (usage.models.all { capsAllow(caps, it.agent) }) return usage
+            return usage.copy(
+                models = usage.models.map { if (capsAllow(caps, it.agent)) it else it.copy(agent = AgentKind.CLAUDE) },
+            )
+        }
+
         /** Whether a peer with [caps] can decode [agent]. Null caps (legacy ingress / bridges) = undeclared,
          *  so only the baseline CLAUDE/CODEX vocabulary is allowed. Post-baseline agents (OPENCODE issue #184,
          *  KIMI issue #206) each need their own declared capability. Single choke point for every list/dir
@@ -417,7 +433,10 @@ class RequestRouter(
             }
 
             // heavy transcript scan → off the inbound pump so it can't wedge the socket
-            is FetchUsage -> scope.launch { sink.emit(UsageService.aggregate(frame.days)) }
+            // issue #258: the reply's by-model rows can now carry KIMI/ZCODE badges, so the same agent
+            // gate the session rows use applies here — a peer that never declared the wire name would
+            // hard-fail the whole Envelope on the unknown enum.
+            is FetchUsage -> scope.launch { sink.emit(gateUsageAgents(UsageService.aggregate(frame.days, agent = frame.agent), caps)) }
 
             // installed skills/plugins browse page (issue #132): a disk scan → off the inbound pump like
             // FetchUsage. Guests never reach here (GuestCaps denies the frame type at the choke point).
