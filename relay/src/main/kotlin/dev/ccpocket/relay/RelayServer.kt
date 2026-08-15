@@ -36,6 +36,7 @@ import dev.ccpocket.relay.auth.DaemonAuthenticator
 import dev.ccpocket.relay.auth.DeviceAuthenticator
 import dev.ccpocket.relay.net.RateLimiter
 import dev.ccpocket.relay.net.clientIp
+import dev.ccpocket.relay.net.installRelayForwardedHeaders
 import dev.ccpocket.relay.pairing.CodeStore
 import dev.ccpocket.relay.pairing.PairingService
 import dev.ccpocket.relay.store.RelayStore
@@ -45,7 +46,6 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
-import io.ktor.server.plugins.forwardedheaders.XForwardedHeaders
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
@@ -97,7 +97,7 @@ class RelayServer(
                 pingPeriodMillis = 20_000
                 timeoutMillis = 60_000
             }
-            install(XForwardedHeaders) // honor Caddy's X-Forwarded-For (we bind loopback; only Caddy reaches us)
+            installRelayForwardedHeaders() // Caddy's X-Forwarded-For, pinned to the LAST hop — see the doc there
 
             launch {
                 while (isActive) {
