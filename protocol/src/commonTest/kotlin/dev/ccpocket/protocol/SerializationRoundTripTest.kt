@@ -706,6 +706,12 @@ class SerializationRoundTripTest {
         // existing constant's ordinal moves. Same contract as kimi/zcode above — the @SerialName IS the
         // cross-build agreement, and DAEMON_SUPPORTED_AGENT_WIRES must advertise it or a newer App would
         // send `agent:"dsh"` to an older daemon that silently coerces the open back to Claude.
+        // TAIL INSERTION, pinned rather than merely documented. A new AgentKind must be APPENDED: the
+        // enum's ordinals are what an ordinal-based encoder (and any peer that ever compares by index)
+        // relies on, so inserting in the middle silently renumbers every later constant. Whoever adds the
+        // NEXT agent has to edit this line, which is exactly the moment to be reminded of the rule.
+        assertEquals(AgentKind.DSH, AgentKind.entries.last())
+
         val list = ModelsList(agent = AgentKind.DSH, models = listOf("deepseek-chat"))
         val listJson = PocketJson.encodeToString(list)
         assertTrue("\"agent\":\"dsh\"" in listJson, listJson)
