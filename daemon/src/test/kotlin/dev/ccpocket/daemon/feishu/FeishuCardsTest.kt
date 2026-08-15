@@ -180,8 +180,12 @@ class FeishuCardsTest {
         // the conversation a press acts on is the CARD'S topic, identical to the one a message in that
         // topic would compute — not a fresh topic rooted at the card itself
         assertEquals(
-            FeishuThreading.conversationKey("oc_group", "group", "om_other", "om_topic", ownerTurn = false),
-            FeishuThreading.conversationKey(line.chatId, line.chatType, line.cardMessageId, line.topicRoot, false),
+            FeishuThreading.conversationKey(
+                "oc_group", "group", "om_other", threadId = "om_topic", rootId = null, ownerTurn = false,
+            ),
+            FeishuThreading.conversationKeyOf(
+                line.chatId, line.chatType, line.topicRoot ?: line.cardMessageId, ownerTurn = false,
+            ),
         )
     }
 }

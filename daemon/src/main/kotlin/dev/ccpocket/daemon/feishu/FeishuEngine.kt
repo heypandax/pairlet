@@ -43,6 +43,7 @@ internal fun trustedEnabledReply(projectName: String): String =
     "✅ 已完全信任「$projectName」：群成员的每条请求会获得整轮 full 权限，不经 Guardian，也不再逐工具等待机主批准。\n" +
         "本轮可运行未被确定性规则拦截的 Bash、MCP、网络工具和子代理，可能访问项目外数据或向外发送数据。\n" +
         "需要人类作答或确认的交互工具仍会询问；授权在每轮结束时撤销，由下一条受信请求重新取得。\n" +
+        "⚠️ 受信请求可写入 .git/hooks、.claude/、CLAUDE.md、.envrc 等位置，这些内容会在你之后的会话或终端里自动执行，不随 /untrust 失效。\n" +
         "换绑到别的项目会自动失效；随时 /untrust 撤销，撤销从下一条请求生效。"
 
 /**
@@ -159,17 +160,20 @@ class FeishuEngine(
     // conversation state: one conversation per direct chat, or per group TOPIC (#234) — see onMessage.
     // convo -> session survives idle-reap so a later message in the same topic resumes with full context.
     private val mutex = Mutex()
-    private val convoByKey = HashMap<String, String>()
+    private val convoByKey = LruMap<String>(TOPIC_STATE_MAX) { key, convoId -> evictConversation(key, convoId) }
     // the workdir each key's convo was opened against. A /bind can move a chat to another project mid-life,
     // and the chat's key still maps to the OLD project's convo — reusing/resuming it would keep sending
     // prompts to the old workdir (the "rebind took no effect until restart/​/new" bug). openOrReuse compares
     // this against the now-requested workdir and, on a mismatch, opens CLEAN instead of reusing or resuming.
-    private val keyWorkdir = HashMap<String, String>()
+    private val keyWorkdir = LruMap<String>(TOPIC_STATE_MAX)
     // a DIRECT unified-inbox chat's CURRENT project (chatId -> workdir) — the continuation bias: a
     // follow-up with no routing signal stays here, an explicit/clear other-project request switches. /new
     // clears it. In-memory like keyWorkdir: a daemon restart just means the next message re-routes.
     private val activeProject = HashMap<String, String>()
-    private val sessionOf = HashMap<String, String>()
+    // convoId -> Claude session id. Normally reaped together with its conversation key (see
+    // [evictConversation]), but an open that TIMED OUT never got recorded under any key, so this one is
+    // bounded on its own too — an evicted entry just means the next message opens clean instead of resuming.
+    private val sessionOf = LruMap<String>(TOPIC_STATE_MAX)
     private val turnWaiters = HashMap<String, CompletableDeferred<TurnDone>>()
     private val openWaiters = HashMap<String, CompletableDeferred<String>>() // openId -> convoId
     // A completed Feishu turn keeps its transcript/session id but must not keep a live CLI forever: bridge
@@ -182,6 +186,40 @@ class FeishuEngine(
     // permission ask on their phone minutes later — the bridge's whole reason to exist). Keyed by convoId.
     private data class ReplySlot(val target: FeishuReplyTarget, var done: Boolean = false)
     private val replySlots = HashMap<String, ReplySlot>()
+
+    /**
+     * 有界 LRU（#265）。话题化之后这几张表按「话题数」而不是「群数」增长，而会话是**故意**在 idle-reap 之后
+     * 仍然留着的——下一条消息还要 resume 它，所以没有一个可靠的「结束」钩子可以挂清理。用容量上限兜底：
+     * 最久没被碰过的话题先掉，它的下一条消息就是开一条干净会话。这个退化可以接受，无界增长不能。
+     *
+     * 全部读写都在 [mutex] 里，所以 accessOrder 的非线程安全在这里不成问题。
+     */
+    private class LruMap<V>(
+        private val max: Int,
+        private val onEvict: (String, V) -> Unit = { _, _ -> },
+    ) : LinkedHashMap<String, V>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, V>?): Boolean {
+            if (size <= max || eldest == null) return false
+            onEvict(eldest.key, eldest.value)
+            return true
+        }
+    }
+
+    /** A conversation key aged out of [convoByKey]: drop everything else that key owned. */
+    private fun evictConversation(key: String, convoId: String) {
+        sessionOf.remove(convoId)
+        replySlots.remove(convoId)
+        pendingAsk.remove(convoId)
+        keyWorkdir.remove(key)
+    }
+
+    /** Forget one conversation key outright (`/new`). Returns true when a live mapping actually went away —
+     *  that's what lets a top-level `/new` report how much it really cleared. Caller holds [mutex]. */
+    private fun forgetConversation(key: String): Boolean {
+        val convoId = convoByKey.remove(key) ?: run { keyWorkdir.remove(key); return false }
+        evictConversation(key, convoId)
+        return true
+    }
 
     private sealed interface OpenResult {
         data class Opened(val convoId: String) : OpenResult
@@ -196,10 +234,16 @@ class FeishuEngine(
     // convoId -> the label of a permission ask currently waiting on the owner's phone, so the "still
     // working" nudge can name it ("Run command 在等你批准") instead of a bare, scary timeout.
     private val pendingAsk = HashMap<String, String>()
-    // per-conversation turn serialization: direct messages share a chat conversation; group messages share
-    // only their topic. A second prompt in that conversation queues instead of overwriting the first waiter;
-    // unrelated topics remain parallel (#234).
-    private val chatLocks = HashMap<String, Mutex>()
+    // Turn serialization, keyed by [FeishuThreading.executionLockKey]: chat-wide in a group (every topic
+    // there writes the SAME workdir — #265), per-conversation in a direct chat. A second prompt queues
+    // instead of overwriting the first's waiter; unrelated chats stay fully parallel.
+    // Bounded like the state above, with one extra rule: a HELD mutex is never evicted. Dropping one would
+    // let the next message mint a fresh mutex and run in parallel with the turn still holding the old one —
+    // exactly the concurrent-write this lock exists to prevent. A locked eldest simply survives the round.
+    private val chatLocks = object : LinkedHashMap<String, Mutex>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Mutex>?): Boolean =
+            size > TOPIC_STATE_MAX && eldest?.value?.isLocked == false
+    }
     // Trust/routes policy linearization, keyed by the Feishu chat (not topic). Every route/trust mutation and
     // the FINAL snapshot validation + grant hand-off takes this mutex. Guardian review deliberately does not:
     // /untrust and /bind must land immediately while it is thinking, then defeat the final claim. This closes
@@ -468,6 +512,9 @@ class FeishuEngine(
         // it HAS a quote before it can tell "nothing was said" from "what was said is the quote".
         val parentId = msg.parentId
         val rootId = msg.rootId
+        // 飞书自己的话题锚点：话题里的每条消息都带同一个 thread_id，包括不点回复的直发消息。rootId 只在
+        // 回复／引用链路上才有值，单靠它会让话题内直发的每一句各自成一条会话（#262）。
+        val threadId = msg.threadId
         // text AND rich-text `post` carry instructions; every other kind (image / file / card) carries none.
         // This used to read `content.text` directly, which is present only on `text` — so any message written
         // with a bullet list or a heading arrived as `post` and vanished here, with no reply and no log.
@@ -492,13 +539,9 @@ class FeishuEngine(
         if (!firstSeen(replyMessageId)) return
 
         val replyTo = FeishuThreading.replyTarget(replyMessageId, msg.chatType)
-        // #234: acknowledge a valid request immediately, independently of the work it starts — groups AND
-        // direct chats (the unified inbox has no other "I heard you" signal before the routing receipt). A
-        // missing reaction scope or a transient Feishu error is cosmetic and must never block the command.
-        scope.launch {
-            runCatching { api?.reactTyping(replyMessageId) }
-                .onFailure { logLine("[chat] typing receipt failed") }
-        }
+        // NOTE: the Typing receipt used to fire HERE, before the policy gate — an unbound group therefore saw
+        // 「机器人在打字」 and then nothing, forever (#265). It now posts from dispatchChatLine, once we know
+        // the line actually starts a turn; every other outcome already answers with real text.
         // warm the group-owner cache for the /bind fallback — groups only (a direct chat's bind authority
         // is its own user), and only when no admin is set (else it's unused)
         if (isGroup && adminOpenId.isNullOrBlank() && !chatOwners.containsKey(chatId)) fetchChatOwner(chatId)
@@ -510,7 +553,10 @@ class FeishuEngine(
         // (keyed apart from the topic's) that auto-allows — race-free, because a session never mixes senders.
         // Everyone else drives the approval-gated topic session. Gated on the toggle + a set admin id.
         val ownerTurn = ownerBypassEnabled && !adminOpenId.isNullOrBlank() && sender == adminOpenId
-        val convoKey = FeishuThreading.conversationKey(chatId, msg.chatType, replyMessageId, rootId, ownerTurn)
+        // one anchor, one identity: the conversation key, the card origin and the 「顶层还是话题内」 judgement
+        // below all read the SAME resolved topic, so a topic can never end up with two identities (#262)
+        val topicAnchor = FeishuThreading.topicAnchor(replyMessageId, threadId, rootId)
+        val convoKey = FeishuThreading.conversationKeyOf(chatId, msg.chatType, topicAnchor, ownerTurn)
 
         // Feishu's callback is synchronous, while policy ordering needs a suspendable per-chat mutex. Move the
         // command dispatch into the engine scope; commands.handle performs /bind, /unbind and single-project
@@ -526,9 +572,12 @@ class FeishuEngine(
                     ownerTurn = ownerTurn,
                     convoKey = convoKey,
                     replyTo = replyTo,
-                    // the topic a card posted here would belong to: a group's own topic root, nothing in a
+                    // the topic a card posted here would belong to: a group's own topic anchor, nothing in a
                     // direct chat (which has exactly one conversation)
-                    topicRoot = if (isGroup) rootId?.takeIf { it.isNotBlank() } ?: replyMessageId else null,
+                    topicRoot = if (isGroup) topicAnchor else null,
+                    // 这条是在话题**里面**说的，还是在群的顶层新起的一条？只有话题锚点来自飞书（thread/root）
+                    // 时才算话题内；否则这条消息自己就是话题的开头。顶层 /new 的语义靠它区分（#265）。
+                    inTopic = isGroup && !(threadId.isNullOrBlank() && rootId.isNullOrBlank()),
                     parentId = parentId,
                     rootId = rootId,
                     quoteOnly = quoteOnly,
@@ -586,11 +635,14 @@ class FeishuEngine(
                     ownerTurn = ownerTurn,
                     // the card's remembered topic keeps a press acting on the conversation the card was
                     // posted into, not on a fresh topic rooted at the card itself
-                    convoKey = FeishuThreading.conversationKey(
-                        line.chatId, line.chatType, line.cardMessageId, line.topicRoot, ownerTurn,
+                    convoKey = FeishuThreading.conversationKeyOf(
+                        line.chatId, line.chatType, line.topicRoot ?: line.cardMessageId, ownerTurn,
                     ),
                     replyTo = FeishuReplyTarget(line.cardMessageId, inThread = isGroup),
                     topicRoot = line.topicRoot,
+                    // a card we posted into a group ALWAYS lives in the topic it answered, so a press on it is
+                    // a line INSIDE that topic — never a top-level one (which would sweep the whole chat)
+                    inTopic = isGroup && line.topicRoot != null,
                 ),
             )
         }
@@ -641,6 +693,8 @@ class FeishuEngine(
         /** the group TOPIC this line belongs to (null in a direct chat) — carried so a card posted in
          *  answer can be resolved back to the same topic when a button on it is pressed. */
         val topicRoot: String?,
+        /** 群里这条是话题**内部**的发言（true），还是在顶层新起的一条（false）。直聊恒为 false。 */
+        val inTopic: Boolean = false,
         val parentId: String? = null,
         val rootId: String? = null,
         val quoteOnly: Boolean = false,
@@ -670,18 +724,23 @@ class FeishuEngine(
                 trustLog.record("${java.time.Instant.now()} trust-change $what")
             }
             dispatch.trustReply?.let { reply(replyTo, it) }
+            // #265: 「收到了」的表情回执排在策略门之后，只有真会起一轮活的行才发。别的分支都会有实打实的
+            // 文字回复，再加个表情是噪音；而以前它排在门之前，未绑定项目的群会先看到表情、然后永远没下文。
+            if (dispatch.action is ChatAction.Ask || dispatch.action is ChatAction.AskAuto) ackTyping(line)
             when (val action = dispatch.action) {
             is ChatAction.Ignore -> {}
             is ChatAction.Reply -> reply(replyTo, action.text)
             is ChatAction.Card -> replyCard(line, action)
             is ChatAction.Reset -> {
-                // drop the SENDER's conversation (owner and group have SEPARATE sessions per chat — see
-                // convoKey) under the same per-session lock a turn holds, so /new can't race a running turn
-                val lock = mutex.withLock { chatLocks.getOrPut(convoKey) { Mutex() } }
-                lock.withLock { mutex.withLock {
-                    convoByKey.remove(convoKey)?.let { sessionOf.remove(it); replySlots.remove(it); pendingAsk.remove(it) }
-                    keyWorkdir.remove(convoKey)
-                } }
+                // 顶层（不在任何话题里）发的 /new：这条消息刚刚生成的话题键上根本还没有会话，照原样 remove
+                // 等于清了个空键，却回一句「已开新会话」——假成功。顶层的自然语义是「把这个群清一清」，
+                // 所以在这里如实清掉本群所有话题的会话并报出真实条数（#265）；话题内的 /new 只清本话题。
+                val sweptTopics = if (isGroup && !line.inTopic) resetAllTopics(chatId) else null
+                if (sweptTopics == null) {
+                    // drop the SENDER's conversation (owner and group have SEPARATE sessions per chat — see
+                    // convoKey) under the same execution lock a turn holds, so /new can't race a running turn
+                    executionLock(line, convoKey).withLock { mutex.withLock { forgetConversation(convoKey) } }
+                }
                 // a DIRECT unified inbox keeps one conversation per (chat, project): /new drops the CURRENT
                 // project's conversation and clears the continuation anchor so the next message re-routes
                 if (!isGroup) {
@@ -689,13 +748,20 @@ class FeishuEngine(
                     if (active != null) {
                         val k = FeishuThreading.directProjectKey(chatId, active, ownerTurn)
                         val plock = mutex.withLock { chatLocks.getOrPut(k) { Mutex() } }
-                        plock.withLock { mutex.withLock {
-                            convoByKey.remove(k)?.let { sessionOf.remove(it); replySlots.remove(it); pendingAsk.remove(it) }
-                            keyWorkdir.remove(k)
-                        } }
+                        plock.withLock { mutex.withLock { forgetConversation(k) } }
                     }
                 }
-                reply(replyTo, action.note)
+                reply(
+                    replyTo,
+                    when {
+                        sweptTopics == null -> action.note
+                        sweptTopics > 0 ->
+                            "🆕 已清空本群 $sweptTopics 个话题的会话上下文，每个话题的下一条消息都会重新开始。"
+                        else ->
+                            "ℹ️ 本群当前没有进行中的话题会话，没有可清的上下文。\n" +
+                                "在某个话题里发 /new 只会清那一个话题。"
+                    },
+                )
             }
             is ChatAction.SetTrust -> error("trust mutation escaped the per-chat policy gate")
             is ChatAction.Ask -> {
@@ -705,12 +771,11 @@ class FeishuEngine(
                 val slashPassThrough = text.startsWith("/")
                 val prompt = buildTurnPrompt(action.prompt, slashPassThrough, parentId, rootId, quoteOnly, sender, ownerTurn)
                     ?: return@run reply(replyTo, UNREADABLE_QUOTE_REPLY)
-                // ONE conversation per group topic (or per direct chat), one turn at a time per conversation
-                // (see chatLocks) — a second message queues instead of clobbering the first's waiter.
-                // ask() posts its OWN reply (inline, or late via onFrame after an approval) so the result
-                // survives an out-of-band owner tap; we only surface a hard failure to open/drive the turn.
-                val lock = mutex.withLock { chatLocks.getOrPut(convoKey) { Mutex() } }
-                lock.withLock {
+                // ONE conversation per group topic (or per direct chat), but only one turn at a time per
+                // CHAT (see chatLocks) — a second message queues instead of clobbering the first's waiter or
+                // racing it inside the same workdir. ask() posts its OWN reply (inline, or late via onFrame
+                // after an approval), so we only surface a hard failure to open/drive the turn.
+                executionLock(line, convoKey).withLock {
                     runCatching { ask(convoKey, chatId, isGroup, action.workdir, prompt, replyTo, sender, ownerTurn) }
                         .onFailure { e ->
                             log.warn("feishu turn failed: ${e.message}")
@@ -727,10 +792,9 @@ class FeishuEngine(
                 val prompt = buildTurnPrompt(action.prompt, slashPassThrough, parentId, rootId, quoteOnly, sender, ownerTurn)
                     ?: return@run reply(replyTo, UNREADABLE_QUOTE_REPLY)
                 if (isGroup) {
-                    // a GROUP topic routes once and stays put: route + run under the topic's lock, so two
-                    // racing first messages cannot route it twice (the loser sees the winner's sticky pick)
-                    val lock = mutex.withLock { chatLocks.getOrPut(convoKey) { Mutex() } }
-                    lock.withLock {
+                    // a GROUP topic routes once and stays put: route + run under the chat's execution lock,
+                    // so two racing first messages cannot route it twice (the loser sees the sticky pick)
+                    executionLock(line, convoKey).withLock {
                         when (val route = resolveAutoRoute(convoKey, chatId, prompt, slashPassThrough)) {
                             is AutoRoute.Unrouted -> reply(replyTo, route.hint)
                             is AutoRoute.Routed -> runAutoTurn(convoKey, chatId, isGroup = true, route, prompt, replyTo, sender, ownerTurn, text)
@@ -744,14 +808,56 @@ class FeishuEngine(
                         is AutoRoute.Unrouted -> reply(replyTo, route.hint)
                         is AutoRoute.Routed -> {
                             val key = FeishuThreading.directProjectKey(chatId, route.workdir, ownerTurn)
-                            val lock = mutex.withLock { chatLocks.getOrPut(key) { Mutex() } }
-                            lock.withLock {
+                            executionLock(line, key).withLock {
                                 runAutoTurn(key, chatId, isGroup = false, route, prompt, replyTo, sender, ownerTurn, text)
                             }
                         }
                     }
                 }
             }
+            }
+        }
+    }
+
+    /** #234 的即时回执：一个 Typing 表情，让发起人知道请求收下了、活已经开始。缺 reaction scope 或飞书临时
+     *  报错都只是观感问题，绝不能挡住这一轮——所以永远 best-effort、永远异步。 */
+    private fun ackTyping(line: ChatLine) {
+        scope.launch {
+            runCatching { api?.reactTyping(line.replyTo.messageId) }
+                .onFailure { logLine("[chat] typing receipt failed") }
+        }
+    }
+
+    /** The mutex that serializes EXECUTION for [line] — see [FeishuThreading.executionLockKey]. [convoKey] is
+     *  the conversation this turn will actually run in (a direct chat's per-project key differs from
+     *  [ChatLine.convoKey]); it is only consulted for a direct chat, where there are no topics to merge. */
+    private suspend fun executionLock(line: ChatLine, convoKey: String): Mutex {
+        val key = FeishuThreading.executionLockKey(line.chatId, line.chatType, convoKey, line.ownerTurn)
+        return mutex.withLock { chatLocks.getOrPut(key) { Mutex() } }
+    }
+
+    /**
+     * 顶层 `/new`：清掉本群**所有**话题的会话，返回真正清掉了几条。
+     *
+     * 群里有两把执行锁（普通成员一把、owner bypass 一把），两把都要拿，否则可能把一个正在跑的话题从表里
+     * 抽走。顺序固定为「普通 → owner」，而任何一轮消息都只拿其中一把，所以构不成环。
+     */
+    private suspend fun resetAllTopics(chatId: String): Int {
+        val chatType = GROUP_CHAT_TYPE
+        val shared = mutex.withLock {
+            chatLocks.getOrPut(FeishuThreading.executionLockKey(chatId, chatType, chatId, ownerTurn = false)) { Mutex() }
+        }
+        val owner = mutex.withLock {
+            chatLocks.getOrPut(FeishuThreading.executionLockKey(chatId, chatType, chatId, ownerTurn = true)) { Mutex() }
+        }
+        return shared.withLock {
+            owner.withLock {
+                mutex.withLock {
+                    val prefix = FeishuThreading.topicKeyPrefix(chatId)
+                    // snapshot first: forgetConversation mutates both maps underneath us
+                    val doomed = (convoByKey.keys + keyWorkdir.keys).filter { it.startsWith(prefix) }.toSet()
+                    doomed.count { forgetConversation(it) }
+                }
             }
         }
     }
@@ -1309,7 +1415,15 @@ class FeishuEngine(
                 openWaiters[openKey]?.complete(convoId)
             }
             val convoId = withTimeoutOrNull(OPEN_TIMEOUT_MS) { opened.await() } ?: return OpenResult.TimedOut
-            mutex.withLock { convoByKey[key] = convoId; keyWorkdir[key] = workdir }
+            mutex.withLock {
+                // the key may already point at an older convo (a rebind opens clean instead of reusing) —
+                // that convo is now unreachable, so drop its session/slot rows with it rather than leaking
+                // them forever under a convoId nothing maps to any more (#265)
+                convoByKey.put(key, convoId)?.takeIf { it != convoId }?.let { stale ->
+                    sessionOf.remove(stale); replySlots.remove(stale); pendingAsk.remove(stale)
+                }
+                keyWorkdir[key] = workdir
+            }
             return OpenResult.Opened(convoId)
         } finally {
             mutex.withLock { openWaiters.remove(openKey) }
@@ -1406,6 +1520,8 @@ class FeishuEngine(
 
     private companion object {
         const val SEEN_MESSAGES_MAX = 512   // at-least-once dedup LRU capacity (see seenMessages)
+        const val TOPIC_STATE_MAX = 512     // per-topic conversation state kept before the oldest ages out (LruMap)
+        const val GROUP_CHAT_TYPE = "group" // the chat_type a topic sweep reasons about (see resetAllTopics)
         const val CARD_ORIGINS_MAX = 256    // live /menu cards we can still resolve a press for (cardOrigins)
         const val NUDGE_MS = 25_000L        // no reply yet after this + an approval pending → nudge the group
         const val TURN_TIMEOUT_MS = 300_000L
