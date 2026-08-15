@@ -43,6 +43,10 @@ class LanE2E(
     val hostname: () -> String? = { null }, // OS computer name advertised in DaemonInfo (client's default binding name — #62)
     val gatewayBaseUrl: () -> String? = { null }, // third-party ANTHROPIC_BASE_URL in DaemonInfo (issue #139; null = official endpoint)
     val firstContactPending: suspend (String) -> Boolean = { false },
+    /** The allow-list lookup the gate consults, re-read PER handshake (see [PairedDevices]) so a device
+     *  paired over the relay a moment ago is accepted here without a restart. A parameter only so tests
+     *  can supply a fixture instead of the real ~/.cc-pocket/devices.json. */
+    val pairedDevices: () -> Map<String, ByteArray> = { PairedDevices.load() },
 ) {
     val gateSlots = kotlinx.coroutines.sync.Semaphore(MAX_PENDING_HANDSHAKES)
 
@@ -139,16 +143,31 @@ class WsConnection(
                 }
                 is WsFrame.Binary -> {
                     val id = deviceId ?: return null // handshake before hello — protocol violation
+                    // an empty BINARY frame has no type byte to read (DeviceSessions.onFrame guards the
+                    // relay path the same way); indexing it would throw out of the whole connection
+                    if (frame.data.isEmpty()) return null
                     if (Wire.payloadType(frame.data) != Wire.HANDSHAKE) return null
                     // re-read per handshake: a device paired over the relay minutes ago must work here now
-                    val devicePub = PairedDevices.load()[id]
+                    val devicePub = gate.pairedDevices()[id]
                     if (devicePub == null) { log.warn("direct connect from unpaired device ${id.take(8)}…"); return null }
                     // a freshly paired device must prove ticket knowledge over the relay FIRST — the LAN
                     // handshake deliberately runs PSK-less and can't provide that pairing-ceremony binding
                     if (gate.firstContactPending(id)) { log.warn("direct connect from ${id.take(8)}… before its first relay handshake — refused"); return null }
-                    val (crypto, responderEph) = E2ESession.responder(
-                        gate.identity.e2ePrivRaw, gate.identity.e2ePubRaw, devicePub, ByteArray(0), Wire.payloadBody(frame.data),
-                    )
+                    // The allow-list authenticates the device's STATIC key, but the ephemeral bytes in
+                    // this frame are still whatever the socket sent. A short, wrong-format, or off-curve
+                    // P-256 point makes the crypto provider throw — mirror of the relay path's fix
+                    // (DeviceSessions.handshake): reject this connection rather than let untrusted input
+                    // escape as an exception. Cancellation is not a crypto failure and must propagate.
+                    val (crypto, responderEph) = try {
+                        E2ESession.responder(
+                            gate.identity.e2ePrivRaw, gate.identity.e2ePubRaw, devicePub, ByteArray(0), Wire.payloadBody(frame.data),
+                        )
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        log.warn("malformed direct handshake from ${id.take(8)}… (${e::class.simpleName}) — refused")
+                        return null
+                    }
                     session.outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.HANDSHAKE, responderEph)))
                     gatedDeviceId = id
                     // freshly gated: hand the device our current direct address (IP may have changed since it
@@ -205,7 +224,10 @@ class WsConnection(
                     if (gated !in PairedDevices.load()) error("device revoked — closing live direct link")
                 }
                 val text = when {
-                    crypto != null && frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT ->
+                    // isNotEmpty() before payloadType() for the same reason as in the gate above: a zero-byte
+                    // BINARY frame has no type byte, and this loop is the whole connection
+                    crypto != null && frame is WsFrame.Binary && frame.data.isNotEmpty() &&
+                        Wire.payloadType(frame.data) == Wire.TRANSPORT ->
                         crypto.open(Wire.payloadBody(frame.data))?.decodeToString()
                             ?: run { log.warn("decrypt failed on direct link"); null }
                     crypto == null && frame is WsFrame.Text -> frame.readText()
