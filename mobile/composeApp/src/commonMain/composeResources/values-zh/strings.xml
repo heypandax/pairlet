@@ -730,6 +730,7 @@
     <string name="bridge_exited_code">已退出（代码 %1$d）</string>
     <string name="bridge_last_error">最近错误</string>
     <string name="bridge_projects">项目</string>
+    <string name="bridge_unbind">解除桥接…</string>
     <string name="bridge_revoke_title">撤销此桥接？</string>
     <string name="bridge_revoke_c1">它进行中的会话会立即结束。</string>
     <string name="bridge_revoke_c2">凭证会被删除；若有托管适配器，会一并停止。</string>

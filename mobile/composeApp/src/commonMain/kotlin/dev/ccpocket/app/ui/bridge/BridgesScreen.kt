@@ -1,5 +1,6 @@
 package dev.ccpocket.app.ui.bridge
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -36,13 +38,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
@@ -207,8 +216,9 @@ private fun BridgeCard(b: BridgeInfo, repo: PocketRepository, onRevoke: () -> Un
 
         Hairline(Modifier.padding(vertical = 12.dp))
 
-        // ── zone D · actions: whole controls that wrap, never shrink ──
-        BridgeActions(b, repo, onRevoke = onRevoke, onEdit = onEdit)
+        // ── zone D · actions: process chips that wrap, then the destructive action under a full-bleed
+        // hairline (the 14 dp is this card's own padding, which the divider must bleed back out over) ──
+        BridgeActions(b, repo, onRevoke = onRevoke, onEdit = onEdit, cardPadding = 14.dp)
 
         if (expanded) {
             Spacer(Modifier.height(14.dp))
@@ -218,10 +228,9 @@ private fun BridgeCard(b: BridgeInfo, repo: PocketRepository, onRevoke: () -> Un
                 b.workdirs.joinToString("  ·  ") { it.trimEnd('/').substringAfterLast('/') },
                 color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, lineHeight = 16.sp,
             )
-            if (runner == null) {
-                Spacer(Modifier.height(10.dp))
-                Text(stringResource(Res.string.bridge_runner_unmanaged), color = Tok.muted, fontSize = 11.5.sp)
-            } else {
+            // (the self-run hint used to live here; it now sits above the footer's hairline, where it
+            // explains an empty control row at the moment the owner is looking at the controls)
+            if (runner != null) {
                 runner.exitCode?.takeIf { !runner.running }?.let {
                     Spacer(Modifier.height(10.dp))
                     Text(stringResource(Res.string.bridge_exited_code, it), color = Tok.warn, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
@@ -257,39 +266,135 @@ private fun DetailLabel(text: String) =
     Text(text, color = Tok.muted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 4.dp))
 
 /**
- * What this bridge can be told to do, as controls that wrap rather than compress.
+ * What this bridge can be told to do — in two tiers (issue #259).
  *
- * Start/Stop/Restart/Edit exist only for a daemon-MANAGED adapter — a self-run one has no process to
- * control, and offering the buttons anyway would be a lie the tap could not fulfil. Revoke is on every
- * card: pulling the plug is the one thing a phone must always be able to do.
+ * Tier 1 is the process controls (Start/Stop/Restart/Edit), whole chips that wrap rather than compress.
+ * They exist only for a daemon-MANAGED adapter — a self-run one has no process to control, and offering
+ * the buttons anyway would be a lie the tap could not fulfil.
+ *
+ * Tier 2 is the ONE destructive action, and it deliberately leaves the chip species: below a full-bleed
+ * hairline, right-aligned in a footer, danger ink on a warning glyph and no chip body at all. Four
+ * identical pills where the last one deletes a credential is a shape that invites the wrong tap — and
+ * 「撤销」 made it worse by promising an undo while performing the opposite. The footer sits in the same
+ * corner in every state, so the destructive action never hides at the end of a variable-length chip run.
  */
 @OptIn(ExperimentalLayoutApi::class) // FlowRowScope.weight: whole controls share a row, then wrap
 @Composable
-private fun BridgeActions(b: BridgeInfo, repo: PocketRepository, onRevoke: () -> Unit, onEdit: () -> Unit) {
+private fun BridgeActions(
+    b: BridgeInfo,
+    repo: PocketRepository,
+    onRevoke: () -> Unit,
+    onEdit: () -> Unit,
+    cardPadding: Dp = 14.dp,
+) {
     val runner = b.runner
-    FlowRow(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    Column(Modifier.fillMaxWidth()) {
         if (runner != null) {
-            if (runner.running) {
-                BridgeAction(stringResource(Res.string.bridge_runner_restart)) { repo.controlBridgeRunner(b.name, RUNNER_RESTART) }
-                BridgeAction(stringResource(Res.string.bridge_runner_stop)) { repo.controlBridgeRunner(b.name, RUNNER_STOP) }
-            } else {
-                BridgeAction(stringResource(Res.string.bridge_runner_start), tone = Tok.accent) { repo.controlBridgeRunner(b.name, RUNNER_START) }
+            FlowRow(
+                Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (runner.running) {
+                    BridgeAction(stringResource(Res.string.bridge_runner_restart)) { repo.controlBridgeRunner(b.name, RUNNER_RESTART) }
+                    BridgeAction(stringResource(Res.string.bridge_runner_stop)) { repo.controlBridgeRunner(b.name, RUNNER_STOP) }
+                } else {
+                    BridgeAction(stringResource(Res.string.bridge_runner_start), tone = Tok.accent) { repo.controlBridgeRunner(b.name, RUNNER_START) }
+                }
+                BridgeAction(stringResource(Res.string.bridge_edit), onClick = onEdit)
             }
-            BridgeAction(stringResource(Res.string.bridge_edit), onClick = onEdit)
+        } else {
+            // nothing to restart, so tier 1 is empty — and an empty row would read as a missing feature.
+            // The hint takes the slot instead, above the same hairline (design: state c).
+            Text(
+                stringResource(Res.string.bridge_runner_unmanaged),
+                color = Tok.muted, fontSize = 12.5.sp, lineHeight = 18.sp,
+                modifier = Modifier.padding(bottom = 11.dp),
+            )
         }
-        // destructive, and deliberately NOT the primary: danger ink on an outline, never a filled button,
-        // and `stretch = false` so a Revoke that wraps onto a row of its own keeps its floor instead of
-        // spanning the card as the largest control on it
-        BridgeAction(stringResource(Res.string.share_revoke), tone = Tok.danger, stretch = false, onClick = onRevoke)
+        // full-bleed: the rule reaches the card's inner edges, so the eye reads a BOUNDARY between two
+        // kinds of thing rather than a gap between two rows of the same kind
+        Hairline(Modifier.fullBleed(cardPadding))
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 44.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End,
+        ) {
+            UnbindAction(onRevoke)
+        }
     }
 }
 
 /**
- * One bridge action: a whole control with a floor on BOTH axes and a label that may not break.
+ * The one destructive action: text, not a chip.
+ *
+ * No border and no raised fill — a thumb scanning pill silhouettes finds only the process controls. Danger
+ * is the ink and the glyph, never a fill (a filled danger surface belongs to exactly one place: the confirm
+ * button inside the sheet). The trailing 「…」 in the label is the promise that the sheet comes first.
+ *
+ * The 10 dp outward offset cancels the control's own padding, so the INK lines up with the card's content
+ * edge while the tap target still spans a comfortable 44 dp.
+ */
+@Composable
+private fun UnbindAction(onClick: () -> Unit) {
+    Box(
+        Modifier.offset(x = 10.dp).clip(RoundedCornerShape(8.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+            .heightIn(min = 44.dp).padding(horizontal = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            DangerGlyph(13.dp)
+            Text(
+                stringResource(Res.string.bridge_unbind), color = Tok.danger, fontSize = 13.5.sp,
+                fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false,
+            )
+        }
+    }
+}
+
+/**
+ * The system's warning triangle, inked in danger — shared with the desktop pane and its confirm dialog so
+ * the same mark means the same thing on both platforms. Drawn rather than imported: Material's filled
+ * warning icon is a solid mass that reads as an alert BANNER, and this is a 13 pt hairline glyph riding
+ * next to a label.
+ */
+@Composable
+internal fun DangerGlyph(size: Dp, color: Color = Tok.danger, modifier: Modifier = Modifier) {
+    Canvas(modifier.size(size)) {
+        val u = this.size.minDimension / 18f // the design's 18-unit viewBox
+        val stroke = 1.5f * u
+        drawPath(
+            Path().apply {
+                moveTo(9f * u, 2.4f * u); lineTo(15.7f * u, 14.6f * u); lineTo(2.3f * u, 14.6f * u); close()
+            },
+            color,
+            style = Stroke(width = stroke, join = StrokeJoin.Round),
+        )
+        drawLine(color, Offset(9f * u, 7f * u), Offset(9f * u, 10.3f * u), strokeWidth = stroke, cap = StrokeCap.Round)
+        drawCircle(color, radius = 0.95f * u, center = Offset(9f * u, 12.5f * u))
+    }
+}
+
+/**
+ * Stretch this element [inset] past its parent's padding on both sides — Compose has no negative padding,
+ * and a divider that stops at the content edge draws a gap rather than a tier break.
+ */
+internal fun Modifier.fullBleed(inset: Dp) = this.layout { measurable, constraints ->
+    val extra = inset.roundToPx() * 2
+    val placeable = measurable.measure(
+        constraints.copy(
+            minWidth = (constraints.minWidth + extra).coerceAtLeast(0),
+            maxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth + extra else constraints.maxWidth,
+        ),
+    )
+    // report the UNwidened width, so the bleed never moves the siblings stacked above and below it
+    val reported = if (constraints.hasBoundedWidth) constraints.maxWidth else (placeable.width - extra).coerceAtLeast(0)
+    layout(reported, placeable.height) { placeable.place(-inset.roundToPx(), 0) }
+}
+
+/**
+ * One process-control chip: a whole control with a floor on BOTH axes and a label that may not break.
  *
  * `softWrap = false` is the load-bearing half — without it Compose answers a too-narrow slot by wrapping
  * the text, which for a two-glyph Chinese label means one glyph per line. With it, the label stays one
@@ -301,7 +406,6 @@ private fun BridgeActions(b: BridgeInfo, repo: PocketRepository, onRevoke: () ->
 private fun FlowRowScope.BridgeAction(
     text: String,
     tone: Color = Tok.tx2,
-    stretch: Boolean = true,
     onClick: () -> Unit,
 ) {
     // 200% type needs a bigger floor, not smaller text: a 96 dp control is where "重启" starts to break
@@ -311,7 +415,7 @@ private fun FlowRowScope.BridgeAction(
     val minHeight = if (big) 60.dp else 48.dp
     val shape = RoundedCornerShape(12.dp)
     Box(
-        Modifier.weight(1f, fill = stretch).widthIn(min = minWidth).heightIn(min = minHeight)
+        Modifier.weight(1f).widthIn(min = minWidth).heightIn(min = minHeight)
             .clip(shape).border(1.dp, tone.copy(alpha = 0.45f), shape)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 8.dp),

@@ -730,6 +730,10 @@
     <string name="bridge_exited_code">Exited (code %1$d)</string>
     <string name="bridge_last_error">Last error</string>
     <string name="bridge_projects">Projects</string>
+    <!-- the card's one destructive action (issue #259). NOT share_revoke: "Revoke" reads as "undo my last
+         step" on a control that deletes a credential, and the trailing ellipsis (U+2026) is part of the
+         spec — it is the promise that a confirm sheet comes first, on phone and desktop alike. -->
+    <string name="bridge_unbind">Disconnect…</string>
     <string name="bridge_revoke_title">Revoke this bridge?</string>
     <string name="bridge_revoke_c1">Its live sessions end immediately.</string>
     <string name="bridge_revoke_c2">The credential is deleted; a managed adapter is stopped too.</string>
