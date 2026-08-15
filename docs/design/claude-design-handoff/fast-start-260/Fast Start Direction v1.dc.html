@@ -107,6 +107,54 @@
     </div>
   </div>
 
+  <!-- ═══════════ H · LOADING ═══════════ -->
+  <div style="padding-top:52px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">H</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Waiting for the directory list · #261</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Presentation only — the fetch and the never-claim-ready rule are unchanged.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">A · loading · full screen</div>
+        <dc-import name="FastStartDevice" screen="loading" hint-size="402px,874px"></dc-import>
+      </div>
+
+      <div style="flex:1;min-width:640px">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">B · skeleton → landed</div>
+        <div style="display:flex;gap:24px;align-items:flex-start">
+          <sc-for list="{{ strip }}" as="f" hint-placeholder-count="3">
+            <div style="width:238px;flex:none">
+              <div style="width:238px;height:518px;overflow:hidden;border-radius:11px">
+                <div style="width:402px;height:874px;transform:scale(.592);transform-origin:top left">
+                  <dc-import name="FastStartDevice" screen="{{ f.screen }}" landed="{{ f.landed }}" hint-size="402px,874px"></dc-import>
+                </div>
+              </div>
+              <div style="margin-top:12px;border-top:1px solid #C9C5BD;padding-top:11px;font:400 12px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">{{ f.tag }}</span> {{ f.note }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="margin-top:28px;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">C · motion spec</div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0 40px;border-top:1px solid #C9C5BD">
+          <sc-for list="{{ spec }}" as="m" hint-placeholder-count="6">
+            <div style="display:grid;grid-template-columns:118px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid #D5D1C8">
+              <span style="font:500 12px/1.4 'Public Sans',sans-serif;color:#1B1A18">{{ m.k }}</span>
+              <span style="font:400 12px/1.5 'JetBrains Mono',monospace;color:#54504A;letter-spacing:-.01em;word-break:break-word">{{ m.v }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:34px;border-top:1px solid #C9C5BD;padding-top:18px;display:grid;grid-template-columns:repeat(3,1fr);gap:0 48px">
+      <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">Breathing, not shimmer.</span> A gradient sweep is a second material moving across a flat surface, and at this density it would run over five mono path bars at once and read as texture. Alpha breathing on the same fills the 2.0 system already uses keeps the screen still: one <span style="font-family:'JetBrains Mono',monospace">infiniteRepeatable</span> per row, nothing new to build.</p>
+      <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">Staggered by 90 ms.</span> Five rows breathing in phase blink as one block, which looks like a broken screen rather than a pending one; a small offset reads as a list arriving. Rows mirror the real card anatomy — status dot, title bar, mono path bar, trailing affordance — at the real 64 dp height, so nothing jumps when content replaces them.</p>
+      <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">One voice, in the header.</span> The state line already owns machine status, so it carries the whole wait — 正在读取 Panda 上的项目… replaces 连接中…, the in-list engineer narration is deleted outright, and 审阅 2 stays hidden until the list lands. The dot goes muted and breathes on the same 1.4 s clock as the rows.</p>
+    </div>
+  </div>
+
   <!-- ═══════════ NOTES ═══════════ -->
   <div style="padding-top:52px">
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 48px;border-top:1px solid #C9C5BD;padding-top:18px">
@@ -128,6 +176,21 @@ class Component extends DCLogic {
         { axis: 'While searching', note: 'The FAB hides. Filtering and creating never share the screen.' },
         { axis: 'Composer', note: 'Bottom sheet: field on top, 项目 and 智能体 chips left, 发送 right. Unchanged from the earlier round.' },
         { axis: 'Dismissal', note: 'Scrim tap or swipe on the grabber. The draft is still there next time the sheet opens.' }
+      ],
+      strip: [
+        { screen: 'loading', landed: 0, tag: '0 ms · waiting.', note: 'Five skeleton rows at the real row height, breathing out of phase. FAB stays — starting a task never depended on the list.' },
+        { screen: 'loading', landed: 2, tag: '≈ +180 ms · landing.', note: 'Rows swap in place: each skeleton fades out as its real content fades and rises 3 dp into the same box. No reflow, no crossfade of the whole list.' },
+        { screen: 'projects', landed: 5, tag: 'settled.', note: 'Header flips to 在线 and 审阅 2 appears — the ready claim happens once, when the list is actually there.' }
+      ],
+      spec: [
+        { k: 'Skeleton pulse', v: 'alpha .34 → .72 → .34' },
+        { k: 'Duration', v: '1400 ms, infinite' },
+        { k: 'Easing', v: 'ease-in-out (FastOutSlowInEasing both ways)' },
+        { k: 'Stagger', v: '90 ms × row index, 5 rows' },
+        { k: 'Row exit', v: 'alpha → 0 over 180 ms' },
+        { k: 'Row enter', v: 'alpha 0 → 1 + translateY 3 dp → 0, 220 ms, cubic-bezier(.2, 0, 0, 1)' },
+        { k: 'Header dot', v: 'same 1400 ms clock, muted #8C8D95' },
+        { k: 'Reduce motion', v: 'hold alpha at .5, no pulse; enter becomes a plain 120 ms fade' }
       ],
       mobile: [
         { label: 'A · Projects idle · FAB', screen: 'projects', note: 'The list runs the full height of the screen again. The accent circle sits over it at the bottom right, with a short gradient beneath so it never has to compete with a row of mono path text. Search is an icon in the nav; nothing else on this screen starts work.' },
