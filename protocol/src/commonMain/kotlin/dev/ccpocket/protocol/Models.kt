@@ -46,6 +46,7 @@ enum class AgentKind {
     @SerialName("opencode") OPENCODE,
     @SerialName("kimi") KIMI,
     @SerialName("zcode") ZCODE,
+    @SerialName("dsh") DSH,
 }
 
 /** OPENCODE's wire name, shared by [ClientCaps.supportsAgents] declarations on both ends — the
@@ -61,6 +62,11 @@ const val AGENT_WIRE_KIMI = "kimi"
  * [ClientCaps.supportsAgents] before the daemon can safely emit `agent:"zcode"` to an App. */
 const val AGENT_WIRE_ZCODE = "zcode"
 
+/** DeepSeek Harness's wire name (issue #255). Same post-baseline contract as the three above: an
+ * already-shipped App hard-fails the WHOLE Envelope on an unknown enum value, so the daemon may only
+ * emit `agent:"dsh"` to a peer whose [ClientCaps.supportsAgents] listed it. */
+const val AGENT_WIRE_DSH = "dsh"
+
 /** Agent backends this daemon build knows how to route. Unlike [ClientCaps] (app -> daemon), this
  * list is advertised in [DaemonInfo] so a newer app never sends a post-baseline enum value to an
  * older daemon that would coerce it to Claude. Keep the baseline names too: the field is an honest
@@ -71,6 +77,7 @@ val DAEMON_SUPPORTED_AGENT_WIRES = listOf(
     AGENT_WIRE_OPENCODE,
     AGENT_WIRE_KIMI,
     AGENT_WIRE_ZCODE,
+    AGENT_WIRE_DSH,
 )
 
 /** Codex model ids the app exposes as first-class presets. */
@@ -114,6 +121,10 @@ fun isModelCompatibleWithAgent(agent: AgentKind, model: String?): Boolean {
         // ZCode's app-server takes a strict {providerId, modelId} reference. The daemon exposes that
         // as "provider/model", so a bare/stale id must fall back to ZCode's configured main model.
         AgentKind.ZCODE -> m.indexOf('/').let { it > 0 && it < m.lastIndex }
+        // DSH (issue #255): model SWITCHING is out of scope for v1 — dsh picks its own model from the
+        // user's environment and the daemon never passes one. Keep the same minimal blocklist as KIMI so a
+        // stale persisted Claude alias can never leak into a dsh open if a later version does send --model.
+        AgentKind.DSH -> m.lowercase() !in CLAUDE_MODEL_ALIAS_IDS
         AgentKind.CLAUDE -> true // gateway users run arbitrary ids, slashed OpenRouter-style included
     }
 }

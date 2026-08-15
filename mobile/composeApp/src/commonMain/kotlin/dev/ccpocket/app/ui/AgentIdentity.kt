@@ -49,6 +49,7 @@ fun agentColor(agent: AgentKind): Color = when (agent) {
     AgentKind.OPENCODE -> Tok.opencode
     AgentKind.KIMI -> Tok.kimi
     AgentKind.ZCODE -> Tok.zcode
+    AgentKind.DSH -> Tok.dsh
     AgentKind.CLAUDE -> Tok.accent
 }
 fun agentName(agent: AgentKind): String = when (agent) {
@@ -56,6 +57,10 @@ fun agentName(agent: AgentKind): String = when (agent) {
     AgentKind.OPENCODE -> "OpenCode"
     AgentKind.KIMI -> "Kimi"
     AgentKind.ZCODE -> "ZCode"
+    // "DeepSeek", not "DeepSeek Harness": these names render in the desktop AgentCard grid, whose
+    // autosize floor (9sp, #178) was already reached by "OpenCode" at 8 chars — a 16-char name bottoms
+    // out and then CLIPS mid-word. The tagline below carries the full product name.
+    AgentKind.DSH -> "DeepSeek"
     AgentKind.CLAUDE -> "Claude"
 }
 /** A 2-letter code for the compact list-row badge (#211) — keeps the agent legible where the full
@@ -65,6 +70,7 @@ fun agentAbbrev(agent: AgentKind): String = when (agent) {
     AgentKind.OPENCODE -> "OC"
     AgentKind.KIMI -> "CC"
     AgentKind.ZCODE -> "ZC"
+    AgentKind.DSH -> "DS"
     AgentKind.CLAUDE -> "CC"
 }
 fun agentTagline(agent: AgentKind): String = when (agent) {
@@ -72,6 +78,7 @@ fun agentTagline(agent: AgentKind): String = when (agent) {
     AgentKind.OPENCODE -> "OpenCode · Open Source"
     AgentKind.KIMI -> "Kimi Code · Moonshot"
     AgentKind.ZCODE -> "ZCode · Z.ai"
+    AgentKind.DSH -> "DeepSeek Harness · DeepSeek"
     AgentKind.CLAUDE -> "Claude Code · Anthropic"
 }
 
@@ -120,6 +127,15 @@ fun AgentGlyph(agent: AgentKind, color: Color = agentColor(agent), size: Int = 1
             drawLine(color, p(4f, 5f), p(16f, 5f), strokeWidth = w, cap = StrokeCap.Round)
             drawLine(color, p(16f, 5f), p(4f, 15f), strokeWidth = w, cap = StrokeCap.Round)
             drawLine(color, p(4f, 15f), p(16f, 15f), strokeWidth = w, cap = StrokeCap.Round)
+        } else if (agent == AgentKind.DSH) {
+            val w = 1.6f * s
+            // A "deep dive" double chevron pointing down (issue #255): reads as descent/depth for DeepSeek,
+            // and its axis is vertical, so it never gets mistaken for Claude's rightward prompt chevron at
+            // list-row size — the only other stroke-only glyph in the set.
+            drawLine(color, p(5f, 5.5f), p(10f, 10.5f), strokeWidth = w, cap = StrokeCap.Round)
+            drawLine(color, p(10f, 10.5f), p(15f, 5.5f), strokeWidth = w, cap = StrokeCap.Round)
+            drawLine(color, p(5f, 10.5f), p(10f, 15.5f), strokeWidth = w, cap = StrokeCap.Round)
+            drawLine(color, p(10f, 15.5f), p(15f, 10.5f), strokeWidth = w, cap = StrokeCap.Round)
         } else {
             val w = 1.8f * s
             // chevron ">"

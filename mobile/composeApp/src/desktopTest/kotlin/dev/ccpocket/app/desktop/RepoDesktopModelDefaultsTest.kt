@@ -23,6 +23,7 @@ class RepoDesktopModelDefaultsTest {
         PocketRepository.K_DEFAULT_OPENCODE_EFFORT,
         PocketRepository.K_DEFAULT_KIMI_EFFORT,
         PocketRepository.K_DEFAULT_ZCODE_EFFORT,
+        PocketRepository.K_DEFAULT_DSH_EFFORT,
     )
     private var saved: Map<String, String?> = emptyMap()
 
@@ -68,7 +69,7 @@ class RepoDesktopModelDefaultsTest {
 
         val repo = PocketRepository(CoroutineScope(Dispatchers.Unconfined))
 
-        listOf(AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE).forEach { agent ->
+        listOf(AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH).forEach { agent ->
             assertEquals("xhigh", repo.defaultEffortFor(agent), "$agent used the old shared preference")
         }
         listOf(
@@ -76,12 +77,13 @@ class RepoDesktopModelDefaultsTest {
             PocketRepository.K_DEFAULT_OPENCODE_EFFORT,
             PocketRepository.K_DEFAULT_KIMI_EFFORT,
             PocketRepository.K_DEFAULT_ZCODE_EFFORT,
+            PocketRepository.K_DEFAULT_DSH_EFFORT,
         ).forEach { key -> assertEquals("xhigh", SecureStore.getString(key)) }
         assertEquals("xhigh", SecureStore.getString(PocketRepository.K_DEFAULT_EFFORT))
 
         SecureStore.putString(PocketRepository.K_DEFAULT_EFFORT, "low")
         val reloaded = PocketRepository(CoroutineScope(Dispatchers.Unconfined))
-        listOf(AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE).forEach { agent ->
+        listOf(AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH).forEach { agent ->
             assertEquals("xhigh", reloaded.defaultEffortFor(agent), "$agent migration must run only once")
         }
         assertEquals("low", reloaded.defaultEffortFor(AgentKind.CLAUDE))
@@ -99,9 +101,11 @@ class RepoDesktopModelDefaultsTest {
         assertNull(repo.defaultEffortFor(AgentKind.OPENCODE))
         assertNull(repo.defaultEffortFor(AgentKind.KIMI))
         assertNull(repo.defaultEffortFor(AgentKind.ZCODE))
+        assertNull(repo.defaultEffortFor(AgentKind.DSH))
         assertEquals("", SecureStore.getString(PocketRepository.K_DEFAULT_OPENCODE_EFFORT))
         assertEquals("", SecureStore.getString(PocketRepository.K_DEFAULT_KIMI_EFFORT))
         assertEquals("", SecureStore.getString(PocketRepository.K_DEFAULT_ZCODE_EFFORT))
+        assertEquals("", SecureStore.getString(PocketRepository.K_DEFAULT_DSH_EFFORT))
         assertEquals("", SecureStore.getString(PocketRepository.K_DEFAULT_EFFORT))
     }
 
@@ -134,6 +138,7 @@ class RepoDesktopModelDefaultsTest {
             PocketRepository.K_DEFAULT_OPENCODE_EFFORT,
             PocketRepository.K_DEFAULT_KIMI_EFFORT,
             PocketRepository.K_DEFAULT_ZCODE_EFFORT,
+            PocketRepository.K_DEFAULT_DSH_EFFORT,
         ).forEach { key -> assertEquals("high", SecureStore.getString(key)) }
         assertEquals("high", repo.defaultEffortFor(AgentKind.CLAUDE))
     }
@@ -147,6 +152,7 @@ class RepoDesktopModelDefaultsTest {
         assertEquals("", SecureStore.getString(PocketRepository.K_DEFAULT_OPENCODE_EFFORT))
         assertEquals("", SecureStore.getString(PocketRepository.K_DEFAULT_KIMI_EFFORT))
         assertEquals("", SecureStore.getString(PocketRepository.K_DEFAULT_ZCODE_EFFORT))
+        assertEquals("", SecureStore.getString(PocketRepository.K_DEFAULT_DSH_EFFORT))
         // This value did not exist at migration time; it is unquestionably a post-split Claude choice.
         first.setDefaultEffort("high")
         first.setDefaultAgent(AgentKind.CODEX)

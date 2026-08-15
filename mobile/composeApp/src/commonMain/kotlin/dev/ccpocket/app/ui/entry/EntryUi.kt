@@ -106,6 +106,8 @@ fun modeChoiceSet(agent: AgentKind): ModeChoiceSet = when (agent) {
     AgentKind.CODEX -> ModeChoiceSet.CODEX_PRESETS
     AgentKind.KIMI -> ModeChoiceSet.KIMI_LADDER
     AgentKind.ZCODE -> ModeChoiceSet.CLAUDE_LADDER
+    // DSH (issue #255): shares Kimi's shape, and for the same reason — see [agentModeChoices].
+    AgentKind.DSH -> ModeChoiceSet.KIMI_LADDER
     AgentKind.OPENCODE -> ModeChoiceSet.OPENCODE_AUTOMATIC
 }
 
@@ -127,6 +129,9 @@ data class ModeChoice(
  * lists drifting apart would silently mislabel an approval × sandbox pair).
  * Kimi: the same ladder minus Accept edits, which has no Kimi equivalent.
  * ZCode: the four shared modes map directly to build / edit / plan / yolo.
+ * DSH: Kimi's three rungs. dsh fixes its permission mode at PROCESS LAUNCH — it cannot be changed
+ * mid-session — and v1 bridges no approvals, so the ladder must state what the process was started with
+ * and nothing finer. Accept edits has no dsh equivalent, same as Kimi.
  * OpenCode: one row, and it is a STATEMENT rather than a choice — the daemon runs it `--auto`.
  */
 fun agentModeChoices(agent: AgentKind, autoAvailable: Boolean = false): List<ModeChoice> = when (agent) {
@@ -137,7 +142,7 @@ fun agentModeChoices(agent: AgentKind, autoAvailable: Boolean = false): List<Mod
         add(ModeChoice(PermissionMode.BYPASS_PERMISSIONS, danger = true))
         if (autoAvailable) add(ModeChoice(PermissionMode.DEFAULT, nativeMode = CLAUDE_PERMISSION_MODE_AUTO))
     }
-    AgentKind.KIMI -> listOf(
+    AgentKind.KIMI, AgentKind.DSH -> listOf(
         ModeChoice(PermissionMode.DEFAULT),
         ModeChoice(PermissionMode.PLAN),
         ModeChoice(PermissionMode.BYPASS_PERMISSIONS, danger = true),

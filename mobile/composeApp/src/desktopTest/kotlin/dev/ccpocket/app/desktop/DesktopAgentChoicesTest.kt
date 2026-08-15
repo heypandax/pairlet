@@ -2,6 +2,7 @@ package dev.ccpocket.app.desktop
 
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.availableAgentsFromDaemon
+import dev.ccpocket.protocol.AGENT_WIRE_DSH
 import dev.ccpocket.protocol.AGENT_WIRE_ZCODE
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DAEMON_SUPPORTED_AGENT_WIRES
@@ -39,6 +40,9 @@ class DesktopAgentChoicesTest {
 
             assertEquals(AgentKind.entries, model.availableAgents)
             assertTrue(AgentKind.KIMI in model.availableAgents, "Kimi must be selectable on desktop")
+            // issue #255: DSH was added to the enum with NO desktop file touched — this is the assertion
+            // that proves the #252 projection really is the single source of desktop candidates.
+            assertTrue(AgentKind.DSH in model.availableAgents, "DeepSeek Harness must be selectable on desktop")
         } finally {
             scope.cancel()
         }
@@ -56,17 +60,23 @@ class DesktopAgentChoicesTest {
         try {
             val (repo, model) = model(scope)
 
-            // Old daemon: nothing advertised — deny-by-omission drops only the post-baseline ZCode.
+            // Old daemon: nothing advertised — deny-by-omission drops the post-baseline ZCode and DSH.
             assertEquals(availableAgentsFromDaemon(emptySet()), model.availableAgents)
             assertEquals(model.availableAgents, repo.availableAgents, "desktop must not diverge from mobile")
             assertTrue(AgentKind.KIMI in model.availableAgents, "Kimi predates the advertisement")
             assertTrue(AgentKind.ZCODE !in model.availableAgents)
+            assertTrue(AgentKind.DSH !in model.availableAgents, "dsh is post-baseline: hidden until advertised")
 
             repo.receiveForTest(DaemonInfo(supportedAgents = listOf(AGENT_WIRE_ZCODE)))
 
             assertEquals(availableAgentsFromDaemon(setOf(AGENT_WIRE_ZCODE)), model.availableAgents)
             assertEquals(model.availableAgents, repo.availableAgents, "desktop must not diverge from mobile")
             assertTrue(AgentKind.ZCODE in model.availableAgents)
+            // each post-baseline agent is gated INDEPENDENTLY — advertising ZCode must not smuggle in DSH
+            assertTrue(AgentKind.DSH !in model.availableAgents)
+
+            repo.receiveForTest(DaemonInfo(supportedAgents = listOf(AGENT_WIRE_ZCODE, AGENT_WIRE_DSH)))
+            assertTrue(AgentKind.DSH in model.availableAgents)
         } finally {
             scope.cancel()
         }

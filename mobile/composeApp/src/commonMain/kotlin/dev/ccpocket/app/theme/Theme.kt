@@ -49,6 +49,7 @@ data class Palette(
     val opencode: Color,
     val kimi: Color,
     val zcode: Color,
+    val dsh: Color,
     val ok: Color,
     val warn: Color,
     val danger: Color,
@@ -72,6 +73,9 @@ val DarkPalette = Palette(
     opencode = Color(0xFF9B72CF),      // OpenCode agent identity — soft purple
     kimi = Color(0xFF4D8DFF),          // Kimi Code agent identity — Moonshot blue, distinct from teal/purple
     zcode = Color(0xFFE07A9D),         // ZCode agent identity — restrained rose, distinct from the existing four
+    dsh = Color(0xFF9B7BFF),           // DSH agent identity (issue #255) — vivid periwinkle violet. DeepSeek's brand
+                                       // is indigo, but a true blue would collide with Kimi; this leans violet and
+                                       // separates from OpenCode's muted mauve by saturation, not hue alone.
     ok = Color(0xFF4FB477),
     warn = Color(0xFFE0A93B),
     danger = Color(0xFFE5604D),
@@ -96,6 +100,7 @@ val LightPalette = Palette(
     opencode = Color(0xFF7B52AB),      // OpenCode agent identity — deeper purple for light mode
     kimi = Color(0xFF2E6FD6),          // Kimi Code agent identity — deeper Moonshot blue for light mode
     zcode = Color(0xFFB4496E),         // ZCode agent identity — deeper rose for light-mode contrast
+    dsh = Color(0xFF6E4AD9),           // DSH agent identity (issue #255) — deeper violet for light-mode contrast
     ok = Color(0xFF2E9E5B),
     warn = Color(0xFFB07D1C),
     danger = Color(0xFFC53D2B),
@@ -140,6 +145,7 @@ object Tok {
     val opencode: Color get() = current.opencode
     val kimi: Color get() = current.kimi
     val zcode: Color get() = current.zcode
+    val dsh: Color get() = current.dsh
     val ok: Color get() = current.ok
     val warn: Color get() = current.warn
     val danger: Color get() = current.danger

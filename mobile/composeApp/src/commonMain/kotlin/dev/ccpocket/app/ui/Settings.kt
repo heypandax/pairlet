@@ -101,7 +101,10 @@ internal fun settingsDefaultModelOptions(
     val available = when (agent) {
         AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { it.second }
         AgentKind.CODEX -> discovered.ifEmpty { CODEX_MODEL_OPTIONS }
-        AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE -> discovered
+        // DSH (issue #255) rides the daemon-reported list like the rest. v1 fetches no catalog for it —
+        // model switching is out of scope and FetchModels answers an explicit empty list — so this
+        // resolves to just the current selection, which is the honest "nothing to pick from" state.
+        AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH -> discovered
     }
     return (listOf<String?>(null) + listOfNotNull(selected) + available.filter { it.isNotBlank() }).distinct()
 }

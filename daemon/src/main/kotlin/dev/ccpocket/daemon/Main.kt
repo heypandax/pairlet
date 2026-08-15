@@ -89,10 +89,10 @@ fun daemonHostName(): String? {
  * boot with claude missing (and vice versa) — but with NEITHER resolvable the daemon has nothing to drive,
  * so refuse to start with an actionable message. Null = at least one agent found, start normally.
  */
-internal fun missingAgentsMessage(claudeExe: java.nio.file.Path?, codexExe: java.nio.file.Path?, opencodeExe: java.nio.file.Path?, kimiExe: java.nio.file.Path? = null, zcodeExe: java.nio.file.Path? = null): String? =
-    if (claudeExe == null && codexExe == null && opencodeExe == null && kimiExe == null && zcodeExe == null) {
-        "none of claude, codex, opencode, kimi, or zcode was found — install a supported agent CLI or ZCode, " +
-            "or point the daemon at one with --claude-bin / --codex-bin / --opencode-bin / --kimi-bin / --zcode-bin."
+internal fun missingAgentsMessage(claudeExe: java.nio.file.Path?, codexExe: java.nio.file.Path?, opencodeExe: java.nio.file.Path?, kimiExe: java.nio.file.Path? = null, zcodeExe: java.nio.file.Path? = null, dshExe: java.nio.file.Path? = null): String? =
+    if (claudeExe == null && codexExe == null && opencodeExe == null && kimiExe == null && zcodeExe == null && dshExe == null) {
+        "none of claude, codex, opencode, kimi, zcode, or dsh was found — install a supported agent CLI or ZCode, " +
+            "or point the daemon at one with --claude-bin / --codex-bin / --opencode-bin / --kimi-bin / --zcode-bin / --dsh-bin."
     } else {
         null
     }
@@ -155,6 +155,7 @@ private class RunCmd : CliktCommand(name = "run") {
     private val opencodeBin by option("--opencode-bin", help = "opencode executable (default: auto-detect the installed OpenCode)")
     private val kimiBin by option("--kimi-bin", help = "kimi executable (default: auto-detect the installed Kimi Code CLI)")
     private val zcodeBin by option("--zcode-bin", help = "zcode executable (default: auto-detect the official ZCode app/CLI)")
+    private val dshBin by option("--dsh-bin", help = "dsh executable (default: auto-detect the installed DeepSeek Harness)")
     private val relay by option("--relay", help = "relay wss base").default(DEFAULT_RELAY)
     private val local by option("--local", help = "run a LAN-only WebSocket server instead of dialing the relay").flag()
     private val directBind by option(
@@ -181,7 +182,8 @@ private class RunCmd : CliktCommand(name = "run") {
         val opencodeExe = runCatching { dev.ccpocket.daemon.opencode.OpenCodeLauncher.resolveExecutable(opencodeBin) }.getOrNull()
         val kimiExe = runCatching { dev.ccpocket.daemon.kimi.KimiLauncher.resolveExecutable(kimiBin) }.getOrNull()
         val zcodeExe = runCatching { dev.ccpocket.daemon.zcode.ZCodeLauncher.resolveExecutable(zcodeBin) }.getOrNull()
-        missingAgentsMessage(exe, codexExe, opencodeExe, kimiExe, zcodeExe)?.let { throw com.github.ajalt.clikt.core.CliktError(it) }
+        val dshExe = runCatching { dev.ccpocket.daemon.dsh.DshLauncher.resolveExecutable(dshBin) }.getOrNull()
+        missingAgentsMessage(exe, codexExe, opencodeExe, kimiExe, zcodeExe, dshExe)?.let { throw com.github.ajalt.clikt.core.CliktError(it) }
         // credential isolation (issue #69, opt-in via `config --isolated-claude-auth on` or the env
         // toggle): the daemon's claude gets its own CLAUDE_CONFIG_DIR — its OAuth token refreshes can't
         // log out a terminal claude sharing the machine. History/settings stay shared (symlinks).
@@ -201,6 +203,7 @@ private class RunCmd : CliktCommand(name = "run") {
                 AgentKind.OPENCODE to AgentBackendFactory { dev.ccpocket.daemon.opencode.OpenCodeBackend(opencodeBin) }, // resolves the binary lazily on first launch
                 AgentKind.KIMI to AgentBackendFactory { dev.ccpocket.daemon.kimi.KimiBackend(kimiBin) }, // resolves the binary lazily on first launch
                 AgentKind.ZCODE to AgentBackendFactory { dev.ccpocket.daemon.zcode.ZCodeBackend(zcodeBin) },
+                AgentKind.DSH to AgentBackendFactory { dev.ccpocket.daemon.dsh.DshBackend(dshBin) }, // resolves the binary lazily on first launch
             ),
             prefs = prefs,
             claudeConfigDir = claudeHome,

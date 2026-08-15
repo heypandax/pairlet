@@ -133,7 +133,7 @@ fun modelLabelForAgent(agent: AgentKind?, model: String?): String {
     if (m.isEmpty()) return ""
     return when (agent ?: AgentKind.CLAUDE) {
         AgentKind.CLAUDE -> modelAlias(m)
-        AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE -> m
+        AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH -> m
     }
 }
 
@@ -606,6 +606,10 @@ internal fun modelChoicesFor(agent: AgentKind, daemonModels: List<String>?, gate
     AgentKind.ZCODE -> (daemonModels ?: emptyList())
         .filter { isModelCompatibleWithAgent(AgentKind.ZCODE, it) }
         .map { ModelChoice(it, it, it, "", false) }
+    // DSH (issue #255): model selection is out of v1 scope — dsh picks its own model and the daemon has
+    // no switch path for it. An empty list is the honest surface; offering rows would spin forever on a
+    // command that is never sent.
+    AgentKind.DSH -> emptyList()
     // window pill derives from the protocol table, so registering a new alias THERE is the only edit
     AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { (name, alias) ->
         val pick = claudeRowPick(alias, gatewayUrl)

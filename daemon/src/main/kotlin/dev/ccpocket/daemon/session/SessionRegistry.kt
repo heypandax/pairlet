@@ -272,6 +272,7 @@ class SessionRegistry(
         peerSupportsOpencode: Boolean = true,
         peerSupportsKimi: Boolean = true,
         peerSupportsZcode: Boolean = true,
+        peerSupportsDsh: Boolean = true,
         bridgeAllowedCommands: List<String> = emptyList(),
         // issue #242: a BRIDGE's session-stable context preamble (chat/project/capability boundary), appended
         // to the agent's system prompt on every launch of this conversation. Null for owner/guest opens.
@@ -342,7 +343,8 @@ class SessionRegistry(
                 // session id is covered too.
                 if ((attach.kind == AgentKind.OPENCODE && !peerSupportsOpencode) ||
                     (attach.kind == AgentKind.KIMI && !peerSupportsKimi) ||
-                    (attach.kind == AgentKind.ZCODE && !peerSupportsZcode)
+                    (attach.kind == AgentKind.ZCODE && !peerSupportsZcode) ||
+                    (attach.kind == AgentKind.DSH && !peerSupportsDsh)
                 ) {
                     log.info("open ${resume.take(8)}… → refused: ${attach.kind} session, peer never declared support")
                     sink.emit(PocketError("agent_unavailable", "update the app to open ${attach.kind} sessions"))

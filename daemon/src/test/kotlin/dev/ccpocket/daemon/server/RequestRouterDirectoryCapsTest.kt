@@ -50,6 +50,7 @@ class RequestRouterDirectoryCapsTest {
                 opencodeCwds = { mapOf(ocDir.toString() to 42L) }, // one opencode-ONLY project
                 kimiCwds = { emptyMap() },
                 zcodeCwds = { mapOf(zcodeDir.toString() to 43L) },
+                dshCwds = { emptyMap() }, // pinned: the default would read the developer's real ~/.dsh
             ),
             transcribe = TranscribeService(scope) { null },
             inbox = FileInboxService { null },

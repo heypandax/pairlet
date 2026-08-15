@@ -61,6 +61,12 @@ class ClientCapsFilterTest {
             busy = busy, gitBranch = "zcode", executingAuthoritative = true,
         )
 
+    private fun dsh(id: String, executing: Boolean = false, busy: Boolean = false) =
+        ActiveSession(
+            sessionId = id, title = "ds", agent = AgentKind.DSH, executing = executing,
+            busy = busy, gitBranch = "dsh", executingAuthoritative = true,
+        )
+
     private fun claude(id: String, executing: Boolean = false, busy: Boolean = false) =
         ActiveSession(
             sessionId = id, title = "cl", agent = AgentKind.CLAUDE, executing = executing,
@@ -130,6 +136,46 @@ class ClientCapsFilterTest {
         val out = RequestRouter.filterDirs(input, RequestRouter.ClientCapsHolder()).single()
         assertEquals(listOf(AgentKind.CLAUDE), out.sessionAgents)
         assertEquals(listOf("cl-sid"), out.activeSessions.map { it.sessionId })
+    }
+
+    @Test
+    fun `dsh live rows require the independent dsh capability`() {
+        val input = listOf(entry(dsh("ds-sid", executing = true), claude("cl-sid")))
+        val undeclared = RequestRouter.filterDirs(input, RequestRouter.ClientCapsHolder()).single()
+        assertEquals(listOf("cl-sid"), undeclared.activeSessions.map { it.sessionId })
+        assertEquals(listOf(AgentKind.CLAUDE), undeclared.sessionAgents)
+        assertEquals("cl-sid", undeclared.activeSessionId)
+        assertFalse(undeclared.executing)
+
+        // declaring a DIFFERENT post-baseline agent must not smuggle dsh through — each bit is its own gate
+        val zcodeOnly = RequestRouter.ClientCapsHolder().apply { supportsZcode = true }
+        assertEquals(listOf("cl-sid"), RequestRouter.filterDirs(input, zcodeOnly).single().activeSessions.map { it.sessionId })
+
+        val declared = RequestRouter.ClientCapsHolder().apply { supportsDsh = true }
+        assertEquals(input, RequestRouter.filterDirs(input, declared))
+    }
+
+    /**
+     * THE LOAD-BEARING ONE for issue #255's wire safety.
+     *
+     * `DirectoryEntry.sessionAgents` is a `List<AgentKind>`, and kotlinx-serialization's
+     * `coerceInputValues` does NOT protect list ELEMENTS — it only rescues a nullable/defaulted FIELD.
+     * So an older App that receives `"dsh"` inside this list fails the decode of the WHOLE Envelope,
+     * and every ingress wraps decode in `runCatching{}.getOrNull()`: the user's symptom is not an error
+     * but a silently vanished directory list. This daemon-side strip is therefore the only thing standing
+     * between a new daemon and every App shipped before dsh existed. Pin it on its own.
+     */
+    @Test
+    fun `dsh history provenance is stripped from the sessionAgents list even with no live dsh row`() {
+        val input = listOf(entry(claude("cl-sid"), sessionAgents = listOf(AgentKind.CLAUDE, AgentKind.DSH)))
+        val out = RequestRouter.filterDirs(input, RequestRouter.ClientCapsHolder()).single()
+        assertEquals(listOf(AgentKind.CLAUDE), out.sessionAgents, "an undeclared peer must never see `dsh` in the list")
+        assertEquals(listOf("cl-sid"), out.activeSessions.map { it.sessionId })
+        // a null holder (legacy ingress / bridge) is the same undeclared case, never fail-open
+        assertEquals(listOf(AgentKind.CLAUDE), RequestRouter.filterDirs(input, null).single().sessionAgents)
+        // and a peer that DID declare it keeps the provenance verbatim
+        val declared = RequestRouter.ClientCapsHolder().apply { supportsDsh = true }
+        assertEquals(input, RequestRouter.filterDirs(input, declared))
     }
 
     /** No opencode anywhere = identity, so ordinary fleets pay nothing for this. */
@@ -219,14 +265,18 @@ class ClientCapsFilterTest {
             UsageModel("claude-opus-5", 100, AgentKind.CLAUDE),
             UsageModel("anthropic/glm-5", 120, AgentKind.ZCODE),
             UsageModel("kimi-code/k3", 80, AgentKind.KIMI),
+            UsageModel("deepseek-chat", 40, AgentKind.DSH), // issue #255: newest post-baseline agent
         )
         for (caps in listOf(null, undeclared())) {
             val gated = RequestRouter.gateUsageAgents(reply, caps)
-            assertEquals(3, gated.models.size, "row COUNT never changes — only the badge degrades")
+            assertEquals(4, gated.models.size, "row COUNT never changes — only the badge degrades")
             assertTrue(gated.models.all { it.agent == AgentKind.CLAUDE })
             // the honest parts of the row survive: model id, tokens, and the window statistics
-            assertEquals(listOf("claude-opus-5", "anthropic/glm-5", "kimi-code/k3"), gated.models.map { it.model })
-            assertEquals(listOf(100L, 120L, 80L), gated.models.map { it.tokens })
+            assertEquals(
+                listOf("claude-opus-5", "anthropic/glm-5", "kimi-code/k3", "deepseek-chat"),
+                gated.models.map { it.model },
+            )
+            assertEquals(listOf(100L, 120L, 80L, 40L), gated.models.map { it.tokens })
             assertEquals(reply.tokensToday, gated.tokensToday)
             assertEquals(reply.days, gated.days)
         }
@@ -238,9 +288,10 @@ class ClientCapsFilterTest {
             UsageModel("anthropic/glm-5", 120, AgentKind.ZCODE),
             UsageModel("kimi-code/k3", 80, AgentKind.KIMI),
             UsageModel("openai/gpt-5.1", 60, AgentKind.OPENCODE),
+            UsageModel("deepseek-chat", 40, AgentKind.DSH),
         )
         val modern = RequestRouter.ClientCapsHolder().apply {
-            supportsOpencode = true; supportsKimi = true; supportsZcode = true
+            supportsOpencode = true; supportsKimi = true; supportsZcode = true; supportsDsh = true
         }
         assertEquals(reply, RequestRouter.gateUsageAgents(reply, modern), "a declared peer's reply is returned as-is")
     }
