@@ -27,7 +27,9 @@ lock 为 07-10 增，workflow/fgtask/bgcontinue 为 07-11 增、在 2.1.206 上�
   skill  Skill 装载在 transcript 落两行 user 记录（issue #126）：tool_result "Launching skill: …"
          的 ack 行 + SKILL.md 注入行 —— 后者顶层带 isMeta:true 与 sourceToolUseID（指回 Skill
          tool_use），文本以 "Base directory for this skill:" 开头。TranscriptReplay/TranscriptPatcher
-         的过滤靠这个形状把 SKILL.md 全文挡在「用户气泡」外
+         的过滤靠这个形状把 SKILL.md 全文挡在「用户气泡」外。搭车验 <system-reminder> 的成对闭合
+         （issue #253）：TranscriptNoise 按「整条都是闭合块」判噪声，标签改名/不闭合＝注入重新
+         顶着「你」渲染（同一条 transcript 上顺带查，不额外起会话）
   entrypoint  -p 会话 transcript 逐行打精确拼写的 "entrypoint":"sdk-cli" 标记，且 picker 隐藏
          集合仍是 ["sdk-cli","sdk-ts","sdk-py"]（issue #216）——unhide 闭环（TranscriptPatcher/
          SpawnedSessions/空闲 reaper）的逐字节替换全押在这两点上，漂移=手机端会话静默重新隐身
@@ -499,6 +501,29 @@ def scenario_skill() -> bool:
                             and c.get("tool_use_id") in use_ids for c in blocks(r))]
         ok &= check("launch ack is a tool_result row ('Launching skill: …')", bool(launches),
                     f"{len(launches)} row(s)")
+
+        # issue #253 搭车断言（不额外起会话）：TranscriptNoise 认的是成对的 <system-reminder> …
+        # </system-reminder>，且只在「整条都是块」时丢弃。标签改名 / 不闭合 = 判定静默失灵，注入
+        # 又会顶着「你」渲染。观察到 reminder 才断言，观察不到只报census（本轮 CLI 没注入而已）。
+        SR_OPEN, SR_CLOSE = "<system-reminder>", "</system-reminder>"
+        sr_rows = [r for r in rows if r.get("type") == "user" and SR_OPEN in json.dumps(r, ensure_ascii=False)]
+        pure = mixed = nested = 0
+        for r in sr_rows:
+            top = "\n".join(texts(r)).strip()
+            if SR_OPEN not in top:
+                nested += 1  # reminder 藏在 tool_result 里（isRealUserTurn 已挡）
+            elif top.startswith(SR_OPEN) and top.rsplit(SR_CLOSE, 1)[-1].strip() == "" and SR_CLOSE in top:
+                pure += 1    # 整条都是注入 —— TranscriptNoise.isPureSystemReminder 该丢弃的那类
+            else:
+                mixed += 1   # 注入 + 真实文本混排 —— 保守取向下整条保留
+        print(f"     · system-reminder census: {len(sr_rows)} user row(s) — "
+              f"pure={pure} mixed={mixed} inside-tool_result={nested}")
+        if sr_rows:
+            unclosed = [r for r in sr_rows
+                        if json.dumps(r, ensure_ascii=False).count(SR_OPEN)
+                        != json.dumps(r, ensure_ascii=False).count(SR_CLOSE)]
+            ok &= check("every <system-reminder> is closed (pure-block detection premise, #253)",
+                        not unclosed, f"{len(unclosed)} unbalanced row(s)")
         return ok
     finally:
         p.kill()
