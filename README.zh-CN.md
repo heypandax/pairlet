@@ -96,7 +96,7 @@ irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.p
 
 `cc-pocket-daemon version` 会告诉你当前跑的是哪个版本、是怎么装的、以及更新**这一份**安装该用哪条命令——离线可用，daemon 没在跑也能问。App 端在「设置 ▸ 版本」里看到同样的信息，任一侧落后时会主动提示。
 
-升级随时执行 `cc-pocket-daemon update`——daemon 每天自查新版本并推送手机提醒（`run` 加 `--auto-update` 可静默自动升级）。Homebrew：`brew upgrade --cask heypandax/tap/cc-pocket`；Scoop：`scoop update cc-pocket-daemon`。其他架构：[从源码构建](#从源码构建)。
+升级随时执行 `cc-pocket-daemon update`。用 curl 一行命令装的会**自己保持最新**：daemon 每天自查新版本并在后台升级；不想自动升级就执行 `cc-pocket-daemon config --auto-update off`，改为只推送手机提醒。Homebrew、Scoop 和 Windows 安装永远不会自动升级，请走各自的包管理器。Homebrew：`brew upgrade --cask heypandax/tap/cc-pocket`；Scoop：`scoop update cc-pocket-daemon`。其他架构：[从源码构建](#从源码构建)。
 
 ## 安全
 
