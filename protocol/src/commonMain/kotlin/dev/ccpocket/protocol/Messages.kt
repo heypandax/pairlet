@@ -1173,6 +1173,13 @@ data class LanHello(val deviceId: String) : ToDaemon
  * enum values it can accept, while an old daemon's missing field decodes to an empty list. Clients use
  * that deny-by-omission default only for newly-added agents whose enum an older daemon could coerce;
  * baseline agents retain their existing compatibility behavior. An old app ignores the added key.
+ *
+ * [supportsUsageAgentFilter] (issue #258) is its OWN flag rather than something inferred from
+ * [supportedAgents], because the two shipped in different releases: [supportedAgents] went out with
+ * v1.7.7, [FetchUsage.agent] came after it. A v1.7.7 daemon therefore advertises the full agent
+ * vocabulary AND silently drops the agent key — inferring the filter from a non-empty [supportedAgents]
+ * would show the App a Kimi chip that answers with every backend's tokens under a Kimi label. Same
+ * deny-by-omission contract as [bridgeControl]: absent → false → the App hides the filter entirely.
  */
 @Serializable
 @SerialName("pocket/daemon.info")
@@ -1188,6 +1195,7 @@ data class DaemonInfo(
     val latestVersion: String? = null,
     val updateCommand: String? = null,
     val supportedAgents: List<String> = emptyList(),
+    val supportsUsageAgentFilter: Boolean = false,
 ) : ToPhone
 
 @Serializable

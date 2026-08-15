@@ -7,10 +7,14 @@ import dev.ccpocket.protocol.AuthorizedActionRecorded
 import dev.ccpocket.protocol.HandoffUpdated
 import dev.ccpocket.protocol.PermissionRiskUpdated
 import dev.ccpocket.protocol.SessionHandoff
+import dev.ccpocket.protocol.Usage
+import dev.ccpocket.protocol.UsageDay
+import dev.ccpocket.protocol.UsageModel
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -194,5 +198,60 @@ class ClientCapsFilterTest {
             ),
             "baseline-agent handoffs remain compatible",
         )
+    }
+
+    // ── issue #258: the usage reply's by-model rows carry the same AgentKind vocabulary ──────────
+
+    private fun usage(vararg models: UsageModel) = Usage(
+        days = listOf(UsageDay("Mon", 300)),
+        models = models.toList(),
+        tokensToday = 300,
+    )
+
+    /**
+     * An undeclared peer gets the post-baseline badges DOWNGRADED to CLAUDE, not dropped: those tokens
+     * are already inside the hero total and the trend, so removing the bars would make the page
+     * contradict itself. Everything else about the reply must survive untouched.
+     */
+    @Test
+    fun `usage model badges degrade to the baseline agent for an undeclared peer`() {
+        val reply = usage(
+            UsageModel("claude-opus-5", 100, AgentKind.CLAUDE),
+            UsageModel("anthropic/glm-5", 120, AgentKind.ZCODE),
+            UsageModel("kimi-code/k3", 80, AgentKind.KIMI),
+        )
+        for (caps in listOf(null, undeclared())) {
+            val gated = RequestRouter.gateUsageAgents(reply, caps)
+            assertEquals(3, gated.models.size, "row COUNT never changes — only the badge degrades")
+            assertTrue(gated.models.all { it.agent == AgentKind.CLAUDE })
+            // the honest parts of the row survive: model id, tokens, and the window statistics
+            assertEquals(listOf("claude-opus-5", "anthropic/glm-5", "kimi-code/k3"), gated.models.map { it.model })
+            assertEquals(listOf(100L, 120L, 80L), gated.models.map { it.tokens })
+            assertEquals(reply.tokensToday, gated.tokensToday)
+            assertEquals(reply.days, gated.days)
+        }
+    }
+
+    @Test
+    fun `a peer that declared the vocabulary keeps every badge verbatim`() {
+        val reply = usage(
+            UsageModel("anthropic/glm-5", 120, AgentKind.ZCODE),
+            UsageModel("kimi-code/k3", 80, AgentKind.KIMI),
+            UsageModel("openai/gpt-5.1", 60, AgentKind.OPENCODE),
+        )
+        val modern = RequestRouter.ClientCapsHolder().apply {
+            supportsOpencode = true; supportsKimi = true; supportsZcode = true
+        }
+        assertEquals(reply, RequestRouter.gateUsageAgents(reply, modern), "a declared peer's reply is returned as-is")
+    }
+
+    /** A Claude/Codex-only reply is baseline vocabulary, so the gate must not even copy the frame. */
+    @Test
+    fun `a baseline-only reply is passed through untouched`() {
+        val reply = usage(
+            UsageModel("claude-opus-5", 100, AgentKind.CLAUDE),
+            UsageModel("gpt-5.1-codex", 50, AgentKind.CODEX),
+        )
+        assertSame(reply, RequestRouter.gateUsageAgents(reply, undeclared()))
     }
 }

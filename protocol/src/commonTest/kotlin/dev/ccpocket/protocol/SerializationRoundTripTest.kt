@@ -2415,9 +2415,32 @@ class SerializationRoundTripTest {
         val json = PocketJson.encodeToString(Envelope(id = "fu2", ts = 0, body = narrowed))
         assertEquals(narrowed, PocketJson.decodeFromString<Envelope>(json).body)
 
+        // The BYTES of an unfiltered request must stay identical to the pre-#258 frame (explicitNulls=false
+        // omits the null): a new App asking for "All" is indistinguishable from an old App to any daemon.
+        val unfiltered = PocketJson.encodeToString(Envelope(id = "fu4", ts = 0, body = FetchUsage(days = 7)))
+        assertFalse("agent" in unfiltered, "an unfiltered request must not put an agent key on the wire")
+
         // a FUTURE agent this build has no name for coerces to null (= All) instead of failing the Envelope
         val future = """{"id":"fu3","ts":0,"body":{"t":"pocket/usage.fetch","days":7,"agent":"someagent"}}"""
         assertNull((PocketJson.decodeFromString<Envelope>(future).body as FetchUsage).agent)
+    }
+
+    /**
+     * issue #258: [DaemonInfo.supportsUsageAgentFilter] is a trailing capability field with the same
+     * deny-by-omission contract as bridgeControl. The old-shape case is the POINT of the field: a v1.7.7
+     * daemon already advertises a full supportedAgents list, so its DaemonInfo must still decode to
+     * `false` here — that is what stops the App from offering a filter that daemon silently ignores.
+     */
+    @Test
+    fun daemonInfo_usageAgentFilter_flag_is_additive() {
+        val info = DaemonInfo(hostname = "mac", supportedAgents = listOf("opencode", "kimi", "zcode"), supportsUsageAgentFilter = true)
+        val json = PocketJson.encodeToString(Envelope(id = "di1", ts = 0, body = info))
+        assertEquals(info, PocketJson.decodeFromString<Envelope>(json).body)
+
+        val v177 = """{"id":"di2","ts":0,"body":{"t":"pocket/daemon.info","hostname":"mac","supportedAgents":["opencode","kimi","zcode"]}}"""
+        val decoded = PocketJson.decodeFromString<Envelope>(v177).body as DaemonInfo
+        assertEquals(3, decoded.supportedAgents.size, "the older advertisement still decodes")
+        assertFalse(decoded.supportsUsageAgentFilter, "a daemon that predates the filter must never look capable")
     }
 
     /** The by-model rows can now carry KIMI/ZCODE (issue #258); both must survive a round trip so the

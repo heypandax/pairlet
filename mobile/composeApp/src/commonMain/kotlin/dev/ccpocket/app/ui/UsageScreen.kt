@@ -100,9 +100,15 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
     var days by remember { mutableStateOf(1) } // default to "Today"
     var agent by remember { mutableStateOf<AgentKind?>(null) } // null = All (issue #258)
     var timedOut by remember { mutableStateOf(false) }
-    LaunchedEffect(days, agent) {
+    // A selection can outlive the capability: reconnecting to a daemon that ignores the filter (or losing
+    // the handshake) must fall back to the honest all-backends request, not keep asking for one agent and
+    // render the whole machine under its label. Keying the fetch on the EFFECTIVE agent re-fetches on that
+    // transition too, so the page can't sit on a mislabeled reply.
+    val filterable = repo.daemonUsageAgentFilter.value
+    val effectiveAgent = agent.takeIf { filterable }
+    LaunchedEffect(days, effectiveAgent) {
         timedOut = false
-        repo.fetchUsage(days, agent)
+        repo.fetchUsage(days, effectiveAgent)
         kotlinx.coroutines.delay(10_000)
         // no reply after the deadline → most likely an older daemon that can't aggregate usage yet (or a huge scan)
         if (repo.usage.value == null) timedOut = true
@@ -128,12 +134,13 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
                     }
                 }
             }
-            // Per-agent filter (issue #258). Offered ONLY to a daemon that advertises its agent vocabulary:
-            // an older one silently ignores FetchUsage.agent and would answer a narrowed request with the
-            // full total — a filter that lies is worse than no filter. Chips follow the same availability
-            // projection as the session pickers, and each wears its own agent color when selected.
+            // Per-agent filter (issue #258). Gated on the daemon's OWN filter capability, never on the
+            // agent-vocabulary advertisement: that one shipped a release earlier, so a v1.7.7 daemon would
+            // pass an `isNotEmpty` gate while silently ignoring FetchUsage.agent — and a filter that
+            // answers with the whole machine under one agent's label is worse than no filter. Chips follow
+            // the same availability projection as the session pickers, each in its own agent color.
             val agents = repo.availableAgents
-            if (repo.daemonSupportedAgents.value.isNotEmpty() && agents.size > 1) {
+            if (filterable && agents.size > 1) {
                 Row(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
