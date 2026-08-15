@@ -663,9 +663,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.getString(K_DEFAULT_AGENT)?.let { s -> AgentKind.entries.firstOrNull { it.name == s } } ?: AgentKind.CLAUDE,
     )
 
-    /** Project + session agent filter: "both" | "claude" | "codex" | "opencode" (persisted). Session rows
-     *  were covered by #31; project rows consume DirectoryEntry.sessionAgents as of issue #188. */
-    val agentFilter = mutableStateOf(SecureStore.getString(K_AGENT_FILTER)?.takeIf { it.isNotEmpty() } ?: "both")
+    /** Project + session agent filter: the SET of backends whose rows are shown; the full set = no filter
+     *  (persisted, migrating the pre-#248 single value — see [parseAgentFilter]). Session rows were covered
+     *  by #31; project rows consume DirectoryEntry.sessionAgents as of issue #188. */
+    val agentFilter = mutableStateOf(parseAgentFilter(SecureStore.getString(K_AGENT_FILTER)))
 
     /** Projects screen: tree (drill-down) vs flat. Persisted (default tree). */
     val treeView = mutableStateOf(SecureStore.getString(K_VIEW_MODE) != "flat")
@@ -1790,12 +1791,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.putString(K_DEFAULT_AGENT, a.name)
     }
 
-    /** Settings: persist the project/session agent filter ("both" | "claude" | "codex" | "opencode"). */
-    fun setAgentFilter(v: String) {
+    /** Settings: persist the project/session agent filter (the set of backends to show; #248). */
+    fun setAgentFilter(selected: Set<AgentKind>) {
+        val v = if (selected.isEmpty()) ALL_AGENTS else selected.toSet() // empty would hide everything with no way back
         if (v == agentFilter.value) return
         agentFilter.value = v
-        SecureStore.putString(K_AGENT_FILTER, v)
+        SecureStore.putString(K_AGENT_FILTER, encodeAgentFilter(v))
     }
+
+    /** Back to "show every agent" — the one call the removable chip and the Projects empty state share. */
+    fun clearAgentFilter() = setAgentFilter(ALL_AGENTS)
 
     /** Settings: persist the chat text scale (clamped to the slider range). Applies live to every message. */
     fun setFontScale(scale: Float) {
@@ -5824,7 +5829,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_CONTEXT_WINDOW_OVERRIDE = "context_window_override" // SecureStore: LEGACY global statusline denominator in tokens ("" = follow derived window); now the fallback tier under K_CONTEXT_WINDOW_OVERRIDES
         const val K_CONTEXT_WINDOW_OVERRIDES = "context_window_overrides" // SecureStore: TSV modelId\ttokens per line — per-model denominators (issue #169)
         const val K_DEFAULT_AGENT = "default_session_agent"   // SecureStore: AgentKind.name new sessions start under (default CLAUDE)
-        const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | "claude" | "codex" | "opencode" — project/session filter (#31/#188)
+        const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | one agent key | comma-joined keys — project/session filter (#31/#188/#248, see AgentFilter.kt)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
         const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
         const val K_WORKING_SET_PREFIX = "working_set_mru:"    // SecureStore: "working_set_mru:<accountId>" → TSV dirKey\tsessionId\ttitle\tproject\tat\tagent — that computer's switcher MRU (issue #165)
