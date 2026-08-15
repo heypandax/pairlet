@@ -1027,8 +1027,16 @@
     <string name="notify_turn_complete">Turn complete</string>
 
     <!-- chat pane -->
-    <string name="chat_no_session">No session open</string>
-    <string name="chat_no_session_hint">Pick a project on the left, then open or start a session.</string>
+    <string name="chat_no_session">Start a new session</string>
+    <string name="chat_no_session_hint">Pick a project on the left, then start a session here.</string>
+    <string name="chat_start_in">New session in %1$s — your first prompt goes straight in.</string>
+    <string name="chat_start_placeholder">Write the first prompt…</string>
+    <string name="chat_start_pick_project">Pick a project on the left first.</string>
+    <string name="chat_start_choose">Choose a folder…</string>
+    <string name="chat_start_opening">Starting the session — your prompt goes out the moment it is ready…</string>
+    <string name="chat_start_failed">Couldn\'t start the session. Your prompt is still here.</string>
+    <string name="chat_start_timeout">The session wasn\'t ready in time. Your prompt is still here.</string>
+    <string name="chat_start_send_failed">The session opened but the prompt wasn\'t sent — send it from the composer.</string>
     <string name="chat_opening">Opening session…</string>
     <string name="chat_opening_named">Opening %1$s…</string>
     <string name="chat_open_failed">Couldn\'t open the session</string>

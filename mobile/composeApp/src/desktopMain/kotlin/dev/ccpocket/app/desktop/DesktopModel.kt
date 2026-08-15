@@ -56,6 +56,20 @@ sealed interface DkUpdateState {
     data class Failed(val message: String) : DkUpdateState
 }
 
+/**
+ * Why a first prompt typed into the empty state (issue #256) never became a turn. Kept as a KIND rather than
+ * a ready-made message so the pane resolves it through the same string resources as everything else it says.
+ * Every value has the same contract: the user's text survives — see [DesktopModel.newSessionPrompt].
+ */
+enum class NewSessionPromptError {
+    /** The open request was refused before it reached the wire (unsupported agent, duplicate open). */
+    OPEN_REFUSED,
+    /** The session never went live inside the wait window. */
+    TIMEOUT,
+    /** The session opened but the send was gated (degraded session, uploads in flight). */
+    SEND_REFUSED,
+}
+
 data class DkComputer(
     val accountId: String,
     val name: String,
@@ -430,6 +444,36 @@ interface DesktopModel {
     /** Start a session at [dir] (display form; "~" is expanded against the daemon host's home).
      *  [model] is the popover's per-creation pick (issue #199); null = the usual default ladder. */
     fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String? = null, model: String? = null)
+
+    // ── empty-state session starter (issue #256) ─────────────────────────────────────────────────
+    // The main pane's "no session open" state used to be a dead end: it named the situation and offered
+    // nothing to do about it. It is now the fastest way INTO a session — type the first prompt, hit ⏎, and
+    // the default agent/mode open a session in the current project with that prompt queued as turn one.
+    /**
+     * The empty state's input text. Owned by the MODEL, not by a `remember` inside the composable, for one
+     * reason: when the queued first prompt can't be delivered (open refused, never landed, send gated) the
+     * text has to come back to the user intact. A composable-local field would be gone by then — the pane
+     * recomposes through open/fail — and silently eating what someone typed is the one outcome this feature
+     * must never have. Defaults are inert so seed/preview models compile untouched.
+     */
+    var newSessionPrompt: String
+        get() = ""
+        set(_) {}
+
+    /** A first prompt is queued and the session it belongs to hasn't landed yet — the empty state locks its
+     *  field and says so, instead of looking idle while an open is in flight. */
+    val startingSession: Boolean get() = false
+
+    /** Why the last [startSessionWithPrompt] didn't deliver; null = nothing to report. The text is still in
+     *  [newSessionPrompt] (or, for [NewSessionPromptError.SEND_REFUSED], in the live composer). */
+    val newSessionPromptError: NewSessionPromptError? get() = null
+
+    /** Open a session at [dir] with the default agent/mode and send [prompt] as its first turn once the
+     *  session is live. Blank prompts and re-entry while one is already queued are no-ops. */
+    fun startSessionWithPrompt(dir: String, prompt: String) {}
+
+    /** Clear the inline failure line (the user edited the prompt / picked another project). */
+    fun dismissNewSessionPromptError() {}
     /**
      * True when the ACTIVE computer is the one this desktop app runs on (issue #163). Gates the native
      * directory chooser: a local Finder panel can only browse local disk, so a remote machine has to fall

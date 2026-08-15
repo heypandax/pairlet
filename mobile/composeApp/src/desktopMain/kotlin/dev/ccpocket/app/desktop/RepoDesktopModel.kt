@@ -42,6 +42,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
@@ -98,7 +100,7 @@ private val storeJson = Json { ignoreUnknownKeys = true }
  */
 class RepoDesktopModel(
     private val fixedRepo: PocketRepository,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
     private val fleet: FleetCoordinator? = null,
     private val store: DesktopStore = SecureDesktopStore,
 ) : DesktopModel {
@@ -841,10 +843,18 @@ class RepoDesktopModel(
         get() = machines.firstOrNull { it.active }?.thisMachine == true
 
     override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?, model: String?) {
+        startSession(dir, agent, mode, permissionMode, model)
+    }
+
+    /** [newSession]'s body, plus the one fact the empty-state starter (#256) needs and the popover doesn't:
+     *  whether the open actually went out. A refusal is decided SYNCHRONOUSLY inside [PocketRepository.openSession]
+     *  (unsupported agent, duplicate target), so a queued first prompt can fail fast instead of waiting out its
+     *  whole window for a session nobody is opening. */
+    private fun startSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?, model: String?): Boolean {
         // "~" ships raw, exactly like mobile's NewPathSheet: the daemon owns the expansion
         // (DirectoryService.expandTilde) — only it knows the remote machine's home
         val typed = trimTrailingSep(dir.trim())
-        if (typed.isEmpty()) return
+        if (typed.isEmpty()) return false
         showNewSession = false
         optimisticSelectedId = null // a brand-new session has no listed row yet — don't re-light a stale one (#82)
         // a tilde path (the popover's own seed is tilde'd) that names an already-listed project swaps to
@@ -855,7 +865,76 @@ class RepoDesktopModel(
         // the project enters RECENT (visit + live listing) exactly as if it had been clicked — without
         // this the group never appeared for a dir typed straight into the popover (#42)
         openProject(DkProject(path = target, name = folderName(target)))
-        repo.openSession(wd = target, startMode = mode, agent = agent, startPermissionMode = permissionMode, startModel = model)
+        return repo.openSession(wd = target, startMode = mode, agent = agent, startPermissionMode = permissionMode, startModel = model)
+    }
+
+    // ── empty-state session starter (issue #256) ─────────────────────────────────────────────────────
+    override var newSessionPrompt: String by mutableStateOf("")
+    override var startingSession: Boolean by mutableStateOf(false)
+    override var newSessionPromptError: NewSessionPromptError? by mutableStateOf(null)
+    override fun dismissNewSessionPromptError() { newSessionPromptError = null }
+
+    /** How long a queued first prompt waits for its session to go live. Generous on purpose — a cold
+     *  `claude` start on a big repo is seconds, and the alternative to waiting is throwing the prompt
+     *  back at a user whose session is about to open anyway. Tests shrink it. */
+    internal var firstPromptTimeoutMs: Long = 30_000L
+
+    /**
+     * Open a session and send [prompt] into it as turn one.
+     *
+     * There is no protocol support for "open with a prompt" and this deliberately doesn't invent one: the
+     * queue lives entirely here, as a coroutine that waits for the SAME `convoId` the chat pane waits for
+     * and then takes the ordinary [PocketRepository.sendPrompt] path. So the prompt is subject to every gate
+     * a typed prompt is, and a daemon of any vintage works unchanged.
+     *
+     * The text is never dropped on any branch: it stays in [newSessionPrompt] until a send actually succeeds,
+     * and only then is the field cleared. Note what this deliberately does NOT do — write into the live
+     * composer. That field is owned by the draft collector above, which re-homes it on every composer-key
+     * flip; a queued prompt landing there would race the target session's own draft restore and could be
+     * saved away under the previous key on the very next flip. Staying out of it keeps a restored draft (#88)
+     * untouched by construction, in the success case as much as the failure one.
+     */
+    override fun startSessionWithPrompt(dir: String, prompt: String) {
+        if (prompt.isBlank() || startingSession) return
+        newSessionPromptError = null
+        newSessionPrompt = prompt // keep it visible through the open; cleared only once it is actually sent
+        // Captured BEFORE the open: openSession nulls convoId from a coroutine that can suspend on the
+        // outgoing CloseSession first, so "convoId is non-null" alone could still be the PREVIOUS session
+        // and would send this prompt into it. (The empty state can only be on screen with no conversation,
+        // so this is belt-and-braces — but it is what makes the wait safe for any future caller.)
+        val previousConvo = repo.convoId.value
+        if (!startSession(dir, defaultAgent, defaultMode, defaultPermissionMode, defaultModelFor(defaultAgent))) {
+            newSessionPromptError = NewSessionPromptError.OPEN_REFUSED
+            return
+        }
+        startingSession = true
+        scope.launch {
+            // Both outcomes come off the same repo state the pane renders: convoId non-null = SessionLive
+            // landed, openTimedOut = the repo's own 8s net already gave up. Waiting on anything else (a
+            // fixed delay, `opening` alone) would either fire before the session can take a prompt or hang
+            // past the point the repo has already declared failure.
+            val live = withTimeoutOrNull(firstPromptTimeoutMs) {
+                snapshotFlow {
+                    val id = repo.convoId.value
+                    when {
+                        id != null && id != previousConvo -> true
+                        repo.openTimedOut.value -> false
+                        else -> null
+                    }
+                }.filterNotNull().first()
+            }
+            startingSession = false
+            when {
+                live == null -> newSessionPromptError = NewSessionPromptError.TIMEOUT
+                !live -> newSessionPromptError = NewSessionPromptError.OPEN_REFUSED
+                // straight to sendPrompt, never through the composer — so a draft the new session restored
+                // is untouched by a successful queue as well as by a failed one
+                repo.sendPrompt(prompt) -> newSessionPrompt = ""
+                // gated (degraded session / uploads in flight): the session is open, so the empty state is
+                // gone — but the text is still held here, and re-entering an empty pane shows it again
+                else -> newSessionPromptError = NewSessionPromptError.SEND_REFUSED
+            }
+        }
     }
 
     override val hasChat: Boolean get() = repo.convoId.value != null

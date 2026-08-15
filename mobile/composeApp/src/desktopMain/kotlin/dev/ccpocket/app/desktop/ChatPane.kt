@@ -75,6 +75,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.text.AnnotatedString
@@ -129,6 +130,14 @@ import dev.ccpocket.app.resources.chat_open_failed_hint
 import dev.ccpocket.app.resources.chat_open_failed_named
 import dev.ccpocket.app.resources.chat_opening
 import dev.ccpocket.app.resources.chat_opening_named
+import dev.ccpocket.app.resources.chat_start_choose
+import dev.ccpocket.app.resources.chat_start_failed
+import dev.ccpocket.app.resources.chat_start_in
+import dev.ccpocket.app.resources.chat_start_opening
+import dev.ccpocket.app.resources.chat_start_pick_project
+import dev.ccpocket.app.resources.chat_start_placeholder
+import dev.ccpocket.app.resources.chat_start_send_failed
+import dev.ccpocket.app.resources.chat_start_timeout
 import dev.ccpocket.app.resources.chat_you
 import dev.ccpocket.app.resources.cmd_source_builtin
 import dev.ccpocket.app.resources.cmd_source_project
@@ -204,6 +213,7 @@ import dev.ccpocket.app.ui.renderClip
 import dev.ccpocket.app.ui.SentImages
 import dev.ccpocket.app.ui.SubagentCard
 import dev.ccpocket.app.ui.WorkflowCard
+import dev.ccpocket.app.ui.folderName
 import dev.ccpocket.app.ui.pathLinked
 import dev.ccpocket.app.ui.rememberBottomPinned
 import dev.ccpocket.app.ui.rememberCopied
@@ -246,7 +256,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             when {
                 model.opening -> OpeningChat(model.chatTitle)
                 model.openFailed -> FailedChat(model.chatTitle) { model.retryOpen() }
-                else -> EmptyChat()
+                else -> EmptyChat(model)
             }
         }
         return
@@ -629,12 +639,123 @@ private fun CenteredStreamRow(content: @Composable () -> Unit) {
     }
 }
 
+/**
+ * The empty pane (issue #256). It used to state a fact and offer nothing — "No session open" over a hint to
+ * go click something else — which made the largest surface in the window the one place you couldn't work.
+ * It is now the session starter: type the first prompt here and ⏎ opens a session in the current project
+ * (default agent + default mode, the same ladder ⌘N uses) with that prompt queued as turn one.
+ *
+ * Deliberately NOT a second composer: it writes to [DesktopModel.newSessionPrompt] — model-owned precisely so
+ * a queue that fails can hand the text back — and it has no attachments, no model chip and no slash/@ menus,
+ * none of which have a session to resolve against yet.
+ *
+ * With no project in context ([DesktopModel.newSessionDir] null — nothing opened yet on this machine) the
+ * field still takes text; submitting says so inline and the full popover is one click away. Refusing to
+ * accept keystrokes would be the dead end this replaces.
+ */
 @Composable
-private fun EmptyChat() {
+private fun EmptyChat(model: DesktopModel) {
+    val dir = model.newSessionDir
+    val busy = model.startingSession
+    var pickHint by remember { mutableStateOf(false) } // "select a project first", shown only after a submit
+    val submit = {
+        val text = model.newSessionPrompt
+        if (text.isNotBlank() && !model.startingSession) {
+            if (dir == null) pickHint = true else { pickHint = false; model.startSessionWithPrompt(dir, text) }
+        }
+    }
+    val fieldFocus = remember { FocusRequester() }
+    // Land ready-to-type. One best-effort attempt, not the composer's retry loop: nothing else claims the
+    // keyboard in an empty pane, and a delay-driven loop is exactly what stalls the UI test clock.
+    LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Text(stringResource(Res.string.chat_no_session), color = Tok.tx, fontFamily = Dk.ui, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text(stringResource(Res.string.chat_no_session_hint), color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, textAlign = TextAlign.Center)
+            Text(
+                if (dir != null) stringResource(Res.string.chat_start_in, folderName(dir)) else stringResource(Res.string.chat_no_session_hint),
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, textAlign = TextAlign.Center,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(6.dp))
+            // the Composer's own shape (surface + hairline + 12dp radius + 34dp send circle), so this reads
+            // as the same input the session will hand over to
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(start = 12.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                Box(Modifier.weight(1f).padding(vertical = 6.dp)) {
+                    val fieldStyle = TextStyle(color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, lineHeight = 20.sp)
+                    if (model.newSessionPrompt.isEmpty()) {
+                        Text(stringResource(Res.string.chat_start_placeholder), style = fieldStyle.copy(color = Tok.muted))
+                    }
+                    BasicTextField(
+                        value = model.newSessionPrompt,
+                        onValueChange = {
+                            model.newSessionPrompt = it
+                            pickHint = false
+                            model.dismissNewSessionPromptError() // editing retracts the last failure line
+                        },
+                        enabled = !busy, // locked while the session it belongs to is opening
+                        textStyle = fieldStyle,
+                        cursorBrush = SolidColor(Tok.accent),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 132.dp).focusRequester(fieldFocus)
+                            .testTag("new-session-prompt")
+                            .onPreviewKeyEvent { e ->
+                                // ⏎ starts the session; ⇧⏎ falls through to the field's own newline
+                                val send = e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed
+                                if (send) submit()
+                                send
+                            },
+                    )
+                }
+                if (busy) {
+                    Box(
+                        Modifier.size(34.dp).clip(RoundedCornerShape(999.dp)).background(Tok.base)
+                            .border(1.dp, Tok.hair, RoundedCornerShape(999.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) { SpinnerRing(24.dp, 2.dp) }
+                } else {
+                    val armed = model.newSessionPrompt.isNotBlank()
+                    Box(
+                        Modifier.size(34.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent)
+                            .alpha(if (armed) 1f else 0.45f).testTag("new-session-send").clickable { submit() },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Rounded.ArrowUpward, null, tint = Tok.base, modifier = Modifier.size(16.dp)) }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Key("⏎"); Text(stringResource(Res.string.key_send), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+                Key("⇧⏎"); Text(stringResource(Res.string.key_newline), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+            }
+            // ONE inline status line — never a dialog: whatever went wrong, the text is still in the field
+            // above it and the fix is to press ⏎ again.
+            val status: Pair<Color, String>? = when {
+                busy -> Tok.tx2 to stringResource(Res.string.chat_start_opening)
+                pickHint -> Tok.warn to stringResource(Res.string.chat_start_pick_project)
+                model.newSessionPromptError == NewSessionPromptError.TIMEOUT -> Tok.danger to stringResource(Res.string.chat_start_timeout)
+                model.newSessionPromptError == NewSessionPromptError.SEND_REFUSED -> Tok.danger to stringResource(Res.string.chat_start_send_failed)
+                model.newSessionPromptError != null -> Tok.danger to stringResource(Res.string.chat_start_failed)
+                else -> null
+            }
+            status?.let { (color, text) ->
+                Text(text, color = color, fontFamily = Dk.ui, fontSize = 12.sp, textAlign = TextAlign.Center)
+            }
+            // no project in context: the typed-path popover, the affordance that already exists
+            if (dir == null) {
+                Text(
+                    stringResource(Res.string.chat_start_choose),
+                    color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(7.dp))
+                        .hoverFill(RoundedCornerShape(7.dp))
+                        .clickable { model.openNewSession() }.padding(horizontal = 10.dp, vertical = 5.dp),
+                )
+            }
         }
     }
 }

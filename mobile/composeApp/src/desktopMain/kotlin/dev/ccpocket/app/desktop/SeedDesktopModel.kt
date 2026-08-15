@@ -337,9 +337,17 @@ open class SeedDesktopModel : DesktopModel {
     override fun addComputer() {}
     override fun openProject(p: DkProject) {}
     override fun selectSession(s: DkSession) { sessions.indexOfFirst { it.sessionId == s.sessionId }.takeIf { it >= 0 }?.let { selectedIndex = it; askResolved = false } }
-    override val newSessionDir = "~/code/cc-pocket"
+    // nullable like the interface (not narrowed to String): "no project in context" is a state the empty-state
+    // starter (#256) has to be able to preview and test, and a narrowed override can't express it
+    override val newSessionDir: String? = "~/code/cc-pocket"
     override var newSessionSeed: String? by mutableStateOf(null)
     override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?, model: String?) { showNewSession = false }
+    // issue #256: the empty state's field is real here (it is a text field the previewer/screenshots and UI
+    // tests type into); the START is inert — a seed model has no session to open.
+    override var newSessionPrompt: String by mutableStateOf("")
+    override var startingSession: Boolean by mutableStateOf(false)
+    override var newSessionPromptError: NewSessionPromptError? by mutableStateOf(null)
+    override fun dismissNewSessionPromptError() { newSessionPromptError = null }
     override fun send(text: String) { composer = "" }
 
     override val pendingImages: List<dev.ccpocket.app.data.PendingImage> = emptyList()
