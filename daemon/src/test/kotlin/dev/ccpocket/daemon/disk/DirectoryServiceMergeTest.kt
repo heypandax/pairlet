@@ -55,6 +55,9 @@ class DirectoryServiceMergeTest {
         opencodeCwds = { opencode },
         kimiCwds = { emptyMap() },
         zcodeCwds = { zcode },
+        // pinned empty like kimi above: without it the default would read the DEVELOPER's real
+        // ~/.dsh store, so this test would pass or fail depending on whose machine ran it
+        dshCwds = { emptyMap() },
         liveClaudeCwds = liveClaudeCwds,
         nowMillis = nowMillis,
     )

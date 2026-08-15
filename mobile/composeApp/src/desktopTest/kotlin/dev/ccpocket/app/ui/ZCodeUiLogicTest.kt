@@ -25,7 +25,7 @@ class ZCodeUiLogicTest {
     @Test
     fun desktopNewSessionAndDefaultAgentChoicesExposeZcode() {
         assertEquals(
-            listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.ZCODE),
+            listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.ZCODE, AgentKind.DSH),
             DESKTOP_AGENT_CHOICES,
         )
     }

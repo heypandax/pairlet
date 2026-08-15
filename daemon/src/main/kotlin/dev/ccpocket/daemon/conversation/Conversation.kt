@@ -1223,7 +1223,14 @@ class Conversation(
         processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
         val launchGeneration = processGeneration
         val p = AgentProcess.start(backend.processBuilder(spec), scope)
-        val io = AgentIo(writeLine = p::writeLine, emit = { sink.emit(it) }) // read sink dynamically (reattach)
+        val io = AgentIo(
+            writeLine = p::writeLine,
+            emit = { sink.emit(it) }, // read sink dynamically (reattach)
+            // issue #255: dsh's events arrive on a WebSocket, not on stdout. Route them into the SAME
+            // channel the pump below drains, so there is still exactly one ordering domain and one seq
+            // assigner. Sends after the process exits fail on the closed channel and are dropped.
+            inject = { line -> runCatching { p.stdout.send(line) } },
+        )
         // Ask pushes ride the emit path for two flavors of conversation (issue #91 bridge + #138 owner):
         //  - BRIDGE (origin set, no pathScope): the ask frame fans out normally (the bridge's egress
         //    filter drops it; any interactive device that reattached sees it), AND the ask-push hook tells

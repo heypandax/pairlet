@@ -203,6 +203,7 @@ import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.DeletePreset
 import dev.ccpocket.protocol.FetchAuthStatus
 import dev.ccpocket.protocol.FetchModels
+import dev.ccpocket.protocol.AGENT_WIRE_DSH
 import dev.ccpocket.protocol.AGENT_WIRE_KIMI
 import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
 import dev.ccpocket.protocol.AGENT_WIRE_ZCODE
@@ -560,6 +561,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private val defaultOpenCodeEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_OPENCODE_EFFORT))
     private val defaultKimiEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_KIMI_EFFORT))
     private val defaultZCodeEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_ZCODE_EFFORT))
+    private val defaultDshEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_DSH_EFFORT))
 
     /**
      * One-time compatibility migration from the build where every backend read the same effort preference.
@@ -585,6 +587,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         AgentKind.OPENCODE -> defaultOpenCodeEffort.value
         AgentKind.KIMI -> defaultKimiEffort.value
         AgentKind.ZCODE -> defaultZCodeEffort.value
+        AgentKind.DSH -> defaultDshEffort.value
     }
     /** Default Codex service tier for new sessions (`priority` = Fast); null follows the account default. */
     val defaultServiceTier = mutableStateOf(SecureStore.getString(K_DEFAULT_SERVICE_TIER)?.takeIf { it.isNotEmpty() })
@@ -599,6 +602,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private val defaultOpenCodeModel = mutableStateOf(SecureStore.getString(K_DEFAULT_OPENCODE_MODEL)?.takeIf { it.isNotEmpty() })
     private val defaultKimiModel = mutableStateOf(SecureStore.getString(K_DEFAULT_KIMI_MODEL)?.takeIf { it.isNotEmpty() })
     private val defaultZCodeModel = mutableStateOf(SecureStore.getString(K_DEFAULT_ZCODE_MODEL)?.takeIf { it.isNotEmpty() })
+    /** DSH (issue #255) has no model switching in v1, so this stays null in practice. It exists anyway so the
+     *  scoped-storage invariant holds structurally: nothing can fall through to another backend's key. */
+    private val defaultDshModel = mutableStateOf(SecureStore.getString(K_DEFAULT_DSH_MODEL)?.takeIf { it.isNotEmpty() })
 
     fun defaultModelFor(agent: AgentKind): String? = when (agent) {
         // legacy persisted bare "opus" follows the Opus row to Opus 5. Official endpoint only: on a
@@ -608,6 +614,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         AgentKind.OPENCODE -> defaultOpenCodeModel.value
         AgentKind.KIMI -> defaultKimiModel.value
         AgentKind.ZCODE -> defaultZCodeModel.value
+        AgentKind.DSH -> defaultDshModel.value
     }
 
     /** Persisted context-window override (tokens) used as the usage statusline's denominator, or null to follow
@@ -1711,6 +1718,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             AgentKind.OPENCODE -> defaultOpenCodeEffort to K_DEFAULT_OPENCODE_EFFORT
             AgentKind.KIMI -> defaultKimiEffort to K_DEFAULT_KIMI_EFFORT
             AgentKind.ZCODE -> defaultZCodeEffort to K_DEFAULT_ZCODE_EFFORT
+            AgentKind.DSH -> defaultDshEffort to K_DEFAULT_DSH_EFFORT
         }
         if (v == state.value) return
         state.value = v
@@ -1739,6 +1747,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             AgentKind.OPENCODE -> defaultOpenCodeModel
             AgentKind.KIMI -> defaultKimiModel
             AgentKind.ZCODE -> defaultZCodeModel
+            AgentKind.DSH -> defaultDshModel
         }
         if (v == state.value) return
         state.value = v
@@ -1750,6 +1759,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 AgentKind.OPENCODE -> K_DEFAULT_OPENCODE_MODEL
                 AgentKind.KIMI -> K_DEFAULT_KIMI_MODEL
                 AgentKind.ZCODE -> K_DEFAULT_ZCODE_MODEL
+                AgentKind.DSH -> K_DEFAULT_DSH_MODEL
             },
             v ?: "",
         )
@@ -1951,7 +1961,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // offers addressed to THIS device. Sending the ordinary volley here would be three refusals.
                 send(ListHandoffs())
             } else {
-                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE), supportsApprovalV2 = true))
+                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true))
                 send(ListDirectories())
                 send(ListPendingApprovals)
             }
@@ -2223,12 +2233,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         defaultOpenCodeEffort.value = from.defaultOpenCodeEffort.value
         defaultKimiEffort.value = from.defaultKimiEffort.value
         defaultZCodeEffort.value = from.defaultZCodeEffort.value
+        defaultDshEffort.value = from.defaultDshEffort.value
         defaultServiceTier.value = from.defaultServiceTier.value
         defaultModel.value = from.defaultModel.value
         defaultCodexModel.value = from.defaultCodexModel.value
         defaultOpenCodeModel.value = from.defaultOpenCodeModel.value
         defaultKimiModel.value = from.defaultKimiModel.value
         defaultZCodeModel.value = from.defaultZCodeModel.value
+        defaultDshModel.value = from.defaultDshModel.value
         // This repository keeps the promoted MACHINE's capability catalog. Reconcile the shell defaults
         // copied from the outgoing machine against that truth now, so Settings and the next OpenSession
         // cannot disagree until another ModelsList happens to arrive.
@@ -5814,12 +5826,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_DEFAULT_OPENCODE_EFFORT = "default_session_effort_opencode" // SecureStore: OpenCode-only effort
         const val K_DEFAULT_KIMI_EFFORT = "default_session_effort_kimi" // SecureStore: Kimi-only effort
         const val K_DEFAULT_ZCODE_EFFORT = "default_session_effort_zcode" // SecureStore: ZCode-only thought level
+        const val K_DEFAULT_DSH_EFFORT = "default_session_effort_dsh" // SecureStore: DSH-only effort (issue #255)
         const val K_DEFAULT_SERVICE_TIER = "default_session_service_tier" // Codex `priority` = Fast; "" = account default
         const val K_DEFAULT_MODEL = "default_session_model"   // SecureStore: Claude model id for new sessions ("" = CLI default)
         const val K_DEFAULT_CODEX_MODEL = "default_session_model_codex" // SecureStore: Codex model id for new sessions
         const val K_DEFAULT_OPENCODE_MODEL = "default_session_model_opencode" // SecureStore: OpenCode provider/model id for new sessions
         const val K_DEFAULT_KIMI_MODEL = "default_session_model_kimi" // SecureStore: Kimi model alias for new sessions (issue #206)
         const val K_DEFAULT_ZCODE_MODEL = "default_session_model_zcode" // SecureStore: ZCode model id for new sessions (issue #228)
+        const val K_DEFAULT_DSH_MODEL = "default_session_model_dsh" // SecureStore: DSH model id — reserved; v1 has no model switching (issue #255)
         private val LEGACY_EFFORT_OPTIONS = listOf("low", "medium", "high", "xhigh", "max")
         const val K_CONTEXT_WINDOW_OVERRIDE = "context_window_override" // SecureStore: LEGACY global statusline denominator in tokens ("" = follow derived window); now the fallback tier under K_CONTEXT_WINDOW_OVERRIDES
         const val K_CONTEXT_WINDOW_OVERRIDES = "context_window_overrides" // SecureStore: TSV modelId\ttokens per line — per-model denominators (issue #169)

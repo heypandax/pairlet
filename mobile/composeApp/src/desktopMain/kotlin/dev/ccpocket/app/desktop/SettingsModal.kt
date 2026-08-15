@@ -309,6 +309,10 @@ private fun GeneralPane(model: DesktopModel) {
                 AgentKind.KIMI -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
                 // ZCode (issue #228): daemon-reported ids only, the same contract as Kimi.
                 AgentKind.ZCODE -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
+                // DSH (issue #255): v1 has no model switching, so nothing is ever discovered here and only
+                // the "CLI default" row above remains. Kept on the shared shape so adding a catalog later
+                // is a daemon-side change, not a UI one.
+                AgentKind.DSH -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
             }
             options.forEach { (label, id) ->
                 PrefRow(label, id, selected = defaultModel == id) { model.setDefaultModelFor(defaultAgent, id) }

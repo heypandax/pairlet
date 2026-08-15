@@ -303,6 +303,7 @@ open class SeedDesktopModel : DesktopModel {
         AgentKind.CODEX -> "gpt-5.1-codex"
         AgentKind.OPENCODE -> "auto"
         AgentKind.ZCODE -> "zai/glm-5"
+        AgentKind.DSH -> "" // issue #255: no model switching, so the seed shows no model chip for dsh
         AgentKind.CLAUDE, AgentKind.KIMI -> "sonnet"
     }
     override val chatMode = PermissionMode.DEFAULT

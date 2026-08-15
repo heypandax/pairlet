@@ -701,6 +701,28 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun dsh_agent_kind_and_caps_pin_wire_names() {
+        // issue #255: DSH is the newest post-baseline agent, appended at the TAIL of AgentKind so no
+        // existing constant's ordinal moves. Same contract as kimi/zcode above — the @SerialName IS the
+        // cross-build agreement, and DAEMON_SUPPORTED_AGENT_WIRES must advertise it or a newer App would
+        // send `agent:"dsh"` to an older daemon that silently coerces the open back to Claude.
+        val list = ModelsList(agent = AgentKind.DSH, models = listOf("deepseek-chat"))
+        val listJson = PocketJson.encodeToString(list)
+        assertTrue("\"agent\":\"dsh\"" in listJson, listJson)
+        assertEquals(list, PocketJson.decodeFromString<ModelsList>(listJson))
+
+        assertEquals("dsh", AGENT_WIRE_DSH)
+        assertTrue(AGENT_WIRE_DSH in DAEMON_SUPPORTED_AGENT_WIRES, DAEMON_SUPPORTED_AGENT_WIRES.toString())
+        val caps = ClientCaps(
+            supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH),
+        )
+        assertEquals(caps, PocketJson.decodeFromString<ClientCaps>(PocketJson.encodeToString(caps)))
+
+        val row = SessionSummary("s1", "t", "p", 1, "/w", 1, agent = AgentKind.DSH)
+        assertEquals(row, PocketJson.decodeFromString<SessionSummary>(PocketJson.encodeToString(row)))
+    }
+
+    @Test
     fun unknown_agent_kind_value_degrades_to_default_instead_of_failing_the_frame() {
         // THE wire hazard of adding an AgentKind constant: a peer built before it receives
         // `"agent":"<new>"` inside frames it already understands. coerceInputValues + the per-field

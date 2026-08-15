@@ -34,6 +34,7 @@ import dev.ccpocket.protocol.ApprovalGrantMutationResult
 import dev.ccpocket.protocol.FetchApprovalHistory
 import dev.ccpocket.protocol.RevokeGrant
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AGENT_WIRE_DSH
 import dev.ccpocket.protocol.AGENT_WIRE_KIMI
 import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
 import dev.ccpocket.protocol.AGENT_WIRE_ZCODE
@@ -197,6 +198,9 @@ class RequestRouter(
         /** issue #228: the client decodes AgentKind.ZCODE. */
         @Volatile var supportsZcode: Boolean = false
 
+        /** issue #255: the client decodes AgentKind.DSH. */
+        @Volatile var supportsDsh: Boolean = false
+
         /** §18.2 P2-3: the client decodes the approval-V2 frame types. The INGRESS sinks consult this to
          *  drop [AuthorizedActionRecorded]/[PermissionRiskUpdated] for undeclared peers — old clients
          *  would drop the unknown types anyway, but gating keeps the wire quiet and the contract real. */
@@ -208,6 +212,7 @@ class RequestRouter(
             AgentKind.OPENCODE -> supportsOpencode
             AgentKind.KIMI -> supportsKimi
             AgentKind.ZCODE -> supportsZcode
+            AgentKind.DSH -> supportsDsh
             AgentKind.CLAUDE, AgentKind.CODEX -> true
         }
     }
@@ -330,12 +335,13 @@ class RequestRouter(
                 caps?.supportsOpencode = AGENT_WIRE_OPENCODE in frame.supportsAgents
                 caps?.supportsKimi = AGENT_WIRE_KIMI in frame.supportsAgents // issue #206: gates KIMI rows
                 caps?.supportsZcode = AGENT_WIRE_ZCODE in frame.supportsAgents // issue #228: gates ZCODE rows
+                caps?.supportsDsh = AGENT_WIRE_DSH in frame.supportsAgents // issue #255: gates DSH rows
                 caps?.supportsApprovalV2 = frame.supportsApprovalV2 // P2-3: gates the V2 approval frames
             }
 
             is ListDirectories ->
                 if (guestScope != null) sink.emit(Directories(filterDirs(scopedDirectories(guestScope, caps), caps)))
-                else sink.emit(Directories(filterDirs(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true, includeZcode = caps?.supportsZcode == true), caps)))
+                else sink.emit(Directories(filterDirs(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true, includeZcode = caps?.supportsZcode == true, includeDsh = caps?.supportsDsh == true), caps)))
 
             // Owner control-plane pull: push is alert-only, so every foreground client can reconstruct the
             // complete queue even if APNs/FCM was delayed or lost. Restricted credentials must never learn
@@ -474,8 +480,16 @@ class RequestRouter(
                     // route a guest's path scope through PermissionBridge, but that path is unverified (probe
                     // blocked on device-code auth), so a restricted credential must not open one yet. P2
                     // re-evaluates once the ACP approval face is proven end-to-end.
+                    // DSH (issue #255): fail-closed for the STRONGEST version of this reason — v1 does not
+                    // bridge dsh's approvals at all (its `approval/requested` frames are logged and left
+                    // unanswered), so PermissionBridge is never consulted for a dsh tool call and a guest's
+                    // path scope / a bridge's command policy would simply not apply. Revisit only together
+                    // with the approval bridge, never before.
                     (guestScope != null || origin != null) &&
-                        (frame.agent == AgentKind.OPENCODE || frame.agent == AgentKind.KIMI || frame.agent == AgentKind.ZCODE) ->
+                        (
+                            frame.agent == AgentKind.OPENCODE || frame.agent == AgentKind.KIMI ||
+                                frame.agent == AgentKind.ZCODE || frame.agent == AgentKind.DSH
+                            ) ->
                         sink.emit(PocketError("share_forbidden", "${frame.agent} sessions are not available over shared/bridge access yet"))
                     guestScope != null && !PathScope.contains(guestScope.roots, wd.toString()) ->
                         sink.emit(PocketError("share_out_of_scope", "that folder is outside your shared folder"))
@@ -496,6 +510,7 @@ class RequestRouter(
                             peerSupportsOpencode = caps?.supportsOpencode == true,
                             peerSupportsKimi = caps?.supportsKimi == true,
                             peerSupportsZcode = caps?.supportsZcode == true,
+                            peerSupportsDsh = caps?.supportsDsh == true,
                             bridgeAllowedCommands = bridgeAllowedCommands,
                             bridgeContextPreamble = bridgeContextPreamble, // #242, bridge opens only
 
@@ -685,6 +700,13 @@ class RequestRouter(
                     AgentKind.ZCODE -> zcodeModels.fetch()
                     AgentKind.CODEX -> codexModels.fetch()
                     AgentKind.CLAUDE -> claudeModels.fetch(frame.workdir)
+                    // issue #255: model SWITCHING is deliberately out of v1 scope — dsh resolves its own
+                    // model from the user's environment and the daemon never passes one. Answer the frame
+                    // (silence would hang the picker) with an explicit empty list + reason.
+                    AgentKind.DSH -> ModelsList(
+                        agent = AgentKind.DSH,
+                        error = "DeepSeek Harness model selection is not supported yet — dsh uses its own configured model.",
+                    )
                 })
             }
 
@@ -707,6 +729,15 @@ class RequestRouter(
                         HandoffCreated(
                             ok = false,
                             error = "ZCode sessions can't be handed off over a collaborator link yet",
+                            code = "handoff_agent_unsupported",
+                        ),
+                    )
+                    // Same for DSH (issue #255) — CollaboratorGuard fails its open closed, so creating the
+                    // offer would only strand the recipient at the door after they accepted.
+                    frame.agent == AgentKind.DSH -> sink.emit(
+                        HandoffCreated(
+                            ok = false,
+                            error = "DeepSeek Harness sessions can't be handed off over a collaborator link yet",
                             code = "handoff_agent_unsupported",
                         ),
                     )
@@ -1178,7 +1209,7 @@ class RequestRouter(
      * rows exactly like the owner path (issue #184 mechanism ②).
      */
     private suspend fun scopedDirectories(scope: GuestScope, caps: ClientCapsHolder?): List<DirectoryEntry> {
-        val all = dirs.listDirectories(null, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true, includeZcode = caps?.supportsZcode == true)
+        val all = dirs.listDirectories(null, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true, includeZcode = caps?.supportsZcode == true, includeDsh = caps?.supportsDsh == true)
         val underScope = all
             .filter { e -> PathScope.contains(scope.roots, e.path) }
             .map { it.stampShare(scope) }

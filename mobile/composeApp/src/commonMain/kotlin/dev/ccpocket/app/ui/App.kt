@@ -1698,6 +1698,7 @@ private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
         "codex" -> Tok.codex
         "opencode" -> Tok.opencode
         "zcode" -> Tok.zcode
+        "dsh" -> Tok.dsh
         else -> Tok.accent
     }
     val label = stringResource(
@@ -1705,6 +1706,7 @@ private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
             "codex" -> Res.string.af_codex_only
             "opencode" -> Res.string.af_opencode_only
             "zcode" -> Res.string.af_zcode_only
+            "dsh" -> Res.string.af_dsh_only
             else -> Res.string.af_claude_only
         }
     )
@@ -1730,6 +1732,7 @@ internal fun filterSessionsByAgent(sessions: List<SessionSummary>, filter: Strin
             "opencode" -> session.agent == AgentKind.OPENCODE
             "kimi" -> session.agent == AgentKind.KIMI
             "zcode" -> session.agent == AgentKind.ZCODE
+            "dsh" -> session.agent == AgentKind.DSH
             else -> true
         }
     }

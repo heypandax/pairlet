@@ -1,5 +1,6 @@
 package dev.ccpocket.app.data
 
+import dev.ccpocket.protocol.AGENT_WIRE_DSH
 import dev.ccpocket.protocol.AGENT_WIRE_ZCODE
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DaemonInfo
@@ -38,8 +39,31 @@ class DaemonAgentCapabilitiesTest {
     }
 
     @Test
+    fun dshOpenIsRefusedUntilDaemonAdvertisesIt() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val sent = mutableListOf<Frame>()
+        val repo = PocketRepository(scope).apply { onSendForTest = { sent += it } }
+        try {
+            assertFalse(repo.supportsAgent(AgentKind.DSH))
+            assertFalse(repo.openSession("/tmp/old-daemon", agent = AgentKind.DSH))
+            assertTrue(sent.filterIsInstance<OpenSession>().isEmpty())
+            assertFalse(repo.opening.value, "a locally refused open must not leave a loading state")
+
+            repo.receiveForTest(DaemonInfo(supportedAgents = listOf(AGENT_WIRE_DSH)))
+
+            assertTrue(repo.supportsAgent(AgentKind.DSH))
+            assertTrue(repo.openSession("/tmp/new-daemon", agent = AgentKind.DSH))
+            assertEquals(AgentKind.DSH, sent.filterIsInstance<OpenSession>().single().agent)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun legacyAgentsRemainSendableWithoutAnAdvertisement() {
-        AgentKind.entries.filterNot { it == AgentKind.ZCODE }.forEach { agent ->
+        // ZCode and DSH are the two post-baseline agents: both are deny-by-omission, so neither belongs
+        // in the set that an old daemon must still accept.
+        AgentKind.entries.filterNot { it == AgentKind.ZCODE || it == AgentKind.DSH }.forEach { agent ->
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             val sent = mutableListOf<Frame>()
             val repo = PocketRepository(scope).apply { onSendForTest = { sent += it } }

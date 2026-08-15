@@ -152,6 +152,7 @@ internal fun filterDirectoriesByAgent(dirs: List<DirectoryEntry>, filter: String
         "opencode" -> AgentKind.OPENCODE
         "kimi" -> AgentKind.KIMI
         "zcode" -> AgentKind.ZCODE
+        "dsh" -> AgentKind.DSH
         else -> return dirs
     }
     return dirs.mapNotNull { entry ->

@@ -492,6 +492,9 @@ private fun ModelRow(m: UsageModel, max: Long) {
         AgentKind.CODEX -> Tok.codex
         AgentKind.OPENCODE -> Tok.opencode
         AgentKind.ZCODE -> Tok.zcode
+        // DSH (issue #255) reports no usage in v1, so this arm is defensive: if a row ever does arrive it
+        // wears the agent's own hue rather than silently borrowing Claude's accent.
+        AgentKind.DSH -> Tok.dsh
         AgentKind.CLAUDE, AgentKind.KIMI -> Tok.accent
     }
     Column(Modifier.padding(vertical = 9.dp)) {

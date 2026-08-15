@@ -137,12 +137,12 @@ internal val CLAUDE_AUTO_MODE =
     DkMode(Res.string.mode_auto_short, CLAUDE_PERMISSION_MODE_AUTO, PermissionMode.DEFAULT, Tok.accent, nativeMode = CLAUDE_PERMISSION_MODE_AUTO)
 
 /** Agents exposed by both desktop entry points: New session and Settings > Default agent. */
-internal val DESKTOP_AGENT_CHOICES = listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.ZCODE)
+internal val DESKTOP_AGENT_CHOICES = listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.ZCODE, AgentKind.DSH)
 
 /** Desktop's rendering model for the shared permission contract. */
 internal fun desktopModeChoices(agent: AgentKind, autoAvailable: Boolean = false): List<DkMode> = when (agent) {
     AgentKind.CLAUDE -> CLAUDE_MODES + if (autoAvailable) listOf(CLAUDE_AUTO_MODE) else emptyList()
-    AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE -> CLAUDE_MODES
+    AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH -> CLAUDE_MODES
 }
 
 internal fun desktopDefaultModeIndex(
@@ -449,6 +449,9 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
             AgentKind.KIMI -> model.modelsForAgent(AgentKind.KIMI).map { it to it }
             // ZCode (issue #228): daemon-reported ids only, the same contract as Kimi.
             AgentKind.ZCODE -> model.modelsForAgent(AgentKind.ZCODE).map { it to it }
+            // DSH (issue #255): no model switching in v1 — dsh picks its own model and the daemon has no
+            // switch path, so an empty picker is the truth rather than rows that would never take effect.
+            AgentKind.DSH -> emptyList()
             // Claude keeps its static alias rows (labels + the 1M/200K semantics live in the shared
             // table) — the daemon's list for Claude is config-default + the same aliases anyway.
             // claudeRowPick: on a gateway the Opus row degrades to the bare alias (#167/#168).

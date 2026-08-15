@@ -16,8 +16,10 @@ import org.jetbrains.compose.resources.stringResource
 // rather than guessing (the daemon still refuses input on its side — App display never authorizes).
 
 /** Whether the current backend may expose the owner-side Session Handoff entry. ZCode's
- * collaborator grant is deliberately fail-closed until its approval boundary is proven. */
-fun AgentKind.canInitiateSessionHandoff(): Boolean = this != AgentKind.ZCODE
+ * collaborator grant is deliberately fail-closed until its approval boundary is proven. DSH (issue #255)
+ * is fail-closed for a stronger reason: v1 bridges no approvals at all, so a handed-off guest would be
+ * driving a session whose tool calls this app can neither show nor gate. */
+fun AgentKind.canInitiateSessionHandoff(): Boolean = this != AgentKind.ZCODE && this != AgentKind.DSH
 
 fun HandoffStatus.toUi(): HandoffUiStatus? = when (this) {
     HandoffStatus.WAITING -> HandoffUiStatus.WAITING

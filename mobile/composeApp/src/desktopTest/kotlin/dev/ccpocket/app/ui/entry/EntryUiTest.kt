@@ -197,9 +197,12 @@ class EntryUiTest {
 
     @Test
     fun everyAgentHasExactlyOneModeChoiceSet() {
-        // the five supported agents, and nothing invented alongside them
+        // the six supported agents, and nothing invented alongside them
         assertEquals(
-            setOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE),
+            setOf(
+                AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE,
+                AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH,
+            ),
             AgentKind.entries.toSet(),
         )
         AgentKind.entries.forEach { a ->

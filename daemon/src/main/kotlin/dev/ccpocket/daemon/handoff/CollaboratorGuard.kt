@@ -127,7 +127,11 @@ class CollaboratorGuard(
         // guests/bridges. TODO: lift when opencode gains an approval protocol.
         // KIMI (issue #206): P1 fail-closed like OpenCode — its ACP approval chain isn't battle-tested for
         // the collaborator REVIEW ceiling yet. P2 re-evaluates once the approval face is proven.
-        if (h.agent == AgentKind.OPENCODE || h.agent == AgentKind.KIMI || h.agent == AgentKind.ZCODE) {
+        // DSH (issue #255): v1 emits no approval requests at all, so the REVIEW ceiling a collaborator
+        // grant depends on has nothing to enforce it. Fail closed until the approval bridge lands.
+        if (h.agent == AgentKind.OPENCODE || h.agent == AgentKind.KIMI || h.agent == AgentKind.ZCODE ||
+            h.agent == AgentKind.DSH
+        ) {
             return Verdict.Deny("handoff_agent_unsupported", "${h.agent} sessions can't be handed off over a collaborator link yet")
         }
         val scope = listOfNotNull(PathScope.canonical(h.workdir)) +

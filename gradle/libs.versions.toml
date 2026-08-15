@@ -65,6 +65,11 @@ jediterm-core = { module = "org.jetbrains.jediterm:jediterm-core", version.ref =
 jediterm-ui = { module = "org.jetbrains.jediterm:jediterm-ui", version.ref = "jediterm" }
 pty4j = { module = "org.jetbrains.pty4j:pty4j", version.ref = "pty4j" }
 nayuki-qrcodegen = { module = "io.nayuki:qrcodegen", version = "1.8.0" }
+# DeepSeek Harness transcripts (issue #255) are CONCATENATED multi-frame zstd: one frame for the header
+# line, then one per durable batch. ZstdInputStream decodes a frame sequence transparently, which is the
+# property we need — a hand-rolled single-frame decode would silently stop after the header. JNI natives
+# for every platform we ship are bundled in the jar (daemon-only; never commonMain/iOS/Android).
+zstd-jni = { module = "com.github.luben:zstd-jni", version = "1.5.7-13" }
 # Feishu official SDK — the daemon's BUILT-IN feishu bridge (issue #91 follow-up). Shades its own
 # okhttp (com.lark.oapi.okhttp), so it can't fight ktor; external deps are just gson/commons-codec/slf4j.
 lark-oapi-sdk = { module = "com.larksuite.oapi:oapi-sdk", version = "2.4.19" }

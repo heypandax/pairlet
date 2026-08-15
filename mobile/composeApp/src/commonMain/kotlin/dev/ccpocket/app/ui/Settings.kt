@@ -97,7 +97,9 @@ internal fun settingsDefaultModelOptions(
     val available = when (agent) {
         AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { it.second }
         AgentKind.CODEX -> discovered.ifEmpty { CODEX_MODEL_OPTIONS }
-        AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE -> discovered
+        // DSH (issue #255) rides the daemon-reported list like the rest, but v1 never fetches a catalog for
+        // it, so this resolves to just the null "CLI default" row rather than a picker with nothing in it.
+        AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH -> discovered
     }
     return (listOf<String?>(null) + listOfNotNull(selected) + available.filter { it.isNotBlank() }).distinct()
 }
@@ -510,9 +512,13 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
             Triple("claude", stringResource(Res.string.af_claude_only), Tok.accent),
             Triple("codex", stringResource(Res.string.af_codex_only), Tok.codex),
             Triple("opencode", stringResource(Res.string.af_opencode_only), Tok.opencode),
-        ) + if (repo.supportsAgent(AgentKind.ZCODE)) {
+        ) + (if (repo.supportsAgent(AgentKind.ZCODE)) {
             listOf(Triple("zcode", stringResource(Res.string.af_zcode_only), Tok.zcode))
-        } else emptyList()
+        } else emptyList()) + (if (repo.supportsAgent(AgentKind.DSH)) {
+            // Same gate as ZCode (issue #255): a daemon that never advertised `dsh` has no dsh rows to
+            // filter to, so offering the segment would only let the user filter the list down to nothing.
+            listOf(Triple("dsh", stringResource(Res.string.af_dsh_only), Tok.dsh))
+        } else emptyList())
         afOpts.forEach { (key, label, dot) ->
             val sel = repo.agentFilter.value == key
             // same thumb as SegmentedRow: selected fills Tok.accent (was a near-invisible Tok.raised).

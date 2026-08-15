@@ -498,5 +498,6 @@ private fun modeFootnote(agent: AgentKind): String? = when (agent) {
     AgentKind.CODEX -> stringResource(Res.string.cfg_codex_note)
     AgentKind.KIMI -> stringResource(Res.string.cfg_kimi_note)
     AgentKind.ZCODE -> null
+    AgentKind.DSH -> null // issue #255: the three rows already say everything v1 can promise about dsh
     AgentKind.OPENCODE -> null
 }

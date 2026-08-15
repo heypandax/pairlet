@@ -472,6 +472,7 @@
     <string name="af_codex_only">Codex</string>
     <string name="af_opencode_only">OpenCode</string>
     <string name="af_zcode_only">ZCode</string>
+    <string name="af_dsh_only">DSH</string>
     <string name="opencode_mode_short">完全访问</string>
     <string name="opencode_mode_title">完全访问（自动批准）</string>
     <string name="opencode_mode_note">OpenCode 以自动批准方式运行：所有工具调用（文件编辑、终端命令）由 CLI 自行放行，远程审批与权限模式对 OpenCode 会话不生效。</string>
