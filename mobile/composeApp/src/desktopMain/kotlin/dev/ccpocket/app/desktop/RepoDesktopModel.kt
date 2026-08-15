@@ -36,7 +36,7 @@ import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.isQuestion
 import dev.ccpocket.protocol.update.ReleaseClient
-import dev.ccpocket.protocol.update.ReleaseVersions
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -46,6 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString
 
 /** Persisted form of a [DkPin] — decoupled from the view type so the store format stays stable. */
@@ -1009,20 +1010,32 @@ class RepoDesktopModel(
     override val updateCommand: String?
         get() = (updateStateInternal as? DkUpdateState.Available)?.let { DesktopUpdater.upgradeCommandFor(it.source) }
 
+    // issue #245: Checking / Downloading double as the re-entry guard, and their UI branches are
+    // spinner-only — so a state that never leaves them locks "Check for updates" until the app restarts.
+    // Every path below therefore ends on a terminal state, with a try/finally backstop for the ones nobody
+    // foresaw (see DesktopUpdateCheck.kt for the deadline and the detached blocking probe).
     override fun checkForUpdates() {
         if (updateStateInternal is DkUpdateState.Checking || updateStateInternal is DkUpdateState.Downloading) return
         updateStateInternal = DkUpdateState.Checking
         updateScope.launch {
-            val rel = DesktopUpdater.latest()
-            updateStateInternal = when {
-                // suspend getString: the model isn't composable, but the failure line IS user-facing UI copy
-                // (same non-composable localization route PocketRepository already uses for preview asks)
-                rel == null -> DkUpdateState.Failed(getString(Res.string.update_reach_failed))
-                ReleaseVersions.isNewer(rel.version, APP_VERSION) -> {
-                    pendingRelease = rel
-                    DkUpdateState.Available(rel.version, DesktopUpdater.currentSource())
+            try {
+                val outcome = resolveUpdateCheck(
+                    current = APP_VERSION,
+                    probeScope = updateScope,
+                    latest = { DesktopUpdater.latest() },
+                    source = { DesktopUpdater.currentSource() },
+                    failureText = { updateFailureText(Res.string.update_reach_failed, UPDATE_CHECK_FALLBACK_MSG, it) },
+                )
+                outcome.release?.let { pendingRelease = it }
+                updateStateInternal = outcome.state
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                updateStateInternal = DkUpdateState.Failed(t.message?.takeIf { it.isNotBlank() } ?: UPDATE_CHECK_FALLBACK_MSG)
+            } finally {
+                // backstop: whatever happened (including cancellation), the spinner must not be the last word
+                if (updateStateInternal is DkUpdateState.Checking) {
+                    updateStateInternal = DkUpdateState.Failed(UPDATE_CHECK_FALLBACK_MSG)
                 }
-                else -> DkUpdateState.UpToDate(APP_VERSION)
             }
         }
     }
@@ -1033,10 +1046,28 @@ class RepoDesktopModel(
         if ((updateStateInternal as? DkUpdateState.Available)?.source != DkInstallSource.STANDALONE) return
         updateStateInternal = DkUpdateState.Downloading(rel.version)
         updateScope.launch {
-            // applyStandalone() does not return on success — it exits so the swap helper / installer can proceed
-            runCatching { DesktopUpdater.applyStandalone(rel) }
-                .onFailure { updateStateInternal = DkUpdateState.Failed(it.message ?: getString(Res.string.update_failed)) }
+            try {
+                // applyStandalone() does not return on success — it exits so the swap helper / installer can proceed
+                runCatching { DesktopUpdater.applyStandalone(rel) }
+                    .onFailure { updateStateInternal = DkUpdateState.Failed(updateFailureText(Res.string.update_failed, UPDATE_APPLY_FALLBACK_MSG, it)) }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                updateStateInternal = DkUpdateState.Failed(t.message?.takeIf { it.isNotBlank() } ?: UPDATE_APPLY_FALLBACK_MSG)
+            } finally {
+                if (updateStateInternal is DkUpdateState.Downloading) {
+                    updateStateInternal = DkUpdateState.Failed(UPDATE_APPLY_FALLBACK_MSG)
+                }
+            }
         }
+    }
+
+    /** Localized failure line + a short cause hint. suspend getString: the model isn't composable, but the
+     *  line IS user-facing copy (the non-composable route PocketRepository already uses for preview asks).
+     *  Resource loading can itself fail, so [fallback] is a plain literal — fetching copy must never throw. */
+    private suspend fun updateFailureText(res: StringResource, fallback: String, cause: Throwable?): String {
+        val base = runCatching { getString(res) }.getOrNull()?.takeIf { it.isNotBlank() } ?: fallback
+        val detail = cause?.let { it.message?.trim()?.takeIf(String::isNotEmpty) ?: it::class.simpleName }
+        return if (detail == null) base else "$base ($detail)"
     }
     override var defaultAgent: AgentKind
         get() = repo.sessionDefaultAgent
