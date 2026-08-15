@@ -89,9 +89,6 @@ class DeviceSessions(
     private val owned = HashMap<String, MutableList<String>>()
     private val nextId = AtomicLong(0)
     private val seenThisAttach = HashSet<String>()          // devices the relay re-announced since the last attach
-    // deviceId -> declared wire vocabulary (ClientCaps): survives reconnects of the same device, bounded
-    // by the paired-device count. Concurrent map — route() reads it outside the mutex.
-    private val deviceCaps = java.util.concurrent.ConcurrentHashMap<String, RequestRouter.ClientCapsHolder>()
 
     @Volatile
     private var lastInteractiveMintAt = 0L // serializes interactive vs headless pairing (issue #91)
@@ -323,6 +320,12 @@ class DeviceSessions(
                 link.fallback = link.active
                 link.active = session
                 link.pskShadow = derived.getOrNull(1) // the twin always tracks the NEWEST handshake
+                // A new connection has declared NOTHING yet: start it at the baseline vocabulary instead
+                // of inheriting the previous connection's bits, so a rolled-back App is not fed rows its
+                // build cannot decode (see [DeviceLink]). The demoted holder rides the fallback so the
+                // supersede-overlap promote below hands the surviving socket its own caps back.
+                link.fallbackCaps = link.activeCaps
+                link.activeCaps = RequestRouter.ClientCapsHolder()
             }
         }
         log.info("handshake from ${deviceId.take(8)}… (psk ${psk.size}B${if (twinned) " + empty-PSK twin" else ""}) → session established")
@@ -365,6 +368,12 @@ class DeviceSessions(
         }
     }
 
+    /** Test seam: the wire vocabulary the device's CURRENT connection has declared (null = no live link).
+     *  Its lifecycle — blank on every fresh handshake, restored by a supersede promote — is the whole
+     *  point of [DeviceLink.activeCaps], and nothing else observes it from outside the class. */
+    internal suspend fun declaredCapsForTest(deviceId: String): RequestRouter.ClientCapsHolder? =
+        mutex.withLock { sessions[deviceId]?.activeCaps }
+
     private suspend fun transport(deviceId: String, body: ByteArray) {
         val link = mutex.withLock { sessions[deviceId] }
         if (link == null) { log.warn("transport before handshake from ${deviceId.take(8)}…"); return }
@@ -377,7 +386,12 @@ class DeviceSessions(
         if (plaintext == null) {
             val fb = link.fallback
             plaintext = fb?.open(body)
-            if (plaintext != null && fb != null) mutex.withLock { link.fallback = link.active; link.active = fb }
+            // the caps holders swap WITH the sessions: the promoted connection gets its own declared
+            // vocabulary back, and the late handshake's blank one follows its session into the fallback
+            if (plaintext != null && fb != null) mutex.withLock {
+                link.fallback = link.active; link.active = fb
+                val demoted = link.activeCaps; link.activeCaps = link.fallbackCaps; link.fallbackCaps = demoted
+            }
         }
         var viaTwin = false
         if (plaintext == null) {
@@ -390,7 +404,12 @@ class DeviceSessions(
             plaintext = tw?.open(body)
             if (plaintext != null && tw != null) {
                 viaTwin = true
-                mutex.withLock { link.fallback = link.active; link.active = tw; link.pskShadow = null }
+                // twin and active came out of the SAME handshake, i.e. the same connection — so its caps
+                // holder is valid for both and travels with it rather than being swapped away
+                mutex.withLock {
+                    link.fallback = link.active; link.active = tw; link.pskShadow = null
+                    link.fallbackCaps = link.activeCaps
+                }
             }
         }
         if (plaintext == null) { log.warn("decrypt failed from ${deviceId.take(8)}…"); return }
@@ -438,11 +457,14 @@ class DeviceSessions(
         // keyed: relay sinks are minted per frame — the deviceId key makes every frame from this device
         // read as the SAME attached client in a conversation's fan-out set (issue #47).
         // §18.2 P2-3: V2 approval frames only reach devices whose ClientCaps declared the capability.
-        val capsForDevice = deviceCaps.computeIfAbsent(deviceId) { RequestRouter.ClientCapsHolder() }
+        // Resolved at EMIT time off the link, never captured: a conversation sink outlives the reconnect
+        // that re-keys the device (same argument as [sealAndSend] resolving the session late), and after a
+        // supersede promote the winning connection's holder is a different object than the one in hand.
+        val capsNow = { link.activeCaps }
         val sink = dev.ccpocket.daemon.conversation.KeyedSink(
             "${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$deviceId",
             OutboundSink { frame ->
-                if (!RequestRouter.allowedForCaps(frame, capsForDevice)) return@OutboundSink
+                if (!RequestRouter.allowedForCaps(frame, capsNow())) return@OutboundSink
                 sealAndSend(deviceId, frame)
             },
         )
@@ -576,15 +598,17 @@ class DeviceSessions(
                     // The owner checks live in the router, so the frame still goes through it — just not
                     // on the loop it depends on.
                     val body = env.body
-                    core.scope.launch { route(body, sink, origin, guestScope, collabScope, deviceId) }
+                    core.scope.launch { route(body, sink, origin, guestScope, collabScope, deviceId, capsNow) }
                     return
                 }
             }
         }
-        route(toRoute, sink, origin, guestScope, collabScope, deviceId)
+        route(toRoute, sink, origin, guestScope, collabScope, deviceId, capsNow)
     }
 
-    /** The router hand-off, extracted so a frame can take it either inline or off the reader loop. */
+    /** The router hand-off, extracted so a frame can take it either inline or off the reader loop.
+     *  [caps] is resolved lazily for the same reason the sink resolves it lazily: an off-reader dispatch
+     *  can run after a promote swapped which connection's holder is the live one. */
     private suspend fun route(
         frame: Frame,
         sink: OutboundSink,
@@ -592,11 +616,12 @@ class DeviceSessions(
         guestScope: GuestScope?,
         collabScope: dev.ccpocket.daemon.handoff.CollaboratorScope?,
         deviceId: String,
+        caps: () -> RequestRouter.ClientCapsHolder,
     ) {
         try {
             // deviceId is the Noise-authenticated transport identity — the handoff gate's ONLY input for
             // "who is driving" (SESSION-HANDOFF.md §5.3: never a frame field)
-            core.router.handle(frame, sink, origin, guestScope, caps = deviceCaps.computeIfAbsent(deviceId) { RequestRouter.ClientCapsHolder() }, deviceId = deviceId, collabScope = collabScope) { convoId ->
+            core.router.handle(frame, sink, origin, guestScope, caps = caps(), deviceId = deviceId, collabScope = collabScope) { convoId ->
                 mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }
                 bridges.guardOf(deviceId)?.noteOpened(convoId)     // bridge (#91)
                 bridges.guestGuardOf(deviceId)?.noteOpened(convoId) // guest (#115)
@@ -667,8 +692,28 @@ class DeviceSessions(
      * a device never holds more than two proven sessions. [pskShadow] is the ticket-less twin derived
      * beside a PSK-armed handshake for an already-allow-listed device; it either gets promoted by the
      * first inbound frame (the device provably burned its ticket) or dies with the PSK confirmation.
+     *
+     * [activeCaps]/[fallbackCaps] ride ALONGSIDE their session because the declared wire vocabulary
+     * ([dev.ccpocket.protocol.ClientCaps]) is a property of one CONNECTION, not of the device — the LAN
+     * leg already models it that way ([dev.ccpocket.daemon.server.WsConnection] holds one holder per
+     * socket). Keying it by deviceId instead made an App DOWNGRADE undetectable: the holder was created
+     * once and never cleared, so a phone that had ever declared ZCODE/KIMI/DSH kept those bits after
+     * being rolled back to a build that cannot decode them — the old build then hard-failed every
+     * Envelope carrying such a row and simply went blank, until an unrelated daemon restart. A fresh
+     * handshake now starts fail-closed (baseline CLAUDE/CODEX only) and re-opens the moment that
+     * connection's own ClientCaps lands, which every connect volley sends FIRST (`PocketRepository`'s
+     * launchTransport — including the deaf-link forced re-handshake, which re-enters the same path).
+     * The holders must MOVE WITH the sessions through the promotes below: otherwise a dying socket's
+     * late handshake would strip the SURVIVING socket's vocabulary for the rest of its connection,
+     * re-breaking exactly what [fallback] exists to protect.
      */
-    private class DeviceLink(var active: E2ESession, var fallback: E2ESession? = null, var pskShadow: E2ESession? = null)
+    private class DeviceLink(
+        var active: E2ESession,
+        var fallback: E2ESession? = null,
+        var pskShadow: E2ESession? = null,
+        var activeCaps: RequestRouter.ClientCapsHolder = RequestRouter.ClientCapsHolder(),
+        var fallbackCaps: RequestRouter.ClientCapsHolder = RequestRouter.ClientCapsHolder(),
+    )
 
     // ---- persistence of paired device public keys (shared with the direct-LAN gate) ----
 
