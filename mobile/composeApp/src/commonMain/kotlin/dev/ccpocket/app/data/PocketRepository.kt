@@ -3567,10 +3567,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val usage = mutableStateOf<Usage?>(null)
     val usageLoading = mutableStateOf(false)
 
-    /** Ask the daemon to aggregate usage over the last [days] local days; the reply lands in [usage]. */
-    fun fetchUsage(days: Int = 7) {
+    /** Ask the daemon to aggregate usage over the last [days] local days; the reply lands in [usage].
+     *  [agent] non-null narrows it to one backend (issue #258); null is the all-backends total. */
+    fun fetchUsage(days: Int = 7, agent: AgentKind? = null) {
         usageLoading.value = true
-        scope.launch { send(FetchUsage(days)) }
+        scope.launch { send(FetchUsage(days, agent)) }
     }
 
     // ── installed skills/plugins catalog (issue #132): the desktop browse page ──

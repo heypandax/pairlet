@@ -97,6 +97,74 @@ object ZCodeTranscriptScanner {
         return out
     }
 
+    /** One ZCode model request's token spend, for usage aggregation (issue #258). [whenEpochMs] is the
+     *  request's wall-clock moment; [model] is "provider/model"; the four token columns are DISJOINT
+     *  (ZCode's own `computed_total_tokens` is exactly their sum), so cache read stays split out of input
+     *  like Claude/OpenCode and the shared cache-hit formula holds. */
+    data class UsageTurn(
+        val id: String,
+        val whenEpochMs: Long,
+        val model: String,
+        val input: Long,
+        val output: Long,
+        val cacheCreation: Long,
+        val cacheRead: Long,
+    )
+
+    /**
+     * Every ZCode model request at or after [sinceEpochMs], for [dev.ccpocket.daemon.disk.UsageService]
+     * to bucket by day/model (issue #258).
+     *
+     * Source is `model_usage`, NOT `turn_usage`: only `model_usage` carries the model identity
+     * (`provider_id`/`model_id`) and it covers EVERY request — probe-verified locally, a turn's
+     * `session_title` side request lands in `model_usage` but is excluded from that turn's `turn_usage`
+     * rollup, so `turn_usage` would under-count real spend. Rows are keyed by `model_usage.id` (its
+     * primary key) for dedup; `error`/`cancelled` rows carry all-zero tokens and drop out on the
+     * total > 0 guard rather than on a status filter (a cancelled turn that already burned tokens
+     * should still count). Read-only + busy-tolerant like every other scan; any failure → empty list.
+     */
+    fun usageTurns(sinceEpochMs: Long, conn: Connection? = ZCodePaths.connectReadOnly()): List<UsageTurn> = runCatching {
+        val c = conn ?: return emptyList()
+        c.use { usageTurnsFrom(it, sinceEpochMs) }
+    }.getOrDefault(emptyList())
+
+    internal fun usageTurnsFrom(conn: Connection, sinceEpochMs: Long): List<UsageTurn> {
+        val out = mutableListOf<UsageTurn>()
+        conn.prepareStatement(
+            "SELECT id,provider_id,model_id,started_at,completed_at,input_tokens,output_tokens," +
+                "cache_creation_input_tokens,cache_read_input_tokens FROM model_usage " +
+                "WHERE COALESCE(completed_at,started_at) >= ? LIMIT 50000",
+        ).use { st ->
+            st.setLong(1, sinceEpochMs)
+            st.executeQuery().use { rs ->
+                while (rs.next()) {
+                    val input = rs.getLong("input_tokens")
+                    val output = rs.getLong("output_tokens")
+                    val cacheCreation = rs.getLong("cache_creation_input_tokens")
+                    val cacheRead = rs.getLong("cache_read_input_tokens")
+                    if (input + output + cacheCreation + cacheRead <= 0L) continue
+                    // prefer the request's completion moment; a still-running row only has started_at
+                    val whenMs = rs.getLong("completed_at").takeIf { it > 0L } ?: rs.getLong("started_at")
+                    if (whenMs < sinceEpochMs) continue
+                    out += UsageTurn(
+                        id = rs.getString("id") ?: "",
+                        whenEpochMs = whenMs,
+                        model = qualifiedModel(rs.getString("provider_id"), rs.getString("model_id")),
+                        input = input, output = output, cacheCreation = cacheCreation, cacheRead = cacheRead,
+                    )
+                }
+            }
+        }
+        return out
+    }
+
+    /** "provider/model" from the usage row's own columns, matching the session rows' model spelling. */
+    private fun qualifiedModel(provider: String?, model: String?): String = when {
+        model.isNullOrBlank() -> "zcode"
+        '/' in model || provider.isNullOrBlank() -> model
+        else -> "$provider/$model"
+    }
+
     private fun parse(raw: String?): JsonObject? = runCatching { json.parseToJsonElement(raw ?: "") as? JsonObject }.getOrNull()
     private fun JsonObject.str(k: String) = (this[k] as? JsonPrimitive)?.contentOrNull
 }

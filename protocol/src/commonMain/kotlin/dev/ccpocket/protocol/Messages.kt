@@ -97,10 +97,18 @@ data object ListArchivedSessions : ToDaemon
 @SerialName("pocket/session.rename")
 data class RenameSession(val workdir: String, val sessionId: String, val title: String) : ToDaemon
 
-/** Fetch aggregated token usage over the last [days] local days (reads transcripts; no launch). Issue #26. */
+/**
+ * Fetch aggregated token usage over the last [days] local days (reads transcripts; no launch). Issue #26.
+ *
+ * [agent] narrows the whole aggregation to ONE backend (issue #258); null (the default) keeps the
+ * all-backends total, i.e. exactly the pre-#258 behavior. Trailing optional with a default, so an old App
+ * omits it and an old daemon drops the unknown key and answers with everything — the App's "All" chip.
+ * A daemon predating this field silently ignores a narrowed request; there is no reverse capability for
+ * it, so the App only offers the filter to a daemon new enough to advertise its agent vocabulary.
+ */
 @Serializable
 @SerialName("pocket/usage.fetch")
-data class FetchUsage(val days: Int = 7) : ToDaemon
+data class FetchUsage(val days: Int = 7, val agent: AgentKind? = null) : ToDaemon
 
 /** Open a session: resume (resumeId != null) or start new (resumeId == null). */
 @Serializable

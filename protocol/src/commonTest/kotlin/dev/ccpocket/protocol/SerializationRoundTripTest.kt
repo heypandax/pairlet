@@ -2403,4 +2403,35 @@ class SerializationRoundTripTest {
         val decoded = PocketJson.decodeFromString<Envelope>(old).body as ClientCaps
         assertFalse(decoded.supportsApprovalV2)
     }
+
+    /** issue #258: FetchUsage.agent is a trailing optional — an OLD App's frame (no key) must still decode
+     *  as the unfiltered "All" request, and a new App's narrowed frame must round-trip. */
+    @Test
+    fun fetchUsage_agent_filter_is_additive() {
+        val old = """{"id":"fu1","ts":0,"body":{"t":"pocket/usage.fetch","days":7}}"""
+        assertNull((PocketJson.decodeFromString<Envelope>(old).body as FetchUsage).agent, "no agent key = every backend")
+
+        val narrowed = FetchUsage(days = 30, agent = AgentKind.ZCODE)
+        val json = PocketJson.encodeToString(Envelope(id = "fu2", ts = 0, body = narrowed))
+        assertEquals(narrowed, PocketJson.decodeFromString<Envelope>(json).body)
+
+        // a FUTURE agent this build has no name for coerces to null (= All) instead of failing the Envelope
+        val future = """{"id":"fu3","ts":0,"body":{"t":"pocket/usage.fetch","days":7,"agent":"someagent"}}"""
+        assertNull((PocketJson.decodeFromString<Envelope>(future).body as FetchUsage).agent)
+    }
+
+    /** The by-model rows can now carry KIMI/ZCODE (issue #258); both must survive a round trip so the
+     *  App's badge colors are the daemon's classification, not a re-guess from the model string. */
+    @Test
+    fun usage_models_round_trip_every_agent_badge() {
+        val usage = Usage(
+            models = listOf(
+                UsageModel("claude-opus-5", 10, AgentKind.CLAUDE),
+                UsageModel("anthropic/glm-5", 20, AgentKind.ZCODE),
+                UsageModel("kimi-code/k3", 30, AgentKind.KIMI),
+            ),
+        )
+        val json = PocketJson.encodeToString(Envelope(id = "us1", ts = 0, body = usage))
+        assertEquals(usage, PocketJson.decodeFromString<Envelope>(json).body)
+    }
 }
