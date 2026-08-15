@@ -17,7 +17,8 @@ package dev.ccpocket.app.data
  * Rules (chronological order is always preserved):
  *  - an empty replay still clears — that is the daemon's explicit /clear wipe;
  *  - the replay is anchored inside the local list; local rows OLDER than the anchor survive;
- *  - matched rows are enriched, never duplicated: User keeps promptId/delivered/images, Tool keeps
+ *  - matched rows are enriched, never duplicated: User keeps promptId/delivered and its own images
+ *    (adopting the replay's only when it has none — issue #254), Tool keeps
  *    taskId/childCount/lastChild and gains ok/output, Assistant keeps the longer of the two texts;
  *  - transcript-invisible local rows inside the overlap are carried through in place;
  *  - a live bubble glued across a dropped-chunk gap is replaced by the replay's full run (the disk
@@ -43,7 +44,7 @@ object TranscriptMerge {
             // a pending bubble whose text the replay now carries WAS delivered (the ack got lost):
             // resolve it in place — checked before the pass-through so it can't duplicate below
             if (l is ChatItem.User && l.pending && r is ChatItem.User && l.text == r.text) {
-                out.add(l.copy(pending = false)); li++; ri++
+                out.add(resolveUser(l, r)); li++; ri++
                 continue
             }
             if (isLocalOnly(l)) { // transcript-invisible row: carry it through in place
@@ -81,11 +82,7 @@ object TranscriptMerge {
                     out.add(ChatItem.Assistant(text))
                     li++; ri++
                 }
-                is ChatItem.User -> {
-                    // same prompt row: keep the receipt fields (promptId/delivered/images) the
-                    // transcript never carries — a late PromptAck still finds its bubble
-                    out.add(l.copy(pending = false)); li++; ri++
-                }
+                is ChatItem.User -> { out.add(resolveUser(l, r as ChatItem.User)); li++; ri++ }
                 is ChatItem.Tool -> {
                     val rt = r as ChatItem.Tool
                     out.add(
@@ -154,6 +151,20 @@ object TranscriptMerge {
     }
 
     // ---- internals ----
+
+    /**
+     * The local prompt bubble [l], resolved against the replay row [r] that proves it landed: the
+     * receipt fields (promptId/delivered) the transcript never carries always stay local.
+     *
+     * Images (issue #254) are a one-way fill: a bubble that already holds its own attachment bytes
+     * keeps them (same picture, no decode round-trip), and only a bubble with NONE — a turn composed
+     * at the computer, or one this device sent before the transcript learned to carry them — adopts
+     * the replay's. The "some images were too large" notice travels with whichever set is shown, so a
+     * bubble holding its full local attachments never inherits a truncation that didn't happen to it.
+     */
+    private fun resolveUser(l: ChatItem.User, r: ChatItem.User): ChatItem.User =
+        if (l.images.isEmpty()) l.copy(pending = false, images = r.images, imagesTruncated = r.imagesTruncated)
+        else l.copy(pending = false)
 
     /** Rows the transcript never contains — carried through a merge, invisible to pairing. */
     private fun isLocalOnly(item: ChatItem): Boolean = when (item) {

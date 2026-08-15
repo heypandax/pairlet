@@ -792,9 +792,11 @@ private fun MessageRow(
                 // on desktop). DisableSelection lets a click reach the tile through the stream-wide
                 // SelectionContainer — same carve-out as the QuestionCard fields (#76); previewFile drops
                 // the bytes to a temp file and opens the OS default viewer (the desktop preview gesture, #79).
-                if (item.images.isNotEmpty()) {
+                // …and since issue #254 they also ride a REPLAYED turn, so a prompt composed at another
+                // client (or in this computer's own terminal) shows its attachments here too.
+                if (item.images.isNotEmpty() || item.imagesTruncated) {
                     DisableSelection {
-                        SentImages(item.images) { i -> previewFile("image-${i + 1}.jpg", item.images[i], "image/jpeg") }
+                        SentImages(item.images, item.imagesTruncated) { i -> previewFile("image-${i + 1}.jpg", item.images[i], "image/jpeg") }
                     }
                     if (item.text.isNotBlank() || item.files.isNotEmpty()) Spacer(Modifier.height(8.dp))
                 }

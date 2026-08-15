@@ -2944,7 +2944,12 @@ private fun MessageItem(
                 Modifier.fillMaxWidth().padding(top = 7.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
+                // images ride the turn whether it was composed here or at the computer (issue #254:
+                // the replay carries them now); imagesTruncated still renders with no tiles at all,
+                // because an image-ONLY prompt the budget shed would otherwise read as an empty turn
+                if (m.images.isNotEmpty() || m.imagesTruncated) {
+                    SentImages(m.images, m.imagesTruncated) { i -> onOpenImages(m.images, i) }
+                }
                 // uploaded files (issue #90): chip per file with its @inbox landing path. Videos (issue
                 // #98) render as a 16:9 card that opens the player; both share the "in workspace" grammar.
                 m.files.forEach { f ->

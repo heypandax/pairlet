@@ -574,6 +574,7 @@
     <string name="img_excluded">· 已排除 %1$d 张</string>
     <string name="img_too_large">过大 · %1$dKB</string>
     <string name="viewer_hint">下滑关闭 · 点按缩放</string>
+    <string name="img_replay_truncated">· 部分图片过大或过多，未同步</string>
 
     <!-- ── 会话信息 + 快捷操作 ───────────────────────────────────── -->
     <string name="session_info_title">会话</string>

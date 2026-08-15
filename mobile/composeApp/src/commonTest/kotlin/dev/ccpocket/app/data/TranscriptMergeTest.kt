@@ -15,6 +15,70 @@ class TranscriptMergeTest {
     private fun user(text: String, pending: Boolean = false, promptId: String? = null, delivered: Boolean = false) =
         ChatItem.User(text, pending = pending, promptId = promptId, delivered = delivered)
 
+    // ---- issue #254: replayed prompt images ----
+
+    @Test
+    fun replayFillsImagesIntoABubbleThatHasNone() {
+        // the reported case: the turn was composed AT THE COMPUTER, so this device has only its text
+        val local = listOf<ChatItem>(user("look at this"), ChatItem.Assistant("ok"))
+        val shot = byteArrayOf(1, 2, 3)
+        val replay = listOf<ChatItem>(
+            ChatItem.User("look at this", images = listOf(shot)),
+            ChatItem.Assistant("ok"),
+        )
+        val out = TranscriptMerge.merge(local, replay)
+        assertEquals(listOf(shot), (out[0] as ChatItem.User).images)
+    }
+
+    @Test
+    fun localAttachmentsSurviveTheReplayAndKeepTheirOwnTruncationState() {
+        // a bubble this device sent holds the real bytes; the replay's budget-shed copy must not
+        // overwrite them, nor stamp a "some images were too large" notice on a complete bubble
+        val mine = byteArrayOf(9)
+        val local = listOf<ChatItem>(
+            user("earlier"), ChatItem.Assistant("sure"),
+            ChatItem.User("mine", images = listOf(mine), pending = true, promptId = "p1"),
+        )
+        val replay = listOf<ChatItem>(
+            user("earlier"), ChatItem.Assistant("sure"),
+            ChatItem.User("mine", images = emptyList(), imagesTruncated = true),
+        )
+        val out = TranscriptMerge.merge(local, replay)[2] as ChatItem.User
+        assertEquals(listOf(mine), out.images)
+        assertFalse(out.imagesTruncated)
+        assertEquals("p1", out.promptId) // receipt fields still local
+        assertFalse(out.pending) // the replay proves it landed
+    }
+
+    @Test
+    fun replayTruncationNoticeRidesAlongWhenItsImagesAreAdopted() {
+        val local = listOf<ChatItem>(user("shed one"))
+        val replay = listOf<ChatItem>(ChatItem.User("shed one", images = emptyList(), imagesTruncated = true))
+        val out = TranscriptMerge.merge(local, replay).single() as ChatItem.User
+        assertTrue(out.imagesTruncated)
+    }
+
+    @Test
+    fun severalImageOnlyRowsPairByPositionNotByTheirIdenticalBlankText() {
+        // image-only turns all have text "" (issue #254), so text equality can no longer tell two
+        // user rows apart — pairing has to hold on POSITION. If it slipped, the second turn's picture
+        // would land on the first turn's bubble, which is worse than the blank this issue started as.
+        val a = byteArrayOf(1)
+        val b = byteArrayOf(2)
+        val local = listOf<ChatItem>(
+            ChatItem.User("", images = listOf(a)), ChatItem.Assistant("first"),
+            ChatItem.User(""), ChatItem.Assistant("second"),
+        )
+        val replay = listOf<ChatItem>(
+            ChatItem.User(""), ChatItem.Assistant("first"),
+            ChatItem.User("", images = listOf(b)), ChatItem.Assistant("second"),
+        )
+        val out = TranscriptMerge.merge(local, replay)
+        assertEquals(4, out.size)
+        assertEquals(listOf(a), (out[0] as ChatItem.User).images) // local bytes kept where it had them
+        assertEquals(listOf(b), (out[2] as ChatItem.User).images) // replay fills the row that had none
+    }
+
     // ---- wholesale cases ----
 
     @Test
