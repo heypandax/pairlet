@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -1354,8 +1355,13 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
             // The scrim under the stack. Not decoration: the list scrolls beneath the FAB, and without it
             // the last row reads as struck through by the circle. Fading the rows out is also what says
             // there is more list down there. Untouchable, so it never steals a row's tap.
-            Box(
+            // Shown ONLY while rows actually continue beneath (owner feedback on #260): at the end of the
+            // list — and on a short list, always — nothing would be struck through, and the scrim stacked
+            // on the 92dp clearance read as a dead band of wasted space.
+            val scrimAlpha by animateFloatAsState(if (listState.canScrollForward) 1f else 0f, label = "fabScrim")
+            if (scrimAlpha > 0f) Box(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(96.dp)
+                    .graphicsLayer { alpha = scrimAlpha }
                     .background(Brush.verticalGradient(0f to Color.Transparent, 0.62f to Tok.base, 1f to Tok.base)),
             )
             Column(
