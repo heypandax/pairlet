@@ -2,6 +2,8 @@ package dev.ccpocket.app.data
 
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
+import dev.ccpocket.protocol.DaemonInfo
+import dev.ccpocket.protocol.FetchModels
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ModelCapabilities
 import dev.ccpocket.protocol.ModelServiceTier
@@ -533,6 +535,40 @@ class SessionCapabilitiesTest {
         } finally {
             repo.setDefaultModelFor(AgentKind.CODEX, null)
             repo.setDefaultEffortFor(AgentKind.CODEX, null)
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun agentFrameIsNotDroppedBeforeTheDaemonHasDeclaredItsAgents() {
+        // #276/#275: the reverse capability guard must NOT fire during the pre-DaemonInfo reconnect window.
+        // daemonSupportedAgents is empty there for the ordinary reason "not told yet", not "unsupported" —
+        // dropping then silently killed ZCode reattach on every reconnect. Once the daemon HAS declared a
+        // set without zcode, the same frame is correctly dropped. Driven through fetchModels (an agent-
+        // carrying frame that funnels the egress guard), so it also pins the C2 widening past OpenSession.
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val sent = mutableListOf<Frame>()
+        val repo = repo(scope, sent)
+        try {
+            // unknown window: no DaemonInfo yet, supported set empty → must pass through
+            repo.fetchModels(AgentKind.ZCODE)
+            assertEquals(
+                1, sent.filterIsInstance<FetchModels>().count { it.agent == AgentKind.ZCODE },
+                "an agent-carrying frame must not be dropped before the daemon has declared its agents",
+            )
+
+            // now the daemon declares a set WITHOUT zcode → the same frame must be dropped
+            sent.clear()
+            repo.receiveForTest(DaemonInfo(supportedAgents = listOf("claude", "codex")))
+            repo.fetchModels(AgentKind.ZCODE)
+            assertTrue(
+                sent.filterIsInstance<FetchModels>().none { it.agent == AgentKind.ZCODE },
+                "once the daemon is known not to support zcode, the frame is correctly withheld",
+            )
+            // a supported agent still goes through after the handshake
+            repo.fetchModels(AgentKind.CODEX)
+            assertEquals(1, sent.filterIsInstance<FetchModels>().count { it.agent == AgentKind.CODEX })
+        } finally {
             scope.cancel()
         }
     }

@@ -272,6 +272,7 @@ import dev.ccpocket.app.resources.status_reconnecting
 import dev.ccpocket.app.resources.voice_audio_engine
 import dev.ccpocket.app.resources.voice_daemon_unreachable
 import dev.ccpocket.app.resources.voice_dictation_failed
+import dev.ccpocket.app.resources.voice_interrupted
 import dev.ccpocket.app.resources.voice_no_response
 import dev.ccpocket.app.resources.voice_no_speech
 import dev.ccpocket.app.resources.voice_record_failed
@@ -1413,6 +1414,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var levelsJob: Job? = null
     private var dictationJob: Job? = null
     private var noticeJob: Job? = null
+    private var voiceStartJob: Job? = null                    // the async recorder.start() window (issue #266)
+    private var interruptJob: Job? = null                     // system interruption (call / route steal) collector
 
     /** Pair from a scanned/pasted `ccpocket://pair?...` link, then connect end-to-end. */
     fun pair(link: String) {
@@ -2152,6 +2155,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         gatewayBaseUrl.value = null // per-daemon truth (issue #139): the next machine re-announces via DaemonInfo
         bridgeControl.value = null  // per-daemon truth too — the next daemon re-advertises via DaemonInfo (issue #91)
         daemonSupportedAgents.value = emptySet() // reverse agent capability: no stale ZCode across machines
+        daemonAgentsKnown = false // #276: back to "not told yet" — the guard must not deny during reconnect
         daemonUsageAgentFilter.value = false // ditto (issue #258): the next machine re-advertises its own
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
@@ -2361,12 +2365,25 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     internal var onSendForTest: ((Frame) -> Unit)? = null // test seam: observe outbound frames (issue #104 resend)
 
+    /** The backend an outbound frame targets, for the reverse capability guard in [send]; null = not agent-scoped. */
+    private fun agentCarried(frame: Frame): AgentKind? = when (frame) {
+        is OpenSession -> frame.agent
+        is ScheduleCreate -> frame.agent
+        is FetchModels -> frame.agent
+        else -> null
+    }
+
     /** All outbound frames funnel here; a throw means the link is dead — trigger the reconnect path. */
     private suspend fun send(frame: Frame) {
-        // Reverse capability guard: an old daemon can coerce the unknown `zcode` enum to OpenSession's
-        // Claude default. Keep this at the final egress seam as defense in depth for reconnect/takeover
-        // paths that do not originate in the new-session picker.
-        if (frame is OpenSession && !supportsAgent(frame.agent)) return
+        // Reverse capability guard (#275/#276): an old daemon coerces the unknown `zcode` enum to the Claude
+        // default, so never fire an agent-carrying frame (open/schedule/fetch-models) at a daemon that lacks
+        // that backend — but ONLY once the daemon has actually told us, THIS connection, what it supports.
+        // Pre-DaemonInfo the set is empty for the ordinary reason "not told yet", not "unsupported"; dropping
+        // then silently killed ZCode reattach on every reconnect (no SessionLive, no retry). In that window
+        // let it through — a genuinely absent backend is refused by the daemon with agent_unavailable, the
+        // proper channel. The new-session picker is already gated upstream in openSession(), so this seam
+        // only backstops the reconnect / takeover / schedule / model-fetch paths.
+        agentCarried(frame)?.let { if (daemonAgentsKnown && !supportsAgent(it)) return }
         onSendForTest?.invoke(frame)
         if (demoMode.value) { demoRespond(frame); return } // no network: synthesize the daemon's reply locally
         try {
@@ -2401,6 +2418,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // Demo has no handshake, so explicitly emulate a current daemon rather than inheriting the
         // disconnected socket's deny-by-default capability state.
         daemonSupportedAgents.value = DAEMON_SUPPORTED_AGENT_WIRES.toSet()
+        daemonAgentsKnown = true // #276: demo asserts a current daemon's caps — the guard may act on them
         daemonUsageAgentFilter.value = true // a current daemon honors the usage filter (issue #258)
         demoAsked = false
         sessionActive.value = true
@@ -2723,6 +2741,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 gatewayBaseUrl.value = f.gatewayBaseUrl
                 bridgeControl.value = f.bridgeControl // capability advertisement (issue #91): false = daemon too old
                 daemonSupportedAgents.value = f.supportedAgents.toSet()
+                daemonAgentsKnown = true // #276: the daemon has now told us — the guard may deny an unsupported agent
                 daemonUsageAgentFilter.value = f.supportsUsageAgentFilter // issue #258: false = daemon ignores the filter
                 // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
                 // the fields — "unknown" must not be shown as the previous machine's numbers
@@ -3486,6 +3505,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      * safe pre-handshake state and the decoded value from an older daemon. Only post-advertisement agents
      * use it as a hard gate; see [agentAvailableFromDaemon]. */
     val daemonSupportedAgents = mutableStateOf<Set<String>>(emptySet())
+
+    /** #276: has THIS connection's DaemonInfo (or the demo/current-daemon assertion) actually landed yet?
+     *  [daemonSupportedAgents] being empty conflates "not told yet" (reconnect window) with "told, lacks the
+     *  backend" (old daemon). The egress guard must only deny on the latter, or it drops legitimate reattach
+     *  frames during every reconnect. False until a handshake sets the capability set. */
+    private var daemonAgentsKnown = false
 
     /** Whether the connected daemon honors [FetchUsage.agent] (issue #258). Deliberately NOT inferred from
      * [daemonSupportedAgents]: that advertisement shipped a release EARLIER, so a v1.7.7 daemon advertises
@@ -4706,6 +4731,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // and so does its receipt deadline
         turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false; turnQueued.value = false // (issue #104) new session clears any ack→turn stall
         sessionDegraded.value = false; degradedSendArmed = false // per-session — SessionLive re-announces the truth
+        abandonVoice() // #266: a capture in flight belongs to the session we're leaving — never carry it into the next
         // Reclaim the current session ONLY if it's idle (or a read-only observe): a RUNNING turn stays
         // alive in the background — same rule as backToBrowse. Desktop switches sessions directly
         // (sidebar click → here, no backToBrowse in between), so an unconditional close was killing
@@ -5279,13 +5305,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             startVoiceTimeout(NATIVE_FINAL_TIMEOUT_MS)
         } else {
             scope.launch {
-                val audio = runCatching { recorder.stop() }.getOrNull()
-                if (audio == null || audio.bytes.isEmpty()) {
-                    showNotice(Res.string.voice_no_speech)
-                    clearVoice()
-                } else {
-                    keptAudio = audio
-                    uploadCapture(audio)
+                // #266: a thrown stop() (mic stolen, route change, engine error) is a real FAILURE and must
+                // be retryable — collapsing it into "no speech" told the user they stayed silent. Only an
+                // empty successful capture is genuine silence.
+                val result = runCatching { recorder.stop() }
+                val audio = result.getOrNull()
+                when {
+                    result.isFailure -> voice.value = VoiceState.Failed(Res.string.voice_record_failed)
+                    audio == null || audio.bytes.isEmpty() -> {
+                        showNotice(Res.string.voice_no_speech)
+                        clearVoice()
+                    }
+                    else -> {
+                        keptAudio = audio
+                        uploadCapture(audio)
+                    }
                 }
             }
         }
@@ -5297,6 +5331,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Tear down capture jobs + engine and reset to Idle; [notifyDaemon] also aborts an in-flight remote transcription. */
     private fun stopCapture(notifyDaemon: Boolean) {
         voiceTicker?.cancel(); levelsJob?.cancel(); voiceTimeout?.cancel(); dictationJob?.cancel()
+        voiceStartJob?.cancel(); interruptJob?.cancel() // #266: cancel a start still in its async window, and the interruption watch
         when (voice.value) {
             is VoiceState.Recording -> if (usingNative) NativeDictation.cancel() else recorder.cancel()
             is VoiceState.Transcribing -> {
@@ -5369,10 +5404,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     private fun startRemoteVoice() {
         usingNative = false
-        scope.launch {
+        // Claim Recording synchronously (issue #266): recorder.start() suspends across the permission
+        // dialog + prepare(), and until it returns voice.value would otherwise stay Idle — a window in
+        // which a second Mic tap passes startVoice()'s guard (double-recording) and an abandonVoice() is a
+        // silent no-op (the recorder then starts AFTER the user left and runs to the cap). Both are closed
+        // by owning the state now and tracking the start job so teardown can cancel mid-start.
+        voice.value = VoiceState.Recording(0)
+        voiceStartJob = scope.launch {
             try {
                 recorder.start()
+            } catch (c: CancellationException) {
+                runCatching { recorder.cancel() } // abandoned during the start window — tear the recorder down
+                throw c
             } catch (_: VoicePermissionDenied) {
+                voice.value = VoiceState.Idle
                 micPermissionSheet.value = true
                 return@launch
             } catch (t: Throwable) {
@@ -5381,6 +5426,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             }
             beginTicker()
             levelsJob = scope.launch { recorder.levels.collect { pushLevel(it) } }
+            // A system interruption (incoming call, another app steals the mic) tears the recorder down
+            // natively; without this the ticker keeps counting over audio that is no longer being captured
+            // and ✓ later reports "no speech". Surface it as an explicit, retryable failure instead.
+            interruptJob = scope.launch {
+                recorder.interruptions.collect {
+                    if (voice.value is VoiceState.Recording) {
+                        voiceTicker?.cancel(); levelsJob?.cancel()
+                        voice.value = VoiceState.Failed(Res.string.voice_interrupted)
+                    }
+                }
+            }
         }
     }
 
@@ -5439,7 +5495,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     private fun onTranscript(f: Transcript) {
-        if (f.captureId != captureId) return // a superseded/cancelled capture
+        // #266: bind to the conversation too, not just captureId. A capture dictated in session A whose
+        // transcript arrives after the user jumped to session B must never land in B's composer — captureId
+        // alone let it through because it isn't reset on session switch.
+        if (f.captureId != captureId || f.convoId != convoId.value) return // a superseded/cancelled/foreign capture
         voiceTimeout?.cancel()
         if (voice.value !is VoiceState.Transcribing) return
         if (f.ok) {
@@ -5474,6 +5533,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Reset all composer voice state (keeps [preferRemote] — it describes the device, not the session). */
     private fun clearVoice() {
+        voiceStartJob?.cancel(); interruptJob?.cancel() // #266: no reset path may leave the start/interruption watchers live
         voice.value = VoiceState.Idle
         liveDictation.value = false
         liveFinal.value = ""
@@ -5821,7 +5881,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // still restore per-session, same as openSession.
             val saved = sessionParams[sid]
             val agent = saved?.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
-            val takeoverModel = compatibleModelForAgent(agent, saved?.model)
+            // A session saved under an older build may carry bare "opus" — resume it through the same legacy
+            // migration openSession applies (Opus 5 on the official endpoint), or "Continue here" relaunches
+            // on Opus 4.8. Migrate BEFORE the compatibility guard, exactly as openSession does.
+            val savedModel = saved?.model?.let {
+                if (agent == AgentKind.CLAUDE && gatewayBaseUrl.value == null) migrateLegacyClaudeModel(it) else it
+            }
+            val takeoverModel = compatibleModelForAgent(agent, savedModel)
             val requestedEffort = saved?.effort ?: if (agent == AgentKind.CODEX) null else defaultEffortFor(agent)
             val supportedEfforts = supportedReasoningEfforts(agent, takeoverModel)
             val takeoverEffort = requestedEffort.takeIf { candidate ->

@@ -263,6 +263,7 @@
     <string name="voice_use_whisper_sub">中英混说更准；说完后录音发到电脑识别，没有逐字实时预览。</string>
     <string name="voice_no_speech">没有听到语音</string>
     <string name="voice_record_failed">无法开始录音</string>
+    <string name="voice_interrupted">录音被中断</string>
     <string name="voice_daemon_unreachable">无法连接守护进程，请检查连接</string>
     <string name="voice_transcribe_failed">转写失败，请重试</string>
     <string name="voice_no_response">无响应，请检查连接</string>

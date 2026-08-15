@@ -55,6 +55,22 @@ class VoiceTranscriptReviewTest {
         assertTrue(sent.isEmpty(), "and certainly sends nothing")
     }
 
+    /** #266: a transcript for a DIFFERENT conversation than the one now open must never land in the composer,
+     *  even when its captureId still matches (captureId isn't reset on a session switch). */
+    @Test
+    fun aTranscriptForAnotherSessionIsRejected() {
+        val r = repo() // convoId = "c1"
+        r.captureId = "cap-3"
+        r.voice.value = VoiceState.Transcribing
+
+        // The capture was dictated in c1; the user jumped to c2 before it came back.
+        r.convoId.value = "c2"
+        r.receiveForTest(Transcript("c1", "cap-3", text = "this belongs to the old chat", ok = true))
+
+        assertNull(r.pendingVoiceText.value, "a foreign-session transcript must not reach the current composer")
+        assertTrue(r.voice.value is VoiceState.Transcribing, "and it must not consume the current capture state")
+    }
+
     /** #238 keeps the existing review-first append contract when Mic starts beside an existing draft. */
     @Test
     fun aReviewedTranscriptAppendsWithoutDamagingTheExistingDraft() {

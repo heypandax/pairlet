@@ -263,6 +263,7 @@
     <string name="voice_use_whisper_sub">Better for mixed-language speech; audio is sent to your computer after you stop, so there's no live transcript.</string>
     <string name="voice_no_speech">Didn't catch any speech</string>
     <string name="voice_record_failed">Couldn't start recording</string>
+    <string name="voice_interrupted">Recording was interrupted</string>
     <string name="voice_daemon_unreachable">Couldn't reach the daemon — check the connection</string>
     <string name="voice_transcribe_failed">Couldn't transcribe — try again</string>
     <string name="voice_no_response">No response — check the connection</string>

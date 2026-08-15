@@ -314,8 +314,12 @@ fun App(scope: CoroutineScope) {
     LaunchedEffect(appForeground, repo.sessionActive.value, repo.phase.value) {
         if (!appForeground || !repo.sessionActive.value || repo.phase.value != ConnPhase.Ready) return@LaunchedEffect
         while (true) {
-            repo.refreshDirectoriesSilently()
-            delay(5_000) // responsive enough for the top list without turning DirectoryService into a hot loop
+            // #267: each refresh is a full-machine scan on the daemon (allProcesses + lsof fork + per-backend
+            // transcript walks), so keep the cadence well clear of a hot loop, and skip it entirely while the
+            // open chat is streaming — the live turn's own SessionLive is the authoritative state then, and a
+            // machine scan per turn is exactly the self-inflicted amplification this repo has been bitten by.
+            if (!repo.streaming.value) repo.refreshDirectoriesSilently()
+            delay(12_000)
         }
     }
     // Android system back walks the in-app stack (chat → sessions → directories) instead of leaving
