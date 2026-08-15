@@ -167,6 +167,28 @@ class SessionRegistryReapTest {
         }
     }
 
+    @Test
+    fun plan_mode_turn_end_publishes_settled_while_the_reaper_still_spares_it() {
+        if (isWindows()) return
+        // Issue #269: the two questions above and below must be answered by DIFFERENT predicates. The
+        // reaper asks "may I reclaim this?" and is held off by the 5-minute continuation grace (test
+        // above). The client asks "is it running?" — and answering that with the same grace kept a
+        // plan-mode session lit as Active for five minutes after its answer had landed, delaying #239's
+        // "new result while you were away" marker by the same window. Both halves are pinned in ONE
+        // test on ONE state so neither can be "fixed" by regressing the other.
+        val script = Files.createTempDirectory("ccp-reap-fx").resolve("stream.jsonl")
+            .apply { writeText(listOf(init, toolUse, result).joinToString("\n") + "\n") }
+        harness(ScriptedBackend(script, thenExit = false), until = { fs -> fs.any { it is TurnDone } }, mode = PermissionMode.PLAN) { registry, convoId ->
+            delay(600) // well inside the 5-min grace: the old publish path still read "running" here
+
+            val row = registry.liveByCwd().values.flatten().single()
+            assertFalse(row.executing, "the landed plan result must publish as settled, not ride the reaper grace")
+            assertFalse(row.busy, "no background shell is running either")
+            assertEquals(0, registry.reapIdle(idleMs = 200), "…and the grace must STILL shield it from the reaper")
+            assertTrue(registry.sendPrompt(SendPrompt(convoId = convoId, text = "still there?")), "conversation must still be alive")
+        }
+    }
+
     // ---- per-session occupancy (issue #216): the reaper no longer gates on global presence — an idle
     // session is spared only while a REACHABLE client view is attached, App online or not ----
 

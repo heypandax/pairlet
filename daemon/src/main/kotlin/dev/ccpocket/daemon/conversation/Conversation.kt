@@ -917,11 +917,33 @@ class Conversation(
     /** The agent emitted a nominal result but is still allowed to continue without another user prompt. */
     fun expectsContinuation(): Boolean = continuationExpected()
 
-    /** One atomic producer view for project-list work state. This is deliberately broader than
-     *  [isExecuting]: continuation grace is unfinished work, but SessionLive still reports the real turn. */
+    /** One atomic producer view of everything that must OUTLIVE its owner leaving — the reaper/close
+     *  side. Deliberately broader than [isExecuting]: continuation grace is unfinished work as far as
+     *  reclaiming the conversation goes. NOT a client-facing signal — see [hasVisibleTurnWork]. */
     fun hasAuthoritativeTurnWork(): Boolean {
         val state = turnWork
         return state.executing || state.backgroundWork || state.pendingPromptWork || continuationExpected(state)
+    }
+
+    /** The CLIENT-VISIBLE turn state (project list / session row "running"). The SAME atomic snapshot as
+     *  [hasAuthoritativeTurnWork] minus the continuation grace, because those two questions are different:
+     *  the grace answers "may I reclaim this?" and is therefore sized for the WORST case a continuation
+     *  could still show up in ([CONTINUATION_GRACE_MS] = 5 min of API retry backoff — over-holding costs
+     *  nothing there). Publishing it as "running" cost plenty: a plan-mode row stayed pinned on Active for
+     *  five minutes after its answer had already landed, and #239's "new result while you were away"
+     *  marker was delayed by the same window (issue #269).
+     *
+     *  Dropping the grace here is safe in the direction that matters. A real continuation re-arms
+     *  `executing` from its own init (probed 2.1.206: 0.1s after the premature result), and clients only
+     *  ever SAMPLE this bit (the directory list is pull-only — 5s on mobile, 15s on desktop), so that
+     *  0.1s window is caught by ~1 poll in 50 and self-corrects on the next one. The old behaviour had no
+     *  such escape: the row read running with nothing running for a full five minutes, and if the reaper
+     *  took the session when the grace lapsed the row VANISHED — so #239's marker, which needs to observe
+     *  a working→settled transition on a row still in the list, never fired for plan mode at all.
+     *  The reaper keeps using [hasAuthoritativeTurnWork]/[isBusy]; only the published bit narrows. */
+    fun hasVisibleTurnWork(): Boolean {
+        val state = turnWork
+        return state.executing || state.backgroundWork || state.pendingPromptWork
     }
 
     /** True while the conversation is doing or awaiting anything that must outlive its owner leaving: a

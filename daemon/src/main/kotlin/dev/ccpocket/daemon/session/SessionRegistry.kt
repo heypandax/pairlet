@@ -693,11 +693,12 @@ class SessionRegistry(
         mutex.withLock {
             convos.values.mapNotNull { c ->
                 val sid = c.sessionId ?: return@mapNotNull null
-                // A plan-mode result and a completed background task can both be followed by an
-                // unprompted turn after a stdout-silent grace. That interval is unfinished work, not an
-                // authoritative SETTLED snapshot; keep it WORKING until continuation starts or the bounded
-                // grace expires. See Conversation.expectsContinuation().
-                val executing = c.hasAuthoritativeTurnWork()
+                // PUBLISHED work state, not the reaper's. A plan-mode result and a completed background
+                // task both arm a 5-minute continuation grace so the reaper can't reclaim a conversation
+                // whose unprompted follow-up turn is still coming — but that shield is not evidence the
+                // agent is running, and publishing it kept settled rows lit as Active for five minutes
+                // (issue #269). The continuation re-arms `executing` from its own init when it starts.
+                val executing = c.hasVisibleTurnWork()
                 c.workdir.toString() to dev.ccpocket.protocol.ActiveSession(
                     sid, executing = executing, busy = c.hasBackgroundWork(), agent = c.kind,
                     origin = c.origin, executingAuthoritative = true,

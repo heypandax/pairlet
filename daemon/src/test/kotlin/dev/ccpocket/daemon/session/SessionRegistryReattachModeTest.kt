@@ -145,8 +145,13 @@ class SessionRegistryReattachModeTest {
     }
 
     @Test
-    fun continuationGraceRemainsAuthoritativelyWorkingUntilItExpiresOrContinues() {
+    fun continuationGraceKeepsTheSessionAliveWithoutPublishingItAsRunning() {
         if (isWindows()) return
+        // Issue #269: the 5-minute continuation grace is a REAPER shield (sized for the worst case an
+        // unprompted follow-up could still arrive in), not evidence the agent is running. Publishing it
+        // as `executing` pinned a plan-mode row on Active for five minutes after its answer had landed.
+        // The published bit must settle with the result; the conversation must still survive — both
+        // asserted here so neither half can be "fixed" by breaking the other.
         val script = Files.createTempDirectory("ccp-authority-grace-fx").resolve("stream.jsonl")
             .apply { writeText(listOf(init, result).joinToString("\n") + "\n") }
         withRegistry(ScriptedBackend(script)) { registry, dir, frames ->
@@ -159,9 +164,13 @@ class SessionRegistryReattachModeTest {
             awaitFrame(frames) { it is TurnDone }
 
             val row = registry.liveByCwd().getValue(dir.toString()).single()
-            assertTrue(row.executing, "the stdout-silent continuation grace is still unfinished work")
+            assertFalse(row.executing, "a landed plan result must publish as settled, not ride the reaper grace")
             assertTrue(row.executingAuthoritative, "the daemon owns this work-state observation")
             assertFalse(row.busy, "continuation grace is not a running background shell")
+            assertTrue(
+                registry.sendPrompt(SendPrompt(convoId = convoId, text = "still there?")),
+                "the grace must still hold the conversation open for the unprompted continuation",
+            )
         }
     }
 
