@@ -147,6 +147,7 @@ Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via
 - Public user manual (shareable with AI assistants) — <https://pocket.ark-nexus.cc/manual/en/>
 - Full feature list — <https://heypandax.github.io/cc-pocket/features.html>
 - User guide (中文使用文档) — [`docs/USAGE.md`](docs/USAGE.md)
+- Feishu bot direct-chat menu setup (飞书机器人单聊底部菜单) — [`docs/FEISHU-BOT-MENU.md`](docs/FEISHU-BOT-MENU.md)
 - Runtime-context handoff guide (运行时上下文协作接力) — [`docs/COLLABORATION-HANDOFF.md`](docs/COLLABORATION-HANDOFF.md)
 - Task-context review (ReviewRequest, preview) — [`docs/design/REVIEW-REQUEST.md`](docs/design/REVIEW-REQUEST.md); the Claude Code skill ships at [`packaging/skills/review-request/SKILL.md`](packaging/skills/review-request/SKILL.md) — copy it to `~/.claude/skills/review-request/` to use it
 - Run / operate the daemon — [`docs/RUN.md`](docs/RUN.md)
