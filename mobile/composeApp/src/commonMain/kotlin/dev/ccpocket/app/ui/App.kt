@@ -32,12 +32,18 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -103,6 +109,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.unit.TextUnit
 import kotlinx.coroutines.flow.first
 import dev.ccpocket.app.media.rememberFileAttacher
 import dev.ccpocket.app.media.rememberImageAttacher
@@ -615,10 +623,27 @@ private fun ConnectionGate(
             // mid-chat: keep the history readable under a slim banner instead of a takeover
             if (repo.convoId.value != null) { StatusBanner(Tok.warn, stringResource(Res.string.conn_computer_offline_banner)); content() }
             else RecoverySurface(repo, recovery)
-        ConnPhase.Connecting ->
-            if (repo.directoriesLoaded.value || repo.convoId.value != null) content()
-            else DirectorySkeleton(repo, onOpenComputers, onOpenReviews)
-        ConnPhase.Reconnecting, ConnPhase.Ready -> content()
+        // Connecting/Reconnecting/Ready share ONE call site (issue #261): the moment the list arrives, the
+        // phase flips to Ready in the same event, so a skeleton composed inside the Connecting branch alone
+        // would be torn out before it could fade. Here the same node survives the flip and the skeleton
+        // fades out over the list that has already landed underneath it — a change of clothes, in place.
+        ConnPhase.Connecting, ConnPhase.Reconnecting, ConnPhase.Ready -> {
+            val waiting = repo.phase.value == ConnPhase.Connecting &&
+                !repo.directoriesLoaded.value && repo.convoId.value == null
+            val landing = remember { ProjectsLandingGate() }
+            // what the list replaces is a skeleton only if one was actually shown
+            LaunchedEffect(waiting) { if (waiting) landing.arm() }
+            CompositionLocalProvider(LocalProjectsLanding provides landing) {
+                Box(Modifier.fillMaxSize()) {
+                    if (!waiting) content()
+                    AnimatedVisibility(
+                        visible = waiting,
+                        enter = EnterTransition.None, // it is the FIRST thing on screen; it does not arrive
+                        exit = fadeOut(tween(LoadingMotion.SKELETON_FADE_MS)),
+                    ) { DirectorySkeleton(repo, onOpenComputers, onOpenReviews) }
+                }
+            }
+        }
     }
 }
 
@@ -678,6 +703,11 @@ private fun ProjectsHeader(
     onQueryChange: (String) -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onCloseSearch: () -> Unit = {},
+    // ── the wait, told once (issue #261) ──
+    // While the directory list is still on its way, this line IS the whole wait narrative: it names the
+    // computer being read rather than reporting the transport ("connecting…"), and nothing under the rows
+    // repeats it. It also withholds Review — a queue whose count this machine has not reported yet.
+    waitingForProjects: Boolean = false,
     body: @Composable ColumnScope.() -> Unit,
 ) {
     val recovery = connRecovery(phase)
@@ -689,6 +719,12 @@ private fun ProjectsHeader(
             else -> Res.string.ses_conn_offline
         },
     )
+    val machineName = machine?.takeIf { it.isNotBlank() }
+    val stateLine = when {
+        !waitingForProjects -> machineName?.let { stringResource(Res.string.proj_machine_line, it, state) } ?: state
+        machineName != null -> stringResource(Res.string.proj_loading_on_machine, machineName)
+        else -> stringResource(Res.string.proj_loading_projects)
+    }
     var menuOpen by remember { mutableStateOf(false) }
     var titleRowPx by remember { mutableStateOf(0) }
     Box(Modifier.fillMaxSize()) {
@@ -752,20 +788,26 @@ private fun ProjectsHeader(
                         Row(verticalAlignment = Alignment.Top) {
                             // the mark rides the FIRST line of the sentence: centred against a wrapped
                             // block it drifts into the gutter between lines and stops reading as its mark
+                            // …and while the list is still coming it breathes on the skeleton's own cycle,
+                            // so the one thing the header says about waiting is visibly alive
+                            val markAlpha = if (waitingForProjects) breathingAlpha(0) else 1f
                             Box(
-                                Modifier.height(with(LocalDensity.current) { TypeRole.preview.lineHeight.toDp() }),
+                                Modifier.height(with(LocalDensity.current) { TypeRole.preview.lineHeight.toDp() })
+                                    .graphicsLayer { alpha = markAlpha },
                                 contentAlignment = Alignment.Center,
                             ) { StateMarkGlyph(recovery.mark, stateColor(recovery.tone)) }
                             Spacer(Modifier.width(Metric.gapS))
                             Text(
-                                machine?.takeIf { it.isNotBlank() }
-                                    ?.let { stringResource(Res.string.proj_machine_line, it, state) } ?: state,
+                                stateLine,
                                 color = Tok.tx2, style = TypeRole.preview,
                                 maxLines = 3, overflow = TextOverflow.Ellipsis,
                             )
                         }
                     },
-                ) { ReviewAction(reviewCount, onReviews) }
+                    // Review stays off the screen until the list lands: offering a queue doorway for a
+                    // machine that has reported nothing is the second wait narrative this screen removed
+                    // (an empty 0×0 box, not nothing at all: ReflowRow measures exactly two children)
+                ) { if (waitingForProjects) Box(Modifier) else ReviewAction(reviewCount, onReviews) }
             }
             body()
         }
@@ -991,10 +1033,79 @@ private fun NewTaskFab(onClick: () -> Unit) {
 // is still the action that ends the state. What the row cost was a permanent band of chrome above the list
 // for a doorway that belongs INSIDE the moment you are choosing a project.
 
-/** Connect/switch placeholder: the REAL Projects header over shimmering rows — so landing on a machine
- *  only swaps skeleton→list, instead of flashing a differently-shaped screen first. It claims nothing:
- *  the sentence below the bars says exactly what is still missing. The header's controls are REAL here
- *  too — waiting for a directory list is no reason to lose the way back to the computers or to Help. */
+/**
+ * The wait, and the landing (issue #261) — transcribed from the design's board H
+ * (`docs/design/claude-design-handoff/fast-start-260/FastStartDevice.dc.html`).
+ *
+ * Two decisions are worth keeping stated, because both are easy to "improve" back into what they replaced:
+ *  · the skeleton BREATHES (alpha), it does not sweep. A shimmer sweep on a mono/rectangle skeleton reads
+ *    as a second material laid over the surface; a breath is the SAME fill the loaded list already uses.
+ *  · rows are staggered by [STAGGER_MS]. In phase they read as a broken screen; out of phase they read as
+ *    a list arriving.
+ */
+private object LoadingMotion {
+    /** Five, matching the design board — and the count the landing reveal staggers before it stops. */
+    const val ROWS = 5
+    const val STAGGER_MS = 90
+    /** `fsbreathe 1.4s ease-in-out infinite`, i.e. half a cycle per leg with [RepeatMode.Reverse]. */
+    const val BREATHE_HALF_MS = 700
+    const val BREATHE_MIN = 0.34f
+    const val BREATHE_MAX = 0.72f
+    /** `fsland 220ms cubic-bezier(.2,0,0,1)` — opacity 0→1 with a 3 dp lift. */
+    const val LAND_MS = 220
+    /** The skeleton's own exit, over the list that has already landed underneath it. */
+    const val SKELETON_FADE_MS = 180
+    val LIFT = 3.dp
+    /** CSS `ease-in-out`. */
+    val breathe = CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
+    val land = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+}
+
+/**
+ * "The system is set to reduce motion."
+ *
+ * Compose Multiplatform exposes no common accessibility signal for this (there is no `LocalAccessibility`
+ * carrying it, and the platform APIs behind it — `UIAccessibility.isReduceMotionEnabled`,
+ * `Settings.Global.ANIMATOR_DURATION_SCALE` — are not surfaced to common code by the framework). Rather than
+ * guess per platform inside this screen, the switch is a composition local with a conservative default:
+ * provide `true` at the app root once a platform probe exists (an `expect fun systemReducesMotion()`), and
+ * everything below degrades in one place. `true` ⇒ no breathing, no stagger, no lift: an instant swap.
+ */
+internal val LocalReduceMotion = staticCompositionLocalOf { false }
+
+/**
+ * The one-shot gate for the landing reveal: the project list animates in the FIRST time it reaches the
+ * screen and never again, so a pull-to-refresh — or coming back to Projects from a session — does not
+ * replay an entrance for a list that was already there.
+ *
+ * Held by [ConnectionGate] (which outlives the skeleton→list swap) and read through [LocalProjectsLanding].
+ */
+internal class ProjectsLandingGate {
+    private var armed = false
+    private var spent = false
+
+    /** A skeleton is on screen: what replaces it is a LANDING. Until this is said, the list is simply
+     *  there (a cached list on open, a screenshot, the desktop shell) and an entrance would be a flicker
+     *  on a screen nobody was waiting on. */
+    fun arm() { armed = true }
+
+    /** True at most once per gate — and never when motion is reduced (the claim is still spent, so the
+     *  answer does not flip to `true` later just because the setting changed mid-flight). */
+    fun claimFirstLanding(reduceMotion: Boolean = false): Boolean {
+        val play = armed && !spent && !reduceMotion
+        spent = true
+        return play
+    }
+}
+
+internal val LocalProjectsLanding = staticCompositionLocalOf { ProjectsLandingGate() }
+
+/** Connect/switch placeholder: the REAL Projects header over breathing rows shaped like project rows — so
+ *  landing on a machine only swaps skeleton→list, instead of flashing a differently-shaped screen first.
+ *  It claims nothing, and it says so ONCE: the header's own state line ("Reading projects on <computer>…")
+ *  is the whole wait narrative, which is why nothing is written under the rows and why Review — a count
+ *  this machine has not reported yet — is not offered until the list lands. The header's other controls are
+ *  REAL here: waiting for a directory list is no reason to lose the way back to the computers or to Help. */
 @Composable
 internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header against the Ready list's
     repo: PocketRepository,
@@ -1005,15 +1116,11 @@ internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header aga
     if (showHelp) { HelpCenterScreen(HelpEntryPoint.PROJECTS, onBack = { showHelp = false }); return }
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return }
-    val shimmer by rememberInfiniteTransition().animateFloat(
-        initialValue = 0.25f, targetValue = 0.6f,
-        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
-    )
     ProjectsHeader(
         title = stringResource(Res.string.dir_projects),
         phase = repo.phase.value,
         machine = repo.paired.value?.displayName(),
-        // this machine has told us NOTHING yet: the labels without counts, rather than a stale number
+        // this machine has told us NOTHING yet: no count, and (below) no doorway promising one
         reviewCount = 0,
         fleetWaiting = 0,
         updateAvailable = repo.versionStatus.value.anyBehind, // a local fact — true with or without a link
@@ -1024,17 +1131,127 @@ internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header aga
         // the search control keeps its BOX here so skeleton → list never shifts the header (EntryFlowUiTest
         // pins exactly that), but it is inert: there is no list yet for a filter to act on
         searchEnabled = false,
+        waitingForProjects = true,
     ) {
-        Column(Modifier.fillMaxSize().padding(Metric.gutter), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(4) {
-                Box(Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(10.dp)).graphicsLayer { alpha = shimmer }.background(Tok.surface))
-            }
-            Text(
-                stringResource(Res.string.conn_connecting_wait), color = Tok.tx2, style = TypeRole.caption,
-                modifier = Modifier.padding(top = Metric.gapS),
-            )
+        // the list's own geometry: same gutter, same 6 dp between rows — the swap moves nothing
+        Column(
+            Modifier.testTag("dir-skeleton").fillMaxSize().padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SkeletonSectionLabel()
+            repeat(LoadingMotion.ROWS) { i -> SkeletonProjectRow(i) }
         }
     }
+}
+
+/** The breath, phase-shifted by [LoadingMotion.STAGGER_MS] per row. Flat (no animation at all, at the
+ *  midpoint of the range) when motion is reduced — a still skeleton is a skeleton, not a broken one. */
+@Composable
+private fun breathingAlpha(index: Int): Float {
+    if (LocalReduceMotion.current) return (LoadingMotion.BREATHE_MIN + LoadingMotion.BREATHE_MAX) / 2f
+    val alpha by rememberInfiniteTransition(label = "skeletonBreathe").animateFloat(
+        initialValue = LoadingMotion.BREATHE_MIN,
+        targetValue = LoadingMotion.BREATHE_MAX,
+        animationSpec = infiniteRepeatable(
+            animation = tween(LoadingMotion.BREATHE_HALF_MS, easing = LoadingMotion.breathe),
+            repeatMode = RepeatMode.Reverse,
+            initialStartOffset = StartOffset(index * LoadingMotion.STAGGER_MS),
+        ),
+        label = "skeletonBreatheRow$index",
+    )
+    return alpha
+}
+
+/** The placeholder for the first section label the list will print (it always prints one — the view
+ *  toggle rides it), so the rows below start where the real rows start. */
+@Composable
+private fun SkeletonSectionLabel() {
+    val alpha = breathingAlpha(0)
+    Box(
+        Modifier.testTag("skeleton-label").heightIn(min = 44.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(Modifier.height(9.dp).width(62.dp).clip(RoundedCornerShape(3.dp)).graphicsLayer { this.alpha = alpha }.background(Tok.hair))
+    }
+}
+
+/**
+ * One skeleton row: the anatomy of a real project row ([DirCell]) with its content withheld — the name
+ * line, the mono path line under it, and the trailing affordance box the ＋ occupies. Same fill, same
+ * radius, same paddings, so the row that replaces it needs no space it did not already have.
+ *
+ * Each bar rides an INVISIBLE line of the type it stands in for, rather than a hand-picked dp height: the
+ * row then measures exactly what [DirCell] measures, by construction, at any font scale.
+ */
+@Composable
+private fun SkeletonProjectRow(index: Int) {
+    val alpha = breathingAlpha(index)
+    Row(
+        Modifier.testTag("skeleton-row").fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            .graphicsLayer { this.alpha = alpha }
+            .background(Tok.surface)
+            // DirCell's paddings, with its ＋-bearing end inset — every project row carries one
+            .padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            // widths vary per row: five identical bars read as a table, not as projects
+            SkeletonBar(
+                barHeight = 15.dp, radius = 4.dp, fraction = SKELETON_TITLE_W[index % SKELETON_TITLE_W.size],
+                color = Tok.hair, lineSize = 14.sp, mono = false, // DirCell's name line
+            )
+            SkeletonBar(
+                barHeight = 11.dp, radius = 3.dp, fraction = SKELETON_PATH_W[index % SKELETON_PATH_W.size],
+                color = Tok.raised, lineSize = 11.sp, mono = true, // …and its mono path line
+            )
+        }
+        // where the ＋ lands: the same 32 dp box the real glyph holds open
+        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.height(11.dp).width(6.dp).clip(RoundedCornerShape(2.dp)).background(Tok.raised))
+        }
+    }
+}
+
+/** A bar on the baseline of the (blank) line of type it replaces. */
+@Composable
+private fun SkeletonBar(barHeight: Dp, radius: Dp, fraction: Float, color: Color, lineSize: TextUnit, mono: Boolean) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+        Text(
+            " ", color = Color.Transparent, fontSize = lineSize, maxLines = 1,
+            fontFamily = if (mono) FontFamily.Monospace else null,
+            fontWeight = if (mono) null else FontWeight.Medium,
+        )
+        Box(Modifier.height(barHeight).fillMaxWidth(fraction).clip(RoundedCornerShape(radius)).background(color))
+    }
+}
+
+private val SKELETON_TITLE_W = listOf(0.54f, 0.43f, 0.61f, 0.38f, 0.50f)
+private val SKELETON_PATH_W = listOf(0.76f, 0.64f, 0.82f, 0.58f, 0.71f)
+
+/**
+ * The landing (issue #261): the real row fades in over 220 ms with a 3 dp lift, on the SAME 90 ms stagger
+ * the skeleton was breathing on, while the skeleton fades out above it — an in-place change of clothes, not
+ * a screen transition. Rows past the skeleton's five, and every later composition (scrolling, refresh), get
+ * the row unwrapped: an entrance animation on a row that scrolls into view months later is a glitch.
+ */
+@Composable
+private fun LandingReveal(index: Int, play: Boolean, content: @Composable () -> Unit) {
+    if (!play || index >= LoadingMotion.ROWS) { content(); return }
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        progress.animateTo(
+            1f,
+            tween(LoadingMotion.LAND_MS, delayMillis = index * LoadingMotion.STAGGER_MS, easing = LoadingMotion.land),
+        )
+    }
+    val lift = with(LocalDensity.current) { LoadingMotion.LIFT.toPx() }
+    // a draw-time transform only: the row occupies its final space from the first frame, so nothing reflows
+    Box(
+        Modifier.graphicsLayer {
+            alpha = progress.value
+            translationY = lift * (1f - progress.value)
+        },
+    ) { content() }
 }
 
 /**
@@ -1150,6 +1367,12 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     shareTarget?.let { ShareFolderScreen(repo, it, onBack = { shareTarget = null }); return }
     // Pull-to-refresh remains available here; the app-level foreground poll keeps the same directory
     // truth fresh while Projects, Sessions, Chat, Settings, or an overlay is mounted (#239).
+
+    // The landing reveal, claimed ONCE (issue #261): the first list to reach the screen animates in behind
+    // the fading skeleton; every later visit — and every refresh of this one — gets the rows unwrapped.
+    val reduceMotion = LocalReduceMotion.current
+    val landingGate = LocalProjectsLanding.current
+    val landing = remember { landingGate.claimFirstLanding(reduceMotion) }
 
     val tree = repo.treeView.value
     val dirsSnapshot = repo.directories.toList()
@@ -1278,47 +1501,70 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                     // whichever row scrolled into view first.
                     var toggleFree = true
                     fun claimToggle(): Boolean = toggleFree.also { toggleFree = false }
+                    // the landing reveal's running order (issue #261) — claimed at list-BUILD time for the
+                    // same reason the toggle is: an index taken inside an item body would follow scrolling,
+                    // not the list, and the cascade would replay from wherever the eye happens to be
+                    var revealSeq = 0
+                    fun reveal(n: Int = 1): Int = revealSeq.also { revealSeq += n }
                     if (base == root) { // PINNED + ACTIVE pinned on top at root
                         if (pinned.isNotEmpty()) {
                             val withToggle = claimToggle()
-                            item { SectionLabel(pinnedLabel, withToggle, tree) { repo.setTreeView(!tree) } }
-                            items(pinned, key = { "p:" + it.path }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) }
+                            val at = reveal()
+                            item { LandingReveal(at, landing) { SectionLabel(pinnedLabel, withToggle, tree) { repo.setTreeView(!tree) } } }
+                            val base0 = reveal(pinned.size)
+                            itemsIndexed(pinned, key = { _, e -> "p:" + e.path }) { i, e -> LandingReveal(base0 + i, landing) { ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) } }
                         }
                         if (live.isNotEmpty()) {
                             val withToggle = claimToggle()
-                            item { SectionLabel(activeLabel, withToggle, tree) { repo.setTreeView(!tree) } }
+                            val at = reveal()
+                            item { LandingReveal(at, landing) { SectionLabel(activeLabel, withToggle, tree) { repo.setTreeView(!tree) } } }
                             // key carries the session too — expansion can put the same project here several times
-                            items(live, key = { "a:" + it.path + ":" + (it.activeSessionId ?: "") }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) }
+                            val base0 = reveal(live.size)
+                            itemsIndexed(live, key = { _, e -> "a:" + e.path + ":" + (e.activeSessionId ?: "") }) { i, e -> LandingReveal(base0 + i, landing) { ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) } }
                         }
-                        if (pinned.isNotEmpty() || live.isNotEmpty()) item { Label(projectsLabel) }
+                        if (pinned.isNotEmpty() || live.isNotEmpty()) {
+                            val at = reveal()
+                            item { LandingReveal(at, landing) { Label(projectsLabel) } }
+                        }
                     }
                     // drilled into a folder that is itself a project → its own sessions lead as "current project"
                     if (currentLeaf != null) {
                         val withToggle = claimToggle()
-                        item { SectionLabel(currentProjectLabel, withToggle, tree) { repo.setTreeView(!tree) } }
+                        val atLabel = reveal()
+                        item { LandingReveal(atLabel, landing) { SectionLabel(currentProjectLabel, withToggle, tree) { repo.setTreeView(!tree) } } }
+                        val atLeaf = reveal()
                         item(key = "cur:" + currentLeaf.entry.path) {
                             val e = currentLeaf.entry
-                            LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) { repo.openProject(e) }
+                            LandingReveal(atLeaf, landing) {
+                                LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) { repo.openProject(e) }
+                            }
                         }
-                        item { Label(projectsLabel) }
+                        val atTail = reveal()
+                        item { LandingReveal(atTail, landing) { Label(projectsLabel) } }
                     }
                     // a root with neither pins nor live sessions prints no label at all — the toggle still
                     // needs a home, or the only way back to the flat list would be to pin something first
-                    if (claimToggle()) item { SectionLabel(null, true, tree) { repo.setTreeView(!tree) } }
-                    items(childRows, key = { r -> when (r) { is TreeRow.Folder -> "f:" + r.path; is TreeRow.Leaf -> "l:" + r.entry.path } }) { r ->
-                        when (r) {
-                            is TreeRow.Folder -> {
-                                val proj = r.project
-                                FolderRow(
-                                    name = r.name,
-                                    project = proj,
-                                    pinned = proj != null && repo.isPinned(proj.path),
-                                    onLongPress = proj?.let { e -> { actionTarget = e } },
-                                ) { repo.browsePath.value = r.path }
-                            }
-                            is TreeRow.Leaf -> {
-                                val e = r.entry
-                                LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) { repo.openProject(e) }
+                    if (claimToggle()) {
+                        val at = reveal()
+                        item { LandingReveal(at, landing) { SectionLabel(null, true, tree) { repo.setTreeView(!tree) } } }
+                    }
+                    val childBase = reveal(childRows.size)
+                    itemsIndexed(childRows, key = { _, r -> when (r) { is TreeRow.Folder -> "f:" + r.path; is TreeRow.Leaf -> "l:" + r.entry.path } }) { i, r ->
+                        LandingReveal(childBase + i, landing) {
+                            when (r) {
+                                is TreeRow.Folder -> {
+                                    val proj = r.project
+                                    FolderRow(
+                                        name = r.name,
+                                        project = proj,
+                                        pinned = proj != null && repo.isPinned(proj.path),
+                                        onLongPress = proj?.let { e -> { actionTarget = e } },
+                                    ) { repo.browsePath.value = r.path }
+                                }
+                                is TreeRow.Leaf -> {
+                                    val e = r.entry
+                                    LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) { repo.openProject(e) }
+                                }
                             }
                         }
                     }
@@ -1332,15 +1578,19 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                     // same rule as the tree list: the toggle rides the first header, and gets a bare row of
                     // its own when the flat list leads straight into project rows (no pins, no live sessions)
                     val leadingHeader = flatRows.firstOrNull() is DirRow.Header
-                    if (!leadingHeader) item { SectionLabel(null, true, tree) { repo.setTreeView(!tree) } }
+                    // the bare toggle row, when it exists, is row 0 of the landing cascade
+                    val flatBase = if (leadingHeader) 0 else 1
+                    if (!leadingHeader) item { LandingReveal(0, landing) { SectionLabel(null, true, tree) { repo.setTreeView(!tree) } } }
                     itemsIndexed(flatRows) { i, row ->
-                        when (row) {
-                            is DirRow.Header -> SectionLabel(row.label, leadingHeader && i == 0, tree) { repo.setTreeView(!tree) }
-                            is DirRow.Dir -> ProjectCell(
-                                repo, row.entry, showPath = row.showPath, direct = row.direct,
-                                onLongPress = { actionTarget = row.entry },
-                                onNewSession = { newPathTarget = row.entry.path },
-                            )
+                        LandingReveal(flatBase + i, landing) {
+                            when (row) {
+                                is DirRow.Header -> SectionLabel(row.label, leadingHeader && i == 0, tree) { repo.setTreeView(!tree) }
+                                is DirRow.Dir -> ProjectCell(
+                                    repo, row.entry, showPath = row.showPath, direct = row.direct,
+                                    onLongPress = { actionTarget = row.entry },
+                                    onNewSession = { newPathTarget = row.entry.path },
+                                )
+                            }
                         }
                     }
                 }

@@ -1659,10 +1659,11 @@
     <string name="conn_offline_body">中转回应了，但那台电脑上的 daemon 没在跑。去启动 cc-pocket，或者把电脑唤醒后重试。</string>
     <string name="conn_invalid_title">配对已失效</string>
     <string name="conn_invalid_body">这台电脑拒绝了已保存的凭据，重试也没有用。</string>
-    <string name="conn_connecting_wait">正在等目录列表。列表没到之前，不会声称已就绪。</string>
 
     <!-- ── 项目 ─────────────────────────────────────────────────────────── -->
     <string name="proj_machine_line">%1$s · %2$s</string>
+    <string name="proj_loading_on_machine">正在读取 %1$s 上的项目…</string>
+    <string name="proj_loading_projects">正在读取项目…</string>
     <string name="proj_state_reconnecting">重连中</string>
     <string name="proj_open_computers">电脑</string>
     <string name="proj_more">更多选项</string>
