@@ -1,6 +1,10 @@
 package dev.ccpocket.daemon.feishu
 
 import com.lark.oapi.event.EventDispatcher
+import com.lark.oapi.event.cardcallback.P2CardActionTriggerHandler
+import com.lark.oapi.event.cardcallback.model.CallBackToast
+import com.lark.oapi.event.cardcallback.model.P2CardActionTrigger
+import com.lark.oapi.event.cardcallback.model.P2CardActionTriggerResponse
 import com.lark.oapi.service.im.ImService
 import com.lark.oapi.service.im.v1.model.P2MessageReceiveV1
 import dev.ccpocket.daemon.DaemonCore
@@ -210,6 +214,16 @@ class FeishuEngine(
     private val seenMessages = object : LinkedHashMap<String, Boolean>(64, 0.75f, false) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean = size > SEEN_MESSAGES_MAX
     }
+    // Where each /menu card this engine posted lives (card message id -> chat + topic), #247. A
+    // card.action.trigger callback names ONLY the card message, so this is how a click is resolved back to a
+    // chat we actually serve — and why an unknown card fails closed instead of the callback picking a chat
+    // for us. In memory and bounded: after a restart an old card's buttons answer "重新发送 /menu", which is
+    // honest, cheap, and keeps a long-lived chat history from being a pile of live remote controls.
+    // Guarded by its own monitor — written and read on the lark SDK's dispatcher threads, like seenMessages.
+    private val cardOrigins = object : LinkedHashMap<String, FeishuCardCallback.Origin>(32, 0.75f, false) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, FeishuCardCallback.Origin>?): Boolean =
+            size > CARD_ORIGINS_MAX
+    }
     // Feishu GROUP OWNER per chat (open_id), lazily fetched — the fallback /bind authority when no admin
     // open_id is configured, so a group's own owner can bind with no env and no restart. ConcurrentHashMap:
     // written from scope coroutines, read on the lark dispatcher thread.
@@ -256,6 +270,11 @@ class FeishuEngine(
                 })
                 .onP2MessageReactionDeletedV1(object : ImService.P2MessageReactionDeletedV1Handler() {
                     override fun handle(event: com.lark.oapi.service.im.v1.model.P2MessageReactionDeletedV1) {}
+                })
+                // /menu button presses (#247). The SDK carries this handler's RETURN VALUE back over the
+                // same long connection as the callback's response frame, so every path must return one.
+                .onP2CardActionTrigger(object : P2CardActionTriggerHandler() {
+                    override fun handle(event: P2CardActionTrigger): P2CardActionTriggerResponse = onCardAction(event)
                 })
                 .build()
             // start() is non-blocking; the SDK reconnects on its own. Building a fresh client per start is
@@ -497,6 +516,150 @@ class FeishuEngine(
         // command dispatch into the engine scope; commands.handle performs /bind, /unbind and single-project
         // auto-bind synchronously, so evaluating it under this mutex covers every route mutation too.
         scope.launch {
+            dispatchChatLine(
+                ChatLine(
+                    text = text,
+                    chatId = chatId,
+                    chatType = msg.chatType,
+                    isGroup = isGroup,
+                    sender = sender,
+                    ownerTurn = ownerTurn,
+                    convoKey = convoKey,
+                    replyTo = replyTo,
+                    // the topic a card posted here would belong to: a group's own topic root, nothing in a
+                    // direct chat (which has exactly one conversation)
+                    topicRoot = if (isGroup) rootId?.takeIf { it.isNotBlank() } ?: replyMessageId else null,
+                    parentId = parentId,
+                    rootId = rootId,
+                    quoteOnly = quoteOnly,
+                ),
+            )
+        }
+    }
+
+    /**
+     * A `/menu` button press (`card.action.trigger`, #247). The click becomes the EXACT command its label
+     * promises and is handed to [dispatchChatLine] — the same entry point a typed line takes, under the
+     * CLICKER's own open_id, through the same per-chat policy gate, the same /bind authority and the same
+     * trust rules. There is no card-only execution path: a button can never be wider authority than typing,
+     * only an equal one over the three commands in [FeishuCards.COMMANDS].
+     *
+     * Four independent things must line up before anything is dispatched: the engine is live, the value
+     * names an allow-listed command, the card is one WE posted into a chat we still remember (and the
+     * callback agrees about which chat that is — see [FeishuCardCallback.resolve]), and the event is new,
+     * since Feishu retries callbacks like it retries messages. Feishu expects a response frame either way,
+     * so every path returns a toast rather than dying under the user's finger.
+     */
+    private fun onCardAction(event: P2CardActionTrigger): P2CardActionTriggerResponse {
+        // the same authority boundary onMessage keeps: stop/revoke flips this before the link goes down
+        if (!running) return cardToast(FeishuCards.UNKNOWN_ACTION_TOAST)
+        val data = event.event ?: return cardToast(FeishuCards.UNKNOWN_ACTION_TOAST)
+        val line = FeishuCardCallback.resolve(
+            value = data.action?.value,
+            // the acting identity is Feishu's attested operator — never anything the card carries
+            operatorOpenId = data.operator?.openId,
+            cardMessageId = data.context?.openMessageId,
+            callbackChatId = data.context?.openChatId,
+            originOf = { id -> synchronized(cardOrigins) { cardOrigins[id] } },
+        ) ?: return cardToast(FeishuCards.UNKNOWN_ACTION_TOAST)
+        // callbacks are delivered at-least-once like messages; a retried click must not fire the command
+        // twice, while two deliberate presses (distinct event ids) still both count
+        val eventId = event.header?.eventId
+        if (eventId != null && !firstSeen(eventId)) return cardToast(cardAckToast(line.command))
+
+        val isGroup = FeishuThreading.isGroup(line.chatType)
+        // owner bypass is re-derived from the CLICKER exactly as onMessage derives it from the sender: a
+        // card the machine owner posted grants a colleague who presses it nothing they didn't already have
+        val ownerTurn = ownerBypassEnabled && !adminOpenId.isNullOrBlank() && line.sender == adminOpenId
+        // the same two context warm-ups a message gets, so a button is not a second-class line
+        if (isGroup && adminOpenId.isNullOrBlank() && !chatOwners.containsKey(line.chatId)) fetchChatOwner(line.chatId)
+        if (isGroup) fetchChatName(line.chatId)
+        logLine("[card] ${line.chatId}: ${line.command}")
+        scope.launch {
+            dispatchChatLine(
+                ChatLine(
+                    text = line.command,
+                    chatId = line.chatId,
+                    chatType = line.chatType,
+                    isGroup = isGroup,
+                    sender = line.sender,
+                    ownerTurn = ownerTurn,
+                    // the card's remembered topic keeps a press acting on the conversation the card was
+                    // posted into, not on a fresh topic rooted at the card itself
+                    convoKey = FeishuThreading.conversationKey(
+                        line.chatId, line.chatType, line.cardMessageId, line.topicRoot, ownerTurn,
+                    ),
+                    replyTo = FeishuReplyTarget(line.cardMessageId, inThread = isGroup),
+                    topicRoot = line.topicRoot,
+                ),
+            )
+        }
+        return cardToast(cardAckToast(line.command))
+    }
+
+    /** Post a `/menu` card and REMEMBER where it lives, so a later press resolves back to this exact chat
+     *  and topic. A card Feishu won't take degrades to its plain-text twin rather than to silence. */
+    private fun replyCard(line: ChatLine, card: ChatAction.Card) {
+        val posted = runCatching {
+            api?.replyCard(line.replyTo.messageId, card.json, inThread = line.replyTo.inThread)
+        }.onFailure { logLine("[chat] card reply failed: ${it.message}") }.getOrNull()
+        if (posted == null) {
+            reply(line.replyTo, card.fallbackText)
+            return
+        }
+        synchronized(cardOrigins) {
+            cardOrigins[posted] = FeishuCardCallback.Origin(line.chatId, line.chatType, line.topicRoot)
+        }
+    }
+
+    /** Feishu wants a response frame for every `card.action.trigger`; a toast is the least surprising one —
+     *  instant feedback under the finger, and no card mutation we would then have to keep in sync. */
+    private fun cardToast(text: String): P2CardActionTriggerResponse = P2CardActionTriggerResponse().apply {
+        toast = CallBackToast().apply {
+            type = "info"
+            content = text
+        }
+    }
+
+    private fun cardAckToast(command: String): String = "已收到：$command"
+
+    /**
+     * One inbound chat line, whatever produced it: a typed/@'d message ([onMessage]) or a `/menu` button
+     * press ([onCardAction]). Every command, every trust check and every turn goes through HERE — a card
+     * has no execution path of its own, so a button can only ever do what its clicker could type.
+     */
+    private data class ChatLine(
+        val text: String,
+        val chatId: String,
+        val chatType: String?,
+        val isGroup: Boolean,
+        /** the Feishu-attested acting user: a message's sender, or a button's OPERATOR. */
+        val sender: String,
+        val ownerTurn: Boolean,
+        val convoKey: String,
+        val replyTo: FeishuReplyTarget,
+        /** the group TOPIC this line belongs to (null in a direct chat) — carried so a card posted in
+         *  answer can be resolved back to the same topic when a button on it is pressed. */
+        val topicRoot: String?,
+        val parentId: String? = null,
+        val rootId: String? = null,
+        val quoteOnly: Boolean = false,
+    )
+
+    private suspend fun dispatchChatLine(line: ChatLine) {
+        val text = line.text
+        val chatId = line.chatId
+        val isGroup = line.isGroup
+        val sender = line.sender
+        val ownerTurn = line.ownerTurn
+        val convoKey = line.convoKey
+        val replyTo = line.replyTo
+        val parentId = line.parentId
+        val rootId = line.rootId
+        val quoteOnly = line.quoteOnly
+        // a labelled block so the two "quote unreadable → answer and stop" exits stay early returns without
+        // reindenting the dispatch they sit in (they used to return from onMessage's launch)
+        run {
             val dispatch = policyGate.withPolicy(chatId) {
                 val resolved = commands.handle(text, chatId, sender, isDirect = !isGroup)
                 if (resolved is ChatAction.SetTrust) applyTrustMutation(resolved, chatId, isDirect = !isGroup)
@@ -510,6 +673,7 @@ class FeishuEngine(
             when (val action = dispatch.action) {
             is ChatAction.Ignore -> {}
             is ChatAction.Reply -> reply(replyTo, action.text)
+            is ChatAction.Card -> replyCard(line, action)
             is ChatAction.Reset -> {
                 // drop the SENDER's conversation (owner and group have SEPARATE sessions per chat — see
                 // convoKey) under the same per-session lock a turn holds, so /new can't race a running turn
@@ -540,7 +704,7 @@ class FeishuEngine(
                 logLine("[chat] ${FeishuRoutes.projectName(action.workdir)} ← $chatId: ${text.take(80)}")
                 val slashPassThrough = text.startsWith("/")
                 val prompt = buildTurnPrompt(action.prompt, slashPassThrough, parentId, rootId, quoteOnly, sender, ownerTurn)
-                    ?: return@launch reply(replyTo, UNREADABLE_QUOTE_REPLY)
+                    ?: return@run reply(replyTo, UNREADABLE_QUOTE_REPLY)
                 // ONE conversation per group topic (or per direct chat), one turn at a time per conversation
                 // (see chatLocks) — a second message queues instead of clobbering the first's waiter.
                 // ask() posts its OWN reply (inline, or late via onFrame after an approval) so the result
@@ -561,7 +725,7 @@ class FeishuEngine(
                 // content, not on a bare placeholder line.
                 val slashPassThrough = text.startsWith("/")
                 val prompt = buildTurnPrompt(action.prompt, slashPassThrough, parentId, rootId, quoteOnly, sender, ownerTurn)
-                    ?: return@launch reply(replyTo, UNREADABLE_QUOTE_REPLY)
+                    ?: return@run reply(replyTo, UNREADABLE_QUOTE_REPLY)
                 if (isGroup) {
                     // a GROUP topic routes once and stays put: route + run under the topic's lock, so two
                     // racing first messages cannot route it twice (the loser sees the winner's sticky pick)
@@ -1242,6 +1406,7 @@ class FeishuEngine(
 
     private companion object {
         const val SEEN_MESSAGES_MAX = 512   // at-least-once dedup LRU capacity (see seenMessages)
+        const val CARD_ORIGINS_MAX = 256    // live /menu cards we can still resolve a press for (cardOrigins)
         const val NUDGE_MS = 25_000L        // no reply yet after this + an approval pending → nudge the group
         const val TURN_TIMEOUT_MS = 300_000L
         const val OPEN_TIMEOUT_MS = 30_000L

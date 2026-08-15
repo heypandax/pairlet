@@ -146,9 +146,26 @@ internal class FeishuApiClient(
         if (!response.success()) throw FeishuApiException("message.react_typing code=${response.code}")
     }
 
-    fun reply(messageId: String, contentJson: String, inThread: Boolean = false) = tracked("message.reply") {
+    fun reply(messageId: String, contentJson: String, inThread: Boolean = false) {
+        replyAs("text", "message.reply", messageId, contentJson, inThread)
+    }
+
+    /** Reply an INTERACTIVE card (the `/menu` panel, #247) and return the posted message's own id — the
+     *  anchor a later `card.action.trigger` callback is resolved against, since the callback names the CARD
+     *  message and nothing else about where it lives. Null when Feishu reports no id. */
+    fun replyCard(messageId: String, cardJson: String, inThread: Boolean = false): String? =
+        replyAs("interactive", "message.reply_card", messageId, cardJson, inThread)
+
+    /** The one reply path; [msgType] is the only thing text and card replies differ by. */
+    private fun replyAs(
+        msgType: String,
+        operation: String,
+        messageId: String,
+        contentJson: String,
+        inThread: Boolean,
+    ): String? = tracked(operation) {
         requireFeishuId(messageId, "message id")
-        val body = ReplyMessageReqBody.newBuilder().content(contentJson).msgType("text")
+        val body = ReplyMessageReqBody.newBuilder().content(contentJson).msgType(msgType)
         // Preserve the direct-message request shape exactly; only group traffic opts into Feishu topics.
         if (inThread) body.replyInThread(true)
         val response = client.im().v1().message().reply(
@@ -156,7 +173,8 @@ internal class FeishuApiClient(
                 .replyMessageReqBody(body.build())
                 .build(),
         )
-        if (!response.success()) throw FeishuApiException("message.reply code=${response.code}")
+        if (!response.success()) throw FeishuApiException("$operation code=${response.code}")
+        response.data?.messageId
     }
 
     fun snapshot(): FeishuApiSnapshot = FeishuApiSnapshot(
