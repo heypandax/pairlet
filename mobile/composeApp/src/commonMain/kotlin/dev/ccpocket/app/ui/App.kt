@@ -1028,6 +1028,18 @@ internal class ProjectsLandingGate {
         spent = true
         return play
     }
+
+    private val rowPlayed = BooleanArray(LoadingMotion.ROWS)
+
+    /** One-shot PER ROW, held here rather than in the item composition: LazyColumn disposes items that
+     *  scroll away, so state remembered inside them restarts from zero on the way back — which replayed
+     *  the reveal (alpha 0 + stagger delay) every time the top rows re-entered the viewport. A claim that
+     *  outlives the item makes the reveal literally once (owner-reported flicker, issue #261 follow-up). */
+    fun claimRow(index: Int): Boolean {
+        if (index !in rowPlayed.indices || rowPlayed[index]) return false
+        rowPlayed[index] = true
+        return true
+    }
 }
 
 internal val LocalProjectsLanding = staticCompositionLocalOf { ProjectsLandingGate() }
@@ -1166,6 +1178,11 @@ private val SKELETON_PATH_W = listOf(0.76f, 0.64f, 0.82f, 0.58f, 0.71f)
 @Composable
 private fun LandingReveal(index: Int, play: Boolean, content: @Composable () -> Unit) {
     if (!play || index >= LoadingMotion.ROWS) { content(); return }
+    // Claimed from the GATE, not remembered here: this composable lives inside a LazyColumn item, and an
+    // item scrolled away is disposed — local state would restart the animation on every return trip.
+    val gate = LocalProjectsLanding.current
+    val playThis = remember { gate.claimRow(index) }
+    if (!playThis) { content(); return }
     val progress = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         progress.animateTo(

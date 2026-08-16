@@ -161,6 +161,19 @@ class ProjectsLoadingUiTest {
     // ══ the landing gate ═══════════════════════════════════════════════════════════════════════════
 
     @Test
+    fun aRecycledRowDoesNotReplayTheReveal() {
+        // LazyColumn disposes items that scroll away; the reveal claim must outlive the item, or the top
+        // rows flash (alpha 0 + stagger) every time they scroll back in (owner-reported, 08-16).
+        val gate = ProjectsLandingGate()
+        gate.arm()
+        assertTrue(gate.claimFirstLanding(), "first landing plays")
+        assertTrue(gate.claimRow(0), "row 0 plays once")
+        assertFalse(gate.claimRow(0), "…and never again after recycling")
+        assertTrue(gate.claimRow(1), "each row claims independently")
+        assertFalse(gate.claimRow(99), "an index past the cascade never animates")
+    }
+
+    @Test
     fun theLandingRevealIsSpentAfterTheFirstList() {
         val gate = ProjectsLandingGate()
         gate.arm() // a skeleton was on screen
