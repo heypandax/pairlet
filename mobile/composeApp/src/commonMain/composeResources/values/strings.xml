@@ -1663,10 +1663,13 @@
     <string name="conn_offline_body">The relay answered, but the daemon is not running. Start cc-pocket on that computer, or wake it and try again.</string>
     <string name="conn_invalid_title">Pairing invalid</string>
     <string name="conn_invalid_body">This computer rejected the stored credential. Retrying will not fix it.</string>
-    <string name="conn_connecting_wait">Waiting for the directory list. Nothing is claimed as ready until it arrives.</string>
 
     <!-- ── Projects ─────────────────────────────────────────────────────────── -->
     <string name="proj_machine_line">%1$s · %2$s</string>
+    <!-- the wait for the project list, told once in the header (issue #261) — it names the computer being
+         read, and replaces both "connecting…" and the engineer's note that used to sit under the rows -->
+    <string name="proj_loading_on_machine">Reading projects on %1$s…</string>
+    <string name="proj_loading_projects">Reading projects…</string>
     <string name="proj_state_reconnecting">reconnecting</string>
     <string name="proj_open_computers">Computers</string>
     <string name="proj_more">More options</string>
