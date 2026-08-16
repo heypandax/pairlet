@@ -1,15 +1,15 @@
-What's new in 1.7.7
+What's new in 1.8.0
 
 New
-• ZCode joins Claude, Codex, Kimi, and OpenCode as a session backend
-• Choose a default model and reasoning effort for each supported agent
-• Feishu bridge sessions now understand their group, sender, and visible-context limits
+• DeepSeek joins Claude, Codex, OpenCode, Kimi, and ZCode as a session backend
+• Start a task directly from the project list with a clearer, cross-device composer
+• Usage can now be filtered by agent, including Kimi and ZCode
 
 Improved
-• Voice input stays available with an existing draft and while a turn is running, then appends the transcript for review
-• Recently completed sessions remain easy to find, and switching through All Projects no longer wedges a reopened chat
-• Feishu reviewed and full-auto modes use clearer, request-scoped approval rules
+• Prompt images remain visible when a session is replayed
+• Project loading, recent sessions, voice input, and prompt delivery provide clearer progress and recovery states
+• Feishu routing, threaded replies, and command controls are more reliable
 
 Fixed
-• Windows daemon updates and bridge gateway authentication are more reliable
-• Malformed connections and concurrent device-limit races no longer disturb healthy sessions
+• Agent capability downgrades no longer corrupt persisted defaults or send unsupported frames
+• Relay and LAN gateway handling is hardened against malformed or spoofed connections

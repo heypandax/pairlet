@@ -9,7 +9,7 @@
 1. 同步版本、商店说明并跑发布门禁：
 
    ```bash
-   bash scripts/check-release-version.sh 1.7.7
+   bash scripts/check-release-version.sh 1.8.0
    bash scripts/check-harmony-release.sh
    bash scripts/check-all.sh
    ```
@@ -18,11 +18,11 @@
 3. 创建同名 GitHub Release 后，从 tag 触发资产工作流；完整发布不允许从可移动的 `main` 构建：
 
    ```bash
-   git tag -a v1.7.7 -m "v1.7.7"
-   git push origin refs/tags/v1.7.7
-   gh release create v1.7.7 --verify-tag --generate-notes
-   gh workflow run release.yml --ref v1.7.7 -f version=1.7.7
-   gh workflow run ios-release.yml --ref v1.7.7
+   git tag -a v1.8.0 -m "v1.8.0"
+   git push origin refs/tags/v1.8.0
+   gh release create v1.8.0 --verify-tag --generate-notes
+   gh workflow run release.yml --ref v1.8.0 -f version=1.8.0
+   gh workflow run ios-release.yml --ref v1.8.0
    ```
 
 4. 所有请求的平台 job 成功后才允许生成 `SHA256SUMS` 和更新 Scoop。取得两份 macOS daemon
@@ -225,7 +225,7 @@ cloud-managed signing、上传、提交审核及 TestFlight 公测；本机 Xcod
 从同名 release tag 触发，不传 `marketing_version`，让 workflow 读取并校验仓库中的锁步版本：
 
 ```bash
-gh workflow run ios-release.yml --ref v1.7.7
+gh workflow run ios-release.yml --ref v1.8.0
 ```
 
 workflow 会归档、上传、等待处理、同步 metadata、提交 App Review，并把同一 build 挂到稳定的
