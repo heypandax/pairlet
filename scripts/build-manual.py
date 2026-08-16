@@ -6,7 +6,6 @@ from __future__ import annotations
 import datetime as dt
 import html
 import json
-import re
 import subprocess
 from pathlib import Path
 
@@ -447,18 +446,6 @@ def main() -> None:
         ],
         check=True,
     )
-    llms_path = ROOT / "site" / "llms.txt"
-    llms_text = llms_path.read_text(encoding="utf-8")
-    llms_text, replacements = re.subn(
-        r"^Last verified: \d{4}-\d{2}-\d{2}\.",
-        f"Last verified: {VERIFIED}.",
-        llms_text,
-        count=1,
-        flags=re.MULTILINE,
-    )
-    if replacements != 1:
-        raise ValueError("site/llms.txt must contain exactly one Last verified date")
-    llms_path.write_text(llms_text, encoding="utf-8")
     print(f"built {3 + len(data['articles']) * 2} manual pages and AI indexes")
 
 
