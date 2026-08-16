@@ -33,7 +33,7 @@ object TranscriptMerge {
         if (replay.isEmpty()) return emptyList() // the daemon's /clear wipe must still clear
         if (local.isEmpty()) return replay
         val anchor = findAnchor(local, replay)
-            ?: return replay + rescuePending(local, replay) // nothing lines up — replay wholesale
+            ?: return replayResolvingPending(local, replay) // nothing lines up — replay wholesale
         val out = ArrayList<ChatItem>(local.size + replay.size)
         out.addAll(local.subList(0, anchor)) // scrollback older than the replay window survives
         var li = anchor
@@ -43,7 +43,7 @@ object TranscriptMerge {
             val r = replay[ri]
             // a pending bubble whose text the replay now carries WAS delivered (the ack got lost):
             // resolve it in place — checked before the pass-through so it can't duplicate below
-            if (l is ChatItem.User && l.pending && r is ChatItem.User && l.text == r.text) {
+            if (l is ChatItem.User && l.pending && r is ChatItem.User && samePendingPrompt(l, r)) {
                 out.add(resolveUser(l, r)); li++; ri++
                 continue
             }
@@ -54,8 +54,7 @@ object TranscriptMerge {
             if (!couldPair(l, r)) {
                 // hard divergence: the on-disk replay wins from here — but typed-and-undelivered
                 // bubbles in the dropped region are rescued (input must never vanish)
-                out.addAll(replay.subList(ri, replay.size))
-                out.addAll(rescuePending(local.subList(li, local.size), replay))
+                out.addAll(replayResolvingPending(local.subList(li, local.size), replay.subList(ri, replay.size)))
                 return out
             }
             when (l) {
@@ -120,8 +119,13 @@ object TranscriptMerge {
         if (delta.isEmpty()) return local
         if (local.isEmpty()) return delta
         if (findAnchor(local, delta) != null) return merge(local, delta)
-        val delivered = delta.filterIsInstance<ChatItem.User>().mapTo(HashSet()) { it.text }
-        return local.filterNot { it is ChatItem.User && it.pending && it.text in delivered } + delta
+        val remaining = local.toMutableList()
+        val resolvedDelta = delta.map { row ->
+            if (row !is ChatItem.User) return@map row
+            val i = remaining.indexOfFirst { it is ChatItem.User && it.pending && samePendingPrompt(it, row) }
+            if (i < 0) row else resolveUser(remaining.removeAt(i) as ChatItem.User, row)
+        }
+        return remaining + resolvedDelta
     }
 
     /**
@@ -177,7 +181,9 @@ object TranscriptMerge {
 
     private fun couldPair(l: ChatItem, r: ChatItem): Boolean = when {
         l is ChatItem.Assistant && r is ChatItem.Assistant -> extendsEither(l.text, r.text)
-        l is ChatItem.User && r is ChatItem.User -> l.text == r.text
+        // Within an already-anchored pairwise run, position disambiguates blank image-only rows. Receipt
+        // recovery below has no such anchor and therefore applies the stricter image check.
+        l is ChatItem.User && r is ChatItem.User -> userTextsMatch(l, r)
         l is ChatItem.Tool && r is ChatItem.Tool -> l.tool == r.tool
         else -> false
     }
@@ -213,12 +219,38 @@ object TranscriptMerge {
         return n
     }
 
-    /** Undelivered prompt bubbles from a dropped region — re-appended so typed input never vanishes.
-     *  A bubble whose text already appears among the replay's trailing user rows WAS delivered (only
-     *  its ack was lost) — the replayed row covers it, so it is not duplicated. */
-    private fun rescuePending(dropped: List<ChatItem>, replay: List<ChatItem>): List<ChatItem> {
-        val delivered = replay.takeLast(RESCUE_WINDOW).filterIsInstance<ChatItem.User>().mapTo(HashSet()) { it.text }
-        return dropped.filter { it is ChatItem.User && it.pending && it.text !in delivered }
+    /** Enrich matching replay USER rows with their local receipt identity/attachments, then append only
+     *  genuinely unmatched pending bubbles. A sent file prompt is deliberately matched by its wire text:
+     *  the local bubble hides generated `@path` references while the transcript stores them verbatim. */
+    private fun replayResolvingPending(dropped: List<ChatItem>, replay: List<ChatItem>): List<ChatItem> {
+        val pending = dropped.filterIsInstance<ChatItem.User>().filter { it.pending }.toMutableList()
+        val eligibleFrom = (replay.size - RESCUE_WINDOW).coerceAtLeast(0)
+        val resolved = replay.mapIndexed { index, row ->
+            if (index < eligibleFrom || row !is ChatItem.User) return@mapIndexed row
+            val i = pending.indexOfFirst { samePendingPrompt(it, row) }
+            if (i < 0) row else resolveUser(pending.removeAt(i), row)
+        }
+        return resolved + pending
+    }
+
+    /** The transcript stores the actual SendPrompt text, while a local file bubble intentionally shows only
+     *  the text the user typed. Image-only prompts require byte-for-byte evidence: blank text by itself is
+     *  not enough to collapse two different photos (and an old daemon that omitted replay images cannot
+     *  prove which blank prompt it saw). */
+    private fun samePendingPrompt(local: ChatItem.User, replay: ChatItem.User): Boolean {
+        if (!userTextsMatch(local, replay)) return false
+        if (local.text.isNotBlank() || local.files.isNotEmpty()) return true
+        if (local.images.isEmpty() || replay.images.size != local.images.size) return false
+        return local.images.indices.all { local.images[it].contentEquals(replay.images[it]) }
+    }
+
+    private fun userTextsMatch(local: ChatItem.User, replay: ChatItem.User): Boolean =
+        local.text == replay.text || localWireText(local) == replay.text
+
+    private fun localWireText(user: ChatItem.User): String {
+        if (user.files.isEmpty()) return user.text
+        val refs = user.files.joinToString("\n") { "@${it.path}" }
+        return if (user.text.isBlank()) refs else user.text + "\n\n" + refs
     }
 
     private fun lastContentIndex(messages: List<ChatItem>): Int {

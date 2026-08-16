@@ -41,7 +41,7 @@
     <string name="conn_computer_offline_hint">电脑恢复后会自动重新连接。</string>
     <string name="conn_computer_offline_banner">电脑已离线，正在等待恢复…</string>
     <string name="conn_connecting_banner">正在连接电脑…</string>
-    <string name="msg_pending_undelivered">尚未送达——连接恢复后将自动发送</string>
+    <string name="msg_pending_undelivered">未确认送达——连接恢复后将自动重试</string>
     <string name="history_loading_earlier">正在加载更早的消息…</string>
     <string name="history_earlier_seam">· 更早的消息 ·</string>
     <string name="msg_sending">发送中…</string>
@@ -1048,7 +1048,7 @@
     <string name="chat_open_failed_hint">电脑未响应。</string>
     <string name="chat_you">你</string>
     <string name="msg_no_response_click">还没有响应——点击重发</string>
-    <string name="msg_undelivered_reconnecting">尚未送达——正在重连…</string>
+    <string name="msg_undelivered_reconnecting">未确认送达——正在重连…</string>
     <string name="msg_delivered_short">✓ 已送达</string>
     <string name="ctx_nearly_full">上下文已用 %1$d%——建议尽快开新会话或 /compact</string>
     <string name="question_answered_label">已回答</string>

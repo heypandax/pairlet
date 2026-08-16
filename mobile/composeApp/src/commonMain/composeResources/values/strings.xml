@@ -41,7 +41,7 @@
     <string name="conn_computer_offline_hint">We\'ll reconnect automatically as soon as it\'s back.</string>
     <string name="conn_computer_offline_banner">Computer offline — waiting for it to come back…</string>
     <string name="conn_connecting_banner">Connecting to your computer…</string>
-    <string name="msg_pending_undelivered">Not delivered yet — will send once connected</string>
+    <string name="msg_pending_undelivered">Delivery not confirmed — will retry once connected</string>
     <string name="history_loading_earlier">Loading earlier messages…</string>
     <string name="history_earlier_seam">· earlier messages ·</string>
     <string name="msg_sending">Sending…</string>
@@ -1051,7 +1051,7 @@
     <string name="chat_open_failed_hint">The computer didn\'t respond.</string>
     <string name="chat_you">You</string>
     <string name="msg_no_response_click">no response yet — click to resend</string>
-    <string name="msg_undelivered_reconnecting">not delivered yet — reconnecting…</string>
+    <string name="msg_undelivered_reconnecting">delivery not confirmed — reconnecting…</string>
     <string name="msg_delivered_short">✓ delivered</string>
     <string name="ctx_nearly_full">Context %1$d% full — consider a new session or /compact soon</string>
     <string name="question_answered_label">Answered</string>

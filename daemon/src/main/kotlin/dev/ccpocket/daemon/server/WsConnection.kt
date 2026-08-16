@@ -178,6 +178,7 @@ class WsConnection(
                                 gate.lanUrl(), gate.hostname(), gate.gatewayBaseUrl(), bridgeControl = true,
                                 supportedAgents = DAEMON_SUPPORTED_AGENT_WIRES,
                                 supportsUsageAgentFilter = true, // issue #258: this build honors FetchUsage.agent
+                                supportsPromptRecovery = true, // #122: acked prompts stay ledgered until agent consumption
                             ),
                         ),
                     )

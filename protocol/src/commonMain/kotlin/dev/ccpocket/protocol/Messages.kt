@@ -1180,6 +1180,12 @@ data class LanHello(val deviceId: String) : ToDaemon
  * vocabulary AND silently drops the agent key — inferring the filter from a non-empty [supportedAgents]
  * would show the App a Kimi chip that answers with every backend's tokens under a Kimi label. Same
  * deny-by-omission contract as [bridgeControl]: absent → false → the App hides the filter entirely.
+ *
+ * [supportsPromptRecovery] means this daemon retains prompts after acknowledging the stdin write and
+ * re-delivers any prompt the agent never consumed. A client connected to such a daemon must not infer
+ * "swallowed" from a quiet first-token window and offer a blind resend: large contexts can legitimately
+ * stay silent, while a fresh-id resend can execute the same request twice. Absent/false preserves the
+ * legacy client's second-stage fallback for older daemons that do not own this recovery.
  */
 @Serializable
 @SerialName("pocket/daemon.info")
@@ -1196,6 +1202,7 @@ data class DaemonInfo(
     val updateCommand: String? = null,
     val supportedAgents: List<String> = emptyList(),
     val supportsUsageAgentFilter: Boolean = false,
+    val supportsPromptRecovery: Boolean = false,
 ) : ToPhone
 
 @Serializable

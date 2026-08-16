@@ -1260,6 +1260,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var promptRetry: PromptRetry? = null
     private var promptResendArmed = false // set by SessionGone: the next matching SessionLive resends promptRetry
     private var promptPending = false // a User bubble is marked pending until the daemon shows signs of life
+    /** The newest prompt whose receipt/start state may still change the global watchdogs. PromptAck can race
+     *  behind the first AssistantChunk (the daemon's stdout pump is concurrent with the stdin write), and old
+     *  receipts can arrive after a newer send. Only an exact id match may advance this state machine. */
+    private var activePromptId: String? = null
 
     /** The in-flight prompt got neither a [dev.ccpocket.protocol.PromptAck] nor any stream evidence within
      *  [promptReceiptTimeoutMs] (issue #78). The link can CLAIM healthy while nothing comes back — outboxes
@@ -1271,7 +1275,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var promptWatchdog: Job? = null
     internal var promptReceiptTimeoutMs = 10_000L // > relay RTT + a lazy agent spawn; a test seam shrinks it
 
-    /** Second-stage deadline (issue #104): a [dev.ccpocket.protocol.PromptAck] only means the daemon WROTE
+    /** Legacy-daemon second-stage deadline (issue #104): a [dev.ccpocket.protocol.PromptAck] only means the daemon WROTE
      *  the prompt to the agent's stdin — not that a turn started. A wedged or mid-relaunch agent can swallow
      *  that write and emit nothing, leaving [streaming] stuck true and the UI silently "thinking" forever
      *  (issue #78's receipt watchdog is already cancelled by the ack, so nothing catches this). Once delivered
@@ -1281,10 +1285,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  SessionGone same-id resend safe would here turn a same-id resend into a bare re-ack — no turn), and a
      *  fresh-id auto-resend would double-run a turn that was merely slow to start. The recovery is user-driven
      *  ([resendStalledPrompt], fresh id). [turnStalled] retracts on the first real turn frame or a session change.
-     *  Only for prompts sent into an IDLE session — a mid-turn send is the queued case, [turnQueued]. */
+     *  Only for prompts sent into an IDLE session — a mid-turn send is the queued case, [turnQueued]. Daemons
+     *  advertising [dev.ccpocket.protocol.DaemonInfo.supportsPromptRecovery] own this recovery with their
+     *  unconsumed ledger, so the silence-only resend timer is disabled for them. */
     val turnStalled = mutableStateOf(false)
 
-    /** Queued flavor of the same deadline: the prompt was sent INTO an already-running turn (the composer's
+    /** Legacy queued flavor of the same deadline: the prompt was sent INTO an already-running turn (the composer's
      *  "sending will queue" state), so the CLI parks it until the next tool boundary / turn end — silence past
      *  the deadline is expected there, not a swallow. The watchdog can only be pending while the prompt is
      *  provably still queued (consuming it takes a tool boundary or turn end, and either frame feeds
@@ -1323,18 +1329,38 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Real turn evidence (chunk / tool / turn-end / error) or a terminal frame (process exit, session gone):
      *  the agent is actually producing — or the whole turn is being torn down. Cancels BOTH the delivery
      *  receipt watchdog (issue #78) and the turn-start watchdog (issue #104), clears both stall cues, drops
-     *  the retry copy, and flips the pending User bubble to delivered (issue #41). */
-    private fun promptEvidence() {
+     *  the retry copy, and flips the matching pending User bubble out of its local-only state (issue #41).
+     *
+     *  A frame from a turn that was ALREADY running when this prompt was sent is not receipt evidence for
+     *  the queued prompt: the old turn can keep streaming before this SendPrompt even reaches the daemon.
+     *  [exactPrompt] is reserved for evidence that names/resolves this prompt itself (currently a matching
+     *  ConvoHistory USER row) and for terminal teardown where no delivery claim remains on screen. */
+    private fun promptEvidence(exactPrompt: Boolean = false) {
+        clearTurnWatchdogState() // any real frame retires a silence-only turn inference
+        if (promptPending && promptQueued && !exactPrompt) return
+
+        val promptId = activePromptId
         promptRetry = null
+        activePromptId = null
         promptWatchdog?.cancel(); promptWatchdog = null // the daemon is talking — the receipt deadline is moot
-        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false // …and a real turn frame moots the turn deadline
         sendStalled.value = false
-        turnStalled.value = false
-        turnQueued.value = false
         if (!promptPending) return
         promptPending = false
-        val i = messages.indexOfLast { it is ChatItem.User }
+        val i = messages.indexOfLast {
+            it is ChatItem.User && it.pending && (promptId == null || it.promptId == promptId)
+        }
         (messages.getOrNull(i) as? ChatItem.User)?.takeIf { it.pending }?.let { messages[i] = it.copy(pending = false) }
+    }
+
+    /** TranscriptMerge may resolve (or replace) the active local pending bubble when a reconnect replay
+     *  contains the matching USER row. That is stronger evidence than link liveness: retire the receipt
+     *  deadline and retry state too, otherwise the invisible old [sendStalled] leaks into the next send. */
+    private fun reconcilePromptReceiptFromHistory(before: List<ChatItem>, after: List<ChatItem>) {
+        if (!promptPending) return
+        val promptId = activePromptId ?: return
+        val wasPending = before.any { it is ChatItem.User && it.promptId == promptId && it.pending }
+        val remainsPending = after.any { it is ChatItem.User && it.promptId == promptId && it.pending }
+        if (wasPending && !remainsPending) promptEvidence(exactPrompt = true)
     }
 
     /** Delivery receipt ONLY (PromptAck, issue #104): the daemon wrote the prompt to the agent's stdin, but an
@@ -1342,11 +1368,52 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  is still expected, hand off to the turn-start watchdog. Deliberately keeps [promptRetry] — the resend cue
      *  (and a late SessionGone in this window) still needs the text/images. The PromptAck handler flips the
      *  specific bubble to delivered right after this; here we only clear the delivery FLAG. */
-    private fun promptDelivered() {
+    private fun promptDelivered(promptId: String) {
+        // The pump may emit real output before sendPrompt() returns and the daemon emits PromptAck. In that
+        // ordering promptEvidence() already retired activePromptId; re-arming here creates the exact false
+        // "no response — resend" cue on top of a live/completed answer. A receipt for an older queued send is
+        // equally forbidden from controlling the newest prompt's watchdog.
+        if (activePromptId != promptId || !promptPending) return
         promptWatchdog?.cancel(); promptWatchdog = null // receipt arrived — the delivery deadline is moot
         sendStalled.value = false
         promptPending = false
-        if (streaming.value) { awaitingTurn = true; armTurnWatchdog(queued = promptQueued) } // a TurnDone/error already in wouldn't re-arm
+        // #122-capable daemons keep the prompt in an unconsumed ledger and re-deliver it after process
+        // replacement. A quiet first-token window is therefore not a failure signal (large-context Codex and
+        // Claude turns routinely exceed 45s); blind fresh-id resend can double-execute the request.
+        if (promptQueued && streaming.value) {
+            // Queue status is informational and non-actionable, so it remains useful with a ledger-capable
+            // daemon; only the unsafe "swallowed → resend" inference is retired.
+            awaitingTurn = true
+            armTurnWatchdog(queued = true, promptId = promptId)
+        } else if (daemonOwnsPromptRecovery) {
+            clearTurnWatchdogState()
+        } else if (streaming.value) {
+            awaitingTurn = true
+            armTurnWatchdog(queued = false, promptId = promptId)
+        } // a TurnDone/error already in wouldn't re-arm
+    }
+
+    /** Retire only the ack→turn fallback. The prompt retry/receipt state is separate: a SessionLive reattach
+     *  proves the conversation lifecycle again, but it does not by itself prove that this exact prompt was
+     *  consumed. */
+    private fun clearTurnWatchdogState() {
+        turnWatchdog?.cancel(); turnWatchdog = null
+        awaitingTurn = false
+        turnStalled.value = false
+        turnQueued.value = false
+    }
+
+    /** A prompt's retry/receipt/turn cues belong to one visible conversation. Every explicit conversation
+     *  boundary calls this alongside clearing [messages], so an invisible timer cannot resurrect underneath
+     *  a later session or its first fresh send. Transport reconnect is intentionally NOT such a boundary. */
+    private fun clearPromptLifecycleState() {
+        promptWatchdog?.cancel(); promptWatchdog = null
+        promptRetry = null
+        promptResendArmed = false
+        promptPending = false
+        activePromptId = null
+        sendStalled.value = false
+        clearTurnWatchdogState()
     }
 
     // mode/model/effort are claude launch flags, NOT stored in the transcript jsonl. Leaving an idle
@@ -2121,8 +2188,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         openJob?.cancel(); openJob = null
         retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); deafJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel(); linkStableJob?.cancel(); presenceProbeJob?.cancel()
         retryJob = null; connectJob = null; inboundJob = null; controlJob = null; deafJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null; linkStableJob = null; presenceProbeJob = null
-        promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // pending bubbles leave with messages below
-        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false; turnQueued.value = false // (issue #104) drop the ack→turn deadline too
+        clearPromptLifecycleState() // pending bubbles and every related deadline leave with messages below
         // frames queued for the binding we're leaving must not leak into the next link (both transports
         // are reused across machine switches, and their outboxes deliberately buffer across reconnects)
         directAttemptInFlight = false
@@ -2157,6 +2223,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         daemonSupportedAgents.value = emptySet() // reverse agent capability: no stale ZCode across machines
         daemonAgentsKnown = false // #276: back to "not told yet" — the guard must not deny during reconnect
         daemonUsageAgentFilter.value = false // ditto (issue #258): the next machine re-advertises its own
+        daemonOwnsPromptRecovery = false // ditto: an older next daemon still needs the legacy fallback
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
@@ -2304,8 +2371,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sessionNavigationFenced = true
         convoId.value?.let { c -> if (observing.value || !streaming.value) scope.launch { send(CloseSession(c)) } }
         pendingOpen = null
-        promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false
-        promptRetry = null; promptPending = false; promptResendArmed = false
+        clearPromptLifecycleState()
         convoId.value = null; currentSessionId = null; sessionKey.value = null
         workdir.value = null // same reason as disconnect(): a stale path must not leak into a later ⌘N (issue #56)
         sessionsDir.value = null; sessions.clear()
@@ -2420,6 +2486,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         daemonSupportedAgents.value = DAEMON_SUPPORTED_AGENT_WIRES.toSet()
         daemonAgentsKnown = true // #276: demo asserts a current daemon's caps — the guard may act on them
         daemonUsageAgentFilter.value = true // a current daemon honors the usage filter (issue #258)
+        daemonOwnsPromptRecovery = true // demo emulates the current daemon's prompt-lifecycle contract
         demoAsked = false
         sessionActive.value = true
         replace(slashCommands, DemoData.commands())
@@ -2743,6 +2810,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 daemonSupportedAgents.value = f.supportedAgents.toSet()
                 daemonAgentsKnown = true // #276: the daemon has now told us — the guard may deny an unsupported agent
                 daemonUsageAgentFilter.value = f.supportsUsageAgentFilter // issue #258: false = daemon ignores the filter
+                daemonOwnsPromptRecovery = f.supportsPromptRecovery
+                if (daemonOwnsPromptRecovery) clearTurnWatchdogState()
                 // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
                 // the fields — "unknown" must not be shown as the previous machine's numbers
                 versionStatus.value = VersionStatus(
@@ -2759,6 +2828,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // conversation's AssistantChunk/ToolEvent frames then passed the guards and spliced another
             // session's live turn into the open transcript. Not our view's session → no state touched.
             is SessionLive -> if (acceptsSessionLive(f)) {
+                // Reattach is an authoritative lifecycle snapshot. A local 45s deadline may have fired while
+                // the phone was suspended and missed both output + TurnDone; never carry that stale inference
+                // over the daemon's fresh executing/idle truth (the screenshot bug).
+                if (f.executing != null) clearTurnWatchdogState()
                 openJob?.cancel(); openJob = null // the answer owns the view; retire its dormant 8s deadline
                 pendingNewOpenWd = null // the in-flight open (if any) is answered by this announce
                 openInFlight = null // …and so is its #235 claim — the next click on this row is a real request again
@@ -2823,6 +2896,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 val retry = promptRetry
                 if (promptResendArmed && retry != null && !f.observing && f.workdir == retry.workdir) {
                     promptRetry = null; promptResendArmed = false
+                    activePromptId = retry.promptId
+                    promptPending = true
                     promptQueued = false // fresh process, no running turn to queue behind — its ack arms the strict deadline
                     streaming.value = true
                     // same promptId as the original: if the first send actually landed, the daemon
@@ -2834,7 +2909,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // delivery receipt (issue #66): the daemon handed the turn to the agent — flip the bubble's
             // marker. Also first evidence: the retry copy is obsolete (the prompt cannot be lost anymore).
             is PromptAck -> if (f.convoId == convoId.value) {
-                promptDelivered() // delivered ≠ turn started (issue #104): hand off to the turn-start watchdog
+                promptDelivered(f.promptId) // delivered ≠ turn started; only the matching active prompt may move the watchdog
                 val i = messages.indexOfLast { it is ChatItem.User && it.promptId == f.promptId }
                 (messages.getOrNull(i) as? ChatItem.User)?.let { messages[i] = it.copy(pending = false, delivered = true) }
             }
@@ -2936,7 +3011,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 }
             }
             is TurnDone -> if (f.convoId == convoId.value) {
+                val queuedReceiptStillPending = promptPending && promptQueued
                 promptEvidence()
+                // This boundary closes the turn that existed before the queued prompt was sent. If its Ack
+                // was lost, keep the bubble pending, but the NEXT stream frame can now safely prove that
+                // prompt started; it can no longer be mistaken for output from the preceding turn.
+                if (queuedReceiptStillPending) promptQueued = false
                 replayEcho = false // turn boundary — the next block belongs to a new turn, never a replay echo
                 val turnWasLive = streaming.value // gate the marker/notify on a turn we actually watched run
                 finishThinking(); streaming.value = false
@@ -3024,7 +3104,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
                 // a dead claude process never sends TurnDone — clear the streaming state here
                 if (f.code == "process_exited" && (f.convoId == null || f.convoId == convoId.value)) {
-                    promptEvidence()
+                    promptEvidence(exactPrompt = true)
                     finishThinking(); streaming.value = false
                     noteCurrentSettledSeen(sessionKey.value ?: currentSessionId)
                 }
@@ -3036,7 +3116,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 if (observing.value) {
                     // an observe view can't run turns — a stray send must not leave the caret spinning
                     // forever (the old blanket ignore did exactly that, issue #45 ②)
-                    promptEvidence(); finishThinking(); streaming.value = false
+                    promptEvidence(exactPrompt = true); finishThinking(); streaming.value = false
                 } else {
                     val sid = sessionKey.value ?: currentSessionId
                     val wd = workdir.value
@@ -3045,7 +3125,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                         // lastEventSeq (issue #147): the transcript is still on screen — delta reattach
                         scope.launch { send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE, lastEventSeq = lastEventSeqFor(sid))) }
                     } else {
-                        promptEvidence(); promptResendArmed = false
+                        promptEvidence(exactPrompt = true); promptResendArmed = false
                         finishThinking(); streaming.value = false
                         messages.add(ChatItem.Sys("session expired on the computer — send again to restart it"))
                     }
@@ -3065,6 +3145,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                         val localRows = messages.toList()
                         val merged = TranscriptMerge.mergeDelta(localRows, f.messages.map(::historyItem))
                         if (merged != localRows) replace(messages, merged)
+                        reconcilePromptReceiptFromHistory(localRows, merged)
                         replayEcho = true // same replay/stream race as the full path
                     }
                     f.lastSeq?.let { historySeq = it; historySeqSession = currentSessionId }
@@ -3079,6 +3160,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     val localRows = messages.toList()
                     val merged = TranscriptMerge.merge(localRows, f.messages.map(::historyItem))
                     if (merged != localRows) replace(messages, merged)
+                    reconcilePromptReceiptFromHistory(localRows, merged)
                     replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race
                     // reattach cursor + paging anchors (issue #147); null fields = a pre-#147 daemon
                     historySeq = f.lastSeq
@@ -3517,6 +3599,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      * every agent while silently ignoring the filter — the usage page would then label a full-machine total
      * as one agent's. False (the pre-handshake and old-daemon value) hides the filter row entirely. */
     val daemonUsageAgentFilter = mutableStateOf(false)
+
+    /** DaemonInfo capability: this daemon keeps every acked prompt in its unconsumed ledger and owns
+     * redelivery after process replacement (#122). Silence is not a safe client-side resend signal then.
+     * Plain Boolean because it only selects repository mechanics; no UI observes it directly. */
+    private var daemonOwnsPromptRecovery = false
 
     fun supportsAgent(agent: AgentKind): Boolean = agentAvailableFromDaemon(agent, daemonSupportedAgents.value)
 
@@ -4730,9 +4817,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private suspend fun runOpen(attempt: OpenAttempt, gen: Int) {
         if (gen != openGen) return // disconnect/demote/back may win before this queued worker gets CPU
         val (wd, resumeId, startMode, title, agent, startPermissionMode, startModel) = attempt
-        promptPending = false // the pending marker belongs to the previous conversation's transcript
-        promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // and so does its receipt deadline
-        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false; turnQueued.value = false // (issue #104) new session clears any ack→turn stall
+        clearPromptLifecycleState() // every prompt marker/deadline belongs to the previous conversation
         sessionDegraded.value = false; degradedSendArmed = false // per-session — SessionLive re-announces the truth
         abandonVoice() // #266: a capture in flight belongs to the session we're leaving — never carry it into the next
         // Reclaim the current session ONLY if it's idle (or a read-only observe): a RUNNING turn stays
@@ -5053,8 +5138,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
         val sentFiles = landed.map { SentFile(it.landedName ?: it.name, it.size, it.path!!, mediaType = it.mediaType, localUri = it.localUri) }
         val promptId = newPromptId()
+        // Every send starts a new status epoch. A receipt/turn deadline from the previous prompt may have
+        // fired while the app was suspended; carrying those booleans forward makes the fresh bubble say
+        // "not delivered", "queued", or "no response" before its own deadline has even started.
+        sendStalled.value = false
+        clearTurnWatchdogState()
         messages.add(ChatItem.User(text, ready, pending = true, promptId = promptId, files = sentFiles))
         promptPending = true
+        activePromptId = promptId
         turnStartMark = kotlin.time.TimeSource.Monotonic.markNow()
         if (chatTitle.value == null && text.isNotBlank()) {
             chatTitle.value = text.take(48) // new session: first prompt becomes the header title
@@ -5067,7 +5158,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         promptQueued = streaming.value // a send into a running turn gets QUEUED by the CLI — flavors the ack→turn watchdog
         streaming.value = true
         limitOffer.value = null; limitConfirmed.value = null // a manual send supersedes the auto-continue offer (#137)
-        workdir.value?.let { promptRetry = PromptRetry(outText, images, it, promptId); promptResendArmed = false }
+        promptRetry = workdir.value?.let { PromptRetry(outText, images, it, promptId) }
+        promptResendArmed = false
         Telemetry.track(TelEvent.PromptSent)
         scope.launch { send(SendPrompt(c, outText, images, promptId = promptId)) }
         armPromptWatchdog()
@@ -5082,29 +5174,30 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  recovery is running — force one re-handshake. The queued frames re-flush on the fresh session, and
      *  the daemon dedupes the promptId if the original actually landed, so this can't double-run the turn. */
     private fun armPromptWatchdog() {
+        val promptId = activePromptId
         promptWatchdog?.cancel()
         promptWatchdog = scope.launch {
             delay(promptReceiptTimeoutMs)
-            if (!promptPending) return@launch
+            if (!promptPending || activePromptId != promptId) return@launch
             sendStalled.value = true
             // non-Ready phases already have the retry/backoff machinery (and the UI banner) on the case
             if (!demoMode.value && sessionActive.value && phase.value == ConnPhase.Ready) launchTransport(reconnect = true)
         }
     }
 
-    /** Second-stage watchdog (issue #104): a delivered prompt that produces no turn frame within the deadline
+    /** Legacy second-stage watchdog (issue #104): a delivered prompt that produces no turn frame within the deadline
      *  was swallowed by a wedged / mid-relaunch agent. Surface an inline resend cue instead of spinning forever.
      *  Self-guarded at fire time — a turn frame ([awaitingTurn] cleared), a session change ([convoId] moved off
      *  the one captured here), or a turn that already ended ([streaming] false) all no-op it, so it never fires
      *  into a stale conversation and no teardown path has to reach in and cancel it.
      *  [queued] flips the fired state: a prompt sent mid-turn waits in the CLI's queue, where the same silence
      *  is expected — it gets the calm [turnQueued] status, never the resend cue (see [turnQueued] for why). */
-    private fun armTurnWatchdog(queued: Boolean) {
+    private fun armTurnWatchdog(queued: Boolean, promptId: String) {
         val c = convoId.value
         turnWatchdog?.cancel()
         turnWatchdog = scope.launch {
             delay(promptTurnTimeoutMs)
-            if (!awaitingTurn || convoId.value != c || !streaming.value) return@launch
+            if (!awaitingTurn || activePromptId != promptId || convoId.value != c || !streaming.value) return@launch
             if (queued) {
                 turnQueued.value = true
                 Telemetry.track(TelEvent.PromptTurnQueued, mapOf(TelKey.Phase to phase.value.name))
@@ -5126,10 +5219,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (!turnStalled.value) return
         val c = convoId.value ?: run { turnStalled.value = false; return }
         val retry = promptRetry ?: run { turnStalled.value = false; return }
+        if (activePromptId != retry.promptId) { clearTurnWatchdogState(); return }
         turnStalled.value = false
-        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false
+        clearTurnWatchdogState()
         val freshId = newPromptId()
         promptRetry = PromptRetry(retry.text, retry.images, retry.workdir, freshId)
+        activePromptId = freshId
         promptResendArmed = false
         promptPending = true // pending until the re-driven turn shows life
         promptQueued = false // the stalled turn never started — the re-driven copy expects the strict deadline
@@ -5772,6 +5867,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Clear the conversation — the daemon starts a fresh session (keeps model/effort/mode) and wipes history. */
     fun clearConversation() {
         val c = convoId.value ?: return
+        clearPromptLifecycleState()
         messages.clear(); chatTitle.value = null; contextUsed.value = null
         resetHistoryPaging() // #147: the wiped transcript's cursor dies with it
         clearBackgroundJobs()
@@ -5826,6 +5922,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             closeConvo?.let { send(CloseSession(it)) }
             dir?.let { send(ListSessions(it)) }
         }
+        clearPromptLifecycleState()
         convoId.value = null
         chatTitle.value = null
         messages.clear()
@@ -5877,6 +5974,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val wd = workdir.value ?: return
         scope.launch {
             obs?.let { send(CloseSession(it)) }
+            clearPromptLifecycleState()
             messages.clear(); convoId.value = null; observing.value = false
             resetHistoryPaging() // #147: the take-over open replays in full
             // "Continue here" resumes under the Settings default mode — omitting it fell back to the
@@ -5923,6 +6021,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         fenceSessionNavigation()
         convoId.value?.let { c -> scope.launch { send(CloseSession(c)) } }
         streaming.value = false
+        clearPromptLifecycleState()
         convoId.value = null
         chatTitle.value = null
         messages.clear()
