@@ -27,7 +27,7 @@ class SessionCapabilitiesTest {
         PocketRepository(scope).apply { onSendForTest = { sent += it } }
 
     @Test
-    fun known_model_capabilities_drop_stale_defaults_before_new_session() {
+    fun known_model_capabilities_keep_the_effort_preference_and_let_the_launch_clamp_it() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val sent = mutableListOf<Frame>()
         val repo = repo(scope, sent)
@@ -48,13 +48,15 @@ class SessionCapabilitiesTest {
                 ),
             )
 
-            assertNull(repo.defaultEffortFor(AgentKind.CODEX))
+            // #274: a leaner catalog must NOT erase the persisted effort preference (SecureStore is global);
+            // it survives and is clamped at the launch boundary instead. Service tier still reconciles.
+            assertEquals("ultra", repo.defaultEffortFor(AgentKind.CODEX), "the effort preference survives")
             assertNull(repo.defaultServiceTier.value)
             repo.openSession("/tmp/project", agent = AgentKind.CODEX)
 
             val open = sent.filterIsInstance<OpenSession>().single()
             assertEquals("gpt-5.5", open.model)
-            assertNull(open.effort)
+            assertNull(open.effort, "the unsupported effort is dropped at launch, not persisted away")
             assertNull(open.serviceTier)
         } finally {
             repo.setDefaultModelFor(AgentKind.CODEX, null)
@@ -216,7 +218,7 @@ class SessionCapabilitiesTest {
     }
 
     @Test
-    fun capabilitiesClearOnlyTheOwningBackendsInvalidEffort() {
+    fun reconcileLeavesEveryBackendsPersistedEffortIntact() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val repo = repo(scope, mutableListOf())
         try {
@@ -236,7 +238,9 @@ class SessionCapabilitiesTest {
                 ),
             )
 
-            assertNull(repo.defaultEffortFor(AgentKind.OPENCODE))
+            // #274: even OpenCode's now-unsupported preference is kept (not erased) — the launch boundary
+            // drops it where it doesn't fit; every other backend is untouched, as before.
+            assertEquals("unsupported", repo.defaultEffortFor(AgentKind.OPENCODE), "the preference survives a leaner catalog")
             assertEquals("high", repo.defaultEffortFor(AgentKind.CLAUDE))
             assertEquals("ultra", repo.defaultEffortFor(AgentKind.CODEX))
             assertEquals("low", repo.defaultEffortFor(AgentKind.KIMI))
@@ -248,7 +252,7 @@ class SessionCapabilitiesTest {
     }
 
     @Test
-    fun claudeBackendWideEffortsClearOnlyClaudeAndGuardResumeLaunch() {
+    fun claudeBackendWideEffortsKeepThePreferenceButGuardTheResumeLaunch() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val sent = mutableListOf<Frame>()
         val repo = repo(scope, sent)
@@ -274,7 +278,9 @@ class SessionCapabilitiesTest {
                 ),
             )
 
-            assertNull(repo.defaultEffortFor(AgentKind.CLAUDE), "the installed Claude CLI rejects the stale value")
+            // #274: the persisted CLAUDE preference is kept even when this machine's CLI advertises a leaner
+            // set; only the launch boundary rejects the stale value.
+            assertEquals("ultra", repo.defaultEffortFor(AgentKind.CLAUDE), "the preference survives a leaner CLI")
             assertEquals("xhigh", repo.defaultEffortFor(AgentKind.CODEX), "Claude capability refresh stays isolated")
             sent.clear()
             repo.openSession(
@@ -284,7 +290,7 @@ class SessionCapabilitiesTest {
             )
             assertNull(
                 sent.filterIsInstance<OpenSession>().single().effort,
-                "a stale per-session value is also rejected at the launch boundary",
+                "a stale per-session value is still rejected at the launch boundary",
             )
         } finally {
             repo.setDefaultEffortFor(AgentKind.CLAUDE, null)
@@ -314,7 +320,8 @@ class SessionCapabilitiesTest {
                 repo.effortOptions(AgentKind.CLAUDE, "sonnet").isEmpty(),
                 "a present per-model row is authoritative even when it advertises no effort choices",
             )
-            assertNull(repo.defaultEffortFor(AgentKind.CLAUDE), "the backend-wide fallback cannot override that empty row")
+            // #274: the preference is kept (not erased by the empty per-model row); the launch drops it.
+            assertEquals("high", repo.defaultEffortFor(AgentKind.CLAUDE), "the preference survives the empty per-model row")
             sent.clear()
             repo.openSession("/tmp/claude-no-effort", agent = AgentKind.CLAUDE)
             assertNull(sent.filterIsInstance<OpenSession>().single().effort)
@@ -372,7 +379,9 @@ class SessionCapabilitiesTest {
             target.adoptShellState(source)
 
             assertEquals("gpt-5.6-sol", target.defaultModelFor(AgentKind.CODEX))
-            assertNull(target.defaultEffortFor(AgentKind.CODEX), "the hot target rejects the copied effort immediately")
+            // #274: the promoted effort preference is kept even against a leaner target catalog (the launch
+            // clamps it); only the service tier still reconciles here.
+            assertEquals("ultra", target.defaultEffortFor(AgentKind.CODEX), "the copied effort preference survives")
             assertNull(target.defaultServiceTier.value, "the hot target rejects the copied tier immediately")
         } finally {
             source.setDefaultModelFor(AgentKind.CODEX, null)

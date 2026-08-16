@@ -3653,15 +3653,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         return listed.supportedEfforts.takeIf { it.isNotEmpty() }
     }
 
-    /** Keep persisted Settings defaults honest whenever either half changes: the selected model, a fresh
-     * daemon catalog, or the shell moving onto a hot machine with a different installed CLI. Unknown
-     * capability remains pass-through; known incompatibility is cleared only for its owning backend. */
+    /** Reconcile Codex's persisted service tier against a fresh daemon catalog / model change.
+     *
+     * #274: the effort preference is deliberately NOT reconciled here. SecureStore is global, not
+     * per-machine, so clearing it whenever THIS machine's CLI advertises a leaner set permanently erased a
+     * preference other machines still support — and switching back never restored it. openSession AND
+     * takeOver already clamp the effort to the machine's supported set at launch (knownEfforts /
+     * supportedEfforts), so an unsupported preference is simply not sent where it doesn't fit and honoured
+     * where it does — non-destructively, restored on return. (The Codex service-tier reconcile below stays:
+     * its launch-time clamp isn't yet uniform across takeOver, so removing it could leak an unsupported
+     * tier — tracked with #274 as the same class, to be lifted once that clamp is uniform.) */
     private fun reconcileDefaultCapabilities(agent: AgentKind) {
         val modelId = defaultModelFor(agent)
-        supportedReasoningEfforts(agent, modelId)?.let { supported ->
-            val scopedEffort = defaultEffortFor(agent)
-            if (scopedEffort != null && scopedEffort !in supported) setDefaultEffortFor(agent, null)
-        }
         modelCapabilities(agent, modelId)?.let { caps ->
             if (agent == AgentKind.CODEX &&
                 defaultServiceTier.value != null && caps.serviceTiers.none { it.id == defaultServiceTier.value }
