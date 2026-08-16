@@ -328,6 +328,40 @@ class DesktopUiTest {
         assertPresent("Port parser to Rust")
     }
 
+    /** A pinned project is a doorway to its RECENT session list. If that group was folded, opening the
+     *  pin must unfold it again; otherwise the click appears to do nothing and the sessions stay hidden. */
+    @Test
+    fun pinnedProjectOpensItsCollapsedSessionList() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { pinProject("~/code/relay", "relay") }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+
+        // PINNED and RUNNING both contain "relay" before the RECENT header, so the latter is last.
+        onAllNodes(hasText("relay")).onLast().performClick()
+        waitForIdle()
+        assertTrue(!present("Bump maxFrame to 4MB"), "precondition: the project's sessions are folded")
+
+        // Open the actual pinned-project row. It must reveal the RECENT group it represents.
+        onNodeWithTag("project-pin:~/code/relay").performClick()
+        waitForIdle()
+        // The fixed-order seed keeps relay below a tall custom-group project; scroll the now-emitted row
+        // into the test viewport. Before the fix it is absent from the lazy layout, so this cannot succeed.
+        onNodeWithTag("sidebar-list").performScrollToNode(hasText("Bump maxFrame to 4MB"))
+        waitForIdle()
+        assertPresent("Bump maxFrame to 4MB")
+
+        // Fold it once more and open the SAME pin again. The reveal is an event, not a path value that
+        // gets stuck equal after its first use.
+        onAllNodes(hasText("relay")).onLast().performClick()
+        waitForIdle()
+        assertTrue(!present("Bump maxFrame to 4MB"))
+        onNodeWithTag("project-pin:~/code/relay").performClick()
+        waitForIdle()
+        onNodeWithTag("sidebar-list").performScrollToNode(hasText("Bump maxFrame to 4MB"))
+        waitForIdle()
+        assertPresent("Bump maxFrame to 4MB")
+    }
+
     @Test
     fun slashMenuFiltersAndCompletes() = runComposeUiTest {
         val model = SeedDesktopModel().apply { composer = "/re" }

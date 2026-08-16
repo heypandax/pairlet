@@ -144,6 +144,12 @@ data class DkPin(
  */
 data class DkProjectPin(val path: String, val name: String)
 
+/**
+ * One-shot request to reveal a pinned project's session list in RECENT. [generation] makes opening the
+ * same pin again observable after the user folds that project a second time.
+ */
+data class DkProjectListReveal(val path: String, val generation: Long)
+
 // ── fleet ("Fleet Desktop" board): machine-grouped sidebar · cross-machine attention · watch pane ──
 
 /**
@@ -297,6 +303,8 @@ interface DesktopModel {
     fun pinProject(path: String, name: String) {}
     fun unpinProject(path: String) {}
     fun isProjectPinned(path: String): Boolean = projectPins.any { it.path == path }
+    /** Latest pinned-project reveal request. Null means this model has not opened a project pin. */
+    val projectListReveal: DkProjectListReveal? get() = null
     /** Open a pinned project: its session LIST — the pinned entity is the project, not one session in it. */
     fun openProjectPin(p: DkProjectPin) { openProject(DkProject(p.path, p.name)) }
 

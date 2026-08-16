@@ -127,6 +127,13 @@ open class SeedDesktopModel : DesktopModel {
     override fun isProjectPinned(path: String) = projectPinList.any { it.path == path }
     override fun pinProject(path: String, name: String) { if (!isProjectPinned(path)) projectPinList += DkProjectPin(path, name) }
     override fun unpinProject(path: String) { projectPinList.removeAll { it.path == path } }
+    private var projectRevealGeneration = 0L
+    private var projectListRevealState by mutableStateOf<DkProjectListReveal?>(null)
+    override val projectListReveal: DkProjectListReveal? get() = projectListRevealState
+    override fun openProjectPin(p: DkProjectPin) {
+        projectListRevealState = DkProjectListReveal(p.path, ++projectRevealGeneration)
+        openProject(DkProject(p.path, p.name))
+    }
 
     // the fleet boards' other machines — the design's four-machine command-center scenario
     private val resolvedAttention = mutableStateListOf<String>()

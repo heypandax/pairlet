@@ -133,6 +133,7 @@ import dev.ccpocket.app.ui.AgentBadge
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.fleet.AttentionBadge
 import dev.ccpocket.app.ui.modelAlias
+import dev.ccpocket.app.ui.sameDirPath
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.app.ui.share.SharedPill
 import dev.ccpocket.app.ui.share.expiryLeft
@@ -380,7 +381,7 @@ private fun ProjectPinRow(model: DesktopModel, p: DkProjectPin, index: Int) {
     val hovered by src.collectIsHoveredAsState()
     Row(
         Modifier.fillMaxWidth().height(32.dp).hoverable(src).hoverFill()
-            .clickable { model.openProjectPin(p) }.padding(horizontal = 12.dp),
+            .clickable { model.openProjectPin(p) }.testTag("project-pin:${p.path}").padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
@@ -514,6 +515,28 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
         LaunchedEffect(model.sessionsRefreshing) { if (!model.sessionsRefreshing) refreshTarget = null }
         val spinningPath = if (model.sessionsRefreshing) refreshTarget ?: groups.firstOrNull { it.current }?.path else null
         val selectedId = model.selectedSessionId // resolved by scanning the session list — once, not per row
+        val projectReveal = model.projectListReveal
+        // A project pin represents the LIST, not a single session. Re-listing it updates the model but
+        // cannot touch this composable-local fold state, which made a folded project's pin look inert.
+        // Observe an explicit, repeatable request, wait until the target group exists, then unfold it and
+        // bring its header into view. Other groups keep their current fold state.
+        LaunchedEffect(projectReveal) {
+            val request = projectReveal ?: return@LaunchedEffect
+            val targetPath = withTimeoutOrNull(5_000) {
+                snapshotFlow {
+                    renderedGroups(model).firstOrNull { sameDirPath(it.path, request.path) }?.path
+                }.filterNotNull().first()
+            } ?: return@LaunchedEffect
+            collapsed.remove(targetPath)
+            val headerKey = "h:$targetPath"
+            if (listState.layoutInfo.visibleItemsInfo.none { it.key == headerKey }) {
+                // openProject makes the requested project the most-recent (first) group in the live model.
+                // recentRowIndex remains the safe fallback for deterministic preview/test models that keep
+                // a fixed group order.
+                val index = recentRowIndex(renderedGroups(model), collapsed, targetPath, "")
+                if (index >= 0) listState.animateScrollToItem(index)
+            }
+        }
         // Reveal the selected session's group when the selection changes — e.g. clicking a RUNNING project
         // resumes its live session (#83). Expand that group if the user had folded it and scroll it into
         // view, but only the TARGET group is touched (multi-expand is intentional) and only when the row

@@ -767,8 +767,14 @@ class RepoDesktopModel(
     override fun isProjectPinned(path: String): Boolean = repo.isPinned(path)
     override fun pinProject(path: String, name: String) { if (!repo.isPinned(path)) repo.togglePin(path) }
     override fun unpinProject(path: String) { if (repo.isPinned(path)) repo.togglePin(path) }
+    private var projectRevealGeneration = 0L
+    private var projectListRevealState by mutableStateOf<DkProjectListReveal?>(null)
+    override val projectListReveal: DkProjectListReveal? get() = projectListRevealState
     override fun openProjectPin(p: DkProjectPin) {
-        navGen++ // user navigation — same guard openPin takes against an in-flight RECENT refill (#102)
+        // RECENT owns fold/scroll state inside the composable, so listing alone cannot reveal a group the
+        // user folded earlier. Publish an explicit one-shot request before re-listing; the generation is
+        // required because the same pinned project may be opened, folded, and opened again.
+        projectListRevealState = DkProjectListReveal(p.path, ++projectRevealGeneration)
         openProject(DkProject(path = p.path, name = p.name))
     }
 
