@@ -135,15 +135,16 @@ class ProjectsLoadingUiTest {
     }
 
     @Test
-    fun reviewIsNotOfferedUntilTheListLands() {
+    fun reviewIsNotOnTheProjectsScreenAtAll() {
+        // #261 originally pinned "hidden while waiting, back on landing"; the 08-16 batch then demoted the
+        // whole P2P review surface off this screen (Review Center lives behind Settings now). The pin
+        // follows the stronger fact: NO state of this screen offers the doorway — a regression on either
+        // side (skeleton or loaded) turns this red.
         baseline(content = { DirectorySkeleton(it) }) {
-            assertFalse(
-                present(str(Res.string.proj_review), substring = true),
-                "Review is a queue this machine has not reported yet — no doorway for it while waiting",
-            )
+            assertFalse(present(str(Res.string.proj_review), substring = true), "no review doorway while waiting")
         }
         baseline(seed = { receiveForTest(projects()) }, content = { DirectoryScreen(it) }) {
-            assertTrue(present(str(Res.string.proj_review), substring = true), "…and it is back the moment the list lands")
+            assertFalse(present(str(Res.string.proj_review), substring = true), "…and none after landing either")
         }
     }
 
