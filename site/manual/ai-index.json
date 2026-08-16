@@ -259,7 +259,7 @@
           ],
           "shortAnswer": "When the daemon reports credential isolation as enabled, only Claude credentials are private to it. Session history, CLAUDE.md , skills, plugins, settings, and MCP configuration remain shared. If setup fails, the daemon warns and runs without isolation.",
           "summary": "After credential isolation starts successfully, the daemon keeps its Claude credentials separate while sharing session history, CLAUDE.md, skills, plugins, settings, and MCP configuration; setup failure falls back with a warning.",
-          "text": "isolated What is isolated After the daemon successfully prepares its isolated CLAUDE_CONFIG_DIR and reports credential isolation as enabled, only the credential store is private to the daemon. Logging in or out from CC Pocket then changes the daemon’s Claude credentials without replacing the terminal Claude login. shared What stays shared Session history under projects, so resume and device handoff keep working. CLAUDE.md , settings, agents, commands, skills, plugins, and todos. MCP server configuration and project trust stored in .claude.json . This is credential isolation, not a separate Claude workspace or multi-profile session store. fallback If isolation setup fails The daemon prints a warning and continues without credential isolation. In that state, do not assume CC Pocket sign-in or sign-out is independent of the terminal Claude login; fix the daemon setup before switching accounts.",
+          "text": "isolated What is isolated After the daemon successfully prepares its isolated CLAUDE_CONFIG_DIR and reports credential isolation as enabled, only the credential store is private to the daemon. Logging in or out from CC Pocket then changes the daemon’s Claude credentials without replacing the terminal Claude login. shared What stays shared Session history under projects, so resuming from another device keeps working. CLAUDE.md , settings, agents, commands, skills, plugins, and todos. MCP server configuration and project trust stored in .claude.json . This is credential isolation, not a separate Claude workspace or multi-profile session store. fallback If isolation setup fails The daemon prints a warning and continues without credential isolation. In that state, do not assume CC Pocket sign-in or sign-out is independent of the terminal Claude login; fix the daemon setup before switching accounts.",
           "title": "What a separate Claude login shares",
           "url": "https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/"
         },
@@ -281,42 +281,6 @@
         }
       },
       "slug": "separate-claude-login",
-      "verifiedAt": "2026-07-25"
-    },
-    {
-      "locales": {
-        "en": {
-          "aliases": [
-            "share",
-            "folder",
-            "guest",
-            "invite",
-            "collaborator",
-            "revoke"
-          ],
-          "shortAnswer": "Open Settings → Shared folders , choose the folder, access level, and expiry, then send the single-use invite to a trusted collaborator. Revoke it from the same screen when access should end.",
-          "summary": "Create a single-use invite for one folder, choose an access level and expiry, then revoke it at any time.",
-          "text": "create Create the invite Open Shared folders In Settings, open Shared folders and choose the folder the guest may use. Choose access and expiry Pick Review, Collaborate, or Autonomous, then set how long the invite remains active. Send the invite once The invite is single-use and expires quickly. Send it only to the intended collaborator. boundary Understand the boundary The guest can open sessions only under the shared folder, but shell commands still run as the owner’s operating-system user. Folder scope is an application boundary, not an operating-system sandbox. Use sharing only with people you trust. Revoke the share immediately when collaboration ends.",
-          "title": "Share one folder with a collaborator",
-          "url": "https://heypandax.github.io/cc-pocket/manual/en/share-a-folder/"
-        },
-        "zh": {
-          "aliases": [
-            "共享",
-            "文件夹",
-            "访客",
-            "邀请",
-            "协作者",
-            "撤销"
-          ],
-          "shortAnswer": "打开 设置 → 共享文件夹 ，选择文件夹、权限和有效期，再把一次性邀请发给可信协作者。需要结束访问时，在同一页面撤销。",
-          "summary": "为一个文件夹生成一次性邀请，选择权限和有效期，并可随时撤销。",
-          "text": "create 创建邀请 打开共享文件夹 在设置中打开“共享文件夹”，选择允许访客使用的文件夹。 选择权限与有效期 选择 Review、Collaborate 或 Autonomous，并设置邀请有效期。 发送一次性邀请 邀请只能使用一次且很快过期，只应发送给预期协作者。 boundary 理解权限边界 访客只能在共享文件夹下打开会话，但 shell 命令仍以所有者的操作系统用户身份执行。文件夹范围是应用层边界，不是操作系统沙箱。 只与可信的人使用共享；协作结束后立即撤销。",
-          "title": "向协作者共享一个文件夹",
-          "url": "https://heypandax.github.io/cc-pocket/manual/zh/share-a-folder/"
-        }
-      },
-      "slug": "share-a-folder",
       "verifiedAt": "2026-07-25"
     },
     {

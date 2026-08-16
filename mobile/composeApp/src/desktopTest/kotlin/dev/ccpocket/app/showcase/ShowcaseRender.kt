@@ -773,6 +773,174 @@ class ShowcaseRender {
         }
     }
 
+    // ── Website / README · the public control loop (Watch → Approve → Continue → Inspect) ────────
+
+    /**
+     * The reel's shots. The four PUBLIC steps are Watch → Approve → Continue → Inspect; Watch gets two
+     * shots (the machine's session list, then the stream itself) because that is what watching is.
+     */
+    private enum class Shot { SESSIONS, STREAM, APPROVE, CONTINUE, INSPECT }
+
+    /** One localized reel script. Every string here is invented demo copy — never a real transcript. */
+    private class LoopScript(
+        val prompt: String,
+        val thinking: String,
+        val say1: String,
+        val say2: String,
+        val done1: String,
+        val done2: String,
+    )
+
+    private fun loopScript(lang: String): LoopScript = if (lang == "zh") LoopScript(
+        prompt = "relay 的重连回路补稳一下，改完跑一遍协议测试。",
+        thinking = "先看重连的计时器挂在哪个 scope 上——socket 一关它大概就跟着没了。",
+        say1 = "重试的计时器和 socket 同一个 scope，socket 一关就被取消。我把它挪到独立 scope，",
+        say2 = "退避重连再加一道守卫，关闭的 socket 杀不掉它。",
+        done1 = "守卫加好了：socket 关闭不再连坐取消重连。",
+        done2 = "协议测试全过。改动在 relay/src/net/WsClient.kt。",
+    ) else LoopScript(
+        prompt = "Harden the relay reconnect loop, then run the protocol tests.",
+        thinking = "Reading the reconnect path first — the retry timer looks like it dies with the socket.",
+        say1 = "The retry timer shares the socket's scope, so closing the socket cancels it. I'll move it out,",
+        say2 = " then guard the backoff so a closed socket can't take it down.",
+        done1 = "Guard added — a closed socket no longer cancels the reconnect.",
+        done2 = "Protocol tests are green. The change is in relay/src/net/WsClient.kt.",
+    )
+
+    /**
+     * NOT a test — the website / README control-loop reel (see `marketing/site/README.md`).
+     *
+     * One continuous 10.5s scene through the four PUBLIC jobs, rendered from the real production
+     * composables (`SessionsScreen` → `ChatScreen` → `SecureApprovalSheet` → `FileViewerScreen`) so the
+     * marketing media can never drift from the shipped UI. Every frame stays a pure function of t: beats
+     * mutate repository state at fixed offsets and the approval countdown is stepped by re-keying
+     * `timeoutSec` (its own `delay`-driven ticker is not deterministic offscreen — same trick as
+     * `permtimeout`).
+     *
+     * `SHOWCASE_LANG=zh` switches BOTH the app's own resource locale and this scripted copy, so a frame
+     * is never half-translated.
+     *
+     *   SITE_LOOP_OUT=/abs/dir [SHOWCASE_LANG=en|zh] [SHOWCASE_FPS=30] \
+     *     ./gradlew :mobile:composeApp:desktopTest --tests dev.ccpocket.app.showcase.ShowcaseRender
+     */
+    @Test
+    fun renderSiteLoop() {
+        val outRoot = System.getenv("SITE_LOOP_OUT") ?: return   // opt-in only
+        val lang = (System.getenv("SHOWCASE_LANG") ?: "en").lowercase()
+        val fps = (System.getenv("SHOWCASE_FPS") ?: "30").toInt()
+        val durationMs = 10_500L
+        val scale = 2f
+        val w = 390; val h = 844
+        val s = loopScript(lang)
+
+        val previousLocale = java.util.Locale.getDefault()
+        java.util.Locale.setDefault(if (lang == "zh") java.util.Locale.SIMPLIFIED_CHINESE else java.util.Locale.US)
+
+        val shot = mutableStateOf(Shot.SESSIONS)
+        val askSec = mutableStateOf(18)
+        fun ask(sec: Int) = PermissionAsk(
+            convoId = convo, askId = "loop-ap", tool = "Bash", title = "Run command",
+            inputPreview = "./gradlew :protocol:allTests --rerun-tasks",
+            rule = "Bash(./gradlew test:*)", grantOptions = listOf("once", "task", "session"),
+            timeoutSec = sec,
+        )
+
+        val beats = listOf(
+            // WATCH · the machine's running work, then the stream itself
+            Beat(0) {
+                phase.value = ConnPhase.Ready       // a paired, attached machine — not a connecting spinner
+                connected.value = true
+                receiveForTest(Sessions(DemoData.LIVE_DIR, DemoData.sessions(DemoData.LIVE_DIR)))
+                receiveForTest(live(executing = true))
+                receiveForTest(ConvoHistory(convo, listOf(HistoryMessage(ChatRole.USER, s.prompt))))
+            },
+            Beat(1600) { shot.value = Shot.STREAM },
+            Beat(1900) { receiveForTest(think(s.thinking)) },
+            Beat(2500) { receiveForTest(text(s.say1)) },
+            Beat(3000) { receiveForTest(text(s.say2)) },
+            Beat(3400) { receiveForTest(tool("Read", "relay/src/net/WsClient.kt")) },
+            // APPROVE · the agent stops at a sensitive action and the decision is made from here
+            Beat(3900) { shot.value = Shot.APPROVE },
+            Beat(4600) { askSec.value = 15 },
+            Beat(5300) { askSec.value = 12 },
+            // CONTINUE · the same session picks up where it stopped and finishes the turn
+            Beat(6000) {
+                shot.value = Shot.CONTINUE
+                receiveForTest(tool("Bash", "./gradlew :protocol:allTests --rerun-tasks"))
+            },
+            Beat(6600) { receiveForTest(tool("Edit", "relay/src/net/WsClient.kt  +24 −6")) },
+            Beat(7100) { receiveForTest(text(s.done1)) },
+            Beat(7600) { receiveForTest(text(s.done2)) },
+            Beat(8000) { receiveForTest(TurnDone(convo, usage = TokenUsage(inputTokens = 42_180, outputTokens = 5_360))) },
+            // INSPECT · what actually changed, line by line
+            Beat(8300) {
+                changedFiles.add(ChangedFile("relay/src/net/WsClient.kt", op = "edit", adds = 24, dels = 6))
+                viewedFilePath.value = "relay/src/net/WsClient.kt"
+                viewedFileDiff.value = FileDiff(
+                    workdir = DemoData.LIVE_DIR, sessionId = DemoData.LIVE_SESSION_ID,
+                    path = "relay/src/net/WsClient.kt", adds = 24, dels = 6,
+                    diff = """
+                        @@ -41,9 +41,14 @@
+                         private fun scheduleReconnect(n: Int) {
+                        -    socketScope.launch {
+                        -        delay(backoff(n))
+                        -        connect()
+                        -    }
+                        +    // the socket scope dies with it
+                        +    retryScope.launch {
+                        +        delay(backoff(n))
+                        +        if (!closedByUser) connect()
+                        +    }
+                         }
+                        +
+                        +private fun backoff(n: Int) =
+                        +    minOf(30_000L, 250L shl n)
+                    """.trimIndent(),
+                )
+                shot.value = Shot.INSPECT
+            },
+        )
+
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val repo = PocketRepository(scope, coreAccount)
+        val dir = File(outRoot).apply { mkdirs() }
+        seq = 0
+        val scene = ImageComposeScene((w * scale).toInt(), (h * scale).toInt(), Density(scale)) {
+            PocketTheme(dark = true) {
+                Box(Modifier.fillMaxSize().background(Tok.base)) {
+                    when (shot.value) {
+                        Shot.SESSIONS -> SessionsScreen(repo)
+                        Shot.STREAM, Shot.CONTINUE -> ChatScreen(repo)
+                        Shot.APPROVE -> {
+                            ChatScreen(repo)
+                            SecureApprovalSheet(
+                                approvalUi(ask(askSec.value), workdir = DemoData.LIVE_DIR),
+                                onDeny = {}, onAllowOnce = {},
+                            )
+                        }
+                        Shot.INSPECT -> FileViewerScreen(repo, onBack = {})
+                    }
+                }
+            }
+        }
+        try {
+            val frames = ceil(durationMs / 1000.0 * fps).toInt()
+            var next = 0
+            for (i in 0 until frames) {
+                val t = i * 1000L / fps
+                while (next < beats.size && beats[next].at <= t) { beats[next].action(repo); next++ }
+                Snapshot.sendApplyNotifications()
+                val png = scene.render(t * 1_000_000L).encodeToData(EncodedImageFormat.PNG) ?: error("encode $i")
+                File(dir, "f%05d.png".format(i)).writeBytes(png.bytes)
+            }
+            println("site-loop[$lang]: $frames frames @ ${fps}fps → ${(w * scale).toInt()}x${(h * scale).toInt()}")
+        } finally {
+            scene.close()
+            scope.cancel()
+            java.util.Locale.setDefault(previousLocale)
+        }
+    }
+
     /** A real paired binding, so the machine name in the Sessions header is a rendered fact, not a blank. */
     private val coreAccount = dev.ccpocket.app.pairing.PairedDaemon(
         relay = "wss://showcase.invalid", accountId = "showcase", daemonPub = "pub",

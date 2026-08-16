@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>CC Pocket — Open-source remote control for Claude Code &amp; Codex</title>
-<meta name="description" content="Remote-control Claude Code and OpenAI Codex from your phone or another computer. Open source, self-hostable, end-to-end encrypted, with no CC Pocket account." />
+<title>CC Pocket — Open-source control plane for local coding agents</title>
+<meta name="description" content="Your coding agents stay on your computer; you stay in control from anywhere. Watch, approve, continue and inspect six agent backends from a phone, tablet or another computer. Open source, end-to-end encrypted, no account." />
 <link rel="canonical" href="https://heypandax.github.io/cc-pocket/" />
 <link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/" />
 <link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/zh/" />
@@ -18,22 +18,22 @@
 <!-- Open Graph -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="CC Pocket" />
-<meta property="og:title" content="CC Pocket — Remote control for Claude Code &amp; Codex" />
-<meta property="og:description" content="One open-source app to steer Claude Code and OpenAI Codex from anywhere. Self-hostable, end-to-end encrypted, and no CC Pocket account required." />
+<meta property="og:title" content="CC Pocket — Open-source control plane for local coding agents" />
+<meta property="og:description" content="Six agent backends keep running on your own computer. Watch, approve, continue and inspect from anywhere, end-to-end encrypted, with no CC Pocket account." />
 <meta property="og:url" content="https://heypandax.github.io/cc-pocket/" />
-<meta property="og:image" content="https://heypandax.github.io/cc-pocket/og-image.png" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/assets/product/overview.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
-<meta property="og:image:alt" content="CC Pocket remote control for Claude Code and OpenAI Codex." />
+<meta property="og:image:alt" content="The CC Pocket desktop console showing paired machines and a live session, beside the phone app showing a session list and an approval decision." />
 <meta property="og:locale" content="en_US" />
 <meta property="og:locale:alternate" content="zh_CN" />
 
 <!-- Twitter / X -->
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="CC Pocket — Remote control for Claude Code &amp; Codex" />
-<meta name="twitter:description" content="One open-source app to steer Claude Code and OpenAI Codex from anywhere. Self-hostable and end-to-end encrypted." />
-<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/og-image.png" />
-<meta name="twitter:image:alt" content="CC Pocket remote control for Claude Code and OpenAI Codex." />
+<meta name="twitter:title" content="CC Pocket — Open-source control plane for local coding agents" />
+<meta name="twitter:description" content="Six agent backends keep running on your own computer. Watch, approve, continue and inspect from anywhere, end-to-end encrypted." />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/assets/product/overview.png" />
+<meta name="twitter:image:alt" content="The CC Pocket desktop console beside the phone app: a session list on one screen, an approval decision on the other." />
 
 <!-- Icons & manifest -->
 <link rel="icon" href="favicon.svg" type="image/svg+xml" />
@@ -56,37 +56,32 @@
       "name": "CC Pocket",
       "alternateName": "cc-pocket",
       "applicationCategory": "DeveloperApplication",
-      "operatingSystem": "iOS, iPadOS, Android, macOS, Windows, Linux",
+      "operatingSystem": "iOS, iPadOS, Android, macOS, Windows, Linux, HarmonyOS",
       "url": "https://heypandax.github.io/cc-pocket/",
       "downloadUrl": "https://github.com/heypandax/cc-pocket/releases/latest",
-      "softwareVersion": "1.3.5",
-      "softwareHelp": "https://pocket.ark-nexus.cc/support/",
-      "image": "https://heypandax.github.io/cc-pocket/og-image.png",
-      "screenshot": "https://heypandax.github.io/cc-pocket/og-image.png",
-      "description": "Open-source, self-hostable remote control for Claude Code and OpenAI Codex running on your computer. Resume sessions, stream output, browse projects, read diffs, and approve or deny tool requests from a phone, tablet, or another computer. Traffic is end-to-end encrypted through a zero-knowledge relay.",
+      "softwareVersion": "1.8.0",
+      "releaseNotes": "v1.8.0 release. Public capability claims were audited against commit 6162816a on main.",
+      "softwareHelp": "https://pocket.ark-nexus.cc/manual/en/",
+      "image": "https://heypandax.github.io/cc-pocket/assets/product/overview.png",
+      "screenshot": "https://heypandax.github.io/cc-pocket/assets/product/desktop-console.png",
+      "description": "Open-source, local-first, end-to-end encrypted cross-device control plane for command-line coding agents. Six agent backends keep running on your own computer; from a phone, tablet or another computer you watch the stream, answer permission requests, continue the same session and read line-level diffs. Traffic passes through a zero-knowledge relay that only forwards ciphertext.",
       "license": "https://github.com/heypandax/cc-pocket/blob/main/LICENSE",
       "isAccessibleForFree": true,
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "featureList": [
-        "Approve or deny the agent's tool-permission requests remotely",
-        "Resume or start Claude Code and OpenAI Codex sessions from anywhere",
-        "Live streaming output with syntax-highlighted code blocks, tool events, sub-agent cards and background-task status",
-        "Browse changed files with line-level diffs and per-language syntax highlighting",
-        "Multi-agent workflow orchestration view with per-phase progress",
-        "Organize sessions into named groups, synced between phone and desktop",
-        "Native desktop app (macOS / Linux / Windows) — a two-pane mission control for driving one computer from another",
-        "Fleet overview: every paired computer's online state, running projects and waiting approvals on one screen",
-        "Usage insights: per-model tokens and estimated cost, hourly activity bars and a 30-day heatmap",
-        "Share a single folder with a guest: access levels, expiry, one-tap revoke",
-        "Four execution modes plus a persisted default mode and reasoning effort",
-        "Switch models mid-session, including custom model ids from third-party gateways",
-        "Voice dictation, image / file / video attachments and slash-command autocomplete",
-        "Background tasks with finish-time push notifications",
-        "Optional Face ID / biometric app lock",
-        "LAN direct connect on the same network for lower latency",
-        "End-to-end encryption (P-256 ECDH + HKDF + AES-256-GCM) over a zero-knowledge relay"
+        "Watch a local agent's live stream, tool events and background tasks from another device",
+        "Approve or deny the agent's permission requests remotely, with a safe auto-deny on timeout",
+        "Continue a running session in place instead of forking it, and start new tasks from phone or desktop",
+        "Inspect changed files with line-level diffs, file preview, context and usage",
+        "Six agent backends: Claude Code, OpenAI Codex, OpenCode, Kimi Code (Preview), ZCode and DeepSeek",
+        "Filter projects, sessions and usage by agent backend",
+        "Native desktop app for macOS and Windows as a two-pane console",
+        "Local daemon for macOS, Linux x86_64/arm64 and Windows",
+        "End-to-end encryption (P-256 ECDH + HKDF + AES-256-GCM) over a zero-knowledge relay",
+        "No CC Pocket account; pairings expire and can be revoked",
+        "Self-hostable relay, MIT licensed"
       ],
-      "keywords": "Claude Code, OpenAI Codex, AI coding agent, remote coding, end-to-end encryption, developer tools",
+      "keywords": "coding agent, Claude Code, OpenAI Codex, OpenCode, Kimi Code, ZCode, DeepSeek, remote approval, end-to-end encryption, developer tools",
       "publisher": { "@id": "https://github.com/heypandax#org" }
     },
     {
@@ -97,6 +92,17 @@
       "inLanguage": ["en", "zh-CN"],
       "about": { "@id": "https://heypandax.github.io/cc-pocket/#app" },
       "publisher": { "@id": "https://github.com/heypandax#org" }
+    },
+    {
+      "@type": "VideoObject",
+      "name": "The CC Pocket control loop: watch, approve, continue, inspect",
+      "description": "A single session seen from the phone app: the machine's running work, the live stream, an approval decision, the session continuing, and the resulting line-level diff. Real product UI with scripted demo data.",
+      "thumbnailUrl": "https://heypandax.github.io/cc-pocket/assets/product/control-loop-en-poster.jpg",
+      "contentUrl": "https://heypandax.github.io/cc-pocket/assets/product/control-loop-en.mp4",
+      "duration": "PT10.5S",
+      "uploadDate": "2026-08-16",
+      "inLanguage": "en",
+      "isFamilyFriendly": true
     },
     {
       "@type": "Organization",
@@ -123,613 +129,410 @@
       <span class="wordmark mono">CC Pocket</span>
     </a>
     <div class="nav-links">
-      <a href="#features" data-sec="features"><span class="i18n-en">Features</span><span class="i18n-zh">特性</span></a>
-      <a href="https://pocket.ark-nexus.cc/support/"><span class="i18n-en">Support</span><span class="i18n-zh">帮助与客服</span></a>
-      <a href="#desktop" data-sec="desktop"><span class="i18n-en">Desktop</span><span class="i18n-zh">桌面版</span></a>
-      <a href="#how" data-sec="how"><span class="i18n-en">How it works</span><span class="i18n-zh">工作原理</span></a>
+      <a href="#loop" data-sec="loop"><span class="i18n-en">Control loop</span><span class="i18n-zh">控制回路</span></a>
+      <a href="#agents" data-sec="agents"><span class="i18n-en">Agents</span><span class="i18n-zh">Agent 支持</span></a>
+      <a href="#surfaces" data-sec="surfaces"><span class="i18n-en">Platforms</span><span class="i18n-zh">平台</span></a>
       <a href="#security" data-sec="security"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></a>
       <a href="#start" data-sec="start"><span class="i18n-en">Download</span><span class="i18n-zh">下载</span></a>
     </div>
     <div class="nav-right">
       <div class="seg" role="group" aria-label="Language">
-        <button data-setlang="zh">中</button>
-        <button data-setlang="en" class="on">EN</button>
+        <button type="button" data-setlang="zh" aria-pressed="false">中</button>
+        <button type="button" data-setlang="en" class="on" aria-pressed="true">EN</button>
       </div>
-      <button class="icon-btn" id="theme-btn" aria-label="Toggle theme"></button>
+      <button class="icon-btn" type="button" id="theme-btn" aria-label="Toggle theme"></button>
       <a class="btn btn-primary desktop-github" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
         <span class="gh-glyph" aria-hidden="true"></span>
         <span class="i18n-en">View on GitHub</span><span class="i18n-zh">在 GitHub 查看</span>
         <span class="star-pill mono" style="display:none"><span class="star-ico" aria-hidden="true"></span><span class="star-n"></span></span>
       </a>
-      <button class="icon-btn hamburger" id="hamburger" aria-label="Menu"></button>
+      <button class="icon-btn hamburger" type="button" id="hamburger" aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu"></button>
     </div>
   </div>
 </nav>
 <div class="mobile-menu" id="mobile-menu">
-  <a href="#features"><span class="i18n-en">Features</span><span class="i18n-zh">特性</span></a>
-  <a href="https://pocket.ark-nexus.cc/support/"><span class="i18n-en">Help &amp; support</span><span class="i18n-zh">帮助与客服</span></a>
-  <a href="#desktop"><span class="i18n-en">Desktop</span><span class="i18n-zh">桌面版</span></a>
-  <a href="#how"><span class="i18n-en">How it works</span><span class="i18n-zh">工作原理</span></a>
+  <a href="#loop"><span class="i18n-en">Control loop</span><span class="i18n-zh">控制回路</span></a>
+  <a href="#jobs"><span class="i18n-en">Four jobs</span><span class="i18n-zh">四件事</span></a>
+  <a href="#agents"><span class="i18n-en">Agent support</span><span class="i18n-zh">Agent 支持</span></a>
+  <a href="#surfaces"><span class="i18n-en">Platforms</span><span class="i18n-zh">平台</span></a>
   <a href="#security"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></a>
   <a href="#start"><span class="i18n-en">Download</span><span class="i18n-zh">下载</span></a>
-  <a href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener" style="color:var(--accent)">View on GitHub →</a>
+  <a href="https://pocket.ark-nexus.cc/manual/en/"><span class="i18n-en">User manual</span><span class="i18n-zh">用户手册</span></a>
+  <a href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener" style="color:var(--accent)">GitHub →</a>
 </div>
 
 <span id="top"></span>
 
-<!-- ══════════════ HERO ══════════════ -->
+<!-- ══════════════ 1 · HERO ══════════════ -->
 <header class="hero">
   <div class="wrap">
     <div class="hero-copy reveal">
+      <p class="eyebrow mono">OPEN SOURCE · LOCAL FIRST · E2E ENCRYPTED</p>
       <h1>
-        <span class="i18n-en">Remote control for Claude Code and Codex — open source.</span>
-        <span class="i18n-zh">开源远程控制 Claude Code 与 Codex。</span>
+        <span class="i18n-en">Your coding agents stay on your computer. You stay in control from anywhere.</span>
+        <span class="i18n-zh">agent 留在你的电脑，人在哪儿都能掌控全程。</span>
       </h1>
       <p class="sub">
-        <span class="i18n-en">Steer either coding agent running on your own computer from your phone, tablet, or another desktop. Approve tools, stream output, and resume sessions over end-to-end encryption.</span>
-        <span class="i18n-zh">用手机、平板或另一台电脑，操控运行在你自己电脑上的任一编码代理。端到端加密地审批工具、查看输出并恢复会话。</span>
+        <span class="i18n-en">CC Pocket drives six command-line coding agents running on your own machine — from your phone, your tablet, or another computer. Watch them work, approve what they are blocked on, continue the same session, and read what changed. End-to-end encrypted; capability differs by backend.</span>
+        <span class="i18n-zh">CC Pocket 遥控跑在你自己电脑上的六个命令行编码 agent——用手机、平板，或另一台电脑。看它干活、批掉挡路的授权、接着原来的会话往下走、再翻一遍它改了什么。端到端加密；能力按后端不同。</span>
       </p>
       <div class="hero-btns">
         <a class="btn btn-primary" href="#start">
-          <span class="i18n-en">Get the app</span><span class="i18n-zh">获取 App</span>
+          <span class="i18n-en">Get the app ↓</span><span class="i18n-zh">获取 App ↓</span>
         </a>
-        <a class="btn btn-ghost" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
-          <span class="gh-glyph" aria-hidden="true"></span>
-          <span class="i18n-en">View on GitHub</span><span class="i18n-zh">在 GitHub 查看</span>
-          <span class="star-pill mono" style="display:none"><span class="star-ico" aria-hidden="true"></span><span class="star-n"></span></span>
+        <a class="btn btn-ghost" href="#loop">
+          <span class="i18n-en">See the control loop →</span><span class="i18n-zh">看真实流程 →</span>
         </a>
       </div>
-      <p class="trustline mono">MIT<span class="dot">·</span>open source<span class="dot">·</span>self-hostable<span class="dot">·</span>zero-knowledge relay<span class="dot">·</span>no CC Pocket account</p>
+
+      <ul class="agent-chips" aria-label="Agent backends in v1.8.0">
+        <li class="agent-chip"><span class="an">Claude Code</span></li>
+        <li class="agent-chip"><span class="an">OpenAI Codex</span></li>
+        <li class="agent-chip"><span class="an">OpenCode</span></li>
+        <li class="agent-chip"><span class="an">Kimi Code</span> <span class="atag mono">Preview</span></li>
+        <li class="agent-chip"><span class="an">ZCode</span></li>
+        <li class="agent-chip"><span class="an">DeepSeek</span> <span class="atag mono"><span class="i18n-en">narrow v1</span><span class="i18n-zh">有限 v1</span></span></li>
+      </ul>
+      <p class="trustline mono">
+        <span class="i18n-en">six agent backends in v1.8.0 <span class="dot">·</span> <a href="#agents">capability differs — see the matrix</a></span>
+        <span class="i18n-zh">v1.8.0 支持六个后端 <span class="dot">·</span> <a href="#agents">能力不一样，看矩阵</a></span>
+      </p>
     </div>
 
     <div class="hero-visual reveal">
-      <!-- phone: chat screen mid-stream -->
-      <div class="phone">
-        <div class="notch"></div>
-        <div class="screen">
-          <div class="app">
-            <div class="app-hd">
-              <div class="row">
-                <span class="dot" style="background:var(--asuccess)"></span>
-                <span class="title">Fix relay reconnect</span>
-                <span style="flex:1"></span>
-                <span class="mono" style="font-size:10px;color:var(--asec);border:1px solid var(--ahair);border-radius:999px;padding:2px 7px">default</span>
-              </div>
-              <div class="ctx">Lidapeng-MacBook · ~/proj/app/cc-pocket</div>
-            </div>
-            <div class="app-body">
-              <div class="atext">The reconnect loop dies after the 3rd retry — the scope owning the timer is cancelled when the socket closes.</div>
-              <div class="tool-row">
-                <span class="dot" style="background:var(--asuccess)"></span>
-                <span class="nm">Bash</span>
-                <span class="tg">gradle :relay:test</span>
-                <span class="meta">9s</span>
-              </div>
-              <div class="codeblock">
-                <div class="cb-hd"><span class="cb-lang">kotlin</span><span class="cb-lang" style="color:var(--asec)">copy</span></div>
-                <pre><span class="hl-k">fun</span> reconnect() {
-  scope.launch {
-    delay(<span class="hl-n">250</span>)
-    open(<span class="hl-s">"relay"</span>)
-    <span class="hl-c">// reconnect guarded</span>
-  }
-}</pre>
-              </div>
-              <div class="atext">Guard added — reconnect now survives scope cancellation.<span class="caret"></span></div>
-            </div>
-            <div class="app-cmp">
-              <span class="mono" style="font-size:14px;color:var(--asec)">+</span>
-              <div class="field">Message Claude…</div>
-              <div class="send"><svg width="14" height="14" viewBox="0 0 18 18" fill="none"><path d="M9 14V4M9 4l-4 4M9 4l4 4" stroke="#0E0F11" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <!-- floating permission card -->
-      <div class="float-perm app">
-        <div style="display:flex;align-items:center;gap:9px;margin-bottom:11px">
-          <span class="perm shield"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8 3v6c0 5.2-3.8 8.6-8 10-4.2-1.4-8-4.8-8-10v-6l8-3z"/></svg></span>
-          <div style="flex:1">
-            <div style="font-size:10px;color:var(--asec)">Claude needs permission</div>
-            <div style="font-size:12.5px;font-weight:600;color:var(--atext)">Run command · Bash</div>
-          </div>
-          <!-- countdown ring -->
-          <svg width="30" height="30" viewBox="0 0 30 30" class="ring">
-            <circle cx="15" cy="15" r="12" stroke="#2A2E33" stroke-width="2.4" fill="none"/>
-            <circle cx="15" cy="15" r="12" stroke="#D97757" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="22"/>
-          </svg>
-        </div>
-        <div class="perm cmd" style="margin-bottom:11px">rm -rf ./build &amp;&amp; ./gradlew clean</div>
-        <div class="perm-btns">
-          <button class="perm-deny">Deny</button>
-          <button class="perm-allow">Allow</button>
-        </div>
-      </div>
+      <figure class="shot-phone">
+        <img class="i18n-en" src="assets/product/control-loop-en-poster.jpg" width="780" height="1688" alt="The CC Pocket phone app holding an approval: 'Run command · Bash', the command it wants to run, a 17-second countdown that auto-denies, and Deny / Allow once / Allow for task." loading="eager" decoding="async" />
+        <img class="i18n-zh" src="assets/product/control-loop-zh-poster.jpg" width="780" height="1688" alt="CC Pocket 手机端拦下一次授权：「运行命令 · Bash」、待执行的命令、17 秒后自动拒绝的倒计时，以及拒绝 / 允许一次 / 本次任务内允许。" loading="eager" decoding="async" />
+        <figcaption class="shot-cap mono">
+          <span class="i18n-en">Real product UI · scripted demo data</span>
+          <span class="i18n-zh">真实产品界面 · 演示数据由脚本生成</span>
+        </figcaption>
+      </figure>
     </div>
   </div>
 </header>
 
-<!-- ══════════════ THE MOMENT ══════════════ -->
-<section class="moment">
-  <div class="wrap reveal">
-    <p class="lead">
-      <span class="q">
-        <span class="i18n-en">You stepped away. Claude is blocked on a permission prompt.</span>
-        <span class="i18n-zh">你离开了工位，Claude 正卡在一个授权弹窗上。</span>
-      </span><br/>
-      <span class="a">
-        <span class="i18n-en">Approve it <b>from your pocket</b> in two taps.</span>
-        <span class="i18n-zh">在<b>口袋里</b>两下点掉它。</span>
-      </span>
-    </p>
-    <div class="mini app">
-      <div style="display:flex;align-items:center;gap:9px;margin-bottom:11px">
-        <span class="perm shield"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8 3v6c0 5.2-3.8 8.6-8 10-4.2-1.4-8-4.8-8-10v-6l8-3z"/></svg></span>
-        <div style="flex:1">
-          <div style="font-size:10px;color:var(--asec)">Claude needs permission</div>
-          <div style="font-size:12.5px;font-weight:600;color:var(--atext)">Edit file</div>
+<!-- ══════════════ 2 · CONTROL LOOP ══════════════ -->
+<section class="section loop" id="loop">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Control loop</span><span class="i18n-zh">控制回路</span></p>
+      <h2><span class="i18n-en">Leave the computer. Stay in the control loop.</span><span class="i18n-zh">人离开电脑，别离开控制回路。</span></h2>
+      <p><span class="i18n-en">One session, start to finish, recorded from the phone app.</span><span class="i18n-zh">一个会话从头到尾，画面取自手机端。</span></p>
+    </div>
+
+    <div class="loop-grid reveal">
+      <ol class="loop-steps" id="loop-steps">
+        <li class="loop-step on" data-at="0">
+          <button type="button" class="loop-btn" aria-pressed="true">
+            <span class="ln mono">01</span>
+            <span class="lb">
+              <strong><span class="i18n-en">Watch</span><span class="i18n-zh">查看</span></strong>
+              <span><span class="i18n-en">What is running, then the stream itself — output, thinking, tool events.</span><span class="i18n-zh">先看这台电脑在跑什么，再看它一句句写——正文、思考、工具事件。</span></span>
+            </span>
+          </button>
+        </li>
+        <li class="loop-step" data-at="3.9">
+          <button type="button" class="loop-btn" aria-pressed="false">
+            <span class="ln mono">02</span>
+            <span class="lb">
+              <strong><span class="i18n-en">Approve</span><span class="i18n-zh">授权</span></strong>
+              <span><span class="i18n-en">It stops at a sensitive command. Allow once, allow for the task, or deny — no answer times out to a deny.</span><span class="i18n-zh">碰到敏感命令它就停。允许一次、本次任务内允许，或者拒绝——不理它，超时也是拒绝。</span></span>
+            </span>
+          </button>
+        </li>
+        <li class="loop-step" data-at="6.0">
+          <button type="button" class="loop-btn" aria-pressed="false">
+            <span class="ln mono">03</span>
+            <span class="lb">
+              <strong><span class="i18n-en">Continue</span><span class="i18n-zh">继续</span></strong>
+              <span><span class="i18n-en">The same session picks up where it stopped and finishes the turn.</span><span class="i18n-zh">同一个会话从断点接着走，把这一轮做完。</span></span>
+            </span>
+          </button>
+        </li>
+        <li class="loop-step" data-at="8.3">
+          <button type="button" class="loop-btn" aria-pressed="false">
+            <span class="ln mono">04</span>
+            <span class="lb">
+              <strong><span class="i18n-en">Inspect</span><span class="i18n-zh">检查</span></strong>
+              <span><span class="i18n-en">Read the line-level diff before you trust the result.</span><span class="i18n-zh">信之前，先把行级 diff 看一遍。</span></span>
+            </span>
+          </button>
+        </li>
+      </ol>
+
+      <figure class="loop-media">
+        <div class="loop-frame">
+          <video class="i18n-en" id="loop-video-en" width="780" height="1688"
+                 poster="assets/product/control-loop-en-poster.jpg"
+                 muted playsinline loop controls preload="none"
+                 aria-label="The CC Pocket control loop: a running session, the live stream, an approval decision, the session continuing, and the resulting line-level diff.">
+            <source src="assets/product/control-loop-en.mp4" type="video/mp4" />
+            <img src="assets/product/control-loop-en-poster.jpg" width="780" height="1688" alt="The CC Pocket phone app holding an approval for a shell command, with a countdown that auto-denies." />
+          </video>
+          <video class="i18n-zh" id="loop-video-zh" width="780" height="1688"
+                 poster="assets/product/control-loop-zh-poster.jpg"
+                 muted playsinline loop controls preload="none"
+                 aria-label="CC Pocket 控制回路：运行中的会话、实时流式输出、一次授权决策、会话继续，以及最后的行级 diff。">
+            <source src="assets/product/control-loop-zh.mp4" type="video/mp4" />
+            <img src="assets/product/control-loop-zh-poster.jpg" width="780" height="1688" alt="CC Pocket 手机端拦下一次 shell 命令授权，倒计时结束会自动拒绝。" />
+          </video>
         </div>
-        <svg width="30" height="30" viewBox="0 0 30 30" class="ring">
-          <circle cx="15" cy="15" r="12" stroke="#2A2E33" stroke-width="2.4" fill="none"/>
-          <circle cx="15" cy="15" r="12" stroke="#D97757" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="40"/>
-        </svg>
-      </div>
-      <div class="perm cmd" style="margin-bottom:11px">src/relay/WsClient.kt</div>
-      <div class="perm-btns">
-        <button class="perm-deny">Deny</button>
-        <button class="perm-allow">Allow</button>
-      </div>
+        <figcaption class="shot-cap mono">
+          <span class="i18n-en">10.5s · no audio · real product UI with scripted demo data</span>
+          <span class="i18n-zh">10.5 秒 · 无声 · 真实产品界面，演示数据由脚本生成</span>
+        </figcaption>
+      </figure>
     </div>
   </div>
 </section>
 
-<!-- ══════════════ FEATURES · the four jobs ══════════════ -->
-<section class="section" id="features">
+<!-- ══════════════ 3 · FOUR JOBS ══════════════ -->
+<section class="section jobs" id="jobs" style="background:var(--surface);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)">
   <div class="wrap">
     <div class="section-head reveal">
-      <p class="eyebrow"><span class="i18n-en">Features</span><span class="i18n-zh">核心特性</span></p>
-      <h2><span class="i18n-en">Four jobs, done from your pocket.</span><span class="i18n-zh">四件事，口袋里搞定。</span></h2>
+      <p class="eyebrow"><span class="i18n-en">Four jobs</span><span class="i18n-zh">四件事</span></p>
+      <h2><span class="i18n-en">Four jobs, one loop.</span><span class="i18n-zh">四件事，一个回路。</span></h2>
+      <p><span class="i18n-en">Not a feature wall — the four things you actually leave your desk needing.</span><span class="i18n-zh">不是功能墙——只是你离开工位后真正要做的那四件事。</span></p>
     </div>
-
-    <!-- 01 · Approve from anywhere -->
-    <div class="feature reveal">
-      <div class="feat-text">
-        <div class="ft-num mono">01</div>
-        <h3><span class="i18n-en">Approve from anywhere</span><span class="i18n-zh">随处批准</span></h3>
-        <p><span class="i18n-en">Tool-permission requests reach your phone the moment the agent raises one. Allow or deny in seconds — and if you don't, it times out to a safe deny.</span><span class="i18n-zh">agent 一请求授权，手机马上收到。允许还是拒绝，几秒钟的事；一时没顾上，超时也会自动拒绝，不会放行。</span></p>
-        <span class="detail-chip mono"><span class="dot" style="background:var(--accent)"></span>auto-deny on timeout</span>
-      </div>
-      <div class="feat-visual">
-        <div class="phone"><div class="notch"></div><div class="screen"><div class="app">
-          <div class="app-hd"><div class="row"><span class="dot" style="background:var(--asuccess)"></span><span class="title">Chat</span></div><div class="ctx">~/proj/app/cc-pocket · ⑂ main</div></div>
-          <div class="app-body" style="justify-content:flex-end;background:rgba(0,0,0,0.25)">
-            <div style="background:var(--araised);border:1px solid var(--ahair);border-radius:14px;padding:13px">
-              <div style="display:flex;align-items:center;gap:9px;margin-bottom:12px">
-                <span class="perm shield"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8 3v6c0 5.2-3.8 8.6-8 10-4.2-1.4-8-4.8-8-10v-6l8-3z"/></svg></span>
-                <div style="flex:1"><div style="font-size:10px;color:var(--asec)">Claude needs permission</div><div style="font-size:13px;font-weight:600">Run command · Bash</div></div>
-              </div>
-              <div class="perm cmd" style="margin-bottom:10px">rm -rf ./build &amp;&amp; ./gradlew clean</div>
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-                <svg width="26" height="26" viewBox="0 0 30 30" class="ring"><circle cx="15" cy="15" r="12" stroke="#2A2E33" stroke-width="2.4" fill="none"/><circle cx="15" cy="15" r="12" stroke="#D97757" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="30"/></svg>
-                <span class="mono" style="font-size:11px;color:var(--asec)">0:18</span>
-                <span style="flex:1"></span>
-                <span class="mono" style="font-size:10px;color:var(--amuted)">⑂ main</span>
-              </div>
-              <div class="perm-btns"><button class="perm-deny">Deny</button><button class="perm-allow">Allow</button></div>
-            </div>
-          </div>
-        </div></div></div>
-      </div>
-    </div>
-
-    <!-- 02 · Pick up any session -->
-    <div class="feature flip reveal">
-      <div class="feat-text">
-        <div class="ft-num mono">02</div>
-        <h3><span class="i18n-en">Take over, don't fork</span><span class="i18n-zh">接管，而不是分叉</span></h3>
-        <p><span class="i18n-en">Resume the exact session you left running — Claude or Codex — or start fresh in any repo. “Continue here” takes a terminal session over <b>in place</b>: no wrapper to launch, no separate mode, no duplicate branch.</span><span class="i18n-zh">电脑上跑着的会话，拿起手机接着聊——Claude 和 Codex 都行；想开新的，哪个仓库都可以。「Continue here」<b>原地</b>接管终端会话：不换启动方式，不开专门模式，也不会分出一条重复的分支。</span></p>
-        <span class="detail-chip mono"><span class="dot" style="background:var(--asec)"></span>💬 12 · ⑂ main · 2h ago</span>
-      </div>
-      <div class="feat-visual">
-        <div class="phone"><div class="notch"></div><div class="screen"><div class="app d-only">
-          <div class="app-hd"><div class="row"><span class="dot" style="background:var(--asuccess)"></span><span class="title">Sessions</span></div><div class="ctx">Lidapeng-MacBook · ⑂ main</div></div>
-          <div class="app-body" style="gap:9px">
-            <div class="sess-new"><span class="pl">+</span><div style="flex:1"><div style="font-size:12.5px;font-weight:600;color:var(--aacc)">New session</div><div class="mono" style="font-size:9.5px;color:var(--amuted);margin-top:1px">~/proj/app/cc-pocket</div></div></div>
-            <div class="sess-card"><div class="st">Refactor auth module</div><div class="pv">add a unit test for the stream parser</div><div class="mt">💬 12 · ⑂ main · 2h ago</div></div>
-            <div class="sess-card"><div class="st">Nightly test sweep <span class="tag-codex mono">codex</span></div><div class="pv">run the flaky suite 20× and bisect</div><div class="mt">💬 6 · ⑂ fix/parser · 5h ago</div></div>
-            <div class="sess-card"><div class="st">Add relay websocket client</div><div class="pv">scaffold the Ktor WS client with reconnect</div><div class="mt">💬 23 · ⑂ feat/relay · yesterday</div></div>
-          </div>
-        </div>
-        <!-- mobile variant (Site 1.5 · M2): the takeover flow, not the list -->
-        <div class="app m-only">
-          <div class="app-hd"><div class="row"><span class="dot" style="background:var(--asuccess)"></span><span class="title">Resume session</span></div><div class="ctx">Lidapeng-MacBook · ~/proj/app/cc-pocket</div></div>
-          <div class="app-body">
-            <div class="takeover">
-              <div class="mono" style="font-size:9px;color:var(--amuted);letter-spacing:0.12em;text-transform:uppercase">Live on terminal</div>
-              <div class="to-live"><span class="pulse"></span><span class="nm">Fix relay reconnect</span><span class="src">terminal</span></div>
-              <div class="atext amuted" style="font-size:11.5px">Running on <span class="mono" style="font-size:10.5px">Lidapeng-MacBook</span> · 💬 12 · ⑂ main</div>
-              <div class="to-arrow"><svg width="16" height="20" viewBox="0 0 16 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v13M3.5 11.5L8 16l4.5-4.5"/></svg></div>
-              <div class="to-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0E0F11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg><span>Continue on this phone</span></div>
-              <div class="to-note"><span class="x"><svg width="14" height="14" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9.5l3.5 3.5 7.5-8"/></svg></span><span>resumes in place · ⑂ no fork</span></div>
-            </div>
-          </div>
-        </div>
-        </div></div>
-      </div>
-    </div>
-
-    <!-- 03 · See what changed -->
-    <div class="feature reveal">
-      <div class="feat-text">
-        <div class="ft-num mono">03</div>
-        <h3><span class="i18n-en">See what changed</span><span class="i18n-zh">看清每一处改动</span></h3>
-        <p><span class="i18n-en">Line-level diffs with per-language highlighting, right on your phone. Text is selectable, you can preview or export the patch, and tapping a path opens the file.</span><span class="i18n-zh">行级 diff 直接在手机上看，按语言高亮。文字能选中，补丁能预览、能导出，点一下路径就打开文件。</span></p>
-        <span class="detail-chip mono"><span class="dot" style="background:var(--accent)"></span><span style="color:var(--success)">+42</span>&nbsp;<span style="color:var(--danger)">−7</span></span>
-      </div>
-      <div class="feat-visual">
-        <div class="phone"><div class="notch"></div><div class="screen"><div class="app filesscreen">
-          <div class="app-hd">
-            <div class="row">
-              <span class="dot" style="background:var(--asuccess)"></span>
-              <span class="title">Files changed</span>
-              <span style="flex:1"></span>
-              <span class="mono" style="font-size:10px;color:var(--asec)">2 files · <span style="color:var(--asuccess)">+73</span> <span style="color:var(--adanger)">−16</span></span>
-            </div>
-            <div class="ctx">~/proj/app/cc-pocket · ⑂ main</div>
-          </div>
-          <div class="app-body" style="gap:9px">
-            <div class="fr"><span class="st A">A</span><div class="mid"><div class="fn">useReconnect.kt</div><div class="dir">src/net</div></div><div class="rt"><span class="stat"><span class="plus">+42</span></span></div></div>
-            <div class="fr exp"><span class="st M">M</span><div class="mid"><div class="fn">WsClient.kt</div><div class="dir">src/net/relay</div></div><div class="rt"><span class="stat"><span class="plus">+31</span> <span class="minus">−9</span></span></div></div>
-            <div class="mdiff">
-              <div class="mdh"><span class="lang">kotlin</span><span>·</span><span>WsClient.kt</span><span class="at">@@ −12,4 +12,6 @@</span></div>
-              <div class="ml"><span class="g">12</span><span class="s"></span><span class="c"><span class="hl-k">fun</span> reconnect() {</span></div>
-              <div class="ml del"><span class="g">13</span><span class="s">−</span><span class="c">  scope.launch { open() }</span></div>
-              <div class="ml add"><span class="g">13</span><span class="s">+</span><span class="c">  appScope.launch {</span></div>
-              <div class="ml add"><span class="g">14</span><span class="s">+</span><span class="c">    delay(backoff); open(<span class="hl-s">"relay"</span>)</span></div>
-              <div class="ml add"><span class="g">15</span><span class="s">+</span><span class="c">  } <span class="hl-c">// survives cancel</span></span></div>
-              <div class="ml"><span class="g">16</span><span class="s"></span><span class="c">}</span></div>
-            </div>
-          </div>
-        </div></div></div>
-      </div>
-    </div>
-
-    <!-- 04 · It finds you — and loses nothing -->
-    <div class="feature flip reveal">
-      <div class="feat-text">
-        <div class="ft-num mono">04</div>
-        <h3><span class="i18n-en">It finds you — and loses nothing</span><span class="i18n-zh">它会找到你——且不丢一个字</span></h3>
-        <p><span class="i18n-en">A push notification lands the moment a turn finishes. If the connection blips mid-stream, the missed output is backfilled on reconnect — the transcript is always complete.</span><span class="i18n-zh">回合一结束，推送就到。中途断了网也不要紧——重连那一刻，漏掉的输出自动补齐，记录始终完整。</span></p>
-        <span class="detail-chip mono"><span class="dot" style="background:var(--accent)"></span>reconnected · backfilled</span>
-      </div>
-      <div class="feat-visual">
-        <div class="phone"><div class="notch"></div><div class="screen">
-          <!-- system push banner overlaying the top edge -->
-          <div class="pushb app">
-            <span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#0E0F11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10.5 18.5h3"/></svg></span>
-            <div class="tw"><div class="app-name">CC Pocket</div><div class="msg">Claude finished · Fix relay reconnect</div></div>
-            <span class="ago">now</span>
-          </div>
-          <div class="app" style="padding-top:60px">
-            <div class="app-hd">
-              <div class="row">
-                <span class="dot" style="background:var(--asuccess)"></span>
-                <span class="title">Fix relay reconnect</span>
-                <span style="flex:1"></span>
-                <span class="mono" style="font-size:10px;color:var(--asec);border:1px solid var(--ahair);border-radius:999px;padding:2px 7px">default</span>
-              </div>
-              <div class="ctx">Lidapeng-MacBook · ~/proj/app/cc-pocket</div>
-            </div>
-            <div class="app-body">
-              <div class="atext">The reconnect loop dies after the 3rd retry — the scope owning the timer is cancelled when the socket closes.</div>
-              <div class="sdiv"><span class="rule"></span><span class="lbl">reconnected — output backfilled</span><span class="rule"></span></div>
-              <div class="atext">I hoisted the backoff timer to an app-level scope, so it survives the socket closing. Re-running the relay suite now.<span class="caret"></span></div>
-              <div class="tool-row"><span class="spin"></span><span class="nm">Bash</span><span class="tg">gradle :relay:test</span></div>
-            </div>
-          </div>
-        </div></div>
-      </div>
+    <div class="job-grid">
+      <article class="job-card reveal">
+        <p class="jn mono">01</p>
+        <h3><span class="i18n-en">Watch</span><span class="i18n-zh">查看</span></h3>
+        <p class="jr"><span class="i18n-en">See what the agent is doing without walking back to the desk.</span><span class="i18n-zh">人不在电脑前，也知道 agent 干到哪一步了。</span></p>
+        <ul>
+          <li><span class="i18n-en">Streaming output, syntax-highlighted code, tool events with timing.</span><span class="i18n-zh">流式输出、带高亮的代码块、带耗时的工具事件。</span></li>
+          <li><span class="i18n-en">Sub-agent cards and background-task state.</span><span class="i18n-zh">子 agent 卡片和后台任务状态。</span></li>
+          <li><span class="i18n-en">Filter projects, sessions and usage by agent.</span><span class="i18n-zh">项目、会话、用量都能按 agent 筛。</span></li>
+        </ul>
+      </article>
+      <article class="job-card reveal">
+        <p class="jn mono">02</p>
+        <h3><span class="i18n-en">Approve</span><span class="i18n-zh">授权</span></h3>
+        <p class="jr"><span class="i18n-en">Unblock a stopped agent from wherever you are — or refuse it.</span><span class="i18n-zh">agent 卡住了，随手放行，或者拒掉。</span></p>
+        <ul>
+          <li><span class="i18n-en">The request reaches your phone the moment it is raised.</span><span class="i18n-zh">它一开口请求，手机立刻收到。</span></li>
+          <li><span class="i18n-en">No answer times out to a safe deny — never a silent allow.</span><span class="i18n-zh">没顾上，超时自动拒绝——绝不会静默放行。</span></li>
+          <li><span class="i18n-en">Execution modes and per-session allow rules you can inspect and revoke. <a href="#agents">Not every backend can enforce them.</a></span><span class="i18n-zh">执行模式和会话级允许规则都能查、能撤。<a href="#agents">但不是每个后端都执行得了。</a></span></li>
+        </ul>
+      </article>
+      <article class="job-card reveal">
+        <p class="jn mono">03</p>
+        <h3><span class="i18n-en">Continue</span><span class="i18n-zh">继续</span></h3>
+        <p class="jr"><span class="i18n-en">Pick the same session back up instead of starting over.</span><span class="i18n-zh">接着原来那个会话往下走，不用重开。</span></p>
+        <ul>
+          <li><span class="i18n-en">Take over a running session <em>in place</em>; it only forks while the terminal is genuinely still writing.</span><span class="i18n-zh"><em>原地</em>接管正在跑的会话；只有终端那头真的还在写时才分叉。</span></li>
+          <li><span class="i18n-en">Start a new task straight from the phone or the desktop app.</span><span class="i18n-zh">手机和桌面 App 都能直接起一个新任务。</span></li>
+          <li><span class="i18n-en">Output missed during a dropout is backfilled on reconnect.</span><span class="i18n-zh">掉线期间漏掉的输出，重连后补齐。</span></li>
+        </ul>
+      </article>
+      <article class="job-card reveal">
+        <p class="jn mono">04</p>
+        <h3><span class="i18n-en">Inspect</span><span class="i18n-zh">检查</span></h3>
+        <p class="jr"><span class="i18n-en">Read what actually changed before you trust the result.</span><span class="i18n-zh">结果值不值得信，先看它到底改了什么。</span></p>
+        <ul>
+          <li><span class="i18n-en">Changed files with line-level diffs and file preview. <a href="#agents">Claude Code and Codex only.</a></span><span class="i18n-zh">改动文件、行级 diff、文件预览。<a href="#agents">只有 Claude Code 和 Codex 有。</a></span></li>
+          <li><span class="i18n-en">Context and usage — Kimi Code and ZCode report usage in v1.8.0.</span><span class="i18n-zh">上下文与用量——Kimi Code 和 ZCode 在 v1.8.0 也有用量了。</span></li>
+          <li><span class="i18n-en">Images in your own prompts stay visible in session replay.</span><span class="i18n-zh">自己发的提示词里的图片，回放时还在。</span></li>
+        </ul>
+      </article>
     </div>
   </div>
 </section>
 
-<!-- ══════════════ DESKTOP + FLEET ══════════════ -->
-<section class="section" id="desktop" style="background:var(--surface);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)">
+<!-- ══════════════ 4 · AGENT SUPPORT ══════════════ -->
+<section class="section" id="agents">
   <div class="wrap">
     <div class="section-head reveal">
-      <p class="eyebrow"><span class="i18n-en">Desktop edition</span><span class="i18n-zh">桌面版</span></p>
-      <h2><span class="i18n-en">One app. Every computer.</span><span class="i18n-zh">一个应用，掌控每台电脑。</span></h2>
-      <p><span class="i18n-en">A native app for macOS, Linux and Windows — drive one computer from another, wrapped in the same end-to-end encryption as your phone. The phone triages; the desktop commands.</span><span class="i18n-zh">macOS、Linux、Windows 三端原生应用——用一台电脑操控另一台，加密和手机端同一套。手机管分诊，桌面管指挥。</span></p>
+      <p class="eyebrow"><span class="i18n-en">Agent support</span><span class="i18n-zh">Agent 支持</span></p>
+      <h2><span class="i18n-en">Six backends. Not the same six capabilities.</span><span class="i18n-zh">六个后端，能力并不一样。</span></h2>
+      <p>
+        <span class="i18n-en">Capability claims for v1.8.0 were audited against commit <a href="https://github.com/heypandax/cc-pocket/commit/6162816a" class="mono" target="_blank" rel="noopener">6162816a</a> on <span class="mono">main</span>. Machine-readable: <a href="public-capabilities.json" class="mono">public-capabilities.json</a>.</span>
+        <span class="i18n-zh">v1.8.0 的公开能力已对照 <span class="mono">main</span> 分支的 <a href="https://github.com/heypandax/cc-pocket/commit/6162816a" class="mono" target="_blank" rel="noopener">6162816a</a> 提交核验。机器可读版本：<a href="public-capabilities.json" class="mono">public-capabilities.json</a>。</span>
+      </p>
     </div>
 
-    <div class="s1-mock reveal">
-      <!-- desktop app window -->
-      <div class="win appdark">
-        <div class="win-bar">
-          <div class="win-lights"><i></i><i></i><i></i></div>
-          <div class="win-titlewrap">
-            <div class="win-title">Fix relay reconnect</div>
-            <div class="win-meta">Lidapeng-MacBook · ~/proj/app/cc-pocket</div>
-          </div>
-        </div>
-        <div class="win-body">
-          <aside class="ds-side">
-            <div>
-              <div class="ds-zlabel"><span class="i18n-en">Pinned</span><span class="i18n-zh">已固定</span></div>
-              <div class="ds-group">
-                <div class="ds-row">
-                  <svg class="pin-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9BA1A6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s6.5-5.7 6.5-11A6.5 6.5 0 0 0 5.5 10c0 5.3 6.5 11 6.5 11z"/><circle cx="12" cy="10" r="2.2"/></svg>
-                  <span class="nm">relay · reconnect</span><span class="kbd">⌘1</span>
-                </div>
-                <div class="ds-row">
-                  <svg class="pin-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9BA1A6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s6.5-5.7 6.5-11A6.5 6.5 0 0 0 5.5 10c0 5.3 6.5 11 6.5 11z"/><circle cx="12" cy="10" r="2.2"/></svg>
-                  <span class="nm">dashboard · api</span>
-                </div>
-              </div>
-            </div>
-            <div>
-              <div class="ds-zlabel"><span class="i18n-en">Running</span><span class="i18n-zh">运行中</span></div>
-              <div class="ds-group">
-                <div class="ds-row"><span class="pulse"></span><span class="nm">Refactor auth module</span><span class="mtag">mac-studio</span></div>
-                <div class="ds-row"><span class="pulse"></span><span class="nm">Nightly test sweep</span><span class="mtag">devbox</span></div>
-              </div>
-            </div>
-            <div>
-              <div class="ds-zlabel"><span class="i18n-en">Recent</span><span class="i18n-zh">最近</span></div>
-              <div class="ds-group">
-                <div class="ds-phead">~/proj/app/cc-pocket</div>
-                <div class="ds-row sel"><span class="nm">Fix relay reconnect</span><span class="rmeta">2h</span></div>
-                <div class="ds-row"><span class="nm">Fix stream parser test</span><span class="rmeta">5h</span></div>
-              </div>
-            </div>
-          </aside>
-          <section class="ds-chat">
-            <div class="ds-chat-hd">
-              <span class="t">Fix relay reconnect</span>
-              <span class="ds-mode">default</span>
-              <span class="ds-kebab"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><circle cx="4" cy="10" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="16" cy="10" r="1.5"/></svg></span>
-            </div>
-            <div class="ds-chat-body">
-              <div class="atext">The reconnect loop dies after the 3rd retry — the scope owning the timer is cancelled when the socket closes. I'll hoist the backoff timer to the parent scope.</div>
-              <div class="tool-row">
-                <span class="dot" style="background:var(--asuccess)"></span>
-                <span class="nm">Bash</span>
-                <span class="tg">gradle :daemon:test</span>
-                <span class="meta">12s</span>
-              </div>
-              <div class="codeblock">
-                <div class="cb-hd"><span class="cb-lang">kotlin</span><span class="cb-lang" style="color:var(--asec)">copy</span></div>
-<pre><span class="hl-k">fun</span> reconnect(): Job {
-  <span class="hl-k">val</span> backoff = <span class="hl-n">250</span>
-  <span class="hl-k">return</span> scope.launch {
-    log(<span class="hl-s">"relay: reopening"</span>)
-    delay(backoff)
-  }
-}  <span class="hl-c">// survives cancellation</span></pre>
-              </div>
-              <div class="atext amuted">Guard added — reconnect now survives scope cancellation.<span class="caret"></span></div>
-            </div>
-            <div class="ds-cmp">
-              <div class="field">Message Claude…</div>
-              <span class="esc"><span class="k">esc</span> stop</span>
-            </div>
-          </section>
-        </div>
-      </div>
+    <div class="matrix-wrap reveal">
+      <table class="matrix">
+        <caption class="sr-only"><span class="i18n-en">Agent backend capability matrix for v1.8.0: core session, approval and mode, changes and diff, usage.</span><span class="i18n-zh">v1.8.0 的 agent 后端能力矩阵：核心会话、审批与模式、改动与 diff、用量。</span></caption>
+        <thead>
+          <tr>
+            <th scope="col"><span class="i18n-en">Agent</span><span class="i18n-zh">Agent</span></th>
+            <th scope="col"><span class="i18n-en">Core session</span><span class="i18n-zh">核心会话</span></th>
+            <th scope="col"><span class="i18n-en">Approval &amp; mode</span><span class="i18n-zh">审批与模式</span></th>
+            <th scope="col"><span class="i18n-en">Changes &amp; diff</span><span class="i18n-zh">改动与 diff</span></th>
+            <th scope="col"><span class="i18n-en">Usage</span><span class="i18n-zh">用量</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr data-agent="claude">
+            <th scope="row"><span class="anm">Claude Code</span></th>
+            <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="approvalMode" data-state="yes" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="changesDiff" data-state="yes" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="usage" data-state="yes" data-label-en="Usage" data-label-zh="用量"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+          </tr>
+          <tr data-agent="codex">
+            <th scope="row"><span class="anm">OpenAI Codex</span></th>
+            <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="approvalMode" data-state="yes" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="changesDiff" data-state="yes" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="usage" data-state="yes" data-label-en="Usage" data-label-zh="用量"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+          </tr>
+          <tr data-agent="opencode">
+            <th scope="row"><span class="anm">OpenCode</span></th>
+            <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="approvalMode" data-state="no" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span><span class="cell-note"><span class="i18n-en">Always Full access</span><span class="i18n-zh">恒为 Full access</span></span></td>
+            <td data-cap="changesDiff" data-state="no" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span></td>
+            <td data-cap="usage" data-state="yes" data-label-en="Usage" data-label-zh="用量"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+          </tr>
+          <tr data-agent="opencode-warn" class="matrix-warn">
+            <td colspan="5">
+              <span class="warn-mark mono" aria-hidden="true">!</span>
+              <span class="i18n-en"><b>OpenCode has no enforceable interactive approval.</b> <span class="mono">opencode run</span> has no approval protocol, so those sessions run at <b>Full access</b>. CC Pocket says so up front instead of offering modes it cannot enforce.</span>
+              <span class="i18n-zh"><b>OpenCode 没有可执法的交互审批。</b><span class="mono">opencode run</span> 本身就没有审批协议，所以这类会话恒为 <b>Full access</b>。CC Pocket 会直接说明，而不是摆出一排它根本管不住的模式。</span>
+            </td>
+          </tr>
+          <tr data-agent="kimi">
+            <th scope="row"><span class="anm">Kimi Code</span> <span class="atag mono">Preview</span></th>
+            <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="approvalMode" data-state="yes" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="changesDiff" data-state="no" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span></td>
+            <td data-cap="usage" data-state="yes" data-label-en="Usage" data-label-zh="用量"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span><span class="cell-note"><span class="i18n-en">New in v1.8.0</span><span class="i18n-zh">v1.8.0 新增</span></span></td>
+          </tr>
+          <tr data-agent="zcode">
+            <th scope="row"><span class="anm">ZCode</span></th>
+            <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="approvalMode" data-state="yes" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="changesDiff" data-state="no" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span></td>
+            <td data-cap="usage" data-state="yes" data-label-en="Usage" data-label-zh="用量"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span><span class="cell-note"><span class="i18n-en">New in v1.8.0</span><span class="i18n-zh">v1.8.0 新增</span></span></td>
+          </tr>
+          <tr data-agent="deepseek">
+            <th scope="row"><span class="anm">DeepSeek Harness</span> <span class="atag mono"><span class="i18n-en">narrow v1</span><span class="i18n-zh">有限 v1</span></span></th>
+            <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span><span class="cell-note"><span class="i18n-en">Discover, replay, create, resume, text, live streaming</span><span class="i18n-zh">发现、回放、新建、恢复、收发文本、实时流式</span></span></td>
+            <td data-cap="approvalMode" data-state="limited" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-lim"><span class="sym" aria-hidden="true">△</span><span class="i18n-en">Limited</span><span class="i18n-zh">有限</span></span><span class="cell-note"><span class="i18n-en">Startup sandbox default only; remote approval not bridged, fail-closed</span><span class="i18n-zh">仅启动时的 sandbox 默认值；远程审批未桥接，失败即拒</span></span></td>
+            <td data-cap="changesDiff" data-state="no" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span></td>
+            <td data-cap="usage" data-state="no" data-label-en="Usage" data-label-zh="用量"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span></td>
+          </tr>
+          <tr data-agent="deepseek-warn" class="matrix-warn">
+            <td colspan="5">
+              <span class="warn-mark mono" aria-hidden="true">!</span>
+              <span class="i18n-en"><b>DeepSeek is supported, but narrow.</b> Sessions work end to end; there is no remote approval bridge (requests fail closed), no Changed-files or diff view, no usage accounting, and no model switching. It is not marked Preview — the parts that exist are shipped, they are just fewer.</span>
+              <span class="i18n-zh"><b>DeepSeek 已支持，但很窄。</b>会话本身能完整跑通；但远程审批没有桥接（请求失败即拒）、没有改动文件与 diff、没有用量统计、不能切换模型。它没有标 Preview——做了的部分是正式的，只是少。</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="matrix-foot">
+        <span class="i18n-en"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span>Yes</span> <span class="st st-lim"><span class="sym" aria-hidden="true">△</span>Limited</span> <span class="st st-no"><span class="sym" aria-hidden="true">✕</span>No</span> — symbol and text, never colour alone. <b>Core session</b> means discover, replay, create, resume, send and receive text, and live streaming. Capability boundaries follow the release; full detail in <a href="features.html">Features</a> and the <a href="https://pocket.ark-nexus.cc/manual/en/">User manual</a>.</span>
+        <span class="i18n-zh"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span>支持</span> <span class="st st-lim"><span class="sym" aria-hidden="true">△</span>有限</span> <span class="st st-no"><span class="sym" aria-hidden="true">✕</span>不支持</span>——符号加文字，不靠颜色区分。<b>核心会话</b>指发现、回放、新建、恢复、收发文本和实时流式。能力边界跟随正式 Release；完整说明见<a href="features.html">能力页</a>与<a href="https://pocket.ark-nexus.cc/manual/zh/">用户手册</a>。</span>
+      </p>
+    </div>
+  </div>
+</section>
 
-      <!-- floating fleet overview card -->
-      <div class="fleet appdark">
-        <div class="fleet-hd">
-          <span class="ttl">3 computers</span>
-          <span class="sub">1 needs you</span>
-        </div>
-        <div class="mrow">
-          <svg class="os" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2.5 19h19"/></svg>
-          <span class="nm">Lidapeng-MacBook</span>
-          <span class="sdot on"></span>
-          <span class="badge acc">2 running</span>
-        </div>
-        <div class="mrow approve">
-          <svg class="os" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="10" rx="2"/><path d="M8 19h8M12 15.5V19"/></svg>
-          <span class="nm">mac-studio</span>
-          <span class="sdot on"></span>
-          <span class="badge warn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8 3v6c0 5.2-3.8 8.6-8 10-4.2-1.4-8-4.8-8-10v-6l8-3z"/></svg>
-            1 approval
-          </span>
-        </div>
-        <div class="mrow offline">
-          <svg class="os" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M7 9l3 2.5-3 2.5M13 14.5h4"/></svg>
-          <span class="nm">devbox-linux</span>
-          <span class="sdot off"></span>
-          <span class="off-tag">offline</span>
-        </div>
-      </div>
+<!-- ══════════════ 5 · PRODUCT SURFACES ══════════════ -->
+<section class="section" id="surfaces" style="background:var(--surface);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Product surfaces</span><span class="i18n-zh">产品组成</span></p>
+      <h2><span class="i18n-en">Four pieces. Each one has a job.</span><span class="i18n-zh">四个组成，各管一段。</span></h2>
+      <p><span class="i18n-en">The desktop app and the local daemon are different packages — a common mix-up worth getting right before you install.</span><span class="i18n-zh">桌面 App 和本机 daemon 是两个不同的安装包——装之前先分清，能省一轮折腾。</span></p>
     </div>
 
-    <div class="mini3 reveal">
-      <div class="mi">
-        <svg class="mci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10.5 10h.01M14.5 10h.01M18 10h.01M7 14h10"/></svg>
-        <div>
-          <div class="mt"><span class="mono">⌘K</span> <span class="i18n-en">everywhere</span><span class="i18n-zh">随处可用</span></div>
-          <div class="md"><span class="i18n-en">Jump to any project or session.</span><span class="i18n-zh">跳转到任意项目或会话。</span></div>
-        </div>
+    <div class="surface-map reveal">
+      <div class="surface">
+        <p class="sname"><span class="i18n-en">Phone &amp; tablet app</span><span class="i18n-zh">手机与平板 App</span></p>
+        <p class="sdesc"><span class="i18n-en">Where you watch, approve, continue and inspect. iOS · iPadOS · Android.</span><span class="i18n-zh">查看、授权、继续、检查都在这儿。iOS · iPadOS · Android。</span></p>
       </div>
-      <div class="mi">
-        <svg class="mci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9a5.5 5.5 0 0 1 11 0c0 5 2 6 2 6H4.5s2-1 2-6z"/><path d="M9.8 20.5a2.4 2.4 0 0 0 4.4 0"/></svg>
-        <div>
-          <div class="mt"><span class="i18n-en">Approvals follow you</span><span class="i18n-zh">授权跟着你走</span></div>
-          <div class="md"><span class="i18n-en">Tray popover when the window's behind.</span><span class="i18n-zh">窗口在后台时，托盘弹窗提醒。</span></div>
-        </div>
+      <div class="surface">
+        <p class="sname"><span class="i18n-en">Desktop app</span><span class="i18n-zh">桌面 App</span></p>
+        <p class="sdesc"><span class="i18n-en">The same client as a two-pane console — one computer driving another. macOS · Windows.</span><span class="i18n-zh">同一个客户端的两栏控制台——用一台电脑操另一台。macOS · Windows。</span></p>
       </div>
-      <div class="mi">
-        <svg class="mci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s6.5-5.7 6.5-11A6.5 6.5 0 0 0 5.5 10c0 5.3 6.5 11 6.5 11z"/><circle cx="12" cy="10" r="2.2"/></svg>
-        <div>
-          <div class="mt"><span class="i18n-en">Pinned sessions</span><span class="i18n-zh">固定会话</span></div>
-          <div class="md"><span class="mono">⌘1–9</span> <span class="i18n-en">to jump straight in.</span><span class="i18n-zh">一键直达。</span></div>
-        </div>
+      <div class="surface">
+        <p class="sname"><span class="i18n-en">Local daemon</span><span class="i18n-zh">本机 daemon</span></p>
+        <p class="sdesc"><span class="i18n-en">Runs on the computer that owns your code and drives the agent CLI. macOS · Linux · Windows.</span><span class="i18n-zh">跑在放着你代码的那台电脑上，驱动 agent CLI。macOS · Linux · Windows。</span></p>
+      </div>
+      <div class="surface">
+        <p class="sname"><span class="i18n-en">Zero-knowledge relay</span><span class="i18n-zh">零知识中继</span></p>
+        <p class="sdesc"><span class="i18n-en">Pairs your devices and forwards ciphertext. Hosted for you, or run your own.</span><span class="i18n-zh">帮设备配对、转发密文。默认用托管的，也可以自建。</span></p>
       </div>
     </div>
 
-    <p class="dl-desktop-line reveal">
-      <span class="i18n-en">Get the desktop app: <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg" style="color:var(--accent)">macOS · Apple Silicon</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg" style="color:var(--accent)">macOS · Intel</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi" style="color:var(--accent)">Windows (.msi)</a> — full setup in <a href="#start" style="color:var(--accent)">Get started</a>.</span>
-      <span class="i18n-zh">下载桌面端：<a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg" style="color:var(--accent)">macOS · Apple 芯片</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg" style="color:var(--accent)">macOS · Intel</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi" style="color:var(--accent)">Windows（.msi）</a>——完整安装步骤见<a href="#start" style="color:var(--accent)">开始使用</a>。</span>
+    <figure class="shot-desktop reveal">
+      <img src="assets/product/desktop-console.png" width="1600" height="1082" loading="lazy" decoding="async"
+           alt="The CC Pocket desktop app: a sidebar of paired machines with pinned and running sessions, the live session transcript in the middle, and a terminal pane on the right." />
+      <figcaption class="shot-cap mono">
+        <span class="i18n-en">Desktop app · real product UI with scripted demo data</span>
+        <span class="i18n-zh">桌面 App · 真实产品界面，演示数据由脚本生成</span>
+      </figcaption>
+    </figure>
+
+    <p class="surface-foot reveal">
+      <span class="i18n-en">Pair several computers and one screen shows each machine's state, running projects and waiting approvals. That is an overview you drive — not an automatic team that runs itself.</span>
+      <span class="i18n-zh">配几台电脑，一屏就能看到每台的状态、在跑的项目和等着批的授权。这是一个由你操作的总览——不是一支自己跑起来的自动团队。</span>
     </p>
   </div>
 </section>
 
-<!-- ══════════════ MORE CAPABILITIES ══════════════ -->
-<section class="section" id="more">
-  <div class="wrap">
-    <div class="section-head reveal">
-      <p class="eyebrow"><span class="i18n-en">More capabilities</span><span class="i18n-zh">更多能力</span></p>
-      <h2><span class="i18n-en">And a lot more in your pocket.</span><span class="i18n-zh">口袋里，还有很多。</span></h2>
-      <p><span class="i18n-en">The four jobs are the headline — here's the rest of what ships in the app, on phone and desktop alike.</span><span class="i18n-zh">四件事是主线，下面是 App 里其余的能力——手机与桌面同样齐全。</span></p>
-    </div>
-    <div class="sec-grid cols3">
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 20v-6M12 20v-11M17 20v-4"/></svg></div>
-        <h4><span class="i18n-en">Usage insights</span><span class="i18n-zh">用量洞察</span></h4>
-        <p><span class="i18n-en">Tokens, estimated cost, and a calm hour-by-hour trend — accounting that soothes, not alarms.</span><span class="i18n-zh">token 用量、预估花费、一天的节奏排成安静的小柱——像记账，不像报警。</span></p>
-      </div>
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8 3v6c0 5.2-3.8 8.6-8 10-4.2-1.4-8-4.8-8-10v-6l8-3z"/><path d="M9 12l2 2 4-4.5"/></svg></div>
-        <h4><span class="i18n-en">Control &amp; permissions</span><span class="i18n-zh">掌控与授权</span></h4>
-        <p><span class="i18n-en">Approve or deny every tool call from your phone, with a timeout that fails safe to deny.</span><span class="i18n-zh">每次工具调用都由你在手机上放行或拦下；超时没批的，默认拒绝。</span></p>
-      </div>
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4.4" rx="1.6"/><rect x="3" y="9.8" width="13" height="4.4" rx="1.6"/><rect x="3" y="15.6" width="9" height="4.4" rx="1.6"/></svg></div>
-        <h4><span class="i18n-en">Agents &amp; workflows</span><span class="i18n-zh">多代理与编排</span></h4>
-        <p><span class="i18n-en">Fan work out across many agents and phases, and watch the whole run stay legible.</span><span class="i18n-zh">活儿分给一群 agent、拆成几个阶段去跑，全程看得清清楚楚。</span></p>
-      </div>
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="10.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></div>
-        <h4><span class="i18n-en">Ways to talk to it</span><span class="i18n-zh">多种输入</span></h4>
-        <p><span class="i18n-en">Type, dictate, or drop in a screenshot — the composer takes text, voice, images, files and video.</span><span class="i18n-zh">打字、口述，或者直接丢张截图——文字、语音、图片、文件、视频都收。</span></p>
-      </div>
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3.5l2-6.5 3.5 13 2.2-6.5H21"/></svg></div>
-        <h4><span class="i18n-en">Watch it think, live</span><span class="i18n-zh">实时看它思考</span></h4>
-        <p><span class="i18n-en">Real-time streaming output, code blocks, and tool events — exactly as the terminal renders them.</span><span class="i18n-zh">实时流式输出、代码块、工具事件——和终端渲染的一模一样。</span></p>
-      </div>
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="9" height="6.5" rx="1.4"/><path d="M5 14.5h4"/><rect x="12.5" y="9.5" width="9" height="6.5" rx="1.4"/><path d="M15 19h4"/><circle cx="20" cy="6" r="1.4" fill="currentColor" stroke="none"/></svg></div>
-        <h4><span class="i18n-en">Fleet overview</span><span class="i18n-zh">多机总览</span></h4>
-        <p><span class="i18n-en">Every paired computer in one list — who's online, who's running, who needs an approval.</span><span class="i18n-zh">所有已配对电脑一张列表——谁在线、谁在跑、谁在等你批准。</span></p>
-      </div>
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.4A1.6 1.6 0 0 1 4.6 4.8h3.3l1.6 1.7h6.9A1.6 1.6 0 0 1 18 8.1v2.4"/><path d="M3 9v9a1.6 1.6 0 0 0 1.6 1.6H12"/><circle cx="17.5" cy="15" r="2.2"/><path d="M13.8 20.5a3.7 3.7 0 0 1 7.4 0"/></svg></div>
-        <h4><span class="i18n-en">Share a folder</span><span class="i18n-zh">共享一个文件夹</span></h4>
-        <p><span class="i18n-en">Lend a guest one directory with a live agent — scoped, expiring, revocable, honest about limits.</span><span class="i18n-zh">借出一个目录，外加一个能干活的 agent——范围锁死、到期自动收回、随时可撤，能碰什么写得明明白白。</span></p>
-      </div>
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6.5" width="13" height="9" rx="2.2"/><path d="M6 15.5v3l3.5-3"/><path d="M8 3.5h9.5A2 2 0 0 1 19.5 5.5v9"/></svg></div>
-        <h4><span class="i18n-en">Sessions &amp; groups</span><span class="i18n-zh">会话与分组</span></h4>
-        <p><span class="i18n-en">Resume any session in place, or organize them into groups per project and per machine.</span><span class="i18n-zh">原地接起任何会话，或按项目、按机器把它们分组。</span></p>
-      </div>
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10" width="15" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
-        <h4><span class="i18n-en">Private by design</span><span class="i18n-zh">为隐私而设计</span></h4>
-        <p><span class="i18n-en">End-to-end encrypted, zero-knowledge relay, no account — plaintext never leaves your endpoints.</span><span class="i18n-zh">端到端加密、零知识中继、免账号——明文永远不离开你的两个端点。</span></p>
-      </div>
-    </div>
-    <div class="reveal" style="text-align:center;margin-top:48px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-      <a class="btn btn-primary" href="#start">
-        <span class="i18n-en">Get the app</span><span class="i18n-zh">获取 App</span>
-      </a>
-      <a class="btn btn-ghost" href="features.html">
-        <span class="i18n-en">See everything it does →</span><span class="i18n-zh">查看全部能力 →</span>
-      </a>
-    </div>
-  </div>
-</section>
-
-<!-- ══════════════ HOW IT WORKS ══════════════ -->
-<section class="section arch" id="how">
-  <div class="wrap">
-    <div class="section-head reveal">
-      <p class="eyebrow"><span class="i18n-en">How it works</span><span class="i18n-zh">工作原理</span></p>
-      <h2><span class="i18n-en">A zero-knowledge bridge, phone to computer.</span><span class="i18n-zh">从手机到电脑的零知识桥接。</span></h2>
-    </div>
-    <div class="arch-flow reveal">
-      <div class="node">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg></div>
-        <div class="nlabel">phone · desktop</div>
-        <div class="nsub"><span class="i18n-en">Compose Multiplatform</span><span class="i18n-zh">Compose 跨平台</span></div>
-      </div>
-      <div class="connector"><span class="clabel">wss · ciphertext →</span><span class="line"></span><span class="csub">E2E encrypted</span></div>
-      <div class="node">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8.5 4.2v6.1c0 4.9-3.6 8.1-8.5 9.2-4.9-1.1-8.5-4.3-8.5-9.2V6.7L12 2.5z"/><path d="M9 12l2 2 4-4.5"/></svg></div>
-        <div class="nlabel">relay</div>
-        <div class="nsub"><span class="i18n-en">zero-knowledge broker</span><span class="i18n-zh">零知识中继</span></div>
-      </div>
-      <div class="connector"><span class="clabel">wss · ciphertext →</span><span class="line"></span><span class="csub">opaque frames</span></div>
-      <div class="node">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
-        <div class="nlabel">daemon</div>
-        <div class="nsub"><span class="i18n-en">your computer</span><span class="i18n-zh">你的电脑</span></div>
-      </div>
-      <div class="connector"><span class="clabel">stdio →</span><span class="line"></span><span class="csub">local</span></div>
-      <div class="node">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7l4 4-4 4M11 15h6"/><rect x="2.5" y="3" width="19" height="18" rx="2.5"/></svg></div>
-        <div class="nlabel mono">claude / codex</div>
-        <div class="nsub"><span class="i18n-en">CLI on your machine</span><span class="i18n-zh">本机 CLI</span></div>
-      </div>
-    </div>
-    <p class="arch-cap reveal">
-      <span class="i18n-en">The relay only forwards opaque encrypted frames — it pairs your devices and moves ciphertext, nothing more. On the same network the app connects to the daemon directly for lower latency. Plaintext never leaves your phone and your computer.</span>
-      <span class="i18n-zh">中继只做两件事：帮设备配对、转发加密帧——内容它一个字也看不到。同一局域网里 App 会直连 daemon，延迟更低。明文自始至终只在你的手机和电脑上。</span>
-    </p>
-  </div>
-</section>
-
-<!-- ══════════════ SECURITY ══════════════ -->
+<!-- ══════════════ 6 · TRUST ══════════════ -->
 <section class="section" id="security">
   <div class="wrap">
     <div class="section-head reveal">
-      <p class="eyebrow"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></p>
-      <h2><span class="i18n-en">The relay can't read a thing.</span><span class="i18n-zh">中继什么也读不到。</span></h2>
+      <p class="eyebrow"><span class="i18n-en">Trust</span><span class="i18n-zh">信任边界</span></p>
+      <h2><span class="i18n-en">Why it is safe to let it touch your machine.</span><span class="i18n-zh">凭什么敢让它碰你的机器。</span></h2>
     </div>
-    <div class="sec-grid">
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8.5 4.2v6.1c0 4.9-3.6 8.1-8.5 9.2-4.9-1.1-8.5-4.3-8.5-9.2V6.7L12 2.5z"/><path d="M9.5 12.5l-2 2M14.5 9.5l-5 5"/></svg></div>
-        <h4><span class="i18n-en">Zero-knowledge relay</span><span class="i18n-zh">零知识中继</span></h4>
-        <p><span class="i18n-en">Forwards ciphertext only; holds no message content and no private keys.</span><span class="i18n-zh">只转发密文；不保存任何消息内容，也不持有私钥。</span></p>
-      </div>
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10" width="15" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg></div>
-        <h4><span class="i18n-en">End-to-end encrypted</span><span class="i18n-zh">端到端加密</span></h4>
-        <p><span class="i18n-en">P-256 ECDH + HKDF + AES-256-GCM, an X3DH/Noise-style handshake; plaintext stays on your two trusted endpoints.</span><span class="i18n-zh">P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手；明文只留在你的两个可信端点。</span></p>
-      </div>
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 9.5h18M7 14.5h4"/></svg></div>
-        <h4><span class="i18n-en">No accounts, no login</span><span class="i18n-zh">无账号、免登录</span></h4>
-        <p><span class="i18n-en">Pair by scanning a QR or typing a 6-digit code; the daemon's key travels out-of-band so even a malicious relay can't MITM. On device, an optional Face ID app lock guards the app itself.</span><span class="i18n-zh">扫个码、或者输 6 位配对码就连上；daemon 的密钥不经中继之手，中继就算变坏也插不进来。手机端还能再加一道 Face ID 应用锁。</span></p>
-      </div>
-      <div class="sec-card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6L4 11l5 5M15 6l5 5-5 5"/></svg></div>
-        <h4><span class="i18n-en">Open &amp; self-hostable</span><span class="i18n-zh">开源可自托管</span></h4>
-        <p><span class="i18n-en">Clean-room Kotlin, MIT, zero content logging; run your own relay.</span><span class="i18n-zh">Kotlin 从零写起，MIT 开源，不留任何内容日志；不放心就自建中继。</span></p>
-      </div>
+
+    <ol class="trust-chain reveal">
+      <li>
+        <h3><span class="i18n-en">Local execution</span><span class="i18n-zh">本地执行</span></h3>
+        <p><span class="i18n-en">The agent and your code never leave your computer. The daemon dials <em>out</em> — no inbound port to open.</span><span class="i18n-zh">agent 和你的代码从不离开你的电脑。daemon 主动<em>往外</em>连——不用开任何入站端口。</span></p>
+      </li>
+      <li>
+        <h3><span class="i18n-en">End-to-end encryption</span><span class="i18n-zh">端到端加密</span></h3>
+        <p><span class="i18n-en">P-256 ECDH + HKDF + AES-256-GCM, an X3DH/Noise-style handshake. Plaintext stays on your two trusted endpoints.</span><span class="i18n-zh">P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手。明文只留在你的两个可信端点上。</span></p>
+      </li>
+      <li>
+        <h3><span class="i18n-en">Zero-knowledge relay</span><span class="i18n-zh">零知识中继</span></h3>
+        <p><span class="i18n-en">It pairs devices and forwards opaque frames. No message content, no private keys, no content logging — and you can host your own.</span><span class="i18n-zh">它只帮设备配对、转发不透明的帧。没有消息内容、没有私钥、不记内容日志——不放心还能自建。</span></p>
+      </li>
+      <li>
+        <h3><span class="i18n-en">Expiry &amp; revocation</span><span class="i18n-zh">到期与吊销</span></h3>
+        <p><span class="i18n-en">No CC Pocket account. Pairing carries the daemon's key out-of-band via QR, so even a malicious relay cannot MITM that path; pairings expire and can be revoked.</span><span class="i18n-zh">没有 CC Pocket 账号。配对时 daemon 的密钥经二维码带外传递，中继就算变坏也插不进来；配对可设有效期，也能随时吊销。</span></p>
+      </li>
+    </ol>
+
+    <div class="limits reveal">
+      <p class="limits-t"><span class="i18n-en">Where the boundary actually is</span><span class="i18n-zh">边界到底在哪</span></p>
+      <ul>
+        <li><span class="i18n-en">The agent still runs with <b>your own operating-system permissions</b>. End-to-end encryption is not a sandbox.</span><span class="i18n-zh">agent 仍以<b>你本机操作系统用户的权限</b>执行。端到端加密不等于沙箱。</span></li>
+        <li><span class="i18n-en"><b>OpenCode sessions have no enforceable interactive approval</b> and run at Full access.</span><span class="i18n-zh"><b>OpenCode 会话没有可执法的交互审批</b>，恒为 Full access。</span></li>
+        <li><span class="i18n-en">Backends differ — check the <a href="#agents">matrix</a> before you rely on approvals.</span><span class="i18n-zh">后端各不相同——指望审批之前，先看<a href="#agents">矩阵</a>。</span></li>
+        <li><span class="i18n-en">The custom Noise-style channel has not had an independent third-party audit.</span><span class="i18n-zh">项目自定义的 Noise 式通道还没做过独立第三方审计。</span></li>
+      </ul>
     </div>
+
     <div class="pullquote reveal">
       <blockquote><span class="i18n-en">Trust without trusting us.</span><span class="i18n-zh">信任，但不必信任我们。</span></blockquote>
-      <a class="tm-link" href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" target="_blank" rel="noopener"><span class="i18n-en">Read the full threat model →</span><span class="i18n-zh">阅读完整威胁模型 →</span></a>
+      <a class="tm-link" href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" target="_blank" rel="noopener"><span class="i18n-en">Read the security model →</span><span class="i18n-zh">阅读安全模型 →</span></a>
+      <a class="tm-link" href="guides/self-hosting.html"><span class="i18n-en">Self-host the relay →</span><span class="i18n-zh">自托管中继 →</span></a>
     </div>
   </div>
 </section>
 
-<!-- ══════════════ GET STARTED (download + connect) ══════════════ -->
+<!-- ══════════════ 7 · GET STARTED ══════════════ -->
 <section class="section start" id="start" style="background:var(--surface);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)">
   <div class="wrap">
     <div class="section-head reveal">
       <p class="eyebrow"><span class="i18n-en">Get started</span><span class="i18n-zh">开始使用</span></p>
-      <h2><span class="i18n-en">Get the app, then connect.</span><span class="i18n-zh">装上 App，连接电脑。</span></h2>
+      <h2><span class="i18n-en">Three steps.</span><span class="i18n-zh">三步接上。</span></h2>
       <p>
-        <span class="i18n-en">On a phone? Tap to install. On a computer? Scan the QR with your phone's camera.</span>
-        <span class="i18n-zh">用手机？点一下直接安装。用电脑？打开手机相机扫码即可。</span>
+        <span class="i18n-en">Install the app, install the daemon on the computer that runs your agent, pair them. On a phone, tap to install; on a computer, scan the QR with your phone's camera.</span>
+        <span class="i18n-zh">装 App、在跑 agent 的电脑上装 daemon、把两边配上。用手机点一下就装；用电脑就拿手机相机扫码。</span>
       </p>
     </div>
+
+    <p class="start-sub mono"><span class="i18n-en">Step 1 — get the app</span><span class="i18n-zh">第 1 步 —— 装 App</span></p>
     <div class="dl-grid">
       <!-- iOS / App Store -->
       <div class="dl-card reveal" data-store="ios"
@@ -739,7 +542,7 @@
             <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M16.36 12.78c.02 2.45 2.15 3.27 2.17 3.28-.02.06-.34 1.17-1.12 2.31-.67.99-1.37 1.97-2.48 1.99-1.08.02-1.43-.64-2.67-.64s-1.62.62-2.65.66c-1.06.04-1.87-1.07-2.55-2.05-1.39-2.01-2.45-5.68-1.02-8.16.71-1.23 1.98-2.01 3.36-2.03 1.05-.02 2.03.71 2.67.71.63 0 1.83-.88 3.09-.75.53.02 2.01.21 2.96 1.61-.08.05-1.77 1.04-1.75 3.07M14.4 5.39c.56-.68.94-1.62.84-2.56-.81.03-1.79.54-2.37 1.22-.52.6-.98 1.56-.86 2.48.9.07 1.82-.46 2.39-1.14"/></svg>
           </span>
           <div>
-            <div class="dl-name"><span class="i18n-en">iOS · App Store</span><span class="i18n-zh">iOS · App Store</span></div>
+            <div class="dl-name">iOS · iPadOS</div>
             <div class="dl-sub"><span class="i18n-en">iPhone &amp; iPad</span><span class="i18n-zh">iPhone 与 iPad</span></div>
           </div>
         </div>
@@ -750,11 +553,10 @@
         </a>
         <p class="dl-beta">
           <span class="i18n-en">New versions land first on the <a href="https://testflight.apple.com/join/8z26MWWr" target="_blank" rel="noopener">TestFlight beta</a>.</span>
-          <span class="i18n-zh">新版本抢先上 <a href="https://testflight.apple.com/join/8z26MWWr" target="_blank" rel="noopener">TestFlight Beta</a></span>
+          <span class="i18n-zh">新版本先上 <a href="https://testflight.apple.com/join/8z26MWWr" target="_blank" rel="noopener">TestFlight 测试版</a>。</span>
         </p>
       </div>
-      <!-- Android / APK -->
-      <!-- data-href is a direct-APK fallback; app.js upgrades it to the newest .apk asset via the GitHub API -->
+      <!-- Android / APK — data-href is a direct-APK fallback; app.js upgrades it via the GitHub API -->
       <div class="dl-card reveal" data-store="android"
            data-href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk">
         <div class="dl-card-hd">
@@ -762,7 +564,7 @@
             <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 9.48l1.84-3.18a.4.4 0 00-.69-.4l-1.86 3.23a11.4 11.4 0 00-9.78 0L5.25 5.9a.4.4 0 10-.69.4L6.4 9.48A10.8 10.8 0 001 18.02h22a10.8 10.8 0 00-5.4-8.54M7 15.25a1.1 1.1 0 110-2.2 1.1 1.1 0 010 2.2m10 0a1.1 1.1 0 110-2.2 1.1 1.1 0 010 2.2"/></svg>
           </span>
           <div>
-            <div class="dl-name"><span class="i18n-en">Android · APK</span><span class="i18n-zh">Android · APK</span></div>
+            <div class="dl-name">Android · APK</div>
             <div class="dl-sub"><span class="i18n-en">Install package on GitHub</span><span class="i18n-zh">GitHub 安装包</span></div>
           </div>
         </div>
@@ -771,143 +573,128 @@
         <a class="btn btn-primary dl-btn" href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk" target="_blank" rel="noopener">
           <span class="i18n-en">Download APK on GitHub</span><span class="i18n-zh">前往 GitHub 下载 APK</span>
         </a>
+        <p class="dl-beta">
+          <span class="i18n-en">HarmonyOS: a signed HAP is available as a <b>Preview</b> with limited capability — see <a href="https://github.com/heypandax/cc-pocket/releases/latest" target="_blank" rel="noopener">Releases</a>.</span>
+          <span class="i18n-zh">鸿蒙：有签名 HAP，属 <b>Preview</b>、能力受限——见 <a href="https://github.com/heypandax/cc-pocket/releases/latest" target="_blank" rel="noopener">Releases</a>。</span>
+        </p>
       </div>
     </div>
 
-    <p class="dl-desktop reveal" style="text-align:center;margin:22px auto 0;max-width:660px;font-size:14.5px;color:var(--sec)">
-      <span class="i18n-en">Prefer the desktop app? Get it for macOS (.dmg, signed) — <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg" style="color:var(--accent)">Apple Silicon</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg" style="color:var(--accent)">Intel</a> — or <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi" style="color:var(--accent)">Windows (.msi)</a>. Drive one computer from another.</span>
-      <span class="i18n-zh">想用桌面端？macOS（.dmg，已签名）下载 <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg" style="color:var(--accent)">Apple 芯片</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg" style="color:var(--accent)">Intel</a>，或 <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi" style="color:var(--accent)">Windows（.msi）</a> 版——用一台电脑操控另一台。</span>
-    </p>
-
-    <!-- then connect the computer (3 commands) -->
     <div class="start-connect reveal">
-      <p class="start-sub mono"><span class="i18n-en">Then connect your computer — three commands</span><span class="i18n-zh">然后连接电脑——三条命令</span></p>
-      <div class="steps">
-        <div class="step">
-          <div class="n mono">1</div>
-          <div class="s-body">
-            <h4><span class="i18n-en">Install the daemon on your computer</span><span class="i18n-zh">在电脑上装好 daemon</span></h4>
-            <!-- OS tabs: JS preselects the visitor's OS; click to switch in case detection is wrong -->
-            <div class="os-tabs" role="tablist" aria-label="Operating system">
-              <button class="os-tab" role="tab" data-os="mac">macOS</button>
-              <button class="os-tab" role="tab" data-os="linux">Linux</button>
-              <button class="os-tab" role="tab" data-os="windows">Windows</button>
-            </div>
+      <p class="start-sub mono"><span class="i18n-en">Step 2 — install the daemon on the computer that runs your agent</span><span class="i18n-zh">第 2 步 —— 在跑 agent 的那台电脑上装 daemon</span></p>
+      <p class="dl-desktop">
+        <span class="i18n-en">Any supported agent CLI will do — you do not have to use Claude.</span>
+        <span class="i18n-zh">任一受支持的 agent CLI 都行——不是非要 Claude。</span>
+      </p>
 
-            <!-- Install / Update mode: defaults to Install; toggle swaps the command across whichever OS is active -->
-            <div class="mode-tabs" role="tablist" aria-label="Install or update">
-              <button class="mode-tab" role="tab" data-mode="install"><span class="i18n-en">Install</span><span class="i18n-zh">安装</span></button>
-              <button class="mode-tab" role="tab" data-mode="update"><span class="i18n-en">Update</span><span class="i18n-zh">更新</span></button>
-            </div>
+      <!-- OS tabs: JS preselects the visitor's OS; click to switch if detection is wrong -->
+      <div class="os-tabs" role="tablist" aria-label="Operating system">
+        <button class="os-tab" type="button" role="tab" data-os="mac" aria-selected="false">macOS</button>
+        <button class="os-tab" type="button" role="tab" data-os="linux" aria-selected="false">Linux</button>
+        <button class="os-tab" type="button" role="tab" data-os="windows" aria-selected="false">Windows</button>
+      </div>
+      <!-- Install / Update: one toggle drives the visible command in whichever OS panel is active -->
+      <div class="mode-tabs" role="tablist" aria-label="Install or update">
+        <button class="mode-tab" type="button" role="tab" data-mode="install" aria-selected="true"><span class="i18n-en">Install</span><span class="i18n-zh">安装</span></button>
+        <button class="mode-tab" type="button" role="tab" data-mode="update" aria-selected="false"><span class="i18n-en">Update</span><span class="i18n-zh">更新</span></button>
+      </div>
 
-            <div class="os-panel" data-os="mac">
-              <div class="mode-block" data-mode="install">
-                <div class="cmd"><span class="prompt mono">$</span><code class="mono">curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash</code><button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-                <p class="os-note"><span class="i18n-en">Apple Silicon &amp; Intel — signed &amp; notarized, checksum-verified, installs under <span class="mono">~/.local</span> and registers the launchd service. Prefer Homebrew? <span class="mono">brew install --cask heypandax/tap/cc-pocket</span></span><span class="i18n-zh">Apple 芯片、Intel 都能用——已签名公证、下载自动校验，装进 <span class="mono">~/.local</span>，launchd 服务顺手注册好。想用 Homebrew？<span class="mono">brew install --cask heypandax/tap/cc-pocket</span></span></p>
-              </div>
-              <div class="mode-block" data-mode="update">
-                <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket-daemon update</code><button class="copy" data-copy="cc-pocket-daemon update" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-                <p class="os-note"><span class="i18n-en">The daemon updates itself (it also checks daily and notifies your phone). Homebrew installs: <span class="mono">brew upgrade --cask heypandax/tap/cc-pocket</span></span><span class="i18n-zh">daemon 会自己升级（每天自查新版，有了就推送到手机）。Homebrew 装的用 <span class="mono">brew upgrade --cask heypandax/tap/cc-pocket</span></span></p>
-              </div>
-            </div>
-
-            <div class="os-panel" data-os="linux">
-              <div class="mode-block" data-mode="install">
-                <div class="cmd"><span class="prompt mono">$</span><code class="mono">curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash</code><button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-                <p class="os-note"><span class="i18n-en">x86_64 / arm64. Installs under <span class="mono">~/.local</span> + a <span class="mono">systemd&nbsp;--user</span> service.</span><span class="i18n-zh">x86_64 / arm64。装进 <span class="mono">~/.local</span>，注册 <span class="mono">systemd&nbsp;--user</span> 服务。</span></p>
-              </div>
-              <div class="mode-block" data-mode="update">
-                <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket-daemon update</code><button class="copy" data-copy="cc-pocket-daemon update" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-                <p class="os-note"><span class="i18n-en">The daemon updates itself (it also checks daily and notifies your phone). Re-running the install one-liner works too.</span><span class="i18n-zh">daemon 会自己升级（每天自查新版，有了就推送到手机）。重跑一遍安装命令也一样。</span></p>
-              </div>
-            </div>
-
-            <div class="os-panel" data-os="windows">
-              <div class="mode-block" data-mode="install">
-                <div class="cmd"><span class="prompt mono">&gt;</span><code class="mono">irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex</code><button class="copy" data-copy="irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-                <p class="os-note"><span class="i18n-en">x86_64. Needs the Claude Code CLI. One command: installs, registers the background service, and opens pairing right away. Prefer <a href="https://scoop.sh" target="_blank" rel="noopener">Scoop</a>? <span class="mono">scoop bucket add heypandax https://github.com/heypandax/scoop-bucket; scoop install cc-pocket-daemon</span></span><span class="i18n-zh">x86_64。要先装好 Claude Code CLI。一条命令搞定：装好、注册后台服务、直接进入配对。想用 <a href="https://scoop.sh" target="_blank" rel="noopener">Scoop</a>？<span class="mono">scoop bucket add heypandax https://github.com/heypandax/scoop-bucket; scoop install cc-pocket-daemon</span></span></p>
-              </div>
-              <div class="mode-block" data-mode="update">
-                <div class="cmd"><span class="prompt mono">&gt;</span><code class="mono">cc-pocket-daemon update</code><button class="copy" data-copy="cc-pocket-daemon update" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-                <p class="os-note"><span class="i18n-en">The daemon updates itself (it also checks daily and notifies your phone). Re-running the install one-liner works too; Scoop installs: <span class="mono">scoop update cc-pocket-daemon</span></span><span class="i18n-zh">daemon 会自己升级（每天自查新版，有了就推送到手机）。重跑一遍安装命令也一样；Scoop 装的用 <span class="mono">scoop update cc-pocket-daemon</span></span></p>
-              </div>
-            </div>
-          </div>
+      <div class="os-panel" data-os="mac">
+        <div class="mode-block" data-mode="install">
+          <div class="cmd"><span class="prompt mono">$</span><code class="mono">curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash</code><button class="copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p class="os-note"><span class="i18n-en">Apple Silicon &amp; Intel — signed &amp; notarized, checksum-verified, installs under <span class="mono">~/.local</span> and registers the launchd service. Homebrew: <span class="mono">brew install --cask heypandax/tap/cc-pocket</span></span><span class="i18n-zh">Apple 芯片、Intel 都能用——已签名公证、下载自动校验，装进 <span class="mono">~/.local</span>，顺手注册好 launchd 服务。Homebrew：<span class="mono">brew install --cask heypandax/tap/cc-pocket</span></span></p>
+          <p class="os-note"><span class="i18n-en"><b>Desktop app</b> (optional, drive one computer from another): <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg">Apple Silicon .dmg</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg">Intel .dmg</a></span><span class="i18n-zh"><b>桌面 App</b>（可选，用一台电脑操另一台）：<a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg">Apple 芯片 .dmg</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg">Intel .dmg</a></span></p>
         </div>
-        <div class="step">
-          <div class="n mono">2</div>
-          <div class="s-body">
-            <h4><span class="i18n-en">Pair your phone</span><span class="i18n-zh">配对你的手机</span></h4>
-            <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket-daemon pair</code><button class="copy" data-copy="cc-pocket-daemon pair" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-            <p style="font-size:13.5px;color:var(--muted);margin:9px 0 0"><span class="i18n-en">Prints a QR + a 6-digit code in your terminal.</span><span class="i18n-zh">终端里会打出一个二维码和 6 位配对码。</span></p>
-          </div>
-        </div>
-        <div class="step">
-          <div class="n mono">3</div>
-          <div class="s-body">
-            <h4><span class="i18n-en">Open the app, scan the QR</span><span class="i18n-zh">打开 App，扫码</span></h4>
-            <p style="font-size:15px;color:var(--sec);margin:0"><span class="i18n-en">…or type the 6-digit code. You're connected end-to-end.</span><span class="i18n-zh">……或者把那 6 位码敲进去。就这样，连上了——端到端加密。</span></p>
-          </div>
+        <div class="mode-block" data-mode="update">
+          <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket-daemon update</code><button class="copy" type="button" data-copy="cc-pocket-daemon update" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p class="os-note"><span class="i18n-en">A daemon installed by the one-liner keeps itself current (opt out with <span class="mono">cc-pocket-daemon config --auto-update off</span> and get a phone notification instead). Homebrew installs: <span class="mono">brew upgrade --cask heypandax/tap/cc-pocket</span></span><span class="i18n-zh">用一键脚本装的 daemon 会自己保持最新（想关掉就 <span class="mono">cc-pocket-daemon config --auto-update off</span>，改成只推一条手机通知）。Homebrew 装的用 <span class="mono">brew upgrade --cask heypandax/tap/cc-pocket</span></span></p>
         </div>
       </div>
-      <p class="step-foot"><span class="i18n-en">Requires an installed, logged-in <span class="mono">claude</span> CLI.</span><span class="i18n-zh">前提：电脑上装好并登录了 <span class="mono">claude</span> CLI。</span></p>
+
+      <div class="os-panel" data-os="linux">
+        <div class="mode-block" data-mode="install">
+          <div class="cmd"><span class="prompt mono">$</span><code class="mono">curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash</code><button class="copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p class="os-note"><span class="i18n-en">Daemon for x86_64 / arm64. Self-contained tarball (bundled JRE), installs under <span class="mono">~/.local</span> + a <span class="mono">systemd&nbsp;--user</span> service.</span><span class="i18n-zh">daemon 支持 x86_64 / arm64。自带 JRE 的独立包，装进 <span class="mono">~/.local</span>，注册 <span class="mono">systemd&nbsp;--user</span> 服务。</span></p>
+          <p class="os-note linux-desktop"><span class="i18n-en"><b>No official Linux desktop package.</b> The desktop app is not distributed for Linux — <a href="https://github.com/heypandax/cc-pocket#build-from-source">build it from source</a>. The daemon above is the piece Linux actually needs.</span><span class="i18n-zh"><b>Linux 没有正式桌面安装包。</b>桌面 App 不为 Linux 分发——<a href="https://github.com/heypandax/cc-pocket#从源码构建">自己从源码构建</a>。Linux 上真正需要的是上面那个 daemon。</span></p>
+        </div>
+        <div class="mode-block" data-mode="update">
+          <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket-daemon update</code><button class="copy" type="button" data-copy="cc-pocket-daemon update" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p class="os-note"><span class="i18n-en">The daemon updates itself (it also checks daily and notifies your phone). Re-running the install one-liner works too.</span><span class="i18n-zh">daemon 会自己升级（每天自查，有新版就推到手机）。重跑一遍安装命令也一样。</span></p>
+        </div>
+      </div>
+
+      <div class="os-panel" data-os="windows">
+        <div class="mode-block" data-mode="install">
+          <div class="cmd"><span class="prompt mono">&gt;</span><code class="mono">irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex</code><button class="copy" type="button" data-copy="irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p class="os-note"><span class="i18n-en">Daemon for x86_64. One command: installs, registers a logon Scheduled Task, and drops straight into pairing. <a href="https://scoop.sh" target="_blank" rel="noopener">Scoop</a>: <span class="mono">scoop bucket add heypandax https://github.com/heypandax/scoop-bucket; scoop install cc-pocket-daemon</span></span><span class="i18n-zh">daemon 支持 x86_64。一条命令搞定：装好、注册登录时的计划任务、直接进配对。想用 <a href="https://scoop.sh" target="_blank" rel="noopener">Scoop</a>：<span class="mono">scoop bucket add heypandax https://github.com/heypandax/scoop-bucket; scoop install cc-pocket-daemon</span></span></p>
+          <p class="os-note"><span class="i18n-en"><b>Desktop app</b> (optional): <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi">Windows x86_64 .msi</a> — unsigned, so SmartScreen asks: More info → Run anyway.</span><span class="i18n-zh"><b>桌面 App</b>（可选）：<a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi">Windows x86_64 .msi</a>——未签名，SmartScreen 会拦：更多信息 → 仍要运行。</span></p>
+        </div>
+        <div class="mode-block" data-mode="update">
+          <div class="cmd"><span class="prompt mono">&gt;</span><code class="mono">cc-pocket-daemon update</code><button class="copy" type="button" data-copy="cc-pocket-daemon update" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p class="os-note"><span class="i18n-en">Re-running the install one-liner works too; Scoop installs: <span class="mono">scoop update cc-pocket-daemon</span></span><span class="i18n-zh">重跑一遍安装命令也一样；Scoop 装的用 <span class="mono">scoop update cc-pocket-daemon</span></span></p>
+        </div>
+      </div>
+
+      <p class="start-sub mono" style="margin-top:34px"><span class="i18n-en">Step 3 — pair</span><span class="i18n-zh">第 3 步 —— 配对</span></p>
+      <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket-daemon pair</code><button class="copy" type="button" data-copy="cc-pocket-daemon pair" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+      <p class="step-foot"><span class="i18n-en">Scan the QR it prints, or type the 6-digit code into the app. You are connected end-to-end. In mainland China use the mirror: <span class="mono">https://pocket.ark-nexus.cc/dl/install.sh</span></span><span class="i18n-zh">扫终端里打出的二维码，或把那 6 位码敲进 App。连上了，端到端加密。国内走镜像：<span class="mono">https://pocket.ark-nexus.cc/dl/install.sh</span></span></p>
     </div>
   </div>
 </section>
 
-<!-- ══════════════ GUIDES ══════════════ -->
-<section class="section" id="guides">
+<!-- ══════════════ 8 · OPEN SOURCE / DOCS / COMMUNITY ══════════════ -->
+<section class="section" id="opensource">
   <div class="wrap">
     <div class="section-head reveal">
-      <p class="eyebrow"><span class="i18n-en">Guides &amp; answers</span><span class="i18n-zh">指南与解答</span></p>
-      <h2><span class="i18n-en">Choose the remote workflow that fits.</span><span class="i18n-zh">选一套适合你的远程工作流。</span></h2>
-      <p><span class="i18n-en">Plain-language guides for Claude Code, OpenAI Codex, security, and self-hosting—with official sources and dated facts.</span><span class="i18n-zh">覆盖 Claude Code、OpenAI Codex、安全与自托管；引用官方来源，并标注核验日期。</span></p>
+      <p class="eyebrow"><span class="i18n-en">Open source</span><span class="i18n-zh">开源</span></p>
+      <h2><span class="i18n-en">Read it, run it, host it.</span><span class="i18n-zh">看得到、跑得起、自己托管。</span></h2>
+      <p><span class="i18n-en">MIT, clean-room Kotlin. Android · iOS · desktop from one Compose Multiplatform codebase, plus the daemon, the relay and the shared wire protocol.</span><span class="i18n-zh">MIT 许可，Kotlin 从零写起。Android · iOS · 桌面同一套 Compose Multiplatform 代码，外加 daemon、中继和共享 wire 协议。</span></p>
     </div>
     <div class="sec-grid cols3">
-      <a class="sec-card resource-card reveal" href="guides/claude-code-mobile-remote.html">
-        <h4><span class="i18n-en">Claude Code on your phone</span><span class="i18n-zh">在手机上用 Claude Code</span></h4>
-        <p><span class="i18n-en">Official Remote Control, CC Pocket, and the differences that matter.</span><span class="i18n-zh">官方 Remote Control、CC Pocket，以及关键区别。</span></p>
-        <span class="more">Read guide →</span>
+      <a class="sec-card resource-card reveal" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
+        <h4>GitHub</h4>
+        <p><span class="i18n-en">Source, issues, releases and the build instructions.</span><span class="i18n-zh">源码、issue、release 和构建说明。</span></p>
+        <span class="more"><span class="i18n-en">Open repository →</span><span class="i18n-zh">打开仓库 →</span></span>
       </a>
-      <a class="sec-card resource-card reveal" href="guides/codex-mobile-remote.html">
-        <h4><span class="i18n-en">OpenAI Codex on your phone</span><span class="i18n-zh">在手机上用 OpenAI Codex</span></h4>
-        <p><span class="i18n-en">How CC Pocket and the official ChatGPT mobile experience compare.</span><span class="i18n-zh">比较 CC Pocket 与官方 ChatGPT 移动体验。</span></p>
-        <span class="more">Read guide →</span>
+      <a class="sec-card resource-card reveal" href="https://pocket.ark-nexus.cc/manual/en/">
+        <h4><span class="i18n-en">User manual</span><span class="i18n-zh">用户手册</span></h4>
+        <p><span class="i18n-en">Task-based steps with stable public URLs you can hand to an AI assistant.</span><span class="i18n-zh">按任务写的操作步骤，每篇都有稳定公开链接，可以直接发给 AI。</span></p>
+        <span class="more"><span class="i18n-en">Read the manual →</span><span class="i18n-zh">打开手册 →</span></span>
       </a>
-      <a class="sec-card resource-card reveal" href="guides/compare-remote-options.html">
-        <h4><span class="i18n-en">Compare remote options</span><span class="i18n-zh">远程方案对比</span></h4>
-        <p><span class="i18n-en">A factual matrix for agent support, hosting, accounts, and encryption.</span><span class="i18n-zh">从代理支持、托管、账号和加密逐项比较。</span></p>
-        <span class="more">Compare →</span>
-      </a>
-      <a class="sec-card resource-card reveal" href="guides/security.html">
+      <a class="sec-card resource-card reveal" href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">
         <h4><span class="i18n-en">Security model</span><span class="i18n-zh">安全模型</span></h4>
-        <p><span class="i18n-en">What is encrypted, what the relay can see, and the trust boundaries.</span><span class="i18n-zh">哪些内容被加密、中继能看到什么，以及信任边界。</span></p>
-        <span class="more">Review security →</span>
+        <p><span class="i18n-en">Threat model, what the relay can see, and the limits stated plainly.</span><span class="i18n-zh">威胁模型、中继看得到什么，以及边界在哪。</span></p>
+        <span class="more"><span class="i18n-en">Review security →</span><span class="i18n-zh">查看安全 →</span></span>
       </a>
-      <a class="sec-card resource-card reveal" href="guides/self-hosting.html">
-        <h4><span class="i18n-en">Self-hosting</span><span class="i18n-zh">自托管</span></h4>
-        <p><span class="i18n-en">Understand the client, relay, daemon, and practical deployment choices.</span><span class="i18n-zh">了解客户端、中继、守护进程与部署选择。</span></p>
-        <span class="more">See architecture →</span>
+      <a class="sec-card resource-card reveal" href="features.html">
+        <h4><span class="i18n-en">Full feature list</span><span class="i18n-zh">完整能力列表</span></h4>
+        <p><span class="i18n-en">Everything the app does, in one long page.</span><span class="i18n-zh">App 能做的全部，一页写完。</span></p>
+        <span class="more"><span class="i18n-en">See everything →</span><span class="i18n-zh">全部看一遍 →</span></span>
       </a>
-      <a class="sec-card resource-card reveal" href="guides/faq.html">
-        <h4><span class="i18n-en">Frequently asked questions</span><span class="i18n-zh">常见问题</span></h4>
-        <p><span class="i18n-en">Short, direct answers about accounts, platforms, cost, and limitations.</span><span class="i18n-zh">直接回答账号、平台、费用与限制。</span></p>
-        <span class="more">See all answers →</span>
+      <a class="sec-card resource-card reveal" href="https://pocket.ark-nexus.cc/support/">
+        <h4><span class="i18n-en">Smart support</span><span class="i18n-zh">帮助与客服</span></h4>
+        <p><span class="i18n-en">Ask without signing in, or report a reproducible problem.</span><span class="i18n-zh">免登录提问，或者报一个可复现的问题。</span></p>
+        <span class="more"><span class="i18n-en">Ask a question →</span><span class="i18n-zh">去提问 →</span></span>
+      </a>
+      <a class="sec-card resource-card reveal" href="https://github.com/heypandax/cc-pocket/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">
+        <h4><span class="i18n-en">Contributing</span><span class="i18n-zh">参与贡献</span></h4>
+        <p><span class="i18n-en">Build prerequisites, test entry points, and how to report a vulnerability privately.</span><span class="i18n-zh">构建前置、测试入口，以及安全问题怎么私下报。</span></p>
+        <span class="more"><span class="i18n-en">Start here →</span><span class="i18n-zh">从这里开始 →</span></span>
       </a>
     </div>
   </div>
 </section>
 
-<!-- ══════════════ OPEN SOURCE BAND ══════════════ -->
 <section class="osband">
   <div class="wrap reveal">
     <p>
-      <span class="i18n-en">Free and open source. <span class="accent">MIT licensed.</span> Clean-room Kotlin. Android · iOS · desktop, one Compose Multiplatform codebase.</span>
-      <span class="i18n-zh">自由开源，<span class="accent">MIT 许可</span>，Kotlin 从零实现。Android · iOS · 桌面，同一套 Compose Multiplatform 代码。</span>
+      <span class="i18n-en">Free and open source. <span class="accent">MIT licensed.</span> No CC Pocket account, ever.</span>
+      <span class="i18n-zh">自由开源，<span class="accent">MIT 许可</span>。永远不需要 CC Pocket 账号。</span>
     </p>
     <a class="btn btn-primary" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
       <span class="star-ico" aria-hidden="true"></span>
       <span class="i18n-en">Star on GitHub</span><span class="i18n-zh">在 GitHub 加星</span>
+      <span class="star-pill mono" style="display:none"><span class="star-ico" aria-hidden="true"></span><span class="star-n"></span></span>
     </a>
   </div>
 </section>
@@ -918,39 +705,41 @@
     <div class="top">
       <div class="brand-col">
         <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
-        <p class="tagline"><span class="i18n-en">Claude Code and Codex, in your pocket. End-to-end encrypted, no CC Pocket account.</span><span class="i18n-zh">Claude Code 与 Codex，装进口袋。端到端加密，无需 CC Pocket 账号。</span></p>
+        <p class="tagline"><span class="i18n-en">Your coding agents stay on your computer. You stay in control from anywhere.</span><span class="i18n-zh">agent 留在你的电脑，人在哪儿都能掌控全程。</span></p>
       </div>
       <div class="col">
         <h5><span class="i18n-en">Product</span><span class="i18n-zh">产品</span></h5>
-        <a href="features.html"><span class="i18n-en">Features</span><span class="i18n-zh">特性</span></a>
-        <a href="#desktop"><span class="i18n-en">Desktop edition</span><span class="i18n-zh">桌面版</span></a>
-        <a href="#how"><span class="i18n-en">How it works</span><span class="i18n-zh">工作原理</span></a>
+        <a href="#loop"><span class="i18n-en">Control loop</span><span class="i18n-zh">控制回路</span></a>
+        <a href="#agents"><span class="i18n-en">Agent support</span><span class="i18n-zh">Agent 支持</span></a>
+        <a href="#surfaces"><span class="i18n-en">Platforms</span><span class="i18n-zh">平台</span></a>
         <a href="#security"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></a>
-        <a href="#start"><span class="i18n-en">Get started</span><span class="i18n-zh">开始使用</span></a>
+        <a href="features.html"><span class="i18n-en">Full feature list</span><span class="i18n-zh">完整能力列表</span></a>
+        <a href="#start"><span class="i18n-en">Download</span><span class="i18n-zh">下载</span></a>
       </div>
       <div class="col">
         <h5><span class="i18n-en">Resources</span><span class="i18n-zh">资源</span></h5>
-        <a href="https://pocket.ark-nexus.cc/support/"><span class="i18n-en">Help &amp; support</span><span class="i18n-zh">帮助与客服</span></a>
         <a href="manual/"><span class="i18n-en">User manual</span><span class="i18n-zh">用户手册</span></a>
+        <a href="https://pocket.ark-nexus.cc/support/"><span class="i18n-en">Help &amp; support</span><span class="i18n-zh">帮助与客服</span></a>
         <a href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">GitHub</a>
         <a href="guides/claude-code-mobile-remote.html"><span class="i18n-en">Claude Code guide</span><span class="i18n-zh">Claude Code 指南</span></a>
         <a href="guides/codex-mobile-remote.html"><span class="i18n-en">Codex guide</span><span class="i18n-zh">Codex 指南</span></a>
-        <a href="guides/security.html"><span class="i18n-en">Security model</span><span class="i18n-zh">安全模型</span></a>
+        <a href="guides/compare-remote-options.html"><span class="i18n-en">Compare remote options</span><span class="i18n-zh">远程方案对比</span></a>
+        <a href="guides/self-hosting.html"><span class="i18n-en">Self-hosting</span><span class="i18n-zh">自托管</span></a>
         <a href="guides/faq.html"><span class="i18n-en">FAQ</span><span class="i18n-zh">常见问题</span></a>
-        <a href="https://github.com/heypandax/cc-pocket#readme" target="_blank" rel="noopener"><span class="i18n-en">Developer README</span><span class="i18n-zh">开发者 README</span></a>
-        <a href="privacy.html"><span class="i18n-en">Privacy policy</span><span class="i18n-zh">隐私政策</span></a>
       </div>
       <div class="col">
         <h5><span class="i18n-en">Legal</span><span class="i18n-zh">法律</span></h5>
         <a href="https://github.com/heypandax/cc-pocket/blob/main/LICENSE" target="_blank" rel="noopener"><span class="i18n-en">MIT License</span><span class="i18n-zh">MIT 许可证</span></a>
+        <a href="privacy.html"><span class="i18n-en">Privacy policy</span><span class="i18n-zh">隐私政策</span></a>
+        <a href="guides/security.html"><span class="i18n-en">Security model</span><span class="i18n-zh">安全模型</span></a>
       </div>
     </div>
     <div class="bottom">
       <span class="copy-line mono">© 2026 CC Pocket · MIT</span>
       <div class="seg" role="group" aria-label="Language">
         <a class="lang-page-link" href="zh/" lang="zh-CN" hreflang="zh-CN">中文页面</a>
-        <button data-setlang="zh">中</button>
-        <button data-setlang="en" class="on">EN</button>
+        <button type="button" data-setlang="zh" aria-pressed="false">中</button>
+        <button type="button" data-setlang="en" class="on" aria-pressed="true">EN</button>
       </div>
     </div>
   </div>

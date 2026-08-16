@@ -26,7 +26,20 @@ def localized(value: dict[str, str], locale: str) -> str:
     return value[locale]
 
 
-def page_head(*, title: str, description: str, canonical: str, locale: str, depth: int, page_type: str) -> str:
+def listed(data: dict) -> list[dict]:
+    """Articles that may appear in a public index.
+
+    An article marked `"unlisted": true` is still BUILT and still reachable by its URL — current
+    users keep their bookmark — but it is kept out of the home page, the recently-verified rail, the
+    in-page search index, the AI index and the sitemap, and its own page ships `noindex`.
+    """
+    return [a for a in data["articles"] if not a.get("unlisted")]
+
+
+def page_head(
+    *, title: str, description: str, canonical: str, locale: str, depth: int, page_type: str,
+    noindex: bool = False,
+) -> str:
     prefix = "../" * depth
     lang = "zh-CN" if locale == "zh" else "en"
     og_locale = "zh_CN" if locale == "zh" else "en_US"
@@ -46,7 +59,7 @@ def page_head(*, title: str, description: str, canonical: str, locale: str, dept
 <link rel="alternate" hreflang="en" href="{canonical.replace(f'/{locale}/', '/en/')}" />
 <link rel="alternate" hreflang="zh-CN" href="{canonical.replace(f'/{locale}/', '/zh/')}" />
 <link rel="alternate" hreflang="x-default" href="{x_default}" />
-<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta name="robots" content="{"noindex, nofollow" if noindex else "index, follow, max-image-preview:large, max-snippet:-1"}" />
 <meta property="og:type" content="{page_type}" />
 <meta property="og:site_name" content="CC Pocket" />
 <meta property="og:title" content="{text(title)}" />
@@ -93,15 +106,20 @@ def nav(locale: str, depth: int) -> str:
 def home_page(data: dict, locale: str) -> str:
     copy = data["home"][locale]
     canonical = f"{PUBLIC_BASE}/{locale}/"
-    article_by_slug = {a["slug"]: a for a in data["articles"]}
+    public = listed(data)
+    article_by_slug = {a["slug"]: a for a in public}
     categories = []
     for category in data["categories"]:
         links = []
         for slug in category["articles"]:
-            article = article_by_slug[slug]
+            article = article_by_slug.get(slug)
+            if article is None:      # unlisted → not offered here
+                continue
             links.append(
                 f'<a href="{slug}/"><span>{text(localized(article["title"], locale))}</span><span aria-hidden="true">→</span></a>'
             )
+        if not links:                # every article in it was unlisted → drop the card
+            continue
         categories.append(
             f"""<section class="category-card">
   <h2>{text(localized(category["title"], locale))}</h2>
@@ -114,7 +132,7 @@ def home_page(data: dict, locale: str) -> str:
   <span><strong>{text(localized(a['title'], locale))}</strong><small>{text(localized(a['categoryLabel'], locale))}</small></span>
   <span class="verified">{"Verified" if locale == "en" else "已核验"} {VERIFIED}</span>
 </a>"""
-        for a in data["articles"][:5]
+        for a in public[:5]
     )
     index_json = json.dumps(
         [
@@ -125,7 +143,7 @@ def home_page(data: dict, locale: str) -> str:
                 "aliases": a["aliases"][locale],
                 "url": f"{a['slug']}/",
             }
-            for a in data["articles"]
+            for a in public
         ],
         ensure_ascii=False,
     ).replace("</", "<\\/")
@@ -245,10 +263,11 @@ def article_page(data: dict, article: dict, locale: str) -> str:
         locale,
     )
     canonical = f"{PUBLIC_BASE}/{locale}/{article['slug']}/"
-    by_slug = {a["slug"]: a for a in data["articles"]}
+    by_slug = {a["slug"]: a for a in listed(data)}   # never point a public page at an unlisted one
     related = "".join(
         f'<a href="../{slug}/"><strong>{text(localized(by_slug[slug]["title"], locale))}</strong><span>{text(localized(by_slug[slug]["summary"], locale))}</span></a>'
         for slug in article["related"]
+        if slug in by_slug
     )
     sections = "".join(render_section(section, locale) for section in article["sections"])
     prompt = (
@@ -264,6 +283,7 @@ def article_page(data: dict, article: dict, locale: str) -> str:
             locale=locale,
             depth=3,
             page_type="article",
+            noindex=bool(article.get("unlisted")),
         )
         + f"""
 <script type="application/ld+json">
@@ -370,7 +390,7 @@ def update_sitemap(data: dict) -> None:
         lang = "zh-CN" if locale == "zh" else "en"
         other = "en" if locale == "zh" else "zh"
         other_lang = "en" if other == "en" else "zh-CN"
-        urls = [""] + [f"{article['slug']}/" for article in data["articles"]]
+        urls = [""] + [f"{article['slug']}/" for article in listed(data)]
         for suffix in urls:
             loc = f"{PUBLIC_BASE}/{locale}/{suffix}"
             other_loc = f"{PUBLIC_BASE}/{other}/{suffix}"

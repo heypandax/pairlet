@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta charset="utf-8" />
+<style>
+  body { margin: 0; background: #0B0C0E; -webkit-font-smoothing: antialiased; }
+  a { color: #D97757; text-decoration: none; }
+  a:hover { color: #E89070; text-decoration: underline; }
+  button { font: inherit; }
+  @keyframes ccp-pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+</style>
+</helmet>
+
+<div style="min-width: 1560px; background: #0B0C0E; font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; padding-bottom: 120px">
+
+  <!-- ======================= CONTROL BAR ======================= -->
+  <div style="position: sticky; top: 0; z-index: 90; background: rgba(11,12,14,.94); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255,255,255,.10); padding: 12px 32px; display: flex; align-items: center; gap: 28px; flex-wrap: wrap">
+    <div style="display: flex; align-items: baseline; gap: 10px; margin-right: 4px">
+      <span style="font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; letter-spacing: .14em; color: #D97757">SITE 2.0</span>
+      <span style="font-size: 12px; color: #6C737B">Agent Control Plane · prototype v1</span>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 8px">
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .12em; color: #6C737B">LANG</span>
+      <div style="display: flex; gap: 4px">
+        <sc-for list="{{ langOpts }}" as="o" hint-placeholder-count="2">
+          <button type="button" onClick="{{ o.on }}" aria-pressed="{{ o.sel }}" style="padding: 5px 12px; border-radius: 6px; border: 1px solid {{ o.bc }}; background: {{ o.bg }}; color: {{ o.fg }}; font-size: 12px; cursor: pointer" style-focus="outline: 2px solid #D97757; outline-offset: 2px">{{ o.label }}</button>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 8px">
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .12em; color: #6C737B">THEME</span>
+      <div style="display: flex; gap: 4px">
+        <sc-for list="{{ themeOpts }}" as="o" hint-placeholder-count="2">
+          <button type="button" onClick="{{ o.on }}" aria-pressed="{{ o.sel }}" style="padding: 5px 12px; border-radius: 6px; border: 1px solid {{ o.bc }}; background: {{ o.bg }}; color: {{ o.fg }}; font-size: 12px; cursor: pointer" style-focus="outline: 2px solid #D97757; outline-offset: 2px">{{ o.label }}</button>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 8px">
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .12em; color: #6C737B">LOOP</span>
+      <div style="display: flex; gap: 4px">
+        <sc-for list="{{ nodeOpts }}" as="o" hint-placeholder-count="4">
+          <button type="button" onClick="{{ o.on }}" aria-pressed="{{ o.sel }}" style="padding: 5px 12px; border-radius: 6px; border: 1px solid {{ o.bc }}; background: {{ o.bg }}; color: {{ o.fg }}; font-size: 12px; cursor: pointer" style-focus="outline: 2px solid #D97757; outline-offset: 2px">{{ o.label }}</button>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 8px">
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .12em; color: #6C737B">VIDEO</span>
+      <div style="display: flex; gap: 4px">
+        <sc-for list="{{ videoOpts }}" as="o" hint-placeholder-count="3">
+          <button type="button" onClick="{{ o.on }}" aria-pressed="{{ o.sel }}" style="padding: 5px 12px; border-radius: 6px; border: 1px solid {{ o.bc }}; background: {{ o.bg }}; color: {{ o.fg }}; font-size: 12px; cursor: pointer" style-focus="outline: 2px solid #D97757; outline-offset: 2px">{{ o.label }}</button>
+        </sc-for>
+      </div>
+    </div>
+
+    <button type="button" onClick="{{ toggleMenu }}" aria-pressed="{{ menuOpen }}" style="padding: 5px 12px; border-radius: 6px; border: 1px solid {{ menuBtn.bc }}; background: {{ menuBtn.bg }}; color: {{ menuBtn.fg }}; font-size: 12px; cursor: pointer" style-focus="outline: 2px solid #D97757; outline-offset: 2px">{{ menuBtn.label }}</button>
+
+    <span style="margin-left: auto; font-size: 11px; color: #6C737B">Esc {{ t.escHint }}</span>
+  </div>
+
+  <!-- ======================= A. 1440 HOME ======================= -->
+  <div style="padding: 56px 60px 0">
+    <div style="display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px">
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; color: #D97757; letter-spacing: .12em">A</span>
+      <h2 style="margin: 0; font-size: 19px; font-weight: 600; color: #F2F3F5; letter-spacing: -.01em">{{ t.abA }}</h2>
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #6C737B">1440 × auto · 8 sections</span>
+    </div>
+    <p style="margin: 0 0 20px; font-size: 13px; color: #6C737B; max-width: 900px">{{ t.abACap }}</p>
+
+    <div style="width: 1440px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; overflow: hidden; --bg: {{ v.bg }}; --surface: {{ v.surface }}; --raised: {{ v.raised }}; --line: {{ v.line }}; --fg: {{ v.fg }}; --muted: {{ v.muted }}; --dim: {{ v.dim }}; --accent: {{ v.accent }}; --accentSoft: {{ v.accentSoft }}; background: var(--bg, #0E0F11)">
+
+      <!-- nav -->
+      <header style="height: 64px; padding: 0 160px; display: flex; align-items: center; gap: 32px; border-bottom: 1px solid var(--line, rgba(255,255,255,.09))">
+        <div style="display: flex; align-items: center; gap: 9px">
+          <div style="width: 18px; height: 18px; border-radius: 5px; background: var(--accent, #D97757)"></div>
+          <span style="font-size: 14px; font-weight: 600; color: var(--fg, #F2F3F5); letter-spacing: -.01em">CC Pocket</span>
+        </div>
+        <nav style="display: flex; gap: 24px">
+          <sc-for list="{{ t.nav }}" as="n" hint-placeholder-count="4">
+            <button type="button" style="background: none; border: 0; padding: 4px 0; font-size: 13px; color: var(--muted, #9BA1A8); cursor: pointer" style-hover="color: var(--fg, #F2F3F5)" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 3px">{{ n }}</button>
+          </sc-for>
+        </nav>
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 14px">
+          <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: var(--dim, #6C737B)">{{ t.releaseChip }}</span>
+          <button type="button" style="background: none; border: 1px solid var(--line, rgba(255,255,255,.09)); border-radius: 7px; padding: 6px 12px; font-size: 12px; color: var(--muted, #9BA1A8); cursor: pointer" style-hover="color: var(--fg, #F2F3F5)" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">GitHub</button>
+          <button type="button" style="background: var(--accent, #D97757); border: 0; border-radius: 7px; padding: 7px 14px; font-size: 12.5px; font-weight: 600; color: #16110E; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">{{ t.ctaPrimary }}</button>
+        </div>
+      </header>
+
+      <!-- 01 hero -->
+      <section style="padding: 84px 160px 68px">
+        <div style="max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center">
+          <div style="display: flex; flex-direction: column; gap: 22px">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .16em; color: var(--accent, #D97757)">OPEN SOURCE · LOCAL FIRST · E2E ENCRYPTED</span>
+            <h1 style="margin: 0; font-size: 44px; line-height: 1.12; font-weight: 600; letter-spacing: -.025em; color: var(--fg, #F2F3F5); text-wrap: pretty">{{ t.heroTitle }}</h1>
+            <p style="margin: 0; font-size: 15.5px; line-height: 1.62; color: var(--muted, #9BA1A8); max-width: 480px; text-wrap: pretty">{{ t.heroSub }}</p>
+            <div style="display: flex; gap: 12px; margin-top: 4px">
+              <button type="button" style="background: var(--accent, #D97757); border: 0; border-radius: 8px; padding: 12px 22px; font-size: 14px; font-weight: 600; color: #16110E; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 3px">{{ t.ctaPrimary }} ↓</button>
+              <button type="button" style="background: transparent; border: 1px solid var(--line, rgba(255,255,255,.09)); border-radius: 8px; padding: 12px 22px; font-size: 14px; color: var(--fg, #F2F3F5); cursor: pointer" style-hover="border-color: var(--accent, #D97757)" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 3px">{{ t.ctaSecondary }} →</button>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 14px">
+              <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .14em; color: var(--dim, #6C737B)">{{ t.agentStripLabel }}</span>
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px">
+                <sc-for list="{{ agents }}" as="a" hint-placeholder-count="6">
+                  <div style="display: flex; align-items: center; gap: 7px; padding: 6px 11px; border: 1px solid var(--line, rgba(255,255,255,.09)); border-radius: 20px; background: var(--surface, #16181B); min-width: 0">
+                    <span style="width: 6px; height: 6px; border-radius: 50%; background: {{ a.dot }}"></span>
+                    <span style="font-size: 12.5px; color: var(--fg, #F2F3F5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ a.name }}</span>
+                    <sc-if value="{{ a.tag }}" hint-placeholder-val="{{ true }}">
+                      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .09em; padding: 2px 5px; border-radius: 4px; background: var(--accentSoft, rgba(217,119,87,.16)); color: var(--accent, #D97757); white-space: nowrap; margin-left: auto">{{ a.tag }}</span>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <!-- hero asset slot -->
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <div style="position: relative; aspect-ratio: 16/10; border-radius: 12px; border: 1px dashed rgba(217,119,87,.5); background: #101215; overflow: hidden; display: flex; flex-direction: column">
+              <div style="height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: #16181B; border-bottom: 1px solid rgba(255,255,255,.07)">
+                <span style="width: 7px; height: 7px; border-radius: 50%; background: #3A3F45"></span>
+                <span style="width: 7px; height: 7px; border-radius: 50%; background: #3A3F45"></span>
+                <span style="width: 7px; height: 7px; border-radius: 50%; background: #3A3F45"></span>
+                <span style="margin-left: 8px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; color: #6C737B">{{ video.srcLabel }}</span>
+              </div>
+              <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center">
+                <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .16em; color: #D97757">{{ t.assetSlot }}</span>
+                <span style="font-size: 13px; color: #C9CED4; line-height: 1.5; max-width: 330px">{{ t.heroAssetDesc }}</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; color: #565C63; line-height: 1.7">ShowcaseRender.kt → marketing/video/<br />control-loop-{{ lang }}.mp4 · 8–12s · muted</span>
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 6px 12px; border-radius: 999px; border: 1px solid {{ video.bc }}; background: {{ video.chipBg }}">
+                  <span style="font-size: 11px; color: {{ video.fg }}">{{ video.icon }}</span>
+                  <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; color: {{ video.fg }}">{{ video.label }}</span>
+                </div>
+              </div>
+            </div>
+            <span style="font-size: 11.5px; color: var(--dim, #6C737B); line-height: 1.5">{{ t.assetCaption }}</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 02 control loop -->
+      <section style="padding: 64px 160px; border-top: 1px solid var(--line, rgba(255,255,255,.09)); background: var(--surface, #16181B)">
+        <div style="max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px">
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .16em; color: var(--dim, #6C737B)">02 / CONTROL LOOP</span>
+            <h2 style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -.02em; color: var(--fg, #F2F3F5)">{{ t.loopTitle }}</h2>
+            <p style="margin: 0; font-size: 14.5px; color: var(--muted, #9BA1A8); max-width: 620px">{{ t.loopSub }}</p>
+          </div>
+          <div style="display: grid; grid-template-columns: 344px 1fr; gap: 40px; align-items: start">
+            <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px">
+              <sc-for list="{{ loopNodes }}" as="n" hint-placeholder-count="4">
+                <li>
+                  <button type="button" onClick="{{ n.on }}" aria-current="{{ n.sel }}" style="width: 100%; text-align: left; display: flex; gap: 14px; padding: 15px 16px; border-radius: 10px; border: 1px solid {{ n.bc }}; background: {{ n.bg }}; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: {{ n.numFg }}; padding-top: 2px">{{ n.num }}</span>
+                    <span style="display: flex; flex-direction: column; gap: 4px">
+                      <span style="font-size: 14px; font-weight: 600; color: {{ n.fg }}">{{ n.name }}</span>
+                      <span style="font-size: 12.5px; line-height: 1.55; color: var(--muted, #9BA1A8)">{{ n.desc }}</span>
+                    </span>
+                  </button>
+                </li>
+              </sc-for>
+            </ol>
+            <div style="display: flex; flex-direction: column; gap: 10px">
+              <div style="position: relative; aspect-ratio: 16/9; border-radius: 12px; border: 1px dashed rgba(217,119,87,.5); background: #101215; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 24px">
+                <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .16em; color: #D97757">{{ t.assetSlot }}</span>
+                <span style="font-size: 14px; color: #C9CED4; max-width: 400px; line-height: 1.5">{{ t.loopAssetDesc }}</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; color: #565C63">{{ t.nowShowing }} → {{ activeNodeName }}</span>
+                <div style="display: flex; align-items: center; gap: 10px; margin-top: 6px">
+                  <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; border: 1px solid {{ video.bc }}; background: {{ video.chipBg }}">
+                    <span style="font-size: 11px; color: {{ video.fg }}">{{ video.icon }}</span>
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; color: {{ video.fg }}">{{ video.label }}</span>
+                  </div>
+                  <button type="button" onClick="{{ cycleVideo }}" style="padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); background: #1E2125; color: #C9CED4; font-size: 11px; cursor: pointer" style-focus="outline: 2px solid #D97757; outline-offset: 2px">{{ video.action }}</button>
+                </div>
+                <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.06)">
+                  <div style="height: 100%; width: {{ loopProgress }}; background: #D97757"></div>
+                </div>
+              </div>
+              <span style="font-size: 11.5px; color: var(--dim, #6C737B)">{{ t.loopAssetCaption }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 03 four jobs -->
+      <section style="padding: 64px 160px; border-top: 1px solid var(--line, rgba(255,255,255,.09))">
+        <div style="max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px">
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .16em; color: var(--dim, #6C737B)">03 / FOUR JOBS</span>
+            <h2 style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -.02em; color: var(--fg, #F2F3F5)">{{ t.jobsTitle }}</h2>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px">
+            <sc-for list="{{ jobs }}" as="j" hint-placeholder-count="4">
+              <div style="display: flex; flex-direction: column; gap: 14px; padding: 24px; border: 1px solid var(--line, rgba(255,255,255,.09)); border-radius: 12px; background: var(--surface, #16181B)">
+                <div style="display: flex; align-items: baseline; gap: 10px">
+                  <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: var(--accent, #D97757)">{{ j.num }}</span>
+                  <h3 style="margin: 0; font-size: 17px; font-weight: 600; color: var(--fg, #F2F3F5)">{{ j.name }}</h3>
+                </div>
+                <p style="margin: 0; font-size: 14px; line-height: 1.55; color: var(--fg, #F2F3F5)">{{ j.outcome }}</p>
+                <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px">
+                  <sc-for list="{{ j.facts }}" as="f" hint-placeholder-count="3">
+                    <li style="display: flex; gap: 9px; font-size: 12.5px; line-height: 1.5; color: var(--muted, #9BA1A8)">
+                      <span style="color: var(--accent, #D97757)">·</span><span>{{ f }}</span>
+                    </li>
+                  </sc-for>
+                </ul>
+                <sc-if value="{{ j.slot }}" hint-placeholder-val="{{ true }}">
+                  <div style="border: 1px dashed rgba(217,119,87,.45); border-radius: 9px; background: #101215; padding: 14px 16px; display: flex; flex-direction: column; gap: 5px">
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .14em; color: #D97757">{{ t.assetSlot }}</span>
+                    <span style="font-size: 12px; color: #9BA1A8; line-height: 1.45">{{ j.slot }}</span>
+                  </div>
+                </sc-if>
+                <button type="button" style="align-self: flex-start; background: none; border: 0; padding: 0; font-size: 12.5px; color: var(--accent, #D97757); cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 3px">{{ t.jobsLink }} →</button>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </section>
+
+      <!-- 04 agent support -->
+      <section style="padding: 64px 160px; border-top: 1px solid var(--line, rgba(255,255,255,.09)); background: var(--surface, #16181B)">
+        <div style="max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px">
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .16em; color: var(--dim, #6C737B)">04 / AGENT SUPPORT</span>
+            <h2 style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -.02em; color: var(--fg, #F2F3F5)">{{ t.agentTitle }}</h2>
+            <p style="margin: 0; font-size: 14.5px; color: var(--muted, #9BA1A8); max-width: 640px">{{ t.agentSub }}</p>
+          </div>
+
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px">
+            <caption style="caption-side: bottom; text-align: left; padding-top: 14px; font-size: 12px; color: var(--dim, #6C737B); line-height: 1.55">{{ t.matrixCaption }}</caption>
+            <thead>
+              <tr>
+                <th scope="col" style="text-align: left; padding: 0 12px 10px 0; font-size: 11px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; color: var(--dim, #6C737B); border-bottom: 1px solid var(--line, rgba(255,255,255,.09))">{{ t.colAgent }}</th>
+                <sc-for list="{{ mCols }}" as="c" hint-placeholder-count="4">
+                  <th scope="col" style="text-align: left; padding: 0 12px 10px; font-size: 11px; font-weight: 500; letter-spacing: .06em; color: var(--dim, #6C737B); border-bottom: 1px solid var(--line, rgba(255,255,255,.09))">{{ c }}</th>
+                </sc-for>
+              </tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{ mRows }}" as="r" hint-placeholder-count="6">
+                <tr>
+                  <th scope="row" style="text-align: left; padding: 13px 12px 13px 0; border-bottom: 1px solid var(--line, rgba(255,255,255,.09)); vertical-align: top">
+                    <span style="display: flex; flex-direction: column; gap: 5px">
+                      <span style="display: flex; align-items: center; gap: 7px">
+                        <span style="font-size: 13.5px; font-weight: 600; color: var(--fg, #F2F3F5)">{{ r.agent }}</span>
+                        <sc-if value="{{ r.tag }}" hint-placeholder-val="{{ true }}">
+                          <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .09em; padding: 2px 5px; border-radius: 4px; background: var(--accentSoft, rgba(217,119,87,.16)); color: var(--accent, #D97757)">{{ r.tag }}</span>
+                        </sc-if>
+                      </span>
+                      <sc-if value="{{ r.status }}" hint-placeholder-val="{{ true }}">
+                        <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; color: var(--dim, #6C737B)">{{ r.status }}</span>
+                      </sc-if>
+                      <sc-if value="{{ r.extra }}" hint-placeholder-val="{{ true }}">
+                        <span style="font-size: 11px; color: var(--muted, #9BA1A8)">{{ r.extra }}</span>
+                      </sc-if>
+                    </span>
+                  </th>
+                  <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="4">
+                    <td style="padding: 13px 12px; border-bottom: 1px solid var(--line, rgba(255,255,255,.09)); vertical-align: top">
+                      <span style="display: flex; flex-direction: column; gap: 3px">
+                        <span style="font-size: 12.5px; color: {{ c.fg }}; white-space: nowrap">{{ c.label }}</span>
+                        <sc-if value="{{ c.note }}" hint-placeholder-val="{{ true }}">
+                          <span style="font-size: 11px; line-height: 1.4; color: var(--muted, #9BA1A8)">{{ c.note }}</span>
+                        </sc-if>
+                      </span>
+                    </td>
+                  </sc-for>
+                </tr>
+                <sc-if value="{{ r.warn }}" hint-placeholder-val="{{ true }}">
+                  <tr>
+                    <td colspan="5" style="padding: 0 0 13px; border-bottom: 1px solid var(--line, rgba(255,255,255,.09))">
+                      <div style="display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(217,119,87,.42); background: var(--accentSoft, rgba(217,119,87,.10))">
+                        <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; color: var(--accent, #D97757)">!</span>
+                        <span style="font-size: 12.5px; line-height: 1.5; color: var(--fg, #F2F3F5)">{{ r.warn }}</span>
+                      </div>
+                    </td>
+                  </tr>
+                </sc-if>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 05 product surfaces -->
+      <section style="padding: 64px 160px; border-top: 1px solid var(--line, rgba(255,255,255,.09))">
+        <div style="max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px">
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .16em; color: var(--dim, #6C737B)">05 / PRODUCT SURFACES</span>
+            <h2 style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -.02em; color: var(--fg, #F2F3F5)">{{ t.surfTitle }}</h2>
+            <p style="margin: 0; font-size: 14.5px; color: var(--muted, #9BA1A8); max-width: 620px">{{ t.surfSub }}</p>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; align-items: stretch">
+            <sc-for list="{{ surfaces }}" as="s" hint-placeholder-count="4">
+              <div style="display: flex; flex-direction: column; gap: 10px; padding: 20px; border: 1px solid var(--line, rgba(255,255,255,.09)); border-radius: 11px; background: var(--surface, #16181B)">
+                <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .12em; color: var(--accent, #D97757)">{{ s.kind }}</span>
+                <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: var(--fg, #F2F3F5)">{{ s.name }}</h3>
+                <p style="margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--muted, #9BA1A8)">{{ s.desc }}</p>
+                <span style="margin-top: auto; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; line-height: 1.6; color: var(--dim, #6C737B)">{{ s.dist }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display: flex; gap: 20px; align-items: stretch">
+            <div style="flex: 1; border: 1px dashed rgba(217,119,87,.45); border-radius: 11px; background: #101215; min-height: 240px; display: flex; flex-direction: column">
+              <div style="height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: #16181B; border-bottom: 1px solid rgba(255,255,255,.07)">
+                <span style="width: 7px; height: 7px; border-radius: 50%; background: #3A3F45"></span>
+                <span style="width: 7px; height: 7px; border-radius: 50%; background: #3A3F45"></span>
+                <span style="width: 7px; height: 7px; border-radius: 50%; background: #3A3F45"></span>
+                <span style="margin-left: 8px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; color: #6C737B">CC Pocket Desktop — {{ t.twoPane }}</span>
+              </div>
+              <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 20px">
+                <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .16em; color: #D97757">{{ t.assetSlot }}</span>
+                <span style="font-size: 13px; color: #C9CED4; max-width: 420px; line-height: 1.5">{{ t.surfAssetDesc }}</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; color: #565C63">DesktopScreenshotTest.kt · 2560×1600 @2x</span>
+              </div>
+            </div>
+            <div style="width: 300px; display: flex; flex-direction: column; gap: 10px; padding: 20px; border: 1px solid var(--line, rgba(255,255,255,.09)); border-radius: 11px; background: var(--surface, #16181B)">
+              <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: var(--fg, #F2F3F5)">{{ t.fleetTitle }}</h3>
+              <p style="margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--muted, #9BA1A8)">{{ t.fleetBody }}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 06 trust -->
+      <section style="padding: 64px 160px; border-top: 1px solid var(--line, rgba(255,255,255,.09)); background: var(--surface, #16181B)">
+        <div style="max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px">
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .16em; color: var(--dim, #6C737B)">06 / TRUST</span>
+            <h2 style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -.02em; color: var(--fg, #F2F3F5)">{{ t.trustTitle }}</h2>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; align-items: stretch">
+            <sc-for list="{{ chain }}" as="c" hint-placeholder-count="4">
+              <div style="display: flex; align-items: stretch">
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 18px 20px 18px 0">
+                  <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; color: var(--accent, #D97757)">{{ c.num }}</span>
+                  <h3 style="margin: 0; font-size: 14.5px; font-weight: 600; color: var(--fg, #F2F3F5)">{{ c.name }}</h3>
+                  <p style="margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--muted, #9BA1A8)">{{ c.desc }}</p>
+                </div>
+                <sc-if value="{{ c.arrow }}" hint-placeholder-val="{{ true }}">
+                  <span style="align-self: center; color: var(--dim, #6C737B); padding-right: 20px">→</span>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 10px; padding: 20px 22px; border: 1px solid rgba(217,119,87,.35); border-radius: 11px; background: var(--accentSoft, rgba(217,119,87,.08))">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .12em; color: var(--accent, #D97757)">{{ t.limitsLabel }}</span>
+            <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px">
+              <sc-for list="{{ t.limits }}" as="l" hint-placeholder-count="3">
+                <li style="display: flex; gap: 9px; font-size: 13px; line-height: 1.55; color: var(--fg, #F2F3F5)"><span style="color: var(--accent, #D97757)">!</span><span>{{ l }}</span></li>
+              </sc-for>
+            </ul>
+          </div>
+          <div style="display: flex; gap: 14px; align-items: center">
+            <button type="button" style="background: var(--accent, #D97757); border: 0; border-radius: 8px; padding: 11px 20px; font-size: 13.5px; font-weight: 600; color: #16110E; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 3px">{{ t.trustCta }}</button>
+            <button type="button" style="background: none; border: 0; padding: 0; font-size: 13px; color: var(--muted, #9BA1A8); text-decoration: underline; text-underline-offset: 3px; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 3px">{{ t.trustCta2 }}</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 07 get started -->
+      <section style="padding: 64px 160px; border-top: 1px solid var(--line, rgba(255,255,255,.09))">
+        <div style="max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px">
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .16em; color: var(--dim, #6C737B)">07 / GET STARTED</span>
+            <h2 style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -.02em; color: var(--fg, #F2F3F5)">{{ t.startTitle }}</h2>
+          </div>
+          <ol style="margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px">
+            <sc-for list="{{ steps }}" as="s" hint-placeholder-count="3">
+              <li style="display: flex; flex-direction: column; gap: 9px; padding: 20px; border: 1px solid var(--line, rgba(255,255,255,.09)); border-radius: 11px; background: var(--surface, #16181B)">
+                <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: var(--accent, #D97757)">{{ s.num }}</span>
+                <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: var(--fg, #F2F3F5)">{{ s.name }}</h3>
+                <p style="margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--muted, #9BA1A8)">{{ s.desc }}</p>
+              </li>
+            </sc-for>
+          </ol>
+
+          <div style="border: 1px solid var(--line, rgba(255,255,255,.09)); border-radius: 12px; background: var(--surface, #16181B); overflow: hidden">
+            <div style="display: flex; align-items: center; gap: 18px; padding: 14px 20px; border-bottom: 1px solid var(--line, rgba(255,255,255,.09)); flex-wrap: wrap">
+              <span style="font-size: 12.5px; color: var(--muted, #9BA1A8)">{{ t.detected }} <span style="color: var(--fg, #F2F3F5); font-weight: 600">{{ osSel }}</span></span>
+              <div style="display: flex; gap: 5px">
+                <sc-for list="{{ osOpts }}" as="o" hint-placeholder-count="3">
+                  <button type="button" onClick="{{ o.on }}" aria-pressed="{{ o.sel }}" style="padding: 6px 13px; border-radius: 7px; border: 1px solid {{ o.bc }}; background: {{ o.bg }}; color: {{ o.fg }}; font-size: 12px; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">{{ o.label }}</button>
+                </sc-for>
+              </div>
+              <div style="display: flex; gap: 5px; margin-left: auto">
+                <sc-for list="{{ modeOpts }}" as="o" hint-placeholder-count="2">
+                  <button type="button" onClick="{{ o.on }}" aria-pressed="{{ o.sel }}" style="padding: 6px 13px; border-radius: 7px; border: 1px solid {{ o.bc }}; background: {{ o.bg }}; color: {{ o.fg }}; font-size: 12px; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">{{ o.label }}</button>
+                </sc-for>
+              </div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr)">
+              <sc-for list="{{ dlCells }}" as="d" hint-placeholder-count="4">
+                <div style="display: flex; flex-direction: column; gap: 11px; padding: 20px; border-right: 1px solid var(--line, rgba(255,255,255,.09))">
+                  <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .12em; color: var(--dim, #6C737B)">{{ d.kind }}</span>
+                  <span style="display: flex; align-items: center; gap: 7px">
+                    <span style="font-size: 14px; font-weight: 600; color: var(--fg, #F2F3F5)">{{ d.name }}</span>
+                    <sc-if value="{{ d.tag }}" hint-placeholder-val="{{ true }}">
+                      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .09em; padding: 2px 5px; border-radius: 4px; background: var(--accentSoft, rgba(217,119,87,.16)); color: var(--accent, #D97757)">{{ d.tag }}</span>
+                    </sc-if>
+                  </span>
+                  <span style="font-size: 12px; line-height: 1.55; color: var(--muted, #9BA1A8)">{{ d.detail }}</span>
+                  <sc-if value="{{ d.btn }}" hint-placeholder-val="{{ true }}">
+                    <button type="button" style="margin-top: auto; align-self: stretch; padding: 9px 12px; border-radius: 8px; border: 0; background: {{ d.btnBg }}; color: {{ d.btnFg }}; font-size: 12.5px; font-weight: 600; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">{{ d.btn }}</button>
+                  </sc-if>
+                  <sc-if value="{{ d.noBtn }}" hint-placeholder-val="{{ true }}">
+                    <span style="margin-top: auto; display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; border-radius: 8px; border: 1px dashed var(--line, rgba(255,255,255,.09))">
+                      <span style="font-size: 12px; color: var(--fg, #F2F3F5)">{{ d.noBtn }}</span>
+                      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; color: var(--dim, #6C737B)">{{ d.noBtnNote }}</span>
+                    </span>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 08 open source -->
+      <section style="padding: 56px 160px 64px; border-top: 1px solid var(--line, rgba(255,255,255,.09)); background: var(--surface, #16181B)">
+        <div style="max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px">
+          <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .16em; color: var(--dim, #6C737B)">08 / OPEN SOURCE · DOCS · COMMUNITY</span>
+          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px">
+            <sc-for list="{{ t.osLinks }}" as="l" hint-placeholder-count="5">
+              <button type="button" style="text-align: left; display: flex; flex-direction: column; gap: 5px; padding: 16px; border: 1px solid var(--line, rgba(255,255,255,.09)); border-radius: 10px; background: var(--bg, #0E0F11); cursor: pointer" style-hover="border-color: var(--accent, #D97757)" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">
+                <span style="font-size: 13.5px; font-weight: 600; color: var(--fg, #F2F3F5)">{{ l.name }}</span>
+                <span style="font-size: 11.5px; color: var(--muted, #9BA1A8)">{{ l.desc }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 18px; border-top: 1px solid var(--line, rgba(255,255,255,.09))">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: var(--dim, #6C737B)">heypandax/cc-pocket · {{ t.releaseChip }}</span>
+            <span style="font-size: 11.5px; color: var(--dim, #6C737B)">{{ t.starNote }}</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div style="width: 1440px; margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px">
+      <sc-for list="{{ t.annA }}" as="n" hint-placeholder-count="4">
+        <span style="font-size: 11px; color: #6C737B; padding: 5px 10px; border: 1px solid rgba(255,255,255,.09); border-radius: 6px; background: #131416">{{ n }}</span>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- ======================= B. 390 MOBILE ======================= -->
+  <div style="padding: 72px 60px 0">
+    <div style="display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px">
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; color: #D97757; letter-spacing: .12em">B</span>
+      <h2 style="margin: 0; font-size: 19px; font-weight: 600; color: #F2F3F5">{{ t.abB }}</h2>
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #6C737B">390 × 844 · no horizontal scroll</span>
+    </div>
+    <p style="margin: 0 0 20px; font-size: 13px; color: #6C737B; max-width: 900px">{{ t.abBCap }}</p>
+
+    <div style="display: flex; gap: 28px; --bg: {{ v.bg }}; --surface: {{ v.surface }}; --raised: {{ v.raised }}; --line: {{ v.line }}; --fg: {{ v.fg }}; --muted: {{ v.muted }}; --dim: {{ v.dim }}; --accent: {{ v.accent }}; --accentSoft: {{ v.accentSoft }}">
+
+      <!-- phone 1: key fold -->
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .12em; color: #6C737B">B1 · {{ t.b1 }}</span>
+        <div style="position: relative; width: 390px; height: 844px; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; overflow: hidden; background: var(--bg, #0E0F11); display: flex; flex-direction: column">
+          <div style="height: 52px; display: flex; align-items: center; padding: 0 20px; gap: 10px; border-bottom: 1px solid var(--line, rgba(255,255,255,.09))">
+            <div style="width: 16px; height: 16px; border-radius: 5px; background: var(--accent, #D97757)"></div>
+            <span style="font-size: 14px; font-weight: 600; color: var(--fg, #F2F3F5)">CC Pocket</span>
+            <button type="button" onClick="{{ toggleMenu }}" aria-expanded="{{ menuOpen }}" style="margin-left: auto; width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line, rgba(255,255,255,.09)); background: var(--surface, #16181B); color: var(--fg, #F2F3F5); font-size: 14px; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">≡</button>
+          </div>
+          <div style="flex: 1; overflow: hidden; padding: 48px 24px 0; display: flex; flex-direction: column; gap: 18px">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .14em; color: var(--accent, #D97757)">OPEN SOURCE · LOCAL FIRST · E2E</span>
+            <h1 style="margin: 0; font-size: 29px; line-height: 1.15; font-weight: 600; letter-spacing: -.02em; color: var(--fg, #F2F3F5); text-wrap: pretty">{{ t.heroTitle }}</h1>
+            <p style="margin: 0; font-size: 14px; line-height: 1.6; color: var(--muted, #9BA1A8)">{{ t.heroSubShort }}</p>
+            <div style="display: flex; flex-direction: column; gap: 9px">
+              <button type="button" style="padding: 14px; border-radius: 9px; border: 0; background: var(--accent, #D97757); color: #16110E; font-size: 15px; font-weight: 600; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 3px">{{ t.ctaPrimary }} ↓</button>
+              <button type="button" style="padding: 14px; border-radius: 9px; border: 1px solid var(--line, rgba(255,255,255,.09)); background: transparent; color: var(--fg, #F2F3F5); font-size: 15px; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 3px">{{ t.ctaSecondary }} →</button>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px">
+              <sc-for list="{{ agents }}" as="a" hint-placeholder-count="6">
+                <span style="display: flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid var(--line, rgba(255,255,255,.09)); border-radius: 16px; background: var(--surface, #16181B); font-size: 11.5px; color: var(--fg, #F2F3F5)">{{ a.name }}<sc-if value="{{ a.tag }}" hint-placeholder-val="{{ true }}"><span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9px; color: var(--accent, #D97757)">{{ a.tag }}</span></sc-if></span>
+              </sc-for>
+            </div>
+            <div style="aspect-ratio: 16/10; border-radius: 11px; border: 1px dashed rgba(217,119,87,.5); background: #101215; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 16px">
+              <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: .14em; color: #D97757">{{ t.assetSlot }}</span>
+              <span style="font-size: 12px; color: #C9CED4; line-height: 1.45">{{ t.heroAssetDescShort }}</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9px; color: {{ video.fg }}">{{ video.icon }} {{ video.label }}</span>
+            </div>
+          </div>
+          <sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ true }}">
+            <div style="position: absolute; inset: 0; background: rgba(8,9,10,.72); display: flex; flex-direction: column">
+              <div style="margin-top: auto; background: var(--surface, #16181B); border-top: 1px solid var(--line, rgba(255,255,255,.09)); border-radius: 16px 16px 0 0; padding: 18px 20px 26px; display: flex; flex-direction: column; gap: 6px">
+                <div style="display: flex; align-items: center; margin-bottom: 6px">
+                  <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .12em; color: var(--dim, #6C737B)">MENU</span>
+                  <button type="button" onClick="{{ closeMenu }}" style="margin-left: auto; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line, rgba(255,255,255,.09)); background: var(--raised, #1E2125); color: var(--fg, #F2F3F5); font-size: 13px; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">✕</button>
+                </div>
+                <sc-for list="{{ t.nav }}" as="n" hint-placeholder-count="4">
+                  <button type="button" style="text-align: left; padding: 13px 0; background: none; border: 0; border-bottom: 1px solid var(--line, rgba(255,255,255,.09)); font-size: 16px; color: var(--fg, #F2F3F5); cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">{{ n }}</button>
+                </sc-for>
+                <div style="display: flex; gap: 8px; margin-top: 12px">
+                  <sc-for list="{{ langOpts }}" as="o" hint-placeholder-count="2">
+                    <button type="button" onClick="{{ o.on }}" style="flex: 1; padding: 11px; border-radius: 8px; border: 1px solid {{ o.bc }}; background: {{ o.bg }}; color: {{ o.fg }}; font-size: 13px; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">{{ o.label }}</button>
+                  </sc-for>
+                  <sc-for list="{{ themeOpts }}" as="o" hint-placeholder-count="2">
+                    <button type="button" onClick="{{ o.on }}" style="flex: 1; padding: 11px; border-radius: 8px; border: 1px solid {{ o.bc }}; background: {{ o.bg }}; color: {{ o.fg }}; font-size: 13px; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">{{ o.label }}</button>
+                  </sc-for>
+                </div>
+                <button type="button" style="margin-top: 8px; padding: 14px; border-radius: 9px; border: 0; background: var(--accent, #D97757); color: #16110E; font-size: 15px; font-weight: 600; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 3px">{{ t.ctaPrimary }}</button>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+
+      <!-- phone 2: loop + platform -->
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .12em; color: #6C737B">B2 · {{ t.b2 }}</span>
+        <div style="width: 390px; height: 844px; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; overflow: hidden; background: var(--bg, #0E0F11); display: flex; flex-direction: column">
+          <div style="padding: 44px 24px 28px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; min-height: 0">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .14em; color: var(--dim, #6C737B)">02 / CONTROL LOOP</span>
+            <h2 style="margin: 0; font-size: 23px; line-height: 1.2; font-weight: 600; letter-spacing: -.02em; color: var(--fg, #F2F3F5)">{{ t.loopTitle }}</h2>
+            <div style="aspect-ratio: 16/9; border-radius: 11px; border: 1px dashed rgba(217,119,87,.5); background: #101215; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; text-align: center; padding: 14px">
+              <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: .14em; color: #D97757">{{ t.assetSlot }}</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; color: #565C63">{{ t.nowShowing }} → {{ activeNodeName }}</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; color: {{ video.fg }}">{{ video.icon }} {{ video.label }}</span>
+            </div>
+            <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px">
+              <sc-for list="{{ loopNodes }}" as="n" hint-placeholder-count="4">
+                <li>
+                  <button type="button" onClick="{{ n.on }}" style="width: 100%; text-align: left; display: flex; gap: 11px; padding: 11px 13px; border-radius: 9px; border: 1px solid {{ n.bc }}; background: {{ n.bg }}; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; color: {{ n.numFg }}; padding-top: 2px">{{ n.num }}</span>
+                    <span style="display: flex; flex-direction: column; gap: 2px">
+                      <span style="font-size: 13.5px; font-weight: 600; color: {{ n.fg }}">{{ n.name }}</span>
+                      <span style="font-size: 11.5px; line-height: 1.45; color: var(--muted, #9BA1A8)">{{ n.desc }}</span>
+                    </span>
+                  </button>
+                </li>
+              </sc-for>
+            </ol>
+            <div style="border-top: 1px solid var(--line, rgba(255,255,255,.09)); padding-top: 14px; display: flex; flex-direction: column; gap: 9px">
+              <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .14em; color: var(--dim, #6C737B)">07 / {{ t.platformPick }}</span>
+              <div style="display: flex; gap: 5px">
+                <sc-for list="{{ osOpts }}" as="o" hint-placeholder-count="3">
+                  <button type="button" onClick="{{ o.on }}" style="flex: 1; padding: 9px 6px; border-radius: 7px; border: 1px solid {{ o.bc }}; background: {{ o.bg }}; color: {{ o.fg }}; font-size: 12px; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">{{ o.label }}</button>
+                </sc-for>
+              </div>
+              <sc-for list="{{ dlCells }}" as="d" hint-placeholder-count="4">
+                <div style="display: flex; align-items: center; gap: 10px; padding: 11px 13px; border: 1px solid var(--line, rgba(255,255,255,.09)); border-radius: 9px; background: var(--surface, #16181B)">
+                  <span style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+                    <span style="font-size: 12.5px; font-weight: 600; color: var(--fg, #F2F3F5)">{{ d.name }}<sc-if value="{{ d.tag }}" hint-placeholder-val="{{ true }}"><span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9px; color: var(--accent, #D97757); margin-left: 6px">{{ d.tag }}</span></sc-if></span>
+                    <span style="font-size: 10.5px; color: var(--muted, #9BA1A8); line-height: 1.4">{{ d.detail }}</span>
+                  </span>
+                  <span style="margin-left: auto; flex-shrink: 0">
+                    <sc-if value="{{ d.btn }}" hint-placeholder-val="{{ true }}">
+                      <button type="button" style="padding: 8px 12px; border-radius: 7px; border: 0; background: {{ d.btnBg }}; color: {{ d.btnFg }}; font-size: 11.5px; font-weight: 600; cursor: pointer; white-space: nowrap" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: 2px">{{ d.btnShort }}</button>
+                    </sc-if>
+                    <sc-if value="{{ d.noBtn }}" hint-placeholder-val="{{ true }}">
+                      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; color: var(--dim, #6C737B); white-space: nowrap">{{ d.noBtnNote }}</span>
+                    </sc-if>
+                  </span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- annotations -->
+      <div style="width: 320px; display: flex; flex-direction: column; gap: 10px; padding-top: 26px">
+        <sc-for list="{{ t.annB }}" as="n" hint-placeholder-count="4">
+          <div style="padding: 12px 14px; border: 1px solid rgba(255,255,255,.09); border-radius: 8px; background: #131416; font-size: 12px; line-height: 1.55; color: #9BA1A8">{{ n }}</div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= C. MATRIX FORMS ======================= -->
+  <div style="padding: 72px 60px 0">
+    <div style="display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px">
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; color: #D97757; letter-spacing: .12em">C</span>
+      <h2 style="margin: 0; font-size: 19px; font-weight: 600; color: #F2F3F5">{{ t.abC }}</h2>
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #6C737B">desktop table · mobile card</span>
+    </div>
+    <p style="margin: 0 0 20px; font-size: 13px; color: #6C737B; max-width: 900px">{{ t.abCCap }}</p>
+
+    <div style="display: flex; gap: 28px; align-items: flex-start; --bg: {{ v.bg }}; --surface: {{ v.surface }}; --raised: {{ v.raised }}; --line: {{ v.line }}; --fg: {{ v.fg }}; --muted: {{ v.muted }}; --dim: {{ v.dim }}; --accent: {{ v.accent }}; --accentSoft: {{ v.accentSoft }}">
+
+      <div style="width: 1024px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: var(--bg, #0E0F11); padding: 32px 36px; display: flex; flex-direction: column; gap: 18px">
+        <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .12em; color: #6C737B">C1 · 1024 {{ t.tableForm }}</span>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12.5px">
+          <caption style="caption-side: bottom; text-align: left; padding-top: 12px; font-size: 11.5px; color: var(--dim, #6C737B)">{{ t.matrixCaption }}</caption>
+          <thead>
+            <tr>
+              <th scope="col" style="text-align: left; padding: 0 10px 9px 0; font-size: 10.5px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; color: var(--dim, #6C737B); border-bottom: 1px solid var(--line, rgba(255,255,255,.09))">{{ t.colAgent }}</th>
+              <sc-for list="{{ mCols }}" as="c" hint-placeholder-count="4">
+                <th scope="col" style="text-align: left; padding: 0 10px 9px; font-size: 10.5px; font-weight: 500; letter-spacing: .06em; color: var(--dim, #6C737B); border-bottom: 1px solid var(--line, rgba(255,255,255,.09))">{{ c }}</th>
+              </sc-for>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{ mRows }}" as="r" hint-placeholder-count="6">
+              <tr>
+                <th scope="row" style="text-align: left; padding: 12px 10px 12px 0; border-bottom: 1px solid var(--line, rgba(255,255,255,.09)); vertical-align: top">
+                  <span style="display: flex; flex-direction: column; gap: 4px">
+                    <span style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
+                      <span style="font-size: 13px; font-weight: 600; color: var(--fg, #F2F3F5)">{{ r.agent }}</span>
+                      <sc-if value="{{ r.tag }}" hint-placeholder-val="{{ true }}">
+                        <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9px; padding: 2px 5px; border-radius: 4px; background: var(--accentSoft, rgba(217,119,87,.16)); color: var(--accent, #D97757)">{{ r.tag }}</span>
+                      </sc-if>
+                    </span>
+                    <sc-if value="{{ r.extra }}" hint-placeholder-val="{{ true }}">
+                      <span style="font-size: 10.5px; color: var(--muted, #9BA1A8)">{{ r.extra }}</span>
+                    </sc-if>
+                  </span>
+                </th>
+                <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="4">
+                  <td style="padding: 12px 10px; border-bottom: 1px solid var(--line, rgba(255,255,255,.09)); vertical-align: top">
+                    <span style="display: flex; flex-direction: column; gap: 3px">
+                      <span style="font-size: 12px; color: {{ c.fg }}; white-space: nowrap">{{ c.label }}</span>
+                      <sc-if value="{{ c.note }}" hint-placeholder-val="{{ true }}">
+                        <span style="font-size: 10.5px; line-height: 1.4; color: var(--muted, #9BA1A8)">{{ c.note }}</span>
+                      </sc-if>
+                    </span>
+                  </td>
+                </sc-for>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+        <div style="display: flex; gap: 10px; align-items: flex-start; padding: 11px 14px; border-radius: 8px; border: 1px solid rgba(217,119,87,.42); background: var(--accentSoft, rgba(217,119,87,.10))">
+          <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; color: var(--accent, #D97757)">!</span>
+          <span style="font-size: 12.5px; line-height: 1.5; color: var(--fg, #F2F3F5)">{{ t.openCodeWarn }}</span>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .12em; color: #6C737B">C2 · 390 {{ t.cardForm }}</span>
+        <div style="width: 390px; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; background: var(--bg, #0E0F11); padding: 22px 20px; display: flex; flex-direction: column; gap: 10px">
+          <sc-for list="{{ mRows }}" as="r" hint-placeholder-count="6">
+            <div style="border: 1px solid {{ r.cardBc }}; border-radius: 11px; background: var(--surface, #16181B); overflow: hidden">
+              <button type="button" onClick="{{ r.toggle }}" aria-expanded="{{ r.open }}" style="width: 100%; text-align: left; display: flex; align-items: center; gap: 8px; padding: 13px 15px; background: none; border: 0; cursor: pointer" style-focus="outline: 2px solid var(--accent, #D97757); outline-offset: -2px">
+                <span style="font-size: 14px; font-weight: 600; color: var(--fg, #F2F3F5)">{{ r.agent }}</span>
+                <sc-if value="{{ r.tag }}" hint-placeholder-val="{{ true }}">
+                  <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9px; padding: 2px 5px; border-radius: 4px; background: var(--accentSoft, rgba(217,119,87,.16)); color: var(--accent, #D97757)">{{ r.tag }}</span>
+                </sc-if>
+                <span style="margin-left: auto; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; color: var(--dim, #6C737B)">{{ r.summary }}</span>
+                <span style="color: var(--muted, #9BA1A8); font-size: 11px">{{ r.chevron }}</span>
+              </button>
+              <div style="padding: 0 15px 13px; display: flex; flex-direction: column; gap: 7px">
+                <sc-if value="{{ r.allGood }}" hint-placeholder-val="{{ true }}">
+                  <div style="display: flex; align-items: baseline; gap: 8px; padding-top: 7px; border-top: 1px solid var(--line, rgba(255,255,255,.09))">
+                    <span style="font-size: 12px; color: var(--fg, #F2F3F5)">✓</span>
+                    <span style="font-size: 12px; color: var(--fg, #F2F3F5)">{{ r.allGood }}</span>
+                  </div>
+                </sc-if>
+                <sc-for list="{{ r.visible }}" as="c" hint-placeholder-count="3">
+                  <div style="display: flex; align-items: baseline; gap: 10px; padding-top: 7px; border-top: 1px solid var(--line, rgba(255,255,255,.09))">
+                    <span style="font-size: 11.5px; color: var(--muted, #9BA1A8); width: 132px; flex-shrink: 0">{{ c.col }}</span>
+                    <span style="display: flex; flex-direction: column; gap: 2px">
+                      <span style="font-size: 12px; color: {{ c.fg }}">{{ c.label }}</span>
+                      <sc-if value="{{ c.note }}" hint-placeholder-val="{{ true }}">
+                        <span style="font-size: 10.5px; color: var(--muted, #9BA1A8); line-height: 1.4">{{ c.note }}</span>
+                      </sc-if>
+                    </span>
+                  </div>
+                </sc-for>
+              </div>
+              <sc-if value="{{ r.extra }}" hint-placeholder-val="{{ true }}">
+                <div style="margin: 0 15px 13px; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line, rgba(255,255,255,.09))">
+                  <span style="font-size: 11.5px; line-height: 1.45; color: var(--muted, #9BA1A8)">{{ r.extra }}</span>
+                </div>
+              </sc-if>
+              <sc-if value="{{ r.warn }}" hint-placeholder-val="{{ true }}">
+                <div style="margin: 0 15px 13px; display: flex; gap: 8px; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(217,119,87,.42); background: var(--accentSoft, rgba(217,119,87,.10))">
+                  <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: var(--accent, #D97757)">!</span>
+                  <span style="font-size: 11.5px; line-height: 1.45; color: var(--fg, #F2F3F5)">{{ r.warn }}</span>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+          <p style="margin: 4px 0 0; font-size: 11px; line-height: 1.5; color: var(--dim, #6C737B)">{{ t.matrixCaption }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= D. README ======================= -->
+  <div style="padding: 72px 60px 0">
+    <div style="display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px">
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; color: #D97757; letter-spacing: .12em">D</span>
+      <h2 style="margin: 0; font-size: 19px; font-weight: 600; color: #F2F3F5">{{ t.abD }}</h2>
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #6C737B">README.md · §1–5 · typography reference</span>
+    </div>
+    <p style="margin: 0 0 20px; font-size: 13px; color: #6C737B; max-width: 900px">{{ t.abDCap }}</p>
+
+    <div style="width: 900px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: #0E0F11; padding: 44px 56px; display: flex; flex-direction: column; gap: 30px">
+      <div style="display: flex; flex-wrap: wrap; gap: 6px">
+        <sc-for list="{{ badges }}" as="b" hint-placeholder-count="5">
+          <span style="display: flex; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; border-radius: 4px; overflow: hidden">
+            <span style="padding: 3px 7px; background: #2A2E33; color: #C9CED4">{{ b.k }}</span>
+            <span style="padding: 3px 7px; background: {{ b.bg }}; color: {{ b.fg }}">{{ b.v }}</span>
+          </span>
+        </sc-for>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px; padding-bottom: 22px; border-bottom: 1px solid rgba(255,255,255,.09)">
+        <div style="display: flex; align-items: center; gap: 11px">
+          <div style="width: 26px; height: 26px; border-radius: 7px; background: #D97757"></div>
+          <h1 style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -.02em; color: #F2F3F5">CC Pocket</h1>
+        </div>
+        <p style="margin: 0; font-size: 16px; line-height: 1.55; color: #C9CED4; max-width: 640px; text-wrap: pretty"><strong style="color: #F2F3F5; font-weight: 600">{{ t.heroTitle }}</strong></p>
+        <p style="margin: 0; font-size: 14px; line-height: 1.65; color: #9BA1A8; max-width: 660px">{{ t.readmeSub }}</p>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 9px">
+        <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .12em; color: #6C737B">§3 · {{ t.readmeOverview }}</span>
+        <div style="aspect-ratio: 21/9; border-radius: 10px; border: 1px dashed rgba(217,119,87,.5); background: #101215; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; text-align: center; padding: 20px">
+          <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .16em; color: #D97757">{{ t.assetSlot }}</span>
+          <span style="font-size: 13px; color: #C9CED4; max-width: 460px; line-height: 1.5">{{ t.readmeAssetDesc }}</span>
+          <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; color: #565C63">docs/assets/overview-{{ lang }}.png · {{ t.noAutoplay }}</span>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 9px">
+        <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .12em; color: #6C737B">§4 · {{ t.readmeEntries }}</span>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px">
+          <sc-for list="{{ t.readmeLinks }}" as="l" hint-placeholder-count="3">
+            <button type="button" style="text-align: left; padding: 14px 16px; border: 1px solid rgba(255,255,255,.09); border-radius: 9px; background: #16181B; cursor: pointer; display: flex; flex-direction: column; gap: 4px" style-hover="border-color: #D97757" style-focus="outline: 2px solid #D97757; outline-offset: 2px">
+              <span style="font-size: 13.5px; font-weight: 600; color: #D97757">{{ l.name }} →</span>
+              <span style="font-size: 11.5px; color: #9BA1A8">{{ l.desc }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px">
+        <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .12em; color: #6C737B">§5 · {{ t.readmeLoop }}</span>
+        <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0">
+          <sc-for list="{{ loopNodes }}" as="n" hint-placeholder-count="4">
+            <li style="display: flex; gap: 14px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,.07)">
+              <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; color: #D97757; padding-top: 1px">{{ n.num }}</span>
+              <span style="display: flex; flex-direction: column; gap: 3px">
+                <span style="font-size: 14.5px; font-weight: 600; color: #F2F3F5">{{ n.name }}</span>
+                <span style="font-size: 13px; line-height: 1.6; color: #9BA1A8">{{ n.desc }}</span>
+              </span>
+            </li>
+          </sc-for>
+        </ol>
+      </div>
+
+      <div style="padding: 14px 16px; border: 1px dashed rgba(255,255,255,.12); border-radius: 9px; display: flex; flex-direction: column; gap: 5px">
+        <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; color: #565C63">§6 → §10</span>
+        <span style="font-size: 12.5px; line-height: 1.6; color: #6C737B">{{ t.readmeRest }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= E. VIDEO STATES ======================= -->
+  <div style="padding: 72px 60px 0">
+    <div style="display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px">
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; color: #D97757; letter-spacing: .12em">E</span>
+      <h2 style="margin: 0; font-size: 19px; font-weight: 600; color: #F2F3F5">{{ t.abE }}</h2>
+      <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #6C737B">ready · failed · reduced-motion</span>
+    </div>
+    <p style="margin: 0 0 20px; font-size: 13px; color: #6C737B; max-width: 900px">{{ t.abECap }}</p>
+
+    <div style="display: grid; grid-template-columns: repeat(3, 460px); gap: 20px">
+      <sc-for list="{{ videoStates }}" as="s" hint-placeholder-count="3">
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; align-items: center; gap: 8px">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .12em; color: {{ s.fg }}">{{ s.icon }} {{ s.label }}</span>
+            <sc-if value="{{ s.sel }}" hint-placeholder-val="{{ true }}">
+              <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; padding: 2px 6px; border-radius: 4px; background: rgba(217,119,87,.18); color: #D97757">{{ t.active }}</span>
+            </sc-if>
+          </div>
+          <div style="border-radius: 11px; border: 1px solid {{ s.ringBc }}; background: #101215; overflow: hidden">
+            <div style="aspect-ratio: 16/9; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 22px; text-align: center; border-bottom: 1px solid rgba(255,255,255,.07)">
+              <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .14em; color: #D97757">{{ t.assetSlot }}</span>
+              <span style="font-size: 12.5px; line-height: 1.5; color: #C9CED4; max-width: 320px">{{ s.body }}</span>
+              <sc-if value="{{ s.badge }}" hint-placeholder-val="{{ true }}">
+                <span style="padding: 6px 13px; border-radius: 999px; border: 1px solid {{ s.fg }}; color: {{ s.fg }}; font-size: 11.5px">{{ s.badge }}</span>
+              </sc-if>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #16181B">
+              <button type="button" onClick="{{ s.on }}" style="width: 30px; height: 30px; border-radius: 50%; border: 1px solid rgba(255,255,255,.16); background: #1E2125; color: #F2F3F5; font-size: 11px; cursor: pointer" style-focus="outline: 2px solid #D97757; outline-offset: 2px">{{ s.ctrl }}</button>
+              <div style="flex: 1; height: 3px; border-radius: 2px; background: rgba(255,255,255,.08)">
+                <div style="height: 100%; border-radius: 2px; width: {{ s.progress }}; background: {{ s.barBg }}"></div>
+              </div>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; color: #6C737B">{{ s.time }}</span>
+            </div>
+          </div>
+          <p style="margin: 0; font-size: 11.5px; line-height: 1.55; color: #6C737B">{{ s.note }}</p>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1600,&quot;height&quot;:1100}}">
+class Component extends DCLogic {
+  state = { lang: 'en', theme: 'dark', node: 1, video: 'ready', menuOpen: false, os: 'macOS', mode: 'install', openCard: 'OpenCode' };
+
+  componentDidMount() {
+    this._esc = (e) => {
+      if (e.key === 'Escape') this.setState({ menuOpen: false, openCard: null });
+    };
+    window.addEventListener('keydown', this._esc);
+  }
+  componentWillUnmount() { window.removeEventListener('keydown', this._esc); }
+
+  seg(sel, accent) {
+    return sel
+      ? { bg: accent ? 'var(--accent, #D97757)' : '#D97757', fg: '#16110E', bc: 'transparent' }
+      : { bg: 'transparent', fg: 'var(--muted, #9BA1A8)', bc: 'var(--line, rgba(255,255,255,.14))' };
+  }
+
+  copy() {
+    const en = {
+      escHint: 'closes menu / expanded layers',
+      nav: ['Control loop', 'Agents', 'Surfaces', 'Security', 'Docs'],
+      ctaPrimary: 'Get the app', ctaSecondary: 'See the control loop',
+      heroTitle: 'Your coding agents stay on your computer. You stay in control from anywhere.',
+      heroSub: 'Drive Claude Code, OpenAI Codex, OpenCode, Kimi Code, ZCode and DeepSeek running on your own machine — from your phone or a second computer. Handle approvals, continue sessions, inspect results. End-to-end encrypted. Backend capabilities differ; the matrix below is the source of truth.',
+      heroSubShort: 'Drive six agent backends running on your own machine from your phone. Approvals, sessions, results — end-to-end encrypted. Capabilities differ per backend.',
+      agentStripLabel: 'AGENT BACKENDS · v1.8.0',
+      releaseChip: 'v1.8.0 · upcoming',
+      assetSlot: 'GENERATED REAL-UI ASSET SLOT',
+      assetCaption: 'Reproducible product demo, rendered from real product UI by repo automation. Not a live customer session.',
+      heroAssetDesc: '8–12s silent control loop: watch a running session → agent works → approve → continue → inspect diff.',
+      heroAssetDescShort: '8–12s silent control loop, EN/中文 sources.',
+      loopTitle: 'Leave the computer. Stay in the control loop.',
+      loopSub: 'One continuous session, four moments. Steps stay readable in order with JavaScript off; with it on, they scrub the video.',
+      loopAssetDesc: 'Same 8–12s clip as the hero, scrubbed to the selected step. Muted, playsinline, user-pausable.',
+      loopAssetCaption: 'Reduced motion: no autoplay, poster shown, controls stay available.',
+      nowShowing: 'CUE',
+      jobsTitle: 'Four jobs, not a feature wall.',
+      jobsLink: 'Agent-specific limits',
+      agentTitle: 'Six backends. Not equivalent.',
+      agentSub: 'Basic session access is not the same as full capability parity. Read the row, not the logo.',
+      colAgent: 'Agent backend',
+      matrixCaption: 'Capability boundaries match the upcoming v1.8.0. Full detail in Features and the User Manual.',
+      openCodeWarn: 'OpenCode has no enforceable interactive approval. Sessions always run at Full access — treat every OpenCode session as pre-approved.',
+      surfTitle: 'Four parts, one control plane.',
+      surfSub: 'The Desktop App and the daemon are separate distributions. You can run the daemon without ever installing the Desktop App.',
+      surfAssetDesc: 'Real desktop console screenshot: two-pane layout, session list and live stream, window chrome kept.',
+      twoPane: 'sessions + live stream',
+      fleetTitle: 'Several computers',
+      fleetBody: 'Pair a daemon on each machine and switch between them from one client. This is a fleet of your own computers, not an orchestrated agent team.',
+      trustTitle: 'Why you can let it touch your local agent.',
+      limitsLabel: 'STATED LIMITS',
+      limits: [
+        'Agents execute with your own OS user permissions. CC Pocket does not sandbox them.',
+        'OpenCode has no enforceable interactive approval; its sessions always run at Full access.',
+        'Capability differs per backend. Read the matrix before you rely on changes, diff or usage on a given agent.'
+      ],
+      trustCta: 'Read the security model', trustCta2: 'Self-host the relay',
+      startTitle: 'Three steps to paired.',
+      detected: 'Detected:',
+      platformPick: 'PLATFORM',
+      starTag: 'Preview',
+      starNote: 'GitHub stars shown only when the API responds. No placeholder numbers.',
+      osLinks: [
+        { name: 'GitHub', desc: 'Source, issues, releases' },
+        { name: 'User Manual', desc: 'Setup and operations' },
+        { name: 'Security', desc: 'Threat model, relay, keys' },
+        { name: 'Contributing', desc: 'Build and PR guide' },
+        { name: 'Smart Support', desc: 'Diagnostics and help' }
+      ],
+      readmeSub: 'Six agent backends: Claude Code, OpenAI Codex, OpenCode, Kimi Code (Preview), ZCode and DeepSeek Harness (narrow v1). Capability differs per backend — see the matrix in §6. Everything below describes the upcoming v1.8.0.',
+      readmeOverview: 'Real UI overview',
+      readmeAssetDesc: 'Static overview rendered from real product UI. README never depends on an autoplaying video.',
+      noAutoplay: 'static, no autoplay',
+      readmeEntries: 'Three entry points',
+      readmeLinks: [
+        { name: 'Get the app', desc: 'Phone, tablet, desktop' },
+        { name: 'Latest release', desc: 'v1.8.0 · upcoming' },
+        { name: 'User manual', desc: 'Pairing and operations' }
+      ],
+      readmeLoop: 'Control loop in four steps',
+      readmeRest: '§6 Agent capability matrix (same source as the site) · §7 Platform & distribution matrix · §8 Three-step quickstart, per-platform detail collapsed · §9 Architecture and security model · §10 Build, docs, contributing, license. README.zh-CN.md mirrors this structure one-to-one; no interleaved bilingual paragraphs.',
+      abA: 'Desktop home — full flow', abB: 'Mobile home — key fold + menu', abC: 'Agent matrix — two forms', abD: 'README reference', abE: 'Video states',
+      abACap: 'All eight sections at their key fold. Content order is identical on mobile. Section padding 64–84px, content column 1120px.',
+      abBCap: 'Same semantic order, no horizontal scroll. Use the LOOP, VIDEO, LANG and MENU controls above to drive both frames.',
+      abCCap: 'Desktop keeps a real table with row and column headers. Mobile becomes per-agent cards where every "No" is visible before expanding.',
+      abDCap: 'Typographic reference for README §1–5. No GitHub chrome simulation.',
+      abECap: 'Hero and control-loop slots follow the VIDEO control above. All three states keep visible controls and a described poster.',
+      b1: 'Key fold + menu overlay', b2: 'Control loop + platform pick',
+      tableForm: 'table form', cardForm: 'card form',
+      active: 'ACTIVE',
+      annA: [
+        'Hero: two CTAs only. GitHub sits in the nav, not beside them.',
+        'No version stacking in the eyebrow. Release chip lives in the nav.',
+        'Agent strip below the visual; Kimi carries Preview inline.',
+        'Sections 2 and 4 replace the old moment + four repeated phone vignettes.',
+        'Fact baseline for this board: current main @ 6162816a, published as upcoming v1.8.0.'
+      ],
+      annB: [
+        'Menu is a bottom sheet: thumb-reachable, closes on ✕ or Escape.',
+        'Language and theme live inside the menu on mobile — same state as the desktop nav.',
+        'Loop steps are a real ordered list; they read top to bottom with JavaScript off.',
+        'Platform picker is a segmented row, never a horizontally scrolling table.'
+      ]
+    };
+
+    const zh = {
+      escHint: '关闭菜单与展开层',
+      nav: ['控制回路', 'Agent 支持', '产品组成', '安全模型', '文档'],
+      ctaPrimary: '获取 App', ctaSecondary: '看真实流程',
+      heroTitle: 'Agent 留在你的电脑，人从任何设备掌控全程。',
+      heroSub: '从手机或另一台电脑，控制本机运行的 Claude Code、OpenAI Codex、OpenCode、Kimi Code、ZCode 与 DeepSeek：处理授权、继续会话、检查结果，端到端加密。各后端能力并不等价，以下方能力矩阵为准。',
+      heroSubShort: '从手机控制本机运行的六个 Agent 后端：授权、会话、结果，端到端加密。各后端能力不同。',
+      agentStripLabel: 'AGENT 后端 · v1.8.0',
+      releaseChip: 'v1.8.0 · 即将发布',
+      assetSlot: '自动生成真实 UI 资产落点',
+      assetCaption: '由仓库自动化从真实产品 UI 渲染的可复现产品演示，不是线上用户会话。',
+      heroAssetDesc: '8–12 秒无声控制闭环：查看运行中会话 → Agent 工作 → 授权 → 继续 → 检查 diff。',
+      heroAssetDescShort: '8–12 秒无声控制闭环，中英各一份源。',
+      loopTitle: '离开电脑，但不离开控制回路。',
+      loopSub: '同一个会话，四个时刻。页面无 JavaScript 时按顺序仍可完整读完；有脚本时点击节点会定位视频进度。',
+      loopAssetDesc: '与 Hero 同一段 8–12 秒素材，定位到所选节点。muted、playsinline，可暂停。',
+      loopAssetCaption: 'reduced motion 下不自动播放，显示 poster，控件仍可用。',
+      nowShowing: '定位',
+      jobsTitle: '四个任务，不是功能墙。',
+      jobsLink: '查看该项的 Agent 限制',
+      agentTitle: '六个后端，能力并不等价。',
+      agentSub: '接入基础会话不等于全部高级能力一致。看行，不要只看 logo。',
+      colAgent: 'Agent 后端',
+      matrixCaption: '能力边界对应即将发布的 v1.8.0。完整说明见 Features 与 User Manual。',
+      openCodeWarn: 'OpenCode 无可执法交互审批，会话恒为 Full access —— 请把每个 OpenCode 会话都视为已预先授权。',
+      surfTitle: '四个组成，一个控制面。',
+      surfSub: 'Desktop App 与 daemon 是不同分发物。不装 Desktop App 也可以只跑 daemon。',
+      surfAssetDesc: '真实桌面控制台截图：两栏布局、会话列表与实时流，保留窗口 chrome。',
+      twoPane: '会话列表 + 实时流',
+      fleetTitle: '多台电脑',
+      fleetBody: '在每台电脑上配对一个 daemon，用一个客户端切换。这是你自己的电脑集合，不是自动编排的 Agent 团队。',
+      trustTitle: '凭什么让它碰你本机的 Agent。',
+      limitsLabel: '公开限制',
+      limits: [
+        'Agent 仍按本机用户权限执行，CC Pocket 不提供沙箱。',
+        'OpenCode 无可执法交互审批，其会话恒为 Full access。',
+        '各后端能力不同。依赖改动、diff 或用量前，请先看能力矩阵。'
+      ],
+      trustCta: '阅读安全模型', trustCta2: '自托管 relay',
+      startTitle: '三步完成配对。',
+      detected: '已检测：',
+      platformPick: '平台选择',
+      starTag: 'Preview',
+      starNote: 'GitHub star 仅在 API 成功时展示，失败不显示假数。',
+      osLinks: [
+        { name: 'GitHub', desc: '源码、issue、release' },
+        { name: 'User Manual', desc: '安装与运维' },
+        { name: 'Security', desc: '威胁模型、relay、密钥' },
+        { name: 'Contributing', desc: '构建与 PR 指南' },
+        { name: 'Smart Support', desc: '诊断与求助' }
+      ],
+      readmeSub: '六个 Agent 后端：Claude Code、OpenAI Codex、OpenCode、Kimi Code（Preview）、ZCode 与 DeepSeek Harness（有限 v1）。各后端能力不同，见 §6 能力矩阵。以下内容描述即将发布的 v1.8.0。',
+      readmeOverview: '真实 UI overview',
+      readmeAssetDesc: '由真实产品 UI 渲染的静态 overview。README 不依赖自动播放视频。',
+      noAutoplay: '静态图，不自动播放',
+      readmeEntries: '三个入口',
+      readmeLinks: [
+        { name: '获取 App', desc: '手机、平板、桌面' },
+        { name: '最新 Release', desc: 'v1.8.0 · 即将发布' },
+        { name: 'User manual', desc: '配对与运维' }
+      ],
+      readmeLoop: '四步控制回路',
+      readmeRest: '§6 Agent 能力矩阵（与官网同源）· §7 平台与分发矩阵 · §8 三步 Quickstart，平台细节折叠 · §9 架构图与安全模型 · §10 Build、Docs、Contributing、License。README.zh-CN.md 与英文版结构一一对应，不逐段双语混排。',
+      abA: '桌面首页 — 全流程', abB: '移动首页 — 关键折叠 + 菜单', abC: 'Agent 能力矩阵 — 两种形态', abD: 'README 排版参考', abE: '视频状态',
+      abACap: '八段信息架构的关键折叠，移动端保持同一语义顺序。section padding 64–84px，内容列宽 1120px。',
+      abBCap: '同一语义顺序，无横向滚动。用上方 LOOP／VIDEO／LANG／MENU 控件驱动两个画板。',
+      abCCap: '桌面保留真实表格与行列表头；移动端转为每个 Agent 一张卡片，展开前所有「否」都已可见。',
+      abDCap: 'README §1–5 的排版参考，不模拟 GitHub chrome。',
+      abECap: 'Hero 与控制回路的资产落点跟随上方 VIDEO 控件。三种状态都保留可见控件与可描述 poster。',
+      b1: '关键折叠 + 菜单浮层', b2: '控制回路 + 平台选择',
+      tableForm: '表格形态', cardForm: '卡片形态',
+      active: '当前',
+      annA: [
+        'Hero 只有两个主行动，GitHub 放导航，不与其并列。',
+        'Eyebrow 不堆版本号，Release 信息放导航右侧。',
+        'Agent 身份条在视觉下方，Kimi 的 Preview 内联紧贴。',
+        '第 2、4 段替代旧的 moment + 四个重复手机 vignette。',
+        '本画板事实基线：current main @ 6162816a，对外表述为即将发布的 v1.8.0。'
+      ],
+      annB: [
+        '菜单是底部 sheet：拇指可达，✕ 或 Escape 关闭。',
+        '移动端语言与主题放进菜单，与桌面导航保持同一状态。',
+        '流程节点是真实有序列表，无 JavaScript 时自上而下可读。',
+        '平台选择用分段按钮，不用横向滚动表格。'
+      ]
+    };
+    return this.state.lang === 'en' ? en : zh;
+  }
+
+  matrixData() {
+    const zh = this.state.lang !== 'en';
+    const Y = { v: 'yes' }, N = { v: 'no' };
+    const cols = zh
+      ? ['基础会话／流式／恢复', '审批与执行模式', '改动与 diff', '用量聚合']
+      : ['Core session', 'Approval & mode', 'Changes & diff', 'Usage'];
+    const L = {
+      yes: zh ? '✓ 是' : '✓ Yes',
+      no: zh ? '✕ 否' : '✕ No',
+      lim: zh ? '△ 有限' : '△ Limited'
+    };
+    const newIn = zh ? 'v1.8.0 新增' : 'new in v1.8.0';
+    const OK = zh ? '已支持' : 'Supported';
+    const rows = [
+      { agent: 'Claude Code', status: OK, cells: [Y, Y, Y, Y] },
+      { agent: 'OpenAI Codex', status: OK, cells: [Y, Y, Y, Y] },
+      { agent: 'OpenCode', status: OK,
+        warn: zh ? '无可执法交互审批：会话恒为 Full access。' : 'No enforceable interactive approval: sessions always run at Full access.',
+        cells: [Y, { v: 'no', note: zh ? '恒为 Full access' : 'Always Full access' }, N, Y] },
+      { agent: 'Kimi Code', tag: 'Preview', status: 'Preview', cells: [Y, Y, N, { v: 'yes', note: newIn }] },
+      { agent: 'ZCode', status: OK, cells: [Y, Y, N, { v: 'yes', note: newIn }] },
+      { agent: 'DeepSeek Harness', tag: zh ? '有限 v1' : 'narrow v1', status: OK,
+        extra: zh ? '不支持切换模型。' : 'No model switching.',
+        cells: [
+          { v: 'yes', note: zh ? '发现／回放／新建／恢复／文本收发／实时流式' : 'Discover, replay, create, resume, text send/receive, live streaming' },
+          { v: 'lim', note: zh ? '仅启动时 sandbox 默认值；远程审批未桥接，fail-closed' : 'Startup sandbox default only; remote approval not bridged, fail-closed' },
+          N, N
+        ] }
+    ];
+    const fg = (v) => v === 'yes' ? 'var(--fg, #F2F3F5)' : v === 'lim' ? 'var(--accent, #D97757)' : 'var(--dim, #6C737B)';
+    return {
+      cols,
+      rows: rows.map((r) => {
+        const cells = r.cells.map((c, i) => ({ col: cols[i], label: L[c.v], note: c.note || null, fg: fg(c.v) }));
+        const open = this.state.openCard === r.agent;
+        const limits = cells.filter((c) => c.label !== L.yes);
+        return {
+          agent: r.agent, tag: r.tag || null, status: r.status === r.tag ? null : r.status, warn: r.warn || null, extra: r.extra || null,
+          cells, open,
+          chevron: open ? '▴' : '▾',
+          cardBc: r.warn ? 'rgba(217,119,87,.42)' : 'var(--line, rgba(255,255,255,.09))',
+          summary: (zh ? '限制 ' : 'limits ') + limits.length + '/4',
+          allGood: (!open && limits.length === 0) ? (zh ? '四项均支持，无限制。' : 'All four supported. No limits.') : null,
+          visible: open ? cells : limits,
+          toggle: () => this.setState((s) => ({ openCard: s.openCard === r.agent ? null : r.agent }))
+        };
+      })
+    };
+  }
+
+  renderVals() {
+    const s = this.state, zh = s.lang !== 'en', t = this.copy();
+    const dark = s.theme === 'dark';
+    const v = dark
+      ? { bg: '#0E0F11', surface: '#16181B', raised: '#1E2125', line: 'rgba(255,255,255,.09)', fg: '#F2F3F5', muted: '#9BA1A8', dim: '#6C737B', accent: '#D97757', accentSoft: 'rgba(217,119,87,.12)' }
+      : { bg: '#FAF9F7', surface: '#FFFFFF', raised: '#F1EFEC', line: 'rgba(15,17,20,.11)', fg: '#16181B', muted: '#565C63', dim: '#838A92', accent: '#C05C3B', accentSoft: 'rgba(192,92,59,.09)' };
+
+    const mk = (list, cur, set) => list.map((o) => Object.assign({ sel: o.key === cur, on: () => set(o.key) }, this.seg(o.key === cur), { label: o.label, key: o.key }));
+
+    const langOpts = mk([{ key: 'en', label: 'EN' }, { key: 'zh', label: '中文' }], s.lang, (k) => this.setState({ lang: k }));
+    const themeOpts = mk([{ key: 'dark', label: zh ? '深' : 'Dark' }, { key: 'light', label: zh ? '浅' : 'Light' }], s.theme, (k) => this.setState({ theme: k }));
+
+    const nodeDefs = zh
+      ? [['Watch', '观察', '在任何设备查看运行中的会话流。'], ['Approve', '授权', 'Agent 触及敏感操作时，在手机上批准或拒绝；超时安全拒绝。'], ['Continue', '继续', '原地接管，继续同一会话，不无故 fork；断线后补齐遗漏内容。'], ['Inspect', '检查', '工具事件、Changed files、行级 diff、文件预览、上下文与用量。']]
+      : [['Watch', 'Watch', 'See the running session stream from anywhere.'], ['Approve', 'Approve', 'The agent hits a sensitive operation. Approve or deny from your phone; timeout denies safely.'], ['Continue', 'Continue', 'Take over in place and keep the same session. Missed output is backfilled after a drop.'], ['Inspect', 'Inspect', 'Tool events, changed files, line diff, file preview, context and usage.']];
+
+    const loopNodes = nodeDefs.map((d, i) => {
+      const sel = i === s.node;
+      return {
+        num: '0' + (i + 1), name: d[1], desc: d[2], sel,
+        bg: sel ? 'var(--accentSoft, rgba(217,119,87,.12))' : 'transparent',
+        bc: sel ? 'rgba(217,119,87,.5)' : 'var(--line, rgba(255,255,255,.09))',
+        fg: sel ? 'var(--accent, #D97757)' : 'var(--fg, #F2F3F5)',
+        numFg: sel ? 'var(--accent, #D97757)' : 'var(--dim, #6C737B)',
+        on: () => this.setState({ node: i })
+      };
+    });
+    const nodeOpts = mk(nodeDefs.map((d, i) => ({ key: i, label: d[1] })), s.node, (k) => this.setState({ node: k }));
+
+    const vDefs = {
+      ready: { icon: '▶', label: zh ? '就绪' : 'READY', fg: '#7FA88C', action: zh ? '暂停' : 'Pause', progress: '38%', time: '0:04 / 0:11',
+        body: zh ? '视频已加载，可播放；muted、playsinline、可暂停。' : 'Clip loaded and playable: muted, playsinline, user-pausable.',
+        badge: null, ctrl: '❚❚', barBg: '#D97757',
+        note: zh ? '默认状态。自动播放仅在 reduced motion 未开启时生效。' : 'Default state. Autoplay only when reduced motion is off.' },
+      failed: { icon: '✕', label: zh ? '加载失败' : 'FAILED', fg: '#D97757', action: zh ? '重试' : 'Retry', progress: '0%', time: '—',
+        body: zh ? '视频源不可用，回退到静态 poster，控件保留，不显示破图。' : 'Source unavailable. Falls back to the static poster; controls stay, no broken frame.',
+        badge: zh ? '回退到 poster' : 'Poster fallback', ctrl: '↻', barBg: '#3A3F45',
+        note: zh ? '失败不阻断阅读：流程节点已提供同等文字信息。' : 'Failure never blocks reading — the loop steps carry the same information in text.' },
+      reduced: { icon: '⏸', label: zh ? 'REDUCED MOTION' : 'REDUCED MOTION', fg: '#9BA1A8', action: zh ? '手动播放' : 'Play', progress: '0%', time: '0:00 / 0:11',
+        body: zh ? 'prefers-reduced-motion 生效：不自动播放，显示 poster，用户可手动播放。' : 'prefers-reduced-motion honoured: no autoplay, poster shown, playback available on request.',
+        badge: zh ? 'poster 静止' : 'Poster, static', ctrl: '▶', barBg: '#3A3F45',
+        note: zh ? '同时禁用滚动 reveal 与非必要过渡。' : 'Also disables scroll reveals and non-essential transitions.' }
+    };
+    const cur = vDefs[s.video];
+    const order = ['ready', 'failed', 'reduced'];
+    const videoOpts = mk(order.map((k) => ({ key: k, label: zh ? { ready: '就绪', failed: '失败', reduced: '弱动效' }[k] : { ready: 'Ready', failed: 'Failed', reduced: 'Reduced' }[k] })), s.video, (k) => this.setState({ video: k }));
+    const videoStates = order.map((k) => Object.assign({}, vDefs[k], {
+      sel: k === s.video, on: () => this.setState({ video: k }),
+      ringBc: k === s.video ? 'rgba(217,119,87,.55)' : 'rgba(255,255,255,.10)'
+    }));
+
+    const m = this.matrixData();
+
+    const osOpts = mk([{ key: 'macOS', label: 'macOS' }, { key: 'Linux', label: 'Linux' }, { key: 'Windows', label: 'Windows' }], s.os, (k) => this.setState({ os: k }));
+    const modeOpts = mk([{ key: 'install', label: zh ? '安装' : 'Install' }, { key: 'update', label: zh ? '更新' : 'Update' }], s.mode, (k) => this.setState({ mode: k }));
+    const verb = s.mode === 'install' ? (zh ? '下载' : 'Download') : (zh ? '更新' : 'Update');
+    const desktopByOs = {
+      macOS: { detail: zh ? 'Apple Silicon 与 Intel DMG' : 'Apple Silicon and Intel DMG', btn: verb + ' DMG' },
+      Windows: { detail: 'x86_64 MSI', btn: verb + ' MSI' },
+      Linux: { detail: zh ? '没有正式安装包' : 'No official package', noBtn: zh ? '从源码构建' : 'Build from source', noBtnNote: zh ? '见 Docs / Build' : 'See Docs / Build' }
+    };
+    const daemonByOs = {
+      macOS: zh ? 'Apple Silicon 与 Intel' : 'Apple Silicon and Intel',
+      Windows: 'x86_64',
+      Linux: 'x86_64 / arm64'
+    };
+    const d = desktopByOs[s.os];
+    const dlCells = [
+      { kind: zh ? '手机／平板' : 'PHONE / TABLET', name: zh ? '手机 App' : 'Phone app', detail: zh ? 'iOS／iPadOS App Store、TestFlight；Android APK' : 'iOS / iPadOS App Store, TestFlight; Android APK', btn: zh ? '打开 App Store' : 'Open App Store', btnShort: zh ? 'App Store' : 'App Store', btnBg: 'var(--accent, #D97757)', btnFg: '#16110E' },
+      Object.assign({ kind: 'DESKTOP APP', name: 'Desktop App', btnBg: 'var(--raised, #1E2125)', btnFg: 'var(--fg, #F2F3F5)', btnShort: d.btn }, d),
+      { kind: 'DAEMON', name: zh ? '本机 daemon' : 'Local daemon', detail: (zh ? '运行任一受支持 CLI 的电脑 · ' : 'Any computer running a supported CLI · ') + daemonByOs[s.os], btn: verb + (zh ? ' daemon' : ' daemon'), btnShort: verb, btnBg: 'var(--raised, #1E2125)', btnFg: 'var(--fg, #F2F3F5)' },
+      { kind: 'HARMONYOS', name: 'HarmonyOS', tag: 'Preview', detail: zh ? '签名 HAP · 能力受限，不与成熟移动端并列' : 'Signed HAP · limited capability, not on par with the mature mobile clients', btn: zh ? '下载 HAP' : 'Download HAP', btnShort: 'HAP', btnBg: 'var(--raised, #1E2125)', btnFg: 'var(--fg, #F2F3F5)' }
+    ];
+
+    const jobs = (zh ? [
+      ['01', 'Watch — 观察', '跨设备查看流式输出、工具事件和任务状态。', ['运行中的会话在手机上实时更新，六个后端一致。', '断线重连后补齐遗漏内容。', '按 Agent 筛选项目、会话与用量。'], null],
+      ['02', 'Approve — 处理授权', 'Agent 卡在敏感操作时，从手机批准或拒绝，超时安全拒绝。', ['执行模式按 Agent 不同，不是所有后端都有可执法审批。', 'OpenCode 恒为 Full access，没有审批阶梯。', '超时默认拒绝，不会静默放行。'], '真实审批界面截图：待批操作 + 通过／拒绝。'],
+      ['03', 'Continue — 继续会话', '跨设备接管同一个会话，不被迫 fork。', ['接管不产生新会话，上下文保持连续。', '从手机或桌面 App 直接发起新任务。', '在手机上输入，回到电脑仍是同一会话。'], null],
+      ['04', 'Inspect — 检查结果', '不打开电脑也能判断这次改动能不能收。', ['工具事件、上下文与用量聚合；Kimi 与 ZCode 在 v1.8.0 已有用量。', 'Changed files 与行级 diff 仅部分后端支持。', '会话回放里用户提示词中的图片仍然可见。'], '真实 diff 界面截图：Changed files 列表 + 行级 diff。']
+    ] : [
+      ['01', 'Watch', 'See streaming output, tool events and task state from any device.', ['Running sessions update live on your phone, the same on all six backends.', 'Missed output is backfilled after a reconnect.', 'Filter projects, sessions and usage by agent.'], null],
+      ['02', 'Approve', 'The agent stalls on a sensitive operation; you clear it from your phone.', ['Execution mode differs per backend — not every one has enforceable approval.', 'OpenCode always runs at Full access, with no approval ladder.', 'Timeout denies by default; nothing passes silently.'], 'Real approval screen: pending operation with approve / deny.'],
+      ['03', 'Continue', 'Take over the same session from another device instead of forking it.', ['Taking over does not spawn a new session; context stays continuous.', 'Start a new task straight from the phone or desktop app.', 'Type on the phone, come back to the desk, same session.'], null],
+      ['04', 'Inspect', 'Decide whether the change is good without opening the laptop.', ['Tool events, context and aggregated usage — Kimi Code and ZCode report usage in v1.8.0.', 'Changed files and line diff are supported on some backends only.', 'Images in your own prompts stay visible in session replay.'], 'Real diff screen: changed file list with line diff.']
+    ]).map((j) => ({ num: j[0], name: j[1], outcome: j[2], facts: j[3], slot: j[4] }));
+
+    const surfaces = zh ? [
+      { kind: 'CLIENT', name: '手机／平板 App', desc: '主要控制面：授权、会话、结果检查。', dist: 'iOS／iPadOS · Android APK' },
+      { kind: 'CLIENT', name: 'Desktop App', desc: '两栏控制台，与 daemon 是不同分发物。', dist: 'macOS DMG · Windows MSI · Linux 源码构建' },
+      { kind: 'HOST', name: '本机 daemon', desc: '在跑 CLI 的电脑上运行，Agent 和代码不离开本机。', dist: 'macOS · Linux x86_64／arm64 · Windows' },
+      { kind: 'TRANSPORT', name: '零知识 relay', desc: '只转发密文，不解密、不存储会话内容。', dist: '托管 relay 默认可用 · 可自托管' }
+    ] : [
+      { kind: 'CLIENT', name: 'Phone / tablet app', desc: 'The primary control surface: approvals, sessions, results.', dist: 'iOS / iPadOS · Android APK' },
+      { kind: 'CLIENT', name: 'Desktop App', desc: 'Two-pane console. A separate distribution from the daemon.', dist: 'macOS DMG · Windows MSI · Linux from source' },
+      { kind: 'HOST', name: 'Local daemon', desc: 'Runs on the computer with your CLI. Agents and code never leave it.', dist: 'macOS · Linux x86_64 / arm64 · Windows' },
+      { kind: 'TRANSPORT', name: 'Zero-knowledge relay', desc: 'Forwards ciphertext only. It cannot decrypt or store session content.', dist: 'Hosted relay by default · self-hostable' }
+    ];
+
+    const chain = (zh ? [
+      ['01', '本地执行', '代码与 Agent 留在你的电脑，由本机 daemon 执行。'],
+      ['02', '端到端加密', '客户端与 daemon 之间加密，relay 只见密文。'],
+      ['03', '零知识 relay', 'relay 不持有密钥，不解密内容；也可以自托管。'],
+      ['04', '到期与撤销', '配对可到期、可撤销；没有 CC Pocket 账号。']
+    ] : [
+      ['01', 'Local execution', 'Your code and agents stay on your computer, run by the local daemon.'],
+      ['02', 'End-to-end encryption', 'Encrypted between client and daemon. The relay only ever sees ciphertext.'],
+      ['03', 'Zero-knowledge relay', 'The relay holds no keys and decrypts nothing. Self-host it if you prefer.'],
+      ['04', 'Expiry and revocation', 'Pairings expire and can be revoked. There is no CC Pocket account.']
+    ]).map((c, i, arr) => ({ num: c[0], name: c[1], desc: c[2], arrow: i < arr.length - 1 }));
+
+    const steps = (zh ? [
+      ['01', '装 App', '在手机或平板安装 CC Pocket。'],
+      ['02', '装 daemon', '在任意一台运行受支持 CLI 的电脑上安装 daemon。不要求特定 CLI。'],
+      ['03', '配对', '扫码，或输入 6 位配对码。']
+    ] : [
+      ['01', 'Install the app', 'Put CC Pocket on your phone or tablet.'],
+      ['02', 'Install the daemon', 'On any computer running one of the supported CLIs. No specific CLI is required.'],
+      ['03', 'Pair', 'Scan the QR code, or type the 6-digit code.']
+    ]).map((x) => ({ num: x[0], name: x[1], desc: x[2] }));
+
+    const agents = [
+      { name: 'Claude Code', tag: null, dot: '#D97757' },
+      { name: 'OpenAI Codex', tag: null, dot: '#8A9199' },
+      { name: 'OpenCode', tag: null, dot: '#8A9199' },
+      { name: 'Kimi Code', tag: 'Preview', dot: '#8A9199' },
+      { name: 'ZCode', tag: null, dot: '#8A9199' },
+      { name: 'DeepSeek', tag: zh ? '有限 v1' : 'narrow v1', dot: '#8A9199' }
+    ];
+
+    const badges = [
+      { k: 'CI', v: 'passing', bg: '#3E5C46', fg: '#D8E8DC' },
+      { k: 'release', v: 'v1.8.0', bg: '#7A4530', fg: '#F5DDD2' },
+      { k: 'license', v: 'MIT', bg: '#2A3E52', fg: '#D3E2F0' },
+      { k: 'docs', v: 'manual', bg: '#2A2E33', fg: '#C9CED4' },
+      { k: 'lang', v: zh ? 'English' : '中文', bg: '#2A2E33', fg: '#D97757' }
+    ];
+
+    return {
+      t, v, lang: s.lang, menuOpen: s.menuOpen, osSel: s.os,
+      langOpts, themeOpts, nodeOpts, videoOpts, osOpts, modeOpts,
+      menuBtn: Object.assign({ label: (s.menuOpen ? (zh ? '关闭菜单' : 'Close menu') : (zh ? '打开菜单' : 'Open menu')) }, this.seg(s.menuOpen)),
+      toggleMenu: () => this.setState((p) => ({ menuOpen: !p.menuOpen })),
+      closeMenu: () => this.setState({ menuOpen: false }),
+      cycleVideo: () => this.setState((p) => ({ video: order[(order.indexOf(p.video) + 1) % order.length] })),
+      loopNodes, activeNodeName: nodeDefs[s.node][1], loopProgress: (25 * (s.node + 1)) + '%',
+      video: Object.assign({}, cur, { bc: cur.fg, chipBg: 'rgba(255,255,255,.04)', srcLabel: 'control-loop-' + s.lang + '.mp4' }),
+      videoStates, mCols: m.cols, mRows: m.rows,
+      jobs, surfaces, chain, steps, agents, badges, dlCells
+    };
+  }
+}
+</script>
+</body>
+</html>

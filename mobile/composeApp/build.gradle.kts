@@ -190,5 +190,14 @@ tasks.withType(org.gradle.api.tasks.testing.Test::class.java).configureEach {
     // not append to the developer's real ~/Library/Logs/cc-pocket/desktop.err.log while doing so.
     val testCrashLog = temporaryDir.resolve("desktop.err.log")
     systemProperty("ccpocket.desktopLog.file", testCrashLog.absolutePath)
+    // The offscreen screenshot generators resolve Compose resources through the test JVM's default
+    // locale, so a capture silently inherits whatever the developer's machine is set to (a zh_CN
+    // laptop produced a half-Chinese English screenshot). marketing/site/generate-assets.sh pins it
+    // per language; unset, nothing changes.
+    providers.environmentVariable("CCP_CAPTURE_LOCALE").orNull?.let { tag ->
+        val zh = tag.startsWith("zh")
+        systemProperty("user.language", if (zh) "zh" else "en")
+        systemProperty("user.country", if (zh) "CN" else "US")
+    }
     doFirst { testStore.delete(); testCrashLog.delete() }
 }

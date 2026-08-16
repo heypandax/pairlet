@@ -539,6 +539,10 @@ def build_ai_index(manual_path: Path, output: Path, llms_output: Path) -> None:
         "",
     ]
     for article in manual.get("articles", []):
+        # `unlisted` articles stay reachable by URL for the users who already rely on them, but they
+        # are not offered to crawlers or assistants through this public index (see build-manual.py).
+        if article.get("unlisted"):
+            continue
         slug = str(article["slug"])
         locale_records: dict[str, Any] = {}
         for locale in ("en", "zh"):

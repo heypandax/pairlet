@@ -4,107 +4,140 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-**Your coding agent, in your pocket.** CC Pocket drives Claude Code — or OpenAI Codex, or OpenCode — running on your computer, from your phone or from another computer, from anywhere (not just your LAN). Watch the agent work in real time, answer its tool-permission requests in two taps, and pick up any session exactly where you left it. Traffic flows through a **zero-knowledge relay** that only ever forwards end-to-end-encrypted ciphertext — no account, no content logging. Clean-room Kotlin, MIT.
+**Your coding agents stay on your computer. You stay in control from anywhere.**
 
-**🌐 Website:** <https://heypandax.github.io/cc-pocket/> · **💬 Smart support:** [ask without signing in](https://pocket.ark-nexus.cc/support/) · **📖 User manual:** [manual](https://pocket.ark-nexus.cc/manual/en/) · **📋 Full feature list:** [features](https://heypandax.github.io/cc-pocket/features.html)
+CC Pocket is an open-source, local-first control plane for command-line coding agents. The agent keeps running on your own machine, against your own checkout; from a phone, a tablet or another computer you watch it work, answer the permission prompts that block it, continue the same session, and read what it changed. Traffic is end-to-end encrypted and passes through a **zero-knowledge relay** that only ever forwards ciphertext — no CC Pocket account, no content logging. Clean-room Kotlin, MIT.
 
-<p align="center"><a href="https://heypandax.github.io/cc-pocket/"><img src="site/og-image.png" alt="CC Pocket — drive Claude Code on your computer from your phone" width="720"></a></p>
+**v1.8.0** drives six agent backends — Claude Code, OpenAI Codex, OpenCode, Kimi Code (Preview), ZCode and DeepSeek. They are not equivalent: see [the capability matrix](#agent-support) before you pick one.
 
-## Get it
+**🌐 [Website](https://heypandax.github.io/cc-pocket/)** · **📖 [User manual](https://pocket.ark-nexus.cc/manual/en/)** · **💬 [Support, no sign-in](https://pocket.ark-nexus.cc/support/)** · **📦 [Latest release](https://github.com/heypandax/cc-pocket/releases/latest)**
 
-| | Platform | Download |
+<p align="center"><a href="https://heypandax.github.io/cc-pocket/"><img src="site/assets/product/overview.png" alt="CC Pocket: the desktop console showing paired machines and a live session, beside the phone app showing a session list and an approval decision." width="900"></a></p>
+
+<sub>Real product UI with scripted demo data — regenerate with `bash marketing/site/generate-assets.sh`. Provenance: [`site/assets/product/manifest.json`](site/assets/product/manifest.json).</sub>
+
+## Quick start
+
+**1 · Get the app** — [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) (iPhone · iPad) · [TestFlight beta](https://testflight.apple.com/join/8z26MWWr) · [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk). Prefer a computer? See the [Desktop app](#platforms--distribution).
+
+**2 · Install the daemon** on the machine that runs your agent CLI — any supported one, not Claude specifically:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash   # macOS · Linux
+irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex          # Windows
+```
+
+**3 · Pair** — run `cc-pocket-daemon pair`, then scan the QR it prints (or type the 6-digit code) in the app. You are connected end-to-end.
+
+Package managers, mirrors, updates and per-platform notes: [Install details](#install-details).
+
+## The four jobs
+
+|  | Job | What you get |
 |---|---|---|
-| 📱 **Phone / tablet** | iOS · iPadOS | [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) · [TestFlight beta](https://testflight.apple.com/join/8z26MWWr) (new versions first) |
-| | Android | [APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk) from GitHub Releases |
-| 🖥️ **Desktop app** | macOS (signed .dmg) | [Apple Silicon](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg) |
-| | Windows | [.msi](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi) (unsigned — SmartScreen → "More info → Run anyway") |
-| | Linux | build from source |
-| ⚙️ **Daemon** (the computer that runs the agent) | macOS · Linux | `curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh \| bash` |
-| | Windows | `irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 \| iex` |
+| **01** | **Watch** | Streaming output, tool events with timing, sub-agent cards and background-task state, across devices. Filter projects, sessions and usage by agent. |
+| **02** | **Approve** | A permission request reaches your phone the moment the agent raises one. Allow or deny in seconds; no answer times out to a safe deny. |
+| **03** | **Continue** | Take a running session over *in place* instead of forking it, start a new task straight from the phone or the desktop app, and get missed output backfilled after a reconnect. |
+| **04** | **Inspect** | Changed files with line-level diffs, file preview, context and usage. Images in your own prompts stay visible in replay. |
 
-On a phone, the [website](https://heypandax.github.io/cc-pocket/) links straight to the store; on a computer it shows a QR to scan. Daemon details, Homebrew/Scoop alternatives and pairing: see [Install](#install).
+Capability differs by backend — the matrix below is the source of truth.
 
-## How it works
+## Agent support
+
+Public capability claims for **v1.8.0**, audited against commit [`6162816a`](https://github.com/heypandax/cc-pocket/commit/6162816a) on `main`. Machine-readable copy: [`site/public-capabilities.json`](site/public-capabilities.json).
+
+| Agent | Core session | Approval & mode | Changes & diff | Usage |
+|---|---|---|---|---|
+| Claude Code | ✓ Yes | ✓ Yes | ✓ Yes | ✓ Yes |
+| OpenAI Codex | ✓ Yes | ✓ Yes | ✓ Yes | ✓ Yes |
+| OpenCode | ✓ Yes | ✕ No — always Full access | ✕ No | ✓ Yes |
+| Kimi Code `Preview` | ✓ Yes | ✓ Yes | ✕ No | ✓ Yes · new in v1.8.0 |
+| ZCode | ✓ Yes | ✓ Yes | ✕ No | ✓ Yes · new in v1.8.0 |
+| DeepSeek Harness `narrow v1` | ✓ Yes | △ Limited | ✕ No | ✕ No |
+
+- **Core session** means discover, replay, create, resume, send and receive text, and live streaming. Every backend does all of it.
+- **OpenCode has no enforceable interactive approval.** `opencode run` has no approval protocol, so those sessions run at **Full access** and the app says so up front instead of offering modes it cannot enforce.
+- **Kimi Code is Preview.** DeepSeek is supported, but narrow: `△ Limited` approval means the launch sandbox default is all you get — remote approvals are **not bridged and fail closed** — and there is no Changed-files/diff view, no usage accounting and no model switching.
+- Boundaries follow the release. Full detail: [Features](https://heypandax.github.io/cc-pocket/features.html) and the [User manual](https://pocket.ark-nexus.cc/manual/en/).
+
+## Architecture & trust boundary
 
 ```mermaid
 flowchart LR
-    phone["📱🖥️ CC Pocket<br/>(phone · desktop)"] -- "wss · ciphertext" --> relay["relay<br/>(zero-knowledge broker)"]
-    relay -- "wss · ciphertext" --> daemon["daemon<br/>(your computer)"]
-    daemon -- "stdio" --> agent["claude / codex / opencode CLI"]
+    app["📱🖥️ CC Pocket app<br/>(phone · tablet · desktop)"] -- "wss · ciphertext" --> relay["relay<br/>(zero-knowledge broker)"]
+    relay -- "wss · ciphertext" --> daemon["local daemon<br/>(your computer)"]
+    daemon -- "stdio" --> agent["agent CLI<br/>(claude · codex · opencode · kimi · zcode · DeepSeek)"]
 ```
 
-The **daemon** runs on your computer and drives the `claude`, `codex`, or `opencode` CLI as a subprocess, dialing *out* to the relay — no inbound ports to open. The **relay** pairs your devices and routes opaque encrypted frames between them; it holds no message content and no private keys. The app and the daemon run an end-to-end session (P-256 ECDH + HKDF + AES-256-GCM, an X3DH/Noise-style handshake), so plaintext never leaves the two trusted endpoints. On the same network, the app connects to the daemon directly for lower latency; the relay stays as the from-anywhere fallback.
+The **daemon** runs on your computer, drives the agent CLI as a subprocess and dials *out* to the relay — no inbound ports to open. The **relay** pairs your devices and routes opaque encrypted frames; it holds no message content and no private keys. The app and the daemon run an end-to-end session (P-256 ECDH + HKDF + AES-256-GCM, an X3DH/Noise-style handshake), so plaintext never leaves the two trusted endpoints. On the same network the app connects to the daemon directly for lower latency; the relay stays as the from-anywhere fallback. Pairings expire and can be revoked.
 
-## What it does
+Honest limits: the agent still executes with your own operating-system permissions — end-to-end encryption is not a sandbox. OpenCode sessions have no enforceable interactive approval. The custom Noise-style channel has not had an independent third-party audit. Threat model: [`docs/SECURITY.md`](docs/SECURITY.md). Report vulnerabilities privately via [GitHub security advisories](https://github.com/heypandax/cc-pocket/security/advisories/new).
 
-- **Approve from anywhere** — tool-permission requests reach your phone the moment the agent raises one. Allow or deny in seconds; if you don't, it times out to a safe deny. Four execution modes (ask each step, auto-edit, plan, full auto), a persisted default mode and reasoning effort, plus per-session allow rules you can inspect and revoke.
-- **Claude, Codex, or OpenCode, per session** — pick the agent when you start a session; streaming and session resume work the same for all three. Codex sessions get a permission preset (Cautious / Balanced / Autonomous / Full auto) mapped to Codex's approval-policy × sandbox, and are tagged teal. OpenCode sessions are tagged purple and always run **full access**: `opencode run` has no interactive approval protocol, so the app says so up front instead of offering modes it can't enforce.
-- **Pick up any session** — resume the exact session you left running, or start fresh in any repo. A terminal session is observed read-only; "Continue here" takes it over *in place*, forking only while the terminal is truly still writing. Hand it back later with `claude --resume`. Organize sessions into named groups per project, synced between phone and desktop.
-- **Watch it work, live** — streaming output, syntax-highlighted code blocks, tool events with timing, extended thinking, and background tasks. Sub-agents show up as expandable cards, and a multi-agent `Workflow` run gets its own orchestration view with per-phase progress. If your connection blips, the missed output is backfilled on reconnect.
-- **See what changed** — browse every file a session touched with line-level diffs, select and copy diff text, preview or export files (approval-gated), tap a path in the transcript to open it, and hover / long-press any path for the full normalized value plus one-tap copy.
-- **Talk to it your way** — voice dictation, image / file / video attachments, `@`-file completion, slash-command autocomplete, and quick actions. Switch models mid-session — custom ids routed through third-party gateways (cc-switch and friends) work as-is. Interrupt anytime; prompts sent mid-turn queue cleanly.
-- **Desktop mission control** — a native macOS / Linux / Windows app from the same codebase: two panes, ⌘K to jump anywhere, pinned sessions on ⌘1–9, and approvals that surface in a menu-bar/tray popover when the window's behind.
-- **Fleet overview** — with several computers paired, one screen shows each machine's online state, running projects and waiting approvals; approve across machines and switch between them instantly.
-- **Usage insights** — tokens and estimated cost per model, today's hourly activity bars, and a 30-day heatmap.
-- **Share a folder** — grant someone an agent on one folder of your machine: three access levels, an expiry, and one-tap revoke. Shell commands still run as your user — the boundary is honest, not a sandbox.
-- **It finds you** — push notification when a turn finishes, heartbeat-guarded reconnect that survives network switches, multi-device pairing, works from cellular or hotel Wi-Fi.
-- **Private by design** — end-to-end encryption over a zero-knowledge relay, no accounts, optional Face ID / biometric app lock, open source and self-hostable.
+## Platforms & distribution
 
-**[Full feature list →](https://heypandax.github.io/cc-pocket/features.html)**
+| Surface | Official packages |
+|---|---|
+| **Phone / tablet app** | iOS · iPadOS ([App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969), [TestFlight](https://testflight.apple.com/join/8z26MWWr)) · Android [APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk) |
+| **Desktop app** | macOS [Apple Silicon](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg) (signed `.dmg`) · Windows x86_64 [`.msi`](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi). **No official Linux desktop package — [build from source](#build-from-source).** |
+| **Local daemon** | macOS Apple Silicon · macOS Intel · Linux x86_64 · Linux arm64 · Windows x86_64 |
+| **HarmonyOS** | Signed HAP, **Preview** — limited capability |
+| **Relay** | Hosted zero-knowledge relay by default; [self-hosting](https://heypandax.github.io/cc-pocket/guides/self-hosting.html) supported |
 
-### Works with third-party gateways
+The desktop app and the local daemon are **different packages**: the app is a client, the daemon is what actually runs the agent.
 
-If you route Claude Code through an LLM gateway or API relay (`ANTHROPIC_BASE_URL`), the official Remote Control [is disabled as of v2.1.196](https://code.claude.com/docs/en/remote-control) — it requires talking to `api.anthropic.com` directly. CC Pocket drives the CLI over stdio on your machine, so the endpoint doesn't matter: gateway setups (cc-switch and friends, or a vendor's Anthropic-compatible endpoint) work as-is. The daemon detects a gateway `ANTHROPIC_BASE_URL` and the model picker leads with one-tap presets for common vendor ids (DeepSeek, GLM, Kimi, Qwen, MiniMax) alongside the free-form custom id field. Which model an id actually reaches is decided by your gateway.
+## Install details
 
-## Install
-
-Two pieces: the **app** ([Get it](#get-it) above) and the **daemon** on the computer that runs the agent — the relay is hosted for you.
-
-> **Mainland China?** GitHub downloads crawl there, so the installer and release artifacts are mirrored on our relay. Use `curl -fsSL https://pocket.ark-nexus.cc/dl/install.sh | bash` (Windows: `irm https://pocket.ark-nexus.cc/dl/install.ps1 | iex`) — same script, checksum-verified, and it falls back to GitHub automatically. The daemon's self-update uses the mirror too.
-
-### macOS (Apple Silicon & Intel — signed, notarized)
+<details>
+<summary><b>macOS</b> — signed &amp; notarized</summary>
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
-cc-pocket-daemon pair                       # prints a QR + 6-digit code
+cc-pocket-daemon pair
 ```
 
-Verifies the download against the release's SHA256SUMS, installs under `~/.local` (one dir per version, Claude Code-style), and registers the launchd service — runs on login, auto-reconnects. Prefer Homebrew? `brew install --cask heypandax/tap/cc-pocket` (use the full name; an unrelated cask is also called `cc-pocket`).
+Verifies the download against the release's `SHA256SUMS`, installs under `~/.local` (one directory per version), and registers the launchd service so it runs on login and reconnects itself. Homebrew: `brew install --cask heypandax/tap/cc-pocket` (use the full name; an unrelated cask is also called `cc-pocket`).
+</details>
 
-### Linux (x86_64 / arm64)
+<details>
+<summary><b>Linux</b> — x86_64 / arm64 daemon</summary>
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
-cc-pocket-daemon pair                       # prints a QR + 6-digit code
+cc-pocket-daemon pair
 ```
 
-Pulls a self-contained tarball (bundled JRE — no system Java), installs under `~/.local`, registers a `systemd --user` service. Voice transcription uses `ffmpeg` instead of macOS's built-in `afconvert`.
+Pulls a self-contained tarball (bundled JRE, no system Java), installs under `~/.local` and registers a `systemd --user` service. Voice transcription uses `ffmpeg` instead of macOS's `afconvert`. There is no official Linux **desktop app** package — build it from source.
+</details>
 
-### Windows (x86_64)
-
-Needs the [Claude Code CLI](https://github.com/anthropics/claude-code) installed — the daemon drives it.
+<details>
+<summary><b>Windows</b> — x86_64</summary>
 
 ```powershell
 irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex
 ```
 
-One command: installs, registers a logon Scheduled Task, and drops straight into pairing. Prefer [Scoop](https://scoop.sh)? `scoop bucket add heypandax https://github.com/heypandax/scoop-bucket` then `scoop install cc-pocket-daemon`.
+One command: installs, registers a logon Scheduled Task, and drops straight into pairing. [Scoop](https://scoop.sh): `scoop bucket add heypandax https://github.com/heypandax/scoop-bucket` then `scoop install cc-pocket-daemon`.
+</details>
 
-### Pair & upgrade
+<details>
+<summary><b>Mainland China mirror</b></summary>
 
-Open the app and **scan the QR** (or type the 6-digit code) that `cc-pocket-daemon pair` printed — you're connected end-to-end. Full walkthrough: [`docs/USAGE.md`](docs/USAGE.md).
+GitHub downloads crawl there, so the installer and release artifacts are mirrored on the relay: `curl -fsSL https://pocket.ark-nexus.cc/dl/install.sh | bash` (Windows: `irm https://pocket.ark-nexus.cc/dl/install.ps1 | iex`). Same script, checksum-verified, with automatic fallback to GitHub. The daemon's self-update uses the mirror too.
+</details>
 
-`cc-pocket-daemon version` tells you what's running, how it was installed, and the one command that updates *this* install — it works offline and whether or not the daemon is up. The app shows the same thing under Settings ▸ Versions, and nudges you when either side falls behind.
+<details>
+<summary><b>Updating</b></summary>
 
-Upgrade anytime with `cc-pocket-daemon update`. Installs from the curl one-liner **keep themselves current**: the daemon checks daily and applies the new version in the background — turn that off with `cc-pocket-daemon config --auto-update off` and you'll just get a phone notification instead. Homebrew, Scoop and Windows installs never self-apply; update them through their own package manager. Homebrew: `brew upgrade --cask heypandax/tap/cc-pocket` · Scoop: `scoop update cc-pocket-daemon`. Other architectures: [build from source](#building-from-source).
+`cc-pocket-daemon version` reports what is running, how it was installed, and the single command that updates *this* install — offline, and whether or not the daemon is up. The app shows the same under **Settings ▸ Versions**.
 
-## Security
+A daemon installed by the one-liner keeps itself current: it checks daily and applies the update in the background. Turn that off with `cc-pocket-daemon config --auto-update off` and you get a phone notification instead. Homebrew, Scoop and Windows installs never self-apply — update them through their own package manager (`brew upgrade --cask heypandax/tap/cc-pocket`, `scoop update cc-pocket-daemon`). The desktop app states it plainly when an update check fails, rather than showing "up to date".
+</details>
 
-No accounts, no login. The daemon generates a static keypair on first run (its account id is the public-key fingerprint); the phone registers its own device key during pairing. Scanning the QR carries the daemon's key out-of-band, so even a malicious relay can't MITM that path. The relay only ever sees ciphertext frames — no message content, no private keys, zero content logging.
+### Works with third-party gateways
 
-Threat model and the trust-without-trusting-us argument (open source, self-hostable): [`docs/SECURITY.md`](docs/SECURITY.md). Please report vulnerabilities privately via [GitHub security advisories](https://github.com/heypandax/cc-pocket/security/advisories/new).
+If you route Claude Code through an LLM gateway or API relay (`ANTHROPIC_BASE_URL`), the official Remote Control [is disabled as of v2.1.196](https://code.claude.com/docs/en/remote-control) — it requires talking to `api.anthropic.com` directly. CC Pocket drives the CLI over stdio on your machine, so the endpoint does not matter. The daemon detects a gateway `ANTHROPIC_BASE_URL` and the model picker leads with one-tap presets for common vendor ids (DeepSeek, GLM, Kimi, Qwen, MiniMax) alongside a free-form custom id field. Which model an id actually reaches is decided by your gateway.
 
-## Building from source
+## Build from source
 
 | Module | What | Stack |
 |---|---|---|
@@ -113,55 +146,43 @@ Threat model and the trust-without-trusting-us argument (open source, self-hosta
 | `:relay` | Cloud broker: device-key pairing, ciphertext routing, multi-tenant, rate-limited | Kotlin/JVM + Ktor + SQLite |
 | `:mobile` | The CC Pocket app | Compose Multiplatform — Android · iOS · desktop |
 
-Requires **JDK 17** (any distribution — the Gradle toolchain auto-downloads one if yours differs), the **Android SDK** (`ANDROID_HOME` or `local.properties`; the Android modules are configured even for JVM-only tasks), and an installed, logged-in `claude` CLI. To build the mobile app, also copy the committed Firebase placeholder once (a real Firebase project is only needed for push/analytics):
+Requires **JDK 17** (any distribution — the Gradle toolchain downloads one if yours differs), the **Android SDK** (`ANDROID_HOME` or `local.properties`; the Android modules are configured even for JVM-only tasks), and at least one installed, logged-in agent CLI. To build the mobile app, copy the committed Firebase placeholder once (a real Firebase project is only needed for push/analytics):
 
 ```bash
 cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
 ```
 
-**Local single-machine (no relay), for development:**
+Local single-machine (no relay), for development:
 
 ```bash
 ./gradlew :protocol:check                         # protocol contract test
 ./gradlew :daemon:run --args="run"                # daemon — local WebSocket on 127.0.0.1:8765
-./gradlew :daemon:run --args="test-client"        # drive it against the real claude
-#   dirs · ls <wd> · open <wd> [resumeId] · say <text> · cd <wd> · mode <m> · allow · deny · quit
+./gradlew :daemon:run --args="test-client"        # drive it against a real agent CLI
 ```
 
-**Through the relay (off-LAN), the real product path:**
+Through the relay (off-LAN), the real product path:
 
 ```bash
-./gradlew :daemon:installDist                      # build the launcher
-daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon \
-  run --relay wss://<your-relay> --claude-bin ~/.local/bin/claude
-# then, in another terminal:
-daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair
+./gradlew :daemon:installDist
+daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon run --relay wss://<your-relay>
+daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair    # in another terminal
 ```
 
-Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via `iosApp/iosApp.xcodeproj` (Xcode — first copy `iosApp/iosApp/GoogleService-Info.plist.template` to `GoogleService-Info.plist` next to it). See [`docs/ios-device.md`](docs/ios-device.md) for on-device install.
+Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via `iosApp/iosApp.xcodeproj` (Xcode — first copy `iosApp/iosApp/GoogleService-Info.plist.template` to `GoogleService-Info.plist` next to it). Desktop (including Linux) via `./gradlew :mobile:composeApp:packageDistributionForCurrentOS`. On-device iOS install: [`docs/ios-device.md`](docs/ios-device.md).
 
 ## Docs
 
-- Website / landing page — <https://heypandax.github.io/cc-pocket/>
-- Public smart support (no sign-in required) — <https://pocket.ark-nexus.cc/support/>
-- Public user manual (shareable with AI assistants) — <https://pocket.ark-nexus.cc/manual/en/>
-- Full feature list — <https://heypandax.github.io/cc-pocket/features.html>
-- User guide (中文使用文档) — [`docs/USAGE.md`](docs/USAGE.md)
-- Feishu bot direct-chat menu setup (飞书机器人单聊底部菜单) — [`docs/FEISHU-BOT-MENU.md`](docs/FEISHU-BOT-MENU.md)
-- Runtime-context handoff guide (运行时上下文协作接力) — [`docs/COLLABORATION-HANDOFF.md`](docs/COLLABORATION-HANDOFF.md)
-- Task-context review (ReviewRequest, preview) — [`docs/design/REVIEW-REQUEST.md`](docs/design/REVIEW-REQUEST.md); the Claude Code skill ships at [`packaging/skills/review-request/SKILL.md`](packaging/skills/review-request/SKILL.md) — copy it to `~/.claude/skills/review-request/` to use it
-- Run / operate the daemon — [`docs/RUN.md`](docs/RUN.md)
+- [Website](https://heypandax.github.io/cc-pocket/) · [Full feature list](https://heypandax.github.io/cc-pocket/features.html)
+- [User manual](https://pocket.ark-nexus.cc/manual/en/) · [Smart support, no sign-in](https://pocket.ark-nexus.cc/support/)
 - Security model & threat analysis — [`docs/SECURITY.md`](docs/SECURITY.md)
-- AI support knowledge lifecycle & OpenClaw deployment — [`docs/SUPPORT-KNOWLEDGE.md`](docs/SUPPORT-KNOWLEDGE.md)
-- iOS device build & install — [`docs/ios-device.md`](docs/ios-device.md)
+- Run / operate the daemon — [`docs/RUN.md`](docs/RUN.md) · User guide (中文) — [`docs/USAGE.md`](docs/USAGE.md)
 - Relay deployment (Caddy + Cloudflare + systemd) — [`deploy/README.md`](deploy/README.md)
-- UI design (claude.ai/design handoff) — [`docs/design/`](docs/design/)
-- Historical planning docs (superseded by the code) — [`docs/archive/`](docs/archive/)
-- Provenance / clean-room statement — [`docs/ANTIPLAGIARISM.md`](docs/ANTIPLAGIARISM.md)
+- Product media pipeline — [`marketing/site/README.md`](marketing/site/README.md)
+- Design deliverables — [`docs/design/`](docs/design/) · Provenance / clean-room statement — [`docs/ANTIPLAGIARISM.md`](docs/ANTIPLAGIARISM.md)
 
 ## Contributing
 
-Issues and PRs welcome — [`CONTRIBUTING.md`](CONTRIBUTING.md) covers build prerequisites, test entry points, and which scripts are maintainer-only. Please report security issues privately via [GitHub security advisories](https://github.com/heypandax/cc-pocket/security/advisories/new) — see [`docs/SECURITY.md`](docs/SECURITY.md).
+Issues and PRs welcome — [`CONTRIBUTING.md`](CONTRIBUTING.md) covers build prerequisites, test entry points, and which scripts are maintainer-only. Please report security issues privately via [GitHub security advisories](https://github.com/heypandax/cc-pocket/security/advisories/new).
 
 ## License
 

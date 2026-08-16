@@ -123,7 +123,7 @@ URL: https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/
 
 When the daemon reports credential isolation as enabled, only Claude credentials are private to it. Session history, CLAUDE.md , skills, plugins, settings, and MCP configuration remain shared. If setup fails, the daemon warns and runs without isolation.
 
-isolated What is isolated After the daemon successfully prepares its isolated CLAUDE_CONFIG_DIR and reports credential isolation as enabled, only the credential store is private to the daemon. Logging in or out from CC Pocket then changes the daemon’s Claude credentials without replacing the terminal Claude login. shared What stays shared Session history under projects, so resume and device handoff keep working. CLAUDE.md , settings, agents, commands, skills, plugins, and todos. MCP server configuration and project trust stored in .claude.json . This is credential isolation, not a separate Claude workspace or multi-profile session store. fallback If isolation setup fails The daemon prints a warning and continues without credential isolation. In that state, do not assume CC Pocket sign-in or sign-out is independent of the terminal Claude login; fix the daemon setup before switching accounts.
+isolated What is isolated After the daemon successfully prepares its isolated CLAUDE_CONFIG_DIR and reports credential isolation as enabled, only the credential store is private to the daemon. Logging in or out from CC Pocket then changes the daemon’s Claude credentials without replacing the terminal Claude login. shared What stays shared Session history under projects, so resuming from another device keeps working. CLAUDE.md , settings, agents, commands, skills, plugins, and todos. MCP server configuration and project trust stored in .claude.json . This is credential isolation, not a separate Claude workspace or multi-profile session store. fallback If isolation setup fails The daemon prints a warning and continues without credential isolation. In that state, do not assume CC Pocket sign-in or sign-out is independent of the terminal Claude login; fix the daemon setup before switching accounts.
 
 ## 独立 Claude 登录会共享什么 (zh)
 
@@ -132,22 +132,6 @@ URL: https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/
 当 daemon 报告凭据隔离已开启时，只有 Claude 凭据归它独立使用；会话历史、 CLAUDE.md 、skills、plugins、settings 和 MCP 配置仍然共享。若准备失败，daemon 会告警并以未隔离模式运行。
 
 isolated 哪些内容会隔离 daemon 成功准备独立的 CLAUDE_CONFIG_DIR 并报告凭据隔离已开启后，只有凭据存储归 daemon 独立使用。此时在 CC Pocket 中登录或退出，只会改变 daemon 的 Claude 凭据，不会替换终端中 Claude 的登录状态。 shared 哪些内容仍然共享 会话历史 （projects），因此恢复会话和跨设备接续仍然有效。 CLAUDE.md 、settings、agents、commands、skills、plugins 和 todos。 保存在 .claude.json 中的 MCP 服务器配置 与项目信任信息。 这是“凭据隔离”，不是另建一套 Claude 工作区或多账号会话库。 fallback 如果隔离准备失败 daemon 会输出告警并继续以未隔离模式运行。此时不要假定 CC Pocket 的登录或退出与终端 Claude 登录相互独立；请先修复 daemon 的隔离准备问题，再切换账号。
-
-## Share one folder with a collaborator (en)
-
-URL: https://heypandax.github.io/cc-pocket/manual/en/share-a-folder/
-
-Open Settings → Shared folders , choose the folder, access level, and expiry, then send the single-use invite to a trusted collaborator. Revoke it from the same screen when access should end.
-
-create Create the invite Open Shared folders In Settings, open Shared folders and choose the folder the guest may use. Choose access and expiry Pick Review, Collaborate, or Autonomous, then set how long the invite remains active. Send the invite once The invite is single-use and expires quickly. Send it only to the intended collaborator. boundary Understand the boundary The guest can open sessions only under the shared folder, but shell commands still run as the owner’s operating-system user. Folder scope is an application boundary, not an operating-system sandbox. Use sharing only with people you trust. Revoke the share immediately when collaboration ends.
-
-## 向协作者共享一个文件夹 (zh)
-
-URL: https://heypandax.github.io/cc-pocket/manual/zh/share-a-folder/
-
-打开 设置 → 共享文件夹 ，选择文件夹、权限和有效期，再把一次性邀请发给可信协作者。需要结束访问时，在同一页面撤销。
-
-create 创建邀请 打开共享文件夹 在设置中打开“共享文件夹”，选择允许访客使用的文件夹。 选择权限与有效期 选择 Review、Collaborate 或 Autonomous，并设置邀请有效期。 发送一次性邀请 邀请只能使用一次且很快过期，只应发送给预期协作者。 boundary 理解权限边界 访客只能在共享文件夹下打开会话，但 shell 命令仍以所有者的操作系统用户身份执行。文件夹范围是应用层边界，不是操作系统沙箱。 只与可信的人使用共享；协作结束后立即撤销。
 
 ## Fix an offline computer (en)
 

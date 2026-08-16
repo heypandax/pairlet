@@ -3,12 +3,12 @@
   "verifiedAt": "2026-07-25",
   "home": {
     "en": {
-      "metaTitle": "CC Pocket User Manual — setup, sessions, approvals, agents, sharing, and fixes",
-      "metaDescription": "Public, task-based CC Pocket guides for people and AI assistants: install and pair, control sessions, schedule prompts, approve work, share folders, and troubleshoot the daemon.",
+      "metaTitle": "CC Pocket User Manual — setup, sessions, approvals, agents, and fixes",
+      "metaDescription": "Public, task-based CC Pocket guides for people and AI assistants: install and pair, control sessions, schedule prompts, approve work, review changes, and troubleshoot the daemon.",
       "title": "How can we help?",
       "lede": "Find the exact steps for a task, or fix something that stopped working. Every guide has a stable public URL you can send to an AI assistant.",
       "searchLabel": "Search the CC Pocket manual",
-      "searchPlaceholder": "Search setup, approvals, agents, sharing…",
+      "searchPlaceholder": "Search setup, approvals, agents, changes…",
       "quickSchedule": "Schedule a prompt for later",
       "quickTakeover": "Take over a terminal session",
       "quickOffline": "Fix an offline computer",
@@ -28,12 +28,12 @@
       "recentTitle": "Recently updated guides"
     },
     "zh": {
-      "metaTitle": "CC Pocket 用户手册——安装、会话、审批、Agent、共享与故障排查",
-      "metaDescription": "面向用户与 AI 助手的 CC Pocket 公开任务指南：安装配对、控制会话、预约提示词、远程审批、共享文件夹与 daemon 故障排查。",
+      "metaTitle": "CC Pocket 用户手册——安装、会话、审批、Agent 与故障排查",
+      "metaDescription": "面向用户与 AI 助手的 CC Pocket 公开任务指南：安装配对、控制会话、预约提示词、远程审批、查看改动与 daemon 故障排查。",
       "title": "你想解决什么问题？",
       "lede": "按任务找到准确步骤，或排查突然失效的功能。每篇指南都有稳定公开链接，可以直接发给 AI 助手。",
       "searchLabel": "搜索 CC Pocket 用户手册",
-      "searchPlaceholder": "搜索安装、审批、Agent、共享…",
+      "searchPlaceholder": "搜索安装、审批、Agent、改动…",
       "quickSchedule": "预约稍后发送提示词",
       "quickTakeover": "接管终端会话",
       "quickOffline": "修复离线电脑",
@@ -78,11 +78,6 @@
       "title": {"en": "Agents & models", "zh": "Agent 与模型"},
       "description": {"en": "Choose Claude, Codex, or OpenCode and understand isolated Claude login behavior.", "zh": "选择 Claude、Codex 或 OpenCode，并了解 Claude 独立登录的共享范围。"},
       "articles": ["choose-agent-and-model", "separate-claude-login"]
-    },
-    {
-      "title": {"en": "Sharing", "zh": "共享"},
-      "description": {"en": "Grant a trusted collaborator access to one folder, then revoke it.", "zh": "只向可信协作者开放一个文件夹，并可随时撤销。"},
-      "articles": ["share-a-folder"]
     },
     {
       "title": {"en": "Troubleshooting", "zh": "故障排查"},
@@ -413,7 +408,7 @@
           }
         }
       ],
-      "related": ["choose-agent-and-model", "share-a-folder"]
+      "related": ["choose-agent-and-model"]
     },
     {
       "slug": "choose-agent-and-model",
@@ -486,7 +481,7 @@
           "heading": {"en": "What stays shared", "zh": "哪些内容仍然共享"},
           "bullets": {
             "en": [
-              "<strong>Session history</strong> under projects, so resume and device handoff keep working.",
+              "<strong>Session history</strong> under projects, so resuming from another device keeps working.",
               "<strong>CLAUDE.md</strong>, settings, agents, commands, skills, plugins, and todos.",
               "<strong>MCP server configuration</strong> and project trust stored in <code>.claude.json</code>."
             ],
@@ -514,6 +509,8 @@
     },
     {
       "slug": "share-a-folder",
+      "_unlisted": "Retained for users who already rely on it: reachable by URL, noindex, and kept out of every public index, the AI index and the sitemap.",
+      "unlisted": true,
       "title": {"en": "Share one folder with a collaborator", "zh": "向协作者共享一个文件夹"},
       "summary": {"en": "Create a single-use invite for one folder, choose an access level and expiry, then revoke it at any time.", "zh": "为一个文件夹生成一次性邀请，选择权限和有效期，并可随时撤销。"},
       "shortAnswer": {

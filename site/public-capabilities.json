@@ -1,0 +1,299 @@
+{
+  "$comment": "Public capability contract for CC Pocket. The website, both READMEs and scripts/check-public-content.py all answer to this file. Serving the static site needs no build step — the HTML restates these facts inline and the checker proves the two agree.",
+  "schemaVersion": 1,
+  "baseline": {
+    "version": "1.8.0",
+    "status": "released",
+    "statusLabel": { "en": "Current release", "zh": "当前版本" },
+    "sourceRef": "main",
+    "sourceCommit": "6162816a",
+    "note": {
+      "en": "This is the public v1.8.0 capability baseline. Every capability claim below was audited against commit 6162816a on main.",
+      "zh": "这是 v1.8.0 的公开能力基线。下面的每条能力都已对照 main 分支的 6162816a 提交核验。"
+    }
+  },
+  "jobs": [
+    {
+      "id": "watch",
+      "en": "Watch",
+      "zh": "查看",
+      "resultEn": "See what the agent is doing without walking back to the desk.",
+      "resultZh": "人不在电脑前，也知道 agent 干到哪一步了。"
+    },
+    {
+      "id": "approve",
+      "en": "Approve",
+      "zh": "授权",
+      "resultEn": "Unblock a stopped agent from wherever you are — or refuse it.",
+      "resultZh": "agent 卡住了，随手放行或者拒掉。"
+    },
+    {
+      "id": "continue",
+      "en": "Continue",
+      "zh": "继续",
+      "resultEn": "Pick the same session back up instead of starting over.",
+      "resultZh": "接着原来那个会话往下走，不用重开。"
+    },
+    {
+      "id": "inspect",
+      "en": "Inspect",
+      "zh": "检查",
+      "resultEn": "Read what actually changed before you trust the result.",
+      "resultZh": "结果值不值得信，先看改了什么。"
+    }
+  ],
+  "capabilityColumns": [
+    { "id": "coreSession", "en": "Core session", "zh": "核心会话" },
+    { "id": "approvalMode", "en": "Approval & mode", "zh": "审批与模式" },
+    { "id": "changesDiff", "en": "Changes & diff", "zh": "改动与 diff" },
+    { "id": "usage", "en": "Usage", "zh": "用量" }
+  ],
+  "states": {
+    "yes": { "symbol": "✓", "en": "Yes", "zh": "支持" },
+    "limited": { "symbol": "△", "en": "Limited", "zh": "有限" },
+    "no": { "symbol": "✕", "en": "No", "zh": "不支持" }
+  },
+  "agents": [
+    {
+      "id": "claude",
+      "name": "Claude Code",
+      "shortName": "Claude Code",
+      "tag": null,
+      "capabilities": {
+        "coreSession": { "state": "yes" },
+        "approvalMode": { "state": "yes" },
+        "changesDiff": { "state": "yes" },
+        "usage": { "state": "yes" }
+      },
+      "limits": { "en": [], "zh": [] }
+    },
+    {
+      "id": "codex",
+      "name": "OpenAI Codex",
+      "shortName": "OpenAI Codex",
+      "tag": null,
+      "capabilities": {
+        "coreSession": { "state": "yes" },
+        "approvalMode": { "state": "yes" },
+        "changesDiff": { "state": "yes" },
+        "usage": { "state": "yes" }
+      },
+      "limits": { "en": [], "zh": [] }
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "shortName": "OpenCode",
+      "tag": null,
+      "capabilities": {
+        "coreSession": { "state": "yes" },
+        "approvalMode": {
+          "state": "no",
+          "noteEn": "Always Full access",
+          "noteZh": "恒为 Full access"
+        },
+        "changesDiff": { "state": "no" },
+        "usage": { "state": "yes" }
+      },
+      "limits": {
+        "en": [
+          "No enforceable interactive approval — `opencode run` has no approval protocol, so sessions run at Full access.",
+          "No Changed files or line diff."
+        ],
+        "zh": [
+          "没有可执法的交互审批——`opencode run` 本身没有审批协议，会话恒为 Full access。",
+          "没有改动文件列表和行级 diff。"
+        ]
+      }
+    },
+    {
+      "id": "kimi",
+      "name": "Kimi Code",
+      "shortName": "Kimi Code",
+      "tag": { "en": "Preview", "zh": "Preview" },
+      "capabilities": {
+        "coreSession": { "state": "yes" },
+        "approvalMode": { "state": "yes" },
+        "changesDiff": { "state": "no" },
+        "usage": { "state": "yes", "noteEn": "New in v1.8.0", "noteZh": "v1.8.0 新增" }
+      },
+      "limits": {
+        "en": ["Preview backend.", "No Changed files or line diff."],
+        "zh": ["Preview 后端。", "没有改动文件列表和行级 diff。"]
+      }
+    },
+    {
+      "id": "zcode",
+      "name": "ZCode",
+      "shortName": "ZCode",
+      "tag": null,
+      "capabilities": {
+        "coreSession": { "state": "yes" },
+        "approvalMode": { "state": "yes" },
+        "changesDiff": { "state": "no" },
+        "usage": { "state": "yes", "noteEn": "New in v1.8.0", "noteZh": "v1.8.0 新增" }
+      },
+      "limits": {
+        "en": ["No Changed files or line diff."],
+        "zh": ["没有改动文件列表和行级 diff。"]
+      }
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek Harness",
+      "shortName": "DeepSeek",
+      "tag": { "en": "narrow v1", "zh": "有限 v1" },
+      "capabilities": {
+        "coreSession": {
+          "state": "yes",
+          "noteEn": "Discover, replay, create, resume, send and receive text, live streaming",
+          "noteZh": "发现、回放、新建、恢复、收发文本、实时流式"
+        },
+        "approvalMode": {
+          "state": "limited",
+          "noteEn": "Launch sandbox default only; remote approvals are not bridged and fail closed",
+          "noteZh": "仅启动时的 sandbox 默认值；远程审批未桥接，失败即拒"
+        },
+        "changesDiff": { "state": "no" },
+        "usage": { "state": "no" }
+      },
+      "limits": {
+        "en": [
+          "No remote approval bridge — a request that needs one fails closed.",
+          "No Changed files or line diff.",
+          "No usage accounting.",
+          "No model switching."
+        ],
+        "zh": [
+          "远程审批没有桥接——需要审批的请求直接失败即拒。",
+          "没有改动文件列表和行级 diff。",
+          "没有用量统计。",
+          "不支持切换模型。"
+        ]
+      }
+    }
+  ],
+  "surfaces": [
+    {
+      "id": "app",
+      "en": "Phone & tablet app",
+      "zh": "手机与平板 App",
+      "descEn": "Where you watch, approve, continue and inspect.",
+      "descZh": "查看、授权、继续、检查都在这里。"
+    },
+    {
+      "id": "desktop",
+      "en": "Desktop app",
+      "zh": "桌面 App",
+      "descEn": "The same client as a two-pane console — one computer driving another.",
+      "descZh": "同一个客户端的两栏控制台——用一台电脑操另一台。"
+    },
+    {
+      "id": "daemon",
+      "en": "Local daemon",
+      "zh": "本机 daemon",
+      "descEn": "Runs on the computer that owns your code and drives the agent CLI. A different package from the desktop app.",
+      "descZh": "跑在放着你代码的那台电脑上，驱动 agent CLI。和桌面 App 是两个不同的安装包。"
+    },
+    {
+      "id": "relay",
+      "en": "Zero-knowledge relay",
+      "zh": "零知识中继",
+      "descEn": "Pairs your devices and forwards ciphertext. Hosted for you, or run your own.",
+      "descZh": "帮设备配对、转发密文。默认用托管的，也可以自建。"
+    }
+  ],
+  "platforms": {
+    "app": {
+      "labelEn": "Phone / tablet app",
+      "labelZh": "手机 / 平板 App",
+      "targets": [
+        { "en": "iOS · iPadOS", "zh": "iOS · iPadOS", "channel": "App Store + TestFlight" },
+        { "en": "Android", "zh": "Android", "channel": "APK" }
+      ]
+    },
+    "desktop": {
+      "labelEn": "Desktop app",
+      "labelZh": "桌面 App",
+      "targets": [
+        { "en": "macOS Apple Silicon", "zh": "macOS Apple 芯片", "channel": "signed .dmg" },
+        { "en": "macOS Intel", "zh": "macOS Intel", "channel": "signed .dmg" },
+        { "en": "Windows x86_64", "zh": "Windows x86_64", "channel": ".msi" }
+      ],
+      "linux": {
+        "official": false,
+        "en": "No official Linux desktop package — build from source.",
+        "zh": "没有正式的 Linux 桌面安装包，只能从源码构建。"
+      }
+    },
+    "daemon": {
+      "labelEn": "Local daemon",
+      "labelZh": "本机 daemon",
+      "targets": [
+        { "en": "macOS Apple Silicon", "zh": "macOS Apple 芯片", "channel": "install script / Homebrew" },
+        { "en": "macOS Intel", "zh": "macOS Intel", "channel": "install script / Homebrew" },
+        { "en": "Linux x86_64", "zh": "Linux x86_64", "channel": "install script" },
+        { "en": "Linux arm64", "zh": "Linux arm64", "channel": "install script" },
+        { "en": "Windows x86_64", "zh": "Windows x86_64", "channel": "install script / Scoop" }
+      ]
+    },
+    "harmony": {
+      "labelEn": "HarmonyOS",
+      "labelZh": "鸿蒙",
+      "status": "preview",
+      "en": "Signed HAP, Preview — limited capability.",
+      "zh": "签名 HAP，Preview——能力受限。"
+    },
+    "relay": {
+      "labelEn": "Relay",
+      "labelZh": "中继",
+      "hosted": true,
+      "selfHost": true,
+      "en": "A hosted zero-knowledge relay is the default; self-hosting is supported.",
+      "zh": "默认走托管的零知识中继，也支持自托管。"
+    }
+  },
+  "highlights": [
+    {
+      "id": "deepseek-backend",
+      "en": "A sixth agent backend: DeepSeek — discovery, replay, new sessions, resume, text and live streaming, within the limits above.",
+      "zh": "第六个 agent 后端 DeepSeek：会话发现、回放、新建、恢复、收发文本、实时流式，边界见上表。"
+    },
+    {
+      "id": "agent-filters",
+      "en": "Filter projects, sessions and usage by agent.",
+      "zh": "项目、会话、用量都能按 agent 筛。"
+    },
+    {
+      "id": "kimi-zcode-usage",
+      "en": "Kimi Code and ZCode report usage.",
+      "zh": "Kimi Code 和 ZCode 有用量数据了。"
+    },
+    {
+      "id": "new-task",
+      "en": "Start a new task straight from the phone or the desktop app.",
+      "zh": "手机和桌面 App 都能直接起一个新任务。"
+    },
+    {
+      "id": "prompt-images",
+      "en": "Images in your own prompts stay visible in session replay.",
+      "zh": "自己发的提示词里的图片，回放时还在。"
+    },
+    {
+      "id": "daemon-auto-update",
+      "en": "A managed daemon keeps itself up to date by default, and you can opt out.",
+      "zh": "托管安装的 daemon 默认自己升级，也可以关掉。"
+    },
+    {
+      "id": "update-check-failure",
+      "en": "The desktop app states it plainly when an update check fails instead of looking up to date.",
+      "zh": "桌面 App 检查更新失败时会明说，不再装作已是最新。"
+    }
+  ],
+  "media": {
+    "manifest": "site/assets/product/manifest.json",
+    "generator": "marketing/site/generate-assets.sh",
+    "statementEn": "Real product UI with scripted demo data.",
+    "statementZh": "真实产品界面，演示数据由脚本生成。"
+  }
+}
