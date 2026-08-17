@@ -78,6 +78,13 @@ jobs:
             --submit_for_review false \
             --force true
 
+      - name: Converge the visible 6.5-inch screenshot sets
+        env:
+          VERSION: ${{ inputs.version }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: ruby scripts/sync-appstore-screenshots.rb
+
       - name: Replace localized App Previews after processing
         env:
           VERSION: ${{ inputs.version }}
