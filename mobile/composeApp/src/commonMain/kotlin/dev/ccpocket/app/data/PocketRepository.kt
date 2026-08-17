@@ -934,6 +934,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val addingDevice = mutableStateOf(false)
     /** No-pairing demo: when true, all I/O is short-circuited to local sample data (see [enterDemo]). */
     val demoMode = mutableStateOf(false)
+
+    /** `demo=1` for the funnel events the demo also fires. [enterDemo] deliberately reuses the REAL state
+     *  machine, so connected/session_opened/prompt_sent land whether or not a computer was ever paired —
+     *  untagged, demo browsing read as activation (issue #278). Tag, don't suppress: demo usage is a metric
+     *  of its own, and reports split on the parameter. */
+    private fun demoTag(): Map<TelKey, Any> = if (demoMode.value) mapOf(TelKey.Demo to 1) else emptyMap()
     /** PREVIEW: brief connecting → end-to-end-encrypted opener shown before the demo project list. */
     val demoConnecting = mutableStateOf(false)
     val directories = mutableStateListOf<DirectoryEntry>()
@@ -1484,26 +1490,50 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var voiceStartJob: Job? = null                    // the async recorder.start() window (issue #266)
     private var interruptJob: Job? = null                     // system interruption (call / route steal) collector
 
-    /** Pair from a scanned/pasted `ccpocket://pair?...` link, then connect end-to-end. */
-    fun pair(link: String) {
+    /** Pair from a scanned/pasted `ccpocket://pair?...` link, then connect end-to-end.
+     *  [fromScan] only flavors telemetry (source=qr-link vs link) — see [handleIncomingLink]. */
+    fun pair(link: String, fromScan: Boolean = false) {
         val info = Pairing.parse(link.trim())
-        if (info == null) { status.value = StatusMsg(Res.string.status_invalid_link); return }
+        if (info == null) {
+            status.value = StatusMsg(Res.string.status_invalid_link)
+            // a reject BEFORE any network is still a pairing failure — untracked, it looked like "never tried"
+            Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to "parse"))
+            return
+        }
         status.value = StatusMsg(Res.string.status_pairing)
-        scope.launch { doPair("link") { info } }
+        scope.launch { doPair(if (fromScan) "qr-link" else "link") { info } }
     }
 
     /** A scanned/opened `ccpocket://…` URL. Kept as the historical name for the pairing call sites, but it
      *  is now just [handleIncomingLink]: the scanner that used to see only pair links routes collaborator
      *  and share invites to their trust screens instead of rejecting them (§7). */
-    fun handlePairUrl(url: String) { handleIncomingLink(url) }
+    fun handlePairUrl(url: String, fromScan: Boolean = false) { handleIncomingLink(url, fromScan = fromScan) }
 
-    /** Pair from the 6-digit code shown by `cc-pocket pair` on the computer. */
-    fun pairWithCode(code: String) {
+    /** Pair from the 6-digit code shown by `cc-pocket pair` on the computer.
+     *  [fromScan] only flavors telemetry: a scanned QR carries the same `code=` payload, so without it every
+     *  camera pairing reported source=code and the scanner's share of activations was invisible. */
+    fun pairWithCode(code: String, fromScan: Boolean = false) {
         status.value = StatusMsg(Res.string.status_pairing)
-        scope.launch { doPair("code") { Pairing.resolveCode(code.trim(), it) } }
+        scope.launch { doPair(if (fromScan) "qr" else "code") { Pairing.resolveCode(code.trim(), it) } }
+    }
+
+    /**
+     * pair_failed cause as a CLASS, never the exception text: a redeem failure's message carries the relay's
+     * raw response body, which has no business leaving the device. Same shape as onTransportDown's conn_failed.
+     */
+    private fun pairFailReason(t: Throwable): String {
+        val fallback = t::class.simpleName ?: "error"
+        val m = t.message ?: return fallback
+        return when {
+            m.contains("invalid or expired code") -> "code"   // relay refused the 6 digits (typo/expired)
+            m.contains("pairing failed") -> "redeem"          // the redeem itself was rejected
+            else -> fallback
+        }
     }
 
     private suspend fun doPair(source: String, getInfo: suspend (HttpClient) -> dev.ccpocket.app.pairing.PairingInfo) {
+        // before any network: this is the "the user actually tried" mark the funnel was missing (issue #278)
+        Telemetry.track(TelEvent.PairStarted, mapOf(TelKey.Source to source))
         val client = HttpClient()
         try {
             val info = getInfo(client)
@@ -1520,7 +1550,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             startRelay()
         } catch (t: Throwable) {
             status.value = StatusMsg(Res.string.status_pair_failed, t.message ?: t::class.simpleName ?: "error")
-            Telemetry.track(TelEvent.PairFailed)
+            Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t)))
             Telemetry.recordError(t.message ?: "pair failed", "pairing")
         } finally {
             client.close()
@@ -2273,7 +2303,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 onDone(true)
             } catch (t: Throwable) {
                 status.value = StatusMsg(Res.string.status_pair_failed, t.message ?: t::class.simpleName ?: "error")
-                Telemetry.track(TelEvent.PairFailed)
+                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t)))
                 onDone(false)
             } finally {
                 client.close()
@@ -2707,7 +2737,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 if (!useRelay && linkStableJob?.isActive != true) armLinkStableReset()
                 if (!hadReadyThisSession) {
                     hadReadyThisSession = true
-                    Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()))
+                    Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()) + demoTag())
                 }
                 recomputePhase()
             }
@@ -3292,7 +3322,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     connected.value = true; relayDeadlinePassed = false
                     if (!hadReadyThisSession) {
                         hadReadyThisSession = true
-                        Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()))
+                        Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()) + demoTag())
                     }
                     recomputePhase()
                 }
@@ -4607,7 +4637,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 onCollaboratorLinkAdded?.invoke(link, invite.ticket)
             } catch (t: Throwable) {
                 collabRedeemError.value = t.message ?: t::class.simpleName ?: "error"
-                Telemetry.track(TelEvent.PairFailed)
+                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t)))
                 Telemetry.recordError(t.message ?: "collaborator redeem failed", "pairing")
             } finally {
                 collabRedeeming.value = false
@@ -4653,12 +4683,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *
      * [allowBareBlob] is the explicit-paste opt-in: a naked base64 string is only treated as an invite when
      * a human deliberately pasted it into a field that asks for one.
+     *
+     * [fromScan] is telemetry-only origin: the camera and a tapped deep link hand over the SAME payload, so
+     * only the entry point can tell them apart (issue #278). It changes no routing and no behaviour.
      */
-    fun handleIncomingLink(raw: String, allowBareBlob: Boolean = false): IncomingLink {
+    fun handleIncomingLink(raw: String, allowBareBlob: Boolean = false, fromScan: Boolean = false): IncomingLink {
         val link = parseIncomingLink(raw, allowBareBlob)
         when (link) {
-            is IncomingLink.Code -> pairWithCode(link.code)
-            is IncomingLink.Pair -> pair(link.url)
+            is IncomingLink.Code -> pairWithCode(link.code, fromScan = fromScan)
+            is IncomingLink.Pair -> pair(link.url, fromScan = fromScan)
             // every invite kind parks in a trust screen; none of them redeems here
             is IncomingLink.Collab ->
                 // A REVIEW invite does not belong to THIS door at all (REVIEW-REQUEST.md §13.3): it is
@@ -4677,7 +4710,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is IncomingLink.Share -> pendingShareInvite.value = link.invite
             is IncomingLink.Session -> requestOpenSession(link.workdir, link.sessionId)
             is IncomingLink.Handoff -> pendingOfferId.value = link.handoffId
-            IncomingLink.Unknown -> status.value = StatusMsg(Res.string.status_invalid_link)
+            // an unroutable payload is the other silent pairing dead end (issue #278): the user scanned or
+            // opened SOMETHING and got a red line, which the funnel used to see as no attempt at all.
+            // (The review-invite wrong-door branch above is deliberately NOT this: it is a routing correction
+            //  on a perfectly valid invite, not a failed pairing.)
+            IncomingLink.Unknown -> {
+                status.value = StatusMsg(Res.string.status_invalid_link)
+                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to "parse"))
+            }
         }
         return link
     }
@@ -4905,7 +4945,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // rather than only fetching on picker-open (SessionSheets.kt ModelPicker LaunchedEffect).
         fetchModels(openAgent)
         clearBackgroundJobs()
-        Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
+        Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0) + demoTag())
         // lastEventSeq = 0 (never null, via lastEventSeqFor after the reset above): full replay, but it
         // declares this client delta-capable so an observe view tails with deltas (issue #147)
         if (gen != openGen) return
@@ -5170,7 +5210,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         limitOffer.value = null; limitConfirmed.value = null // a manual send supersedes the auto-continue offer (#137)
         promptRetry = workdir.value?.let { PromptRetry(outText, images, it, promptId) }
         promptResendArmed = false
-        Telemetry.track(TelEvent.PromptSent)
+        Telemetry.track(TelEvent.PromptSent, demoTag())
         scope.launch { send(SendPrompt(c, outText, images, promptId = promptId)) }
         armPromptWatchdog()
         return true
@@ -5258,7 +5298,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (cmd.isEmpty() || terminalBusy.value) return
         terminalEntries.add(TerminalEntry(cmd))
         terminalBusy.value = true
-        Telemetry.track(TelEvent.PromptSent)
+        Telemetry.track(TelEvent.PromptSent, demoTag())
         scope.launch { send(RunShellCommand(c, cmd, wd)) }
     }
 

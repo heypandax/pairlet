@@ -77,6 +77,10 @@ private data class OStep(
 @Composable
 fun OnboardingScreen(onBack: () -> Unit, onPairNow: () -> Unit) {
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
+    // install-guide exposure (issue #278): how many of the users who never pair even open these steps
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.OnboardingShown)
+    }
     var os by remember { mutableStateOf("macOS") }
     val uri = LocalUriHandler.current
 

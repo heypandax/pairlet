@@ -7,6 +7,12 @@ package dev.ccpocket.app.telemetry
  */
 enum class TelEvent(val id: String) {
     AppLaunch("app_launch"),
+    // activation funnel (issue #278): the stretch between app_launch and paired used to be a black box, so a
+    // drop-off there was unattributable. OnboardingShown measures install-guide exposure; PairStarted fires on
+    // every pairing ATTEMPT before any network action, which is what separates "tried and failed" from "never
+    // tried"; PairFailed now carries WHY (TelKey.Reason), including the two rejects that never reach the relay.
+    OnboardingShown("onboarding_shown"),
+    PairStarted("pair_started"),
     Paired("paired"),
     PairFailed("pair_failed"),
     Connected("connected"),
@@ -40,17 +46,24 @@ enum class TelEvent(val id: String) {
 
 /** Parameter keys — also enum-only; values are short categorical strings or counts, never content. */
 enum class TelKey(val id: String) {
-    Source("source"),       // qr | code | link
+    Source("source"),       // qr | qr-link | code | link | share | collaborator | code-add
     Transport("transport"), // relay | direct
     Resume("resume"),       // 0 | 1
     Tool("tool"),
     Decision("decision"),   // allow | deny
     Phase("phase"),         // ConnPhase name, e.g. Ready | RelayUnreachable | ComputerOffline
-    Reason("reason"),       // conn_failed cause: wedged | auth | closed | <exception name>
+    // conn_failed cause: wedged | auth | closed | <exception name>
+    // pair_failed cause: parse (rejected before any network) | code | redeem | <exception name>. A CLASS only —
+    // the exception's message is never transmitted, since a redeem failure carries the relay's response body.
+    Reason("reason"),
     Attempt("attempt"),     // reconnect attempt counter at the time of failure
     Version("version"),
     EntryPoint("entry_point"), // projects | sessions | chat | settings
     HelpTask("help_task"),     // one of the fixed HelpTaskId values
+    // 1 when the event came from the no-pairing demo walkthrough; ABSENT on a real session. The demo drives the
+    // real state machine, so connected/session_opened/prompt_sent fire either way — without this split, demo
+    // browsing counted as activation (issue #278). The demo's own behaviour is untouched.
+    Demo("demo"),
 }
 
 /** The single seam over Firebase Analytics + Crashlytics. Default-on, opt-out via [setEnabled]. */

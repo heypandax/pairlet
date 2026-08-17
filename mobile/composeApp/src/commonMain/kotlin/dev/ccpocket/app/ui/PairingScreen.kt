@@ -100,7 +100,8 @@ fun PairingScreen(repo: PocketRepository) {
         PairScanRoute(
             digitsEntered = code.length,
             onBack = { scanning = false },
-            onScanned = { scanning = false; repo.handlePairUrl(it) },
+            // fromScan: telemetry-only origin — the camera's payload is indistinguishable from a pasted one
+            onScanned = { scanning = false; repo.handlePairUrl(it, fromScan = true) },
             onUseCode = { scanning = false },
             onPasteLink = { scanning = false; showPaste = true },
         )
