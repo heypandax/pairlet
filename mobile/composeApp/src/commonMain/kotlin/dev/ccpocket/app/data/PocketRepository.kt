@@ -2436,19 +2436,25 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         is OpenSession -> frame.agent
         is ScheduleCreate -> frame.agent
         is FetchModels -> frame.agent
+        is ListSessionFiles -> frame.agent
+        is ReadFile -> frame.agent
+        is ExportFile -> frame.agent
+        is ReadFileDiff -> frame.agent
+        is CreateHandoff -> frame.agent
+        is FetchUsage -> frame.agent
         else -> null
     }
 
     /** All outbound frames funnel here; a throw means the link is dead — trigger the reconnect path. */
     private suspend fun send(frame: Frame) {
         // Reverse capability guard (#275/#276): an old daemon coerces the unknown `zcode` enum to the Claude
-        // default, so never fire an agent-carrying frame (open/schedule/fetch-models) at a daemon that lacks
+        // default, so never fire an agent-carrying frame at a daemon that lacks
         // that backend — but ONLY once the daemon has actually told us, THIS connection, what it supports.
         // Pre-DaemonInfo the set is empty for the ordinary reason "not told yet", not "unsupported"; dropping
         // then silently killed ZCode reattach on every reconnect (no SessionLive, no retry). In that window
         // let it through — a genuinely absent backend is refused by the daemon with agent_unavailable, the
         // proper channel. The new-session picker is already gated upstream in openSession(), so this seam
-        // only backstops the reconnect / takeover / schedule / model-fetch paths.
+        // backstops every lower-level session, schedule, model, file, handoff, and usage path.
         agentCarried(frame)?.let { if (daemonAgentsKnown && !supportsAgent(it)) return }
         onSendForTest?.invoke(frame)
         if (demoMode.value) { demoRespond(frame); return } // no network: synthesize the daemon's reply locally
@@ -2629,6 +2635,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // test seam (issue #104): feed an inbound frame exactly as a transport would, to exercise the
     // delivery→turn watchdog handoff (PromptAck vs. a following turn frame) without a live daemon.
     internal fun receiveForTest(f: Frame) = handle(f)
+
+    // Test the single outbound capability boundary with arbitrary protocol frames. Keeping this beside
+    // receiveForTest makes additions to agentCarried() independently pin-able without UI setup.
+    internal suspend fun sendForTest(f: Frame) = send(f)
 
     /**
      * Session-identity check for an incoming [SessionLive] (issue #219). The daemon deliberately keeps
