@@ -1,6 +1,6 @@
 name: ios-store-metadata
 
-# Creates or updates an editable App Store version and syncs localized metadata + screenshots.
+# Creates or updates an editable App Store version and syncs localized metadata + screenshots + previews.
 # No binary is uploaded, no build is attached, and the version is never submitted for review.
 on:
   workflow_dispatch:
@@ -78,6 +78,20 @@ jobs:
             --submit_for_review false \
             --force true
 
+      - name: Replace localized App Previews after processing
+        env:
+          VERSION: ${{ inputs.version }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: ruby scripts/sync-appstore-previews.rb
+
+      - name: Verify media in the visible 6.5-inch slot
+        env:
+          VERSION: ${{ inputs.version }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: ruby scripts/verify-appstore-media.rb
+
       - name: Summary
         env:
           VERSION: ${{ inputs.version }}
@@ -86,7 +100,8 @@ jobs:
             echo "## App Store page synced"
             echo "- Version: $VERSION"
             echo "- Locales: en-US, zh-Hans"
-            echo "- Screenshots: 6 per locale"
+            echo "- Screenshots: 6 per locale (6.5-inch slot)"
+            echo "- App Previews: 1 per locale"
             echo "- Binary uploaded: no"
             echo "- Submitted for review: no"
           } >> "$GITHUB_STEP_SUMMARY"

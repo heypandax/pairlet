@@ -6,7 +6,8 @@
 #   bash marketing/appstore/generate-assets.sh --reuse  # reuse current site/fleet frames
 #
 # Phone pixels are rendered by ShowcaseRender with scripted demo data. AppStoreScreenshotRender
-# only adds the 1290x2796 marketing canvas and localized copy; no product UI is drawn by hand.
+# only adds the marketing canvas and localized copy; no product UI is drawn by hand. The final
+# resize targets the 6.5-inch slot currently used by App Store Connect (1242x2688).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -57,6 +58,13 @@ APPSTORE_SITE_BUILD="$SITE_BUILD" \
 APPSTORE_FLEET_BUILD="$WORK" \
   "$ROOT/gradlew" -p "$ROOT" :mobile:composeApp:desktopTest \
     --tests dev.ccpocket.app.showcase.AppStoreScreenshotRender --rerun --console=plain -q
+
+step "resize screenshots for the App Store 6.5-inch slot"
+for shot in "$OUT"/en-US/*.png "$OUT"/zh-Hans/*.png; do
+  tmp="$shot.tmp.png"
+  ffmpeg -nostdin -y -loglevel error -i "$shot" -vf "scale=1242:2688:flags=lanczos" "$tmp"
+  mv "$tmp" "$shot"
+done
 
 step "validate"
 python3 "$ROOT/scripts/check-appstore-content.py"

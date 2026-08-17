@@ -38,8 +38,9 @@ import kotlin.test.Test
 /**
  * Composes App Store marketing frames around screenshots captured from the real Compose UI.
  *
- * The phone pixels come from [ShowcaseRender]; this class only adds the App Store canvas, copy,
- * and framing. It is opt-in so normal tests never write marketing assets:
+ * The phone pixels come from [ShowcaseRender]; this class only adds the master canvas, copy,
+ * and framing. generate-assets.sh resizes the master to the active App Store device slot. It is
+ * opt-in so normal tests never write marketing assets:
  *
  *   APPSTORE_SCREENSHOT_OUT=/abs/fastlane/screenshots \
  *   APPSTORE_SITE_BUILD=/abs/marketing/site/build \

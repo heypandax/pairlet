@@ -8,6 +8,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 METADATA = ROOT / "fastlane" / "metadata"
 SCREENSHOTS = ROOT / "fastlane" / "screenshots"
+PREVIEWS = ROOT / "fastlane" / "previews"
 LOCALES = ("en-US", "zh-Hans")
 LIMITS = {
     "description.txt": 4000,
@@ -57,15 +58,21 @@ def main() -> None:
         if any(not shot.name.startswith(prefix) for shot, prefix in zip(shots, expected)):
             fail(f"{locale} screenshots must use stable 01- through 06- ordering")
         for shot in shots:
-            if png_dimensions(shot) != (1290, 2796):
-                fail(f"{shot} must be 1290x2796; got {png_dimensions(shot)}")
+            if png_dimensions(shot) != (1242, 2688):
+                fail(f"{shot} must be 1242x2688 for APP_IPHONE_65; got {png_dimensions(shot)}")
+
+        preview = PREVIEWS / locale / "app-preview.mov"
+        if not preview.is_file() or preview.stat().st_size < 1_000_000:
+            fail(f"missing or implausibly small App Preview: {preview}")
+        if preview.read_bytes()[4:8] != b"ftyp":
+            fail(f"not a QuickTime/MP4 container: {preview}")
 
     joined = "\n".join(public_text)
     for phrase in FORBIDDEN:
         if phrase.casefold() in joined.casefold():
             fail(f"public metadata must not promote or expose draft text: {phrase}")
 
-    print("App Store content OK: 2 locales, 8 metadata fields, 12 screenshots")
+    print("App Store content OK: 2 locales, 8 metadata fields, 12 screenshots, 2 previews")
 
 
 if __name__ == "__main__":
