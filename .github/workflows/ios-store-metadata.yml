@@ -27,6 +27,10 @@ jobs:
             echo "::error::version must be x.y.z, got: $VERSION"
             exit 1
           fi
+          if ! command -v ffprobe >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
           python3 scripts/check-appstore-content.py
 
       - name: Set up Ruby + fastlane

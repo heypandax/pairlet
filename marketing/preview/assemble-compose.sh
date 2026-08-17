@@ -14,14 +14,15 @@ CW=("0.4,4.7" "4.9,9.6" "9.8,14.4" "14.6,19.8" "20.0,24.5" "25.0,29.2")
 [ -f "$FRAMES/f00000.png" ] || { echo "missing Compose frames: $FRAMES" >&2; exit 1; }
 
 # The 10.5-second product loop is slowed to 24.9 seconds so each real workflow state remains
-# readable, then a five-second brand card closes the preview. App Store requires a stereo audio
-# track even for a silent preview, so anullsrc supplies one.
+# readable, then a five-second brand card closes the preview. App Store requires a 256 kbps stereo
+# AAC track even for a silent preview. Near-inaudible -100 dB noise keeps AAC at the required target
+# instead of letting a digital-silence encoder collapse the track to a few kbps.
 ffmpeg -nostdin -y -loglevel error \
   -framerate 30 -i "$FRAMES/f%05d.png" \
   -loop 1 -t 5 -i "$ASSETS/logo.png" \
   -i "$ASSETS/cap1.png" -i "$ASSETS/cap2.png" -i "$ASSETS/cap3.png" \
   -i "$ASSETS/cap4.png" -i "$ASSETS/cap5.png" -i "$ASSETS/cap6.png" \
-  -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000 \
+  -f lavfi -i anoisesrc=color=white:amplitude=0.00001:sample_rate=48000 \
   -filter_complex "\
 [0:v]scale=1320:2868:flags=lanczos,setpts=2.38*PTS,fps=30,trim=duration=24.9,setpts=PTS-STARTPTS[flow];\
 [1:v]scale=1320:2868:flags=lanczos,fps=30,trim=duration=5,setpts=PTS-STARTPTS[end];\
@@ -33,7 +34,8 @@ ffmpeg -nostdin -y -loglevel error \
 [v4][6:v]overlay=0:0:enable='between(t,${CW[4]})'[v5];\
 [v5][7:v]overlay=0:0:enable='between(t,${CW[5]})',scale=886:1920:flags=lanczos,setsar=1[v]" \
   -map "[v]" -map 8:a -t 29.9 -r 30 \
-  -c:v libx264 -profile:v high -level 4.0 -pix_fmt yuv420p -b:v 11M -maxrate 12M -bufsize 24M \
+  -c:v libx264 -profile:v high -level 4.0 -pix_fmt yuv420p \
+  -b:v 11M -minrate 11M -maxrate 11M -bufsize 22M -x264-params "nal-hrd=cbr:force-cfr=1" \
   -c:a aac -b:a 256k -ar 48000 -ac 2 -movflags +faststart "$FINAL"
 
 ffprobe -v error -select_streams v:0 \

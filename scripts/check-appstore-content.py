@@ -2,6 +2,9 @@
 """Validate App Store metadata and deterministic screenshot deliverables."""
 
 from pathlib import Path
+import json
+import shutil
+import subprocess
 import struct
 import sys
 
@@ -36,6 +39,19 @@ def png_dimensions(path: Path) -> tuple[int, int]:
     return struct.unpack(">II", data[16:24])
 
 
+def preview_properties(path: Path) -> dict:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        fail("ffprobe is required to validate App Preview encoding")
+    result = subprocess.run(
+        [ffprobe, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
+
+
 def main() -> None:
     public_text: list[str] = []
     for locale in LOCALES:
@@ -66,6 +82,30 @@ def main() -> None:
             fail(f"missing or implausibly small App Preview: {preview}")
         if preview.read_bytes()[4:8] != b"ftyp":
             fail(f"not a QuickTime/MP4 container: {preview}")
+        properties = preview_properties(preview)
+        streams = properties["streams"]
+        video = next((stream for stream in streams if stream["codec_type"] == "video"), None)
+        audio = next((stream for stream in streams if stream["codec_type"] == "audio"), None)
+        if not video or (
+            video.get("codec_name") != "h264"
+            or video.get("profile") != "High"
+            or video.get("level") != 40
+            or (video.get("width"), video.get("height")) != (886, 1920)
+            or video.get("pix_fmt") != "yuv420p"
+            or video.get("avg_frame_rate") != "30/1"
+            or not 10_000_000 <= int(video.get("bit_rate", 0)) <= 12_000_000
+        ):
+            fail(f"{preview} does not meet the 6.5-inch H.264 App Preview video specification")
+        if not audio or (
+            audio.get("codec_name") != "aac"
+            or audio.get("sample_rate") != "48000"
+            or audio.get("channels") != 2
+            or not 220_000 <= int(audio.get("bit_rate", 0)) <= 280_000
+        ):
+            fail(f"{preview} does not meet the stereo AAC App Preview audio specification")
+        duration = float(properties["format"].get("duration", 0))
+        if not 15 <= duration <= 30 or preview.stat().st_size > 500_000_000:
+            fail(f"{preview} must be 15-30 seconds and no larger than 500 MB")
 
     joined = "\n".join(public_text)
     for phrase in FORBIDDEN:
