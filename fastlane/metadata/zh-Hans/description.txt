@@ -1,0 +1,28 @@
+离开键盘，也能让编程任务继续推进。
+
+CC Pocket 是一款开源、本地优先的命令行 AI 编程 Agent 伴侣。Agent 继续运行在你自己的 macOS、Windows 或 Linux 电脑上，并直接使用本机代码目录；你可以通过 iPhone 实时查看进度、处理权限请求、继续同一个会话，并检查实际改动。
+
+支持的 AGENT
+• Claude Code
+• OpenAI Codex
+• OpenCode
+• Kimi Code（Preview）
+• ZCode
+• DeepSeek Harness（窄范围支持）
+
+你可以
+• 查看项目、会话、实时输出、工具调用和后台任务
+• 对受支持的权限请求批准或拒绝；超时默认安全拒绝
+• 发送文字、图片和语音输入
+• 继续同一个任务，不必从头开始
+• 在后端支持时查看 Changed files 和行级 diff
+• 配对多台电脑并随时切换
+
+本地优先
+daemon 运行在你的电脑上，并在本机驱动 Agent CLI。它只需主动连接服务端，无需开放入站端口。App 与 daemon 之间采用端到端加密；托管 relay 只转发密文，不持有你的消息正文或私钥。无需注册 CC Pocket 账号，也支持自行部署 relay。
+
+真实的能力边界
+不同 Agent 后端能力并不相同。权限审批、Changed files、用量统计、模型控制等功能，取决于对应 Agent 实际提供的接口。OpenCode 没有可强制执行的交互式审批，会以 Full access 运行。DeepSeek 目前是窄范围支持：远程审批会安全失败，且暂不提供 Changed files、用量统计和模型切换。
+
+CC Pocket 使用 Kotlin 开发，并以 MIT 许可证开源。查看源码和安全模型：
+https://github.com/heypandax/cc-pocket
