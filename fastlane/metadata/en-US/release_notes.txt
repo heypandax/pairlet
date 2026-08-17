@@ -1,15 +1,12 @@
-What's new in 1.8.0
+What's new in 1.8.1
 
 New
-• DeepSeek joins Claude, Codex, OpenCode, Kimi, and ZCode as a session backend
-• Start a task directly from the project list with a clearer, cross-device composer
-• Usage can now be filtered by agent, including Kimi and ZCode
+• A guided first run: install cc-pocket on your computer with per-platform steps, then pair — no more guessing
+• DeepSeek usage now appears in usage stats alongside every other backend
 
 Improved
-• Prompt images remain visible when a session is replayed
-• Project loading, recent sessions, voice input, and prompt delivery provide clearer progress and recovery states
-• Feishu routing, threaded replies, and command controls are more reliable
+• Pairing failures explain what happened and what to do next — a stale code, network trouble, or a link that isn't a pairing link each get their own guidance
+• The setup guide and support chat are reachable before the first pairing succeeds
 
 Fixed
-• Agent capability downgrades no longer corrupt persisted defaults or send unsupported frames
-• Relay and LAN gateway handling is hardened against malformed or spoofed connections
+• All agent-scoped requests respect the computer's supported backends when connected to an older daemon
