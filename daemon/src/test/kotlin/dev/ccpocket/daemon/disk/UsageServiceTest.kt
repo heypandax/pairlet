@@ -32,8 +32,9 @@ class UsageServiceTest {
         openCodeTurns: (Long) -> List<dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.UsageTurn> = { emptyList() },
         zcodeTurns: (Long) -> List<dev.ccpocket.daemon.zcode.ZCodeTranscriptScanner.UsageTurn> = { emptyList() },
         kimiRecords: (Long) -> List<dev.ccpocket.daemon.kimi.KimiUsageScanner.UsageRecord> = { emptyList() },
+        dshRecords: (Long) -> List<dev.ccpocket.daemon.dsh.DshUsageScanner.UsageRecord> = { emptyList() },
         agent: AgentKind? = null,
-    ) = UsageService.aggregate(days, projectsRoot, codexFiles, openCodeTurns, zcodeTurns, kimiRecords, agent)
+    ) = UsageService.aggregate(days, projectsRoot, codexFiles, openCodeTurns, zcodeTurns, kimiRecords, dshRecords, agent)
 
     private fun withProjects(block: (Path) -> Unit) {
         val root = Files.createTempDirectory("ccp-usage-projects")
@@ -265,6 +266,11 @@ class UsageServiceTest {
     private fun kRecord(id: String, hour: Int, model: String, input: Long, output: Long, cacheCreation: Long = 0, cacheRead: Long = 0) =
         dev.ccpocket.daemon.kimi.KimiUsageScanner.UsageRecord(id, msToday(hour), model, input, output, cacheCreation, cacheRead)
 
+    /** issue #279: dsh's records arrive with cache read already split out of input (DshUsageScanner does the
+     *  OpenAI→Claude normalization), so they feed this aggregation on the same footing as every other backend. */
+    private fun dRecord(id: String, hour: Int, model: String, input: Long, output: Long, cacheRead: Long = 0) =
+        dev.ccpocket.daemon.dsh.DshUsageScanner.UsageRecord(id, msToday(hour), model, input, output, cacheCreation = 0, cacheRead = cacheRead)
+
     @Test
     fun zcode_requests_count_and_classify_as_zcode() {
         withProjects { root ->
@@ -305,6 +311,32 @@ class UsageServiceTest {
         }
     }
 
+    // issue #279: dsh joins the total. Its chip existed from #255 but nothing fed it, so every DeepSeek bar
+    // read 0 while the spend sat on disk.
+    @Test
+    fun dsh_records_count_and_classify_as_dsh() {
+        withProjects { root ->
+            val records = listOf(
+                dRecord("d1", 7, "deepseek-v4-flash", input = 100, output = 40, cacheRead = 60),
+                dRecord("d2", 7, "deepseek-v4-reasoner", input = 10, output = 10),
+            )
+            val u = hermetic(1, projectsRoot = root, codexFiles = emptyList(), dshRecords = { records })
+
+            assertEquals(220L, u.tokensToday, "100+40+60 + 10+10")
+            assertEquals(2L, u.requestsToday)
+            assertEquals(220L, u.hours!![7].tokens)
+            val flash = u.models.single { it.model == "deepseek-v4-flash" }
+            assertEquals(200L, flash.tokens)
+            // the legacy string heuristic would have mis-badged a "deepseek-…" key as CLAUDE; the badge must
+            // come from the backend recorded at accumulation
+            assertEquals(AgentKind.DSH, flash.agent)
+            assertEquals(AgentKind.DSH, u.models.single { it.model == "deepseek-v4-reasoner" }.agent)
+            // cache read is already split out of input, so the shared formula sees 60 / (110 + 60)
+            assertEquals(35, u.cacheHitPct)
+            assertNull(u.costUsdToday, "dsh stamps no cost — the column stays blank rather than estimated")
+        }
+    }
+
     @Test
     fun zcode_and_kimi_dedup_by_their_own_ids() {
         withProjects { root ->
@@ -337,12 +369,13 @@ class UsageServiceTest {
                 openCodeTurns = { openCodeScanned = true; emptyList() },
                 zcodeTurns = { listOf(zTurn("u1", 6, "anthropic/glm-5", input = 100, output = 0)) },
                 kimiRecords = { listOf(kRecord("k1", 8, "kimi-code/k3", input = 0, output = 76)) },
+                dshRecords = { listOf(dRecord("d1", 10, "deepseek-v4-flash", input = 200, output = 0)) },
                 agent = agent,
             )
 
             val all = aggregate(null)
-            assertEquals(676L, all.tokensToday, "unfiltered stays the sum of every backend")
-            assertEquals(3, all.models.size)
+            assertEquals(876L, all.tokensToday, "unfiltered stays the sum of every backend")
+            assertEquals(4, all.models.size)
             assertTrue(openCodeScanned, "the unfiltered pass reads every backend")
 
             openCodeScanned = false
@@ -353,8 +386,13 @@ class UsageServiceTest {
             assertEquals(100L, zcodeOnly.days.last().tokens, "the trend follows the filter too")
             assertFalse(openCodeScanned, "a narrowed request must not scan the other backends' stores")
 
-            assertEquals(76L, aggregate(AgentKind.KIMI).tokensToday)
+            assertEquals(76L, aggregate(AgentKind.KIMI).tokensToday, "the Kimi view must not pick up dsh's 200")
             assertEquals(500L, aggregate(AgentKind.CLAUDE).tokensToday)
+            val dshOnly = aggregate(AgentKind.DSH)
+            assertEquals(200L, dshOnly.tokensToday)
+            assertEquals(1L, dshOnly.requestsToday)
+            assertEquals(AgentKind.DSH, dshOnly.models.single().agent)
+            assertEquals(200L, dshOnly.days.last().tokens, "the trend follows the dsh filter too")
             assertEquals(0L, aggregate(AgentKind.CODEX).tokensToday, "a backend with no records reads as empty, not as everything")
         }
     }

@@ -32,6 +32,9 @@ import kotlin.io.path.isDirectory
  *  - OpenCode turns from its SQLite store (issue #217).
  *  - ZCode requests from `~/.zcode/cli/db/db.sqlite`'s `model_usage` table and Kimi Code `usage.record`
  *    lines from each session's `agents/main/wire.jsonl` (issue #258). Neither backend records a cost.
+ *  - dsh (DeepSeek Harness) turns from each `~/.dsh/sessions/**/session.jsonl[.zstd]`'s `assistant/message`
+ *    events (issue #279). No cost either — dsh stamps none, and an estimate from a price table would be
+ *    worse than the blank the App already renders.
  *
  * [aggregate] can be scoped to ONE backend ([AgentKind] filter, issue #258); the default null keeps the
  * all-backends total. A filtered run doesn't even touch the other backends' disks.
@@ -41,9 +44,9 @@ object UsageService {
     private val zone: ZoneId = ZoneId.systemDefault()
 
     /** [projectsRoot]/[codexFiles] default to the real on-disk roots; tests inject temp ones.
-     *  [openCodeTurns]/[zcodeTurns]/[kimiRecords] read token spend from each backend's own store since a
-     *  cutoff (issues #217, #258) — function seams so tests can feed fixtures without a real db/home.
-     *  [agent] non-null narrows the whole aggregation to that backend. */
+     *  [openCodeTurns]/[zcodeTurns]/[kimiRecords]/[dshRecords] read token spend from each backend's own
+     *  store since a cutoff (issues #217, #258, #279) — function seams so tests can feed fixtures without
+     *  a real db/home. [agent] non-null narrows the whole aggregation to that backend. */
     fun aggregate(
         days: Int,
         projectsRoot: Path = ProjectPaths.projectsRoot(),
@@ -54,6 +57,8 @@ object UsageService {
             { since -> runCatching { dev.ccpocket.daemon.zcode.ZCodeTranscriptScanner.usageTurns(since) }.getOrDefault(emptyList()) },
         kimiRecords: (sinceEpochMs: Long) -> List<dev.ccpocket.daemon.kimi.KimiUsageScanner.UsageRecord> =
             { since -> runCatching { dev.ccpocket.daemon.kimi.KimiUsageScanner.usageRecords(since) }.getOrDefault(emptyList()) },
+        dshRecords: (sinceEpochMs: Long) -> List<dev.ccpocket.daemon.dsh.DshUsageScanner.UsageRecord> =
+            { since -> runCatching { dev.ccpocket.daemon.dsh.DshUsageScanner.usageRecords(since) }.getOrDefault(emptyList()) },
         agent: AgentKind? = null,
     ): Usage {
         val span = days.coerceIn(1, 90)
@@ -250,6 +255,15 @@ object UsageService {
         // mismatch simply yields no records — Kimi then contributes nothing rather than wrong numbers.
         if (agent == null || agent == AgentKind.KIMI) for (r in kimiRecords(prevStartEpochMs)) {
             add(r.id, r.whenEpochMs, r.model, AgentKind.KIMI, r.input, r.output, r.cacheCreation, r.cacheRead)
+        }
+
+        // ── dsh turns: one record per `assistant/message` event in each session transcript (issue #279).
+        // The usage page has been offering a "DeepSeek" chip since #255 with nothing behind it, so every
+        // dsh bar read 0 while the spend sat on disk. DshUsageScanner already normalizes DeepSeek's
+        // OpenAI-style cached ⊂ input into the disjoint columns this aggregation assumes, and folds
+        // reasoning into output — so the columns arrive on the same footing as every other backend's.
+        if (agent == null || agent == AgentKind.DSH) for (r in dshRecords(prevStartEpochMs)) {
+            add(r.id, r.whenEpochMs, r.model, AgentKind.DSH, r.input, r.output, r.cacheCreation, r.cacheRead)
         }
 
         val trend = (0 until span).map { i ->
