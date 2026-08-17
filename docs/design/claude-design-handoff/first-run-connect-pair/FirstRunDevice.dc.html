@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  @keyframes ccpulse { 0%, 100% { opacity: 1 } 50% { opacity: .3 } }
+  @keyframes ccbar { 0% { transform: translateX(-100%) } 100% { transform: translateX(300%) } }
+</style>
+</helmet>
+
+<div style="display:flex;gap:22px;align-items:flex-start;font-family:'Public Sans',system-ui,sans-serif">
+
+  <div style="width:390px;height:844px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5);flex:none">
+
+    <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none">
+      <span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span>
+      <span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #F3F3F4;border-radius:2px;opacity:.7"></span><span style="width:22px;height:10px;border:1.3px solid #F3F3F4;border-radius:3px;opacity:.7"></span></span>
+    </div>
+
+    <div style="flex:1;min-height:0;position:relative">
+
+      <!-- ═══════ SCREEN 1 · CONNECT YOUR COMPUTER ═══════ -->
+      <sc-if value="{{ isConnect }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="Connect your computer" style="position:absolute;inset:0;display:flex;flex-direction:column">
+
+        <sc-if value="{{ compact }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:none;display:flex;align-items:center;gap:11px;padding:0 20px 11px;border-bottom:1px solid rgba(255,255,255,.14)">
+          <span style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8C8D95;flex:none">cc-pocket</span>
+          <span style="flex:1;min-width:0;font:600 16px/1.25 system-ui,sans-serif;letter-spacing:-.015em">Connect your computer</span>
+        </div>
+        </sc-if>
+
+        <div style="flex:1;min-height:0;overflow:auto;padding:6px 20px 0">
+
+          <sc-if value="{{ full }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:#8C8D95;padding-top:6px">cc-pocket</div>
+            <h1 style="margin:26px 0 0;font:600 33px/1.06 system-ui,sans-serif;letter-spacing:-.028em;text-wrap:pretty">Connect your computer</h1>
+            <p style="margin:14px 0 0;font:400 15.5px/1.5 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">Your phone drives the AI coding agent that runs on your computer.</p>
+          </div>
+          </sc-if>
+
+          <div style="margin-top:{{ stepGap }}">
+            <div style="display:flex;align-items:center;gap:11px">
+              <span style="width:24px;height:24px;border-radius:50%;background:rgba(226,121,90,.14);border:1px solid rgba(226,121,90,.52);display:flex;align-items:center;justify-content:center;font:600 12px/1 'JetBrains Mono',monospace;color:#F0A184;flex:none">1</span>
+              <span style="flex:1;min-width:0;font:600 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em;text-wrap:pretty">Install cc-pocket on the computer</span>
+            </div>
+
+            <div role="tablist" aria-label="Platform" style="display:flex;gap:4px;margin-top:14px;padding:3px;border-radius:12px;background:#141417;border:1px solid rgba(255,255,255,.14)">
+              <sc-for list="{{ platforms }}" as="p" hint-placeholder-count="3">
+                <sc-if value="{{ p.selected }}" hint-placeholder-val="{{ true }}">
+                  <button type="button" role="tab" aria-selected="true" onClick="{{ p.pick }}" style="appearance:none;flex:1;min-width:0;min-height:44px;border-radius:9px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.22);font:600 14px/1.2 system-ui,sans-serif;color:#F3F3F4;cursor:pointer">{{ p.label }}</button>
+                </sc-if>
+                <sc-if value="{{ p.unselected }}" hint-placeholder-val="{{ false }}">
+                  <button type="button" role="tab" aria-selected="false" onClick="{{ p.pick }}" style="appearance:none;flex:1;min-width:0;min-height:44px;border-radius:9px;background:none;border:0;font:500 14px/1.2 system-ui,sans-serif;color:#B4B5BC;cursor:pointer">{{ p.label }}</button>
+                </sc-if>
+              </sc-for>
+            </div>
+
+            <div style="margin-top:12px;background:#141417;border:1px solid rgba(255,255,255,.14);border-radius:11px;padding:10px 8px 10px 14px;display:flex;align-items:center;gap:8px">
+              <span style="flex:1;min-width:0;font:400 13px/1.5 'JetBrains Mono',monospace;color:#E6E6E9;letter-spacing:-.01em;word-break:break-all">{{ command }}</span>
+              <button type="button" aria-label="Copy install command" onClick="{{ copyCommand }}" style="appearance:none;background:none;border:0;width:44px;height:44px;margin:-6px 0;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer"><span style="width:28px;height:28px;border:1px solid rgba(255,255,255,.22);border-radius:8px;display:flex;align-items:center;justify-content:center"><span style="width:10px;height:12px;border:1.2px solid #B4B5BC;border-radius:2px;margin:-3px 0 0 -3px"></span></span></button>
+            </div>
+            <sc-if value="{{ copiedInstall }}" hint-placeholder-val="{{ false }}">
+            <div style="font:400 12px/1.4 system-ui,sans-serif;color:#7ECBA0;margin-top:7px">Copied</div>
+            </sc-if>
+
+            <sc-if value="{{ quietPrereq }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;align-items:baseline;gap:4px;flex-wrap:wrap;margin-top:9px">
+              <span style="font:400 12.5px/1.5 system-ui,sans-serif;color:#8C8D95;text-wrap:pretty">Needs the Claude Code CLI on that computer</span>
+              <button type="button" onClick="{{ openCliInfo }}" style="appearance:none;background:none;border:0;padding:13px 4px;margin:-13px 0;font:500 12.5px/1.5 system-ui,sans-serif;color:#E2795A;cursor:pointer">What's that?</button>
+            </div>
+            </sc-if>
+
+            <sc-if value="{{ loudPrereq }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:12px;background:#141417;border:1px solid rgba(233,180,92,.34);border-radius:11px;padding:13px 15px">
+              <div style="display:flex;align-items:center;gap:9px">
+                <span style="width:9px;height:9px;background:#E9B45C;transform:rotate(45deg);flex:none"></span>
+                <span style="flex:1;min-width:0;font:600 14.5px/1.25 system-ui,sans-serif;color:#F0C079;text-wrap:pretty">Needs the Claude Code CLI on that computer</span>
+              </div>
+              <p style="margin:10px 0 0;font:400 13.5px/1.5 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">On Windows the CLI is installed separately, in Windows itself or in WSL. Pairing cannot start without it.</p>
+              <button type="button" onClick="{{ openCliInfo }}" style="appearance:none;background:none;border:0;padding:13px 0;margin:-4px 0 -13px;font:500 13px/1.4 system-ui,sans-serif;color:#E2795A;cursor:pointer;text-align:left">Install the Claude Code CLI ›</button>
+            </div>
+            </sc-if>
+          </div>
+
+          <div style="margin-top:26px">
+            <div style="display:flex;align-items:center;gap:11px">
+              <span style="width:24px;height:24px;border-radius:50%;background:rgba(226,121,90,.14);border:1px solid rgba(226,121,90,.52);display:flex;align-items:center;justify-content:center;font:600 12px/1 'JetBrains Mono',monospace;color:#F0A184;flex:none">2</span>
+              <span style="flex:1;min-width:0;font:600 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em">Pair</span>
+            </div>
+            <p style="margin:12px 0 0;font:400 14.5px/1.55 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">Run <span style="font:400 13px/1.4 'JetBrains Mono',monospace;color:#E6E6E9;letter-spacing:-.01em">cc-pocket-daemon pair</span> on the computer — it shows a six-digit code and a QR.</p>
+          </div>
+
+          <sc-if value="{{ full }}" hint-placeholder-val="{{ true }}">
+          <button type="button" onClick="{{ goPair }}" style="appearance:none;width:100%;min-height:52px;margin-top:26px;border-radius:13px;background:#E2795A;border:0;font:600 17px/1.2 system-ui,sans-serif;letter-spacing:-.01em;color:#160C07;cursor:pointer">I'm ready — pair now</button>
+          </sc-if>
+
+          <div style="margin-top:20px;border-top:1px solid rgba(255,255,255,.14)">
+            <button type="button" onClick="{{ goPair }}" style="appearance:none;width:100%;background:none;border:0;border-bottom:1px solid rgba(255,255,255,.14);min-height:56px;display:flex;align-items:center;gap:12px;padding:8px 0;cursor:pointer;text-align:left">
+              <span style="flex:1;min-width:0;font:500 15.5px/1.35 system-ui,sans-serif;color:#E6E6E9;text-wrap:pretty">Already installed? Enter code directly</span>
+              <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76;flex:none">›</span>
+            </button>
+            <button type="button" onClick="{{ openDemo }}" style="appearance:none;width:100%;background:none;border:0;border-bottom:1px solid rgba(255,255,255,.14);min-height:56px;display:flex;align-items:center;gap:12px;padding:8px 0;cursor:pointer;text-align:left">
+              <span style="flex:1;min-width:0">
+                <span style="display:block;font:500 15.5px/1.35 system-ui,sans-serif;color:#B4B5BC">Explore the demo instead</span>
+                <span style="display:block;font:400 12px/1.4 system-ui,sans-serif;color:#8C8D95;margin-top:3px">No computer needed</span>
+              </span>
+              <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76;flex:none">›</span>
+            </button>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:8px">
+            <button type="button" onClick="{{ openGuide }}" style="appearance:none;background:none;border:0;min-height:44px;padding:0 4px;font:400 12.5px/1.4 system-ui,sans-serif;color:#8C8D95;cursor:pointer">Full setup guide</button>
+            <span style="font:400 12.5px/1 system-ui,sans-serif;color:#4A4A52">·</span>
+            <button type="button" onClick="{{ openHelp }}" style="appearance:none;background:none;border:0;min-height:44px;padding:0 4px;font:400 12.5px/1.4 system-ui,sans-serif;color:#8C8D95;cursor:pointer">Help &amp; support</button>
+          </div>
+          <div style="height:12px"></div>
+        </div>
+
+        <sc-if value="{{ compact }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:none;padding:10px 20px 12px;border-top:1px solid rgba(255,255,255,.14);background:#0B0B0C">
+          <button type="button" onClick="{{ goPair }}" style="appearance:none;width:100%;min-height:52px;border-radius:13px;background:#E2795A;border:0;font:600 17px/1.2 system-ui,sans-serif;letter-spacing:-.01em;color:#160C07;cursor:pointer">I'm ready — pair now</button>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <!-- ═══════ SCREEN 2 · PAIR A COMPUTER ═══════ -->
+      <sc-if value="{{ isPair }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Pair a computer" style="position:absolute;inset:0;display:flex;flex-direction:column">
+        <div style="flex:1;min-height:0;overflow:auto;padding:0 20px">
+
+          <div style="display:flex;align-items:center;margin:0 -12px 2px">
+            <button type="button" aria-label="Back to install guide" onClick="{{ goConnect }}" style="appearance:none;background:none;border:0;width:48px;height:48px;display:flex;align-items:center;justify-content:center;flex:none;font:300 26px/1 system-ui,sans-serif;color:#E2795A;cursor:pointer">‹</button>
+          </div>
+
+          <h1 style="margin:0;font:600 31px/1.1 system-ui,sans-serif;letter-spacing:-.026em;text-wrap:pretty">Pair a computer</h1>
+          <p style="margin:12px 0 0;font:400 15.5px/1.5 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">Enter the six-digit code shown on your computer.</p>
+
+          <sc-if value="{{ boxesLive }}" hint-placeholder-val="{{ true }}">
+          <button type="button" aria-label="Six-digit pairing code" onClick="{{ tapCode }}" style="appearance:none;background:none;border:0;padding:0;width:100%;display:flex;gap:8px;margin-top:24px;cursor:pointer">
+            <sc-for list="{{ codeBoxes }}" as="box" hint-placeholder-count="6">
+              <sc-if value="{{ box.filled }}" hint-placeholder-val="{{ false }}">
+                <span style="flex:1;height:58px;border-radius:11px;border:1px solid rgba(255,255,255,.24);background:#141417;display:flex;align-items:center;justify-content:center;font:500 25px/1 'JetBrains Mono',monospace;color:#F3F3F4">{{ box.d }}</span>
+              </sc-if>
+              <sc-if value="{{ box.caret }}" hint-placeholder-val="{{ true }}">
+                <span style="flex:1;height:58px;border-radius:11px;border:1px solid #E2795A;background:#141417;display:flex;align-items:center;justify-content:center;font:500 25px/1 'JetBrains Mono',monospace;color:#6E6E76">·</span>
+              </sc-if>
+              <sc-if value="{{ box.empty }}" hint-placeholder-val="{{ false }}">
+                <span style="flex:1;height:58px;border-radius:11px;border:1px solid rgba(255,255,255,.16);background:#141417"></span>
+              </sc-if>
+            </sc-for>
+          </button>
+          </sc-if>
+
+          <sc-if value="{{ boxesLocked }}" hint-placeholder-val="{{ false }}">
+          <div aria-label="Six-digit pairing code, locked" style="display:flex;gap:8px;margin-top:24px">
+            <sc-for list="{{ codeBoxes }}" as="box" hint-placeholder-count="6">
+              <span style="flex:1;height:58px;border-radius:11px;border:1px solid rgba(255,255,255,.12);background:#111113;display:flex;align-items:center;justify-content:center;font:500 25px/1 'JetBrains Mono',monospace;color:{{ lockedInk }}">{{ box.d }}</span>
+            </sc-for>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ ctaReady }}" hint-placeholder-val="{{ false }}">
+          <button type="button" onClick="{{ pairNow }}" style="appearance:none;width:100%;min-height:52px;margin-top:16px;border-radius:13px;background:#E2795A;border:0;font:600 17px/1.2 system-ui,sans-serif;letter-spacing:-.01em;color:#160C07;cursor:pointer">Pair computer</button>
+          </sc-if>
+          <sc-if value="{{ ctaInert }}" hint-placeholder-val="{{ true }}">
+          <div style="width:100%;min-height:52px;margin-top:16px;border-radius:13px;border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font:600 17px/1.2 system-ui,sans-serif;letter-spacing:-.01em;color:#6E6E76">Pair computer</div>
+          </sc-if>
+
+          <!-- ── status region ── -->
+          <sc-if value="{{ statusIdle }}" hint-placeholder-val="{{ true }}">
+          <div style="font:400 12.5px/1.5 system-ui,sans-serif;color:#8C8D95;margin-top:11px;text-wrap:pretty">{{ idleHint }}</div>
+          </sc-if>
+
+          <sc-if value="{{ statusVerifying }}" hint-placeholder-val="{{ false }}">
+          <div aria-live="polite" style="margin-top:14px">
+            <div style="height:2px;border-radius:2px;background:rgba(255,255,255,.10);overflow:hidden"><span style="display:block;width:34%;height:2px;background:#E2795A;animation:ccbar 1.25s ease-in-out infinite"></span></div>
+            <div style="display:flex;align-items:center;gap:9px;margin-top:11px">
+              <span style="width:9px;height:9px;border-radius:50%;border:1.5px solid #E2795A;flex:none;animation:ccpulse 1.4s ease-in-out infinite"></span>
+              <span style="flex:1;min-width:0;font:500 14px/1.4 system-ui,sans-serif;color:#E6E6E9">Checking code…</span>
+            </div>
+            <div style="font:400 12.5px/1.5 system-ui,sans-serif;color:#8C8D95;margin-top:7px;text-wrap:pretty">The field is locked while the code is checked.</div>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ errExpired }}" hint-placeholder-val="{{ false }}">
+          <div role="alert" style="margin-top:16px;background:#141417;border:1px solid rgba(233,116,98,.42);border-radius:12px;padding:15px">
+            <div style="display:flex;align-items:center;gap:9px">
+              <span style="width:9px;height:9px;background:#E97462;flex:none"></span>
+              <span style="flex:1;min-width:0;font:600 16px/1.25 system-ui,sans-serif;color:#F0A08F;text-wrap:pretty">That code didn't work</span>
+            </div>
+            <p style="margin:11px 0 0;font:400 14.5px/1.5 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">Codes expire after a short while. On the computer, run the command again to get a fresh one:</p>
+            <div style="margin-top:12px;background:#0B0B0C;border-radius:9px;padding:8px 6px 8px 12px;display:flex;align-items:center;gap:8px">
+              <span style="flex:1;min-width:0;font:400 13px/1.45 'JetBrains Mono',monospace;color:#E6E6E9;letter-spacing:-.01em;word-break:break-all">cc-pocket-daemon pair</span>
+              <button type="button" aria-label="Copy pairing command" onClick="{{ copyPairCmd }}" style="appearance:none;background:none;border:0;width:44px;height:44px;margin:-8px 0;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer"><span style="width:26px;height:26px;border:1px solid rgba(255,255,255,.22);border-radius:7px;display:flex;align-items:center;justify-content:center"><span style="width:9px;height:11px;border:1.2px solid #B4B5BC;border-radius:2px;margin:-3px 0 0 -3px"></span></span></button>
+            </div>
+            <sc-if value="{{ copiedPair }}" hint-placeholder-val="{{ false }}">
+            <div style="font:400 12px/1.4 system-ui,sans-serif;color:#7ECBA0;margin-top:7px">Copied</div>
+            </sc-if>
+            <button type="button" onClick="{{ tryAgain }}" style="appearance:none;width:100%;min-height:48px;margin-top:13px;border-radius:11px;background:none;border:1px solid rgba(255,255,255,.24);font:600 15px/1.2 system-ui,sans-serif;color:#E6E6E9;cursor:pointer">Try again</button>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ errNetwork }}" hint-placeholder-val="{{ false }}">
+          <div role="alert" style="margin-top:16px;background:#141417;border:1px solid rgba(233,116,98,.42);border-radius:12px;padding:15px">
+            <div style="display:flex;align-items:center;gap:9px">
+              <span style="width:9px;height:9px;background:#E97462;flex:none"></span>
+              <span style="flex:1;min-width:0;font:600 16px/1.25 system-ui,sans-serif;color:#F0A08F;text-wrap:pretty">Can't reach the pairing service</span>
+            </div>
+            <p style="margin:11px 0 0;font:400 14.5px/1.5 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">Check the phone's network (VPN/proxy can block it), then retry.</p>
+            <button type="button" onClick="{{ retryNetwork }}" style="appearance:none;width:100%;min-height:48px;margin-top:13px;border-radius:11px;background:none;border:1px solid rgba(255,255,255,.24);font:600 15px/1.2 system-ui,sans-serif;color:#E6E6E9;cursor:pointer">Retry</button>
+            <button type="button" onClick="{{ openHelp }}" style="appearance:none;width:100%;background:none;border:0;min-height:44px;margin-bottom:-8px;font:500 13.5px/1.4 system-ui,sans-serif;color:#8C8D95;cursor:pointer">Help &amp; support</button>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ errLink }}" hint-placeholder-val="{{ false }}">
+          <div role="alert" style="margin-top:16px;background:#141417;border:1px solid rgba(233,116,98,.42);border-radius:12px;padding:15px">
+            <div style="display:flex;align-items:center;gap:9px">
+              <span style="width:9px;height:9px;background:#E97462;flex:none"></span>
+              <span style="flex:1;min-width:0;font:600 16px/1.25 system-ui,sans-serif;color:#F0A08F;text-wrap:pretty">That link isn't a pairing link</span>
+            </div>
+            <p style="margin:11px 0 0;font:400 14.5px/1.5 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">Scan the QR that <span style="font:400 13px/1.4 'JetBrains Mono',monospace;color:#E6E6E9;letter-spacing:-.01em">cc-pocket-daemon pair</span> prints, or paste the full <span style="font:400 13px/1.4 'JetBrains Mono',monospace;color:#E6E6E9;letter-spacing:-.01em">ccpocket://</span> link.</p>
+            <div style="display:flex;gap:8px;margin-top:13px">
+              <button type="button" onClick="{{ openScan }}" style="appearance:none;flex:1;min-width:0;min-height:48px;border-radius:11px;background:none;border:1px solid rgba(255,255,255,.24);font:600 15px/1.2 system-ui,sans-serif;color:#E6E6E9;cursor:pointer">Scan QR</button>
+              <button type="button" onClick="{{ openPasteLink }}" style="appearance:none;flex:1;min-width:0;min-height:48px;border-radius:11px;background:none;border:1px solid rgba(255,255,255,.24);font:600 15px/1.2 system-ui,sans-serif;color:#E6E6E9;cursor:pointer">Paste link</button>
+            </div>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ ok }}" hint-placeholder-val="{{ false }}">
+          <div aria-live="polite" style="margin-top:16px;background:#141417;border:1px solid rgba(92,181,130,.38);border-radius:12px;padding:16px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:22px;height:22px;border-radius:50%;background:rgba(226,121,90,.16);border:1px solid #E2795A;display:flex;align-items:center;justify-content:center;font:600 12px/1 system-ui,sans-serif;color:#F0A184;flex:none">✓</span>
+              <span style="flex:1;min-width:0;font:600 17px/1.25 system-ui,sans-serif;letter-spacing:-.015em">Paired</span>
+            </div>
+            <div style="font:400 13.5px/1.5 'JetBrains Mono',monospace;color:#E6E6E9;margin-top:12px;letter-spacing:-.01em;word-break:break-all">{{ pairedName }}</div>
+            <div style="font:400 13.5px/1.5 system-ui,sans-serif;color:#8C8D95;margin-top:9px">Opening your projects…</div>
+          </div>
+          </sc-if>
+
+          <!-- ── alternate routes ── -->
+          <sc-if value="{{ showRoutes }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <div style="margin-top:22px;border-top:1px solid rgba(255,255,255,.14)">
+              <button type="button" onClick="{{ openScan }}" style="appearance:none;width:100%;background:none;border:0;border-bottom:1px solid rgba(255,255,255,.14);min-height:56px;display:flex;align-items:center;gap:12px;cursor:pointer;text-align:left">
+                <span style="width:26px;height:26px;border:1px solid rgba(255,255,255,.28);border-radius:6px;flex:none;display:flex;align-items:center;justify-content:center"><span style="width:10px;height:10px;border:1.2px solid #B4B5BC"></span></span>
+                <span style="flex:1;min-width:0;font:500 15.5px/1.35 system-ui,sans-serif;color:#E6E6E9">Scan QR code</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76;flex:none">›</span>
+              </button>
+              <button type="button" onClick="{{ openPasteLink }}" style="appearance:none;width:100%;background:none;border:0;border-bottom:1px solid rgba(255,255,255,.14);min-height:56px;display:flex;align-items:center;gap:12px;cursor:pointer;text-align:left">
+                <span style="width:26px;height:26px;flex:none"></span>
+                <span style="flex:1;min-width:0;font:500 15.5px/1.35 system-ui,sans-serif;color:#E6E6E9">Paste pairing link</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76;flex:none">›</span>
+              </button>
+              <button type="button" onClick="{{ openLan }}" style="appearance:none;width:100%;background:none;border:0;border-bottom:1px solid rgba(255,255,255,.14);min-height:56px;display:flex;align-items:center;gap:12px;cursor:pointer;text-align:left">
+                <span style="width:26px;height:26px;flex:none"></span>
+                <span style="flex:1;min-width:0;font:500 15.5px/1.35 system-ui,sans-serif;color:#E6E6E9">Direct LAN address</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76;flex:none">›</span>
+              </button>
+            </div>
+
+            <div style="margin-top:20px;background:#141417;border-radius:11px;padding:14px 16px">
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">On the computer</div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+                <span style="flex:1;min-width:0;font:400 13.5px/1.45 'JetBrains Mono',monospace;color:#E6E6E9;letter-spacing:-.01em;word-break:break-all">cc-pocket-daemon pair</span>
+                <button type="button" aria-label="Copy pairing command" onClick="{{ copyPairCmd }}" style="appearance:none;background:none;border:0;width:44px;height:44px;margin:-8px -10px -8px 0;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer"><span style="width:28px;height:28px;border:1px solid rgba(255,255,255,.22);border-radius:8px;display:flex;align-items:center;justify-content:center"><span style="width:10px;height:12px;border:1.2px solid #B4B5BC;border-radius:2px;margin:-3px 0 0 -3px"></span></span></button>
+              </div>
+              <sc-if value="{{ copiedPair }}" hint-placeholder-val="{{ false }}">
+              <div style="font:400 12px/1.4 system-ui,sans-serif;color:#7ECBA0;margin-top:7px">Copied</div>
+              </sc-if>
+              <button type="button" onClick="{{ goConnect }}" style="appearance:none;width:100%;background:none;border:0;border-top:1px solid rgba(255,255,255,.12);margin-top:12px;min-height:48px;display:flex;align-items:center;gap:10px;cursor:pointer;text-align:left">
+                <span style="flex:1;min-width:0;font:500 13.5px/1.45 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">Don't have cc-pocket on the computer yet? Install it first</span>
+                <span style="font:300 16px/1 system-ui,sans-serif;color:#6E6E76;flex:none">›</span>
+              </button>
+            </div>
+
+            <div style="display:flex;flex-direction:column;align-items:center;margin-top:6px">
+              <button type="button" onClick="{{ openHelp }}" style="appearance:none;background:none;border:0;min-height:44px;padding:0 8px;font:400 12.5px/1.4 system-ui,sans-serif;color:#8C8D95;cursor:pointer">Help &amp; support</button>
+              <span style="font:400 11.5px/1.4 system-ui,sans-serif;color:#6E6E76;margin-top:-6px">Support chat, no sign-in</span>
+            </div>
+            <div style="height:14px"></div>
+          </div>
+          </sc-if>
+          <sc-if value="{{ ok }}" hint-placeholder-val="{{ false }}">
+          <div style="height:20px"></div>
+          </sc-if>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ═══════ STUB ═══════ -->
+      <sc-if value="{{ isStub }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Existing surface" style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:0 24px">
+        <div style="font:600 22px/1.25 system-ui,sans-serif;letter-spacing:-.015em;text-wrap:pretty">{{ stubTitle }}</div>
+        <p style="margin:12px 0 0;font:400 15px/1.5 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">{{ stubBody }}</p>
+        <button type="button" onClick="{{ stubBack }}" style="appearance:none;width:100%;min-height:52px;margin-top:24px;border-radius:13px;background:none;border:1px solid rgba(255,255,255,.24);font:600 16px/1.2 system-ui,sans-serif;color:#E6E6E9;cursor:pointer">Back</button>
+      </div>
+      </sc-if>
+
+    </div>
+
+    <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+  </div>
+
+  <sc-if value="{{ showControls }}" hint-placeholder-val="{{ false }}">
+  <div style="width:250px;flex:none;padding-top:2px">
+    <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">Prototype controls · not product UI</div>
+    <div style="margin-top:14px;border-top:1px solid #C9C5BD;padding-top:12px">
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.13em;text-transform:uppercase;color:#8A857C">Screen</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+        <sc-for list="{{ jumps }}" as="j" hint-placeholder-count="3">
+          <button type="button" onClick="{{ j.go }}" style="appearance:none;min-height:32px;padding:0 10px;border-radius:8px;border:1px solid #C9C5BD;background:{{ j.bg }};font:500 11.5px/1 'JetBrains Mono',monospace;color:{{ j.ink }};cursor:pointer">{{ j.label }}</button>
+        </sc-for>
+      </div>
+    </div>
+    <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:12px">
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.13em;text-transform:uppercase;color:#8A857C">Pairing state</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+        <sc-for list="{{ stateBtns }}" as="b" hint-placeholder-count="6">
+          <button type="button" onClick="{{ b.set }}" style="appearance:none;min-height:32px;padding:0 10px;border-radius:8px;border:1px solid #C9C5BD;background:{{ b.bg }};font:500 11.5px/1 'JetBrains Mono',monospace;color:{{ b.ink }};cursor:pointer">{{ b.label }}</button>
+        </sc-for>
+      </div>
+    </div>
+    <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:12px">
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.13em;text-transform:uppercase;color:#8A857C">Install screen</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+        <sc-for list="{{ platformBtns }}" as="b" hint-placeholder-count="3">
+          <button type="button" onClick="{{ b.set }}" style="appearance:none;min-height:32px;padding:0 10px;border-radius:8px;border:1px solid #C9C5BD;background:{{ b.bg }};font:500 11.5px/1 'JetBrains Mono',monospace;color:{{ b.ink }};cursor:pointer">{{ b.label }}</button>
+        </sc-for>
+      </div>
+      <button type="button" onClick="{{ toggleCompact }}" style="appearance:none;width:100%;min-height:36px;margin-top:10px;border-radius:9px;border:1px solid #C9C5BD;background:{{ compactBg }};font:500 12px/1 'JetBrains Mono',monospace;color:{{ compactInk }};cursor:pointer">scrolled-compact</button>
+    </div>
+    <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:12px">
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.13em;text-transform:uppercase;color:#8A857C">Log</div>
+      <div style="margin-top:9px">
+        <sc-for list="{{ logLines }}" as="l" hint-placeholder-count="3">
+          <div style="font:400 11.5px/1.6 'JetBrains Mono',monospace;color:#54504A;word-break:break-all">{{ l.text }}</div>
+        </sc-for>
+      </div>
+      <button type="button" onClick="{{ reset }}" style="appearance:none;width:100%;min-height:36px;margin-top:12px;border-radius:9px;border:1px solid #C9C5BD;background:none;font:500 12px/1 'JetBrains Mono',monospace;color:#1B1A18;cursor:pointer">reset prototype</button>
+      <div style="font:400 12px/1.55 'Public Sans',sans-serif;color:#6E695F;margin-top:12px;text-wrap:pretty">Tapping the code field enters the fixture code one digit at a time — it stands in for the system keyboard. Pair computer then verifies and succeeds; the error states are entered from here.</div>
+    </div>
+  </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:390,&quot;height&quot;:844},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;connect&quot;,&quot;options&quot;:[&quot;connect&quot;,&quot;pair&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;platform&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;macOS&quot;,&quot;options&quot;:[&quot;macOS&quot;,&quot;Windows&quot;,&quot;Linux&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;compact&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;idle&quot;,&quot;options&quot;:[&quot;idle&quot;,&quot;verifying&quot;,&quot;expired&quot;,&quot;network&quot;,&quot;badlink&quot;,&quot;success&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Pairing&quot;},&quot;controls&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Host&quot;}}">
+class Component extends DCLogic {
+  CMDS = {
+    'macOS': 'brew install cc-pocket/tap/cc-pocket',
+    'Windows': 'winget install ccpocket.daemon',
+    'Linux': 'curl -fsSL https://cc-pocket.dev/install.sh | sh'
+  };
+  FIXTURE = '482170';
+  PAIRED = 'panda.local';
+
+  constructor(props) {
+    super(props);
+    const st = props.state || 'idle';
+    this.state = {
+      screen: props.screen || 'connect',
+      platform: props.platform || 'macOS',
+      compact: !!props.compact,
+      pairState: st,
+      code: st === 'idle' ? '' : this.FIXTURE,
+      copied: null, stub: null, log: []
+    };
+  }
+  componentWillUnmount() { clearTimeout(this.t); }
+  after(ms, fn) { clearTimeout(this.t); this.t = setTimeout(fn, ms); }
+  note(text) { this.setState(s => ({ log: [text].concat(s.log).slice(0, 5) })); }
+  stub(title, body) { this.setState(s => ({ screen: 'stub', stub: [title, body], stubFrom: s.screen })); this.note('open → ' + title); }
+  flash(what) { this.setState({ copied: what }); this.after(1400, () => this.setState({ copied: null })); }
+
+  renderVals() {
+    const s = this.state;
+    const cmd = this.CMDS[s.platform];
+    const st = s.pairState;
+    const locked = st === 'verifying' || st === 'success';
+    const jump = (label, screen) => ({
+      label: label, bg: s.screen === screen ? '#1B1A18' : 'transparent',
+      ink: s.screen === screen ? '#FCFBFA' : '#54504A',
+      go: () => { clearTimeout(this.t); this.setState({ screen: screen, stub: null }); }
+    });
+    const pill = (label, on, fn) => ({
+      label: label, bg: on ? '#1B1A18' : 'transparent', ink: on ? '#FCFBFA' : '#54504A', set: fn
+    });
+
+    return {
+      showControls: !!this.props.controls,
+      isConnect: s.screen === 'connect', isPair: s.screen === 'pair', isStub: s.screen === 'stub',
+
+      compact: s.compact, full: !s.compact,
+      stepGap: s.compact ? '18px' : '30px',
+      platforms: ['macOS', 'Windows', 'Linux'].map(p => ({
+        label: p, selected: p === s.platform, unselected: p !== s.platform,
+        pick: () => { this.setState({ platform: p }); this.note('platform → ' + p); }
+      })),
+      command: cmd,
+      quietPrereq: s.platform !== 'Windows', loudPrereq: s.platform === 'Windows',
+      copiedInstall: s.copied === 'install', copiedPair: s.copied === 'pair',
+      copyCommand: () => { this.flash('install'); this.note('copied install command'); },
+      copyPairCmd: () => { this.flash('pair'); this.note('copied cc-pocket-daemon pair'); },
+      openCliInfo: () => this.stub('Claude Code CLI', 'The prerequisite explainer. It already exists in the docs surface and is not redesigned here.'),
+      openGuide: () => this.stub('Full setup guide', 'The long-form guide. Reachable from the first screen before anything is paired.'),
+      openHelp: () => this.stub('Help & support', 'Support chat, no sign-in. New in this flow: it is reachable before pairing has ever succeeded.'),
+      openDemo: () => this.stub('Demo', 'The demo runs with no computer attached. Existing surface.'),
+      openScan: () => this.stub('Scan QR code', 'The existing camera route, unchanged by this work.'),
+      openPasteLink: () => this.stub('Paste pairing link', 'The existing paste route, unchanged by this work.'),
+      openLan: () => this.stub('Direct LAN address', 'The existing direct-address route, unchanged by this work.'),
+      goPair: () => { this.setState({ screen: 'pair', pairState: 'idle', code: '' }); this.note('→ pair · nothing entered'); },
+      goConnect: () => { this.setState({ screen: 'connect' }); this.note('→ install step'); },
+
+      codeBoxes: [0, 1, 2, 3, 4, 5].map(i => ({
+        d: s.code[i] || '', filled: !!s.code[i],
+        caret: !s.code[i] && i === s.code.length, empty: !s.code[i] && i !== s.code.length
+      })),
+      boxesLive: !locked, boxesLocked: locked,
+      lockedInk: st === 'success' ? '#8C8D95' : '#B4B5BC',
+      ctaReady: !locked && s.code.length === 6,
+      ctaInert: !locked ? s.code.length < 6 : st === 'verifying',
+      statusIdle: st === 'idle', statusVerifying: st === 'verifying',
+      errExpired: st === 'expired', errNetwork: st === 'network', errLink: st === 'badlink',
+      ok: st === 'success',
+      showRoutes: st !== 'success',
+      idleHint: s.code.length === 6
+        ? 'The code stays valid only while the computer is still showing it.'
+        : 'Tap the field to enter the code the computer is showing.',
+      pairedName: this.PAIRED,
+      tapCode: () => this.setState(x => ({ code: this.FIXTURE.slice(0, Math.min(6, x.code.length + 1)) })),
+      pairNow: () => {
+        this.setState({ pairState: 'verifying' });
+        this.note('verifying ' + s.code);
+        this.after(1500, () => {
+          this.setState({ pairState: 'success' });
+          this.note('paired · ' + this.PAIRED);
+          this.after(1900, () => this.stub('Projects', 'Pairing succeeded and the flow hands over. Projects is an existing surface.'));
+        });
+      },
+      tryAgain: () => { this.setState({ pairState: 'idle', code: '' }); this.note('try again · field refocused, cleared'); },
+      retryNetwork: () => {
+        this.setState({ pairState: 'verifying' });
+        this.note('retry after network failure');
+        this.after(1500, () => { this.setState({ pairState: 'success' }); this.note('paired · ' + this.PAIRED); });
+      },
+
+      stubTitle: s.stub ? s.stub[0] : '', stubBody: s.stub ? s.stub[1] : '',
+      stubBack: () => this.setState({ screen: s.stubFrom || 'connect', stub: null }),
+
+      jumps: [jump('connect', 'connect'), jump('pair', 'pair')],
+      stateBtns: ['idle', 'verifying', 'expired', 'network', 'badlink', 'success'].map(x => pill(x, st === x, () => {
+        clearTimeout(this.t);
+        this.setState({ screen: 'pair', pairState: x, code: x === 'idle' ? '' : this.FIXTURE, stub: null });
+      })),
+      platformBtns: ['macOS', 'Windows', 'Linux'].map(p => pill(p, s.platform === p, () => this.setState({ screen: 'connect', platform: p, stub: null }))),
+      compactBg: s.compact ? '#1B1A18' : 'transparent', compactInk: s.compact ? '#FCFBFA' : '#54504A',
+      toggleCompact: () => this.setState({ screen: 'connect', compact: !s.compact, stub: null }),
+      logLines: s.log.map(t => ({ text: '· ' + t })),
+      reset: () => { clearTimeout(this.t); this.setState({ screen: 'connect', platform: 'macOS', compact: false, pairState: 'idle', code: '', copied: null, stub: null, log: [] }); }
+    };
+  }
+}
+
+</script>
+</body>
+</html>

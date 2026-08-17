@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+  a { color: #B4522F; text-decoration: none; }
+  a:hover { color: #8E3F23; }
+</style>
+</helmet>
+
+<div style="position:fixed;inset:0;z-index:-1;background:{{ boardBg }}"></div>
+
+<div style="width:1920px;margin:0 auto;padding:64px 72px 96px;font-family:'Public Sans',system-ui,sans-serif;color:#1B1A18">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:900px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · mobile ui 2.0 · zero-state first run · v1</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">Connect your computer · Pairing 2.0</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Activation needs three things to line up: the daemon installed on a computer, <span style="font:400 14px/1 'JetBrains Mono',monospace">cc-pocket-daemon pair</span> run there, and the code it prints entered here. Today only the third step has a screen. This adds the install guide in front of it and rebuilds every pairing failure as a card that says what to do next. Both frames are the same live component at 390 × 844.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div>
+        <div style="color:#1B1A18">live prototype</div>
+        <div>390 × 844 · 1:1</div>
+      </div>
+      <div>
+        <div style="color:#1B1A18">one compose layout</div>
+        <div>ios + android</div>
+      </div>
+      <div>
+        <div style="color:#1B1A18">no new tokens</div>
+        <div>targets ≥ 44 pt</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ A · WALK THE FLOW ═══════════ -->
+  <div style="padding-top:46px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">A</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Walk the flow</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Starts on the install guide, as a brand-new user does. The rail is host chrome for review — not product UI.</span>
+    </div>
+
+    <div style="display:flex;gap:52px;align-items:flex-start">
+      <dc-import name="FirstRunDevice" controls="{{ true }}" hint-size="662px,844px"></dc-import>
+
+      <div style="flex:1;min-width:0;display:grid;grid-template-columns:repeat(2,1fr);gap:0 40px">
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">What changed</div>
+          <div style="border-top:1px solid #C9C5BD">
+            <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+              <div style="font:600 13px/1.4 'Public Sans',sans-serif">The computer requirement is the first screen, not a footnote</div>
+              <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">A new user meets a two-step journey — install, then pair — before any input. The six-digit field is one tap away and still labelled for people who already installed, so returning users are not routed through a tutorial.</p>
+            </div>
+            <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+              <div style="font:600 13px/1.4 'Public Sans',sans-serif">Failures became cards with an action</div>
+              <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Each error names the cause, carries the fix — a fresh code, a network check, the right link — and ends in a control. Danger is a tinted border and a square mark, never a filled red panel.</p>
+            </div>
+            <div style="padding:12px 0;border-bottom:1px solid #C9C5BD">
+              <div style="font:600 13px/1.4 'Public Sans',sans-serif">Help exists before success</div>
+              <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Both screens carry Help &amp; support in the bottom caption, and the network card repeats it. Nothing about it requires a paired computer or a sign-in.</p>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Acceptance paths, wired</div>
+          <div style="border-top:1px solid #C9C5BD;font:400 13px/1.55 'Public Sans',sans-serif;color:#3A3730">
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">01</span><span style="text-wrap:pretty">Switch platform: the command changes and the Windows note takes over from the quiet prerequisite line.</span></div>
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">02</span><span style="text-wrap:pretty">Copy either command — install or <span style="font:400 12px/1 'JetBrains Mono',monospace">cc-pocket-daemon pair</span> — and the row confirms in place.</span></div>
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">03</span><span style="text-wrap:pretty">Tap the code field six times, then <b style="font-weight:600">Pair computer</b> → verifying → paired → hand-off. The camera is never touched.</span></div>
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">04</span><span style="text-wrap:pretty">Enter the expired card, tap <b style="font-weight:600">Try again</b>: the field clears and returns to idle with the same routes underneath.</span></div>
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">05</span><span style="text-wrap:pretty">From pairing, <b style="font-weight:600">Install it first</b> returns to step 1 — the loop between the two screens closes in both directions.</span></div>
+          </div>
+          <div style="margin-top:18px;background:#E4E1DA;border-radius:11px;padding:14px 16px">
+            <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Prototype boundaries</div>
+            <p style="margin:9px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Scan, paste, LAN, demo, guide, help and Projects open a stub that names the surface and stops — all seven already exist. Copy reports success without touching the clipboard. Install commands are placeholders for the real distribution channels.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ B · SCREEN 1 ═══════════ -->
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">B</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Screen 1 · Connect your computer</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">The landing for anyone with zero paired computers.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">01 · default · macOS</div>
+        <dc-import name="FirstRunDevice" hint-size="390px,844px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}"><div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Wordmark, display title, one-line model. Then two numbered steps, one filled CTA, and three quiet routes in falling weight: enter code, demo, then the caption pair. Nothing is illustrated.</div></sc-if>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">02 · Windows tab</div>
+        <dc-import name="FirstRunDevice" platform="Windows" hint-size="390px,844px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}"><div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The prerequisite stops being a quiet line and becomes an attention-marked note, because on Windows the CLI is the step people miss. Attention, not danger — nothing has failed yet.</div></sc-if>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">03 · scrolled · compact</div>
+        <dc-import name="FirstRunDevice" compact="{{ true }}" hint-size="390px,844px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}"><div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The display title collapses into a hairline bar that keeps the wordmark and the screen name, and the CTA docks above the home indicator so the primary action never scrolls out of reach.</div></sc-if>
+      </div>
+
+      <div style="width:334px;flex:none;padding-top:34px">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Structure</div>
+        <div style="border-top:1px solid #C9C5BD">
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans',sans-serif">Two steps, numbered once</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Accent-subtle circles, 24 pt, mono numerals. The journey is short enough to read as a whole screen, which is the point: the user learns a computer is involved before they look for a code.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans',sans-serif">Segment control, not a dropdown</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Three platforms are visible at once, 44 pt each inside a 50 pt track. Selection is a raised fill plus a border — it survives a monochrome screenshot.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans',sans-serif">Commands stay copyable and breakable</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Mono, 13 pt, <span style="font:400 12px/1 'JetBrains Mono',monospace">word-break: break-all</span>, with the copy affordance in a 44 pt box that hangs into the padding so the glyph stays optically on the line.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #C9C5BD">
+            <div style="font:600 13px/1.4 'Public Sans',sans-serif">Strings are short and structural</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">No row has a fixed height and every label wraps, so zh strings and 200% type grow the row rather than clipping. Step labels, CTA and captions are single clauses.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ C · SCREEN 2 ═══════════ -->
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">C</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Screen 2 · Pairing 2.0 · six states</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Code-first and camera-free stays. The status region under the CTA is the redesign.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">04 · idle</div>
+        <dc-import name="FirstRunDevice" screen="pair" state="idle" hint-size="390px,844px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}"><div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Pair stays inert until six digits exist. Below the hairline: the three alternate routes as peers, the daemon command as help, and the new line back to installing.</div></sc-if>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">05 · verifying</div>
+        <dc-import name="FirstRunDevice" screen="pair" state="verifying" hint-size="390px,844px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}"><div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Boxes lock and lose the caret, the CTA goes inert, and a 2 pt indeterminate bar sits above the words. The reason for the lock is written, not implied.</div></sc-if>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">06 · expired or invalid code</div>
+        <dc-import name="FirstRunDevice" screen="pair" state="expired" hint-size="390px,844px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}"><div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The most common failure, so the fix is embedded: the command to run again, copyable in place, then Try again — which clears the field and refocuses it rather than leaving a stale code behind.</div></sc-if>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">07 · network unreachable</div>
+        <dc-import name="FirstRunDevice" screen="pair" state="network" hint-size="390px,844px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}"><div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Names the phone's own network as the suspect, including VPN and proxy, and blames neither the code nor the computer. Retry is canonical; Help sits under it as the second exit.</div></sc-if>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">08 · invalid link or QR</div>
+        <dc-import name="FirstRunDevice" screen="pair" state="badlink" hint-size="390px,844px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}"><div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Arrives from the scan and paste routes, so both are offered back as equals. The body names what a real pairing link looks like instead of calling the input wrong.</div></sc-if>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">09 · success</div>
+        <dc-import name="FirstRunDevice" screen="pair" state="success" hint-size="390px,844px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}"><div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">A moment, not a screen: accent check, the computer's own name in mono, and the hand-off said out loud. The routes and the install help disappear — there is nothing left to choose.</div></sc-if>
+      </div>
+
+      <div style="width:334px;flex:none;padding-top:34px">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Card rules</div>
+        <div style="border-top:1px solid #C9C5BD">
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans',sans-serif">One shape, three failures</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Surface fill, a danger-tinted hairline, a 9 pt square mark, a titled sentence, then controls. Same geometry every time, so the difference a user reads is the words.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans',sans-serif">Never colour alone</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Square for danger, rotated square for attention, ring for in-flight, circle-check for success — each beside a written state. The cards also carry <span style="font:400 12px/1 'JetBrains Mono',monospace">role="alert"</span>; verifying and success are polite live regions.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #C9C5BD">
+            <div style="font:600 13px/1.4 'Public Sans',sans-serif">Every card ends in a control</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Try again, Retry, Scan QR, Paste link — 48 pt outlined, full-width or paired. No card leaves the user to work out the next move, and none of them is a dead gray caption.</p>
+          </div>
+        </div>
+        <div style="margin-top:18px;background:#E4E1DA;border-radius:11px;padding:14px 16px">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Owned by code</div>
+          <div style="font:400 12.5px/1.85 'JetBrains Mono',monospace;color:#54504A;margin-top:9px">install channel per platform<br />code lifetime before expiry<br />hostname shown on success<br />en / zh strings from resources</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ D · LIGHT PROOFS ═══════════ -->
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">D</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Light palette proofs</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">One frame per screen. Same geometry, same marks, light tokens.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start;flex-wrap:wrap">
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">10 · connect · light</div>
+        <div style="width:390px;height:844px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;background:#FCFBFA;color:#17161A;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.28)">
+          <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none"><span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span><span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #17161A;border-radius:2px;opacity:.6"></span><span style="width:22px;height:10px;border:1.3px solid #17161A;border-radius:3px;opacity:.6"></span></span></div>
+          <div style="flex:1;min-height:0;overflow:hidden;padding:6px 20px 0">
+            <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:#6B6970;padding-top:6px">cc-pocket</div>
+            <h1 style="margin:26px 0 0;font:600 33px/1.06 system-ui,sans-serif;letter-spacing:-.028em;text-wrap:pretty">Connect your computer</h1>
+            <p style="margin:14px 0 0;font:400 15.5px/1.5 system-ui,sans-serif;color:#4B4A50;text-wrap:pretty">Your phone drives the AI coding agent that runs on your computer.</p>
+
+            <div style="margin-top:30px">
+              <div style="display:flex;align-items:center;gap:11px">
+                <span style="width:24px;height:24px;border-radius:50%;background:rgba(169,72,42,.10);border:1px solid rgba(169,72,42,.55);display:flex;align-items:center;justify-content:center;font:600 12px/1 'JetBrains Mono',monospace;color:#A9482A;flex:none">1</span>
+                <span style="flex:1;min-width:0;font:600 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em;text-wrap:pretty">Install cc-pocket on the computer</span>
+              </div>
+              <div style="display:flex;gap:4px;margin-top:14px;padding:3px;border-radius:12px;background:#F4F2EF;border:1px solid rgba(20,18,16,.16)">
+                <span style="flex:1;min-height:44px;border-radius:9px;background:#FFFFFF;border:1px solid rgba(20,18,16,.20);display:flex;align-items:center;justify-content:center;font:600 14px/1.2 system-ui,sans-serif;color:#17161A">macOS</span>
+                <span style="flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;font:500 14px/1.2 system-ui,sans-serif;color:#4B4A50">Windows</span>
+                <span style="flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;font:500 14px/1.2 system-ui,sans-serif;color:#4B4A50">Linux</span>
+              </div>
+              <div style="margin-top:12px;background:#F4F2EF;border:1px solid rgba(20,18,16,.16);border-radius:11px;padding:10px 8px 10px 14px;display:flex;align-items:center;gap:8px">
+                <span style="flex:1;min-width:0;font:400 13px/1.5 'JetBrains Mono',monospace;color:#17161A;letter-spacing:-.01em;word-break:break-all">brew install cc-pocket/tap/cc-pocket</span>
+                <span style="width:44px;height:44px;margin:-6px 0;display:flex;align-items:center;justify-content:center;flex:none"><span style="width:28px;height:28px;border:1px solid rgba(20,18,16,.24);border-radius:8px;display:flex;align-items:center;justify-content:center"><span style="width:10px;height:12px;border:1.2px solid #4B4A50;border-radius:2px;margin:-3px 0 0 -3px"></span></span></span>
+              </div>
+              <div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;margin-top:9px">
+                <span style="font:400 12.5px/1.5 system-ui,sans-serif;color:#6B6970;text-wrap:pretty">Needs the Claude Code CLI on that computer</span>
+                <span style="font:500 12.5px/1.5 system-ui,sans-serif;color:#A9482A">What's that?</span>
+              </div>
+            </div>
+
+            <div style="margin-top:26px">
+              <div style="display:flex;align-items:center;gap:11px">
+                <span style="width:24px;height:24px;border-radius:50%;background:rgba(169,72,42,.10);border:1px solid rgba(169,72,42,.55);display:flex;align-items:center;justify-content:center;font:600 12px/1 'JetBrains Mono',monospace;color:#A9482A;flex:none">2</span>
+                <span style="flex:1;min-width:0;font:600 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em">Pair</span>
+              </div>
+              <p style="margin:12px 0 0;font:400 14.5px/1.55 system-ui,sans-serif;color:#4B4A50;text-wrap:pretty">Run <span style="font:400 13px/1.4 'JetBrains Mono',monospace;color:#17161A;letter-spacing:-.01em">cc-pocket-daemon pair</span> on the computer — it shows a six-digit code and a QR.</p>
+            </div>
+
+            <div style="min-height:52px;margin-top:26px;border-radius:13px;background:#A9482A;display:flex;align-items:center;justify-content:center;font:600 17px/1.2 system-ui,sans-serif;letter-spacing:-.01em;color:#FFF4EF">I'm ready — pair now</div>
+
+            <div style="margin-top:20px;border-top:1px solid rgba(20,18,16,.16)">
+              <div style="border-bottom:1px solid rgba(20,18,16,.16);min-height:56px;display:flex;align-items:center;gap:12px;padding:8px 0">
+                <span style="flex:1;min-width:0;font:500 15.5px/1.35 system-ui,sans-serif;color:#17161A;text-wrap:pretty">Already installed? Enter code directly</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#8E8C92;flex:none">›</span>
+              </div>
+              <div style="border-bottom:1px solid rgba(20,18,16,.16);min-height:56px;display:flex;align-items:center;gap:12px;padding:8px 0">
+                <span style="flex:1;min-width:0">
+                  <span style="display:block;font:500 15.5px/1.35 system-ui,sans-serif;color:#4B4A50">Explore the demo instead</span>
+                  <span style="display:block;font:400 12px/1.4 system-ui,sans-serif;color:#6B6970;margin-top:3px">No computer needed</span>
+                </span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#8E8C92;flex:none">›</span>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:8px;min-height:44px">
+              <span style="font:400 12.5px/1.4 system-ui,sans-serif;color:#6B6970">Full setup guide</span>
+              <span style="font:400 12.5px/1 system-ui,sans-serif;color:#B3AFA8">·</span>
+              <span style="font:400 12.5px/1.4 system-ui,sans-serif;color:#6B6970">Help &amp; support</span>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none"><span style="width:132px;height:5px;border-radius:3px;background:#17161A;opacity:.22"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}"><div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The step circles keep their accent-subtle fill against a warmer paper, and the segment control's selection becomes white-on-surface instead of a raised tint. Nothing else is re-specified.</div></sc-if>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">11 · pair · expired code · light</div>
+        <div style="width:390px;height:844px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;background:#FCFBFA;color:#17161A;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.28)">
+          <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none"><span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span><span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #17161A;border-radius:2px;opacity:.6"></span><span style="width:22px;height:10px;border:1.3px solid #17161A;border-radius:3px;opacity:.6"></span></span></div>
+          <div style="flex:1;min-height:0;overflow:hidden;padding:0 20px">
+            <div style="display:flex;align-items:center;margin:0 -12px 2px"><span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;flex:none;font:300 26px/1 system-ui,sans-serif;color:#A9482A">‹</span></div>
+            <h1 style="margin:0;font:600 31px/1.1 system-ui,sans-serif;letter-spacing:-.026em;text-wrap:pretty">Pair a computer</h1>
+            <p style="margin:12px 0 0;font:400 15.5px/1.5 system-ui,sans-serif;color:#4B4A50;text-wrap:pretty">Enter the six-digit code shown on your computer.</p>
+
+            <div style="display:flex;gap:8px;margin-top:24px">
+              <span style="flex:1;height:58px;border-radius:11px;border:1px solid rgba(20,18,16,.24);background:#F4F2EF;display:flex;align-items:center;justify-content:center;font:500 25px/1 'JetBrains Mono',monospace">4</span>
+              <span style="flex:1;height:58px;border-radius:11px;border:1px solid rgba(20,18,16,.24);background:#F4F2EF;display:flex;align-items:center;justify-content:center;font:500 25px/1 'JetBrains Mono',monospace">8</span>
+              <span style="flex:1;height:58px;border-radius:11px;border:1px solid rgba(20,18,16,.24);background:#F4F2EF;display:flex;align-items:center;justify-content:center;font:500 25px/1 'JetBrains Mono',monospace">2</span>
+              <span style="flex:1;height:58px;border-radius:11px;border:1px solid rgba(20,18,16,.24);background:#F4F2EF;display:flex;align-items:center;justify-content:center;font:500 25px/1 'JetBrains Mono',monospace">1</span>
+              <span style="flex:1;height:58px;border-radius:11px;border:1px solid rgba(20,18,16,.24);background:#F4F2EF;display:flex;align-items:center;justify-content:center;font:500 25px/1 'JetBrains Mono',monospace">7</span>
+              <span style="flex:1;height:58px;border-radius:11px;border:1px solid rgba(20,18,16,.24);background:#F4F2EF;display:flex;align-items:center;justify-content:center;font:500 25px/1 'JetBrains Mono',monospace">0</span>
+            </div>
+
+            <div style="min-height:52px;margin-top:16px;border-radius:13px;background:#A9482A;display:flex;align-items:center;justify-content:center;font:600 17px/1.2 system-ui,sans-serif;letter-spacing:-.01em;color:#FFF4EF">Pair computer</div>
+
+            <div style="margin-top:16px;background:#F4F2EF;border:1px solid rgba(168,58,38,.38);border-radius:12px;padding:15px">
+              <div style="display:flex;align-items:center;gap:9px">
+                <span style="width:9px;height:9px;background:#A83A26;flex:none"></span>
+                <span style="flex:1;min-width:0;font:600 16px/1.25 system-ui,sans-serif;color:#A83A26;text-wrap:pretty">That code didn't work</span>
+              </div>
+              <p style="margin:11px 0 0;font:400 14.5px/1.5 system-ui,sans-serif;color:#4B4A50;text-wrap:pretty">Codes expire after a short while. On the computer, run the command again to get a fresh one:</p>
+              <div style="margin-top:12px;background:#FFFFFF;border:1px solid rgba(20,18,16,.12);border-radius:9px;padding:8px 6px 8px 12px;display:flex;align-items:center;gap:8px">
+                <span style="flex:1;min-width:0;font:400 13px/1.45 'JetBrains Mono',monospace;color:#17161A;letter-spacing:-.01em;word-break:break-all">cc-pocket-daemon pair</span>
+                <span style="width:44px;height:44px;margin:-8px 0;display:flex;align-items:center;justify-content:center;flex:none"><span style="width:26px;height:26px;border:1px solid rgba(20,18,16,.24);border-radius:7px;display:flex;align-items:center;justify-content:center"><span style="width:9px;height:11px;border:1.2px solid #4B4A50;border-radius:2px;margin:-3px 0 0 -3px"></span></span></span>
+              </div>
+              <div style="min-height:48px;margin-top:13px;border-radius:11px;border:1px solid rgba(20,18,16,.28);display:flex;align-items:center;justify-content:center;font:600 15px/1.2 system-ui,sans-serif;color:#17161A">Try again</div>
+            </div>
+
+            <div style="margin-top:22px;border-top:1px solid rgba(20,18,16,.16)">
+              <div style="border-bottom:1px solid rgba(20,18,16,.16);min-height:56px;display:flex;align-items:center;gap:12px">
+                <span style="width:26px;height:26px;border:1px solid rgba(20,18,16,.28);border-radius:6px;flex:none;display:flex;align-items:center;justify-content:center"><span style="width:10px;height:10px;border:1.2px solid #4B4A50"></span></span>
+                <span style="flex:1;min-width:0;font:500 15.5px/1.35 system-ui,sans-serif;color:#17161A">Scan QR code</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#8E8C92;flex:none">›</span>
+              </div>
+              <div style="border-bottom:1px solid rgba(20,18,16,.16);min-height:56px;display:flex;align-items:center;gap:12px">
+                <span style="width:26px;height:26px;flex:none"></span>
+                <span style="flex:1;min-width:0;font:500 15.5px/1.35 system-ui,sans-serif;color:#17161A">Paste pairing link</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#8E8C92;flex:none">›</span>
+              </div>
+              <div style="border-bottom:1px solid rgba(20,18,16,.16);min-height:56px;display:flex;align-items:center;gap:12px">
+                <span style="width:26px;height:26px;flex:none"></span>
+                <span style="flex:1;min-width:0;font:500 15.5px/1.35 system-ui,sans-serif;color:#17161A">Direct LAN address</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#8E8C92;flex:none">›</span>
+              </div>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none"><span style="width:132px;height:5px;border-radius:3px;background:#17161A;opacity:.22"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}"><div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The danger hairline and mark darken to hold contrast on paper; the embedded command inverts to white so it still reads as a lower layer inside the card. The routes and the daemon block continue below the fold.</div></sc-if>
+      </div>
+
+      <div style="width:334px;flex:none;padding-top:34px">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Platform and localisation</div>
+        <div style="border-top:1px solid #C9C5BD">
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans',sans-serif">One Compose layout, no platform chrome</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">No back bars, no action sheets, no platform-specific dialogs. The only back affordance is the leading chevron on screen 2, which both systems read the same way.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans',sans-serif">Targets</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Rows 56, buttons 48–52, copy and inline links 44, segments 44. Inline links use vertical padding with negative margins so the hit box reaches 44 without opening the line.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #C9C5BD">
+            <div style="font:600 13px/1.4 'Public Sans',sans-serif">en / zh</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Every string here is a single clause with no embedded layout. Commands and hostnames stay untranslated mono; the two long-form sentences are the card bodies, which wrap freely.</p>
+          </div>
+        </div>
+        <div style="margin-top:18px;background:#E4E1DA;border-radius:11px;padding:14px 16px">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Open for review</div>
+          <p style="margin:9px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">The three install commands and the Windows CLI sentence are placeholders standing in for whatever the release actually ships. Everything else is existing product truth.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;boardBg&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#EDEBE6&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#EDEBE6&quot;,&quot;#E4E1DA&quot;,&quot;#F4F2EF&quot;,&quot;#D9D5CC&quot;]},&quot;showNotes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      boardBg: this.props.boardBg ?? '#EDEBE6',
+      showNotes: this.props.showNotes ?? true
+    };
+  }
+}
+
+</script>
+</body>
+</html>
