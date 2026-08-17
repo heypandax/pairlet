@@ -368,8 +368,19 @@ fun App(scope: CoroutineScope) {
                 Box(Modifier.weight(1f)) {
                     when {
                         // a dead transport does NOT leave the content screens — ConnectionGate + auto-retry handle it
-                        !repo.sessionActive.value ->
-                            if (repo.addingDevice.value || repo.pairedList.isEmpty()) PairingScreen(repo) else ConnectScreen(repo)
+                        // issue #278 batch 2: a first run lands on the install guide, not on a code field for
+                        // a code nothing is printing yet. entryLanding() holds that decision as a pure rule.
+                        !repo.sessionActive.value -> when (
+                            dev.ccpocket.app.ui.entry.entryLanding(
+                                hasBindings = repo.pairedList.isNotEmpty(),
+                                addingDevice = repo.addingDevice.value,
+                                hasCollaboratorLinks = repo.collaboratorLinks.isNotEmpty(),
+                            )
+                        ) {
+                            dev.ccpocket.app.ui.entry.EntryLanding.FIRST_RUN_CONNECT -> PairingScreen(repo, firstRun = true)
+                            dev.ccpocket.app.ui.entry.EntryLanding.PAIR -> PairingScreen(repo)
+                            dev.ccpocket.app.ui.entry.EntryLanding.COMPUTERS -> ConnectScreen(repo)
+                        }
                         repo.demoConnecting.value -> DemoConnectScreen { repo.finishDemoConnect() } // PREVIEW opener
                         else -> Box(Modifier.fillMaxSize()) {
                             ConnectionGate(

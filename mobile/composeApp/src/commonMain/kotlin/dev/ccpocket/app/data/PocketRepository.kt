@@ -20,9 +20,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.merge
 import dev.ccpocket.app.pairing.BindingRole
 import dev.ccpocket.app.pairing.IncomingLink
+import dev.ccpocket.app.pairing.PairFailure
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.Pairing
+import dev.ccpocket.app.pairing.classifyPairFailure
 import dev.ccpocket.app.pairing.parseIncomingLink
+import dev.ccpocket.app.pairing.wireReason
 import dev.ccpocket.app.push.PushTokens
 import dev.ccpocket.app.lock.AppLockController
 import dev.ccpocket.app.lock.createBiometrics
@@ -1497,9 +1500,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (info == null) {
             status.value = StatusMsg(Res.string.status_invalid_link)
             // a reject BEFORE any network is still a pairing failure — untracked, it looked like "never tried"
-            Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to "parse"))
+            setPairFailure(PairFailure.PARSE)
+            Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to PairFailure.PARSE.wireReason(null)))
             return
         }
+        setPairFailure(null)
+        pairVerifying.value = true
         status.value = StatusMsg(Res.string.status_pairing)
         scope.launch { doPair(if (fromScan) "qr-link" else "link") { info } }
     }
@@ -1514,31 +1520,73 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  camera pairing reported source=code and the scanner's share of activations was invisible. */
     fun pairWithCode(code: String, fromScan: Boolean = false) {
         status.value = StatusMsg(Res.string.status_pairing)
+        // cleared HERE as well as in doPair: the launch is one dispatch away, and a card from the previous
+        // attempt surviving into the new one's first frames reads as "that failed again, instantly"
+        setPairFailure(null)
+        pairVerifying.value = true
         scope.launch { doPair(if (fromScan) "qr" else "code") { Pairing.resolveCode(code.trim(), it) } }
     }
 
     /**
      * pair_failed cause as a CLASS, never the exception text: a redeem failure's message carries the relay's
      * raw response body, which has no business leaving the device. Same shape as onTransportDown's conn_failed.
+     *
+     * Both halves now come from ONE place — [classifyPairFailure] decides the class, [wireReason] names it —
+     * so the screen's actionable card and the funnel's category can never describe the same failure
+     * differently. The strings are unchanged by construction; `PairFailureTest` pins that.
      */
-    private fun pairFailReason(t: Throwable): String {
-        val fallback = t::class.simpleName ?: "error"
-        val m = t.message ?: return fallback
-        return when {
-            m.contains("invalid or expired code") -> "code"   // relay refused the 6 digits (typo/expired)
-            m.contains("pairing failed") -> "redeem"          // the redeem itself was rejected
-            else -> fallback
-        }
+    private fun pairFailReason(t: Throwable): String = classifyPairFailure(t).wireReason(t)
+
+    /**
+     * Why the last pairing attempt failed, as the class the SCREEN can act on (issue #278 batch 2).
+     *
+     * [status] alone could not carry this: one sentence cannot both name a stale code and offer the command
+     * that mints a new one. Written at every point that reports `pair_failed` from THIS screen's routes, and
+     * cleared the moment a new attempt starts — a card that outlives its attempt is a lie about the present.
+     */
+    val pairFailure = mutableStateOf<PairFailure?>(null)
+
+    /**
+     * Bumped on every write to [pairFailure], so a pairing surface can tell news from history.
+     *
+     * The state is repository-scoped but the card is screen-scoped: an unroutable `ccpocket://` link tapped
+     * while the user was happily connected sets PARSE from the ROOT deep-link handler, and without this a
+     * pairing screen opened days later would greet them with it. A surface records the value it entered on
+     * and shows only failures recorded after that.
+     */
+    val pairFailureSeq = mutableStateOf(0)
+
+    /** True while a pairing attempt is in flight, so the code field can lock and say why it is locked.
+     *  Distinct from [status], which is a sentence and cannot gate an input. */
+    val pairVerifying = mutableStateOf(false)
+
+    /** Drop the failure card — the user is starting over (the "Try again" / "Retry" actions). */
+    fun clearPairFailure() { setPairFailure(null) }
+
+    /** Which attempt currently OWNS the screen state. The alternate routes (scan, paste, LAN) stay live
+     *  while an attempt is in flight, so a slow attempt can still be running when a later one succeeds —
+     *  and a loser that reports its timeout afterwards would arm a failure card over a completed pairing. */
+    private var pairAttempt = 0
+
+    private fun setPairFailure(kind: PairFailure?) {
+        pairFailure.value = kind
+        pairFailureSeq.value++
     }
 
     private suspend fun doPair(source: String, getInfo: suspend (HttpClient) -> dev.ccpocket.app.pairing.PairingInfo) {
         // before any network: this is the "the user actually tried" mark the funnel was missing (issue #278)
         Telemetry.track(TelEvent.PairStarted, mapOf(TelKey.Source to source))
-        val client = HttpClient()
+        val attempt = ++pairAttempt
+        setPairFailure(null)          // this attempt's outcome is not known yet; the last one's card must go
+        pairVerifying.value = true
+        // constructed INSIDE the try: an engine that fails to initialise would otherwise skip the finally
+        // and strand the screen on a locked field with a spinner and no recovery
+        var client: HttpClient? = null
         try {
+            client = HttpClient()
             val info = getInfo(client)
             val keys = Pairing.deviceKeys()
-            paired.value = Pairing.redeem(info, keys, client) // upserts the list + pins this as the active account
+            paired.value = Pairing.redeem(info, keys, client!!) // upserts the list + pins this as the active account
             // a FRESH pairing (e.g. a guest redeeming a new invite for the same daemon/accountId) supersedes
             // any recorded "share ended" terminal state — else the new binding would open on the dead card
             paired.value?.let { SecureStore.remove(K_SHARE_ENDED_PREFIX + it.accountId) }
@@ -1550,10 +1598,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             startRelay()
         } catch (t: Throwable) {
             status.value = StatusMsg(Res.string.status_pair_failed, t.message ?: t::class.simpleName ?: "error")
+            // …but only the NEWEST attempt owns the SCREEN state. Telemetry below is deliberately left
+            // unconditional: a superseded attempt really did fail, and suppressing it here would change what
+            // the funnel counts (a pre-existing race, out of this change's scope).
+            if (attempt == pairAttempt) setPairFailure(classifyPairFailure(t))
             Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t)))
             Telemetry.recordError(t.message ?: "pair failed", "pairing")
         } finally {
-            client.close()
+            if (attempt == pairAttempt) pairVerifying.value = false
+            client?.close()
         }
     }
 
@@ -2278,10 +2331,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // ── multi-device: bind several computers, talk to one at a time ─────────────────────────────────
 
     /** Pair another computer without dropping the existing ones: tear down the live link, show PairingScreen. */
-    fun beginAddDevice() { disconnect(); addingDevice.value = true }
+    fun beginAddDevice() { disconnect(); clearPairFailure(); addingDevice.value = true }
 
     /** Back out of "add a computer" — returns to the device picker (bindings are untouched). */
-    fun cancelAddDevice() { addingDevice.value = false }
+    fun cancelAddDevice() { clearPairFailure(); addingDevice.value = false }
 
     /**
      * Desktop "add a computer" while a session is live: pair the new binding and add it to the list, but
@@ -4716,7 +4769,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             //  on a perfectly valid invite, not a failed pairing.)
             IncomingLink.Unknown -> {
                 status.value = StatusMsg(Res.string.status_invalid_link)
-                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to "parse"))
+                setPairFailure(PairFailure.PARSE)
+                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to PairFailure.PARSE.wireReason(null)))
             }
         }
         return link

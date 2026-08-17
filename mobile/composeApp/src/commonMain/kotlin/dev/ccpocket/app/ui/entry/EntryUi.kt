@@ -19,6 +19,46 @@ import dev.ccpocket.protocol.PermissionMode
  * really implements — never a plausible-looking superset.
  */
 
+// ── where a disconnected app root lands ─────────────────────────────────────────────────────────
+
+/** The surface a session-less app root opens on. */
+enum class EntryLanding {
+    /** First run: the install guide, because "the daemon must already be running on a computer" is the
+     *  precondition the pairing screen could only imply (issue #278 — the pairing wall was the largest
+     *  drop-off in the activation funnel). */
+    FIRST_RUN_CONNECT,
+
+    /** The pairing screen itself. */
+    PAIR,
+
+    /** Bindings exist — the computer picker / reconnect surface. */
+    COMPUTERS,
+}
+
+/**
+ * Which surface a session-less root opens on.
+ *
+ * [addingDevice] is an EXISTING user deliberately adding a second computer: they have already installed the
+ * daemon at least once, so walking them back through the install guide is a step backwards. It therefore
+ * wins over [hasBindings] in both directions — including the (rare) case of an add-device request raised
+ * while no binding is left, which must still land on pairing rather than on the guide.
+ *
+ * [hasCollaboratorLinks] is a PURE RECIPIENT (SESSION-HANDOFF.md §10: "接收方要求 cc-pocket App；不要求
+ * daemon"). They own no binding, so they look exactly like a first run — but they are the one audience for
+ * whom "install the daemon on your computer" is the wrong instruction entirely. The pairing screen states
+ * their real situation; this guide would not.
+ */
+fun entryLanding(
+    hasBindings: Boolean,
+    addingDevice: Boolean,
+    hasCollaboratorLinks: Boolean = false,
+): EntryLanding = when {
+    addingDevice -> EntryLanding.PAIR
+    hasBindings -> EntryLanding.COMPUTERS
+    hasCollaboratorLinks -> EntryLanding.PAIR
+    else -> EntryLanding.FIRST_RUN_CONNECT
+}
+
 // ── connection recovery ─────────────────────────────────────────────────────────────────────────
 
 /** A recovery action a failing connection may offer. Each maps 1:1 onto an existing repository effect. */

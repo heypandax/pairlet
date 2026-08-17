@@ -442,7 +442,17 @@
     <string name="dir_picker_remote_only">远程电脑 — 请在此手动输入路径</string>
     <string name="ob_open">还没在电脑上安装 cc-pocket？</string>
     <string name="ob_title">连接你的电脑</string>
-    <string name="ob_sub">在你要驱动的电脑上安装 cc-pocket daemon。</string>
+    <string name="ob_sub">手机负责发号施令，干活的 AI 编程助手跑在你自己的电脑上。</string>
+    <!-- ── 首启 · 连接你的电脑（issue #278 批次 2） ──── -->
+    <string name="fr_step_install">在电脑上装好 cc-pocket</string>
+    <string name="fr_step_pair_body">在电脑上跑 cc-pocket-daemon pair，它会给出一个 6 位验证码和一个二维码。</string>
+    <string name="fr_prereq">那台电脑上要先有 Claude Code CLI</string>
+    <string name="fr_prereq_what">那是什么？</string>
+    <string name="fr_prereq_win_body">Windows 上这个 CLI 得单独装，装在 Windows 里或 WSL 里都行。没有它，配对根本起不来。</string>
+    <string name="fr_prereq_win_cta">去装 Claude Code CLI ›</string>
+    <string name="fr_cta">装好了，现在配对</string>
+    <string name="fr_enter_code">已经装好了？直接输验证码</string>
+    <string name="fr_demo_sub">不用电脑也能看</string>
     <string name="ob_step_install">安装</string>
     <string name="ob_step_run">开机自启</string>
     <string name="ob_step_bucket">添加 bucket</string>
@@ -1558,7 +1568,7 @@
 
     <!-- ── 配对电脑（验证码优先；这里永远不会请求摄像头） ──── -->
     <string name="pair_title">配对电脑</string>
-    <string name="pair_sub">在你想控制的电脑上运行配对命令，它会显示一个 6 位验证码。</string>
+    <string name="pair_sub">输入电脑上显示的那个 6 位验证码。</string>
     <string name="pair_add_title">添加电脑</string>
     <string name="pair_code_label">配对码</string>
     <string name="pair_cta">配对电脑</string>
@@ -1571,6 +1581,20 @@
     <string name="pair_on_computer">在电脑上</string>
     <string name="pair_copied">已复制</string>
     <string name="pair_demo">先看看演示</string>
+    <!-- ── 配对状态区：一次只说一件事，每种失败都给得出下一步（issue #278 批次 2） ──── -->
+    <string name="pair_verifying">正在核对验证码……</string>
+    <string name="pair_verifying_note">核对期间输入框先锁住。</string>
+    <string name="pair_err_code_title">这个验证码不好使</string>
+    <string name="pair_err_code_body">验证码过一会儿就失效了。回电脑上把这条命令再跑一次，换个新的：</string>
+    <string name="pair_try_again">重新输一次</string>
+    <string name="pair_err_net_title">连不上配对服务</string>
+    <string name="pair_err_net_body">看看手机的网络——VPN 或代理有可能把它挡了——然后重试。</string>
+    <string name="pair_err_link_title">这不是一条配对链接</string>
+    <string name="pair_err_link_body">扫 cc-pocket-daemon pair 打出来的那个二维码，或者把完整的 ccpocket:// 链接粘进来。</string>
+    <string name="pair_err_other_title">配对没走完</string>
+    <string name="pair_err_other_body">这次尝试被拒了，但原因不在已知的几种里。下面是它自己报出来的信息。</string>
+    <string name="pair_install_first">电脑上还没装 cc-pocket？先去装</string>
+    <string name="pair_help_sub">在线客服，不用登录</string>
 
     <!-- ── 显式进入的扫码页（唯一会开摄像头的界面） ────────────────── -->
     <string name="scan_title">扫描二维码</string>

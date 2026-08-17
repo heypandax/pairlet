@@ -24,6 +24,64 @@ import kotlin.test.assertTrue
  */
 class EntryUiTest {
 
+    // ══ where a session-less root lands ════════════════════════════════════════════════════════════
+
+    /**
+     * Issue #278 batch 2 moved the front door: a first run opens on the install guide, because the pairing
+     * screen was asking for six digits that no computer was printing yet — the largest single drop-off in
+     * the activation funnel. The three cases have to stay separable, since two of them look identical from
+     * inside the pairing screen (no session, and a code field on screen).
+     */
+    @Test
+    fun aFirstRunLandsOnTheGuideAndAnExistingUserNeverDoes() {
+        assertEquals(
+            EntryLanding.FIRST_RUN_CONNECT,
+            entryLanding(hasBindings = false, addingDevice = false),
+            "nothing paired and nothing asked for: the install guide is the front door",
+        )
+        assertEquals(
+            EntryLanding.COMPUTERS,
+            entryLanding(hasBindings = true, addingDevice = false),
+            "a returning user goes to their computers, not through onboarding again",
+        )
+        // "add a computer" is an EXISTING user: they have installed the daemon at least once, so replaying
+        // the install guide at them is a step backwards. It wins over the binding count in both directions.
+        assertEquals(
+            EntryLanding.PAIR,
+            entryLanding(hasBindings = true, addingDevice = true),
+            "adding a second computer goes straight to pairing",
+        )
+        assertEquals(
+            EntryLanding.PAIR,
+            entryLanding(hasBindings = false, addingDevice = true),
+            "an add-device request with no binding left still means pairing, never the guide",
+        )
+    }
+
+    /**
+     * A pure recipient (SESSION-HANDOFF.md §10) owns collaborator links and NO binding, so by binding count
+     * alone they are indistinguishable from a first run — and they are the one audience for whom "install
+     * the daemon on your computer" is the wrong instruction entirely. The pairing screen carries the line
+     * that explains their actual state; the guide does not.
+     */
+    @Test
+    fun aPureRecipientIsNotTreatedAsAFirstRun() {
+        assertEquals(
+            EntryLanding.PAIR,
+            entryLanding(hasBindings = false, addingDevice = false, hasCollaboratorLinks = true),
+        )
+        assertNotEquals(
+            EntryLanding.FIRST_RUN_CONNECT,
+            entryLanding(hasBindings = false, addingDevice = false, hasCollaboratorLinks = true),
+            "a recipient must never be sent through daemon onboarding",
+        )
+        // …and an owner who ALSO holds collaborator links still goes to their own computers
+        assertEquals(
+            EntryLanding.COMPUTERS,
+            entryLanding(hasBindings = true, addingDevice = false, hasCollaboratorLinks = true),
+        )
+    }
+
     // ══ the six connection phases ══════════════════════════════════════════════════════════════════
 
     @Test

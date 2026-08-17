@@ -442,7 +442,17 @@
     <string name="dir_picker_remote_only">Remote computer — type the path here</string>
     <string name="ob_open">Need to install cc-pocket on your computer?</string>
     <string name="ob_title">Connect your computer</string>
-    <string name="ob_sub">Install the cc-pocket daemon on the computer you want to drive.</string>
+    <string name="ob_sub">Your phone drives the AI coding agent that runs on your computer.</string>
+    <!-- ── first run · connect your computer (issue #278 batch 2) ──── -->
+    <string name="fr_step_install">Install cc-pocket on the computer</string>
+    <string name="fr_step_pair_body">Run cc-pocket-daemon pair on the computer — it shows a six-digit code and a QR.</string>
+    <string name="fr_prereq">Needs the Claude Code CLI on that computer</string>
+    <string name="fr_prereq_what">What\'s that?</string>
+    <string name="fr_prereq_win_body">On Windows the CLI is installed separately, in Windows itself or in WSL. Pairing cannot start without it.</string>
+    <string name="fr_prereq_win_cta">Install the Claude Code CLI ›</string>
+    <string name="fr_cta">I\'m ready — pair now</string>
+    <string name="fr_enter_code">Already installed? Enter code directly</string>
+    <string name="fr_demo_sub">No computer needed</string>
     <string name="ob_step_install">Install</string>
     <string name="ob_step_run">Run on login</string>
     <string name="ob_step_bucket">Add the bucket</string>
@@ -1561,7 +1571,7 @@
 
     <!-- ── pair a computer (code-first; the camera is never requested here) ──── -->
     <string name="pair_title">Pair a computer</string>
-    <string name="pair_sub">Run the pairing command on the computer you want to control. It prints a six-digit code.</string>
+    <string name="pair_sub">Enter the six-digit code shown on your computer.</string>
     <string name="pair_add_title">Add a computer</string>
     <string name="pair_code_label">Pairing code</string>
     <string name="pair_cta">Pair computer</string>
@@ -1574,6 +1584,20 @@
     <string name="pair_on_computer">On the computer</string>
     <string name="pair_copied">Copied</string>
     <string name="pair_demo">Explore the demo instead</string>
+    <!-- ── pairing status region: one outcome at a time, every failure actionable (issue #278 batch 2) ──── -->
+    <string name="pair_verifying">Checking code…</string>
+    <string name="pair_verifying_note">The field is locked while the code is checked.</string>
+    <string name="pair_err_code_title">That code didn\'t work</string>
+    <string name="pair_err_code_body">Codes expire after a short while. On the computer, run the command again to get a fresh one:</string>
+    <string name="pair_try_again">Try again</string>
+    <string name="pair_err_net_title">Can\'t reach the pairing service</string>
+    <string name="pair_err_net_body">Check the phone\'s network — a VPN or proxy can block it — then retry.</string>
+    <string name="pair_err_link_title">That link isn\'t a pairing link</string>
+    <string name="pair_err_link_body">Scan the QR that cc-pocket-daemon pair prints, or paste the full ccpocket:// link.</string>
+    <string name="pair_err_other_title">Pairing didn\'t finish</string>
+    <string name="pair_err_other_body">The attempt was refused, and not for a reason this app recognises. What it reported is below.</string>
+    <string name="pair_install_first">Don\'t have cc-pocket on the computer yet? Install it first</string>
+    <string name="pair_help_sub">Support chat, no sign-in</string>
 
     <!-- ── the explicit scan route (the only camera surface) ────────────────── -->
     <string name="scan_title">Scan QR code</string>

@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -64,15 +65,19 @@ import dev.ccpocket.app.ui.entry.EntryPrimaryButton
 import dev.ccpocket.app.ui.entry.EntryQuietAction
 import dev.ccpocket.app.ui.entry.EntryRouteRow
 import dev.ccpocket.app.ui.entry.EntrySecondaryButton
+import dev.ccpocket.app.ui.entry.EntryStateBlock
 import dev.ccpocket.app.ui.entry.EntryTitle
 import dev.ccpocket.app.ui.session.Hairline
+import dev.ccpocket.app.ui.session.StateMark
+import dev.ccpocket.app.ui.session.StateMarkGlyph
+import dev.ccpocket.app.ui.session.StateTone
 import dev.ccpocket.app.voice.openAppSettings
 import org.jetbrains.compose.resources.stringResource
 import qrscanner.CameraLens
 import qrscanner.QrScanner
 
 /** The desktop command that mints a pairing code — quoted verbatim, never paraphrased. */
-private const val PAIR_COMMAND = "cc-pocket-daemon pair"
+internal const val PAIR_COMMAND = "cc-pocket-daemon pair"
 
 /**
  * "Pair a computer" — the first surface of the entry flow (Entry Flow UI 2.0 · Master frame 01).
@@ -85,17 +90,35 @@ private const val PAIR_COMMAND = "cc-pocket-daemon pair"
  * Every previously reachable route survives at a lower weight, below one hairline, in expected order: scan,
  * paste-link, direct LAN — then the desktop command, the install guide and Demo. Pairing validation, URI
  * parsing and every repository effect are untouched.
+ *
+ * [firstRun] opens on the install guide instead (issue #278 batch 2): with no binding on the device, the code
+ * field is asking for six digits that no computer is printing yet. The guide is then this flow's ROOT, and
+ * the two screens stay one back-step apart in both directions for the whole session.
  */
 @Composable
-fun PairingScreen(repo: PocketRepository) {
-    var showOnboarding by remember { mutableStateOf(false) }
+fun PairingScreen(repo: PocketRepository, firstRun: Boolean = false) {
+    var showOnboarding by remember { mutableStateOf(firstRun) }
+    // Whether the install guide is the root of this flow or a detour FROM pairing. It decides which screen
+    // owns "back", and it is captured once: a binding appearing mid-flow must not re-root the user.
+    val connectIsRoot = remember { firstRun }
     // The six digits and the paste disclosure are hoisted ABOVE the scan route on purpose: walking into the
     // scanner and back must not silently erase what was already typed (acceptance path 02).
     var code by remember { mutableStateOf("") }
     var scanning by remember { mutableStateOf(false) }
     var showPaste by remember { mutableStateOf(false) }
+    // Declared ABOVE the scan branch so it survives the detour into the scanner: a PARSE recorded BY that
+    // scan is news for this surface, while one left over from a deep link tapped days ago is not.
+    val enteredAtSeq = remember { repo.pairFailureSeq.value }
 
-    if (showOnboarding) { OnboardingScreen(onBack = { showOnboarding = false }, onPairNow = { showOnboarding = false }); return }
+    if (showOnboarding) {
+        OnboardingScreen(
+            onPairNow = { showOnboarding = false },
+            onBack = if (connectIsRoot) null else ({ showOnboarding = false }),
+            // the demo needs no computer at all, so it belongs on the screen that explains the computer
+            onEnterDemo = { repo.enterDemo() },
+        )
+        return
+    }
     if (scanning) {
         PairScanRoute(
             digitsEntered = code.length,
@@ -111,14 +134,29 @@ fun PairingScreen(repo: PocketRepository) {
     var link by remember { mutableStateOf("") }
     var showLan by remember { mutableStateOf(false) }
     var url by remember { mutableStateOf(defaultDaemonUrl()) }
+    val verifying = repo.pairVerifying.value
+    val failure = repo.pairFailure.value?.takeIf { repo.pairFailureSeq.value > enteredAtSeq }
     val complete = code.length == 6
     // "Add a computer" entered from an existing binding — let the user back out to the device picker.
     val adding = repo.addingDevice.value
     if (adding) dev.ccpocket.app.SystemBackHandler(enabled = true) { repo.cancelAddDevice() }
+    // Otherwise the install guide is always a legitimate destination from here ("I don't have it on the
+    // computer yet"), so system back reaches it rather than dropping out of the app.
+    else dev.ccpocket.app.SystemBackHandler(enabled = true) { showOnboarding = true }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Metric.gutter),
     ) {
+        // the way back to step 1. Not shown while ADDING, where Cancel below already owns the back path and
+        // a second one would offer two different retreats from the same screen.
+        if (!adding) Row(
+            Modifier.fillMaxWidth().padding(top = Metric.gapXs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            EntryQuietAction("‹ " + stringResource(Res.string.ob_title), color = Tok.accent) {
+                showOnboarding = true
+            }
+        }
         // added from an existing binding: a real way back, and the current computer stays connected
         if (adding) Row(
             Modifier.fillMaxWidth().padding(top = Metric.gapXs),
@@ -130,7 +168,7 @@ fun PairingScreen(repo: PocketRepository) {
             )
             EntryQuietAction(stringResource(Res.string.cancel), color = Tok.accent) { repo.cancelAddDevice() }
         }
-        Spacer(Modifier.height(if (adding) Metric.gapS else 40.dp))
+        Spacer(Modifier.height(Metric.gapS))
         EntryTitle(stringResource(Res.string.pair_title), stringResource(Res.string.pair_sub))
 
         // A pure RECIPIENT (SESSION-HANDOFF.md §10: "接收方要求 cc-pocket App；不要求 daemon") has
@@ -158,19 +196,20 @@ fun PairingScreen(repo: PocketRepository) {
 
         // ── the hierarchy: six digits, then the one canonical action ──
         EntryLabel(stringResource(Res.string.pair_code_label), Modifier.padding(top = 26.dp, bottom = Metric.gap))
-        CodeInput(code) { v -> code = v }
+        CodeInput(code, locked = verifying) { v -> code = v }
         EntryPrimaryButton(
             stringResource(Res.string.pair_cta),
             Modifier.padding(top = Metric.gapL),
-            enabled = complete,
+            enabled = complete && !verifying,
         ) { repo.pairWithCode(code) }
-        EntryNote(
-            stringResource(if (complete) Res.string.pair_helper_complete else Res.string.pair_helper_incomplete),
-            Modifier.padding(top = Metric.gapS),
-        )
-        Text(
-            repo.status.value.resolve(), color = Tok.muted, style = TypeRole.captionMono,
-            modifier = Modifier.padding(top = Metric.gapS),
+
+        // ── the status region: ONE outcome at a time, and every failure is actionable ──
+        PairStatusRegion(
+            repo, verifying = verifying, failure = failure, complete = complete,
+            onTryAgain = { code = ""; repo.clearPairFailure() },
+            onRetry = { repo.clearPairFailure(); if (complete) repo.pairWithCode(code) },
+            onScan = { scanning = true },
+            onPasteLink = { repo.clearPairFailure(); showPaste = true },
         )
 
         // ── alternatives: peers below one hairline, in the order they are actually reached for ──
@@ -201,9 +240,23 @@ fun PairingScreen(repo: PocketRepository) {
         // ── technical help: the exact command, copyable ──
         EntryLabel(stringResource(Res.string.pair_on_computer), Modifier.padding(top = 22.dp, bottom = Metric.gapS))
         CopyableCommand(PAIR_COMMAND)
-        EntryQuietAction(stringResource(Res.string.ob_open), Modifier.padding(top = Metric.gapXs)) { showOnboarding = true }
+        // The other half of the loop back to step 1: this screen is where a user discovers that nothing is
+        // printing a code because nothing is installed. Stated as the question they are actually asking.
+        Hairline(Modifier.padding(top = Metric.gap))
+        EntryQuietAction(
+            stringResource(Res.string.pair_install_first), Modifier.padding(top = Metric.gapXs),
+        ) { showOnboarding = true }
 
-        // No computer? Explore the whole app with sample data — no pairing or account needed.
+        // Reachable before anything has ever paired (issue #278): a user stuck HERE is exactly the one who
+        // could not previously get to support at all.
+        Hairline(Modifier.padding(top = Metric.gap))
+        EntryQuietAction(stringResource(Res.string.support_title), Modifier.padding(top = Metric.gapXs)) {
+            dev.ccpocket.app.openWebUrl(dev.ccpocket.app.supportChatUrl())
+        }
+        EntryNote(stringResource(Res.string.pair_help_sub), Modifier.padding(start = Metric.gapS))
+        // No computer? Explore the whole app with sample data — no pairing or account needed. Kept HERE as
+        // well as on step 1: it is the App Store's review path into the app, and a single doorway to it that
+        // depends on which screen the flow happened to open on is a doorway that can go missing.
         Hairline(Modifier.padding(top = Metric.gap))
         EntryQuietAction(stringResource(Res.string.pair_demo), Modifier.padding(top = Metric.gapXs)) { repo.enterDemo() }
         Spacer(Modifier.height(28.dp))
@@ -346,25 +399,32 @@ private fun Viewfinder(onScanned: (String) -> Unit, onFailure: (String) -> Unit)
  * that fires by itself leaves the primary button reading as decoration (and re-fires on every correction).
  */
 @Composable
-private fun CodeInput(code: String, onCode: (String) -> Unit) {
+private fun CodeInput(code: String, locked: Boolean = false, onCode: (String) -> Unit) {
     val label = stringResource(Res.string.pair_code_label)
     Box(Modifier.fillMaxWidth()) {
         // visible boxes
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             for (i in 0 until 6) {
                 val ch = code.getOrNull(i)
-                val active = i == code.length.coerceAtMost(5)
+                // a LOCKED field has no caret: the six digits are being checked, so there is nothing to type
+                // into and a blinking cursor would invite exactly that
+                val active = !locked && i == code.length.coerceAtMost(5)
                 Box(
-                    Modifier.weight(1f).height(58.dp).clip(RoundedCornerShape(Metric.gap)).background(Tok.surface)
+                    Modifier.weight(1f).height(58.dp).clip(RoundedCornerShape(Metric.gap))
+                        .background(if (locked) Tok.base else Tok.surface)
                         .border(
                             if (active) 1.5.dp else Metric.hairline,
-                            if (active) Tok.accent else Tok.hair,
+                            when {
+                                active -> Tok.accent
+                                locked -> Tok.hair.copy(alpha = 0.6f)
+                                else -> Tok.hair
+                            },
                             RoundedCornerShape(Metric.gap),
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
-                        ch != null -> Text(ch.toString(), color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 24.sp, fontWeight = FontWeight.Medium)
+                        ch != null -> Text(ch.toString(), color = if (locked) Tok.tx2 else Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 24.sp, fontWeight = FontWeight.Medium)
                         active -> Box(Modifier.width(2.dp).height(26.dp).background(Tok.accent))
                         else -> Box(Modifier.width(8.dp).height(2.dp).background(Tok.hair))
                     }
@@ -373,7 +433,7 @@ private fun CodeInput(code: String, onCode: (String) -> Unit) {
         }
         // transparent input on top, capturing taps + the numeric keyboard. It carries the field's name, so
         // the invisible target is announced by a screen reader instead of being a silent rectangle.
-        BasicTextField(
+        if (!locked) BasicTextField(
             value = code,
             onValueChange = { onCode(it.filter(Char::isDigit).take(6)) },
             modifier = Modifier.fillMaxWidth().height(58.dp).alpha(0f).semantics { contentDescription = label },
@@ -381,4 +441,156 @@ private fun CodeInput(code: String, onCode: (String) -> Unit) {
             cursorBrush = SolidColor(Color.Transparent),
         )
     }
+}
+
+/**
+ * Everything the pairing attempt has to say, in ONE region under the canonical action.
+ *
+ * Six outcomes, and five of them used to be the same grey sentence: `status` is a single line, and one line
+ * cannot both name a stale code and hand over the command that mints a fresh one. So each failure is a card
+ * that carries its own recovery, and the recovery is the thing the user would otherwise have had to guess:
+ *
+ *  - CODE / REDEEM → the same human action ("go get a new code"), so ONE card: the command, copyable in
+ *    place, and Try again, which CLEARS the field rather than leaving a dead code sitting in it.
+ *  - NETWORK → names the phone's own network, including VPN and proxy, and blames neither the code nor the
+ *    computer. Retry is canonical; support sits under it as the second exit.
+ *  - PARSE → arrives from the scan and paste routes, so both are offered back as equals. The body says what
+ *    a real pairing link looks like instead of calling the user's input wrong.
+ *  - OTHER → the design's six states have no card for a failure we could not classify, and folding it into
+ *    the network card would be a guess presented as a diagnosis. It gets its own honest card, and it is the
+ *    only one that still shows the raw status line, because that line is all we actually know.
+ *
+ * There is deliberately no SUCCESS card. Pairing success calls `startRelay()`, which flips `sessionActive`
+ * and hands the whole root over to the connecting surface in the same frame — a confirmation here would have
+ * to be held open by an artificial delay, which is a slower first run bought with nothing.
+ */
+@Composable
+private fun PairStatusRegion(
+    repo: PocketRepository,
+    verifying: Boolean,
+    failure: dev.ccpocket.app.pairing.PairFailure?,
+    complete: Boolean,
+    onTryAgain: () -> Unit,
+    onRetry: () -> Unit,
+    onScan: () -> Unit,
+    onPasteLink: () -> Unit,
+) {
+    val top = Modifier.padding(top = Metric.gapL)
+    when {
+        verifying -> Column(Modifier.fillMaxWidth().padding(top = Metric.gap)) {
+            IndeterminateBar()
+            Row(
+                Modifier.fillMaxWidth().padding(top = Metric.gap),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
+            ) {
+                PulsingRing()
+                Text(stringResource(Res.string.pair_verifying), color = Tok.tx, style = TypeRole.action)
+            }
+            // the reason for the lock is WRITTEN, not implied by a field that stopped responding
+            EntryNote(stringResource(Res.string.pair_verifying_note), Modifier.padding(top = Metric.gapXs))
+        }
+
+        failure == dev.ccpocket.app.pairing.PairFailure.CODE ||
+            failure == dev.ccpocket.app.pairing.PairFailure.REDEEM ->
+            EntryStateBlock(
+                StateMark.SQUARE, StateTone.DANGER,
+                stringResource(Res.string.pair_err_code_title),
+                stringResource(Res.string.pair_err_code_body),
+                top,
+            ) {
+                CopyableCommand(PAIR_COMMAND, fill = Tok.base, bordered = false)
+                EntrySecondaryButton(stringResource(Res.string.pair_try_again)) { onTryAgain() }
+            }
+
+        failure == dev.ccpocket.app.pairing.PairFailure.NETWORK ->
+            EntryStateBlock(
+                StateMark.SQUARE, StateTone.DANGER,
+                stringResource(Res.string.pair_err_net_title),
+                stringResource(Res.string.pair_err_net_body),
+                top,
+            ) {
+                // a retry is only offered where retrying can actually work: with six digits still in hand
+                RetryButton(complete, onRetry)
+                SupportAction()
+            }
+
+        failure == dev.ccpocket.app.pairing.PairFailure.PARSE ->
+            EntryStateBlock(
+                StateMark.SQUARE, StateTone.DANGER,
+                stringResource(Res.string.pair_err_link_title),
+                stringResource(Res.string.pair_err_link_body),
+                top,
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
+                    EntrySecondaryButton(stringResource(Res.string.pair_route_scan), Modifier.weight(1f)) { onScan() }
+                    EntrySecondaryButton(stringResource(Res.string.pair_route_paste), Modifier.weight(1f)) { onPasteLink() }
+                }
+            }
+
+        failure == dev.ccpocket.app.pairing.PairFailure.OTHER ->
+            EntryStateBlock(
+                StateMark.SQUARE, StateTone.DANGER,
+                stringResource(Res.string.pair_err_other_title),
+                stringResource(Res.string.pair_err_other_body),
+                top,
+                hint = repo.status.value.resolve(),
+            ) {
+                RetryButton(complete, onRetry)
+                SupportAction()
+            }
+
+        else -> EntryNote(
+            stringResource(if (complete) Res.string.pair_helper_complete else Res.string.pair_helper_incomplete),
+            Modifier.padding(top = Metric.gapS),
+        )
+    }
+}
+
+/**
+ * Retry, offered only where retrying can DO something: the attempt is replayed with the six digits still in
+ * the field, so with no complete code there is nothing to replay. Inert reads as inert — a live-looking
+ * button that swallows the tap is the failure this flow's vocabulary exists to avoid.
+ */
+@Composable
+private fun RetryButton(complete: Boolean, onRetry: () -> Unit) = EntrySecondaryButton(
+    stringResource(Res.string.action_retry),
+    enabled = complete,
+    tint = if (complete) Tok.tx else Tok.muted,
+) { onRetry() }
+
+/** Public support, reachable from inside a failure — the moment it is most needed. */
+@Composable
+private fun SupportAction() = EntryQuietAction(stringResource(Res.string.support_title)) {
+    dev.ccpocket.app.openWebUrl(dev.ccpocket.app.supportChatUrl())
+}
+
+/** The 2 pt indeterminate bar above the verifying sentence — motion that says "still working", nothing more. */
+@Composable
+private fun IndeterminateBar() {
+    val anim = rememberInfiniteTransition()
+    val at by anim.animateFloat(-SWEEP, 1f, infiniteRepeatable(tween(1250, easing = LinearEasing)))
+    BoxWithConstraints(
+        Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(2.dp)).background(Tok.hair),
+    ) {
+        // measured, not guessed: the sweep has to travel the bar's real width or it stalls at one edge
+        val track = maxWidth
+        Box(
+            Modifier.width(track * SWEEP).height(2.dp)
+                .offset(x = track * at).background(Tok.accent),
+        )
+    }
+}
+
+/** How much of the track the indeterminate sweep occupies. */
+private const val SWEEP = 0.34f
+
+/** The in-flight mark: the state vocabulary's ring, pulsing. Colour confirms; the word beside it states. */
+@Composable
+private fun PulsingRing() {
+    val anim = rememberInfiniteTransition()
+    val a by anim.animateFloat(
+        1f, 0.3f, infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse),
+    )
+    Box(Modifier.alpha(a)) { StateMarkGlyph(StateMark.RING, Tok.accent, size = 9.dp) }
 }

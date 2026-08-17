@@ -41,7 +41,9 @@ import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
 import dev.ccpocket.app.ui.session.Hairline
+import dev.ccpocket.app.ui.session.StateMark
 import dev.ccpocket.app.ui.session.StateMarkGlyph
+import dev.ccpocket.app.ui.session.StateTone
 import dev.ccpocket.app.ui.session.stateColor
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
@@ -159,8 +161,28 @@ fun EntryStateBlock(
     modifier: Modifier = Modifier,
     hint: String? = null,
     actions: @Composable ColumnScope.() -> Unit = {},
+) = EntryStateBlock(recovery.mark, recovery.tone, title, body, modifier, hint, actions)
+
+/**
+ * The same written state block addressed by [mark] + [tone] directly, for the states that are NOT a
+ * [ConnPhase] — the pairing failures (issue #278 batch 2).
+ *
+ * Deliberately the same composable and therefore the same geometry: square for danger, rotated square for
+ * attention, ring for in-flight, each beside a sentence. What a user reads as the difference between a stale
+ * code and a blocked network is then the WORDS, which is the point — a card that also changed shape and
+ * padding per cause would be four designs pretending to be one.
+ */
+@Composable
+fun EntryStateBlock(
+    mark: StateMark,
+    tone: StateTone,
+    title: String,
+    body: String,
+    modifier: Modifier = Modifier,
+    hint: String? = null,
+    actions: @Composable ColumnScope.() -> Unit = {},
 ) {
-    val tint = stateColor(recovery.tone)
+    val tint = stateColor(tone)
     val shape = RoundedCornerShape(Metric.radius)
     Column(
         modifier.fillMaxWidth().clip(shape).background(tint.copy(alpha = 0.08f))
@@ -169,7 +191,7 @@ fun EntryStateBlock(
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
-                StateMarkGlyph(recovery.mark, tint)
+                StateMarkGlyph(mark, tint)
                 Text(title, color = Tok.tx, style = TypeRole.rowTitle, modifier = Modifier.weight(1f))
             }
             Text(body, color = Tok.tx2, style = TypeRole.preview, modifier = Modifier.padding(top = Metric.gapS))
@@ -184,17 +206,27 @@ fun EntryStateBlock(
 /**
  * The exact desktop command, mono and verbatim, beside a real 48 dp copy target — technical help that can
  * actually be USED. The command WRAPS: a half-command is worse than a tall row.
+ *
+ * [fill] exists for the one case where this sits INSIDE another surface (the pairing failure card embeds the
+ * command that fixes it): on the base fill it still reads as a layer under the card instead of dissolving
+ * into it, and the hairline drops away because the fill contrast is already doing that work.
  */
 @Composable
-fun CopyableCommand(command: String, modifier: Modifier = Modifier) {
+fun CopyableCommand(
+    command: String,
+    modifier: Modifier = Modifier,
+    fill: Color = Tok.surface,
+    bordered: Boolean = true,
+) {
     val clipboard = LocalClipboardManager.current
     val label = stringResource(Res.string.copy_path)
     var copied by remember { mutableStateOf(false) }
     LaunchedEffect(copied) { if (copied) { delay(1400); copied = false } }
     val shape = RoundedCornerShape(Metric.radiusS)
     Row(
-        modifier.fillMaxWidth().heightIn(min = Metric.touch).clip(shape).background(Tok.surface)
-            .border(Metric.hairline, Tok.hair, shape).padding(start = Metric.gap, end = Metric.gapXs),
+        modifier.fillMaxWidth().heightIn(min = Metric.touch).clip(shape).background(fill)
+            .then(if (bordered) Modifier.border(Metric.hairline, Tok.hair, shape) else Modifier)
+            .padding(start = Metric.gap, end = Metric.gapXs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(command, color = Tok.tx, style = TypeRole.bodyMono, modifier = Modifier.weight(1f))
@@ -223,6 +255,8 @@ fun EntryRouteRow(
     modifier: Modifier = Modifier,
     expanded: Boolean? = null,
     trailing: String = "›",
+    sub: String? = null,
+    quiet: Boolean = false,
     onClick: () -> Unit,
 ) {
     Column(modifier.fillMaxWidth()) {
@@ -233,7 +267,15 @@ fun EntryRouteRow(
                 .padding(vertical = Metric.gap),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(label, color = Tok.tx, style = TypeRole.body, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                // [quiet] demotes a route that is an ALTERNATIVE to the screen's purpose rather than another
+                // way to achieve it (the demo, which pairs nothing) — one step down in ink, not in target size
+                Text(label, color = if (quiet) Tok.tx2 else Tok.tx, style = TypeRole.body)
+                if (!sub.isNullOrBlank()) Text(
+                    sub, color = Tok.muted, style = TypeRole.caption,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
             Text(
                 expanded?.let { if (it) "▴" else "▾" } ?: trailing,
                 color = Tok.muted, style = TypeRole.body,
