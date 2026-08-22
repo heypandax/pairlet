@@ -3,8 +3,10 @@ package dev.ccpocket.daemon.agent
 import java.io.File
 import java.nio.file.Path
 import kotlin.io.path.inputStream
+import kotlin.io.path.isDirectory
 import kotlin.io.path.isExecutable
 import kotlin.io.path.isRegularFile
+import kotlin.io.path.listDirectoryEntries
 
 /**
  * Resolves a CLI's real executable — shared by the agent launchers. Resolution never invokes a shell: a
@@ -25,6 +27,7 @@ object ExecutableResolver {
         val dirs = buildList {
             System.getenv("PATH")?.split(File.pathSeparator)?.forEach { if (it.isNotBlank()) add(it) }
             addAll(fallbackDirs)
+            addAll(nvmVersionBins()) // issue #287: `npm i -g` under nvm is invisible to a service PATH
         }
         dirs.forEach { dir -> exeNames.forEach { name -> candidates.add(Path.of(dir, name)) } }
         val valid = candidates.filter { it.isRunnableFile() }
@@ -34,6 +37,29 @@ object ExecutableResolver {
         // That matters beyond tidiness: a batch shim can only be started through cmd.exe, which re-parses
         // the command line and eats argv quoting (see ClaudeLauncher.processBuilder).
         return valid.sortedBy { if (isShim(it)) 1 else 0 }.firstOrNull()?.toRealPath() ?: error(notFound)
+    }
+
+    /**
+     * nvm keeps each Node under `~/.nvm/versions/node/vX.Y.Z/bin` — per-version directories that no
+     * service PATH ever contains, so a `npm i -g` on an nvm machine is invisible to a launchd /
+     * scheduled-task daemon (issue #287). Newest version first: after a runtime upgrade the fresh
+     * install's globals must beat a stale copy left under the old version.
+     */
+    internal fun nvmVersionBins(home: Path = Path.of(System.getProperty("user.home"))): List<String> =
+        runCatching {
+            val versions = home.resolve(".nvm").resolve("versions").resolve("node")
+            if (!versions.isDirectory()) return@runCatching emptyList<String>()
+            versions.listDirectoryEntries()
+                .filter { it.isDirectory() }
+                .sortedByDescending { versionKey(it.fileName.toString()) }
+                .map { it.resolve("bin").toString() }
+        }.getOrDefault(emptyList())
+
+    /** `v24.3.0` → 24_003_000. Malformed segments read as 0 so odd directory names sort last, never throw. */
+    private fun versionKey(name: String): Long {
+        val parts = name.removePrefix("v").split('.')
+        fun seg(i: Int) = parts.getOrNull(i)?.toIntOrNull() ?: 0
+        return seg(0) * 1_000_000L + seg(1) * 1_000L + seg(2)
     }
 
     /**

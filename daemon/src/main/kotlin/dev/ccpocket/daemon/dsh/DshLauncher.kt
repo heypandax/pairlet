@@ -43,8 +43,15 @@ object DshLauncher {
     fun resolveExecutable(explicit: String? = null): Path =
         ExecutableResolver.resolve(
             explicit, envBin, exeNames, fallbackDirs,
-            "dsh executable not found. Install DeepSeek Harness (npm i -g @deepseek-ai/dsh), " +
-                "or set CC_POCKET_DSH_BIN / pass --dsh-bin.",
+            // The old text said "set CC_POCKET_DSH_BIN" with no qualifier — which walks a launchd user
+            // straight into a shell `export` the service can never see (issue #287). Split the advice by
+            // the actual situation instead.
+            "dsh executable not found. Not installed yet? Run: npm i -g @deepseek-ai/dsh (needs Node >= 22.12). " +
+                "Already installed? The daemon runs as a background service and can't see your shell's PATH — " +
+                "re-run `cc-pocket-daemon service-install --apply` from the terminal where `which dsh` works, " +
+                "or pass --dsh-bin / set CC_POCKET_DSH_BIN where the service can see it " +
+                "(a plain `export` in your shell won't reach it). " +
+                "Desktop-app builds of dsh bundle a private copy the daemon can't drive — keep the npm install.",
         )
 
     /**

@@ -112,6 +112,26 @@ class ExecutableResolverTest {
     }
 
     @Test
+    fun nvm_version_bins_are_listed_newest_first_and_survive_odd_names() {
+        // issue #287: `npm i -g` under nvm lands in ~/.nvm/versions/node/vX.Y.Z/bin, which no service
+        // PATH contains. Newest first so a fresh runtime's globals beat a stale copy — and v9 vs v10
+        // must compare numerically, not lexically.
+        val home = Files.createTempDirectory("ccp-nvmhome")
+        for (v in listOf("v9.11.2", "v22.12.0", "v10.24.1", "weird")) {
+            Files.createDirectories(home.resolve(".nvm/versions/node/$v/bin"))
+        }
+        val bins = ExecutableResolver.nvmVersionBins(home)
+        assertEquals(
+            listOf("v22.12.0", "v10.24.1", "v9.11.2", "weird").map {
+                home.resolve(".nvm/versions/node/$it/bin").toString()
+            },
+            bins,
+        )
+        // no nvm at all → empty, never an error (the common case on CI and non-nvm machines)
+        assertEquals(emptyList(), ExecutableResolver.nvmVersionBins(Files.createTempDirectory("ccp-nonvm")))
+    }
+
+    @Test
     fun batch_shims_are_recognised_by_extension_case_insensitively() {
         // the launchers use this to decide to go through cmd.exe, and the Feishu reviewer to refuse to run
         // at all — so a `.CMD` from a Windows PATH entry must not read as native
