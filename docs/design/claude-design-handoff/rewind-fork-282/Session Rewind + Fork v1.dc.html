@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style data-omelette-injected>html,body{background:transparent}</style><script data-omelette-injected>(()=>{{const n=new URLSearchParams(location.search).get("theme");if(n==="light"||n==="dark"){document.documentElement.dataset.theme=n}}{if(new URLSearchParams(location.search).get("_omthumb")==="1"){const n=(f)=>{const g=f.focus;if(!g)return;f.focus=function(h){g.call(this,{...h,preventScroll:true})}};n(HTMLElement.prototype);n(SVGElement.prototype);if(typeof MathMLElement!=="undefined"){n(MathMLElement.prototype)}const d=(f)=>{f.removeAttribute("autofocus");f.inert=true;if(!(f instanceof HTMLElement))f.removeAttribute("tabindex")};const p=(f)=>{if(f.hasAttribute("autofocus"))d(f);for(const g of f.querySelectorAll("[autofocus]")){d(g)}};p(document.documentElement);new MutationObserver((f)=>{for(const g of f){for(const h of g.addedNodes){if(h.nodeType===1)p(h)}}}).observe(document,{childList:true,subtree:true})}}{const n=()=>{try{if(document.querySelector('meta[name="color-scheme"]'))return;const d=getComputedStyle(document.documentElement).getPropertyValue("color-scheme").trim();if(d&&d!=="normal")return;const p=(y)=>{if(!y)return null;const m=getComputedStyle(y).backgroundColor.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+%?))?\s*\)$/);if(!m)return null;const w=m[4]==null?1:parseFloat(m[4])/(m[4].endsWith("%")?100:1);if(w<0.99)return null;return[+m[1],+m[2],+m[3]]};const f=p(document.body)||p(document.documentElement);if(!f)return;const g=(y)=>{const m=y/255;return m<=0.04045?m/12.92:((m+0.055)/1.055)**2.4};const h=0.2126*g(f[0])+0.7152*g(f[1])+0.0722*g(f[2]);document.documentElement.style.setProperty("color-scheme",h<0.4?"dark":"light")}catch{}};if(document.readyState==="complete")n();else window.addEventListener("load",n)}var I=[];var B=false;var K=false;var C=()=>{};if(K===true){try{const n=setTimeout.bind(window);const d=1e4;const p=15;const f=1e4;const g=120000;const h=200;const y=(o)=>{try{let r;if(typeof o==="string")r=o;else if(o instanceof URL)r=o.href;else if(typeof Request!=="undefined"&&o instanceof Request)r=o.url;else return null;if(!r)return null;const l=document.baseURI;const i=new URL(r,l);if(i.protocol!=="http:"&&i.protocol!=="https:")return null;if(i.origin!==new URL(l).origin)return null;return i.origin+i.pathname}catch{return null}};const m=new Map;const w=(o)=>{let r=m.get(o);if(!r){if(m.size>=h){const l=m.keys().next().value;if(l!==undefined)m.delete(l)}r={fails:[],until:0,cooldown:f,hard:false};m.set(o,r)}return r};const R=(o)=>{const r=m.get(o);return r!==undefined&&r.until>Date.now()};const O=(o,r)=>{const l=Date.now();const i=w(o);if(r)i.hard=true;if(i.until>l)return;i.fails.push(l);while(i.fails.length>0&&i.fails[0]<=l-d)i.fails.shift();if(i.fails.length>=p){i.until=l+i.cooldown;if(i.hard)i.cooldown=Math.min(i.cooldown*2,g);i.fails.length=0;try{n(()=>{try{S(true)}catch{}},i.until-l+100)}catch{}console.warn("[omelette] asset circuit breaker: pausing requests to "+o+" for "+Math.round((i.until-l)/1000)+"s after "+p+" failures in "+d/1000+"s")}};const e=(o)=>{m.delete(o)};const t=100;const a=new WeakMap;const u=new Set;let s=null;const S=(o)=>{for(const r of Array.from(u)){try{const l=a.get(r);if(l===undefined){u.delete(r);continue}if(o){const i=y(l);if(i!==null&&R(i))continue}a.delete(r);u.delete(r);if(s!==null)s.call(r,l)}catch{}}};C=()=>{try{m.clear();S(false)}catch{}};document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")C()});const _=window.fetch;if(typeof _==="function"){const o=function(...r){let l=null;try{l=y(r[0])}catch{}if(l!==null&&R(l)){let c;try{if(r[1]&&r[1].signal!==undefined){c=r[1].signal||undefined}else if(typeof Request!=="undefined"&&r[0]instanceof Request){c=r[0].signal||undefined}}catch{c=undefined}return new Promise((k,b)=>{const E=()=>{try{return c.reason!==undefined?c.reason:new DOMException("The operation was aborted.","AbortError")}catch{return new DOMException("The operation was aborted.","AbortError")}};try{if(c&&c.aborted){b(E());return}}catch{}let T=false;const j=()=>{if(T)return;T=true;b(E())};try{if(c)c.addEventListener("abort",j,{once:true})}catch{}n(()=>{if(T)return;T=true;try{if(c)c.removeEventListener("abort",j)}catch{}let L;try{L=new Response(null,{status:429,statusText:"Too Many Requests",headers:{"Retry-After":"10"}})}catch{L={ok:false,status:429}}k(L)},250)})}const i=_.apply(window,r);if(l!==null){const c=l;i.then((k)=>{try{if(k.ok)e(c);else if(k.status===401||k.status===403||k.status===404||k.status===429){O(c,k.status!==404)}}catch{}},()=>{})}return i};window.fetch=o}const v=Object.getOwnPropertyDescriptor(HTMLImageElement.prototype,"src");if(v!==undefined&&v.set!==undefined&&v.get!==undefined){const o=v.set;s=o;Object.defineProperty(HTMLImageElement.prototype,"src",{configurable:true,enumerable:v.enumerable,get:v.get,set(r){const l=`${r}`;try{const i=y(l);if(i!==null&&R(i)){a.set(this,l);if(u.size<t)u.add(this);return}}catch{}try{a.delete(this);u.delete(this)}catch{}o.call(this,l)}})}try{const o=HTMLImageElement.prototype.setAttribute;HTMLImageElement.prototype.setAttribute=function(r,l){if(arguments.length<2){o.apply(this,arguments);return}if(typeof r==="string"&&r.toLowerCase()==="src"){const i=`${l}`;try{const c=y(i);if(c!==null&&R(c)){a.set(this,i);if(u.size<t)u.add(this);return}a.delete(this);u.delete(this)}catch{}o.call(this,r,i);return}o.call(this,r,l)}}catch{}window.addEventListener("error",(o)=>{try{const r=o.target;if(r instanceof HTMLImageElement){const l=y(r.currentSrc||r.src||"");if(l!==null)O(l,true)}}catch{}},true);window.addEventListener("load",(o)=>{try{const r=o.target;if(r instanceof HTMLImageElement){const l=y(r.currentSrc||r.src||"");if(l!==null)e(l);const i=a.get(r);if(i!==undefined){let c=false;try{c=new URL(i,document.baseURI).href===new URL(r.currentSrc||r.src||"",document.baseURI).href}catch{c=false}if(c){a.delete(r);u.delete(r)}}}}catch{}},true)}catch{}}var J=30000;var G=3000;document.addEventListener("DOMContentLoaded",()=>{const n=window.Babel;const d="om-src-id";if(n&&n.registerPlugin&&!(n.availablePlugins&&n.availablePlugins[d])){n.registerPlugin(d,({types:h})=>({visitor:{JSXOpeningElement(y,m){const w=y.node;if(w.name&&w.name.type==="JSXMemberExpression")return;for(let t=0;t<w.attributes.length;t++){const a=w.attributes[t];if(a.type==="JSXAttribute"&&a.name&&a.name.name==="data-om-id")return}const R=m.file&&m.file.opts&&m.file.opts.filename||"?";const O=w.loc&&w.loc.start;const e=`jsx:${R}:${w.start??0}:${O?O.line:0}:${O?O.column+1:0}`;w.attributes.push(h.jsxAttribute(h.jsxIdentifier("data-om-id"),h.stringLiteral(e)))}}}))}const p="om-text-extract";let f=false;if(B&&n&&n.registerPlugin&&!(n.availablePlugins&&n.availablePlugins[p])){const h=window.React;if(h&&h.useSyncExternalStore&&h.createElement){f=true;const y={};const m=new Set;let w=0;window.__omTextO=y;window.__omTextSet=(e)=>{for(const t in e){const a=e[t];if(a==null)delete y[t];else y[t]=a}w++;m.forEach((t)=>t())};const R=(e)=>{m.add(e);return()=>m.delete(e)};const O=()=>w;window.__OmT=function e(t){h.useSyncExternalStore(R,O,O);return h.createElement("span",{"data-om-text":t.i,className:"__om-t"},t.i in y?y[t.i]:t.children)};n.registerPlugin(p,({types:e})=>{const t={style:1,script:1,noscript:1,textarea:1,title:1,option:1,text:1,tspan:1,textPath:1};const a={placeholder:1,alt:1,title:1,label:1,"aria-label":1,"aria-description":1,"aria-placeholder":1};const u=(o,r)=>e.logicalExpression("??",e.memberExpression(e.logicalExpression("||",e.memberExpression(e.identifier("window"),e.identifier("__omTextO")),e.objectExpression([])),e.stringLiteral(o),true),r);const s=(o)=>o.file&&o.file.opts&&o.file.opts.filename||"?";const S=(o)=>o.file&&o.file.code||"";const _=(o,r)=>{const l=(c)=>c&&c.start!=null&&c.end!=null&&(c.type==="StringLiteral"||c.type==="TemplateLiteral"&&c.expressions.length===0)?[c.start,c.end]:null;const i=l(r);if(i)return i;if(r&&r.type==="Identifier"){const c=o.scope.getBinding(r.name);if(c&&c.constant&&c.path.node.type==="VariableDeclarator"){return l(c.path.node.init)}}return null};const v=(o,r,l)=>{const i=o.node;let c=false;const k=(E,T)=>{c=true;return e.jsxElement(e.jsxOpeningElement(e.jsxIdentifier("__OmT"),[e.jsxAttribute(e.jsxIdentifier("i"),e.stringLiteral(E))],false),e.jsxClosingElement(e.jsxIdentifier("__OmT")),[T],false)};const b=i.children.map((E)=>{if(E.type==="JSXText"){if(E.start==null||E.end==null)return E;const T=l.slice(E.start,E.end);const j=T.length-T.trimStart().length;const L=T.length-T.trimEnd().length;if(j+L>=T.length)return E;return k(`txt:${r}:${E.start+j}:${E.end-L}`,E)}if(E.type==="JSXExpressionContainer"){const T=_(o,E.expression);if(T)return k(`str:${r}:${T[0]}:${T[1]}`,E)}return E});if(c)i.children=b};return{visitor:{JSXOpeningElement(o,r){const l=o.node;const i=s(r);const c={};for(let k=0;k<l.attributes.length;k++){const b=l.attributes[k];if(b.type!=="JSXAttribute"||!b.name)continue;const E=b.name.name;if(!a[E])continue;if(!b.value||b.value.type!=="StringLiteral")continue;if(b.value.start==null||b.value.end==null)continue;const T=`txt:${i}:${b.value.start}:${b.value.end}`;c[E]=T;b.value=e.jsxExpressionContainer(u(T,e.stringLiteral(b.value.value)))}if(Object.keys(c).length){l.attributes.push(e.jsxAttribute(e.jsxIdentifier("data-om-text-attrs"),e.stringLiteral(JSON.stringify(c))))}},JSXElement(o,r){const l=o.node.openingElement;const i=l&&l.name&&l.name.name;if(i==="__OmT")return;if(typeof i==="string"&&t[i])return;v(o,s(r),S(r))},JSXFragment(o,r){v(o,s(r),S(r))}}}})}}const g=f?["transform-react-jsx-source",d,p]:["transform-react-jsx-source",d];document.querySelectorAll('script[type="text/babel"],script[type="text/jsx"]').forEach((h,y)=>{const m=h.getAttribute("data-plugins")||"";const w=g.filter((R)=>m.indexOf(R)<0);if(w.length){h.setAttribute("data-plugins",m?`${m},${w.join(",")}`:w.join(","))}if(!h.hasAttribute("data-filename")){h.setAttribute("data-filename",h.getAttribute("src")||`inline-${y}`)}})});var A=window.parent;var U="not editable here — open the project in the Claude Design editor to save";var W=()=>Promise.resolve({persisted:false,noHost:true,reason:U});var H=W;var M="data/storage.json";var z=()=>{try{const n=new URL(document.baseURI);const d=n.pathname.match(/\/projects\/([^/]+)\/serve\//);if(d)return d[1];return n.hostname.split(".")[0]||""}catch{return location.hostname.split(".")[0]||""}};var Z=()=>{try{const n=new URL(document.baseURI);const d=n.pathname.indexOf("/serve/");if(d>=0)return n.origin+n.pathname.slice(0,d+"/serve/".length)+M}catch{}return"./"+M};var x=null;var N=()=>{if(!x){x=fetch(Z(),{cache:"no-store"}).then((n)=>{if(n.ok)return n.text();return n.status===404?"":null}).catch(()=>null).then((n)=>{if(n===null){x=null;return null}const d=new Map;if(!n)return d;let p;try{p=JSON.parse(n)}catch{console.warn("[omelette.storage] "+M+" is not valid JSON; treating the store as unreadable so a save cannot overwrite the "+"hand-edited bytes. Fix the JSON (or delete the file) to re-enable persistence.");x=null;return null}if(p===null||typeof p!=="object"||Array.isArray(p)){console.warn("[omelette.storage] "+M+" doesn't hold a JSON object; treating the store as unreadable so a save cannot "+"overwrite the hand-edited bytes. Make the top level a JSON object to re-enable persistence.");x=null;return null}const f=p;if("data"in f){const g=f.data;if(g===null||typeof g!=="object"||Array.isArray(g)){console.warn("[omelette.storage] "+M+' has a "data" field that is not a JSON object; treating the store as unreadable so a '+'save cannot overwrite the hand-edited bytes. Make "data" a JSON object to re-enable persistence.');x=null;return null}const h=f._meta;const y=h!==null&&typeof h==="object"?h.project:undefined;if(typeof y==="string"&&y!==""&&y!==z())return d;for(const m of Object.keys(g))d.set(m,g[m]);return d}for(const g of Object.keys(f)){if(g!=="_meta")d.set(g,f[g])}return d})}return x};var F=(n)=>H(M,JSON.stringify({_meta:{project:z(),version:1},data:Object.fromEntries(n)},null,2));var D=Promise.resolve();var $=(n)=>{const d=D.then(n);D=d.then(()=>{return},()=>{return});return d};var V=/sk-(?:ant-)?[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|xox[a-z]-[A-Za-z0-9][A-Za-z0-9-]{9,}|AIza[0-9A-Za-z_-]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/;var Y=/password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token|credential/i;var Q=(n,d,p)=>{if(V.test(d)||Y.test(n)&&typeof p==="string"&&p.length>=8){console.warn('[omelette.storage] the value for "'+n+'" looks like a credential. The storage file is a plaintext project file — visible to '+"everyone with project access and copied when the project is duplicated. Do not store secrets here.")}};var q={persisted:false,reason:"could not load the existing store — not overwriting it"};var X={persisted:false,reason:"stored value changed since a failed read — re-read this key before saving"};var P=new Set;var ee={get:(n)=>{if(typeof n!=="string"){return Promise.reject(new TypeError("storage.get: key must be a string"))}return $(N).then((d)=>{if(d===null){P.add(n);return null}P.delete(n);if(!d.has(n))return null;const p=d.get(n);return p==null?null:JSON.parse(JSON.stringify(p))})},set:(n,d)=>{if(typeof n!=="string"){return Promise.reject(new TypeError("storage.set: key must be a string"))}let p;try{p=JSON.stringify(d)}catch(g){return Promise.reject(new TypeError("storage.set: value must be JSON-serializable ("+String(g)+")"))}if(p===undefined){return Promise.reject(new TypeError("storage.set: value must be JSON-serializable"))}Q(n,p,d);const f=JSON.parse(p);return $(()=>N().then((g)=>{if(g===null)return q;if(P.has(n)){if(g.has(n))return X;P.delete(n)}g.set(n,f);return F(g)}))},delete:(n)=>{if(typeof n!=="string"){return Promise.reject(new TypeError("storage.delete: key must be a string"))}return $(()=>N().then((d)=>{if(d===null)return q;if(P.has(n)){if(d.has(n))return X;P.delete(n)}d.delete(n);return F(d)}))},keys:()=>$(N).then((n)=>n===null?[]:Array.from(n.keys()))};window.omelette={writeFile:(n,d)=>H(n,d).then((p)=>{if(!p.persisted&&!p.noHost){throw new Error(p.reason||"write failed")}}),storage:ee};if(A&&A!==window){const n=(e,t)=>{try{A.postMessage({__omelette_log:true,type:e,data:t},"*")}catch{}};["log","warn","error"].forEach((e)=>{const t=console[e];console[e]=(...a)=>{const u=a.map((s)=>{try{return typeof s==="object"?JSON.stringify(s):String(s)}catch{try{return String(s)}catch{return"[unstringifiable]"}}}).join(" ");n(e,u);t.apply(console,a)}});window.addEventListener("error",(e)=>{const t=e.target;if(t&&t!==window&&t.tagName){const a=t.src||t.href||"";n("resource_error",`${t.tagName} failed to load: ${a}`)}else{n("error",`${e.message||"Unknown error"} at ${e.filename||"?"}:${e.lineno||0}:${e.colno||0}`)}},true);window.addEventListener("unhandledrejection",(e)=>{const t=e.reason;const a=t instanceof Error?`${t.message} ${t.stack}`:String(t);n("error",`Unhandled rejection: ${a}`)});window.addEventListener("click",(e)=>{if(e.defaultPrevented||e.button!==0)return;if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;const t=e.composedPath?e.composedPath():[];const a=["button","input","select","textarea","summary","label"];let u=null;for(const v of t){if(!(v instanceof Element))continue;if(v.localName==="a"){if(!(v instanceof HTMLAnchorElement))return;u=v;break}if(a.indexOf(v.localName)!==-1)return}if(!u)return;if(u.isContentEditable)return;const s=u.closest("[contenteditable]");if(s&&s.getAttribute("contenteditable")!=="false")return;const S=(u.getAttribute("target")||"_self").toLowerCase();if(S!=="_self"&&S!=="_top"&&S!=="_parent")return;let _;try{_=new URL(u.href)}catch{return}if(_.protocol!=="http:"&&_.protocol!=="https:")return;if(location.origin==="null")return;if(_.origin===location.origin)return;e.preventDefault();window.open(_.href,"_blank","noopener,noreferrer")});const d=()=>{try{A.postMessage({type:"omelette:height",height:document.documentElement.scrollHeight},"*")}catch{}};if(window.ResizeObserver)new ResizeObserver(d).observe(document.documentElement);const p=()=>{d();if(!document.querySelector('script[type="text/babel"],script[type="text/jsx"]'))return;const e=()=>document.getElementById("root")||document.querySelector("body > div[id]");const t=e()?.firstElementChild??null;let a=0;const u=()=>{const s=e();if(s&&s.firstElementChild!==t||++a>30){d();return}setTimeout(u,100)};setTimeout(u,100)};if(document.readyState==="complete")p();else window.addEventListener("load",p);const f={};let g=0;const h=(e)=>new Promise((t,a)=>{if(!I.length){a(new Error("claude.complete: no parent origin"));return}const u=`c${++g}`;const s=()=>setTimeout(()=>{delete f[u];a(new Error(`claude.complete: no data for ${J/1000}s`))},J);const S=s();f[u]={resolve:t,reject:a,text:"",t:S,arm:s};try{for(const _ of I){A.postMessage({__om_api:true,id:u,body:e},_)}}catch(_){clearTimeout(S);delete f[u];a(_)}});const y=8;const m=async(e,t)=>{if(!Array.isArray(e.messages)){throw new Error("claude.complete: tools require a messages array")}const a=e.messages.slice();const u={...e,tools:e.tools.map((_)=>{if(_===null||typeof _!=="object")return _;const v={};for(const o of Object.keys(_)){if(typeof _[o]!=="function")v[o]=_[o]}return v})};const s=u.tool_choice;const S=s!=null&&(s.type==="any"||s.type==="tool")?{...u,tool_choice:s.disable_parallel_tool_use!==undefined?{type:"auto",disable_parallel_tool_use:s.disable_parallel_tool_use}:{type:"auto"}}:u;for(let _=0;_<y;_++){const v=await h({..._===0?u:S,messages:a});const o=v.message;const r=o&&Array.isArray(o.content)?o.content:null;const l=r?r.filter((c)=>c?.type==="tool_use"):[];if(o?.stop_reason!=="tool_use"||l.length===0){return v.text}const i=[];for(const c of l){const k=t.get(c.name);if(!k){i.push({type:"tool_result",tool_use_id:c.id,content:`no handler for tool "${c.name}"`,is_error:true});continue}try{const b=await k(c.input);const E=typeof b==="string"?b:O(b)??"";i.push({type:"tool_result",tool_use_id:c.id,content:E})}catch(b){i.push({type:"tool_result",tool_use_id:c.id,content:String(b?.message??b??"tool handler failed"),is_error:true})}}a.push({role:"assistant",content:r},{role:"user",content:i})}throw new Error(`claude.complete: exceeded ${y} tool turns`)};window.claude={complete(e){const t=e;if(t!==null&&typeof t==="object"&&Array.isArray(t.tools)&&t.tools.some((a)=>a!==null&&typeof a==="object"&&typeof a.run==="function")){const a=new Map;for(const u of t.tools){if(u!==null&&typeof u==="object"&&typeof u.run==="function"){a.set(String(u.name),u.run)}}return m(t,a)}return h(e).then((a)=>a.text)}};const w={};let R=0;H=(e,t)=>new Promise((a)=>{if(!I.length){a({persisted:false,noHost:true,reason:U});return}const u=`f${++R}`;const s=setTimeout(()=>{delete w[u];a({persisted:false,noHost:true,reason:U})},G);w[u]={settle:a,t:s};try{for(const S of I){A.postMessage({__om_file:true,id:u,op:"write",path:e,content:t},S)}}catch{clearTimeout(s);delete w[u];a({persisted:false,noHost:true,reason:U})}});const O=(e)=>{try{return JSON.stringify(e)}catch{return JSON.stringify(String(e))}};window.addEventListener("message",(e)=>{if(I.indexOf(e.origin)<0)return;if(e.source!==A)return;const t=e.data;if(!t)return;if(t.type==="omelette-preview-refresh"){if(typeof t.token!=="string"||!/^[0-9a-f.-]+(\.(rc|pr-[0-9]+))?(\.[0-9]+\.[0-9a-f]{16})?$/.test(t.token))return;const s=Math.max(1,Math.floor((t.expiresAt||0)-Date.now()/1000));document.cookie="__Host-omelette-preview="+t.token+"; Path=/; Secure; SameSite=None; Partitioned; Max-Age="+s;C();return}if(t.__om_file_r){const s=w[t.id];if(!s)return;clearTimeout(s.t);delete w[t.id];s.settle(t.ok?{persisted:true}:{persisted:false,reason:t.error||"write failed"});return}if(t.__om_api_r){const s=f[t.id];if(!s)return;if(t.error!=null){clearTimeout(s.t);delete f[t.id];s.reject(new Error(t.error));return}if(t.chunk!=null){clearTimeout(s.t);s.t=s.arm();s.text+=t.chunk;return}if(t.done){clearTimeout(s.t);delete f[t.id];s.resolve({text:t.text!=null?t.text:s.text,message:t.message});return}return}if(!t.__om_eval)return;const a=t;const u=(s)=>{e.source.postMessage({...s,__om_eval_r:1,id:a.id},e.origin)};try{const s=(0,eval)(a.code);if(s&&typeof s.then==="function"){s.then((S)=>u({ok:1,v:O(S)}),(S)=>u({ok:0,e:String(S)}))}else{u({ok:1,v:O(s)})}}catch(s){u({ok:0,e:String(s)})}})}})();
+</script>
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+  a { color: #B4522F; text-decoration: none; }
+  a:hover { color: #8E3F23; }
+</style>
+</helmet>
+
+<div style="position:fixed;inset:0;z-index:-1;background:#EDEBE6"></div>
+
+<div style="width:1920px;margin:0 auto;padding:64px 72px 96px;font-family:'Public Sans',system-ui,sans-serif;color:#1B1A18">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:960px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · mobile ui 2.0 · rewind &amp; fork · v1</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">Session Rewind + Fork v1</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Going back to an earlier point in a conversation, either by rewinding the session or forking a parallel one. Entry is a long press on a user message — no new navigation, no new tab. The whole design turns on one fact the confirm sheet must land in under two seconds: the transcript rewinds, the files do not.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div><div style="color:#1B1A18">390 × 844</div><div>dark · EN</div></div>
+      <div><div style="color:#1B1A18">4 screens</div><div>9 frames</div></div>
+      <div><div style="color:#1B1A18">2 routes</div><div>rewind · fork</div></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0 36px;border-bottom:1px solid #C9C5BD;padding:18px 0 20px;margin-top:34px;border-top:1px solid #C9C5BD">
+    <div>
+      <div style="font:600 13px/1.4 'Public Sans',sans-serif">Files are the loud part</div>
+      <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The warning strip is fixed in the sheet, in bad tone, above the buttons — not a footnote and not dismissible. It names the one thing rewinding does not do and points at the surface that knows: the Git tab.</p>
+    </div>
+    <div>
+      <div style="font:600 13px/1.4 'Public Sans',sans-serif">A dry run, not a dialog</div>
+      <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The cost is counted before it is paid: four turns, eleven tool calls, set as a stat row you read at a glance. The sheet has one destructive filled button and a quiet Cancel, never two equal choices.</p>
+    </div>
+    <div>
+      <div style="font:600 13px/1.4 'Public Sans',sans-serif">Rewind hides, fork keeps</div>
+      <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">One explainer row states which it is, in words, in both the sheet and the list. Rewound originals are tucked into a collapsed group and stay recoverable; forks are ordinary sessions with a lineage caption.</p>
+    </div>
+    <div>
+      <div style="font:600 13px/1.4 'Public Sans',sans-serif">Borrowed vocabulary</div>
+      <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Message rows, tool bands, the two-layer composer and the session list row are unchanged from Chat Master v2 and A Master Core v1. New here: the lifted message, the menu, the sheet, the lineage banner, one collapsed group.</p>
+    </div>
+  </div>
+
+  <div style="padding-top:48px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">A</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Entry · long press a user message</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">The message lifts out of the dimmed transcript and keeps its own reading style; the menu hangs off it.</span>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">A1 · enabled</div>
+        <dc-import name="RewindForkDevice" screen="menu" hint-size="390px,844px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Copy stays where it has always been, first and captionless. The two new items each carry one line of what they do, because <em>rewind</em> and <em>fork</em> are not words a user should have to guess at. Turn number is printed on the lifted message so the anchor is unambiguous.</p>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">A2 · agent running · disabled</div>
+        <dc-import name="RewindForkDevice" screen="menuDisabled" hint-size="390px,844px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Only the two new items grey out — copying a message while the agent works is still fine. The reason is written once, at the foot of the menu, next to the running mark, and the composer already shows Stop, so the fix is visible on the same screen.</p>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">A3 · stale anchor · error</div>
+        <dc-import name="RewindForkDevice" screen="stale" hint-size="390px,844px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">If the transcript moved under the sheet, the action fails closed: the menu and sheet dismiss, nothing is dropped, and the toast says what happened and what to do. Bad-tone hairline, no icon-only alarm, and it does not block the composer.</p>
+      </div>
+
+      <div style="width:342px;flex:none;padding-top:34px">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Entry rules</div>
+        <div style="border-top:1px solid #C9C5BD;font:400 13px/1.6 'Public Sans',sans-serif;color:#3A3730">
+          <sc-for list="{{ entryRules }}" as="r" hint-placeholder-count="5">
+            <div style="display:grid;grid-template-columns:22px 1fr;gap:12px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.6 'JetBrains Mono',monospace;color:#8A857C">{{ r.n }}</span><span style="text-wrap:pretty">{{ r.text }}</span></div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">B</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Confirm · the mandatory dry run</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Same four blocks in both variants, in the same order: cost, file warning, what happens to this session, decide.</span>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">B1 · rewind</div>
+        <dc-import name="RewindForkDevice" screen="confirmRewind" hint-size="390px,844px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The lifted message stays on screen above the sheet, so the sheet never asks about an anchor you can no longer see. Cancel is a hairline at two fifths the width of the filled action — reachable, obviously secondary.</p>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">B2 · fork</div>
+        <dc-import name="RewindForkDevice" screen="confirmFork" hint-size="390px,844px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Three strings change: title, explainer, button. Everything else is identical, including the file warning — a fork does not roll files back either, and pretending otherwise would be the one mistake worth avoiding here.</p>
+      </div>
+
+      <div style="flex:1;min-width:560px;display:grid;grid-template-columns:repeat(2,1fr);gap:0 40px;padding-top:34px">
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Reading order, top to bottom</div>
+          <div style="border-top:1px solid #C9C5BD;font:400 13px/1.6 'Public Sans',sans-serif;color:#3A3730">
+            <sc-for list="{{ sheetOrder }}" as="r" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:22px 1fr;gap:12px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.6 'JetBrains Mono',monospace;color:#8A857C">{{ r.n }}</span><span style="text-wrap:pretty">{{ r.text }}</span></div>
+            </sc-for>
+          </div>
+        </div>
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Held lines</div>
+          <div style="background:#E4E1DA;border-radius:11px;padding:15px 16px">
+            <p style="margin:0;font:400 12.5px/1.7 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Warning, verbatim in both variants: <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">Files are NOT rolled back — only the conversation rewinds. Check the Git tab for file state.</span></p>
+            <p style="margin:12px 0 0;font:400 12.5px/1.7 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Explainer, rewind: <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">The current session will be tucked away (recoverable)</span>. Fork: <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">The current session stays untouched</span>.</p>
+            <p style="margin:12px 0 0;font:400 12.5px/1.7 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The counts are a dry run supplied by the caller. If the daemon cannot count them, the sheet does not guess and does not show the card — it shows nothing in that slot rather than a zero.</p>
+          </div>
+          <p style="margin:14px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">There is no third route in this sheet. Recovering a rewound original happens in the session list, where the tucked-away sessions actually live.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">C</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Landing · the new session</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Where you came from, and the message you were retrying, already in the field.</span>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">C1 · after rewind</div>
+        <dc-import name="RewindForkDevice" screen="afterRewind" hint-size="390px,844px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The lineage banner replaces the context row rather than stacking on top of it, so the header does not grow a second line of chrome. The original title is the tap target back. The composer holds the old wording as a selection: one keystroke replaces it, or you edit in place.</p>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">C2 · after fork</div>
+        <dc-import name="RewindForkDevice" screen="afterFork" hint-size="390px,844px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Identical mechanics, one word different in the banner: <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">Fork of</span> rather than <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">Rewound from</span>. The transcript above the anchor is shared history and reads exactly as it did in the parent.</p>
+      </div>
+
+      <div style="flex:1;min-width:560px;display:grid;grid-template-columns:repeat(2,1fr);gap:0 40px;padding-top:34px">
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Landing rules</div>
+          <div style="border-top:1px solid #C9C5BD;font:400 13px/1.6 'Public Sans',sans-serif;color:#3A3730">
+            <sc-for list="{{ landingRules }}" as="r" hint-placeholder-count="4">
+              <div style="display:grid;grid-template-columns:22px 1fr;gap:12px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.6 'JetBrains Mono',monospace;color:#8A857C">{{ r.n }}</span><span style="text-wrap:pretty">{{ r.text }}</span></div>
+            </sc-for>
+          </div>
+        </div>
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Open question for review</div>
+          <div style="background:#E4E1DA;border-radius:11px;padding:15px 16px">
+            <p style="margin:0;font:400 12.5px/1.7 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Titles. The frames assume the new session takes a derived title (<span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">Replay ordering, take 2</span>) so the list can tell the two apart without reading captions. Inheriting the parent title verbatim is the other option, and it makes the list ambiguous. Worth a decision before build.</p>
+            <p style="margin:12px 0 0;font:400 12.5px/1.7 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The banner is not dismissible in these frames. If it should be, it needs a rule for where lineage goes afterwards — Session info is the obvious home.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">D</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Session list · where the originals go</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">One collapsed group at the foot of the list. Forks are not special and stay in Active.</span>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">D1 · collapsed</div>
+        <dc-import name="RewindForkDevice" screen="list" hint-size="390px,844px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The disclosure row sits below Recent and states the count, so nothing has silently disappeared. It is a muted row on the standard hairline, not a card, and it does not compete with New session.</p>
+      </div>
+
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">D2 · expanded</div>
+        <dc-import name="RewindForkDevice" screen="listExpanded" hint-size="390px,844px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Tucked-away originals keep the list row, dropped one step in weight and colour: hollow mark, quieter title, no body or meta line, and a caption naming where the conversation continued. The chevron opens the original read-only; recovery is its own decision inside it.</p>
+      </div>
+
+      <div style="flex:1;min-width:560px;padding-top:34px">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Row vocabulary, unchanged from A Master Core v1</div>
+        <div style="border-top:1px solid #C9C5BD">
+          <div style="display:grid;grid-template-columns:150px 118px 1fr;gap:0 28px;padding:11px 0;border-bottom:1px solid #C9C5BD;font:500 10.5px/1.3 'JetBrains Mono',monospace;letter-spacing:.13em;text-transform:uppercase;color:#8A857C">
+            <span>Row</span><span>Mark</span><span>Caption</span>
+          </div>
+          <sc-for list="{{ rowKinds }}" as="k" hint-placeholder-count="4">
+            <div style="display:grid;grid-template-columns:150px 118px 1fr;gap:0 28px;padding:12px 0;border-bottom:1px solid #DAD6CE;font:400 12.5px/1.55 'Public Sans',sans-serif;color:#3A3730">
+              <span style="font-weight:600">{{ k.row }}</span>
+              <span style="color:#54504A">{{ k.mark }}</span>
+              <span style="text-wrap:pretty;color:#54504A">{{ k.caption }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <p style="margin:16px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;max-width:620px;text-wrap:pretty">No count badge, no duration, no branch health — the list prints only facts the daemon already supplies to it today. The group header is the only new string on this screen.</p>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:22px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">E</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">State table</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Every state this feature can be in, what the user sees, and what it is forbidden to do.</span>
+    </div>
+
+    <div style="border-top:1px solid #C9C5BD">
+      <div style="display:grid;grid-template-columns:190px 200px 1.1fr 1fr;gap:0 28px;padding:11px 0;border-bottom:1px solid #C9C5BD;font:500 10.5px/1.3 'JetBrains Mono',monospace;letter-spacing:.13em;text-transform:uppercase;color:#8A857C">
+        <span>State</span><span>Trigger</span><span>Shown</span><span>Never</span>
+      </div>
+      <sc-for list="{{ states }}" as="s" hint-placeholder-count="6">
+        <div style="display:grid;grid-template-columns:190px 200px 1.1fr 1fr;gap:0 28px;padding:12px 0;border-bottom:1px solid #DAD6CE;font:400 12.5px/1.55 'Public Sans',sans-serif;color:#3A3730">
+          <span style="font-weight:600">{{ s.name }}</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#54504A">{{ s.trigger }}</span>
+          <span style="text-wrap:pretty">{{ s.shown }}</span>
+          <span style="text-wrap:pretty;color:#54504A">{{ s.never }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="margin-top:30px;border-top:1px solid #C9C5BD;padding-top:16px;font:400 12.5px/1.7 'Public Sans',sans-serif;color:#6E695F;max-width:1180px;text-wrap:pretty">
+      <span style="font-weight:600;color:#1B1A18">Scope.</span> Chat, Sessions and the composer keep their contracts in <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">Chat Master v2</span> and <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">A Master Core v1</span>; this file adds four surfaces to them and changes none of their rules. Git state is referenced, never restated — <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">Session Git Tab v1</span> owns what files actually did. Not designed here: recovering a tucked-away original from inside it, deleting a rewound session, or rewinding on the Windows tray surface.
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const n = (arr) => arr.map((text, i) => ({ n: '0' + (i + 1), text }));
+    return {
+      entryRules: n([
+        'Long press is the only entry. No new toolbar button, no swipe action, nothing added to Quick Actions.',
+        'Only user messages carry the two new items — you cannot rewind to the middle of an agent turn.',
+        'The lifted message keeps the transcript type and its right-aligned YOU label; it gains a turn number, a surface and elevation.',
+        'The menu opens below the message when there is room, above it when there is not, and is right-aligned to the message.',
+        'Disabled items stay visible and keep their captions, greyed. The reason is stated once at the foot of the menu.'
+      ]),
+      sheetOrder: n([
+        'Title, naming the action and the anchor: Rewind from this message?',
+        'Cost, as two large counts under one Will drop label. Read in about a second.',
+        'File warning, fixed, bad tone, with the Git tab as its link out.',
+        'What happens to this session — tucked away, or untouched.',
+        'Decide. Quiet Cancel, filled terracotta action, no third option.'
+      ]),
+      landingRules: n([
+        'The banner replaces the collapsed context row; it never stacks below it.',
+        'Lineage is one line: relation, original title as the link, and the turn it branched at.',
+        'The draft arrives selected, not just typed — the retry is meant to be reworded.',
+        'Transcript above the anchor is shared history and is not re-labelled or re-timestamped.'
+      ]),
+      rowKinds: [
+        { row: 'Running', mark: 'filled dot', caption: 'none' },
+        { row: 'Fork', mark: 'filled dot', caption: '⑂ fork of ‹parent title›' },
+        { row: 'Recent', mark: 'hollow dot', caption: 'none' },
+        { row: 'Rewound original', mark: 'hollow dot, quiet', caption: '↩ rewound → ‹new title›, no meta line' }
+      ],
+      states: [
+        { name: 'Menu available', trigger: 'long press · agent idle', shown: 'Copy plus the two new items with captions, message lifted out of a dimmed transcript.', never: 'Rewind offered on an agent message.' },
+        { name: 'Menu disabled', trigger: 'long press · agent running', shown: 'Both new items greyed, one footer line: Stop the current turn first. Copy still works.', never: 'Hiding the items, or a toast fired after the tap instead.' },
+        { name: 'Confirm · rewind', trigger: 'tap Rewind from here', shown: 'Counts, file warning, tucked-away explainer, Cancel and filled Rewind.', never: 'Skipping the sheet, even for one dropped turn.' },
+        { name: 'Confirm · fork', trigger: 'tap Fork from here', shown: 'Same sheet; title, explainer and button read fork. Warning unchanged.', never: 'Implying a fork restores files.' },
+        { name: 'Stale anchor', trigger: 'transcript changed under the sheet', shown: 'Everything dismisses, nothing is dropped, toast: The transcript changed — reload and try again.', never: 'Partial rewind, or silently rewinding to a shifted anchor.' },
+        { name: 'Landed', trigger: 'rewind or fork committed', shown: 'New session with the lineage banner and the original wording selected in the composer.', never: 'A success dialog, or losing the way back to the original.' },
+        { name: 'Originals tucked', trigger: 'after any rewind', shown: 'Collapsed Rewound sessions (n) at the foot of the list; expanding shows quiet rows with their destination.', never: 'Deleting the original, or leaving the list without a count.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -49,8 +49,22 @@ lock 为 07-10 增，workflow/fgtask/bgcontinue 为 07-11 增、在 2.1.206 上�
           被当成路径 → 起不来），所以改成只给 strict。等价性一漂移＝guest/bridge 静默拿回 owner 已认证的
           MCP 集成（#115 最大的洞），且不会有任何报错
 
+  rewind  会话回溯/分叉的 CLI 原生能力（issue #282 的技术路线基座）。三个 flag 承载它，且后两个
+          **被 .hideHelp() 藏起来、`claude --help` 里查不到**（2.1.228 在 bundle 里实证），所以只能靠
+          本探针盯着它们别消失：
+            --fork-session          resume 时铸新 session id，原 transcript 逐字节不动
+            --resume-session-at <chain uuid>   只加载到该链条目为止（CLI 内部 messages.slice(0, i+1)），
+                                    等价于 Agent SDK 的 resumeSessionAt —— 「任意点截断续聊」的原生实现
+            --resume-drops-turn <prompt uuid>  安全声明：被丢弃区间若混入未声明的东西就拒绝启动
+          两条反直觉事实决定 daemon 怎么用它：① **不带 --fork-session 时截断 resume 不重写文件，而是
+          往原 jsonl 追加一条新分支**（被丢弃的行全都留在盘上，锚点行出现多个子节点）—— 线性回放
+          transcript 会把两条分支都渲染出来，必须按 parentUuid 走链或认 last-prompt.leafUuid；
+          ② fork 出的 transcript **不带任何 lineage 字段**（不写 parentSessionId/forkedFrom，连原 sid
+          都不出现），血缘只能由 daemon 自己记账。任一 flag 消失 = #282 的回溯要退回「手工截断 jsonl
+          副本」的备选路线（已实证可行：CLI 按文件名认会话，行内 sessionId 改不改都接受）。
+
 用法：python3 scripts/probe-claude-wire.py [steer|queue|ask|ask_plan|task|workflow|lock|fgtask|bgcontinue|
-      skill|scope|scope_acceptedits|settingsources|cleanroom|entrypoint|all]（默认 all）
+      skill|scope|scope_acceptedits|settingsources|cleanroom|entrypoint|rewind|all]（默认 all）
       CLAUDE_BIN=/path/to/claude 可覆盖二进制。失败退出码非 0。
 探针在 /tmp/ccprobe 下起真实 claude 进程（bypassPermissions / default / acceptEdits），会消耗少量用量。
 """
@@ -425,6 +439,181 @@ def scenario_lock() -> bool:
     finally:
         if short_id:  # 释放持锁者，别把 blocked 的 bg agent 留在用户机器上
             subprocess.run([CLAUDE, "stop", short_id], capture_output=True, text=True, env=env, timeout=30)
+
+
+def _project_dir(cwd: str) -> str:
+    """cwd 对应的 ~/.claude/projects/<dirKey> —— 与 daemon 的 dirKey 编码规则一致。"""
+    return os.path.expanduser("~/.claude/projects/" + re.sub(r"[^A-Za-z0-9-]", "-", os.path.realpath(cwd)))
+
+
+def _chain_rows(path: str):
+    """transcript 里的「链条目」（带 uuid 的行）—— --resume-session-at 的锚点只能是这些行之一。
+    queue-operation / last-prompt / mode 这类边车行没有 uuid，截断时不参与定位。"""
+    out = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if r.get("uuid"):
+                out.append(r)
+    return out
+
+
+def _is_prompt_row(r) -> bool:
+    """真正的用户提问行（排除 tool_result 回填出来的 user 行）。"""
+    if r.get("type") != "user" or r.get("toolUseResult") is not None:
+        return False
+    content = (r.get("message") or {}).get("content")
+    if isinstance(content, str):
+        return True
+    return isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == "text" for b in content)
+
+
+def _rw_run(cwd: str, extra, text: str = "Reply with exactly: ok"):
+    """跑一次 daemon 同款旗子的一次性 turn，返回 (CompletedProcess, init 里的 session_id, 解析出的帧)。"""
+    env = dict(os.environ)
+    env.pop("CLAUDECODE", None)
+    env.pop("CLAUDE_CODE_ENTRYPOINT", None)
+    r = subprocess.run(
+        [CLAUDE, *BASE_ARGS, "--permission-mode", "default", *extra],
+        input=user_frame(text) + "\n", capture_output=True, text=True,
+        cwd=cwd, env=env, timeout=240,
+    )
+    sid, frames = None, []
+    for line in r.stdout.splitlines():
+        try:
+            j = json.loads(line)
+        except ValueError:
+            continue
+        frames.append(j)
+        if j.get("type") == "system" and j.get("subtype") == "init":
+            sid = j.get("session_id")
+    return r, sid, frames
+
+
+def scenario_rewind() -> bool:
+    print("── rewind：--fork-session / --resume-session-at / --resume-drops-turn（issue #282 路线基座）──")
+    # #282 要的「回到某条消息重开」在 CLI 上是有原生实现的，但两个关键 flag 被 .hideHelp() 藏了，
+    # `claude --help` 查不到 —— 它们随时可能被静默摘掉，所以钉在这里。断言全部是结构性的
+    # （新旧 session id、原文件字节、fork transcript 里出现/不出现哪些 uuid、退出码与错误文案），
+    # 不赌模型答什么，避免推理波动导致假红。
+    # 子目录名刻意短且不含 '-'：dirKey 把 '/' 和 '-' 都编码成 '-'，"ccprobe/rewind" 会与外部的
+    # "ccprobe-rewind" 撞进同一个 ~/.claude/projects 目录（已知的 dirKey 有损编码坑）。
+    cwd = os.path.join(WORKDIR, "rw")
+    os.makedirs(cwd, exist_ok=True)
+    NOTOOL = " Do not use any tools. Do not save anything to memory."
+
+    # ① 静态：三个 flag 还在 bundle 里（hidden flag 的消失不会有任何报错，只能这样早发现）
+    data = open(os.path.realpath(CLAUDE), "rb").read()
+    missing = [t.decode() for t in (b"--fork-session", b"--resume-session-at", b"--resume-drops-turn")
+               if t not in data]
+    ok = check("三个 flag 仍在 CLI bundle 里（后两个 --help 查不到）", not missing,
+               "all present" if not missing else f"missing: {missing}")
+    if missing:
+        return False
+
+    # ② 造一个两轮会话：轮1 记数字、轮2 记颜色。截断点取轮1 末尾 —— 轮2 是「要被丢弃的那一轮」。
+    r1, sid, _ = _rw_run(cwd, [], "Remember the number 7." + NOTOOL + " Reply with exactly: ok")
+    ok &= check("seed turn 1", r1.returncode == 0 and bool(sid), f"exit={r1.returncode} sid={sid}")
+    if not sid:
+        return False
+    r2, _, _ = _rw_run(cwd, ["--resume", sid], "Remember the color blue." + NOTOOL + " Reply with exactly: ok")
+    ok &= check("seed turn 2 (same session id, no fork)", r2.returncode == 0, f"exit={r2.returncode}")
+
+    proj = _project_dir(cwd)
+    orig = os.path.join(proj, sid + ".jsonl")
+    if not check("seed transcript on disk", os.path.isfile(orig), orig):
+        return False
+    chain = _chain_rows(orig)
+    prompts = [i for i, r in enumerate(chain) if _is_prompt_row(r)]
+    if not check("seed has two user prompts (anchor computable)", len(prompts) >= 2,
+                 f"{len(prompts)} prompt row(s) in {len(chain)} chain entries"):
+        return False
+    t1_prompt = chain[prompts[0]]["uuid"]
+    t2_prompt = chain[prompts[1]]["uuid"]
+    t1_last = chain[prompts[1] - 1]["uuid"]  # 轮1 的最后一条链条目 = 截断锚点
+    pristine = open(orig, "rb").read()
+
+    def unchanged() -> bool:
+        return open(orig, "rb").read() == pristine
+
+    # ③ 纯 fork：铸新 id，原 transcript 逐字节不动
+    rf, fork_sid, _ = _rw_run(cwd, ["--resume", sid, "--fork-session"])
+    ok &= check("--fork-session 铸新 session id", rf.returncode == 0 and bool(fork_sid) and fork_sid != sid,
+                f"exit={rf.returncode} new={fork_sid}")
+    ok &= check("--fork-session 不动原 transcript（逐字节）", unchanged(), f"{len(pristine)} byte(s)")
+
+    # ④ 截断 fork：#282 的主路线 —— 只保留锚点及之前，轮2 必须从上下文里彻底消失
+    rt, trunc_sid, _ = _rw_run(cwd, ["--resume", sid, "--resume-session-at", t1_last, "--fork-session"])
+    ok &= check("--resume-session-at + --fork-session 启动成功并铸新 id",
+                rt.returncode == 0 and bool(trunc_sid) and trunc_sid not in (sid, fork_sid),
+                f"exit={rt.returncode} new={trunc_sid} stderr={rt.stderr.strip()[:80]!r}")
+    ok &= check("截断 fork 同样不动原 transcript", unchanged(), f"{len(pristine)} byte(s)")
+    if trunc_sid:
+        tpath = os.path.join(proj, trunc_sid + ".jsonl")
+        tuuids = [r.get("uuid") for r in _chain_rows(tpath)] if os.path.isfile(tpath) else []
+        ok &= check("截断副本保留了锚点及之前（轮1 在）", t1_last in tuuids,
+                    f"{len(tuuids)} chain entries, anchor present={t1_last in tuuids}")
+        ok &= check("截断副本丢掉了锚点之后（轮2 不在）", t2_prompt not in tuuids,
+                    f"dropped turn-2 prompt {t2_prompt[:8]}… present={t2_prompt in tuuids}")
+        ok &= check("截断副本在锚点后续写了新一轮（可继续对话）", len(tuuids) > tuuids.index(t1_last) + 1
+                    if t1_last in tuuids else False, f"{len(tuuids)} chain entries")
+        # blood line：fork 不写任何 lineage 字段（2.1.228 实证）。若将来 CLI 补上了，是良性漂移，
+        # 只留痕不判红 —— daemon 无论如何都得自己记账，多一个字段不会让既有逻辑变坏。
+        if os.path.isfile(tpath):
+            has_lineage = sid in open(tpath, encoding="utf-8").read()
+            print(f"     · fork lineage census: 原 sid 出现在 fork transcript 里 = {has_lineage}"
+                  f"（2.1.228 为 False —— 血缘只能 daemon 自己记）")
+
+    # ⑤ 锚点不存在时必须启动即拒（daemon 传了个陈旧 uuid 时要拿到明确失败，而不是静默全量重放）
+    rb, rb_sid, rb_frames = _rw_run(cwd, ["--resume", sid, "--resume-session-at",
+                                          "00000000-0000-4000-8000-000000000000", "--fork-session"])
+    # 拒绝形态：exit 1 + 一个 is_error 的 result 帧，且**没有 init 帧**（turn 根本没起来）。
+    # 不断言 stdout 为空 —— 用户自己的 SessionStart 钩子会在 stdout 上留 hook_started/hook_response 帧。
+    err_result = [j for j in rb_frames if j.get("type") == "result" and j.get("is_error")]
+    ok &= check("未知锚点 uuid → exit 1 且没有 init 帧（turn 未启动）",
+                rb.returncode == 1 and rb_sid is None,
+                f"exit={rb.returncode} init_sid={rb_sid}")
+    ok &= check("未知锚点在 stdout 上给出结构化 is_error result 帧",
+                bool(err_result) and err_result[0].get("subtype") == "error_during_execution",
+                f"{len(err_result)} error result(s), subtype="
+                f"{err_result[0].get('subtype') if err_result else 'none'}")
+    ok &= check("未知锚点的错误文案", "No message found with message.uuid of:" in rb.stderr,
+                repr(rb.stderr.strip())[:110])
+
+    # ⑥ --resume-drops-turn 护栏：声明「这次只丢弃哪一轮」，对不上就拒绝启动。
+    #    daemon 若要做「撤回上一轮」，这是防止连坐丢掉排队消息/后台通知的现成安全网。
+    rok, drop_sid, _ = _rw_run(cwd, ["--resume", sid, "--resume-session-at", t1_last,
+                                     "--resume-drops-turn", t2_prompt, "--fork-session"])
+    ok &= check("drops-turn 声明正确 → 放行", rok.returncode == 0 and bool(drop_sid),
+                f"exit={rok.returncode} stderr={rok.stderr.strip()[:80]!r}")
+    rno, _, _ = _rw_run(cwd, ["--resume", sid, "--resume-session-at", t1_last,
+                              "--resume-drops-turn", t1_prompt, "--fork-session"])
+    ok &= check("drops-turn 声明错误 → exit 1 拒绝启动", rno.returncode == 1,
+                f"exit={rno.returncode}")
+    ok &= check("drops-turn 拒绝文案", "Resume rejected by --resume-drops-turn" in rno.stderr,
+                repr(rno.stderr.strip())[:110])
+
+    # ⑦ 反直觉的那条：不带 --fork-session 的截断 resume **不重写文件，而是长出第二条分支**。
+    #    被丢弃的行还在盘上，锚点因此有了多个子节点 —— 线性回放 transcript 会同时渲染两条分支。
+    #    这条放最后跑，因为它是本场景里唯一会改动 seed 的操作。
+    rn, same_sid, _ = _rw_run(cwd, ["--resume", sid, "--resume-session-at", t1_last])
+    ok &= check("不带 fork 的截断 resume 沿用原 session id", rn.returncode == 0 and same_sid == sid,
+                f"exit={rn.returncode} sid={same_sid}")
+    after = _chain_rows(orig)
+    auuids = [r.get("uuid") for r in after]
+    kids = [r.get("uuid") for r in after if r.get("parentUuid") == t1_last]
+    ok &= check("原文件是追加而非重写（被丢弃的轮2 仍留在盘上）",
+                len(open(orig, "rb").read()) > len(pristine) and t2_prompt in auuids,
+                f"{len(pristine)} → {len(open(orig, 'rb').read())} byte(s), turn-2 retained={t2_prompt in auuids}")
+    ok &= check("锚点长出第二个子节点 = transcript 变成分支树（线性回放会重影）",
+                len(kids) >= 2, f"anchor has {len(kids)} child chain entries: {[k[:8] for k in kids]}")
+    return ok
 
 
 def scenario_skill() -> bool:
@@ -881,7 +1070,7 @@ def main():
         "fgtask": scenario_fgtask, "bgcontinue": scenario_bgcontinue, "skill": scenario_skill,
         "scope": scenario_scope, "scope_acceptedits": scenario_scope_acceptedits,
         "settingsources": scenario_settingsources, "cleanroom": scenario_cleanroom,
-        "entrypoint": scenario_entrypoint,
+        "entrypoint": scenario_entrypoint, "rewind": scenario_rewind,
     }
     run = scenarios.values() if which == "all" else [scenarios[which]]
     results = [fn() for fn in run]
