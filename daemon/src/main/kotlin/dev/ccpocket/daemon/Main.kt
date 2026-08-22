@@ -802,17 +802,26 @@ private class ServiceInstallCmd : CliktCommand(name = "service-install") {
     private val relay by option("--relay").default(DEFAULT_RELAY)
     private val claudeBin by option("--claude-bin")
     private val codexBin by option("--codex-bin")
+    private val opencodeBin by option("--opencode-bin")
+    private val kimiBin by option("--kimi-bin")
     private val zcodeBin by option("--zcode-bin")
+    private val dshBin by option("--dsh-bin")
     private val apply by option("--apply", help = "actually write + load the service (default: print only)").flag()
 
     override fun run() {
         val launcher = exec ?: resolveLauncher()
+        // Every backend `run` accepts a --*-bin for must pass through here (issue #286): the launcher
+        // resolvers tell users to "pass --dsh-bin", and for a service-managed daemon THIS command is the
+        // only place that flag can be baked in.
         val runArgs = buildList {
             add("run")
             add("--relay"); add(relay)
             claudeBin?.let { add("--claude-bin"); add(it) }
             codexBin?.let { add("--codex-bin"); add(it) }
+            opencodeBin?.let { add("--opencode-bin"); add(it) }
+            kimiBin?.let { add("--kimi-bin"); add(it) }
             zcodeBin?.let { add("--zcode-bin"); add(it) }
+            dshBin?.let { add("--dsh-bin"); add(it) }
         }
         echo(ServiceInstaller.install(launcher, runArgs, apply))
     }
