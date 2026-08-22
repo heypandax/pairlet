@@ -199,7 +199,40 @@ open class SeedDesktopModel : DesktopModel {
     override var showFolderPicker by mutableStateOf(false)
     override var showModelPopover by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
+    override var showGit by mutableStateOf(false)
+    override var showWorktrees by mutableStateOf(false)
     override var showSkills by mutableStateOf(false)
+
+    // ── Git panel (#280) / worktrees (#281): canned but STRUCTURALLY complete — one staged file, one
+    // working change, one untracked path and two checkouts, so the overlay's grouping, chips and the
+    // worktree card all render in a screenshot without a daemon. Mutations are inert by design: the
+    // seed model fakes state, never verbs.
+    override val gitStatus = dev.ccpocket.protocol.GitStatus(
+        convoId = "seed", workdir = "~/code/cc-pocket",
+        branch = "feat/auth-refactor", upstream = "origin/feat/auth-refactor", ahead = 2, behind = 1,
+        staged = listOf(dev.ccpocket.protocol.GitFileEntry("src/relay/FrameParser.kt", "M", 12, 3)),
+        unstaged = listOf(
+            dev.ccpocket.protocol.GitFileEntry("src/relay/RelaySession.kt", "M", 6, 2),
+            dev.ccpocket.protocol.GitFileEntry("src/relay/LegacyChunker.kt", "D", 0, 87),
+        ),
+        untracked = listOf(dev.ccpocket.protocol.GitFileEntry("docs/relay/frame-splitting.md", "?")),
+        branches = listOf(
+            dev.ccpocket.protocol.GitBranchInfo("feat/auth-refactor", current = true, lastCommitAt = 1_755_000_000),
+            dev.ccpocket.protocol.GitBranchInfo("main", lastCommitAt = 1_754_800_000),
+            dev.ccpocket.protocol.GitBranchInfo("fix/pair-timeout", lastCommitAt = 1_754_600_000, checkedOutAt = "~/code/cc-pocket-worktrees/pair-timeout"),
+        ),
+        worktreeCount = 2,
+    )
+    override val worktrees = dev.ccpocket.protocol.WorktreeList(
+        convoId = "seed", workdir = "~/code/cc-pocket", repoRoot = "~/code/cc-pocket",
+        worktrees = listOf(
+            dev.ccpocket.protocol.WorktreeEntry("~/code/cc-pocket", branch = "feat/auth-refactor", isMain = true, dirty = true, dirtyCount = 3),
+            dev.ccpocket.protocol.WorktreeEntry(
+                "~/code/cc-pocket-worktrees/pair-timeout", branch = "fix/pair-timeout",
+                dirty = false, activeSessionId = "s2", activeSessionTitle = "Fix stream parser test",
+            ),
+        ),
+    )
     // the flag is real so a UI test can open the Center; [reviewRepo] stays null, so it renders its
     // honest inert state rather than faked ledger data
     override var showReviewCenter by mutableStateOf(false)

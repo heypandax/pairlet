@@ -76,6 +76,20 @@ import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.FileChunk
 import dev.ccpocket.protocol.FileUploadCancel
 import dev.ccpocket.protocol.Frame
+// Git panel (#280) + worktrees (#281) — every one of these is OWNER-ONLY at dispatch, see the block
+// in handle() and RequestRouterGitTest for the three credential classes that are refused.
+import dev.ccpocket.protocol.AddWorktree
+import dev.ccpocket.protocol.GIT_OP_WORKTREE_ADD
+import dev.ccpocket.protocol.GIT_OP_WORKTREE_REMOVE
+import dev.ccpocket.protocol.FetchGitStatus
+import dev.ccpocket.protocol.GitAction
+import dev.ccpocket.protocol.GitActionResult
+import dev.ccpocket.protocol.GitDiff
+import dev.ccpocket.protocol.GitStatus
+import dev.ccpocket.protocol.ListWorktrees
+import dev.ccpocket.protocol.ReadGitDiff
+import dev.ccpocket.protocol.RemoveWorktree
+import dev.ccpocket.protocol.WorktreeList
 import dev.ccpocket.protocol.GroupAssign
 import dev.ccpocket.protocol.GroupCreate
 import dev.ccpocket.protocol.GroupDelete
@@ -170,6 +184,11 @@ class RequestRouter(
     private val grants: dev.ccpocket.daemon.approval.ApprovalGrantStore =
         dev.ccpocket.daemon.approval.ApprovalGrantStore(),
     private val approvalHistory: dev.ccpocket.daemon.approval.ApprovalHistoryStore? = null,
+    // the Git panel's engine (#280) and, on the same argv allow-list, worktree management (#281).
+    // Defaulted like the model services so router tests that never touch git need no wiring; DaemonCore
+    // passes one wired to the registry's live-session truth so a worktree with a running agent is
+    // refused removal.
+    private val git: dev.ccpocket.daemon.git.GitService = dev.ccpocket.daemon.git.GitService(),
     // the session-archive store's backing file (issue #202). Injectable like prefs/presets/schedules so a
     // test never reads or rewrites the developer's real ~/.cc-pocket/session-archive.json.
     private val archiveFile: java.io.File = SessionArchive.defaultFile(),
@@ -216,6 +235,22 @@ class RequestRouter(
             AgentKind.CLAUDE, AgentKind.CODEX -> true
         }
     }
+
+    /**
+     * The Git surface's single admission point: owner credential AND a workdir that survives the same
+     * [DirectoryService.validateWorkdir] the files surface uses. Returns the canonical directory, or null
+     * for "refused" — the caller then answers with the frame shape its request expects, so the phone gets
+     * a readable state instead of silence.
+     */
+    private fun gitWorkdir(workdir: String, origin: String?, guestScope: GuestScope?, collabScope: CollaboratorScope?): java.nio.file.Path? {
+        if (!gitOwnerOnly(origin, guestScope, collabScope)) return null
+        return dirs.validateWorkdir(workdir)
+    }
+
+    /** Why a git request was refused. A non-owner learns only that the surface is owner-only — never
+     *  whether the path they named exists, which would make this a directory oracle. */
+    private fun gitDenial(origin: String?, guestScope: GuestScope?, collabScope: CollaboratorScope?, workdir: String): String =
+        if (!gitOwnerOnly(origin, guestScope, collabScope)) GIT_OWNER_ONLY else "not a readable directory: $workdir"
 
     companion object {
         /** The device identity for callers with no transport-authenticated id: the plaintext `--local`
@@ -292,6 +327,21 @@ class RequestRouter(
                     gitBranch = first?.gitBranch,
                 )
             }
+
+        /**
+         * The Git panel's owner test (#280 §3.1 / #281 §5), as a pure function so it can be asserted
+         * without standing up a router.
+         *
+         * All THREE credential classes must be absent. `origin != null` is a bridge or a share; a scoped
+         * guest carries [GuestScope]; and a COLLABORATOR link carries only [CollaboratorScope] — its
+         * origin and guestScope are BOTH null, so the older two-term test would have waved through
+         * exactly the weakest credential the product hands out.
+         */
+        internal fun gitOwnerOnly(origin: String?, guestScope: GuestScope?, collabScope: CollaboratorScope?): Boolean =
+            origin == null && guestScope == null && collabScope == null
+
+        /** The one refusal sentence a non-owner sees — no repository facts leak with it. */
+        internal const val GIT_OWNER_ONLY = "the Git panel is owner-only"
 
         /**
          * Make a [Usage] reply safe for [caps]' vocabulary (issue #258). The by-model rows carry an
@@ -462,6 +512,53 @@ class RequestRouter(
             is ExportFile -> scope.launch {
                 exports.run(frame, registry.modeOf(frame.convoId), sink::emit)
             }
+            // ---- Git panel (issue #280) + worktree management (issue #281) ----
+            // OWNER-ONLY, and deliberately guarded HERE as well as by the caps allow-lists. GuestCaps /
+            // BridgeCaps / CollaboratorCaps default-deny already stops these types at the ingress; this is
+            // the second door, so a future ingress change cannot silently open the surface. Owner means all
+            // THREE credential classes are absent (RequestRouter.kt's SetSessionArchived note: a
+            // COLLABORATOR arrives with origin == null AND guestScope == null, so testing the first two
+            // alone is vacuous for exactly the weakest credential we hand out).
+            //
+            // The READS are gated too, not just the writes: a guest's files/diff surface answers "what did
+            // this session change", while git status answers "what does the whole repository look like" —
+            // a strictly wider face, including paths and branches no share ever covered.
+            //
+            // All of them scope.launch: a fetch/pull/push is a network round trip and the relay pumps
+            // inbound frames sequentially and inline, so awaiting here would wedge the socket for every
+            // device until git returned. The workdir goes through the SAME dirs.validateWorkdir() the
+            // files surface uses — an arbitrary path is never handed to a git process.
+            is FetchGitStatus -> scope.launch {
+                val wd = gitWorkdir(frame.workdir, origin, guestScope, collabScope)
+                if (wd == null) sink.emit(GitStatus(frame.convoId, frame.workdir, ok = false, error = gitDenial(origin, guestScope, collabScope, frame.workdir)))
+                else sink.emit(git.status(frame, wd))
+            }
+            is ReadGitDiff -> scope.launch {
+                val wd = gitWorkdir(frame.workdir, origin, guestScope, collabScope)
+                if (wd == null) sink.emit(GitDiff(frame.convoId, frame.workdir, frame.path, frame.staged, ok = false, error = gitDenial(origin, guestScope, collabScope, frame.workdir)))
+                else sink.emit(git.diff(frame, wd))
+            }
+            is GitAction -> scope.launch {
+                val wd = gitWorkdir(frame.workdir, origin, guestScope, collabScope)
+                if (wd == null) sink.emit(GitActionResult(frame.convoId, frame.op, ok = false, exitCode = -1, error = gitDenial(origin, guestScope, collabScope, frame.workdir)))
+                else sink.emit(git.act(frame, wd))
+            }
+            is ListWorktrees -> scope.launch {
+                val wd = gitWorkdir(frame.workdir, origin, guestScope, collabScope)
+                if (wd == null) sink.emit(WorktreeList(frame.convoId, frame.workdir, ok = false, error = gitDenial(origin, guestScope, collabScope, frame.workdir)))
+                else sink.emit(git.listWorktrees(frame, wd))
+            }
+            is AddWorktree -> scope.launch {
+                val wd = gitWorkdir(frame.workdir, origin, guestScope, collabScope)
+                if (wd == null) sink.emit(GitActionResult(frame.convoId, GIT_OP_WORKTREE_ADD, ok = false, exitCode = -1, error = gitDenial(origin, guestScope, collabScope, frame.workdir)))
+                else sink.emit(git.addWorktree(frame, wd))
+            }
+            is RemoveWorktree -> scope.launch {
+                val wd = gitWorkdir(frame.workdir, origin, guestScope, collabScope)
+                if (wd == null) sink.emit(GitActionResult(frame.convoId, GIT_OP_WORKTREE_REMOVE, ok = false, exitCode = -1, error = gitDenial(origin, guestScope, collabScope, frame.workdir)))
+                else sink.emit(git.removeWorktree(frame, wd))
+            }
+
             // composer @-file completion (issue #75): a directory scan → off the inbound pump like the others
             is ListPathEntries -> scope.launch {
                 val res = dirs.listPathEntries(frame.workdir, frame.subPath, frame.limit)

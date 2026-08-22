@@ -272,6 +272,13 @@ data class DirectoryEntry(
      *  daemon omits it and the new app treats empty as "unknown" (keeps the row); an old app ignores it.
      *  Live sessions remain separately authoritative in [activeSessions]. */
     val sessionAgents: List<AgentKind> = emptyList(),
+    /** issue #281: this directory is a LINKED git worktree, and this is the path of the repository's main
+     *  worktree it belongs to (null = an ordinary directory, or a main worktree itself). Purely a display
+     *  fact — the row gets a "⎇ part of <repo>" caption so nobody opens a linked checkout believing it is
+     *  a separate project. It changes NO grouping: different checkouts are different cwds and therefore
+     *  different `~/.claude/projects` directories, and TranscriptScanner's attribution stays untouched.
+     *  A trailing optional: an old daemon omits it (rows render exactly as before), an old app ignores it. */
+    val worktreeOf: String? = null,
 )
 
 /** One filesystem child under a session's cwd, for the composer's `@`-file completion ([PathEntries],

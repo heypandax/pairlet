@@ -1792,7 +1792,7 @@ private fun ProjectCell(
         direct && e.open && sid != null ->
             // the 历史 badge lists this project's sessions (issue #49) — the row itself keeps auto-resuming
             LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }, onNewSession = onNewSession) { repo.openProject(e) }
-        else -> DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, indent = false, pinned = pinned, onLongPress = onLongPress, onNewSession = onNewSession) { repo.listSessions(e.path) }
+        else -> DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, indent = false, pinned = pinned, worktreeOf = e.worktreeOf, onLongPress = onLongPress, onNewSession = onNewSession) { repo.listSessions(e.path) }
     }
 }
 
@@ -2016,6 +2016,10 @@ private fun DirCell(
     path: String?,
     indent: Boolean,
     pinned: Boolean = false,
+    /** #281 Screen D: the main worktree this directory is a linked checkout OF; null for an ordinary
+     *  folder. A one-line annotation, deliberately NOT a regrouping of the list — the family view is
+     *  the worktree surface's job, this only stops a `-worktrees/` row looking like a stray project. */
+    worktreeOf: String? = null,
     onLongPress: (() -> Unit)? = null,
     onNewSession: (() -> Unit)? = null,
     onClick: () -> Unit,
@@ -2029,6 +2033,7 @@ private fun DirCell(
         Column(Modifier.weight(1f)) {
             Text(name, color = Tok.tx, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1)
             if (path != null) Text(path, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
+            if (worktreeOf != null) WorktreeOfCaption(worktreeOf)
         }
         if (pinned) PinGlyph()
         onNewSession?.let { Spacer(Modifier.width(4.dp)); NewSessionGlyph(it) }
@@ -2082,6 +2087,26 @@ private fun LiveProjectCell(
             },
             color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1,
             modifier = Modifier.padding(top = 4.dp),
+        )
+        e.worktreeOf?.let { WorktreeOfCaption(it) }
+    }
+}
+
+/** "⎇ part of cc-pocket" — the one-line annotation a linked worktree's row carries (#281 Screen D).
+ *  Only the repository's BASENAME: the full path is already on the row above it, and what this line
+ *  answers is "which family is this", not "where is it". */
+@Composable
+private fun WorktreeOfCaption(mainWorktreePath: String) {
+    Row(
+        Modifier.padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("⎇", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+        Text(
+            stringResource(Res.string.wt_part_of, dev.ccpocket.app.data.repoBasename(mainWorktreePath)),
+            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -2380,6 +2405,11 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     var showBgJobs by remember { mutableStateOf(false) }
     var showTerminal by remember { mutableStateOf(false) }
     var showChangedFiles by remember { mutableStateOf(false) }
+    // the Git tab and the worktree surface (issues #280/#281) — per conversation, like the panel's own
+    // state in the repo: leaving a chat must not reopen on another repository's status
+    var showGit by remember(repo.convoId.value) { mutableStateOf(false) }
+    var showWorktrees by remember(repo.convoId.value) { mutableStateOf(false) }
+    var lastGitDiffPath by remember(repo.convoId.value) { mutableStateOf<String?>(null) }
     var showScheduleSheet by remember { mutableStateOf(false) } // send long-press → schedule send (issue #137)
     // ── session handoff (SESSION-HANDOFF.md; design session-handoff/) ──
     var showHandoffDraft by remember { mutableStateOf(false) }
@@ -2467,6 +2497,41 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
         return
     }
     if (showTerminal) { TerminalScreen(repo) { showTerminal = false }; return } // full-screen, replaces chat (issue #3)
+    // ── Git tab (#280) / worktrees (#281): full-screen, same early-return shape as the terminal.
+    // Order matters — the worktree surface is raised FROM the panel, and the diff screen from the
+    // list, so the innermost destination is tested first and Back unwinds one level at a time.
+    if (showWorktrees) {
+        dev.ccpocket.app.ui.git.WorktreesScreen(
+            repo,
+            // "Open session here" is the ordinary OpenSession at that cwd — leave the git surfaces
+            // first so the new session lands in the chat rather than behind two overlays
+            onOpenSessionHere = { path -> showWorktrees = false; showGit = false; repo.openSession(path) },
+            onBack = { showWorktrees = false },
+        )
+        return
+    }
+    if (repo.gitDiffPath.value != null) {
+        // the last path opened from the panel, so its Diff tab has somewhere to return to (the diff
+        // screen replaces the panel, taking the panel's own remembered state with it)
+        lastGitDiffPath = repo.gitDiffPath.value
+        dev.ccpocket.app.ui.git.GitDiffScreen(
+            repo,
+            onBack = { repo.closeGitDiff() },
+            onOpenFiles = { repo.closeGitDiff(); showGit = false; repo.fetchChangedFiles(); showChangedFiles = true },
+            onOpenTerminal = { repo.closeGitDiff(); showGit = false; showTerminal = true },
+        )
+        return
+    }
+    if (showGit) {
+        dev.ccpocket.app.ui.git.GitPanelScreen(
+            repo,
+            onBack = { showGit = false },
+            onOpenFiles = { showGit = false; repo.fetchChangedFiles(); showChangedFiles = true },
+            onOpenWorktrees = { showWorktrees = true },
+            lastDiffPath = lastGitDiffPath,
+        )
+        return
+    }
     if (repo.viewedFilePath.value != null) { // changed-file viewer (issue #36); back → the still-open files list, ✕ → chat (issue #53)
         FileViewerScreen(repo, onExit = if (showChangedFiles) ({ repo.closeFileViewer(); showChangedFiles = false }) else null) { repo.closeFileViewer() }
         return
@@ -3136,6 +3201,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 onTerminal = { showTerminal = true },
                 onMode = { showModeSheet = true },
                 onFiles = { repo.fetchChangedFiles(); showChangedFiles = true },
+                // the Git tab's entrance (issue #280). Owner-only on the wire; here it is simply the
+                // peer of Terminal and Changed files it is drawn as.
+                onGit = { showGit = true },
                 onHelp = { showHelp = true },
                 // entry only while the session is handoff-free — one non-terminal handoff per session
                 onHandoff = if (canInitiateHandoff && activeHandoff == null) ({ showHandoffDraft = true }) else null,

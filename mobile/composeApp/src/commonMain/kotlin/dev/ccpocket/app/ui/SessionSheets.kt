@@ -344,6 +344,7 @@ fun QuickActionsSheet(
     onTerminal: () -> Unit,
     onMode: () -> Unit,
     onFiles: () -> Unit,
+    onGit: () -> Unit,
     onHelp: () -> Unit,
     onHandoff: (() -> Unit)? = null, // session handoff entry (design Frame 1); null hides the row
     onDismiss: () -> Unit,
@@ -398,6 +399,7 @@ fun QuickActionsSheet(
                             QaGroup(stringResource(Res.string.qa_group_tools)) {
                                 ActionRow(stringResource(Res.string.terminal_open)) { onTerminal(); onDismiss() }
                                 ActionRow(stringResource(Res.string.qa_files)) { onFiles(); onDismiss() }
+                                ActionRow(stringResource(Res.string.git_tab)) { onGit(); onDismiss() }
                                 // "Hand off to a colleague" is an ordinary peer of Terminal / Changed files:
                                 // available is not recommended, and conditional is not new (no badge, no accent,
                                 // no glyph). Only the capability gate is its own — null means no row at all.

@@ -224,6 +224,8 @@ interface DesktopModel {
     var showQuickActions: Boolean // chat-header ⋯ popover: effort/mode + compact/clear (mirrors mobile's sheet)
     var showModelPopover: Boolean // the composer chip's anchored model popover (issue #157) — the ⋯ Model row shortcuts here too
     var showChanges: Boolean // the Changes two-pane diff browser (chat-header ± pill / palette verb)
+    var showGit: Boolean // the Git panel overlay (issue #280; chat-header branch pill)
+    var showWorktrees: Boolean // every checkout of the open repository (issue #281; raised from the Git overlay)
     var showSkills: Boolean // the installed skills/plugins browser (issue #132; sidebar row / palette verb)
     var showHandoff: Boolean // session-handoff draft modal (design session-handoff/ Frame 11)
     var showReviewCenter: Boolean // the ReviewRequest centre (REVIEW-REQUEST.md §12; sidebar row / ⌘⇧R)
@@ -274,11 +276,11 @@ interface DesktopModel {
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showSkills || showHandoff || showReviewCenter || showFolderPicker || handoffInvite != null
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showGit || showWorktrees || showSkills || showHandoff || showReviewCenter || showFolderPicker || handoffInvite != null
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showSkills = false; showHandoff = false; showReviewCenter = false; showFolderPicker = false; dismissHandoffInvite()
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showGit = false; showWorktrees = false; showSkills = false; showHandoff = false; showReviewCenter = false; showFolderPicker = false; dismissHandoffInvite()
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts
@@ -633,6 +635,40 @@ interface DesktopModel {
     fun selectChangedFile(path: String) {}
     /** Open the browser: flip the flag and refresh both the list and the remembered selection. */
     fun openChanges() { showChanges = true; fetchChangedFiles() }
+
+    // ── Git panel (issue #280) + worktrees (issue #281) ──────────────────────────────────────────
+    // Same shape as `changes` above: inert defaults so seed/preview models compile untouched, live
+    // values ride the repository. Every one of these is a NEW frame family, so a daemon that predates
+    // them simply never answers and the repo's deadline lands the overlay in its "update" state.
+    val gitStatus: dev.ccpocket.protocol.GitStatus? get() = null
+    val gitStatusLoading: Boolean get() = false
+    /** No reply — the daemon predates pocket/git.*; the overlay shows its "update the computer" state. */
+    val gitStatusStale: Boolean get() = false
+    val gitDiff: dev.ccpocket.protocol.GitDiff? get() = null
+    val gitDiffPath: String? get() = null
+    val gitDiffStaged: Boolean get() = false
+    /** The verb currently running — drives the spinner in the button that started it, nothing else. */
+    val gitBusyOp: String? get() = null
+    val gitError: dev.ccpocket.protocol.GitActionResult? get() = null
+    /** A two-step verb's preview: non-null raises the confirm dialog and nothing else. */
+    val gitPendingConfirm: dev.ccpocket.protocol.GitActionPreview? get() = null
+    fun fetchGitStatus(withBranches: Boolean = false) {}
+    fun openGitDiff(path: String, staged: Boolean) {}
+    fun gitAct(op: String, paths: List<String> = emptyList(), message: String? = null, branch: String? = null) {}
+    fun confirmPendingGit() {}
+    fun dismissGitConfirm() {}
+    fun dismissGitError() {}
+    /** Open the panel: flip the flag and re-read, in the [openChanges] idiom. Branches ride along so
+     *  the branch popover has its data before it is asked for. */
+    fun openGit() { showGit = true; fetchGitStatus(withBranches = true) }
+
+    val worktrees: dev.ccpocket.protocol.WorktreeList? get() = null
+    val worktreesLoading: Boolean get() = false
+    val worktreesStale: Boolean get() = false
+    fun fetchWorktrees() {}
+    fun addWorktree(branch: String, createBranch: Boolean) {}
+    fun removeWorktree(path: String) {}
+    fun openWorktrees() { showWorktrees = true; fetchWorktrees() }
 
     // installed skills/plugins browser (issue #132): the machine's ~/.claude catalog, plus the open
     // project's `.claude/skills` when a chat is live. Defaults keep seed/preview models inert.

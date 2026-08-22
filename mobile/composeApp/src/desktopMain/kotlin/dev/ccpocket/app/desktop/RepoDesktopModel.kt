@@ -151,6 +151,8 @@ class RepoDesktopModel(
     override fun dismissHandoffInvite() { repo.lastHandoffInvite.value = null }
     override var showModelPopover by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
+    override var showGit by mutableStateOf(false)
+    override var showWorktrees by mutableStateOf(false)
     override var showSkills by mutableStateOf(false)
     override var showReviewCenter by mutableStateOf(false)
     override val composerState = ComposerState()
@@ -218,6 +220,31 @@ class RepoDesktopModel(
     override val selectedContent: dev.ccpocket.protocol.FileContent? get() = repo.viewedFile.value
     override val selectedContentProgress: Pair<Long, Long>? get() = repo.viewedFileProgress.value
     override fun selectChangedFile(path: String) = repo.openChangedFile(path)
+
+    // ── Git panel (#280) / worktrees (#281): straight repo pass-throughs. The repo already scopes
+    // every reply to (convoId, workdir) and arms the 8s stale-daemon deadline on every request.
+    override val gitStatus: dev.ccpocket.protocol.GitStatus? get() = repo.gitStatus.value
+    override val gitStatusLoading: Boolean get() = repo.gitStatusLoading.value
+    override val gitStatusStale: Boolean get() = repo.gitStatusUnavailable.value
+    override val gitDiff: dev.ccpocket.protocol.GitDiff? get() = repo.gitDiff.value
+    override val gitDiffPath: String? get() = repo.gitDiffPath.value
+    override val gitDiffStaged: Boolean get() = repo.gitDiffStaged.value
+    override val gitBusyOp: String? get() = repo.gitBusyOp.value
+    override val gitError: dev.ccpocket.protocol.GitActionResult? get() = repo.gitError.value
+    override val gitPendingConfirm: dev.ccpocket.protocol.GitActionPreview? get() = repo.gitPendingConfirm.value
+    override fun fetchGitStatus(withBranches: Boolean) = repo.fetchGitStatus(withBranches)
+    override fun openGitDiff(path: String, staged: Boolean) = repo.openGitDiff(path, staged)
+    override fun gitAct(op: String, paths: List<String>, message: String?, branch: String?) =
+        repo.gitAct(op, paths, message, branch)
+    override fun confirmPendingGit() = repo.confirmPendingGit()
+    override fun dismissGitConfirm() = repo.dismissGitConfirm()
+    override fun dismissGitError() = repo.dismissGitError()
+    override val worktrees: dev.ccpocket.protocol.WorktreeList? get() = repo.worktrees.value
+    override val worktreesLoading: Boolean get() = repo.worktreesLoading.value
+    override val worktreesStale: Boolean get() = repo.worktreesUnavailable.value
+    override fun fetchWorktrees() = repo.fetchWorktrees()
+    override fun addWorktree(branch: String, createBranch: Boolean) = repo.addWorktree(branch, createBranch)
+    override fun removeWorktree(path: String) = repo.removeWorktree(path)
 
     // ── ReviewRequest (REVIEW-REQUEST.md §12) ──
     // The whole repository, not field-by-field: the Center's UI is shared verbatim with mobile, and
