@@ -139,7 +139,13 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Row(Modifier.fillMaxWidth().weight(1f)) {
-            Column(Modifier.width(176.dp).fillMaxHeight().padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            // The nav rail scrolls too (issue #209 re-report): the Overlay clamps the modal to the
+            // window's visible height, and on a short/high-DPI-scaled window the clamped rail used to
+            // crop its bottom items (About) with no way to reach them — only the CONTENT pane scrolled.
+            Column(
+                Modifier.width(176.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 SettingsTab.entries.forEach { t -> RailItem(t, selected = t == tab) { tab = t } }
             }
             Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
@@ -389,9 +395,19 @@ private fun GeneralPane(model: DesktopModel) {
                 TerminalRow(t, selected = t == model.terminalApp) { model.terminalApp = t }
             }
         }
-        // menu-bar presence (issue #151): the OS status glyph + anchored popover, on by default
-        Group(stringResource(Res.string.settings_menu_bar), stringResource(Res.string.settings_menu_bar_sub)) {
-            ToggleRow(stringResource(Res.string.settings_menu_bar_toggle), model.menuBarEnabled) { model.menuBarEnabled = !model.menuBarEnabled }
+        // menu-bar presence (issue #151): the OS status glyph + anchored popover, on by default.
+        // Windows gets its own wording (issue #292): "menu bar" is a mac term — the Windows user who
+        // wanted the floating panel gone never connected it to this switch, because there it lives in
+        // the notification area as a tray icon + popover.
+        val isWinDesktop = remember { System.getProperty("os.name").lowercase().contains("win") }
+        Group(
+            stringResource(if (isWinDesktop) Res.string.settings_menu_bar_win else Res.string.settings_menu_bar),
+            stringResource(if (isWinDesktop) Res.string.settings_menu_bar_sub_win else Res.string.settings_menu_bar_sub),
+        ) {
+            ToggleRow(
+                stringResource(if (isWinDesktop) Res.string.settings_menu_bar_toggle_win else Res.string.settings_menu_bar_toggle),
+                model.menuBarEnabled,
+            ) { model.menuBarEnabled = !model.menuBarEnabled }
         }
         // daemon-side switch: silence phone alerts while working at the computer. Null = old daemon.
         LaunchedEffect(Unit) { model.refreshPushPrefs() }

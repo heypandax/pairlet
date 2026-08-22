@@ -931,6 +931,9 @@
     <string name="settings_menu_bar">菜单栏</string>
     <string name="settings_menu_bar_sub">常驻状态图标——不用唤起窗口，也能一眼看到审批与运行中的会话。</string>
     <string name="settings_menu_bar_toggle">在菜单栏显示 cc-pocket</string>
+    <string name="settings_menu_bar_win">托盘图标与悬浮面板</string>
+    <string name="settings_menu_bar_sub_win">通知区状态图标＋悬浮面板——一眼看到审批与运行中的会话。不需要可以在这里整个关掉。</string>
+    <string name="settings_menu_bar_toggle_win">显示托盘图标和悬浮面板</string>
     <string name="settings_notifications">通知</string>
     <string name="settings_notifications_sub">由这台电脑推送到手机的任务完成提醒。</string>
     <string name="settings_push_stale">需要先更新电脑上的 daemon，才能推送手机提醒。</string>

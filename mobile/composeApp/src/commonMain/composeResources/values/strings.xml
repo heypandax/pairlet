@@ -934,6 +934,9 @@
     <string name="settings_menu_bar">Menu bar</string>
     <string name="settings_menu_bar_sub">A persistent status glyph — approvals and running sessions at a glance, without raising this window.</string>
     <string name="settings_menu_bar_toggle">Show cc-pocket in the menu bar</string>
+    <string name="settings_menu_bar_win">Tray icon &amp; popover</string>
+    <string name="settings_menu_bar_sub_win">A status icon in the notification area with a floating panel — approvals and running sessions at a glance. Turn it off to remove the popover entirely.</string>
+    <string name="settings_menu_bar_toggle_win">Show the tray icon and floating panel</string>
     <string name="settings_notifications">Notifications</string>
     <string name="settings_notifications_sub">Turn-complete alerts pushed to your phone by this computer.</string>
     <string name="settings_push_stale">Phone alerts need the computer\'s daemon updated first.</string>
