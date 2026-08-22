@@ -30,6 +30,9 @@ class DirectoryService(
     private val dshCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.dsh.DshTranscriptScanner.cwdsByNewest() },
     private val liveClaudeCwds: () -> Set<String> = LiveProcesses::claudeCwds,
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    // issue #290 test seam: tests create their fixture workdirs UNDER the real system temp, so they pin
+    // this to emptyList() to opt out of the noise filter; production uses the machine's temp roots.
+    private val tempNoiseRoots: List<String>? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val recents = LinkedHashSet<String>()
@@ -86,6 +89,12 @@ class DirectoryService(
         val kimi = if (includeKimi) runCatching(kimiCwds).getOrDefault(emptyMap()) else emptyMap()
         val zcode = if (includeZcode) runCatching(zcodeCwds).getOrDefault(emptyMap()) else emptyMap()
         val dsh = if (includeDsh) runCatching(dshCwds).getOrDefault(emptyMap()) else emptyMap()
+        // issue #290: programmatic one-shot sessions (a dsh plugin driving OpenCode per image, …) leave
+        // dozens of throwaway cwds under the system temp dir and drown the project list. Hide temp rows
+        // unless something keeps them relevant — a live/busy conversation, or the user having opened the
+        // dir themselves (recent). Sessions stay on disk; only the list denoises.
+        fun keep(e: DirectoryEntry): Boolean = e.open || e.busy || e.recent ||
+            !(tempNoiseRoots?.let { TempDirs.isUnderSystemTemp(e.path, it) } ?: TempDirs.isUnderSystemTemp(e.path))
         // issue #188: the App's agent filter needs PROJECT-level provenance, not just the backend of any
         // currently-live session. Keep it additive on DirectoryEntry so each client can apply its own
         // persisted filter without turning that preference into daemon-global state.
@@ -112,7 +121,7 @@ class DirectoryService(
         kimi.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
         zcode.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
         dsh.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
-        if (allExternal.isEmpty()) return claude
+        if (allExternal.isEmpty()) return claude.filter(::keep)
         val known = claude.mapTo(HashSet()) { ProjectPaths.canonicalKey(it.path) }
         // spelling variants of one dir collapse into a group; the group's mtime is its max
         val externalByKey = allExternal.entries.groupBy({ ProjectPaths.canonicalKey(it.key) }, { it.value })
@@ -150,7 +159,7 @@ class DirectoryService(
                     .distinct().sortedBy { it.ordinal },
             )
         }
-        return (merged + externalOnly).sortedByDescending { it.lastModified }
+        return (merged + externalOnly).filter(::keep).sortedByDescending { it.lastModified }
     }
 
     /** Directories with Claude history, newest-first, deduped per cwd. [liveNorm] = daemon conversations

@@ -60,6 +60,9 @@ class DirectoryServiceMergeTest {
         dshCwds = { emptyMap() },
         liveClaudeCwds = liveClaudeCwds,
         nowMillis = nowMillis,
+        // the fixture workdirs above live under the REAL system temp — opt out of the #290 noise filter
+        // (which has its own dedicated test) or every row here would be hidden as one-shot noise
+        tempNoiseRoots = emptyList(),
     )
 
     @Test
