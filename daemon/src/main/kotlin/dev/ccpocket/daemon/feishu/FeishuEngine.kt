@@ -185,8 +185,15 @@ class FeishuEngine(
     // ask() delivers it inline (finished within the wait) or a late TurnDone does (the owner approved a
     // permission ask on their phone minutes later — the bridge's whole reason to exist). Keyed by convoId.
     /** [promptId]：这个槽位等的是哪条请求（issue #285 归属门的钥匙）。null = 老路径没铸 id 的槽位，
-     *  归属门放行一切（等价旧行为）；非 null 时，只有拿到该 prompt 消费凭证之后的终态帧才允许结算它。 */
-    private data class ReplySlot(val target: FeishuReplyTarget, var done: Boolean = false, val promptId: String? = null)
+     *  归属门放行一切（等价旧行为）；非 null 时，只有拿到该 prompt 消费凭证之后的终态帧才允许结算它。
+     *  [atUser]（#284）：群聊里这一轮的发起人 open_id，只在**完成回报**那一帖被拼成 @ 前缀；单聊为 null。
+     *  存在槽位里而不是现算，是因为回报可能由分钟级之后的 late TurnDone 发出，那时 ask() 的栈早没了。 */
+    private data class ReplySlot(
+        val target: FeishuReplyTarget,
+        var done: Boolean = false,
+        val promptId: String? = null,
+        val atUser: String? = null,
+    )
     private val replySlots = HashMap<String, ReplySlot>()
 
     /**
@@ -1244,7 +1251,12 @@ class FeishuEngine(
             }
 
             val done = CompletableDeferred<TurnDone>()
-            mutex.withLock { turnWaiters[convoId] = done; replySlots[convoId] = ReplySlot(replyTo, promptId = promptId) }
+            // #284: 只有群聊才需要 @ 定向（单聊本来就只发给他一个人），且 open_id 必须真的有值。
+            val atUser = senderOpenId.takeIf { isGroup && it.isNotBlank() }
+            mutex.withLock {
+                turnWaiters[convoId] = done
+                replySlots[convoId] = ReplySlot(replyTo, promptId = promptId, atUser = atUser)
+            }
             // issue #285 的另一半窗口：遗留结算轮的终态帧若赶在槽位安装**之前**到达，上面的归属门看不到它
             // （expected==null 走了正常回收路径），释放任务已被武装——1 秒轮询的 closeIfIdle 会在我们的
             // prompt 尚未被消费（queuedWork=false，不算 busy）时把进程连同 CLI 队列里的真实请求一起关掉。
@@ -1363,7 +1375,8 @@ class FeishuEngine(
      *  both try, and the loser no-ops, so an out-of-band approval never double-posts nor drops the reply. */
     private suspend fun postTurn(convoId: String, text: String) {
         val slot = mutex.withLock { replySlots[convoId]?.takeIf { !it.done }?.also { it.done = true } } ?: return
-        reply(slot.target, text)
+        // #284: 这里是轮次终态的唯一发帖口（成功文本 / ⚠️ 错误 / 空轮说明），所以 @ 只可能拼在这一帖上。
+        reply(slot.target, FeishuMention.completionText(slot.atUser, text))
     }
 
     // 空文本如实说明状态而不是含糊的「(无回复)」（issue #285 诚实分型）：归属门保证走到这里的终态帧确属
