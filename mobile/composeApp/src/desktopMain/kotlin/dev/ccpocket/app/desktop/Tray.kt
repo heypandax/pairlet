@@ -226,8 +226,10 @@ internal fun trayStatsLine(computers: Int, sessions: Int): String =
         " · " + stringResource(if (sessions == 1) Res.string.tray_sessions_one else Res.string.tray_sessions_many, sessions)
 
 /** Switch the active binding to the machine that owns an approval (its single live ask then surfaces inline).
- *  [DkAttention] carries no session id, so this is the honest "jump" — exactly what the bell popover does. */
-private fun jumpToMachine(model: DesktopModel, accountId: String) {
+ *  [DkAttention] carries no session id, so this is the honest "jump" — exactly what the bell popover does.
+ *  `internal` (was private) so the Windows flyout ([WinTrayFlyout], issue #292) reuses the SAME jump — the
+ *  two carriers must not drift into two definitions of "open the machine that's asking". */
+internal fun jumpToMachine(model: DesktopModel, accountId: String) {
     model.machines.firstOrNull { it.computer.accountId == accountId }?.let { if (!it.active) model.selectComputer(it.computer) }
 }
 

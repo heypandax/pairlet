@@ -1143,6 +1143,17 @@
     <string name="tray_sessions_one">%1$d session</string>
     <string name="tray_sessions_many">%1$d sessions</string>
 
+    <!-- windows tray flyout (issue #292) — the corner-anchored Windows 11 carrier for the same tray content -->
+    <string name="win_tray_more">More</string>
+    <string name="win_tray_hide_flyout">Hide this flyout</string>
+    <string name="win_tray_notification_settings">Notification settings…</string>
+    <string name="win_tray_hide_note">The tray icon keeps showing the pending approval count; you can turn the flyout back on in Settings.</string>
+    <string name="win_tray_running">Running</string>
+    <string name="win_tray_all_quiet">All quiet. No sessions running</string>
+    <string name="win_tray_more_waiting">%1$d more waiting → open the approval queue</string>
+    <string name="win_tray_more_sessions">+%1$d sessions</string>
+    <string name="win_tray_exit">Exit</string>
+
     <!-- skills & plugins overlay -->
     <string name="skills_title">Skills &amp; plugins</string>
     <string name="skills_count">%1$d skills · %2$d plugins</string>

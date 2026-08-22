@@ -1140,6 +1140,17 @@
     <string name="tray_sessions_one">%1$d 个会话</string>
     <string name="tray_sessions_many">%1$d 个会话</string>
 
+    <!-- Windows 托盘浮层（issue #292）——同一份托盘内容，换成贴角的 Windows 11 载体 -->
+    <string name="win_tray_more">更多</string>
+    <string name="win_tray_hide_flyout">隐藏此浮层</string>
+    <string name="win_tray_notification_settings">通知设置…</string>
+    <string name="win_tray_hide_note">关闭后托盘图标仍会显示待审批数量，可在设置中重新开启。</string>
+    <string name="win_tray_running">正在运行</string>
+    <string name="win_tray_all_quiet">一切安静。没有正在运行的会话</string>
+    <string name="win_tray_more_waiting">还有 %1$d 条在等 → 打开审批中心</string>
+    <string name="win_tray_more_sessions">+%1$d 个会话</string>
+    <string name="win_tray_exit">退出</string>
+
     <!-- 技能与插件浏览器 -->
     <string name="skills_title">技能与插件</string>
     <string name="skills_count">%1$d 个技能 · %2$d 个插件</string>
