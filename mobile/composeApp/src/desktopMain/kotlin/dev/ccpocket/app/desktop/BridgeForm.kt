@@ -306,7 +306,7 @@ internal fun NewBridgeForm(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 stringResource(Res.string.action_create), color = if (canCreate) Tok.accent else Tok.muted.copy(alpha = 0.5f),
-                fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(12.sp),
                 modifier = Modifier.clip(RoundedCornerShape(6.dp))
                     .background((if (canCreate) Tok.accent else Tok.muted).copy(alpha = 0.12f))
                     .clickable(enabled = canCreate) {
@@ -443,7 +443,7 @@ internal fun EditRunnerForm(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 stringResource(Res.string.bridge_edit_save), color = if (dirty) Tok.accent else Tok.muted.copy(alpha = 0.5f),
-                fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(11.sp),
                 modifier = Modifier.clip(RoundedCornerShape(6.dp))
                     .background((if (dirty) Tok.accent else Tok.muted).copy(alpha = 0.12f))
                     .clickable(enabled = dirty) {
@@ -524,17 +524,18 @@ private fun PickedDirs(picked: List<String>, onAdd: () -> Unit, onRemove: (Strin
                 Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    p.substringAfterLast('/'), color = Tok.tx, fontFamily = Dk.ui, fontSize = 11.sp,
+                    p.substringAfterLast('/'), color = Tok.tx, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp),
                 )
                 Spacer(Modifier.width(8.dp))
-                Text(p, color = Tok.muted.copy(alpha = 0.7f), fontFamily = Dk.mono, fontSize = 9.sp)
+                Text(p, color = Tok.muted.copy(alpha = 0.7f), fontFamily = Dk.mono, fontSize = 9.sp, style = tightCenter(9.sp))
                 Spacer(Modifier.weight(1f))
-                Text(stringResource(Res.string.device_remove), color = Tok.muted, fontFamily = Dk.ui, fontSize = 9.sp, modifier = Modifier.clickable { onRemove(p) })
+                Text(stringResource(Res.string.device_remove), color = Tok.muted, fontFamily = Dk.ui, fontSize = 9.sp, style = tightCenter(9.sp), modifier = Modifier.clickable { onRemove(p) })
             }
         }
         Spacer(Modifier.height(4.dp))
         Text(
             stringResource(Res.string.bridge_add_project), color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp,
+            style = tightCenter(10.sp),
             modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.accent.copy(alpha = 0.12f))
                 .clickable(onClick = onAdd).padding(horizontal = 9.dp, vertical = 5.dp),
         )

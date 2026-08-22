@@ -241,6 +241,7 @@ private fun TrayGroupLabel(text: String, count: Int = 0) {
         if (count > 0) {
             Text(
                 "$count", color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(10.sp),
                 modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f)).padding(horizontal = 7.dp, vertical = 1.dp),
             )
         }
@@ -269,7 +270,7 @@ private fun MachineChip(name: String, os: DkOs) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Icon(osIcon(os), null, tint = Tok.muted, modifier = Modifier.size(10.dp))
-        Text(name, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(name, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -373,7 +374,7 @@ fun TrayIcon(badge: Int = 1) {
             Box(
                 Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp).size(16.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent),
                 contentAlignment = Alignment.Center,
-            ) { Text("$badge", color = Tok.base, fontFamily = Dk.mono, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+            ) { Text("$badge", color = Tok.base, fontFamily = Dk.mono, fontSize = 10.sp, fontWeight = FontWeight.Bold, style = tightCenter(10.sp)) }
         }
     }
 }

@@ -203,6 +203,7 @@ fun HandoffModal(model: DesktopModel, onDismiss: () -> Unit) {
             // the cost of the action, restated next to the primary button — desktop users click faster
             Text(
                 stringResource(Res.string.ho_locked_placeholder), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp,
+                style = tightCenter(11.sp),
                 modifier = Modifier.clip(RoundedCornerShape(6.dp)).border(1.dp, Tok.hair, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
             )
             Spacer(Modifier.weight(1f))
@@ -337,6 +338,7 @@ fun HandoffConnectModal(model: DesktopModel, onBack: () -> Unit) {
                 Text(connected.label.ifBlank { "?" }, color = Tok.tx, fontFamily = Dk.ui, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     "✓ " + stringResource(Res.string.co_connected_chip), color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.5.sp,
+                    style = tightCenter(10.5.sp),
                     modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Tok.ok.copy(alpha = 0.10f))
                         .border(1.dp, Tok.ok.copy(alpha = 0.35f), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
                 )
@@ -468,6 +470,7 @@ fun CollaboratorsPane(model: DesktopModel) {
                             Text(stringResource(Res.string.co_direction).uppercase(), color = Tok.muted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
                             Text(
                                 "✓ " + stringResource(Res.string.co_both_ways), color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.5.sp,
+                                style = tightCenter(10.5.sp),
                                 modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Tok.ok.copy(alpha = 0.10f))
                                     .border(1.dp, Tok.ok.copy(alpha = 0.35f), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
                             )

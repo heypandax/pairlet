@@ -60,7 +60,8 @@ import org.jetbrains.compose.resources.stringResource
 fun DkMachineChip(name: String, os: DkOs, online: Boolean = true, fontSize: TextUnit = 11.sp, glyph: androidx.compose.ui.unit.Dp = 12.dp, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Icon(osIcon(os), null, tint = Tok.tx2, modifier = Modifier.size(glyph))
-        Text(name, color = Tok.tx, fontFamily = Dk.mono, fontSize = fontSize, lineHeight = fontSize, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // lineHeight 单独给不生效（Compose 默认 Trim.Both 会把行盒收回字体度量），走 tightCenter（#293）
+        Text(name, color = Tok.tx, fontFamily = Dk.mono, fontSize = fontSize, style = tightCenter(fontSize), maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (online) PulseDot(Tok.ok, 6.dp) else Dot(Tok.muted, 6.dp)
     }
 }
@@ -155,11 +156,13 @@ private fun AttentionRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> Unit
             Spacer(Modifier.weight(1f))
             Text(
                 stringResource(Res.string.deny), color = Tok.danger, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(11.sp),
                 modifier = Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, Tok.danger.copy(alpha = 0.33f), RoundedCornerShape(7.dp))
                     .clickable(onClick = onDeny).padding(horizontal = 12.dp, vertical = 4.dp),
             )
             Text(
                 stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                style = tightCenter(11.sp),
                 modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(Tok.accent)
                     .clickable(onClick = onAllow).padding(horizontal = 12.dp, vertical = 4.dp),
             )
@@ -185,7 +188,7 @@ fun PaneHeader(machine: String, os: DkOs, title: String, mode: String, focused: 
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
             Text(
-                mode, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp,
+                mode, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp),
                 modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp)).padding(horizontal = 8.dp, vertical = 2.dp),
             )
         }
@@ -222,6 +225,7 @@ fun WatchPane(watch: DkWatch, model: DesktopModel, modifier: Modifier = Modifier
                     }
                     Text(
                         stringResource(Res.string.watch_review), color = Tok.base, fontFamily = Dk.ui, fontSize = 11.5.sp, fontWeight = FontWeight.Bold,
+                        style = tightCenter(11.5.sp),
                         modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent)
                             .clickable { model.showAttention = true }.padding(horizontal = 12.dp, vertical = 4.dp),
                     )

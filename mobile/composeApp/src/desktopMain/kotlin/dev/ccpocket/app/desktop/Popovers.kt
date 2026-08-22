@@ -656,7 +656,7 @@ fun CollapsedSidebar(modifier: Modifier = Modifier) {
         Box(Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(Tok.raised), contentAlignment = Alignment.Center) {
             AgentGlyph(AgentKind.CLAUDE, size = 17)
             Box(Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp).size(15.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent), contentAlignment = Alignment.Center) {
-                Text("1", color = Tok.base, fontFamily = Dk.mono, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text("1", color = Tok.base, fontFamily = Dk.mono, fontSize = 9.sp, fontWeight = FontWeight.Bold, style = tightCenter(9.sp))
             }
         }
         Spacer(Modifier.weight(1f))

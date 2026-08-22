@@ -56,6 +56,7 @@ fun ReviewCenterOverlay(model: DesktopModel, onDismiss: () -> Unit) {
             if (model.reviewPending > 0) {
                 Text(
                     "${model.reviewPending}", color = Tok.base, fontFamily = Dk.mono, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    style = tightCenter(10.sp),
                     modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(Tok.accent).padding(horizontal = 5.dp, vertical = 1.dp),
                 )
             }

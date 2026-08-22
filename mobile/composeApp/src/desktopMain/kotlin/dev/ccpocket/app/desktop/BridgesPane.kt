@@ -379,7 +379,7 @@ private fun BridgeChip(label: String, accent: Boolean = false, onClick: () -> Un
     ) {
         Text(
             label, color = if (accent) Tok.accent else Tok.tx, fontFamily = Dk.ui, fontSize = 11.5.sp,
-            fontWeight = FontWeight.SemiBold, maxLines = 1,
+            fontWeight = FontWeight.SemiBold, maxLines = 1, style = tightCenter(11.5.sp),
         )
     }
 }
@@ -491,15 +491,15 @@ private fun TierPill(tier: AccessTier) = when (tier) {
 @Composable
 private fun Detail(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-        Text(label, color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp, modifier = Modifier.width(80.dp))
-        Text(value, color = Tok.tx.copy(alpha = 0.85f), fontFamily = Dk.mono, fontSize = 10.sp)
+        Text(label, color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp, style = tightCenter(10.sp), modifier = Modifier.width(80.dp))
+        Text(value, color = Tok.tx.copy(alpha = 0.85f), fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp))
     }
 }
 
 @Composable
 private fun Tag(text: String, color: Color) {
     Text(
-        text, color = color, fontFamily = Dk.ui, fontSize = 9.sp,
+        text, color = color, fontFamily = Dk.ui, fontSize = 9.sp, style = tightCenter(9.sp),
         modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(color.copy(alpha = 0.14f))
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
@@ -516,7 +516,7 @@ private fun Hint(text: String) = Box(Modifier.fillMaxWidth().padding(32.dp), con
 private fun PillButton(label: String, accent: Boolean = false, onClick: () -> Unit) {
     val c = if (accent) Tok.accent else Tok.muted
     Text(
-        label, color = c, fontFamily = Dk.ui, fontSize = 10.sp, fontWeight = FontWeight.Medium,
+        label, color = c, fontFamily = Dk.ui, fontSize = 10.sp, fontWeight = FontWeight.Medium, style = tightCenter(10.sp),
         modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(c.copy(alpha = 0.12f))
             .clickable(onClick = onClick).padding(horizontal = 9.dp, vertical = 4.dp),
     )

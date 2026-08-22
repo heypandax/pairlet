@@ -139,6 +139,7 @@ internal fun RemoteDirPickerCard(
         Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 confirmLabel, color = Tok.base, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(12.sp),
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Tok.accent)
                     .clickable { onPick(browseWorkdirOf(anchor, subPath)) }.padding(horizontal = 14.dp, vertical = 8.dp),
             )
@@ -193,17 +194,17 @@ private fun RemoteCrumbBar(
                         Modifier.clip(RoundedCornerShape(6.dp)).clickable { expanded = !expanded }.padding(horizontal = 3.dp, vertical = 1.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(s, color = if (last) Tok.tx else Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp, fontWeight = if (last) FontWeight.SemiBold else FontWeight.Normal)
-                        Text(if (expanded) "▴" else "▾", color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp, modifier = Modifier.padding(start = 3.dp))
+                        Text(s, color = if (last) Tok.tx else Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp), fontWeight = if (last) FontWeight.SemiBold else FontWeight.Normal)
+                        Text(if (expanded) "▴" else "▾", color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp, style = tightCenter(10.sp), modifier = Modifier.padding(start = 3.dp))
                     }
                 } else {
                     Text(
                         s, color = if (last) Tok.tx else Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
-                        fontWeight = if (last) FontWeight.SemiBold else FontWeight.Normal,
+                        fontWeight = if (last) FontWeight.SemiBold else FontWeight.Normal, style = tightCenter(11.sp),
                         modifier = Modifier.clickable(enabled = !last) { onSegment(i) },
                     )
                 }
-                if (!last) Text("›", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+                if (!last) Text("›", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp))
             }
         }
         if (switchable && expanded) {

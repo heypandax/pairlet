@@ -693,7 +693,7 @@ private fun GroupHeader(
                 Spacer(Modifier.width(6.dp))
                 Text(
                     stringResource(Res.string.group_current_dir), color = Tok.accent, fontFamily = Dk.ui,
-                    fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, style = tightCenter(9.sp),
                     modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Tok.accent.copy(alpha = 0.12f))
                         .border(1.dp, Tok.accent.copy(alpha = 0.32f), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
                 )
@@ -1054,7 +1054,7 @@ private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean,
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     Icon(Icons.Rounded.PriorityHigh, null, tint = Tok.base, modifier = Modifier.size(10.dp))
-                    Text("${s.pending}", color = Tok.base, fontFamily = Dk.mono, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text("${s.pending}", color = Tok.base, fontFamily = Dk.mono, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(10.sp))
                 }
             }
             if (hovered) {

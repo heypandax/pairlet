@@ -369,7 +369,7 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
             if (item.secondary != null && selected) {
                 Text(
                     item.secondaryLabel.orEmpty(), color = Tok.accent, fontFamily = Dk.ui, fontSize = 11.5.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.SemiBold, style = tightCenter(11.5.sp),
                     modifier = Modifier.testTag("palette-secondary").clip(RoundedCornerShape(6.dp))
                         .clickable { item.secondary.invoke() }.padding(horizontal = 6.dp, vertical = 3.dp),
                 )

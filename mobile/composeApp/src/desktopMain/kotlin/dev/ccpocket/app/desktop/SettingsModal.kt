@@ -836,6 +836,7 @@ private fun AccountPane(model: DesktopModel) {
                         s.subscriptionType?.let { plan ->
                             Text(
                                 plan.uppercase(), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                                style = tightCenter(10.sp),
                                 modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(5.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
                             )
                         }
@@ -1085,6 +1086,7 @@ private fun PresetRow(
             }
             active -> Text(
                 stringResource(Res.string.settings_preset_active), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.sp,
+                style = tightCenter(10.sp),
                 modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.accent.copy(alpha = 0.13f)).padding(horizontal = 7.dp, vertical = 2.dp),
             )
             hovered -> Row {
@@ -1348,7 +1350,7 @@ private fun HelperLine(mono: String, rest: String) {
 @Composable
 private fun SegChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Text(
-        label, color = if (selected) Tok.tx else Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp,
+        label, color = if (selected) Tok.tx else Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp),
         modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(if (selected) Tok.hair else Color.Transparent)
             .clickable(onClick = onClick).padding(horizontal = 7.dp, vertical = 2.5.dp),
     )
@@ -1367,7 +1369,7 @@ private fun FilledBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
 @Composable
 private fun MonoPill(label: String, accent: Boolean) {
     Text(
-        label, color = if (accent) Tok.accent else Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
+        label, color = if (accent) Tok.accent else Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp),
         modifier = Modifier.clip(RoundedCornerShape(20.dp))
             .background(if (accent) Tok.accent.copy(alpha = 0.13f) else Tok.base)
             .border(1.dp, if (accent) Tok.accent.copy(alpha = 0.3f) else Tok.hair, RoundedCornerShape(20.dp))
@@ -1667,6 +1669,7 @@ private fun ShareFormLabel(text: String) {
 private fun SegPill(label: String, selected: Boolean, onClick: () -> Unit) {
     Text(
         label, color = if (selected) Tok.base else Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, fontWeight = FontWeight.Medium,
+        style = tightCenter(11.5.sp),
         modifier = Modifier.clip(RoundedCornerShape(7.dp)).then(if (selected) Modifier.background(Tok.accent) else Modifier.border(1.dp, Tok.hair, RoundedCornerShape(7.dp)))
             .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
     )

@@ -82,7 +82,6 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
@@ -464,7 +463,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 // replace the blinking caret with a restrained, clickable resend cue.
                                 Text(
                                     stringResource(Res.string.msg_no_response_click), color = Tok.warn,
-                                    fontFamily = Dk.mono, fontSize = 11.sp,
+                                    fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp),
                                     modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { model.resendStalled() }
                                         .padding(vertical = 3.dp, horizontal = 6.dp),
                                 )
@@ -473,7 +472,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 // status only, no resend affordance (the queued original would double-run).
                                 Text(
                                     stringResource(Res.string.msg_queued), color = Tok.muted,
-                                    fontFamily = Dk.mono, fontSize = 11.sp,
+                                    fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp),
                                     modifier = Modifier.padding(vertical = 3.dp, horizontal = 6.dp),
                                 )
                             } else if (model.streaming) {
@@ -544,6 +543,7 @@ private fun HandoffPaneRibbon(model: DesktopModel, onFinishReturn: () -> Unit) {
         if (recipient) {
             Text(
                 stringResource(Res.string.ho_finish_return), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(12.sp),
                 modifier = Modifier.clip(RoundedCornerShape(9.dp)).background(Tok.accent.copy(alpha = 0.10f))
                     .border(1.dp, Tok.accent, RoundedCornerShape(9.dp))
                     .clickable(onClick = onFinishReturn).padding(horizontal = 11.dp, vertical = 6.dp),
@@ -871,9 +871,9 @@ private fun StarterChip(
         Text(
             label, color = ink, fontFamily = if (mono) Dk.mono else Dk.ui, fontSize = 12.sp,
             fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(max = 132.dp),
+            style = tightCenter(12.sp), modifier = Modifier.widthIn(max = 132.dp),
         )
-        Text(if (open) "▴" else "▾", color = ink, fontFamily = Dk.ui, fontSize = 10.sp)
+        Text(if (open) "▴" else "▾", color = ink, fontFamily = Dk.ui, fontSize = 10.sp, style = tightCenter(10.sp))
     }
 }
 
@@ -1026,7 +1026,7 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
             val canOpenTerminal = remember(model.chatWorkdir) { TerminalLauncher.canOpen(model.chatWorkdir) }
             if (canOpenTerminal) {
                 Text(
-                    ">_", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
+                    ">_", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp),
                     modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
                         .clickable(onClick = onTerminalMenu)
                         .padding(horizontal = 9.dp, vertical = 3.dp),
@@ -1182,6 +1182,7 @@ private fun MessageRow(
         )
         is ChatItem.RuleChip -> Text(
             stringResource(Res.string.allow_chip_prefix) + "  ${item.rule}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.sp,
+            style = tightCenter(11.sp),
             modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f)).padding(horizontal = 10.dp, vertical = 4.dp),
         )
         // approval design M2 §9.6 (design frame 3 `.achip`): grant-covered auto-run audit chip + 收紧 link
@@ -1191,22 +1192,23 @@ private fun MessageRow(
                     .padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                Text("⚡ " + stringResource(Res.string.autorun_label), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp)
-                Text(item.summary, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("⚡ " + stringResource(Res.string.autorun_label), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp))
+                Text(item.summary, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     stringResource(if (item.basis == "task-grant") Res.string.autorun_basis_task else Res.string.autorun_basis_session),
-                    color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+                    color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(10.sp),
                     modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.12f)).padding(horizontal = 6.dp, vertical = 1.dp),
                 )
                 if (item.tightening) {
-                    Text("…", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                    Text("…", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
                 } else if (!item.tightened) {
                     Text(
                         stringResource(Res.string.autorun_tighten), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+                        style = tightCenter(10.5.sp),
                         modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onTightenAutoRun(item) }.padding(horizontal = 5.dp, vertical = 2.dp),
                     )
                 } else {
-                    Text("✓", color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                    Text("✓", color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
                 }
             }
         }
@@ -1610,11 +1612,10 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                             ) {
                                 if (diaBusy) SpinnerRing(11.dp, 1.5.dp)
                                 else Icon(Icons.Outlined.Language, null, tint = Tok.tx2, modifier = Modifier.size(12.dp))
-                                // trim=Both 去掉字体默认行距，让文字视觉中心与图标（12dp 对称盒）在 CenterVertically 下真正对齐
+                                // tightCenter 把行盒交给字号（#293），让文字视觉中心与图标（12dp 对称盒）在 CenterVertically 下真正对齐
                                 Text(
                                     if (diaBusy) stringResource(Res.string.dia_restarting) else stringResource(Res.string.dia_launch),
-                                    color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp,
-                                    style = TextStyle(lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both)),
+                                    color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp),
                                 )
                             }
                             if (diaConfirm) {

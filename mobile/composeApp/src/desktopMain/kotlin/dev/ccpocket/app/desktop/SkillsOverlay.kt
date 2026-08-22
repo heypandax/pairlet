@@ -273,6 +273,7 @@ private fun RailRow(name: String, detail: String, tag: String?, tagAccent: Boole
                 val borderTint = if (tagAccent) Tok.accent.copy(alpha = 0.33f) else Tok.hair
                 Text(
                     it, color = tint, fontFamily = Dk.mono, fontSize = 10.sp, fontWeight = FontWeight.Medium,
+                    style = tightCenter(10.sp),
                     modifier = Modifier.clip(RoundedCornerShape(999.dp))
                         .border(1.dp, borderTint, RoundedCornerShape(999.dp))
                         .padding(horizontal = 7.dp, vertical = 1.dp),
@@ -346,7 +347,7 @@ private fun DetailScaffold(
                 Text(title, color = Tok.tx, fontFamily = Dk.mono, fontSize = 25.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp)
                 Text(
                     kind.uppercase(), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 10.5.sp,
-                    fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp,
+                    fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, style = tightCenter(10.5.sp),
                     modifier = Modifier.clip(RoundedCornerShape(999.dp))
                         .border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
                         .padding(horizontal = 9.dp, vertical = 2.dp),
@@ -375,6 +376,7 @@ private fun DetailScaffold(
                                         commands.forEach { c ->
                                             Text(
                                                 c, color = Tok.accent, fontFamily = Dk.mono, fontSize = 12.sp,
+                                                style = tightCenter(12.sp),
                                                 modifier = Modifier.clip(RoundedCornerShape(6.dp))
                                                     .background(Tok.accent.copy(alpha = 0.10f))
                                                     .border(1.dp, Tok.accent.copy(alpha = 0.27f), RoundedCornerShape(6.dp))
@@ -483,7 +485,7 @@ private fun CenterStatePane(icon: ImageVector, tint: Color, title: String, sub: 
 private fun FootHintText(keycap: String, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
-            keycap, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.sp,
+            keycap, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp),
             modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Tok.hair.copy(alpha = 0.5f)).padding(horizontal = 5.dp, vertical = 1.dp),
         )
         Text(label, color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp)
