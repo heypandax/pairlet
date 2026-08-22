@@ -61,10 +61,20 @@ object DshTranscript {
         val version: Long,
         val origin: String?,
         val parentSession: String?,
+        val delegationDepth: Long,
     ) {
-        /** dsh records a sub-agent's own session under `origin:"subagent"`. Those are internal machinery,
-         *  not chats the user started, so they never reach the session list (same rule as ZCode's). */
-        val isSubagent: Boolean get() = origin == "subagent"
+        /**
+         * A session some agent spawned rather than the user — internal machinery that must not reach the
+         * session list (same rule as ZCode's scanner).
+         *
+         * THREE signals, not one (issue #288): dsh's own header validation makes `origin` OPTIONAL
+         * (`delegationDepth` is the required field), and plugin-created child sessions
+         * (dsh-background-agents / dsh-routed-subagent …) legally omit it — a user's list was polluted
+         * exactly that way. `parentSession` and a positive `delegationDepth` each independently mark a
+         * derived session, so any of the three counts.
+         */
+        val isSubagent: Boolean get() =
+            origin == "subagent" || parentSession != null || delegationDepth > 0
         val isSupported: Boolean get() = version == SUPPORTED_VERSION
     }
 
@@ -162,7 +172,73 @@ object DshTranscript {
             version = root.long("version") ?: -1L,
             origin = root.str("origin"),
             parentSession = root.str("parentSession"),
+            // absent reads as 0 (a root session): the field is formally required upstream, but a header
+            // that omits it must not make every session look derived — filtering is fail-open here
+            delegationDepth = root.long("delegationDepth") ?: 0L,
         )
+    }
+
+    /**
+     * The LAST `session/title` of the WHOLE transcript — the rename channel (issue #289).
+     *
+     * dsh renames a session by APPENDING a `session/title` event, so the summary-budget read (which
+     * assumes the title lives near the top) misses every rename once the chat outgrows [SUMMARY_BYTES].
+     * This streams the full file line-by-line WITHOUT materializing it: O(1) memory, bounded by
+     * [MAX_DECOMPRESSED_BYTES]. Cheap in the common case — a line is JSON-parsed only after a plain
+     * substring hit on the event name. Null when the transcript has no title event at all.
+     */
+    fun lastTitle(file: Path): String? {
+        var title: String? = null
+        val needle = "\"$EVENT_TITLE\""
+        forEachLine(file, MAX_DECOMPRESSED_BYTES) { line ->
+            if (needle !in line) return@forEachLine
+            val root = parseLine(line) ?: return@forEachLine
+            if (root.str("type") != EVENT_TITLE) return@forEachLine
+            root.obj("data")?.str("title")?.takeIf { it.isNotBlank() }?.let { title = it }
+        }
+        return title
+    }
+
+    /**
+     * Stream every line through [onLine] without holding the transcript in memory. Same decoding
+     * tolerance as [lines] (concatenated zstd, ragged live tail survives as a truncated prefix), at most
+     * [maxBytes] decompressed bytes visited. Unlike [lines] a half-flushed FINAL line IS offered to
+     * [onLine] — callers parse defensively ([parseLine] rejects truncated JSON), which is equivalent to
+     * dropping it, and it saves this reader from re-implementing newline bookkeeping around a charset
+     * decoder (a raw byte-chunk split would corrupt multi-byte UTF-8 on the chunk boundary).
+     */
+    private fun forEachLine(file: Path, maxBytes: Long, onLine: (String) -> Unit) {
+        if (!file.isRegularFile()) return
+        var seen = 0L
+        runCatching {
+            val raw = Files.newInputStream(file)
+            val decoded = if (file.fileName.toString().endsWith(".zstd")) {
+                ZstdInputStreamNoFinalizer(BufferedInputStream(raw)).also { it.setContinuous(true) }
+            } else {
+                raw
+            }
+            // budget the DECOMPRESSED bytes: a hostile/runaway file must not stream forever
+            val bounded = object : java.io.FilterInputStream(decoded) {
+                override fun read(): Int =
+                    if (seen >= maxBytes) -1 else super.read().also { if (it >= 0) seen += 1 }
+
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    if (seen >= maxBytes) return -1
+                    val n = super.read(b, off, len)
+                    if (n > 0) seen += n
+                    return n
+                }
+            }
+            bounded.bufferedReader(Charsets.UTF_8).use { reader ->
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    if (line.isNotBlank()) onLine(line)
+                }
+            }
+        }.onFailure {
+            // live writers land here routinely (ragged final frame) — the complete prefix was streamed
+            log.debug("dsh transcript $file stream stopped early (${it.javaClass.simpleName}) after ${seen}B")
+        }
     }
 
     /** The session's title: `session/title` events are LAST-WINS (dsh re-titles as the chat develops).

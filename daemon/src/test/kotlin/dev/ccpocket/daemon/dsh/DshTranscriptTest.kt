@@ -30,11 +30,19 @@ class DshTranscriptTest {
         return file
     }
 
-    private fun header(id: String = "session-abc", cwd: String = "/w", version: Int = 0, origin: String? = null) =
+    private fun header(
+        id: String = "session-abc",
+        cwd: String = "/w",
+        version: Int = 0,
+        origin: String? = null,
+        parentSession: String? = null,
+        delegationDepth: Int = 0,
+    ) =
         buildString {
             append("""{"type":"session","version":$version,"id":"$id","cwd":"$cwd",""")
-            append(""""createdAt":1700000000000,"delegationDepth":0""")
+            append(""""createdAt":1700000000000,"delegationDepth":$delegationDepth""")
             if (origin != null) append(""","origin":"$origin"""")
+            if (parentSession != null) append(""","parentSession":"$parentSession"""")
             append("}\n")
         }
 
@@ -133,6 +141,23 @@ class DshTranscriptTest {
     }
 
     @Test
+    fun derived_sessions_are_flagged_even_when_origin_is_omitted() {
+        // issue #288: upstream header validation makes `origin` OPTIONAL — plugin-created child sessions
+        // (background-agents / routed-subagent …) legally omit it. parentSession and delegationDepth each
+        // mark the session as derived on their own.
+        val byParent = writeFrames(tmp(), header(parentSession = "session-root"))
+        assertEquals(true, DshTranscript.header(byParent)?.isSubagent)
+
+        val byDepth = writeFrames(tmp(), header(delegationDepth = 2))
+        assertEquals(true, DshTranscript.header(byDepth)?.isSubagent)
+
+        // a root session (depth 0, no parent, no origin) must never be hidden — and a header missing
+        // delegationDepth entirely reads as a root, not as derived (filtering fails open)
+        val noDepthLine = """{"type":"session","version":0,"id":"session-nd","cwd":"/w","createdAt":1}""" + "\n"
+        assertEquals(false, DshTranscript.header(writeFrames(tmp(), noDepthLine))?.isSubagent)
+    }
+
+    @Test
     fun a_file_whose_first_line_is_not_a_session_record_has_no_header() {
         assertNull(DshTranscript.header(writeFrames(tmp(), userMsg("orphan", 1))))
     }
@@ -155,6 +180,30 @@ class DshTranscriptTest {
     fun without_a_title_event_the_first_user_message_is_the_fallback() {
         val file = writeFrames(tmp(), header(), userMsg("summarize the repo", 1), assistantMsg("sure", 2))
         assertEquals("summarize the repo", DshTranscript.title(DshTranscript.lines(file)))
+    }
+
+    @Test
+    fun a_rename_appended_beyond_the_summary_budget_is_still_found() {
+        // issue #289: dsh renames by APPENDING session/title. Build a transcript whose decompressed size
+        // exceeds the 512KB summary budget, with the rename as the very last event — the summary read
+        // must miss it (the old bug) and lastTitle must find it.
+        val filler = "x".repeat(1000)
+        val bulk = (1..700).joinToString("") { seq ->
+            """{"type":"assistant/message","seq":$seq,"time":1,"data":{"turn":1,"step":1,""" +
+                """"message":{"id":"a$seq","role":"assistant","content":[{"type":"text","text":"$filler"}],"source":"model"}}}""" + "\n"
+        }
+        val rename = """{"type":"session/title","seq":999,"time":9,"data":{"title":"重命名后的标题","source":{"kind":"user"}}}""" + "\n"
+        val file = writeFrames(tmp(), header(), userMsg("start", 0), bulk, rename)
+
+        val summaryTitle = DshTranscript.title(DshTranscript.summaryLines(file))
+        assertEquals("start", summaryTitle, "precondition: the rename must lie beyond the summary budget")
+        assertEquals("重命名后的标题", DshTranscript.lastTitle(file))
+    }
+
+    @Test
+    fun lastTitle_is_null_when_no_title_event_exists() {
+        val file = writeFrames(tmp(), header(), userMsg("only chat", 1))
+        assertNull(DshTranscript.lastTitle(file))
     }
 
     // ---- defensive parsing ----

@@ -96,11 +96,30 @@ object DshTranscriptScanner {
     private fun mtimeOf(file: Path): Long =
         runCatching { file.getLastModifiedTime().toMillis() }.getOrDefault(0L)
 
+    /**
+     * issue #289: a rename APPENDS a `session/title` event, so the summary-budget read misses it once
+     * the chat outgrows the budget. The full-transcript streaming scan is cached by (path, mtime) — a
+     * settled session is scanned once per daemon lifetime; only a live writer (mtime moving) re-scans.
+     */
+    private data class CachedTitle(val mtime: Long, val title: String?)
+    private val titleCache = java.util.concurrent.ConcurrentHashMap<String, CachedTitle>()
+    private const val TITLE_CACHE_MAX = 4_096 // ~2× the scan bound; blunt reset beats an LRU here
+
+    private fun fullTitle(found: Found): String? {
+        val key = found.file.toString()
+        titleCache[key]?.takeIf { it.mtime == found.mtime }?.let { return it.title }
+        val fresh = runCatching { DshTranscript.lastTitle(found.file) }.getOrNull()
+        if (titleCache.size >= TITLE_CACHE_MAX) titleCache.clear()
+        titleCache[key] = CachedTitle(found.mtime, fresh)
+        return fresh
+    }
+
     private fun summarize(found: Found): SessionSummary {
-        // Bounded read: the header, the title event and the opening user turn all live near the top, so
-        // the list never pays for decompressing a long chat.
+        // Bounded read for everything BUT the title: header, opening user turn and the message count all
+        // live near the top, so the list never materializes a long chat. The title alone must consider
+        // the whole file (renames append; see [fullTitle]) — done as a cached O(1)-memory stream.
         val lines = runCatching { DshTranscript.summaryLines(found.file) }.getOrDefault(emptyList())
-        val title = runCatching { DshTranscript.title(lines) }.getOrNull()
+        val title = fullTitle(found) ?: runCatching { DshTranscript.title(lines) }.getOrNull()
         val firstPrompt = lines.asSequence()
             .mapNotNull { DshTranscript.parseLine(it) }
             .firstOrNull { it.str("type") == DshTranscript.EVENT_USER }
