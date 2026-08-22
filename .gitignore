@@ -9,6 +9,14 @@ local.properties
 .DS_Store
 captures/
 .cc-connect
+.VSCodeCounter
+
+# 内部工作产物：会话交接计划、设计运行草稿、营销素材——不进公开库
+docs/plans/
+docs/design/app-design-runs/
+docs/design/image2-concepts/
+docs/design/APP-DESIGN-AUTOPILOT.md
+marketing/
 
 # local agent / IDE state
 .claude/
