@@ -102,6 +102,8 @@ import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.awtTransferable
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.ui.chat.LineageBanner
+import dev.ccpocket.app.ui.chat.RewindErrorBar
 import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.ImgState
 import dev.ccpocket.app.data.PendingFile
@@ -384,6 +386,11 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                     onOpenWorkflow = model::openWorkflowPanel,
                                     onOpenVideo = { model.openWorkspaceFile(it.path) },
                                     onTightenAutoRun = model::tightenAutoRun,
+                                    // rewind/fork (issue #282): built only for a user turn the daemon
+                                    // gave transcript coordinates to — see DesktopModel.canRewind
+                                    onRewind = (m as? ChatItem.User)?.takeIf(model::canRewind)?.let {
+                                        RewindEntries(!model.rewindBlockedByTurn) { turn, mode -> model.startRewind(turn, mode) }
+                                    },
                                 )
                             }
                         }
@@ -514,6 +521,9 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
     }
     }
     }
+    // rewind/fork confirmation (issue #282) — a popup over the whole pane, so the numbers land in the
+    // middle of the window rather than tucked beside the turn they refer to
+    RewindConfirmPopup(model)
 }
 
 /**
@@ -616,7 +626,18 @@ private fun HandoffComposerZone(model: DesktopModel, questionOwnsInput: Boolean)
             HandoffWatchBar(onRecall = { model.handoffRecall() })
         }
         model.observing -> ObserveBar(model)
-        else -> Composer(model, suppressAutoFocus = questionOwnsInput)
+        else -> Column(Modifier.fillMaxWidth()) {
+            // A refused rewind (issue #282) docks above the composer, like every other transient chat
+            // notice, and self-dismisses — the commonest refusal is a stale anchor, which is information
+            // ("reload and point again"), not a decision to make.
+            model.rewindError?.let { reason ->
+                RewindErrorBar(
+                    reason, onDismiss = { model.dismissRewindError() },
+                    modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 8.dp),
+                )
+            }
+            Composer(model, suppressAutoFocus = questionOwnsInput)
+        }
     }
 }
 
@@ -1054,6 +1075,15 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
         // pathLinked left-clicks OPEN the workdir (when it's local); right-click adds "Copy path" so the
         // cwd is grabbable even on a remote session where it isn't a link at all. Copies the bare workdir,
         // not the whole machine·branch·model meta line.
+        // Branch lineage (issue #282, design frame C) TAKES THE PLACE of the context meta line while a
+        // rewound/forked conversation is on screen: right after a rewind, "which conversation is this"
+        // outranks machine·path·model, and stacking both would say two different things about identity.
+        val lineage = model.sessionLineage
+        if (lineage != null) {
+            LineageBanner(lineage.mode, lineage.fromTitle, Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+            return@Column
+        }
         val clipboard = LocalClipboardManager.current
         val copyPath = stringResource(Res.string.menu_copy_path)
         ContextMenuArea(items = {
@@ -1100,9 +1130,17 @@ private fun MessageRow(
     onOpenWorkflow: (String) -> Unit = {},
     onOpenVideo: (SentFile) -> Unit = {},
     onTightenAutoRun: (ChatItem.AutoRun) -> Unit = {},
+    // rewind/fork (issue #282): null = this row has no entries (no coordinates / not Claude). The
+    // Boolean is `enabled` — a disabled entry is still SHOWN, with the reason, because "not right now"
+    // and "this build can't" must not look the same.
+    onRewind: RewindEntries? = null,
 ) {
     when (item) {
-        is ChatItem.User -> CopyableBlock(item.text) {
+        // rewind/fork (issue #282): right-click is the desktop's long-press, matching the sidebar row's
+        // own ContextMenuArea. Entries appear ONLY when the row carries transcript coordinates — with a
+        // pre-#282 daemon or a non-Claude backend the menu isn't built at all, so the user turn keeps
+        // exactly its previous behaviour (no empty menu on right-click either).
+        is ChatItem.User -> RewindMenuArea(item, onRewind) { CopyableBlock(item.text) {
             UserTurn(bubbles) {
                 Column {
                 Text(stringResource(Res.string.chat_you), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
@@ -1157,7 +1195,7 @@ private fun MessageRow(
                 }
                 }
             }
-        }
+        } }
         is ChatItem.Assistant -> CopyableBlock(item.text) { MarkdownText(item.text, Tok.tx) }
         is ChatItem.Thinking -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Text("💭", fontSize = 12.sp)

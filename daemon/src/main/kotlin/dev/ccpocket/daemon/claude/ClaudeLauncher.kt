@@ -94,6 +94,16 @@ object ClaudeLauncher {
             // fork into a fresh id rather than appending to the resumed transcript — guarded by resumeId
             // so we never emit --fork-session with nothing to fork (see AgentSpec.forkSession)
             if (spec.forkSession) add("--fork-session")
+            // rewind/fork (issue #282): truncate the resumed context at a chain entry, and — when the cut
+            // is exactly one turn wide — declare which turn that is so the CLI can refuse a cut that would
+            // take anything else with it. Guarded by resumeId for the same reason as --fork-session (there
+            // is nothing to truncate without a resume), and emitted AFTER it so a malformed anchor can only
+            // ever damage the tail of the command line, never the flags ahead of it. --resume-drops-turn is
+            // nested one level deeper: alone it has no meaning and the CLI rejects the launch.
+            spec.resumeSessionAt?.let { anchor ->
+                add("--resume-session-at"); add(anchor)
+                spec.resumeDropsTurn?.let { dropped -> add("--resume-drops-turn"); add(dropped) }
+            }
         }
         spec.model?.let { add("--model"); add(it) }
         spec.effort?.let { add("--effort"); add(it) }

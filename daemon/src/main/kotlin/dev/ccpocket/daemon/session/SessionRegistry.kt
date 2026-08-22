@@ -84,6 +84,12 @@ class SessionRegistry(
     private val pendingClose = mutableMapOf<PendingCloseKey, Job>()
     private data class LiveReattachClaim(val staleClose: Job?)
 
+    /** Conversations with a rewind PAST its point of no return (issue #282), guarded by [mutex]. The
+     *  frame arrives on the router's scope, so two copies of one request — a duplicate tap, a resend
+     *  after a flaky link — can both clear the admission gate before either has closed anything, and
+     *  would then branch the same session twice. The claim is what makes the swap happen at most once. */
+    private val rewinding = mutableSetOf<String>()
+
     /** Test-only race seam: invoked after a grace delay but before that timer claims the mutex. A
      *  replacement can supersede the awakened timer here, pinning the cancellation boundary. */
     internal var beforePendingCloseClaim: (suspend () -> Unit)? = null
@@ -505,6 +511,147 @@ class SessionRegistry(
         }
         if (spectators.isNotEmpty()) log.info("handoff rebuild: migrated ${spectators.size} spectator view(s) onto ${convoId.take(8)}…")
         return convoId
+    }
+
+    // ── rewind / fork (issue #282, docs/design/REWIND-FORK.md §6) ──────────────────────────────────
+
+    /**
+     * Answer one [RewindSession]: preview the cut, or make it.
+     *
+     * The whole operation is "close one conversation, open a branch of it", and the ONE invariant is
+     * that it either happens completely or leaves nothing behind. So every refusable condition is
+     * checked BEFORE anything is closed — the admission gate, then the anchor translated against the
+     * file on disk — and the only step after the point of no return is creating the replacement, whose
+     * failure path restores nothing because nothing on disk was touched: `--fork-session` writes a new
+     * transcript and leaves the original byte-for-byte (probed on 2.1.228), and the branch's own file
+     * does not exist until its first turn.
+     *
+     * Both modes launch identically (`--resume <sid> --resume-session-at <anchor> --fork-session`); the
+     * mode only decides how the ORIGINAL is later filed, which is the lineage ledger's business, not
+     * this function's. The "truncate WITHOUT forking" shape is never emitted anywhere: it keeps the
+     * original id and appends the branch to the same file, turning the transcript into a tree that
+     * linear replay renders twice.
+     *
+     * Answers the REQUESTING sink only — another attached client did not ask and must not be told its
+     * session is being cut by a frame it has no context for; it finds out the ordinary way, by being
+     * migrated onto the branch below.
+     */
+    suspend fun rewind(req: dev.ccpocket.protocol.RewindSession, sink: OutboundSink) {
+        val refuse: suspend (String) -> Unit = { reason ->
+            log.info("rewind ${req.convoId.take(8)}… refused: $reason")
+            sink.emit(
+                if (req.dryRun) dev.ccpocket.protocol.RewindPreview(req.convoId, 0, 0, ok = false, reason = reason)
+                else dev.ccpocket.protocol.RewindDone(req.convoId, ok = false, reason = reason),
+            )
+        }
+        val R = dev.ccpocket.protocol.RewindRefusal
+        if (req.mode != dev.ccpocket.protocol.RewindMode.REWIND && req.mode != dev.ccpocket.protocol.RewindMode.FORK) {
+            return refuse(R.BAD_MODE)
+        }
+        val convo = get(req.convoId) ?: return refuse(R.NO_CONVO)
+        // Claude only: no other backend has a truncated-resume primitive, and silently doing something
+        // ELSE (a plain resume, a fresh session) would be worse than refusing. Restricted conversations
+        // are out too — a bridge / guest / handoff-granted session branching the owner's history is an
+        // authority question this feature has not answered, so the answer is no.
+        if (convo.kind != AgentKind.CLAUDE) return refuse(R.UNSUPPORTED)
+        if (convo.origin != null || !convo.matchesGrant(null, null)) return refuse(R.UNSUPPORTED)
+        // idle in BOTH senses: nothing running or unanswered (isBusy), and nothing queued toward the
+        // agent that a cut would strand (the #122 ledger). Keeps this orthogonal to the #285 attribution
+        // gate — a rewind can only start from a standstill, where no prompt has a fate to decide.
+        if (convo.isBusy() || convo.hasQueuedPrompts()) return refuse(R.NOT_IDLE)
+        val sid = convo.sessionId ?: convo.resumeAnchor ?: return refuse(R.NO_TRANSCRIPT)
+        val workdir = convo.workdir.toString()
+        val file = ProjectPaths.dirForUnder(projectsRoot, workdir).resolve("$sid.jsonl")
+        if (!file.exists()) return refuse(R.NO_TRANSCRIPT)
+        // a terminal `claude --resume` on this transcript is a second writer; our own live process is
+        // fine (we are about to stop it) and externallyActive already excludes it
+        if (externallyActive(sid, workdir, file)) return refuse(R.EXTERNAL_WRITER)
+
+        val plan = when (val p = withContext(Dispatchers.IO) { dev.ccpocket.daemon.disk.RewindPlanner.plan(file, req.anchorUuid, req.anchorSeq) }) {
+            is dev.ccpocket.daemon.disk.RewindPlanner.Result.Refused -> return refuse(p.reason)
+            is dev.ccpocket.daemon.disk.RewindPlanner.Result.Ok -> p.plan
+        }
+        if (req.dryRun) {
+            log.info("rewind ${req.convoId.take(8)}… preview: ${plan.dropTurns} turn(s), ${plan.dropToolCalls} tool call(s)")
+            return sink.emit(dev.ccpocket.protocol.RewindPreview(req.convoId, plan.dropTurns, plan.dropToolCalls, ok = true))
+        }
+
+        val factory = backends[AgentKind.CLAUDE] ?: return refuse(R.UNSUPPORTED)
+        // Claim the conversation before touching anything. A loser here gets NO_CONVO, which is what its
+        // request has effectively become: the conversation it named is on its way out.
+        if (!mutex.withLock { rewinding.add(convo.convoId) }) return refuse(R.NO_CONVO)
+        try {
+            rewindLocked(req, sink, convo, sid, plan, factory, refuse)
+        } finally {
+            mutex.withLock { rewinding.remove(convo.convoId) }
+        }
+    }
+
+    /** The execute half of [rewind], past the point of no return and holding the [rewinding] claim. */
+    private suspend fun rewindLocked(
+        req: dev.ccpocket.protocol.RewindSession,
+        sink: OutboundSink,
+        convo: Conversation,
+        sid: String,
+        plan: dev.ccpocket.daemon.disk.RewindPlanner.Plan,
+        factory: AgentBackendFactory,
+        refuse: suspend (String) -> Unit,
+    ) {
+        val R = dev.ccpocket.protocol.RewindRefusal
+        val knobs = convo.launchKnobs()
+        // Everyone else watching this conversation moves onto the branch (the §3.3 auto-spectate shape):
+        // the alternative is leaving them attached to a conversation that is about to stop existing.
+        val spectators = convo.attachedSinks().filterNot { sinkKey(it) == sinkKey(sink) }
+        // POINT OF NO RETURN. Stop the old conversation first and let its process flush: the branch is
+        // launched with --fork-session so two writers could not actually collide, but the daemon's own
+        // "one writer per session" discipline does not get relaxed just because the CLI would survive it.
+        mutex.withLock { convos.remove(convo.convoId) }
+        cancelPendingCloses(convo.convoId)
+        approvals.withdrawAllForConvo(convo.convoId)
+        runCatching { convo.close() }
+        noteSelfClosed(convo)
+
+        val newConvoId = UUID.randomUUID().toString()
+        val branch = Conversation(
+            newConvoId, convo.workdir, knobs.mode, sink, scope, factory.create(),
+            pushHookProvider = { pushHook }, askPushHookProvider = { askPushHook },
+            approvals = approvals, grants = grants, riskEngine = riskEngine,
+        )
+        mutex.withLock { convos[newConvoId] = branch }
+        val started = runCatching {
+            branch.open(
+                sid, knobs.model, knobs.effort,
+                permissionMode = knobs.permissionMode,
+                serviceTier = knobs.serviceTier,
+                // LAZY, like every plain open. Nothing is forked until the person actually sends the
+                // first turn — back out here and no transcript, no session row and no ledger entry were
+                // created, which is the strongest possible reading of "a fork is never implicit". It is
+                // also why RewindDone carries no newSessionId: the CLI has not minted one yet.
+                rewind = Conversation.RewindLaunch(
+                    parentSid = sid,
+                    anchorUuid = plan.anchorUuid,
+                    dropsTurnUuid = plan.dropsTurnUuid,
+                    cutSeq = req.anchorSeq,
+                    mode = req.mode,
+                ),
+            )
+        }
+        if (started.isFailure) {
+            mutex.withLock { convos.remove(newConvoId) }
+            runCatching { branch.close() }
+            log.warn("rewind ${req.convoId.take(8)}… branch failed to open: ${started.exceptionOrNull()?.message}")
+            return refuse(R.LAUNCH_FAILED)
+        }
+        for (s in spectators) {
+            runCatching { branch.reattach(s) }
+                .onFailure { log.warn("rewind: could not migrate a spectator onto ${newConvoId.take(8)}…: ${it.message}") }
+        }
+        log.info(
+            "rewind ${req.convoId.take(8)}… → ${req.mode} branch ${newConvoId.take(8)}… of ${sid.take(8)}… " +
+                "at seq ${req.anchorSeq} (dropping ${plan.dropTurns} turn(s), ${plan.dropToolCalls} tool call(s)" +
+                "${if (plan.dropsTurnUuid != null) ", guarded" else ""})",
+        )
+        sink.emit(dev.ccpocket.protocol.RewindDone(req.convoId, ok = true, newConvoId = newConvoId))
     }
 
     /** Test hook: is [convoId] still a live observe view? (the issue-107 stale-observer reap) */

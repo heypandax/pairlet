@@ -375,6 +375,25 @@ class Conversation(
     @Volatile
     private var openedWithFork = false
 
+    /**
+     * The truncation this conversation was opened as (issue #282, docs/design/REWIND-FORK.md) — set by
+     * [SessionRegistry]'s rewind orchestration and null for every ordinary open. [anchorUuid] is the CLI
+     * chain anchor (already translated from the message the user picked), [dropsTurnUuid] the one-turn
+     * guard rail, [cutSeq] the transcript cursor of the dropped message (used to clip the replay so the
+     * phone sees the branch, not the history the branch discards), and [mode]/[parentSid] the lineage
+     * this branch gets journalled under once the CLI reports the forked id.
+     */
+    data class RewindLaunch(
+        val parentSid: String,
+        val anchorUuid: String,
+        val dropsTurnUuid: String?,
+        val cutSeq: Long,
+        val mode: String,
+    )
+
+    @Volatile
+    private var rewindLaunch: RewindLaunch? = null
+
     // best-guess model for DISPLAY only (header + context window before the first init lands): read back from
     // the resumed transcript, or — for a brand-new session with no --model — the backend's configured default
     // (issue #96). Never baked into an AgentSpec: pinning a historical — possibly retired — model onto a
@@ -599,6 +618,33 @@ class Conversation(
 
     private fun hasUnconsumedPrompts(): Boolean = synchronized(promptLedger) { promptLedger.isNotEmpty() }
 
+    /**
+     * Prompts written toward the agent that it has not acknowledged yet (the issue #122 ledger) — the
+     * other half of the rewind admission gate (issue #282), alongside [isBusy]. A queued prompt is
+     * invisible to [isBusy] before its turn starts, and cutting the history under it would either
+     * strand it in a conversation that is about to be closed, or hand it to a branch as an unexplained
+     * first turn. This is a READ of the #285 ledger, not a change to it: nothing here settles, expires
+     * or re-keys an entry.
+     */
+    fun hasQueuedPrompts(): Boolean = hasUnconsumedPrompts()
+
+    /**
+     * The launch knobs this conversation is currently running under, so a rewind/fork branch opens the
+     * copy against the SAME model / effort / permission mode the person was actually talking to instead
+     * of resetting to today's account defaults (issue #282). Deliberately the explicitly-chosen values —
+     * `backfilledModel`, the display guess read back off a transcript, is NOT included, exactly as a
+     * relaunch never bakes it in (issue #27 residual).
+     */
+    data class LaunchKnobs(
+        val mode: PermissionMode,
+        val model: String?,
+        val effort: String?,
+        val permissionMode: String?,
+        val serviceTier: String?,
+    )
+
+    fun launchKnobs(): LaunchKnobs = LaunchKnobs(mode, model, effort, permissionMode, serviceTier)
+
     /** One-shot queue drain: the oldest queued prompt leaves the ledger to become the next spawn's
      *  argv message — launchProcess re-records it (initialSend) under the fresh generation, so the
      *  usual SessionInit settle applies. Pop-then-re-record keeps exactly one live copy. */
@@ -712,7 +758,12 @@ class Conversation(
         sinceSeq: Long? = null,
         permissionMode: String? = null,
         serviceTier: String? = null,
+        // issue #282: open this conversation as a TRUNCATED branch of [resumeId] rather than a plain
+        // resume. Set only by SessionRegistry.rewind, which has already validated the anchor against the
+        // file on disk; null keeps every other open byte-for-byte as it was.
+        rewind: RewindLaunch? = null,
     ) {
+        this.rewindLaunch = rewind
         this.model = model
         this.effort = backend.normalizeEffort(model, effort) // drop stale persisted levels a known model cannot run
         this.permissionMode = normalizePermissionMode(permissionMode)
@@ -781,12 +832,31 @@ class Conversation(
                 // inside replaySlice. An EMPTY delta is never emitted — the client is already caught up,
                 // and an empty non-delta ConvoHistory means /clear to it. A DELTA goes to the OPENER's
                 // sink only (it continues that client's cursor); the full window keeps the fan-out.
-                val slice = backend.replaySlice(workdir.toString(), resumeId, sinceSeq)
+                val slice = clipToRewind(backend.replaySlice(workdir.toString(), resumeId, sinceSeq))
                 if (slice.messages.isNotEmpty()) (if (slice.delta) openerSink else sink).emit(historyFrame(slice))
                 replayWorkflowRuns(resumeId, sink)
             }
             emitCommands()
         }
+    }
+
+    /**
+     * Clip a replay of the PARENT transcript to what the branch actually inherits (issue #282).
+     *
+     * Between a rewind and its first turn this conversation still resumes the parent's session id, so an
+     * unclipped replay would show the phone exactly the turns the rewind just discarded. Rows carry their
+     * transcript cursor since #282, so the cut is a filter on `seq` rather than another parse.
+     *
+     * [ReplaySlice.lastSeq] is dropped deliberately: it is the client's delta cursor, and honouring it on
+     * the next reattach would hand back the very rows clipped here. Null means "no delta" (the pre-#147
+     * contract), and the window is small by construction. Once the first turn lands, the CLI's forked id
+     * takes over and every later replay reads the branch's OWN file, where no clipping applies.
+     */
+    private fun clipToRewind(slice: dev.ccpocket.daemon.disk.ReplaySlice): dev.ccpocket.daemon.disk.ReplaySlice {
+        val cut = rewindLaunch?.cutSeq?.takeIf { sessionId == null } ?: return slice
+        val kept = slice.messages.filter { (it.seq ?: Long.MIN_VALUE) < cut }
+        if (kept.size == slice.messages.size) return slice
+        return slice.copy(messages = kept, lastSeq = null, delta = false)
     }
 
     /** One replayed window/delta as a wire frame — the single place the #147 cursor fields are stamped. */
@@ -1279,7 +1349,17 @@ class Conversation(
         } else {
             rawSpec
         }
-        val spec = if (cleanRoom) securedSpec.copy(cleanRoom = true) else securedSpec
+        val cleanSpec = if (cleanRoom) securedSpec.copy(cleanRoom = true) else securedSpec
+        // REWIND/FORK truncation (issue #282), applied at the ONE choke point every launch path funnels
+        // through so no caller can forget it — and gated on `sessionId == null`, which is what makes it
+        // fire exactly once. Only the FIRST launch is the branching one; after the CLI reports the forked
+        // id every later relaunch (mode switch, model switch, lock heal) resumes THAT id in place, and
+        // re-sending --resume-session-at would truncate the branch again at an anchor uuid the copy still
+        // contains — a silent second cut on every settings change.
+        val spec = rewindLaunch
+            ?.takeIf { sessionId == null && cleanSpec.resumeId != null }
+            ?.let { cleanSpec.copy(resumeSessionAt = it.anchorUuid, resumeDropsTurn = it.dropsTurnUuid, forkSession = true) }
+            ?: cleanSpec
         intentionalStop = false
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
         processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
@@ -1525,6 +1605,19 @@ class Conversation(
                             val parentSid = prevSid ?: openedResumeId
                             if (parentSid != null && parentSid != newSid) {
                                 runCatching { SessionGroups.inherit(workdir.toString(), parentSid, newSid) }
+                                // REWIND/FORK lineage (issue #282). The same choke point, but a NARROWER
+                                // gate: SessionGroups.inherit covers every fork path, while the ledger must
+                                // record only branches the USER asked for — journalling a heal-lock or
+                                // take-over fork here would fold an innocent session away as "rewound".
+                                // Cleared after the first write: this conversation branched once, and a
+                                // later relaunch reporting the same id must not add a second edge.
+                                rewindLaunch?.let { rl ->
+                                    rewindLaunch = null
+                                    runCatching {
+                                        dev.ccpocket.daemon.disk.RewindLineage.note(rl.parentSid, newSid, rl.cutSeq, rl.mode)
+                                    }
+                                    log.info("$convoId ${rl.mode} branch: ${rl.parentSid.take(8)}… → ${newSid.take(8)}… at seq ${rl.cutSeq}")
+                                }
                             }
                             sessionId = newSid
                         }

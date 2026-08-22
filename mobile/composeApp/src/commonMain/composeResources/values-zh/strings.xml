@@ -1791,4 +1791,33 @@
     <string name="proj_search">搜索项目</string>
     <string name="proj_search_cancel">取消</string>
     <string name="proj_view_mode">列表形态</string>
+    <!-- session rewind / fork (issue #282) -->
+    <string name="rewind_menu_rewind">从这里重来</string>
+    <string name="rewind_menu_rewind_sub">换个说法，重发这条消息</string>
+    <string name="rewind_menu_fork">从这里分叉</string>
+    <string name="rewind_menu_fork_sub">从这个点分出一条并行会话</string>
+    <string name="rewind_menu_blocked">先停止当前这一轮</string>
+    <string name="rewind_confirm_rewind_title">从这条消息重来？</string>
+    <string name="rewind_confirm_fork_title">从这条消息分叉？</string>
+    <string name="rewind_will_drop">将丢弃</string>
+    <string name="rewind_turns">轮对话</string>
+    <string name="rewind_tool_calls">次工具调用</string>
+    <string name="rewind_counting">正在统计……</string>
+    <string name="rewind_files_warning_lead">文件改动不会回滚</string>
+    <string name="rewind_files_warning_rest">——回溯的只是对话。</string>
+    <string name="rewind_mode_note_rewind">当前会话会收起来（还找得回）</string>
+    <string name="rewind_mode_note_fork">当前会话原样保留</string>
+    <string name="rewind_action_rewind">重来</string>
+    <string name="rewind_action_fork">创建分叉</string>
+    <string name="rewind_lineage_rewound">回溯自</string>
+    <string name="rewind_lineage_fork">分叉自</string>
+    <string name="rewind_group_rewound">已回溯的会话（%1$d）</string>
+    <string name="rewind_caption_fork">分叉自 %1$s</string>
+    <string name="rewind_caption_rewound">已回溯 → %1$s</string>
+    <string name="rewind_err_stale">对话记录已经变了——刷新后再试。</string>
+    <string name="rewind_err_not_idle">这个会话还在忙——先停止当前这一轮。</string>
+    <string name="rewind_err_unsupported">这个会话的后端不支持回溯。</string>
+    <string name="rewind_err_external">现在有别人正在写这个会话。</string>
+    <string name="rewind_err_first">这已经是第一条消息了——直接新建会话吧。</string>
+    <string name="rewind_err_generic">这个会话没能回溯。</string>
 </resources>

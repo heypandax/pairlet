@@ -198,6 +198,21 @@ data class SessionSummary(
     // stamped by the daemon per row; a trailing optional — an old daemon omits it (every row reads ungrouped),
     // an old app ignores it (renders today's flat list).
     val group: String? = null,
+    // Lineage of a session this daemon branched on the user's explicit request (issue #282): the
+    // sessionId this one was FORKED from, i.e. the original is still a peer in the list and both are
+    // meant to be visible. The CLI writes NO blood line of its own into a forked transcript (probed on
+    // 2.1.228: the parent id appears nowhere in the copy), so this is the daemon's own journal talking
+    // — see the daemon's RewindLineage store. Exactly one of [forkedFrom]/[rewindOf] is ever set, and
+    // only on the CHILD row. Trailing optional both ways: an old daemon omits it (rows read as ordinary
+    // unrelated sessions), an old app ignores it and renders today's flat list.
+    val forkedFrom: String? = null,
+    // The other half of [forkedFrom]: the sessionId this one REWOUND — the original was replaced rather
+    // than branched from, so the list must not grow. Clients derive the fold from the list itself: an
+    // entry that some other entry names in its [rewindOf] is the superseded original and belongs in the
+    // collapsed "rewound" group, which keeps the visible count unchanged across a rewind. Deliberately
+    // NOT a "collapsed" flag on the original — a flag would need a second write to a row the daemon may
+    // not be scanning, while the child's own pointer is written once and reads the same to every client.
+    val rewindOf: String? = null,
 )
 
 /**

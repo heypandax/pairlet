@@ -249,6 +249,11 @@ import dev.ccpocket.protocol.SessionGroup
 import dev.ccpocket.protocol.GroupCreate
 import dev.ccpocket.protocol.GroupRename
 import dev.ccpocket.protocol.RenameSession
+import dev.ccpocket.protocol.RewindDone
+import dev.ccpocket.protocol.RewindMode
+import dev.ccpocket.protocol.RewindPreview
+import dev.ccpocket.protocol.RewindRefusal
+import dev.ccpocket.protocol.RewindSession
 import dev.ccpocket.protocol.GroupDelete
 import dev.ccpocket.protocol.GroupAssign
 import dev.ccpocket.app.isPreviewMode
@@ -340,6 +345,15 @@ sealed interface ChatItem {
         /** The replay budget shed some of this turn's images to keep the history frame under the relay
          *  cap (issue #254) — the renderers say so in place instead of showing fewer tiles silently. */
         val imagesTruncated: Boolean = false,
+        /** This turn's transcript coordinates, replayed straight off [HistoryMessage] (issue #282).
+         *  Present TOGETHER or not at all, and only on rows a new daemon replayed from a Claude
+         *  transcript — a locally-composed bubble has none until the history comes back. Both being
+         *  non-null IS the rewind capability probe: no coordinates, no rewind/fork entry, which is what
+         *  keeps the affordance off older daemons and off every non-Claude backend without a version
+         *  check. Never invented client-side: a guessed anchor would cut somewhere the daemon can't
+         *  verify. */
+        val seq: Long? = null,
+        val uuid: String? = null,
     ) : ChatItem
     data class Assistant(val text: String) : ChatItem
 
@@ -1012,6 +1026,44 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  error line. Cleared by the next attempt / [dismissRenameError]. */
     val renameError = mutableStateOf<RenameRefusal?>(null)
     private var renameTarget: String? = null // the sessionId the in-flight RenameSession asked about
+
+    // ── session rewind / fork (issue #282, docs/design/REWIND-FORK.md) ──────────────────────────────
+
+    /** The message a rewind/fork was asked about, held while the dry run is out and the confirmation
+     *  sheet is up. [text] is the anchor's own wording — the composer is prefilled with it after a
+     *  rewind, which is the whole point of the gesture ("say that again, differently"). */
+    data class RewindTarget(val convoId: String, val seq: Long, val uuid: String, val text: String, val mode: String)
+
+    /** What the confirmation sheet is showing. `null` = no sheet. [counts] is null while the dry run is
+     *  in flight — the sheet opens immediately in a loading state rather than after a round trip, so the
+     *  gesture feels answered even on a slow link. */
+    data class RewindSheet(val target: RewindTarget, val counts: RewindCounts? = null, val submitting: Boolean = false)
+    data class RewindCounts(val turns: Int, val toolCalls: Int)
+
+    val rewindSheet = mutableStateOf<RewindSheet?>(null)
+
+    /** The daemon's machine-readable refusal of the last rewind attempt (a [dev.ccpocket.protocol.RewindRefusal]
+     *  value), surfaced as a transient bar. Never rendered raw — the UI maps known values to copy and
+     *  falls back to a generic line for anything a newer daemon invents. */
+    val rewindError = mutableStateOf<String?>(null)
+
+    fun dismissRewindError() { rewindError.value = null }
+
+    /** Where the OPEN conversation came from, when this app is the one that branched it (issue #282).
+     *  Deliberately local and short-lived rather than read back off the session list: the branch has no
+     *  transcript — and therefore no list row and no lineage ledger entry — until its first turn, so for
+     *  the whole "rewound, now retype it" window the client's own memory is the only source there is.
+     *  [convoId] scopes it: the banner shows only while that exact conversation is on screen. */
+    data class SessionLineage(val convoId: String, val mode: String, val fromSessionId: String?, val fromTitle: String)
+
+    val sessionLineage = mutableStateOf<SessionLineage?>(null)
+
+    /** The cut that has been SENT and is waiting for its [dev.ccpocket.protocol.RewindDone].
+     *  Deliberately outlives [rewindSheet]: the daemon opens the branch and announces it BEFORE it answers
+     *  the request, so by the time the answer lands `convoId` may already be the branch's — matching the
+     *  answer against the live conversation would drop it exactly when it succeeded. Cleared by the answer
+     *  (or by a conversation switch, which orphans it). */
+    private var rewindAwaiting: RewindTarget? = null
     val messages = mutableStateListOf<ChatItem>()
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
     val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
@@ -2878,6 +2930,49 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 agentModels[f.agent] = accepted
                 reconcileDefaultCapabilities(f.agent)
             }
+            // rewind/fork dry run (issue #282): fills the open sheet's numbers, or replaces the sheet
+            // with the refusal. Convo-scoped like every other per-conversation frame — a preview for a
+            // conversation we have since left must not repaint a sheet the user opened somewhere else.
+            is RewindPreview -> if (f.convoId == rewindSheet.value?.target?.convoId) {
+                if (!f.ok) {
+                    rewindSheet.value = null
+                    rewindError.value = f.reason ?: RewindRefusal.LAUNCH_FAILED
+                } else {
+                    rewindSheet.value = rewindSheet.value?.copy(counts = RewindCounts(f.dropTurns, f.dropToolCalls))
+                }
+            }
+            // rewind/fork executed. On success the daemon has ALREADY opened the branch and announced it
+            // (SessionLive with the new convoId, which the #219 identity guard accepts because the branch
+            // still resumes this session's id) — so there is nothing to open here, only the two things
+            // only this side knows: where the branch came from, and what the person was trying to say.
+            // Matched against the conversation the REQUEST named, never against the live one: the daemon
+            // opens the branch and announces it (SessionLive, new convoId) before answering, so `convoId`
+            // has often already moved on by now — and a success is precisely when it has.
+            is RewindDone -> if (f.convoId == rewindAwaiting?.convoId) {
+                val target = rewindAwaiting
+                rewindAwaiting = null
+                rewindSheet.value = null
+                val branch = f.newConvoId
+                if (!f.ok || branch == null) {
+                    rewindError.value = f.reason ?: RewindRefusal.LAUNCH_FAILED
+                } else {
+                    sessionLineage.value = SessionLineage(
+                        convoId = branch,
+                        mode = target?.mode ?: RewindMode.REWIND,
+                        fromSessionId = sessionKey.value,
+                        fromTitle = chatTitle.value.orEmpty(),
+                    )
+                    // Prefill the anchor's own words for a REWIND ("say it differently"); a FORK explores
+                    // from that point instead and starts empty. Routed through the draft + epoch bump
+                    // rather than poked into a ComposerState: that is the one write both the mobile and
+                    // the desktop composer re-read, and it survives the re-key the branch's first turn
+                    // will do (#93/#108 — never touch a live IME field from underneath).
+                    if (target != null && target.mode == RewindMode.REWIND) {
+                        saveDraft(composerKey(), target.text)
+                        composerEpoch.value++
+                    }
+                }
+            }
             is PushPrefs -> pushPrefs.value = f.enabled
             is ApprovalPrefs -> {
                 approvalPrefs.value = f.noAutoDeny
@@ -3513,6 +3608,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             h.text,
             images = h.images.mapNotNull { runCatching { Base64.Default.decode(it.base64) }.getOrNull() },
             imagesTruncated = h.imagesTruncated,
+            // rewind/fork anchor coordinates (issue #282) — carried verbatim, including their absence
+            seq = h.seq,
+            uuid = h.uuid,
         )
         // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65).
         // Attribution follows the placeholder text so the replay reads the same as the daemon live prompt:
@@ -4849,6 +4947,46 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Dismiss the inline rename-refusal feedback (Esc on the sidebar's rename row). */
     fun dismissRenameError() { renameError.value = null }
+
+    // ── session rewind / fork actions (issue #282) ─────────────────────────────────────────────────
+
+    /** May [item] offer the rewind/fork entry at all? Three conditions, none of them a version number:
+     *  the row carries transcript coordinates (only a #282-aware daemon replaying a Claude transcript
+     *  sends those), the session is Claude, and nothing is in flight — cutting history under a running
+     *  turn is exactly what the daemon refuses, so the entry is shown disabled rather than firing a
+     *  frame that can only come back as `not_idle`. */
+    fun canRewind(item: ChatItem.User): Boolean =
+        item.seq != null && item.uuid != null && !item.pending &&
+            (sessionAgent.value ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
+
+    /** True when the entry must be shown but greyed out, with the "stop the current turn first" note. */
+    fun rewindBlockedByTurn(): Boolean = streaming.value
+
+    /** Step 1 of the gesture: open the confirmation sheet and ask the daemon what the cut would cost.
+     *  Never cuts anything — [confirmRewind] is the only path that does. */
+    fun startRewind(item: ChatItem.User, mode: String) {
+        val seq = item.seq ?: return
+        val uuid = item.uuid ?: return
+        val convo = convoId.value ?: return
+        rewindError.value = null
+        rewindSheet.value = RewindSheet(RewindTarget(convo, seq, uuid, item.text, mode))
+        scope.launch { send(RewindSession(convo, seq, uuid, mode, dryRun = true)) }
+    }
+
+    /** Step 2: the person read the numbers and tapped through. */
+    fun confirmRewind() {
+        val sheet = rewindSheet.value ?: return
+        if (sheet.submitting) return // a double tap must not send two cuts
+        val convo = convoId.value ?: return
+        rewindSheet.value = sheet.copy(submitting = true)
+        val t = sheet.target
+        rewindAwaiting = t
+        scope.launch { send(RewindSession(convo, t.seq, t.uuid, t.mode, dryRun = false)) }
+    }
+
+    /** Dismiss the sheet. A cut already on the wire is NOT cancelled — nothing can recall it — so the
+     *  pending answer is left armed and still lands its lineage + prefill. */
+    fun cancelRewind() { rewindSheet.value = null }
     /** Whether ([wd], [resumeId]) names the conversation the chat is ALREADY showing (issue #235). Demands a
      *  materialized identity on both sides: a brand-new open (resumeId == null) has none, so it must never
      *  fold into "already open" just because the workdir agrees — that would make ⌘N in the current project

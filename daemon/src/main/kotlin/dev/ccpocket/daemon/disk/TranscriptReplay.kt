@@ -53,16 +53,37 @@ object TranscriptReplay {
         return ReplaySlicer.page(rows, beforeSeq, limit, maxFrameTextBytes)
     }
 
+    /**
+     * One parsed row plus its transcript CHAIN identity (issue #282) — the rewind planner's view.
+     * [parentUuid] is the row's own `parentUuid` field, i.e. the chain entry immediately before it, which
+     * is precisely the CLI's `--resume-session-at` anchor for "drop this row and everything after it".
+     * Read off the record rather than inferred from the previous visible row, because the entry before a
+     * user prompt is often one the replay filters out (a tool_result record, a meta injection) and the CLI
+     * resolves the anchor against ITS parse, not ours.
+     */
+    data class ChainRow(val msg: HistoryMessage, val line: Long, val parentUuid: String?)
+
+    /** Every replayed row with its chain identity, in file order — the input to a rewind/fork anchor
+     *  translation and to the dry-run "what would this drop" count (issue #282). Deliberately the SAME
+     *  rows the phone was shown: the person points at a bubble they can see, and the preview counts what
+     *  they could scroll back and verify. */
+    fun chain(file: Path): List<ChainRow> =
+        parseRows(file).first.map { ChainRow(it.msg, it.line, it.parentUuid) }
+
     /** A parsed row still open to patching, finalized into [ReplaySlicer.Row] once the file is read. */
-    private class MutableRow(var msg: HistoryMessage, val line: Long) {
+    private class MutableRow(var msg: HistoryMessage, val line: Long, val parentUuid: String? = null) {
         var patchLine: Long = 0L
     }
 
     /** Parse the whole transcript into rows tagged with their source line (the #147 seq) + the total
      *  line count (the cursor). Every raw line — noise included — advances the cursor, so it equals
      *  the file's line count and stays stable under append-only growth. */
-    private fun parse(file: Path): Pair<List<ReplaySlicer.Row>, Long> {
-        if (!file.exists()) return emptyList<ReplaySlicer.Row>() to 0L
+    private fun parse(file: Path): Pair<List<ReplaySlicer.Row>, Long> =
+        parseRows(file).let { (rows, cursor) -> rows.map { ReplaySlicer.Row(it.msg, it.line, it.patchLine) } to cursor }
+
+    /** The shared pass behind [parse] and [chain] — the latter needs the chain identity the former drops. */
+    private fun parseRows(file: Path): Pair<List<MutableRow>, Long> {
+        if (!file.exists()) return emptyList<MutableRow>() to 0L
         val out = ArrayList<MutableRow>()
         val taskIdx = HashMap<String, Int>() // sub-agent tool_use id -> its card's index in `out` (issue #77)
         val questionIdx = HashMap<String, Int>() // AskUserQuestion tool_use id -> its row's index (issue #110)
@@ -87,19 +108,31 @@ object TranscriptReplay {
                                 // an IMAGE-ONLY prompt has no text at all (issue #254) — keeping the row
                                 // on its attachments is why this is no longer a bare isNotBlank() gate
                                 .takeIf { (it.text.isNotBlank() || it.images.isNotEmpty()) && !TranscriptNoise.isNoiseUserText(it.text) }
-                                ?.let { out += MutableRow(HistoryMessage(ChatRole.USER, it.text, images = it.images), lineNo) }
+                                // seq/uuid ride along on USER rows (issue #282) — the pair the phone hands
+                                // back to name a rewind anchor. uuid comes off the record, never invented.
+                                ?.let {
+                                    out += MutableRow(
+                                        HistoryMessage(
+                                            ChatRole.USER, it.text, images = it.images,
+                                            seq = lineNo, uuid = obj.str("uuid"),
+                                        ),
+                                        lineNo, obj.str("parentUuid"),
+                                    )
+                                }
                         }
                         // the id keys the AskUserQuestion row (issue #110) or the sub-agent card (issue #77);
                         // the tool name says which map so its later tool_result patches the right one
                         "assistant" -> assistantBlocks(obj).forEach { (msg, id) ->
                             id?.let { (if (msg.tool == ASK_TOOL) questionIdx else taskIdx)[it] = out.size }
-                            out += MutableRow(msg, lineNo)
+                            // seq only: a rewind anchor is always a user message, so a non-USER row's uuid
+                            // would be an attractive nuisance on the wire (issue #282)
+                            out += MutableRow(msg.copy(seq = lineNo), lineNo, obj.str("parentUuid"))
                         }
                     }
                 }
             }
         }
-        return out.map { ReplaySlicer.Row(it.msg, it.line, it.patchLine) } to lineNo
+        return out to lineNo
     }
 
     /** One history row + (for a sub-agent tool_use) its tool_use id, so the reader can key the card. */

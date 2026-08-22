@@ -94,6 +94,7 @@ import dev.ccpocket.app.SUPPORT_URL
 import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.rewind_group_rewound
 import dev.ccpocket.app.resources.add_device
 import dev.ccpocket.app.resources.archive_remove_from_recents
 import dev.ccpocket.app.resources.archive_session
@@ -509,6 +510,8 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
         // collapse set + scroll position hoisted out of the LazyColumn so the reveal effect below can
         // drive them (expand a folded group, scroll it in) without collapsing the others (#83)
         val collapsed = remember { mutableStateListOf<String>() }
+        // #282: the rewound bucket's fold, collapsed by default (that default IS the feature's promise)
+        var rewoundOpen by remember { mutableStateOf(false) }
         val listState = rememberLazyListState()
         // which header's refresh icon spins: the clicked group's; ⌘R has no click, so the current one's
         var refreshTarget by remember { mutableStateOf<String?>(null) }
@@ -581,6 +584,9 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                     // issue #119: only the live-listed project carries custom-group data (the daemon lists
                     // groups per dir) — a RECENT snapshot has none and renders FLAT, which is also the
                     // degrade path for an older daemon that omits groups entirely.
+                    // #282: the rewound originals leave the visible list before anything else groups it,
+                    // so the fold holds across custom groups and the flat fallback alike.
+                    val shown = visibleSessions(g.sessions)
                     val custom = if (g.current) model.customGroups else emptyList()
                     // sessions the current project can be moved between (owner + has groups) — drives the row
                     // right-click "move to group" menu; empty everywhere else so no menu appears.
@@ -599,7 +605,7 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                     // from a still-flat list; an older daemon / guest / RECENT snapshot shows nothing.
                     if (g.current && model.canEditGroups) item(key = "ng:${g.path}") { NewGroupRow(model) }
                     if (custom.isEmpty()) {
-                        if (g.sessions.isEmpty()) {
+                        if (shown.isEmpty()) {
                             item(key = "e:${g.path}") {
                                 Text(
                                     stringResource(Res.string.sidebar_no_sessions_here),
@@ -608,11 +614,11 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                                 )
                             }
                         }
-                        items(g.sessions, key = { "s:${g.path}:${it.sessionId}" }) { s ->
+                        items(shown, key = { "s:${g.path}:${it.sessionId}" }) { s ->
                             SessionRow(model, s, selected = s.sessionId == selectedId, menuGroups = menuGroups, renameable = renameable, canArchive = canArchive) { model.selectSession(s) }
                         }
                     } else {
-                        sessionSections(g.sessions, custom).forEach { sec ->
+                        sessionSections(shown, custom).forEach { sec ->
                             item(key = "gh:${g.path}:${sec.id}") { CustomGroupHeader(model, g.path, sec) }
                             if (!model.groupCollapsed(g.path, sec.id)) {
                                 items(sec.sessions, key = { "s:${g.path}:${it.sessionId}" }) { s ->
@@ -620,6 +626,36 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                                 }
                             }
                         }
+                    }
+                }
+            }
+            // ── Rewound sessions (issue #282, design frame D) ──────────────────────────────────────
+            // Emitted AFTER every project group, never inside one: [recentRowIndex] mirrors the layout
+            // group by group to scroll a selected row into view, and a bucket nested in the middle would
+            // silently shift every index after it. Collapsed by default — the whole point of the group is
+            // that a rewind leaves the visible list the length it was.
+            val rewound = groups.flatMap { g -> g.sessions.filter { it.sessionId in supersededIds(g.sessions) } }
+            if (rewound.isNotEmpty()) {
+                item(key = "rewound-header") {
+                    Row(
+                        Modifier.fillMaxWidth().height(26.dp).hoverFill()
+                            .clickable { rewoundOpen = !rewoundOpen }
+                            .padding(start = 14.dp, end = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted,
+                            modifier = Modifier.size(12.dp).rotate(if (rewoundOpen) 0f else -90f),
+                        )
+                        Text(
+                            stringResource(Res.string.rewind_group_rewound, rewound.size),
+                            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+                if (rewoundOpen) {
+                    items(rewound, key = { "rw:${it.sessionId}" }) { s ->
+                        SessionRow(model, s, selected = s.sessionId == selectedId, indented = true) { model.selectSession(s) }
                     }
                 }
             }
@@ -642,12 +678,14 @@ private fun recentRowIndex(
         val header = idx
         idx++ // the group header is always emitted
         val closed = g.path in collapsed
+        // #282: the renderer folds rewound originals out, so the index has to count the same rows
+        val rows = visibleSessions(g.sessions)
         if (g.path == path) {
-            if (closed || g.sessions.isEmpty()) return header
-            val pos = g.sessions.indexOfFirst { it.sessionId == sessionId }
+            if (closed || rows.isEmpty()) return header
+            val pos = rows.indexOfFirst { it.sessionId == sessionId }
             return if (pos >= 0) header + 1 + pos else header
         }
-        if (!closed) idx += if (g.sessions.isEmpty()) 1 else g.sessions.size
+        if (!closed) idx += if (rows.isEmpty()) 1 else rows.size
     }
     return -1
 }
@@ -749,6 +787,24 @@ private const val UNGROUPED_SECTION = "__ungrouped__"
  *  fallback ([name] null / [editable] false). Named groups always show — even empty, they're move targets;
  *  Ungrouped shows only when it actually holds rows. */
 private data class SessionSection(val id: String, val name: String?, val editable: Boolean, val sessions: List<DkSession>)
+
+/**
+ * Rewind fold (issue #282), the desktop twin of the mobile list's [dev.ccpocket.app.ui.session.splitRewound].
+ *
+ * A session another row in the SAME list declares it rewound is superseded: it leaves the default list so
+ * the branch that replaced it takes its place, one out for one in. Scoped to the list it is given, so an
+ * original whose successor isn't here (a different project's snapshot) stays visible rather than
+ * disappearing with nothing to point at.
+ */
+private fun supersededIds(sessions: List<DkSession>): Set<String> =
+    sessions.mapNotNullTo(HashSet()) { s -> s.rewindOf?.takeIf { it != s.sessionId } }
+
+/** The rows the default list shows — everything a peer has not rewound. Applied to BOTH the renderer and
+ *  [recentRowIndex], because the reveal-scroll index has to mirror the layout exactly. */
+private fun visibleSessions(sessions: List<DkSession>): List<DkSession> {
+    val gone = supersededIds(sessions)
+    return if (gone.isEmpty()) sessions else sessions.filter { it.sessionId !in gone }
+}
 
 private fun sessionSections(sessions: List<DkSession>, custom: List<DkGroup>): List<SessionSection> {
     val ids = custom.mapTo(HashSet()) { it.id }
