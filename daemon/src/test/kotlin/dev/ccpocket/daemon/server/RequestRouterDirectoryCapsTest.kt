@@ -51,6 +51,7 @@ class RequestRouterDirectoryCapsTest {
                 kimiCwds = { emptyMap() },
                 zcodeCwds = { mapOf(zcodeDir.toString() to 43L) },
                 dshCwds = { emptyMap() }, // pinned: the default would read the developer's real ~/.dsh
+                tempNoiseRoots = emptyList(), // fixture dirs live under the real system temp — opt out of #290's noise filter
             ),
             transcribe = TranscribeService(scope) { null },
             inbox = FileInboxService { null },
