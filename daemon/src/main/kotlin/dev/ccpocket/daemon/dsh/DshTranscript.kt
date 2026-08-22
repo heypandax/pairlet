@@ -345,4 +345,12 @@ object DshTranscript {
     const val EVENT_TEXT_CHUNKS = "text-chunks"
     const val EVENT_REASONING_CHUNKS = "reasoning-chunks"
     const val EVENT_TOOL_CALL_CHUNKS = "tool-call-chunks"
+
+    // issue #291 — the two human-decision pairs. NOTE the asymmetry: a question leaves no `question/*`
+    // record at all (it is a plain tool call), while an approval is a first-class event pair. And the
+    // approval id is spelled `id` in these records but `approvalId` on the wire.
+    const val EVENT_TOOL_CALL = "tool/call"
+    const val EVENT_TOOL_RESULT = "tool/result"
+    const val EVENT_APPROVAL_ASKED = "approval/asked"
+    const val EVENT_APPROVAL_DECIDED = "approval/decided"
 }

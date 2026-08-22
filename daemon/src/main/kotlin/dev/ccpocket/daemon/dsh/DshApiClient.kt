@@ -169,10 +169,17 @@ class DshApiClient(
         }
     }
 
-    /** Answer a host→client server-request (an approval or a question). [value] is the method-specific
-     *  payload; dsh replies with a delivery receipt, not a result. Returns true when it accepted. */
-    suspend fun respond(rpcId: String, value: JsonObject): Boolean {
-        if (closed.get()) return false
+    /**
+     * Answer a host→client server-request (an approval or a question). [value] is the method-specific
+     * payload; dsh replies with an `RpcReceipt` — `{accepted, reason?}` — NOT a result envelope.
+     *
+     * The REASON is returned, not just the boolean, because the two failures mean opposite things and the
+     * caller must treat them differently: `not-pending` is a benign race (another client claimed it first,
+     * or the turn was cancelled), while `bad-response` means we built a shape dsh refused — the turn is
+     * still hanging and somebody has to be told.
+     */
+    suspend fun respond(rpcId: String, value: JsonObject): DshRespond {
+        if (closed.get()) return DshRespond.UNREACHABLE
         val body = buildJsonObject {
             put("type", "client-response")
             put("rpcId", rpcId)
@@ -184,13 +191,20 @@ class DshApiClient(
                 header("Origin", base)
                 setBody(body.toString())
             }
-            val root = DshTranscript.json.parseToJsonElement(response.bodyAsText()) as? JsonObject
-            (root?.get("accepted")?.toString() == "true").also {
-                if (!it) log.warn("dsh respond $rpcId not accepted: ${root?.str("reason")}")
+            // Same rule as [rpc]: a non-200 is a CARRIER fault, not dsh's verdict on our shape. Reporting
+            // it as a refusal would tell the user they built a bad response when the request never landed.
+            if (response.status != HttpStatusCode.OK) {
+                log.warn("dsh respond $rpcId → HTTP ${response.status}")
+                return DshRespond.UNREACHABLE
             }
+            val root = DshTranscript.json.parseToJsonElement(response.bodyAsText()) as? JsonObject
+            val accepted = root?.get("accepted")?.toString() == "true"
+            val reason = root?.str("reason")
+            if (!accepted) log.warn("dsh respond $rpcId not accepted: $reason")
+            DshRespond(accepted, reason)
         }.getOrElse {
             log.warn("dsh respond $rpcId failed: ${it.message}")
-            false
+            DshRespond.UNREACHABLE
         }
     }
 

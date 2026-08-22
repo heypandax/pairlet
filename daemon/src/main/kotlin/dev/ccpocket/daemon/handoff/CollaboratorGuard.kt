@@ -127,8 +127,13 @@ class CollaboratorGuard(
         // guests/bridges. TODO: lift when opencode gains an approval protocol.
         // KIMI (issue #206): P1 fail-closed like OpenCode — its ACP approval chain isn't battle-tested for
         // the collaborator REVIEW ceiling yet. P2 re-evaluates once the approval face is proven.
-        // DSH (issue #255): v1 emits no approval requests at all, so the REVIEW ceiling a collaborator
-        // grant depends on has nothing to enforce it. Fail closed until the approval bridge lands.
+        // DSH: still fail-closed AFTER the approval bridge landed (issue #291). dsh DOES emit approval
+        // requests now, but that is not what the REVIEW ceiling needs: `PermissionBridge.handoffWriteBanned`
+        // recognizes Claude/Codex write-tool SPELLINGS, and dsh names its own tools — so a review/read-only
+        // grant would hard-deny nothing, and the recipient (who answers its own asks) could approve a write.
+        // Worse, a REVIEW clamp lands on PermissionMode.DEFAULT, not PLAN (see TierClamp), so dsh launches
+        // workspace-write and there is no sandbox layer underneath to catch it either. Lift only once dsh
+        // tool names are normalized into the wall's vocabulary.
         if (h.agent == AgentKind.OPENCODE || h.agent == AgentKind.KIMI || h.agent == AgentKind.ZCODE ||
             h.agent == AgentKind.DSH
         ) {

@@ -1339,8 +1339,15 @@ class Conversation(
                     ApprovalTimeout.noAutoDeny
             },
             // a bridge-origin ask is a one-off human decision (issue #91): never offer/honor "always
-            // allow", so one owner approval can't be replayed by later attacker-supplied prompts
-            forceNeverRemember = origin != null,
+            // allow", so one owner approval can't be replayed by later attacker-supplied prompts.
+            // dsh joins it for a different reason (issue #291): its approval vocabulary is literally
+            // `allowed-once | rejected` — there IS no "always allow" to grant. Offering one would be the
+            // daemon inventing standing authority the agent never agreed to, and every later tool call
+            // would skip a card dsh still expects a human to answer. This bounds REMEMBERING only;
+            // bypassPermissions still auto-allows ordinary dsh tools exactly as it does for every other
+            // backend (and dsh is itself launched danger-full-access in that mode), which is the user's
+            // own explicit choice rather than an authority this bridge minted.
+            forceNeverRemember = origin != null || backend.kind == AgentKind.DSH,
             // bridge defense-in-depth (issue #91): Bash gated by BridgeCommandPolicy + structured file tools
             // confined to the bound workdir (a bridge Read must not escape to ~/.ssh). Bridge only.
             bridgeSession = origin != null && pathScope == null,

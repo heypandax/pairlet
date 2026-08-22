@@ -150,22 +150,26 @@
           "noteZh": "发现、回放、新建、恢复、收发文本、实时流式"
         },
         "approvalMode": {
-          "state": "limited",
-          "noteEn": "Launch sandbox default only; remote approvals are not bridged and fail closed",
-          "noteZh": "仅启动时的 sandbox 默认值；远程审批未桥接，失败即拒"
+          "state": "yes",
+          "noteEn": "Approvals and questions bridged; sandbox mode fixed at launch",
+          "noteZh": "审批与提问已桥接；sandbox 模式在启动时定死"
         },
         "changesDiff": { "state": "no" },
         "usage": { "state": "no" }
       },
       "limits": {
         "en": [
-          "No remote approval bridge — a request that needs one fails closed.",
+          "No \"always allow\" — DeepSeek only has allow-once and reject, so every request is decided again.",
+          "DeepSeek never times out a request on its own; CC Pocket's own window bounds it — an expired approval is rejected, an expired question is skipped.",
+          "Sandbox mode is fixed at launch — changing it relaunches the session.",
           "No Changed files or line diff.",
           "No usage accounting.",
           "No model switching."
         ],
         "zh": [
-          "远程审批没有桥接——需要审批的请求直接失败即拒。",
+          "没有「总是允许」——DeepSeek 只有本次允许和拒绝，每次请求都要重新决定。",
+          "DeepSeek 自己永不超时；由 CC Pocket 的审批时限兜底——审批超时按拒绝回，提问超时按跳过回。",
+          "sandbox 模式在启动时定死——改模式会重启会话。",
           "没有改动文件列表和行级 diff。",
           "没有用量统计。",
           "不支持切换模型。"

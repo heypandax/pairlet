@@ -53,11 +53,12 @@ Public capability claims for **v1.8.0**, audited against commit [`6162816a`](htt
 | OpenCode | ✓ Yes | ✕ No — always Full access | ✕ No | ✓ Yes |
 | Kimi Code `Preview` | ✓ Yes | ✓ Yes | ✕ No | ✓ Yes · new in v1.8.0 |
 | ZCode | ✓ Yes | ✓ Yes | ✕ No | ✓ Yes · new in v1.8.0 |
-| DeepSeek Harness `narrow v1` | ✓ Yes | △ Limited | ✕ No | ✕ No |
+| DeepSeek Harness `narrow v1` | ✓ Yes | ✓ Yes | ✕ No | ✕ No |
 
 - **Core session** means discover, replay, create, resume, send and receive text, and live streaming. Every backend does all of it.
 - **OpenCode has no enforceable interactive approval.** `opencode run` has no approval protocol, so those sessions run at **Full access** and the app says so up front instead of offering modes it cannot enforce.
-- **Kimi Code is Preview.** DeepSeek is supported, but narrow: `△ Limited` approval means the launch sandbox default is all you get — remote approvals are **not bridged and fail closed** — and there is no Changed-files/diff view, no usage accounting and no model switching.
+- **Kimi Code is Preview.** DeepSeek is supported, but narrow: approvals and multiple-choice questions are bridged to the app, but the sandbox mode is fixed at launch (changing it relaunches the session), and there is no Changed-files/diff view, no usage accounting and no model switching.
+- **DeepSeek Harness has no timeout of its own.** Left alone, an unanswered approval or question blocks its turn indefinitely — it does not deny. CC Pocket puts the request on the daemon's normal approval window instead: an approval that expires is answered *reject*, and a question that expires is answered *skipped*, so an unanswered request ends the wait rather than hanging it. DeepSeek also has no "always allow" — every request is a one-off decision.
 - Boundaries follow the release. Full detail: [Features](https://heypandax.github.io/cc-pocket/features.html) and the [User manual](https://pocket.ark-nexus.cc/manual/en/).
 
 ## Architecture & trust boundary
