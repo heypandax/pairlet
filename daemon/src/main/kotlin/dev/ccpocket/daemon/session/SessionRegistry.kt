@@ -7,6 +7,7 @@ import dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX
 import dev.ccpocket.daemon.conversation.KeyedSink
 import dev.ccpocket.daemon.conversation.ObserveSession
 import dev.ccpocket.daemon.conversation.OutboundSink
+import dev.ccpocket.daemon.conversation.PromptFate
 import dev.ccpocket.daemon.conversation.PushHook
 import dev.ccpocket.daemon.conversation.sinkKey
 import dev.ccpocket.daemon.disk.LiveProcesses
@@ -762,6 +763,11 @@ class SessionRegistry(
     /** One-off bridge request approval, before the requester-controlled text reaches the agent. */
     suspend fun approveBridgeRequest(convoId: String, preview: String): Boolean =
         get(convoId)?.awaitBridgeRequestApproval(preview) ?: false
+
+    /** issue #285 归属门：桥接用它判定一个 TurnDone 是否属于自己发出的那条请求（凭证=消费账本）。
+     *  会话已不在册时回 UNKNOWN——此时也不会再有它的帧了，答案只影响日志措辞。 */
+    suspend fun promptFate(convoId: String, promptId: String): PromptFate =
+        get(convoId)?.promptFate(promptId) ?: PromptFate.UNKNOWN
 
     /** Execute the one request that just passed [approveBridgeRequest] under its ephemeral full grant. */
     suspend fun sendApprovedBridgePrompt(p: SendPrompt): Boolean {

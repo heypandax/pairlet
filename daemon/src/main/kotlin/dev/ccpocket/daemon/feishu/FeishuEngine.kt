@@ -184,7 +184,9 @@ class FeishuEngine(
     // a turn's reply target + a one-shot guard: the final text posts to the group EXACTLY ONCE, whether
     // ask() delivers it inline (finished within the wait) or a late TurnDone does (the owner approved a
     // permission ask on their phone minutes later — the bridge's whole reason to exist). Keyed by convoId.
-    private data class ReplySlot(val target: FeishuReplyTarget, var done: Boolean = false)
+    /** [promptId]：这个槽位等的是哪条请求（issue #285 归属门的钥匙）。null = 老路径没铸 id 的槽位，
+     *  归属门放行一切（等价旧行为）；非 null 时，只有拿到该 prompt 消费凭证之后的终态帧才允许结算它。 */
+    private data class ReplySlot(val target: FeishuReplyTarget, var done: Boolean = false, val promptId: String? = null)
     private val replySlots = HashMap<String, ReplySlot>()
 
     /**
@@ -1171,8 +1173,11 @@ class FeishuEngine(
         var waiterInstalled = false
         var preserveLateReply = false
         try {
+            // issue #285：为这条请求铸一个 promptId。它随 SendPrompt 进入会话的 prompt 账本，回复槽记住它，
+            // 归属门（onFrame 的 TurnDone 分支）凭消费凭证把「遗留轮次的终态帧」和「这条请求的结果」分开。
+            val promptId = java.util.UUID.randomUUID().toString()
             // Reject an over-limit/oversized prompt before asking the owner to approve something that cannot run.
-            val promptVerdict = vet(SendPrompt(convoId, prompt))
+            val promptVerdict = vet(SendPrompt(convoId, prompt, promptId = promptId))
             val vetted = (promptVerdict as? BridgeVerdict.Allow)?.frame as? SendPrompt
             if (vetted == null) {
                 val code = (promptVerdict as? BridgeVerdict.Deny)?.code ?: BridgeDenyCode.FORBIDDEN
@@ -1239,7 +1244,12 @@ class FeishuEngine(
             }
 
             val done = CompletableDeferred<TurnDone>()
-            mutex.withLock { turnWaiters[convoId] = done; replySlots[convoId] = ReplySlot(replyTo) }
+            mutex.withLock { turnWaiters[convoId] = done; replySlots[convoId] = ReplySlot(replyTo, promptId = promptId) }
+            // issue #285 的另一半窗口：遗留结算轮的终态帧若赶在槽位安装**之前**到达，上面的归属门看不到它
+            // （expected==null 走了正常回收路径），释放任务已被武装——1 秒轮询的 closeIfIdle 会在我们的
+            // prompt 尚未被消费（queuedWork=false，不算 busy）时把进程连同 CLI 队列里的真实请求一起关掉。
+            // 在这里取消任何已武装的释放：这条请求接下来必然亲自走到终态（成功/失败/超时），由它重新排程。
+            cancelRelease(convoId)
             waiterInstalled = true
             var policyChangedBeforeHandoff = false
             suspend fun claimStillValid(expectedMode: FeishuTrustMode, handOff: suspend () -> Boolean): Boolean {
@@ -1356,8 +1366,11 @@ class FeishuEngine(
         reply(slot.target, text)
     }
 
+    // 空文本如实说明状态而不是含糊的「(无回复)」（issue #285 诚实分型）：归属门保证走到这里的终态帧确属
+    // 本请求，空文本只剩「这轮真的没产出文字」一种含义（如纯工具轮）。
     private fun turnText(t: TurnDone): String =
-        t.error?.let { "⚠️ $it" } ?: t.finalText?.takeIf { it.isNotBlank() } ?: "(无回复)"
+        t.error?.let { "⚠️ $it" } ?: t.finalText?.takeIf { it.isNotBlank() }
+            ?: "ℹ️ 这轮已执行完成，但没有产生文字回复。"
 
     private suspend fun openOrReuse(
         key: String,
@@ -1498,10 +1511,22 @@ class FeishuEngine(
             // tool so the nudge can name it. The bridge never ANSWERS the ask — that's the phone's job.
             is PermissionAsk -> mutex.withLock { pendingAsk[frame.convoId] = frame.title.ifBlank { frame.tool } }
             is TurnDone -> {
-                mutex.withLock { turnWaiters.remove(frame.convoId) }?.complete(frame)
-                mutex.withLock { pendingAsk.remove(frame.convoId) }
-                postTurn(frame.convoId, turnText(frame)) // idempotent; delivers a late reply after approval
-                scheduleRelease(frame.convoId)
+                // 归属门（issue #285）：恢复长会话时，CLI 先为遗留后台任务跑零轮结算（task_notification 批＋
+                // 空文本 result），其终态帧与刚进来的新请求同 convoId 却不属于它。凭证=prompt 消费账本：槽位
+                // 等的那条请求还没拿到消费凭证（UserReplay/一次性启动结算/本地命令回执）之前，任何终态帧都
+                // 是历史轮次的——不结算 waiter、不发帖、更不释放进程（释放会连坐杀掉 CLI 队列里的真请求）。
+                // 属于这条请求的终态帧稍后仍会经过这里。三种授权模式（逐请求/智能审核/完全信任）共用本门。
+                val awaited = mutex.withLock { replySlots[frame.convoId]?.takeIf { !it.done }?.promptId }
+                val foreign = awaited != null &&
+                    core.registry.promptFate(frame.convoId, awaited) != dev.ccpocket.daemon.conversation.PromptFate.CONSUMED
+                if (foreign) {
+                    logLine("[turn] 忽略遗留轮次的终态帧：请求 ${awaited?.take(8)}… 尚未开始执行（convo ${frame.convoId.take(8)}…）")
+                } else {
+                    mutex.withLock { turnWaiters.remove(frame.convoId) }?.complete(frame)
+                    mutex.withLock { pendingAsk.remove(frame.convoId) }
+                    postTurn(frame.convoId, turnText(frame)) // idempotent; delivers a late reply after approval
+                    scheduleRelease(frame.convoId)
+                }
             }
             is PocketError -> {
                 logLine("[engine] ${frame.code}: ${frame.message}")

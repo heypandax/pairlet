@@ -67,6 +67,23 @@ import java.util.concurrent.atomic.AtomicReference
 private val FILE_PATH_TOOLS = setOf("Write", "Edit", "MultiEdit", "NotebookEdit")
 
 /**
+ * 一条已发送 prompt 的归属命运（issue #285）。桥接（FeishuEngine）用它把 TurnDone 终态帧和「自己发出的那条
+ * 请求」对上号：恢复长会话时 CLI 会先为遗留后台任务跑一个零轮结算（task_notification 批＋空文本 result），
+ * 那个终态帧与新请求同 convoId 却不属于它——只有拿到消费凭证（UserReplay / 一次性启动结算 / 本地命令回执）
+ * 之后的终态帧才可以结算这条请求。
+ */
+enum class PromptFate {
+    /** 已记入账本、尚无消费凭证——终态帧此刻结算它就是误结算。 */
+    PENDING,
+
+    /** 有消费凭证：这条 prompt 确实开始（或已被本地命令处理）——其后的终态帧属于它。 */
+    CONSUMED,
+
+    /** 账本与消费记录都查无此条：尚未送达（发送仍在途）、或已被判定丢失。 */
+    UNKNOWN,
+}
+
+/**
  * One live conversation: glues an [AgentBackend] (Claude / Codex) to an [OutboundSink]. Owns its own
  * scope; a single stdout pump assigns the monotonic `seq` (no locks). Agent-agnostic — every provider
  * specific (wire schema, prompt/interrupt/approval encoding, transcript layout) lives behind [backend].
@@ -437,6 +454,27 @@ class Conversation(
     private val promptLedger = ArrayDeque<PendingPrompt>()
     private val localPromptSeq = AtomicLong(0)
 
+    // 已拿到消费凭证的 promptId（issue #285）。与账本共用 synchronized(promptLedger) 锁：settle 的
+    // 「移出账本＋记入这里」必须是一次原子迁移，否则 promptFate 的两段查询会在迁移间隙同时扑空。
+    // 有界 LRU——只需覆盖「请求在途」这个窗口，桥接的回复槽一结算就不再查它。
+    private val consumedPromptKeys = LinkedHashSet<String>()
+
+    private fun markPromptConsumed(key: String) = synchronized(promptLedger) {
+        if (consumedPromptKeys.add(key) && consumedPromptKeys.size > SEEN_PROMPTS_MAX) {
+            consumedPromptKeys.iterator().run { next(); remove() }
+        }
+    }
+
+    /** [promptId] 的归属命运——桥接终态帧归属门（issue #285）的唯一凭证来源。先查账本再查消费记录：
+     *  settle 在同一把锁里完成迁移，所以「账本刚移走」时消费记录必然已经写入，不会两头落空。 */
+    fun promptFate(promptId: String): PromptFate = synchronized(promptLedger) {
+        when {
+            promptLedger.any { it.key == promptId } -> PromptFate.PENDING
+            promptId in consumedPromptKeys -> PromptFate.CONSUMED
+            else -> PromptFate.UNKNOWN
+        }
+    }
+
     // which launchProcess call a ledger entry was written to — an entry from a PREVIOUS generation (or
     // with no process at all) can no longer be consumed by anyone: it is lost, not merely queued
     @Volatile
@@ -523,6 +561,7 @@ class Conversation(
                     val entry = iter.next()
                     if (entry.generation == generation && entry.text == text) {
                         iter.remove()
+                        markPromptConsumed(entry.key) // 同锁内原子迁移：账本→消费记录（issue #285）
                         turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
                         return@inner entry
                     }
@@ -549,6 +588,7 @@ class Conversation(
                 val entry = iter.next()
                 if (entry.generation == generation) {
                     iter.remove()
+                    markPromptConsumed(entry.key) // 同锁内原子迁移（issue #285），与 stdin replay 的 settle 同规
                     turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
                     return@inner entry
                 }
@@ -2012,7 +2052,7 @@ class Conversation(
             }
             // fall through: promptId stays in seenPromptIds — it is being run for real right now
         }
-        if (tryIntercept(text)) {
+        if (tryIntercept(text, promptId)) {
             promptId?.let { sink.emit(PromptAck(convoId, it)) } // handled by the daemon = delivered
             return
         }
@@ -2135,14 +2175,18 @@ class Conversation(
      * command (and was handled) — the caller then skips the normal prompt path. Custom commands, skills,
      * and prompt-backed built-ins (/review, /compact, …) are NOT intercepted: they pass through to the agent.
      */
-    private suspend fun tryIntercept(text: String): Boolean {
+    private suspend fun tryIntercept(text: String, promptId: String? = null): Boolean {
         val trimmed = text.trim()
-        when (trimmed.substringBefore(' ').substringBefore('\n')) {
-            "/model" -> handleModelCommand(trimmed)
-            "/effort" -> handleEffortCommand(trimmed)
-            "/clear" -> handleClearCommand()
+        val handler: suspend () -> Unit = when (trimmed.substringBefore(' ').substringBefore('\n')) {
+            "/model" -> ({ handleModelCommand(trimmed) })
+            "/effort" -> ({ handleEffortCommand(trimmed) })
+            "/clear" -> ({ handleClearCommand() })
             else -> return false
         }
+        // 本地命令没有 UserReplay，但它的回执（reply → TurnDone）确实属于这条请求：先记消费凭证再执行，
+        // 否则桥接的归属门（issue #285）会把回执当成遗留轮次的终态帧丢掉。
+        promptId?.let { markPromptConsumed(it) }
+        handler()
         return true
     }
 
