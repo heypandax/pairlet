@@ -27,7 +27,9 @@ tasks=(:protocol:jvmTest :daemon:test :relay:test :mobile:composeApp:desktopTest
 # --affected [基线]：按 git 改动（工作区+暂存+基线以来的提交）圈定受影响模块。
 # protocol 是所有模块的依赖，动它 = 全量；脚本/文档等模块外改动不触发任何测试模块。
 if [[ "${1:-}" == "--affected" ]]; then
-  base="${2:-HEAD}"
+  shift                                  # 先吃掉参数，剩余 "$@" 原样透传 gradle
+  base="HEAD"
+  if [[ $# -gt 0 && "$1" != -* && "$1" != :* ]]; then base="$1"; shift; fi
   changed="$( { git diff --name-only "$base" 2>/dev/null; git diff --name-only --cached; git status --porcelain | awk '{print $2}'; } | sort -u )"
   if echo "$changed" | grep -q '^protocol/'; then
     echo "── --affected：protocol 有改动 → 全量 ──"
@@ -42,7 +44,6 @@ if [[ "${1:-}" == "--affected" ]]; then
     fi
     echo "── --affected（基线 $base）→ ${tasks[*]} ──"
   fi
-  shift; [[ "${1:-}" == "$base" && $# -gt 0 ]] && shift
 fi
 mobile_targets="Desktop"
 if [[ "${CHECK_IOS:-0}" == "1" ]]; then
