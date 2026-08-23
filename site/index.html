@@ -59,8 +59,8 @@
       "operatingSystem": "iOS, iPadOS, Android, macOS, Windows, Linux, HarmonyOS",
       "url": "https://heypandax.github.io/cc-pocket/",
       "downloadUrl": "https://github.com/heypandax/cc-pocket/releases/latest",
-      "softwareVersion": "1.8.0",
-      "releaseNotes": "v1.8.0 release. Public capability claims were audited against commit 6162816a on main.",
+      "softwareVersion": "1.9.0",
+      "releaseNotes": "v1.9.0 release. Public capability claims were audited against commit ec957f2b on main.",
       "softwareHelp": "https://pocket.ark-nexus.cc/manual/en/",
       "image": "https://heypandax.github.io/cc-pocket/assets/product/overview.png",
       "screenshot": "https://heypandax.github.io/cc-pocket/assets/product/desktop-console.png",
@@ -185,7 +185,7 @@
         </a>
       </div>
 
-      <ul class="agent-chips" aria-label="Agent backends in v1.8.0">
+      <ul class="agent-chips" aria-label="Agent backends in v1.9.0">
         <li class="agent-chip"><span class="an">Claude Code</span></li>
         <li class="agent-chip"><span class="an">OpenAI Codex</span></li>
         <li class="agent-chip"><span class="an">OpenCode</span></li>
@@ -194,8 +194,8 @@
         <li class="agent-chip"><span class="an">DeepSeek</span> <span class="atag mono"><span class="i18n-en">narrow v1</span><span class="i18n-zh">有限 v1</span></span></li>
       </ul>
       <p class="trustline mono">
-        <span class="i18n-en">six agent backends in v1.8.0 <span class="dot">·</span> <a href="#agents">capability differs — see the matrix</a></span>
-        <span class="i18n-zh">v1.8.0 支持六个后端 <span class="dot">·</span> <a href="#agents">能力不一样，看矩阵</a></span>
+        <span class="i18n-en">six agent backends in v1.9.0 <span class="dot">·</span> <a href="#agents">capability differs — see the matrix</a></span>
+        <span class="i18n-zh">v1.9.0 支持六个后端 <span class="dot">·</span> <a href="#agents">能力不一样，看矩阵</a></span>
       </p>
     </div>
 
@@ -410,15 +410,15 @@
           <tr data-agent="deepseek">
             <th scope="row"><span class="anm">DeepSeek Harness</span> <span class="atag mono"><span class="i18n-en">narrow v1</span><span class="i18n-zh">有限 v1</span></span></th>
             <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span><span class="cell-note"><span class="i18n-en">Discover, replay, create, resume, text, live streaming</span><span class="i18n-zh">发现、回放、新建、恢复、收发文本、实时流式</span></span></td>
-            <td data-cap="approvalMode" data-state="limited" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-lim"><span class="sym" aria-hidden="true">△</span><span class="i18n-en">Limited</span><span class="i18n-zh">有限</span></span><span class="cell-note"><span class="i18n-en">Startup sandbox default only; remote approval not bridged, fail-closed</span><span class="i18n-zh">仅启动时的 sandbox 默认值；远程审批未桥接，失败即拒</span></span></td>
+            <td data-cap="approvalMode" data-state="yes" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span><span class="cell-note"><span class="i18n-en">Approvals and questions bridged; sandbox mode fixed at launch</span><span class="i18n-zh">审批与提问已桥接；sandbox 档位启动时固定</span></span></td>
             <td data-cap="changesDiff" data-state="no" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span></td>
             <td data-cap="usage" data-state="no" data-label-en="Usage" data-label-zh="用量"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span></td>
           </tr>
           <tr data-agent="deepseek-warn" class="matrix-warn">
             <td colspan="5">
               <span class="warn-mark mono" aria-hidden="true">!</span>
-              <span class="i18n-en"><b>DeepSeek is supported, but narrow.</b> Sessions work end to end; there is no remote approval bridge (requests fail closed), no Changed-files or diff view, no usage accounting, and no model switching. It is not marked Preview — the parts that exist are shipped, they are just fewer.</span>
-              <span class="i18n-zh"><b>DeepSeek 已支持，但很窄。</b>会话本身能完整跑通；但远程审批没有桥接（请求失败即拒）、没有改动文件与 diff、没有用量统计、不能切换模型。它没有标 Preview——做了的部分是正式的，只是少。</span>
+              <span class="i18n-en"><b>DeepSeek is supported, but narrow.</b> Sessions, approvals and multiple-choice questions are bridged to the app; the sandbox mode is fixed at launch, and there is no Changed-files or diff view, no usage accounting and no model switching. DeepSeek has no timeout of its own — an unanswered request rides the daemon's approval window: an approval that expires is answered reject, a question that expires is answered skipped.</span>
+              <span class="i18n-zh"><b>DeepSeek 已支持，但很窄。</b>会话、审批与选择题式提问都已桥接到 App；sandbox 档位启动时固定，仍没有改动文件与 diff、没有用量统计、不能切换模型。DeepSeek 自身没有超时——无人应答的请求走 daemon 的审批窗口：审批到期按拒绝作答，提问到期按跳过作答。</span>
             </td>
           </tr>
         </tbody>

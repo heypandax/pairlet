@@ -103,14 +103,14 @@ EXPECTED_AGENTS = [
     ("opencode", "OpenCode", None, None, ["yes", "no", "no", "yes"]),
     ("kimi", "Kimi Code", "Preview", "Preview", ["yes", "yes", "no", "yes"]),
     ("zcode", "ZCode", None, None, ["yes", "yes", "no", "yes"]),
-    ("deepseek", "DeepSeek Harness", "narrow v1", "有限 v1", ["yes", "limited", "no", "no"]),
+    ("deepseek", "DeepSeek Harness", "narrow v1", "有限 v1", ["yes", "yes", "no", "no"]),
 ]
 
-BASELINE_VERSION = "1.8.0"
-SOURCE_COMMIT = "6162816a"
+BASELINE_VERSION = "1.9.0"
+SOURCE_COMMIT = "ec957f2b"
 # Files that must state the baseline and must not carry the previous public version.
 BASELINE_TARGETS = ["README.md", "README.zh-CN.md", "site/index.html", "site/llms.txt"]
-PREVIOUS_VERSION = r"\b1\.7\.7\b"
+PREVIOUS_VERSION = r"\b1\.8\.1\b"
 
 # Release-asset name shapes that would imply an official Linux desktop build.
 LINUX_DESKTOP_ARTIFACTS = r"cc-pocket-desktop-linux|desktop-linux-(?:x86_64|amd64|arm64)|cc-pocket[-_]desktop[^\s\"'<>]*\.(?:AppImage|deb|rpm)"
@@ -298,18 +298,13 @@ def check_facts(sources: dict[str, str]) -> None:
         if not re.search(r"no enforceable interactive approval", text, re.I):
             fail("opencode", f"{rel} never states that OpenCode has no enforceable interactive approval")
 
-    # DeepSeek's Limited state must be a distinct, accessible, symbol-plus-text state.
-    html = sources.get("site/index.html")
-    if html is not None and not re.search(r'△</span><span class="i18n-en">Limited</span>', html):
-        fail("deepseek", "site/index.html does not render '△ Limited' as symbol plus text")
-    for rel in ("README.md", "README.zh-CN.md"):
-        text = sources.get(rel)
-        if text is not None and "△" not in text:
-            fail("deepseek", f"{rel} does not use the △ Limited state")
+    # DeepSeek approvals are bridged since v1.9.0 (#291). The honest claim to pin is the timeout
+    # takeover: dsh has NO timeout of its own, an unanswered request rides the daemon's approval
+    # window (expired approval -> reject, expired question -> skipped). Public copy must say so.
     for rel in ("README.md", "site/index.html", "site/llms.txt"):
         text = sources.get(rel)
-        if text is not None and not re.search(r"fail[\s-]closed", text, re.I):
-            fail("deepseek", f"{rel} never states that DeepSeek's remote approvals fail closed")
+        if text is not None and not re.search(r"timeout of its own|没有自带超时|自身没有超时", text, re.I):
+            fail("deepseek", f"{rel} never states that DeepSeek requests ride the daemon's approval window (no timeout of its own)")
 
     # No official Linux desktop binary, anywhere.
     for rel, text in sources.items():

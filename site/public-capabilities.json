@@ -6,7 +6,7 @@
     "status": "released",
     "statusLabel": { "en": "Current release", "zh": "当前版本" },
     "sourceRef": "main",
-    "sourceCommit": "6162816a",
+    "sourceCommit": "ec957f2b",
     "note": {
       "en": "This is the public v1.9.0 capability baseline. Every capability claim below was audited against commit ec957f2b on main.",
       "zh": "这是 v1.9.0 的公开能力基线。下面的每条能力都已对照 main 分支的 ec957f2b 提交核验。"
