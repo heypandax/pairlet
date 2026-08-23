@@ -46,6 +46,23 @@ import dev.ccpocket.protocol.BackgroundJob
 import dev.ccpocket.protocol.GetWorkflowAgentDetail
 import dev.ccpocket.protocol.BackgroundJobs
 import dev.ccpocket.protocol.ChangedFile
+import dev.ccpocket.protocol.AddWorktree
+import dev.ccpocket.protocol.FetchGitStatus
+import dev.ccpocket.protocol.GIT_OPS
+import dev.ccpocket.protocol.GIT_OP_FETCH
+import dev.ccpocket.protocol.GIT_OP_REVERT
+import dev.ccpocket.protocol.GIT_OP_WORKTREE_ADD
+import dev.ccpocket.protocol.GIT_OP_WORKTREE_REMOVE
+import dev.ccpocket.protocol.GIT_TWO_STEP_OPS
+import dev.ccpocket.protocol.GitAction
+import dev.ccpocket.protocol.GitActionPreview
+import dev.ccpocket.protocol.GitActionResult
+import dev.ccpocket.protocol.GitDiff
+import dev.ccpocket.protocol.GitStatus
+import dev.ccpocket.protocol.ListWorktrees
+import dev.ccpocket.protocol.ReadGitDiff
+import dev.ccpocket.protocol.RemoveWorktree
+import dev.ccpocket.protocol.WorktreeList
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
@@ -1118,6 +1135,25 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val viewedFileProgress = mutableStateOf<Pair<Long, Long>?>(null) // received/total bytes of an in-flight chunked read (#134 · 0714 A1 determinate bar)
     val viewedFileDiff = mutableStateOf<FileDiff?>(null)      // the loaded line-level diff; ok=false = none/too-old daemon
     val exportWaiting = mutableStateOf(false)                 // an ExportFile awaits the owner's approval/reply (issue #67 v2)
+
+    // ── Git panel (issue #280) + worktrees (issue #281): owner-only, per-session surfaces ────────
+    // Every request below is a NEW frame family, so an old daemon drops it silently — each one arms
+    // an 8s deadline that lands in the honest "update the computer" state rather than spinning.
+    val gitStatus = mutableStateOf<GitStatus?>(null)          // the repository's whole state (Screen A)
+    val gitStatusLoading = mutableStateOf(false)
+    val gitStatusUnavailable = mutableStateOf(false)          // no reply — the daemon predates pocket/git.*
+    val gitDiff = mutableStateOf<GitDiff?>(null)              // the open file diff (Screen B); ok=false = none/too-old
+    val gitDiffPath = mutableStateOf<String?>(null)           // non-null = the git diff screen is open
+    val gitDiffStaged = mutableStateOf(false)                 // which side the Working|Staged control shows
+    val gitBusyOp = mutableStateOf<String?>(null)             // the verb whose button spins; nothing ELSE locks (A4)
+    val gitError = mutableStateOf<GitActionResult?>(null)     // the last failed action — drives the A5/A6 strip
+    // A fetch changes nothing local, so without this the panel answers a successful fetch with silence
+    // (issue #280 真机反馈 1). Cleared the moment the next verb starts — it is a receipt, not a state.
+    val gitFetchNote = mutableStateOf<GitFetchReport?>(null)
+    val gitPendingConfirm = mutableStateOf<GitActionPreview?>(null) // a two-step verb's preview → Screen D / C1-C2
+    val worktrees = mutableStateOf<WorktreeList?>(null)       // every checkout of this repository (#281 Screen A)
+    val worktreesLoading = mutableStateOf(false)
+    val worktreesUnavailable = mutableStateOf(false)          // no reply — the daemon predates pocket/worktree.*
     val pathListing = mutableStateOf<PathEntries?>(null)     // latest @-file completion listing (issue #75); match its subPath before use
     val browseListing = mutableStateOf<PathEntries?>(null)   // latest anchored folder-browse listing (issue #152); match its (workdir, subPath) before use
     val browseRoots = mutableStateOf<List<String>>(emptyList()) // #176: fs roots latched from the "~" home-anchor reply (owner-only; empty on old daemon / guest → root switcher hidden)
@@ -2520,6 +2556,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         terminalEntries.clear(); terminalBusy.value = false
         changedFiles.clear(); changedFilesLoading.value = false; changedFilesUnavailable.value = false
         closeFileViewer()
+        clearGitState() // the Git panel is per-session too (#280/#281)
         pathListing.value = null
         allowRules.clear()
         slashCommands.clear()
@@ -3417,6 +3454,55 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             }
             is FileDiff -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
                 viewedFileDiff.value = f
+            }
+            // ── Git panel (#280) / worktrees (#281): identity-matched on (convoId, workdir) before any
+            // state moves — a reply for a conversation or repository we've left is dropped, never merged.
+            is GitStatus -> if (f.convoId == convoId.value && f.workdir == workdir.value) {
+                gitStatusDeadline?.cancel()
+                gitStatusLoading.value = false; gitStatusUnavailable.value = false
+                gitStatus.value = f
+            }
+            // [staged] is part of the identity: a late reply for the OTHER side of the Working|Staged
+            // control must not overwrite the side currently on screen.
+            is GitDiff -> if (f.convoId == convoId.value && f.workdir == workdir.value &&
+                f.path == gitDiffPath.value && f.staged == gitDiffStaged.value
+            ) {
+                gitDiffDeadline?.cancel()
+                gitDiff.value = f
+            }
+            // workdir is a TRAILING optional: an older daemon omits it and we fall back to the convoId
+            // match, but when it is present it must agree — a session can switch directory while a
+            // preview is in flight, and a stale one would offer to discard files from the old tree.
+            is GitActionPreview -> if (f.convoId == convoId.value && (f.workdir == null || f.workdir == workdir.value)) {
+                gitActionDeadline?.cancel()
+                gitBusyOp.value = null
+                gitPendingConfirm.value = f
+            }
+            is GitActionResult -> if (f.convoId == convoId.value && (f.workdir == null || f.workdir == workdir.value)) {
+                gitActionDeadline?.cancel()
+                if (gitBusyOp.value == f.op) gitBusyOp.value = null
+                gitPendingAction = null; gitPendingRemove = null
+                gitError.value = if (f.ok) null else f
+                // the receipt a fetch otherwise has no way to give: read off the snapshot it came with,
+                // so "远端领先 1，可合并" is the SAME number the header is about to show (真机反馈 1)
+                if (f.op == GIT_OP_FETCH) {
+                    gitFetchNote.value = if (f.ok) gitFetchReport(f.statusAfter ?: gitStatus.value) else null
+                }
+                // the daemon hands back a fresh snapshot with a successful mutation — refresh IN PLACE
+                // rather than asking again (no second round trip, and no polling anywhere in this surface)
+                f.statusAfter?.takeIf { it.workdir == workdir.value }?.let {
+                    gitStatus.value = it
+                    gitStatusLoading.value = false; gitStatusUnavailable.value = false
+                }
+                // the worktree verbs change a list the status snapshot doesn't carry
+                if (f.ok && (f.op == GIT_OP_WORKTREE_ADD || f.op == GIT_OP_WORKTREE_REMOVE)) fetchWorktrees()
+                // reverting the file on screen makes the open diff a lie — re-read the side we're showing
+                if (f.ok && f.op == GIT_OP_REVERT) gitDiffPath.value?.let { openGitDiff(it, gitDiffStaged.value) }
+            }
+            is WorktreeList -> if (f.convoId == convoId.value && f.workdir == workdir.value) {
+                worktreesDeadline?.cancel()
+                worktreesLoading.value = false; worktreesUnavailable.value = false
+                worktrees.value = f
             }
             // @-file completion (issue #75): keyed on workdir, not a session id — it browses the cwd, not a
             // session's changed set. A reply for a workdir we've since left is dropped (the completer keys
@@ -5078,6 +5164,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         composerEpoch.value++ // a REAL context switch — composers re-init from the target's draft (#29/#88); identity flips don't
         terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
         changedFiles.clear(); changedFilesLoading.value = false; closeFileViewer() // changed-files view is per-session too
+        clearGitState() // …and so is the Git panel (#280/#281)
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
         turnStartMark = null // …nor stamp its send time onto this session's TurnEnded duration / stop-refill window
         clearAskQueue()
@@ -5567,6 +5654,177 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 viewedFileDiff.value = FileDiff(wd, sid, path, ok = false, error = DIFF_ERROR_STALE_DAEMON)
             }
         }
+    }
+
+    // ── Git panel (#280) / worktrees (#281) ─────────────────────────────────────────────────────
+    // Same shape as the changed-files pair above: a NEW frame family an old daemon drops, so every
+    // request arms a reply deadline and settles into the "update the computer" state instead of a
+    // spinner that never ends. The two-step verbs keep their ORIGINAL request around rather than
+    // rebuilding one from the preview — the confirm must execute exactly what was previewed.
+    private var gitStatusDeadline: Job? = null
+    private var gitDiffDeadline: Job? = null
+    private var gitActionDeadline: Job? = null
+    private var worktreesDeadline: Job? = null
+    private var gitPendingAction: GitAction? = null
+    private var gitPendingRemove: RemoveWorktree? = null
+
+    /** Read the whole repository state for the Git tab. [withBranches] rides along when the branch
+     *  sheet is about to open, so it costs one round trip instead of two. */
+    fun fetchGitStatus(withBranches: Boolean = false) {
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        gitStatusLoading.value = true
+        gitStatusUnavailable.value = false
+        gitStatusDeadline?.cancel()
+        gitStatusDeadline = scope.launch {
+            delay(GIT_REPLY_DEADLINE_MS)
+            if (gitStatusLoading.value) { gitStatusLoading.value = false; gitStatusUnavailable.value = true }
+        }
+        scope.launch { send(FetchGitStatus(c, wd, withBranches)) }
+    }
+
+    /** Open ONE path's diff on one side (Screen B). Flipping the Working|Staged control re-asks: the
+     *  two sides are two different truths and the daemon owns both. */
+    fun openGitDiff(path: String, staged: Boolean = false) {
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        gitDiffPath.value = path
+        gitDiffStaged.value = staged
+        gitDiff.value = null
+        gitDiffDeadline?.cancel()
+        gitDiffDeadline = scope.launch {
+            delay(GIT_REPLY_DEADLINE_MS)
+            if (gitDiffPath.value == path && gitDiff.value == null) {
+                gitDiff.value = GitDiff(c, wd, path, staged, ok = false, error = DIFF_ERROR_STALE_DAEMON)
+            }
+        }
+        scope.launch { send(ReadGitDiff(c, wd, path, staged)) }
+    }
+
+    fun closeGitDiff() {
+        gitDiffDeadline?.cancel()
+        gitDiffPath.value = null; gitDiff.value = null; gitDiffStaged.value = false
+    }
+
+    /**
+     * Run one verb from the closed allow-list. A [GIT_TWO_STEP_OPS] verb sent WITHOUT a token comes
+     * back as a [GitActionPreview] (→ [gitPendingConfirm], the confirm sheet); [confirmPendingGit]
+     * re-sends this exact frame with the token. An op outside [GIT_OPS] never leaves the app — the
+     * daemon rejects it by name too, this is only so a typo can't reach the wire.
+     */
+    fun gitAct(
+        op: String,
+        paths: List<String> = emptyList(),
+        message: String? = null,
+        branch: String? = null,
+        confirmToken: String? = null,
+    ) {
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        if (op !in GIT_OPS) return
+        val frame = GitAction(c, wd, op, paths, message, branch, confirmToken)
+        if (confirmToken == null && op in GIT_TWO_STEP_OPS) gitPendingAction = frame
+        armGitAction(op)
+        scope.launch { send(frame) }
+    }
+
+    /** List every checkout of the repository the open session sits in (#281 Screen A). */
+    fun fetchWorktrees(withStatus: Boolean = true) {
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        worktreesLoading.value = true
+        worktreesUnavailable.value = false
+        worktreesDeadline?.cancel()
+        worktreesDeadline = scope.launch {
+            delay(GIT_REPLY_DEADLINE_MS)
+            if (worktreesLoading.value) { worktreesLoading.value = false; worktreesUnavailable.value = true }
+        }
+        scope.launch { send(ListWorktrees(c, wd, withStatus)) }
+    }
+
+    /** `git worktree add` — L1, one tap: it writes a new directory and touches no existing data. The
+     *  destination is the daemon's own `<repoRoot>-worktrees/<slug>` policy, so no path crosses here. */
+    fun addWorktree(branch: String, createBranch: Boolean) {
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        val name = branch.trim()
+        if (name.isEmpty()) return
+        armGitAction(GIT_OP_WORKTREE_ADD)
+        scope.launch { send(AddWorktree(c, wd, name, createBranch)) }
+    }
+
+    /** `git worktree remove` — two-step on the SAME token machinery as revert/dirty-checkout. */
+    fun removeWorktree(path: String, confirmToken: String? = null) {
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        val frame = RemoveWorktree(c, wd, path, confirmToken)
+        if (confirmToken == null) gitPendingRemove = frame
+        armGitAction(GIT_OP_WORKTREE_REMOVE)
+        scope.launch { send(frame) }
+    }
+
+    /** Redeem the preview's token by re-sending the request it previewed, verbatim plus the token. A
+     *  [GitActionPreview.blocked] preview is never redeemable (a live session in the worktree) — the
+     *  sheet renders an inert button, and this refuses too so a stray call can't route around it. */
+    fun confirmPendingGit() {
+        val preview = gitPendingConfirm.value ?: return
+        gitPendingConfirm.value = null
+        if (preview.blocked) return
+        when (preview.op) {
+            GIT_OP_WORKTREE_REMOVE -> {
+                val req = gitPendingRemove ?: return
+                gitPendingRemove = null
+                removeWorktree(req.path, preview.confirmToken)
+            }
+            else -> {
+                val req = gitPendingAction ?: return
+                gitPendingAction = null
+                gitAct(req.op, req.paths, req.message, req.branch, preview.confirmToken)
+            }
+        }
+    }
+
+    /** Cancel a confirm sheet — the token simply expires unredeemed on the daemon. */
+    fun dismissGitConfirm() {
+        gitPendingConfirm.value = null
+        gitPendingAction = null; gitPendingRemove = null
+        gitBusyOp.value = null
+    }
+
+    /** Close the A5/A6 error strip (× ). Purely local: nothing about the repository changed. */
+    fun dismissGitError() { gitError.value = null }
+
+    /** Close the fetch receipt (×). Same nothing-changed promise as [dismissGitError]. */
+    fun dismissGitFetchNote() { gitFetchNote.value = null }
+
+    /** One in-flight verb drives the spinner in the button that started it; the deadline turns a
+     *  dropped frame into the same "update the computer" sentence the reads use, in the strip. */
+    private fun armGitAction(op: String) {
+        gitBusyOp.value = op
+        gitError.value = null
+        gitFetchNote.value = null // a receipt for the PREVIOUS verb must not survive into this one
+        gitActionDeadline?.cancel()
+        gitActionDeadline = scope.launch {
+            delay(GIT_REPLY_DEADLINE_MS)
+            if (gitBusyOp.value == op) {
+                gitBusyOp.value = null
+                gitPendingAction = null; gitPendingRemove = null
+                gitError.value = GitActionResult(convoId.value ?: "", op, ok = false, error = GIT_ERROR_STALE_DAEMON)
+                gitStatusUnavailable.value = gitStatus.value == null
+            }
+        }
+    }
+
+    /** Per-session, exactly like the changed-files view: leaving a chat must not carry another
+     *  repository's status, diff or half-finished confirmation into the next one. */
+    private fun clearGitState() {
+        gitStatusDeadline?.cancel(); gitDiffDeadline?.cancel()
+        gitActionDeadline?.cancel(); worktreesDeadline?.cancel()
+        gitStatus.value = null; gitStatusLoading.value = false; gitStatusUnavailable.value = false
+        gitBusyOp.value = null; gitError.value = null; gitFetchNote.value = null
+        gitPendingConfirm.value = null; gitPendingAction = null; gitPendingRemove = null
+        worktrees.value = null; worktreesLoading.value = false; worktreesUnavailable.value = false
+        closeGitDiff()
     }
 
     fun closeFileViewer() {

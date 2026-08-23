@@ -1054,6 +1054,7 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
                 )
             }
             ChangesPill(model) // "± N" — the session's changed files, opens the Changes browser
+            GitPill(model) // "⎇ branch ↑2" — the repository's state, opens the Git panel (issue #280)
             // the permission-mode switch lives in the ⋯ popover now, mirroring mobile's quick-actions
             // sheet (the old header pill was display-only and read as a broken control)
             Icon(

@@ -129,6 +129,17 @@ class DaemonCore(
     val inbox = FileInboxService(registry::workdirOf)
     val shell = ShellService(scope, coordinator = approvals, grants = grants)
     val exports = FileExportService(scope, registry::workdirOf, coordinator = approvals)
+
+    /**
+     * The Git panel (#280) / worktree (#281) engine. Wired to the SAME two live-session truths the
+     * project list uses — the daemon's own conversations by cwd, and `claude` processes started in an
+     * outside terminal — because "a worktree with a running agent must not be removed" has to mean the
+     * same thing here as the running dot means there. No new liveness heuristic is invented.
+     */
+    val git = dev.ccpocket.daemon.git.GitService(
+        liveByCwd = { registry.liveByCwd() },
+        externalCwds = { dev.ccpocket.daemon.disk.LiveProcesses.claudeCwds() },
+    )
     val auth = AuthService(
         scope, registry::busyForAuth, registry::closeIdleForAuth, registry::closeBusyForAuth,
         claudeConfigDir = claudeConfigDir,
@@ -207,6 +218,7 @@ class DaemonCore(
         approvalHistory = approvalHistory,
         reviews = reviews,
         reviewOwner = reviewOwner,
+        git = git,
     )
 
     /**

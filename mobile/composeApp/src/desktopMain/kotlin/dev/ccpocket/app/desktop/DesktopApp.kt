@@ -179,6 +179,18 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 ChangesOverlay(model) { model.showChanges = false }
             }
         }
+        if (model.showGit) {
+            // the Git panel (issue #280) — same centered-scrim language as Changes, which it sits beside
+            Overlay(onDismiss = { model.showGit = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                GitOverlay(model) { model.showGit = false }
+            }
+        }
+        if (model.showWorktrees) {
+            // raised FROM the Git panel (issue #281); closing it returns to the panel underneath
+            Overlay(onDismiss = { model.showWorktrees = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                WorktreesOverlay(model) { model.showWorktrees = false }
+            }
+        }
         if (model.showSkills) {
             // the installed skills/plugins browser (issue #132) — same centered-scrim language as Changes
             Overlay(onDismiss = { model.showSkills = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {

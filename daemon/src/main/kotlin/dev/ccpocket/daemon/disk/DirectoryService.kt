@@ -121,7 +121,10 @@ class DirectoryService(
         kimi.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
         zcode.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
         dsh.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
-        if (allExternal.isEmpty()) return claude.filter(::keep)
+        // issue #281: a linked worktree row gets its "part of <repo>" caption. Read off the `.git` file,
+        // no git process — see WorktreeMarks. Display only: grouping and transcript attribution are
+        // untouched, because different checkouts are genuinely different cwds.
+        if (allExternal.isEmpty()) return dev.ccpocket.daemon.git.WorktreeMarks.stamp(claude.filter(::keep))
         val known = claude.mapTo(HashSet()) { ProjectPaths.canonicalKey(it.path) }
         // spelling variants of one dir collapse into a group; the group's mtime is its max
         val externalByKey = allExternal.entries.groupBy({ ProjectPaths.canonicalKey(it.key) }, { it.value })
@@ -159,7 +162,9 @@ class DirectoryService(
                     .distinct().sortedBy { it.ordinal },
             )
         }
-        return (merged + externalOnly).filter(::keep).sortedByDescending { it.lastModified }
+        return dev.ccpocket.daemon.git.WorktreeMarks.stamp(
+            (merged + externalOnly).filter(::keep).sortedByDescending { it.lastModified },
+        )
     }
 
     /** Directories with Claude history, newest-first, deduped per cwd. [liveNorm] = daemon conversations

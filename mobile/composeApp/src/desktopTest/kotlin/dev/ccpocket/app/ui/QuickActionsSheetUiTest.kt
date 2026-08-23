@@ -23,6 +23,7 @@ import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.fast_mode
+import dev.ccpocket.app.resources.git_tab
 import dev.ccpocket.app.resources.ho_menu_row
 import dev.ccpocket.app.resources.label_effort
 import dev.ccpocket.app.resources.label_mode
@@ -128,7 +129,7 @@ class QuickActionsSheetUiTest {
                     Box(Modifier.fillMaxSize()) {
                         QuickActionsSheet(
                             repo,
-                            onTerminal = {}, onMode = {}, onFiles = {}, onHelp = {},
+                            onTerminal = {}, onMode = {}, onFiles = {}, onGit = {}, onHelp = {},
                             onHandoff = if (handoff) ({}) else null,
                             onDismiss = onDismiss,
                         )
@@ -200,10 +201,12 @@ class QuickActionsSheetUiTest {
         assertFalse(present(str(Res.string.ho_menu_row)), "the gate hides the row…")
         assertTrue(present(str(Res.string.qa_group_tools).uppercase()), "…without taking its group with it")
         assertTrue(present(str(Res.string.terminal_open)) && present(str(Res.string.qa_files)) && present(str(Res.string.support_title)))
-        // no placeholder, no gap: the list closes up and Help follows Changed files directly
-        val files = onAllNodes(hasText(str(Res.string.qa_files))).onFirst().getUnclippedBoundsInRoot()
+        // no placeholder, no gap: the list closes up and Help follows the row above the gated one
+        // directly. That neighbour is Git since issue #280 added it as another ordinary peer — what is
+        // pinned here is the ABSENCE of a hole where Handoff was, not which two strings happen to touch.
+        val above = onAllNodes(hasText(str(Res.string.git_tab))).onFirst().getUnclippedBoundsInRoot()
         val help = onAllNodes(hasText(str(Res.string.support_title))).onFirst().getUnclippedBoundsInRoot()
-        assertEquals(files.bottom.value, help.top.value, 1.5f, "the neighbours stay adjacent (hairline only)")
+        assertEquals(above.bottom.value, help.top.value, 1.5f, "the neighbours stay adjacent (hairline only)")
     }
 
     @Test
