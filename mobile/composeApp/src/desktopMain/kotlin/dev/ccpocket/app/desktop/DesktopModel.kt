@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.ui.ComposerState
 import dev.ccpocket.app.ui.tilde
@@ -99,6 +100,12 @@ data class DkSession(
     // custom session-group id this row belongs to (issue #119), or null = ungrouped. Only meaningful for
     // the CURRENT project's live rows — the daemon lists groups only for the listed dir.
     val group: String? = null,
+    // rewind/fork lineage (issue #282), mirroring SessionSummary: [forkedFrom] keeps both sessions
+    // visible as peers, [rewindOf] folds the ORIGINAL — the one this row names — into the collapsed
+    // "rewound" bucket, which is what keeps a rewind from growing the list. Null on a synthesized row
+    // (a session not yet on disk has no ledger entry either).
+    val forkedFrom: String? = null,
+    val rewindOf: String? = null,
 )
 
 /** One custom session group inside a project (issue #119) — the view mirror of protocol's SessionGroup.
@@ -426,6 +433,28 @@ interface DesktopModel {
     fun renameError(sessionId: String): String? = null
     /** Dismiss the inline rename refusal (the rename row's Esc). */
     fun dismissRenameError() {}
+
+    // ── session rewind / fork (issue #282) ────────────────────────────────────────────────────────
+    // Defaults leave Seed/preview models entirely inert: [canRewind] false means the chat's user turns
+    // grow no context menu at all, so a fake model never has to answer a frame it has no transport for.
+    /** May THIS user turn be rewound? False when the row carries no transcript coordinates (older
+     *  daemon / non-Claude backend), which is the capability probe — not a version check. */
+    fun canRewind(item: ChatItem.User): Boolean = false
+    /** True when the entry is shown but disabled, with the "stop the current turn first" reason. */
+    val rewindBlockedByTurn: Boolean get() = false
+    /** Open the confirmation and ask the daemon what the cut would cost. Never cuts anything. */
+    fun startRewind(item: ChatItem.User, mode: String) {}
+    /** The confirmation currently on screen (counts null while the dry run is out), or null. */
+    val rewindSheet: PocketRepository.RewindSheet? get() = null
+    fun confirmRewind() {}
+    fun cancelRewind() {}
+    /** The daemon's machine-readable refusal of the last attempt — a `RewindRefusal` value, mapped to
+     *  copy by the renderer (never shown raw: the vocabulary is a protocol, not user-facing text). */
+    val rewindError: String? get() = null
+    fun dismissRewindError() {}
+    /** Where the OPEN conversation was branched from, when this app is the one that branched it. Null
+     *  once the view moves on — the banner is scoped to the exact conversation the rewind produced. */
+    val sessionLineage: PocketRepository.SessionLineage? get() = null
 
     /** True while a session-list re-scan is in flight — the sidebar's refresh affordances spin on it. */
     val sessionsRefreshing: Boolean get() = false

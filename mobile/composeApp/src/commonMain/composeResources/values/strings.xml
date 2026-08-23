@@ -1796,4 +1796,33 @@
     <string name="proj_search">Search projects</string>
     <string name="proj_search_cancel">Cancel</string>
     <string name="proj_view_mode">List style</string>
+    <!-- session rewind / fork (issue #282) -->
+    <string name="rewind_menu_rewind">Rewind from here</string>
+    <string name="rewind_menu_rewind_sub">Retry this message with a different wording</string>
+    <string name="rewind_menu_fork">Fork from here</string>
+    <string name="rewind_menu_fork_sub">Branch a parallel session from this point</string>
+    <string name="rewind_menu_blocked">Stop the current turn first</string>
+    <string name="rewind_confirm_rewind_title">Rewind from this message?</string>
+    <string name="rewind_confirm_fork_title">Fork from this message?</string>
+    <string name="rewind_will_drop">Will drop</string>
+    <string name="rewind_turns">turns</string>
+    <string name="rewind_tool_calls">tool calls</string>
+    <string name="rewind_counting">Counting…</string>
+    <string name="rewind_files_warning_lead">Files are NOT rolled back</string>
+    <string name="rewind_files_warning_rest">— only the conversation rewinds.</string>
+    <string name="rewind_mode_note_rewind">The current session will be tucked away (recoverable)</string>
+    <string name="rewind_mode_note_fork">The current session stays untouched</string>
+    <string name="rewind_action_rewind">Rewind</string>
+    <string name="rewind_action_fork">Create fork</string>
+    <string name="rewind_lineage_rewound">Rewound from</string>
+    <string name="rewind_lineage_fork">Fork of</string>
+    <string name="rewind_group_rewound">Rewound sessions (%1$d)</string>
+    <string name="rewind_caption_fork">fork of %1$s</string>
+    <string name="rewind_caption_rewound">rewound → %1$s</string>
+    <string name="rewind_err_stale">The transcript changed — reload and try again.</string>
+    <string name="rewind_err_not_idle">The session is still working — stop the current turn first.</string>
+    <string name="rewind_err_unsupported">This session\'s agent can\'t rewind.</string>
+    <string name="rewind_err_external">Someone else is writing this session right now.</string>
+    <string name="rewind_err_first">That\'s the first message — start a new session instead.</string>
+    <string name="rewind_err_generic">Couldn\'t rewind this session.</string>
 </resources>

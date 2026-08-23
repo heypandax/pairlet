@@ -80,6 +80,7 @@ import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Reorder
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Search
@@ -170,7 +171,15 @@ import dev.ccpocket.app.ui.chat.ChatHeader
 import dev.ccpocket.app.ui.chat.ChatStateBlock
 import dev.ccpocket.app.ui.chat.CONTEXT_SEP
 import dev.ccpocket.app.ui.chat.ContextLine
+import dev.ccpocket.app.ui.chat.LineageBanner
+import dev.ccpocket.app.ui.chat.RewindConfirmBody
+import dev.ccpocket.app.ui.chat.RewindErrorBar
+import dev.ccpocket.app.ui.chat.RewindMenuItems
+import dev.ccpocket.app.ui.chat.RewindSheetActionRow
 import dev.ccpocket.app.ui.chat.ToolTurnBand
+import dev.ccpocket.app.ui.session.forkParentTitle
+import dev.ccpocket.app.ui.session.rewoundSuccessorTitle
+import dev.ccpocket.app.ui.session.splitRewound
 import dev.ccpocket.app.ui.chat.TurnSourceLabel
 import dev.ccpocket.app.ui.chat.chatStateUi
 import dev.ccpocket.app.ui.fleet.attentionAsk
@@ -183,8 +192,10 @@ import dev.ccpocket.app.ui.entry.ComputersSurface
 import dev.ccpocket.app.ui.entry.EntrySecondaryButton
 import dev.ccpocket.app.ui.entry.connRecovery
 import dev.ccpocket.app.ui.session.ConnBadge
+import dev.ccpocket.app.ui.session.ForkLineageCaption
 import dev.ccpocket.app.ui.session.Hairline
 import dev.ccpocket.app.ui.session.NewSessionDock
+import dev.ccpocket.app.ui.session.RewoundSessionRow
 import dev.ccpocket.app.ui.session.SessionAttention
 import dev.ccpocket.app.ui.session.SessionListRow
 import dev.ccpocket.app.ui.session.SessionRowUi
@@ -2144,6 +2155,9 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
     var manageTarget by remember { mutableStateOf<SessionGroup?>(null) }
     var moveTarget by remember { mutableStateOf<SessionSummary?>(null) }
     val collapsed = remember(dir) { mutableStateMapOf<String, Boolean>() }
+    // #282: the "rewound sessions" bucket, collapsed by default and per project like every other fold.
+    // Its default is the whole point of the group — a rewind must leave the visible list the size it was.
+    var rewoundOpen by remember(dir) { mutableStateOf(false) }
     val approvalCount = repo.fleetAttention().size
     val approvalsRefreshing = repo.fleetMachines().any { it.pending > 0 && it.status != MachineStatus.ONLINE }
     // Mobile UI 2.0: the state a row may claim is decided once, by the pure mapper, from real facts only —
@@ -2187,7 +2201,12 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 modifier = Modifier.padding(top = 4.dp),
             )
             val af = repo.agentFilter.value
-            val filtered = filterSessionsByAgent(repo.sessions, af)
+            val allForDir = filterSessionsByAgent(repo.sessions, af)
+            // #282: a rewound original is folded out of the default list BEFORE the Active/Recent split,
+            // not inside one of them — the session it was replaced by can land in either half, and the
+            // "a rewind never grows the list" rule has to hold across both.
+            val lineage = splitRewound(allForDir)
+            val filtered = lineage.visible
             val split = splitSessions(
                 sessionRows(
                     filtered,
@@ -2220,6 +2239,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                                 row,
                                 onOpen = { repo.openSession(dir, row.session.sessionId, title = row.session.title, agent = row.session.agent ?: AgentKind.CLAUDE) },
                                 onLongPress = if (hasRowMenu) ({ moveTarget = row.session }) else null,
+                                caption = forkCaptionOf(row.session, allForDir),
                             )
                         }
                     }
@@ -2267,6 +2287,47 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                                 Hairline()
                                 SessionListRow(
                                     SessionRowUi(s, SurfaceState.COMPLETE), // by construction: this half IS the settled one
+                                    onOpen = { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) },
+                                    onLongPress = if (hasRowMenu) ({ moveTarget = s }) else null,
+                                    caption = forkCaptionOf(s, allForDir),
+                                )
+                            }
+                        }
+                    }
+                }
+                // ── Rewound sessions (issue #282, design frame D): the originals a rewind replaced.
+                // Last, collapsed by default, and counted in the header — the list did not get longer,
+                // the superseded rows just moved somewhere they can still be found.
+                if (lineage.rewound.isNotEmpty()) {
+                    item(key = "grp:rewound") {
+                        val open = rewoundOpen
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = Metric.gapS).clip(RoundedCornerShape(8.dp))
+                                .clickable { rewoundOpen = !open }
+                                .padding(horizontal = 4.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                if (open) Icons.Rounded.KeyboardArrowDown else Icons.Rounded.KeyboardArrowRight,
+                                null, tint = Tok.muted, modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                stringResource(Res.string.rewind_group_rewound, lineage.rewound.size),
+                                color = Tok.tx2, fontSize = 13.sp,
+                            )
+                        }
+                    }
+                    if (rewoundOpen) {
+                        items(lineage.rewound, key = { "rw:" + it.sessionId }) { s ->
+                            Column {
+                                Hairline()
+                                // the quiet D2 row, not a full SessionListRow: no state mark colour, no
+                                // preview, no meta line — just the title and where it went. A folded row
+                                // with no forward pointer is just a session that vanished.
+                                RewoundSessionRow(
+                                    s,
+                                    successorTitle = rewoundSuccessorTitle(s, allForDir),
                                     onOpen = { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) },
                                     onLongPress = if (hasRowMenu) ({ moveTarget = s }) else null,
                                 )
@@ -2376,6 +2437,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     // per conversation, so switching sessions never lands you inside the previous one's expanded context
     var contextExpanded by remember(repo.convoId.value) { mutableStateOf(false) }
     var showQuickActions by remember { mutableStateOf(false) }
+    // the long-pressed user turn whose rewind/fork menu is up (issue #282). Reset per conversation:
+    // a menu left open across a session switch would act on a message that is no longer on screen.
+    var rewindMenuFor by remember(repo.convoId.value) { mutableStateOf<ChatItem.User?>(null) }
     var showModelSheet by remember { mutableStateOf(false) } // composer model chip → the picker, one tap (issue #157)
     var showBgJobs by remember { mutableStateOf(false) }
     var showTerminal by remember { mutableStateOf(false) }
@@ -2639,6 +2703,13 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     ) { Text("⋯", color = Tok.tx2, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
                 }
             }
+            // Branch lineage (issue #282, design frame C): sits where the context line does, because it
+            // answers the same question — "which conversation am I in" — and right after a rewind that is
+            // the only question. Shown only while THIS app's own branch is on screen; a session opened
+            // from the list gets its lineage from the list row's caption instead.
+            repo.sessionLineage.value
+                ?.takeIf { it.convoId == repo.convoId.value }
+                ?.let { LineageBanner(it.mode, it.fromTitle) }
             // ── the one pinned state, chosen by the shared ladder from real facts only ────────────────
             // Approval/Answer lead; a streaming turn under them is demoted to a qualifying line, and
             // streaming ALONE pins nothing — the composer note + Stop write it once, where the user acts.
@@ -2737,6 +2808,11 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 onOpenImages = { imgs, i -> viewer = imgs to i },
                                 onOpenVideo = { videoViewer = it },
                                 onTightenAutoRun = repo::tightenAutoRun,
+                                // rewind/fork (issue #282): offered only on rows the daemon gave
+                                // transcript coordinates to — see PocketRepository.canRewind
+                                onLongPressUser = if (m is ChatItem.User && repo.canRewind(m)) {
+                                    { u -> rewindMenuFor = u }
+                                } else null,
                             )
                             when {
                                 undelivered -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -2804,6 +2880,15 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     hoResult.toUi(activeHandoff.recipientLabel ?: "?", elapsedLabel(activeHandoff.returnedAt, hoNow)),
                     onMarkReviewed = { repo.completeHandoff(activeHandoff.id) },
                     onOpenFull = { showSessionInfo = true },
+                    modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 10.dp),
+                )
+            }
+            // A refused rewind (issue #282, design "State · stale anchor"). Docks above the composer
+            // like every other transient chat notice, and self-dismisses: the commonest refusal is a
+            // stale anchor, which is information ("reload and point again"), not a decision to make.
+            repo.rewindError.value?.let { reason ->
+                RewindErrorBar(
+                    reason, onDismiss = { repo.dismissRewindError() },
                     modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 10.dp),
                 )
             }
@@ -3141,6 +3226,33 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 onHandoff = if (canInitiateHandoff && activeHandoff == null) ({ showHandoffDraft = true }) else null,
             ) { showQuickActions = false }
         }
+        // ── rewind / fork (issue #282, design frames A + B) ──
+        // Two sheets, never both: the long-press menu hands off to the confirmation, which is the only
+        // path to an actual cut. The menu carries Copy as well, so the gesture answers the whole "what
+        // can I do with this message" question rather than just the new half of it.
+        rewindMenuFor?.let { turn ->
+            val clip = LocalClipboardManager.current
+            PocketSheet({ rewindMenuFor = null }) {
+                Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp, top = 4.dp)) {
+                    Text(
+                        renderClip(turn.text), color = Tok.tx2, fontSize = 13.sp, lineHeight = 18.sp,
+                        maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    )
+                    RewindSheetActionRow(stringResource(Res.string.code_copy)) {
+                        clip.setText(AnnotatedString(turn.text)); rewindMenuFor = null
+                    }
+                    RewindMenuItems(enabled = !repo.rewindBlockedByTurn()) { mode ->
+                        rewindMenuFor = null
+                        repo.startRewind(turn, mode)
+                    }
+                }
+            }
+        }
+        repo.rewindSheet.value?.let { sheet ->
+            PocketSheet({ repo.cancelRewind() }) {
+                RewindConfirmBody(sheet, onCancel = { repo.cancelRewind() }, onConfirm = { repo.confirmRewind() })
+            }
+        }
         // ── session handoff sheets (design Frames 2 / 3a / 8; contacts increment Frames 1/2) ──
         if (showHandoffDraft && canInitiateHandoff) {
             val hoDefaultRequest = stringResource(Res.string.ho_default_request)
@@ -3296,6 +3408,18 @@ private fun FileCompletionMenu(
     }
 }
 
+/**
+ * A fork child's list caption (issue #282, design frame D1): "⑂ fork of ‹original›", as a [SessionListRow]
+ * caption slot so it sits inside the row's text column — aligned under the title, above the metadata —
+ * instead of dangling below the row as an unowned line.
+ *
+ * Null (no slot at all) when [s] is not a fork, or when its parent is not in this view: a caption naming a
+ * session you cannot reach from here is worse than no caption. A rewind child gets none either — its
+ * lineage is told from the other end, by the folded original's own "↩ rewound → …".
+ */
+private fun forkCaptionOf(s: SessionSummary, all: List<SessionSummary>): (@Composable () -> Unit)? =
+    forkParentTitle(s, all)?.let { parent -> { ForkLineageCaption(parent) } }
+
 @Composable
 private fun MessageItem(
     m: ChatItem,
@@ -3310,6 +3434,10 @@ private fun MessageItem(
     onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> },
     onOpenVideo: (dev.ccpocket.app.data.SentFile) -> Unit = {},
     onTightenAutoRun: (ChatItem.AutoRun) -> Unit = {},
+    // long-press on a USER turn opens the rewind/fork menu (issue #282). Null = no entry at all: the
+    // caller passes null when the row has no transcript coordinates (old daemon / non-Claude backend),
+    // so the affordance is absent rather than present-and-broken.
+    onLongPressUser: ((ChatItem.User) -> Unit)? = null,
 ) {
     when (m) {
         // Mobile UI 2.0: a quiet uppercase source label above each ordinary turn is all the structure the
@@ -3318,7 +3446,21 @@ private fun MessageItem(
         // label is what says "you"; the container that used to say it cost a 300dp cap, so a pasted log or
         // a long prompt reflowed into a narrow ribbon while the agent's reply beside it read at full
         // measure — two grammars for the same conversation. Everything the turn carries is unchanged.
-        is ChatItem.User -> Column(Modifier.fillMaxWidth()) {
+        // The rewind/fork gesture (issue #282) rides the WHOLE turn — label, images, chips, gutters —
+        // but deliberately does NOT replace the inner SelectionContainer: drag-select-to-copy is the
+        // iOS text path (issue #5) and the project's selection contract is load-bearing, so a long press
+        // landing on the glyphs themselves still starts a selection. Indication is suppressed and the
+        // tap arm left empty so the row keeps behaving exactly as before for every non-long gesture.
+        is ChatItem.User -> Column(
+            Modifier.fillMaxWidth().let { base ->
+                if (onLongPressUser == null) base else base.combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                    onLongClick = { onLongPressUser(m) },
+                )
+            },
+        ) {
             TurnSourceLabel(stringResource(Res.string.chat_you), alignEnd = true)
             Column(
                 Modifier.fillMaxWidth().padding(top = 7.dp),

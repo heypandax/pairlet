@@ -69,6 +69,49 @@ class ClaudeLauncherTest {
     }
 
     @Test
+    fun rewind_flags_ride_the_resume_block_and_never_appear_alone() {
+        // issue #282. The two flags are `.hideHelp()`-hidden on the CLI but are exactly what the Agent
+        // SDK's resumeSessionAt compiles to; scripts/probe-claude-wire.py `scenario_rewind` asserts they
+        // still exist on every upgrade, and this asserts we spell them the way it proved works.
+        val args = ClaudeLauncher.buildArgs(
+            AgentSpec(
+                Path.of("/x"), resumeId = "sid-9", forkSession = true,
+                resumeSessionAt = "anchor-uuid", resumeDropsTurn = "dropped-uuid",
+            ),
+        )
+        assertEquals("anchor-uuid", args[args.indexOf("--resume-session-at") + 1])
+        assertEquals("dropped-uuid", args[args.indexOf("--resume-drops-turn") + 1])
+        // ordering is load-bearing: --resume-session-at must follow --resume (there is nothing to
+        // truncate without one), and the free-text values sit at the tail so a mangled command line can
+        // only ever damage them and never the flags ahead of them
+        assertTrue(args.indexOf("--resume") < args.indexOf("--resume-session-at"))
+        assertTrue(args.indexOf("--fork-session") < args.indexOf("--resume-session-at"))
+
+        // truncation without a resume is meaningless — and emitting it bare would make the CLI reject
+        // the launch outright
+        val noResume = ClaudeLauncher.buildArgs(AgentSpec(Path.of("/x"), resumeSessionAt = "anchor-uuid"))
+        assertFalse("--resume-session-at" in noResume)
+
+        // the guard rail is nested one level deeper: alone it has no meaning, and a multi-turn cut
+        // deliberately omits it (declaring one turn while dropping several is always rejected)
+        val multiTurn = ClaudeLauncher.buildArgs(
+            AgentSpec(Path.of("/x"), resumeId = "sid-9", forkSession = true, resumeSessionAt = "anchor-uuid"),
+        )
+        assertTrue("--resume-session-at" in multiTurn)
+        assertFalse("--resume-drops-turn" in multiTurn)
+
+        val dropsOnly = ClaudeLauncher.buildArgs(
+            AgentSpec(Path.of("/x"), resumeId = "sid-9", resumeDropsTurn = "dropped-uuid"),
+        )
+        assertFalse("--resume-drops-turn" in dropsOnly)
+
+        // an ordinary launch is byte-for-byte what it was
+        val plain = ClaudeLauncher.buildArgs(AgentSpec(Path.of("/x"), resumeId = "sid-9"))
+        assertFalse("--resume-session-at" in plain)
+        assertFalse("--resume-drops-turn" in plain)
+    }
+
+    @Test
     fun bypass_mode_serializes_to_cli_name() {
         assertEquals("bypassPermissions", PermissionMode.BYPASS_PERMISSIONS.wireName())
     }

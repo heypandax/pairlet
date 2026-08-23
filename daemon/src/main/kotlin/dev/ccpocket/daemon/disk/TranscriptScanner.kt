@@ -22,8 +22,20 @@ object TranscriptScanner {
     fun scan(dir: Path): List<SessionSummary> {
         if (!dir.isDirectory()) return emptyList()
         val files = Files.newDirectoryStream(dir, "*.jsonl").use { it.toList() }
+        // read the rewind/fork ledger ONCE per scan, not once per file (issue #282) — a project dir can
+        // hold hundreds of transcripts and the edges are daemon-global
+        val lineage = runCatching { RewindLineage.byChild() }.getOrDefault(emptyMap())
         return files.mapNotNull { runCatching { summarize(it) }.getOrNull() }
+            .map { s -> lineage[s.sessionId]?.let { stampLineage(s, it) } ?: s }
             .sortedByDescending { it.lastModified }
+    }
+
+    /** Land one ledger edge on the CHILD row. The original keeps a clean summary: clients derive "this
+     *  one was superseded" by looking for a peer that names it, so nothing has to be written twice. */
+    private fun stampLineage(s: SessionSummary, e: RewindLineage.Entry): SessionSummary = when (e.mode) {
+        dev.ccpocket.protocol.RewindMode.FORK -> s.copy(forkedFrom = e.parentSid)
+        dev.ccpocket.protocol.RewindMode.REWIND -> s.copy(rewindOf = e.parentSid)
+        else -> s
     }
 
     fun summarize(file: Path): SessionSummary? {

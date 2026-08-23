@@ -649,6 +649,15 @@ class RequestRouter(
             // older-history page (issue #147): a transcript parse → off the inbound pump; answered to
             // the requesting sink only (never fanned out to other attached clients)
             is FetchHistoryPage -> scope.launch { registry.fetchHistoryPage(frame, sink) }
+            // rewind / fork (issue #282): a transcript parse plus (on execute) a conversation swap, so
+            // off the inbound loop like the other disk-bound frames. Gated on the SAME handoff drive
+            // lease as a prompt: cutting a session's history is the most consequential input there is,
+            // and a device the lease denies must not be able to do it just because it is not "a prompt".
+            // Answered to the requesting sink only — the registry never fans a rewind reply out.
+            is dev.ccpocket.protocol.RewindSession -> when (val deny = registry.driveDenied(frame.convoId, dev)) {
+                null -> scope.launch { registry.rewind(frame, sink) }
+                else -> sink.emit(handoffDenied(deny, frame.convoId))
+            }
 
             // voice capture: buffer fast here; whisper runs on the service's own scope
             is AudioChunk -> transcribe.onChunk(frame, sink)

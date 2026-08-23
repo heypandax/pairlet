@@ -167,8 +167,21 @@ object TranscriptMerge {
      * bubble holding its full local attachments never inherits a truncation that didn't happen to it.
      */
     private fun resolveUser(l: ChatItem.User, r: ChatItem.User): ChatItem.User =
-        if (l.images.isEmpty()) l.copy(pending = false, images = r.images, imagesTruncated = r.imagesTruncated)
-        else l.copy(pending = false)
+        (
+            if (l.images.isEmpty()) l.copy(pending = false, images = r.images, imagesTruncated = r.imagesTruncated)
+            else l.copy(pending = false)
+            )
+            // The LOCAL bubble wins everywhere else, but it can never have transcript coordinates of its
+            // own — it was composed here, and only the daemon's replay knows which line the turn landed
+            // on (issue #282). Without adopting them, the turns most likely to be rewound (the ones you
+            // just typed) would be the only ones with no rewind entry.
+            //
+            // The replay is authoritative INCLUDING when it carries none, which is why this is a plain
+            // take and not `r.seq ?: l.seq`. Absence of coordinates is the feature's capability probe, so
+            // a row re-merged from a daemon that cannot rewind has to LOSE them: keeping stale ones alive
+            // across a reconnect to an older build (a rollback, or the two-daemons-on-one-machine case)
+            // would leave the entry showing and send an anchor that daemon silently drops.
+            .copy(seq = r.seq, uuid = r.uuid)
 
     /** Rows the transcript never contains — carried through a merge, invisible to pairing. */
     private fun isLocalOnly(item: ChatItem): Boolean = when (item) {

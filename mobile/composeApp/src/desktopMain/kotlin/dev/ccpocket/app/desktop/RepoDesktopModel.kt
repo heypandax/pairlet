@@ -427,6 +427,7 @@ class RepoDesktopModel(
                 pending = if (askWd != null && it.cwd == askWd && it.title == repo.chatTitle.value) 1 else 0,
                 model = it.model,
                 group = it.group, // custom session-group membership (issue #119)
+                forkedFrom = it.forkedFrom, rewindOf = it.rewindOf, // #282 lineage
             )
         }
         // a just-created session isn't on disk until its first turn persists, so ListSessions can't
@@ -701,6 +702,20 @@ class RepoDesktopModel(
     override fun renameError(sessionId: String): String? =
         repo.renameError.value?.takeIf { it.sessionId == sessionId }?.message
     override fun dismissRenameError() { repo.dismissRenameError() }
+
+    // ── session rewind / fork (issue #282): straight delegation, so the two clients can never drift on
+    // when the entry appears or on what a refusal means. All the judgement lives in the repository.
+    override fun canRewind(item: ChatItem.User): Boolean = repo.canRewind(item)
+    override val rewindBlockedByTurn: Boolean get() = repo.rewindBlockedByTurn()
+    override fun startRewind(item: ChatItem.User, mode: String) = repo.startRewind(item, mode)
+    override val rewindSheet: PocketRepository.RewindSheet? get() = repo.rewindSheet.value
+    override fun confirmRewind() = repo.confirmRewind()
+    override fun cancelRewind() = repo.cancelRewind()
+    override val rewindError: String? get() = repo.rewindError.value
+    override fun dismissRewindError() { repo.dismissRewindError() }
+    override val sessionLineage: PocketRepository.SessionLineage?
+        // scoped to the conversation it named: a banner surviving a switch would label the wrong session
+        get() = repo.sessionLineage.value?.takeIf { it.convoId == repo.convoId.value }
 
     // collapse memory keyed by (canonical project path, group id) — persisted like the RECENT visit keys
     // (issue #102): a snapshot list so reads recompose, written through the same DesktopStore.

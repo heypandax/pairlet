@@ -1254,6 +1254,21 @@ data class HistoryMessage(
      *  fewer tiles than the computer has. Trailing optional both ways: old daemons omit it (false = no
      *  claim either way, which is what a daemon that never carried images means), old clients ignore it. */
     val imagesTruncated: Boolean = false,
+    /** This row's transcript cursor — the source `.jsonl` line it was parsed from, the SAME numbering
+     *  as [ConvoHistory.firstSeq]/[ConvoHistory.lastSeq]. Carried per row (issue #282) so the client can
+     *  name a point in the history when it asks for a rewind/fork: [RewindSession.anchorSeq] is this
+     *  value, and the daemon re-derives the row from disk and refuses on a mismatch rather than cutting
+     *  at whatever now sits there. Trailing optional both ways: an old daemon omits it (the client sees
+     *  null and hides the rewind entry entirely — the capability probe is the field's own absence), an
+     *  old client ignores it. Null from any backend whose replay has no line-addressable transcript. */
+    val seq: Long? = null,
+    /** The transcript chain-entry uuid of this row — filled on USER rows only (issue #282), because a
+     *  rewind anchor is always "this message of mine and everything after it". The daemon translates it
+     *  into the CLI's `--resume-session-at` anchor (the row's own parentUuid) and never trusts the value
+     *  blind: [RewindSession] carries uuid AND [seq], and both must still agree with the file. Trailing
+     *  optional both ways: an old daemon omits it (no rewind entry, same probe as [seq]), an old client
+     *  ignores it. Null on ASSISTANT/TOOL rows and on backends other than Claude. */
+    val uuid: String? = null,
 )
 
 /**
@@ -1316,6 +1331,130 @@ data class ConvoHistoryPage(
     val firstSeq: Long? = null,
     val hasMore: Boolean = false,
 ) : ToPhone
+
+// ── session rewind / fork (issue #282, docs/design/REWIND-FORK.md) ─────────────────────────────
+
+/**
+ * phone -> daemon: rewind or fork [convoId]'s session at one of its own past user messages.
+ *
+ * [anchorUuid] is the [HistoryMessage.uuid] of the USER row the person long-pressed and [anchorSeq] its
+ * [HistoryMessage.seq]; together they mean "drop this message and everything after it". Both travel
+ * because either alone can be stale: a uuid that moved lines, or a line whose occupant changed, must
+ * fail loudly instead of cutting somewhere the user did not point at. The daemon re-reads the file,
+ * requires uuid AND seq to agree, and only then translates the pair into the CLI's chain anchor (the
+ * row's parentUuid — "keep up to my parent"). The client never sees or sends that translated anchor.
+ *
+ * [mode] is `"rewind"` or `"fork"` — the underlying launch is IDENTICAL (`--resume <sid>
+ * --resume-session-at <anchor> --fork-session`), and the two differ only in how the ORIGINAL session is
+ * then filed: a rewind's original folds away under [SessionSummary.rewindOf], a fork's stays in place
+ * under [SessionSummary.forkedFrom]. A plain String rather than an enum, per this protocol's tolerant
+ * wire-string convention: an unknown value from a newer client is refused with a reason instead of
+ * failing the whole frame's decode.
+ *
+ * [dryRun] = true asks ONLY for the [RewindPreview] count ("N turns, M tool calls will be dropped") and
+ * changes nothing; the confirmation sheet cannot be skipped, so the client always sends the dry run
+ * first and the real one only after the person taps through. A NEW message type, wire-safe both ways:
+ * an old daemon can't decode the unknown discriminator and silently DROPS the frame (its inbound
+ * decodes are runCatching-wrapped; no reply ever comes) — but a client only reaches this at all when
+ * the row carried [HistoryMessage.seq]/[HistoryMessage.uuid], which the same old daemon never sends.
+ * An old phone never sends it.
+ */
+@Serializable
+@SerialName("pocket/session.rewind")
+data class RewindSession(
+    val convoId: String,
+    val anchorSeq: Long,
+    val anchorUuid: String,
+    val mode: String,
+    val dryRun: Boolean = false,
+) : ToDaemon
+
+/**
+ * daemon -> phone: the dry-run answer to a [RewindSession] with `dryRun = true` — what the cut would
+ * cost, sent ONLY to the asking client.
+ *
+ * [dropTurns] counts the user turns that would leave the context (the anchor message included) and
+ * [dropToolCalls] the tool calls in them, both counted on the MAIN chain exactly as the transcript
+ * replay renders it — so the sheet's numbers match what the person can scroll back and see, rather
+ * than a sub-agent-inflated total they have no way to check.
+ *
+ * [ok] = false means the cut is refused and [reason] says why in machine-readable form (`not_idle`,
+ * `unsupported`, `stale`, `no_convo`, `first_message`, `bad_mode`); the counts are then meaningless and
+ * the client shows the reason instead of the sheet. [reason] is null when [ok] is true. An old phone
+ * drops the unknown frame harmlessly; an old daemon never sends it.
+ */
+@Serializable
+@SerialName("pocket/session.rewindPreview")
+data class RewindPreview(
+    val convoId: String,
+    val dropTurns: Int,
+    val dropToolCalls: Int,
+    val ok: Boolean,
+    val reason: String? = null,
+) : ToPhone
+
+/**
+ * daemon -> phone: the result of an executed [RewindSession] (`dryRun = false`), sent ONLY to the
+ * asking client. [convoId] is the ORIGINAL conversation the request named, so a client can match the
+ * answer even when the rewind failed and nothing new exists.
+ *
+ * On success [newConvoId] is the conversation the client should switch to. [newSessionId] is normally
+ * NULL and that is not a failure: the branch is opened lazily, exactly like any other open, so the CLI
+ * has not minted the forked session id yet — it arrives with the first turn's `SessionLive`, which is
+ * also when the daemon journals the lineage that later fills [SessionSummary.forkedFrom]/[rewindOf].
+ * Keeping it lazy is what makes "a fork is never implicit" true all the way down: back out without
+ * typing and no transcript, no session row and no ledger entry were ever created. A daemon that DOES
+ * know the id early (a future eager path) may fill it; clients must not require it.
+ *
+ * On failure [ok] = false with the same machine-readable [reason] vocabulary as [RewindPreview] plus
+ * `launch_failed`, and NOTHING has changed — the original conversation is still the live one and the
+ * client stays on it. Trailing optionals both ways; an old phone drops the unknown frame harmlessly.
+ */
+@Serializable
+@SerialName("pocket/session.rewindDone")
+data class RewindDone(
+    val convoId: String,
+    val ok: Boolean,
+    val newConvoId: String? = null,
+    val newSessionId: String? = null,
+    val reason: String? = null,
+) : ToPhone
+
+/** The two [RewindSession.mode] values this daemon understands. Kept as strings on the wire (see
+ *  [RewindSession.mode]); anything else is answered with [RewindRefusal.BAD_MODE]. */
+object RewindMode {
+    const val REWIND = "rewind"
+    const val FORK = "fork"
+}
+
+/**
+ * The `reason` vocabulary of [RewindPreview] / [RewindDone] — shared so the client branches on a value
+ * instead of matching prose, and so a LATER daemon can add a reason without an older client rendering
+ * it wrong: anything unrecognised must fall back to a generic "couldn't rewind" message.
+ */
+object RewindRefusal {
+    /** The named conversation is not live here (idle-reaped, or the daemon restarted). */
+    const val NO_CONVO = "no_convo"
+    /** Not a plain Claude owner conversation: another backend (no truncated-resume support exists), or
+     *  a bridge / guest / handoff-granted session, which must not branch someone else's work. */
+    const val UNSUPPORTED = "unsupported"
+    /** [RewindSession.mode] was neither [RewindMode.REWIND] nor [RewindMode.FORK]. */
+    const val BAD_MODE = "bad_mode"
+    /** A turn is executing, background work is running, an ask is unanswered, or a prompt is still
+     *  queued — the session has to be at a standstill before its history can be cut. */
+    const val NOT_IDLE = "not_idle"
+    /** Something outside this daemon is writing the transcript right now (a terminal `claude --resume`). */
+    const val EXTERNAL_WRITER = "external_writer"
+    /** No transcript on disk for this session yet — nothing to branch from. */
+    const val NO_TRANSCRIPT = "no_transcript"
+    /** The (uuid, seq) pair no longer names the same row: the client's replay is out of date and must be
+     *  reloaded before trying again. Never resolved to a nearby row — see [RewindSession]. */
+    const val STALE = "stale"
+    /** The anchor is the session's first message; cutting before it is a new session, not a rewind. */
+    const val FIRST_MESSAGE = "first_message"
+    /** The branch conversation could not be created. Nothing changed; the original is still live. */
+    const val LAUNCH_FAILED = "launch_failed"
+}
 
 /** One slash command the composer can offer. [name] has no leading "/". */
 @Serializable

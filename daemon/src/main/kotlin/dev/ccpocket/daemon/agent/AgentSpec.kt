@@ -22,6 +22,21 @@ data class AgentSpec(
     // Claude only: fork the resumed session into a fresh id (--fork-session) instead of appending to the
     // original transcript. Set when the phone takes over / cold-resumes a session another writer may hold.
     val forkSession: Boolean = false,
+    // Claude only, issue #282 (docs/design/REWIND-FORK.md): truncate the resumed context at a chain entry
+    // (`--resume-session-at <uuid>`) — the CLI keeps everything up to and including that entry and drops the
+    // rest. ALWAYS set together with [forkSession]: without a fork the CLI keeps the original id and APPENDS
+    // the branch to the same transcript, turning it into a tree that linear replay renders twice (probed);
+    // with one, the original file is untouched byte-for-byte and the truncated context lands in a fresh copy.
+    // Both flags are `.hideHelp()`-hidden on the CLI but are the same knobs the Agent SDK's resumeSessionAt
+    // compiles to; scripts/probe-claude-wire.py `scenario_rewind` asserts they still exist on every upgrade.
+    val resumeSessionAt: String? = null,
+    // Claude only, issue #282: the guard rail for the above (`--resume-drops-turn <uuid>`) — declares WHICH
+    // user turn this truncation means to discard. The CLI refuses to start if the cut would also take
+    // anything outside that turn (an absorbed queued message, a task notification), which is exactly the
+    // #122 queued-injection hazard. Only meaningful when the cut drops EXACTLY one turn: declaring a single
+    // turn while dropping several is always rejected, so the daemon leaves it null there and relies on the
+    // dry-run preview + explicit confirmation instead. Ignored unless [resumeSessionAt] is also set.
+    val resumeDropsTurn: String? = null,
     // GUEST folder-share clean-room (issue #115): launch the agent WITHOUT the owner's private, machine-wide
     // context, so a scoped collaborator can't siphon it through the agent (the issue's "context & capability
     // overflow" threat). Claude honours it (Codex ignores it; v1 guests are Claude-only in practice) via:
