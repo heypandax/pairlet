@@ -308,6 +308,55 @@ class GitServiceTest {
         assertTrue(r.error.orEmpty().contains("no upstream"), r.error.orEmpty())
     }
 
+    /**
+     * A real diverged pair, which is the state the phone reported from (↑1↓1), against the two verbs
+     * that behave differently there (issue #280 真机反馈 5 + 6):
+     *
+     *  · `pull --ff-only` must come back with [GitActionResult.notFastForward] — that flag is the ONLY
+     *    thing that turns the strip amber and says "needs a merge" instead of painting a red failure.
+     *    If a git wording change ever slipped past `looksNonFastForward`, the A6 state would silently
+     *    disappear into the generic red one and nobody would notice by reading the code.
+     *  · `push` must report the `! [rejected] … (fetch first)` line, NOT the `To <url>` banner git prints
+     *    first — the complaint that started this fix.
+     */
+    @Test
+    fun a_diverged_upstream_makes_pull_amber_and_push_report_the_rejected_line_not_the_banner() {
+        assumeTrue(gitAvailable())
+        val bare = tmp.resolve("remote.git")
+        sh(tmp, "init", "--bare", "-q", "-b", "main", bare.toString())
+        // the "other computer": seeds the remote, then moves it on by one commit
+        val other = repo("other")
+        sh(other, "remote", "add", "origin", bare.toString())
+        sh(other, "push", "-q", "-u", "origin", "main")
+        // the machine the phone is driving — a clone, so it has a real upstream
+        sh(tmp, "clone", "-q", bare.toString(), "local")
+        val local = tmp.resolve("local")
+        sh(local, "config", "--local", "user.email", "test@example.com")
+        sh(local, "config", "--local", "user.name", "Test")
+        sh(local, "config", "--local", "commit.gpgsign", "false")
+        other.resolve("theirs.txt").writeText("them\n")
+        sh(other, "add", "-A"); sh(other, "commit", "-q", "-m", "theirs"); sh(other, "push", "-q")
+        local.resolve("ours.txt").writeText("us\n")
+        sh(local, "add", "-A"); sh(local, "commit", "-q", "-m", "ours")
+
+        val svc = service()
+        val pull = act(svc, local, dev.ccpocket.protocol.GIT_OP_PULL) as GitActionResult
+        assertFalse(pull.ok)
+        assertTrue(pull.notFastForward, "A6 needs this flag; stderr was: ${pull.stderr}")
+        assertTrue(pull.stderr.startsWith("fatal:"), pull.stderr)
+
+        // the status the phone was staring at: one out, one in
+        val st = status(svc, local)
+        assertEquals(1, st.ahead)
+        assertEquals(1, st.behind)
+
+        val push = act(svc, local, dev.ccpocket.protocol.GIT_OP_PUSH) as GitActionResult
+        assertFalse(push.ok)
+        assertFalse(push.stderr.startsWith("To "), "the To banner is the line we must NOT send: ${push.stderr}")
+        assertTrue(push.stderr.contains("[rejected]"), push.stderr)
+        assertTrue(push.stderr.contains("fetch first") || push.stderr.contains("non-fast-forward"), push.stderr)
+    }
+
     // -------------------------------------------------- the injection red line
 
     @Test

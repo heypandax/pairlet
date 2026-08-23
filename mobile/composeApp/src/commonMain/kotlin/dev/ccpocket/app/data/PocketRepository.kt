@@ -49,6 +49,7 @@ import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.AddWorktree
 import dev.ccpocket.protocol.FetchGitStatus
 import dev.ccpocket.protocol.GIT_OPS
+import dev.ccpocket.protocol.GIT_OP_FETCH
 import dev.ccpocket.protocol.GIT_OP_REVERT
 import dev.ccpocket.protocol.GIT_OP_WORKTREE_ADD
 import dev.ccpocket.protocol.GIT_OP_WORKTREE_REMOVE
@@ -1094,6 +1095,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val gitDiffStaged = mutableStateOf(false)                 // which side the Working|Staged control shows
     val gitBusyOp = mutableStateOf<String?>(null)             // the verb whose button spins; nothing ELSE locks (A4)
     val gitError = mutableStateOf<GitActionResult?>(null)     // the last failed action — drives the A5/A6 strip
+    // A fetch changes nothing local, so without this the panel answers a successful fetch with silence
+    // (issue #280 真机反馈 1). Cleared the moment the next verb starts — it is a receipt, not a state.
+    val gitFetchNote = mutableStateOf<GitFetchReport?>(null)
     val gitPendingConfirm = mutableStateOf<GitActionPreview?>(null) // a two-step verb's preview → Screen D / C1-C2
     val worktrees = mutableStateOf<WorktreeList?>(null)       // every checkout of this repository (#281 Screen A)
     val worktreesLoading = mutableStateOf(false)
@@ -3384,6 +3388,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 if (gitBusyOp.value == f.op) gitBusyOp.value = null
                 gitPendingAction = null; gitPendingRemove = null
                 gitError.value = if (f.ok) null else f
+                // the receipt a fetch otherwise has no way to give: read off the snapshot it came with,
+                // so "远端领先 1，可合并" is the SAME number the header is about to show (真机反馈 1)
+                if (f.op == GIT_OP_FETCH) {
+                    gitFetchNote.value = if (f.ok) gitFetchReport(f.statusAfter ?: gitStatus.value) else null
+                }
                 // the daemon hands back a fresh snapshot with a successful mutation — refresh IN PLACE
                 // rather than asking again (no second round trip, and no polling anywhere in this surface)
                 f.statusAfter?.takeIf { it.workdir == workdir.value }?.let {
@@ -5647,11 +5656,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Close the A5/A6 error strip (× ). Purely local: nothing about the repository changed. */
     fun dismissGitError() { gitError.value = null }
 
+    /** Close the fetch receipt (×). Same nothing-changed promise as [dismissGitError]. */
+    fun dismissGitFetchNote() { gitFetchNote.value = null }
+
     /** One in-flight verb drives the spinner in the button that started it; the deadline turns a
      *  dropped frame into the same "update the computer" sentence the reads use, in the strip. */
     private fun armGitAction(op: String) {
         gitBusyOp.value = op
         gitError.value = null
+        gitFetchNote.value = null // a receipt for the PREVIOUS verb must not survive into this one
         gitActionDeadline?.cancel()
         gitActionDeadline = scope.launch {
             delay(GIT_REPLY_DEADLINE_MS)
@@ -5670,7 +5683,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         gitStatusDeadline?.cancel(); gitDiffDeadline?.cancel()
         gitActionDeadline?.cancel(); worktreesDeadline?.cancel()
         gitStatus.value = null; gitStatusLoading.value = false; gitStatusUnavailable.value = false
-        gitBusyOp.value = null; gitError.value = null
+        gitBusyOp.value = null; gitError.value = null; gitFetchNote.value = null
         gitPendingConfirm.value = null; gitPendingAction = null; gitPendingRemove = null
         worktrees.value = null; worktreesLoading.value = false; worktreesUnavailable.value = false
         closeGitDiff()

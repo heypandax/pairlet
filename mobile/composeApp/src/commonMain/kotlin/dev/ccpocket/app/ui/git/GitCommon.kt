@@ -37,6 +37,7 @@ import dev.ccpocket.app.ui.DiffEmptyState
 import dev.ccpocket.app.ui.DiffView
 import dev.ccpocket.app.ui.TruncatedBanner
 import dev.ccpocket.protocol.GitDiff
+import dev.ccpocket.protocol.gitStderrHighlight
 import org.jetbrains.compose.resources.stringResource
 
 // ════════════════════════════════════════════════════════════════════
@@ -182,11 +183,20 @@ fun GitDiffPaneBody(diff: GitDiff?, ext: String?, dense: Boolean, wrap: Boolean,
     }
 }
 
-/** The pinned composer's error strip (A5 red / A6 amber): one sentence of ours, then git's own first
- *  stderr line verbatim in mono — a developer recognises `(fetch first)` instantly and we never
- *  rewrite git's words into something a search engine cannot match. */
+/**
+ * The pinned composer's error strip (A5 red / A6 amber): one sentence of ours, then git's own stderr
+ * line verbatim in mono — a developer recognises `(fetch first)` instantly and we never rewrite git's
+ * words into something a search engine cannot match.
+ *
+ * [hint] is the second sentence of OURS — what to do next — and it only appears when we actually know
+ * (issue #280 真机反馈 5: a push rejected by a diverged remote). Order is ours, ours, git's.
+ *
+ * The mono line goes through [gitStderrHighlight] here as well as in the daemon: a phone on a new build
+ * talking to a daemon that still ships the old verbatim stderr would otherwise show `To https://…`,
+ * which is the line that started this complaint.
+ */
 @Composable
-fun GitErrorStrip(title: String, detail: String?, amber: Boolean, onDismiss: () -> Unit) {
+fun GitErrorStrip(title: String, detail: String?, amber: Boolean, onDismiss: () -> Unit, hint: String? = null) {
     val ink = if (amber) Tok.warn else Tok.danger
     val shape = RoundedCornerShape(10.dp)
     Row(
@@ -205,9 +215,14 @@ fun GitErrorStrip(title: String, detail: String?, amber: Boolean, onDismiss: () 
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, color = ink, fontSize = 13.sp, lineHeight = 17.5.sp, fontWeight = FontWeight.SemiBold)
-            if (!detail.isNullOrBlank()) Text(
-                detail.lineSequence().first().trim(),
-                color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp,
+            if (!hint.isNullOrBlank()) Text(
+                hint, color = Tok.tx2, fontSize = 12.sp, lineHeight = 17.sp,
+            )
+            val line = remember(detail) { detail?.let { gitStderrHighlight(it) }.orEmpty() }
+            if (line.isNotEmpty()) Text(
+                line,
+                color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
             )
         }
         Box(

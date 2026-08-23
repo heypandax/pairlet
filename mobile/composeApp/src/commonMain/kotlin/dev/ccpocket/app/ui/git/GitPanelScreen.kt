@@ -17,7 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -39,6 +41,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.GitChip
 import dev.ccpocket.app.data.GitCommitBlock
+import dev.ccpocket.app.data.GitFetchOutcome
+import dev.ccpocket.app.data.GitFetchReport
 import dev.ccpocket.app.data.GitRowAction
 import dev.ccpocket.app.data.GitSection
 import dev.ccpocket.app.data.PocketRepository
@@ -55,6 +61,7 @@ import dev.ccpocket.app.data.commitBlockedBy
 import dev.ccpocket.app.data.conflictShape
 import dev.ccpocket.app.data.divergenceText
 import dev.ccpocket.app.data.gitInSync
+import dev.ccpocket.app.data.gitPushBlockedByRemote
 import dev.ccpocket.app.data.gitSections
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
@@ -94,6 +101,15 @@ fun GitPanelScreen(
     // the message survives a status refresh (which recomposes the whole list) but not a session
     // switch — the repo clears its git state there and this screen leaves composition with it
     var message by remember(repo.convoId.value) { mutableStateOf("") }
+
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    val dismissKeyboard = { focus.clearFocus(); keyboard?.hide(); Unit }
+    // Reading the list with the keyboard up leaves a third of the screen unusable, and on a phone the
+    // gesture that means "let me see the list" IS the scroll (issue #280 真机反馈 3). The state is hoisted
+    // here rather than inside StatusList so the composer's focus and the list's motion can meet.
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) dismissKeyboard() }
 
     // one pull on entry; everything after rides GitActionResult.statusAfter — no polling anywhere
     LaunchedEffect(repo.convoId.value) { repo.fetchGitStatus(withBranches = true) }
@@ -137,6 +153,7 @@ fun GitPanelScreen(
                     if (sections.isEmpty()) CleanTreeState(status) else StatusList(
                         sections = sections,
                         truncated = status.truncated,
+                        listState = listState,
                         onAct = { entry, action ->
                             when (action) {
                                 GitRowAction.STAGE -> repo.gitAct(GIT_OP_STAGE, paths = listOf(entry.path))
@@ -151,7 +168,13 @@ fun GitPanelScreen(
             }
         }
 
-        CommitBar(repo, status, message, onMessage = { message = it }, onCommitted = { message = "" })
+        CommitBar(
+            repo, status, message,
+            onMessage = { message = it },
+            // the commit is sent, the field is empty, and there is nothing left to type into: the keyboard
+            // staying up would be covering the list the user just changed (真机反馈 3)
+            onCommitted = { message = ""; dismissKeyboard() },
+        )
     }
 
     if (showBranches) BranchSheet(repo) { showBranches = false }
@@ -327,10 +350,11 @@ private fun sectionLabel(section: GitSection): String = stringResource(
 private fun StatusList(
     sections: List<GitSection>,
     truncated: Boolean,
+    listState: LazyListState,
     onAct: (GitFileEntry, GitRowAction) -> Unit,
     onOpen: (GitFileEntry, GitChip) -> Unit,
 ) {
-    LazyColumn(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize(), state = listState) {
         sections.forEach { section ->
             item(key = "h-${section.key}") {
                 Row(
@@ -397,14 +421,23 @@ private fun GitFileRow(
             if (action == GitRowAction.NONE) {
                 Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(16.dp))
             } else {
-                Text(
-                    stringResource(if (action == GitRowAction.STAGE) Res.string.git_stage else Res.string.git_unstage),
-                    color = Tok.tx2, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.height(34.dp).clip(RoundedCornerShape(9.dp))
+                // The pill is a BOX that centres its label, not a Text wearing a fixed height: a 34dp box
+                // with 8dp of vertical padding leaves 18dp for a 12.5sp line (~17.5dp with CJK metrics),
+                // and the descender of 暂存/撤出 landed on the clip boundary (真机反馈 2). heightIn keeps
+                // the 34dp touch target as a MINIMUM and lets a taller line grow instead of being cut.
+                Box(
+                    Modifier.heightIn(min = 34.dp).clip(RoundedCornerShape(9.dp))
                         .border(1.dp, Tok.hair, RoundedCornerShape(9.dp))
                         .clickable(onClick = onAct)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                )
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        stringResource(if (action == GitRowAction.STAGE) Res.string.git_stage else Res.string.git_unstage),
+                        color = Tok.tx2, fontSize = 12.5.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }
@@ -435,24 +468,44 @@ private fun CommitBar(
                     // ours above, git's own words below — the strip shows both, never a paraphrase
                     detail = err.stderr.ifBlank { err.error },
                     amber = err.notFastForward,
+                    // the ONE failure we can give real advice about: the remote moved on (真机反馈 5)
+                    hint = if (gitPushBlockedByRemote(err)) stringResource(Res.string.git_push_rejected_hint) else null,
                     onDismiss = { repo.dismissGitError() },
                 )
                 Box(Modifier.height(11.dp))
             }
+            // A fetch's whole point is that nothing local changes, so it needs a receipt or it reads as a
+            // no-op (真机反馈 1). Shown only when no error strip is up — one voice at a time.
+            if (repo.gitError.value == null) repo.gitFetchNote.value?.let { note ->
+                GitFetchNoteStrip(note) { repo.dismissGitFetchNote() }
+                Box(Modifier.height(11.dp))
+            }
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(
-                    Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Tok.raised)
-                        .border(1.dp, Tok.hair, RoundedCornerShape(12.dp))
-                        .padding(horizontal = 13.dp, vertical = 12.dp),
-                ) {
-                    if (message.isEmpty()) Text(stringResource(Res.string.git_commit_hint), color = Tok.muted, fontSize = 14.5.sp)
-                    BasicTextField(
-                        message, onMessage,
-                        textStyle = TextStyle(color = Tok.tx, fontSize = 14.5.sp, lineHeight = 20.sp),
-                        cursorBrush = SolidColor(Tok.accent),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
+                // The placeholder sat a couple of points off the caret because it was a SEPARATE Text with
+                // its own (default 14.5sp/20.8sp) line metrics, stacked in the same Box as the field
+                // (真机反馈 4). Both now render with ONE TextStyle inside the field's own decorationBox, so
+                // they share a line box and cannot drift.
+                val fieldStyle = TextStyle(color = Tok.tx, fontSize = 14.5.sp, lineHeight = 20.sp)
+                BasicTextField(
+                    message, onMessage,
+                    textStyle = fieldStyle,
+                    cursorBrush = SolidColor(Tok.accent),
+                    modifier = Modifier.weight(1f),
+                    decorationBox = { inner ->
+                        Box(
+                            Modifier.clip(RoundedCornerShape(12.dp)).background(Tok.raised)
+                                .border(1.dp, Tok.hair, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 13.dp, vertical = 12.dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            if (message.isEmpty()) Text(
+                                stringResource(Res.string.git_commit_hint),
+                                style = fieldStyle.copy(color = Tok.muted),
+                            )
+                            inner()
+                        }
+                    },
+                )
                 val on = blocked == null
                 Row(
                     Modifier.height(46.dp).clip(RoundedCornerShape(12.dp))
@@ -487,8 +540,13 @@ private fun CommitBar(
                     tail = null, spinning = busy == GIT_OP_FETCH, modifier = Modifier.weight(1f),
                 ) { repo.gitAct(GIT_OP_FETCH) }
                 RemoteButton(
+                    // `--ff-only` used to ride along as a tail here and it was what made the row overflow:
+                    // three buttons at 1/3 of a 390dp screen get ~111dp each, and 合并远端 (≈52dp) + 7dp gap
+                    // + the mono tail (≈50dp) + 2×1dp border did not fit, so the tail was clipped mid-word
+                    // (真机反馈 2). The flag is a promise about what the verb will NOT do, and that promise
+                    // is kept by the amber refusal strip (A6), which states it in words when it matters.
                     label = stringResource(if (busy == GIT_OP_PULL) Res.string.git_pulling else Res.string.git_pull),
-                    tail = stringResource(Res.string.git_pull_tail), spinning = busy == GIT_OP_PULL,
+                    tail = null, spinning = busy == GIT_OP_PULL,
                     modifier = Modifier.weight(1f),
                 ) { repo.gitAct(GIT_OP_PULL) }
                 val ahead = status?.ahead ?: 0
@@ -503,20 +561,62 @@ private fun CommitBar(
     }
 }
 
-/** 42dp hairline button. The spinner lives in the button that started the work and NOTHING else
- *  locks: staging can continue while a push runs (A4). */
+/**
+ * 42dp hairline button. The spinner lives in the button that started the work and NOTHING else locks:
+ * staging can continue while a push runs (A4).
+ *
+ * Three of these share one row, so each is only ~1/3 of the screen wide: the label is centred, capped at
+ * one line and ELLIPSISED rather than clipped, and it yields its width to the tail instead of pushing it
+ * off the edge (真机反馈 2). `fill = false` on the label's weight is what keeps a short label centred with
+ * its tail rather than parked against the left edge.
+ */
 @Composable
 private fun RemoteButton(label: String, tail: String?, spinning: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Row(
-        modifier.height(42.dp).clip(RoundedCornerShape(10.dp))
+        modifier.heightIn(min = 42.dp).clip(RoundedCornerShape(10.dp))
             .background(if (spinning) Tok.tx.copy(alpha = 0.05f) else Color.Transparent)
             .border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
-            .clickable(enabled = !spinning, onClick = onClick),
+            .clickable(enabled = !spinning, onClick = onClick)
+            .padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
     ) {
-        Text(label, color = if (spinning) Tok.tx2 else Tok.tx, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Text(
+            label, color = if (spinning) Tok.tx2 else Tok.tx, fontSize = 13.sp, lineHeight = 18.sp,
+            fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center, modifier = Modifier.weight(1f, fill = false),
+        )
         if (tail != null) Text(tail, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1)
         if (spinning) CircularProgressIndicator(Modifier.size(12.dp), color = Tok.accent, strokeWidth = 1.6.dp)
+    }
+}
+
+/** The fetch receipt (真机反馈 1): green when there is nothing new, amber when the two sides diverged —
+ *  the same colour language the header's divergence numbers already speak. */
+@Composable
+private fun GitFetchNoteStrip(note: GitFetchReport, onDismiss: () -> Unit) {
+    val ink = if (note.outcome == GitFetchOutcome.DIVERGED) Tok.warn else Tok.ok
+    val shape = RoundedCornerShape(10.dp)
+    val text = when (note.outcome) {
+        GitFetchOutcome.UP_TO_DATE -> stringResource(Res.string.git_fetch_note_up_to_date)
+        GitFetchOutcome.BEHIND -> stringResource(Res.string.git_fetch_note_behind, note.behind)
+        GitFetchOutcome.DIVERGED -> stringResource(Res.string.git_fetch_note_diverged, note.behind, note.ahead)
+        GitFetchOutcome.DONE -> stringResource(Res.string.git_fetch_note_done)
+    }
+    Row(
+        Modifier.fillMaxWidth().clip(shape).background(ink.copy(alpha = 0.08f))
+            .border(1.dp, ink.copy(alpha = 0.26f), shape)
+            .padding(start = 12.dp, end = 4.dp, top = 9.dp, bottom = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text, color = ink, fontSize = 12.5.sp, lineHeight = 17.5.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            Modifier.size(24.dp).clip(RoundedCornerShape(999.dp)).clickable(onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) { Text("×", color = Tok.muted, fontSize = 14.sp) }
     }
 }

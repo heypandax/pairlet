@@ -34,6 +34,7 @@ import dev.ccpocket.protocol.ReadGitDiff
 import dev.ccpocket.protocol.RemoveWorktree
 import dev.ccpocket.protocol.WorktreeEntry
 import dev.ccpocket.protocol.WorktreeList
+import dev.ccpocket.protocol.gitStderrHighlight
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -373,7 +374,8 @@ class GitService(
             val r = git(exe, repo.root, argv, timeoutMs = LOCAL_TIMEOUT_MS)
             return GitActionResult(
                 f.convoId, op, ok = r.code == 0, exitCode = r.code,
-                stdout = r.out.take(MAX_OUT), stderr = r.err.take(MAX_OUT),
+                stdout = r.out.take(MAX_OUT),
+                stderr = (if (r.code == 0) r.err else gitStderrHighlight(r.err)).take(MAX_OUT),
                 error = if (r.code == 0) null else "git worktree add failed",
             )
         } catch (e: Exception) {
@@ -438,7 +440,8 @@ class GitService(
             val r = git(exe, repo.root, argv, timeoutMs = LOCAL_TIMEOUT_MS)
             return GitActionResult(
                 f.convoId, op, ok = r.code == 0, exitCode = r.code,
-                stdout = r.out.take(MAX_OUT), stderr = r.err.take(MAX_OUT),
+                stdout = r.out.take(MAX_OUT),
+                stderr = (if (r.code == 0) r.err else gitStderrHighlight(r.err)).take(MAX_OUT),
                 error = if (r.code == 0) null else "git worktree remove failed",
             )
         } catch (e: Exception) {
@@ -638,7 +641,11 @@ class GitService(
         val after = if (ok) runCatching { statusAt(f.convoId, f.workdir, repo.root, withBranches = false) }.getOrNull() else null
         return GitActionResult(
             convoId = f.convoId, op = f.op, ok = ok, exitCode = r.code,
-            stdout = r.out.take(MAX_OUT), stderr = r.err.take(MAX_OUT),
+            // A FAILURE carries the one line that says WHY (issue #280 真机反馈 5): a rejected push opens
+            // with `To https://…`, so the top line is the least informative one git printed. Success keeps
+            // stderr verbatim — nothing renders it, and progress chatter is not a verdict to pick from.
+            stdout = r.out.take(MAX_OUT),
+            stderr = (if (ok) r.err else gitStderrHighlight(r.err)).take(MAX_OUT),
             notFastForward = notFastForward,
             error = error ?: if (ok) null else (r.failure ?: "git ${f.op} failed"),
             statusAfter = after,

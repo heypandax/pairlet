@@ -459,6 +459,61 @@ data class GitActionResult(
 ) : ToPhone
 
 /**
+ * The ONE line of a failed git command's stderr that is worth showing a phone (issue #280 真机反馈 5).
+ *
+ * git writes the useful sentence in the middle of its output, never at the top: a rejected push opens
+ * with `To https://…`, which names the remote and says nothing about what went wrong. Taking the first
+ * line — which is what a naive strip does — therefore shows the user the least informative line git
+ * printed. This picks by MEANING instead, in four ranks:
+ *
+ *  0. `! [rejected]` / `! [remote rejected]` — git's own verdict line, and it carries the reason in
+ *     parentheses (`(fetch first)`, `(non-fast-forward)`);
+ *  1. `fatal:` — how a refused `pull --ff-only` speaks;
+ *  2. `error:` — the summary line of a failed push;
+ *  3. a line carrying the reason in parentheses even without a marker prefix;
+ *  4. anything else non-blank that is not the `To <remote>` banner.
+ *
+ * Ties inside a rank go to the earliest line. Returns "" when stderr holds nothing but `To` banners and
+ * blanks — the caller then falls back to our own sentence, which beats echoing a URL at the user. The
+ * chosen line is git's own words VERBATIM (trimmed): a developer searches for `(fetch first)`, and a
+ * paraphrase of it would be unsearchable.
+ */
+fun gitStderrHighlight(stderr: String): String {
+    var best = ""
+    var bestRank = Int.MAX_VALUE
+    for (raw in stderr.lineSequence()) {
+        val line = raw.trim()
+        val rank = gitStderrLineRank(line)
+        if (rank != null && rank < bestRank) {
+            bestRank = rank
+            best = line
+            if (rank == 0) break
+        }
+    }
+    return best
+}
+
+/** null = this line can never be the one we show (blank, or the `To <remote>` banner). */
+private fun gitStderrLineRank(line: String): Int? {
+    if (line.isEmpty()) return null
+    val lower = line.lowercase()
+    return when {
+        line.startsWith("!") && line.contains('[') -> 0
+        lower.startsWith("fatal:") -> 1
+        lower.startsWith("error:") -> 2
+        REASON_MARKERS.any { it in lower } -> 3
+        // `To https://…` / `To ../bare.git` is the banner naming the remote, never the reason
+        line.startsWith("To ") || line == "To" -> null
+        else -> 4
+    }
+}
+
+private val REASON_MARKERS = listOf(
+    "(fetch first)", "(non-fast-forward)", "(unpacker error)", "(pre-receive hook declined)",
+    "(permission denied)", "(cannot lock ref)",
+)
+
+/**
  * daemon -> phone (issue #281): reply to [ListWorktrees]. [repoRoot] is the main worktree's path — the
  * anchor the app shows as the surface's subtitle and the base of the `<repoRoot>-worktrees` policy
  * directory. [worktrees] is in git's own order, which puts the main worktree first.

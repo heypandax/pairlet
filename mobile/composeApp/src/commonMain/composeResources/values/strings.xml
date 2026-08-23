@@ -1820,6 +1820,11 @@
     <string name="git_pull_tail">--ff-only</string>
     <string name="git_push">Push</string>
     <string name="git_pushing">Pushing</string>
+    <string name="git_fetch_note_up_to_date">Fetched — already up to date</string>
+    <string name="git_fetch_note_behind">Fetched — remote is %1$d ahead, ready to merge</string>
+    <string name="git_fetch_note_diverged">Fetched — diverged: %1$d in, %2$d out. Merge on the computer</string>
+    <string name="git_fetch_note_done">Fetched from the remote</string>
+    <string name="git_push_rejected_hint">The remote has new commits — fetch and merge first, or finish this on the computer.</string>
     <string name="git_clean_title">Nothing to commit — working tree clean</string>
     <string name="git_clean_caption">In sync with %1$s.</string>
     <string name="git_clean_caption_plain">Nothing staged, nothing changed.</string>

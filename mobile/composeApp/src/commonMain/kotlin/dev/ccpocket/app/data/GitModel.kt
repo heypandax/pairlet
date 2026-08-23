@@ -1,5 +1,7 @@
 package dev.ccpocket.app.data
 
+import dev.ccpocket.protocol.GIT_OP_PUSH
+import dev.ccpocket.protocol.GitActionResult
 import dev.ccpocket.protocol.GitDiff
 import dev.ccpocket.protocol.GitFileEntry
 import dev.ccpocket.protocol.GitStatus
@@ -123,6 +125,51 @@ fun conflictShape(entry: GitFileEntry): GitConflictShape? = when (entry.xy) {
     "UU" -> GitConflictShape.BOTH_MODIFIED
     else -> null
 }
+
+/**
+ * What a SUCCESSFUL fetch has to say for itself (issue #280 真机反馈 1).
+ *
+ * Fetch changes nothing local on purpose, so the panel looked identical before and after — the ↓1 the
+ * user was staring at is still ↓1, correctly, and with no word from us that reads as "it worked". This
+ * is that word, computed from the snapshot the daemon sends back with the result.
+ */
+enum class GitFetchOutcome {
+    /** Level with the upstream — the fetch found nothing new. */
+    UP_TO_DATE,
+
+    /** The upstream is ahead and we are not: a fast-forward merge is available. */
+    BEHIND,
+
+    /** Both sides moved. `pull --ff-only` will refuse this — the note says so before the tap. */
+    DIVERGED,
+
+    /** Fetch succeeded but the daemon sent no snapshot (older daemon): "done", nothing more. */
+    DONE,
+}
+
+/** The counted outcome of the last successful fetch, as the composer band reports it. */
+data class GitFetchReport(val outcome: GitFetchOutcome, val ahead: Int = 0, val behind: Int = 0)
+
+fun gitFetchReport(status: GitStatus?): GitFetchReport = when {
+    status == null || !status.ok || status.detached || status.initial || status.upstream == null ->
+        GitFetchReport(GitFetchOutcome.DONE)
+    status.behind > 0 && status.ahead > 0 -> GitFetchReport(GitFetchOutcome.DIVERGED, status.ahead, status.behind)
+    status.behind > 0 -> GitFetchReport(GitFetchOutcome.BEHIND, status.ahead, status.behind)
+    else -> GitFetchReport(GitFetchOutcome.UP_TO_DATE, status.ahead, status.behind)
+}
+
+/**
+ * True when a push was refused because the REMOTE moved on — the one push failure the phone can give
+ * real advice about (issue #280 真机反馈 5). Everything else (no upstream, auth, a hook) gets git's own
+ * line and no advice from us, because guessing at it would be worse than silence.
+ */
+fun gitPushBlockedByRemote(result: GitActionResult): Boolean {
+    if (result.ok || result.op != GIT_OP_PUSH) return false
+    val text = (result.stderr + "\n" + result.error.orEmpty()).lowercase()
+    return PUSH_REJECTED_MARKERS.any { it in text }
+}
+
+private val PUSH_REJECTED_MARKERS = listOf("[rejected]", "(fetch first)", "non-fast-forward", "fetch first")
 
 /** The last path segment of a worktree's main-repo anchor — what "part of cc-pocket" names (#281 D). */
 fun repoBasename(path: String): String =
