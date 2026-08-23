@@ -39,6 +39,8 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.copy_path
 import dev.ccpocket.app.resources.new_session_cta
+import dev.ccpocket.app.resources.rewind_caption_fork
+import dev.ccpocket.app.resources.rewind_caption_rewound
 import dev.ccpocket.app.resources.ses_conn_connecting
 import dev.ccpocket.app.resources.ses_conn_offline
 import dev.ccpocket.app.resources.ses_conn_online
@@ -172,6 +174,10 @@ fun SessionListRow(
     onOpen: () -> Unit,
     onLongPress: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    // #282 · design frame D1: an optional lineage line ("⑂ fork of ‹parent›"), rendered INSIDE the text
+    // column between the preview and the metadata. A slot rather than a String so the row stays ignorant
+    // of lineage vocabulary, and so every list that does not have lineage pays nothing for it.
+    caption: (@Composable () -> Unit)? = null,
 ) {
     val s = row.session
     val tint = stateColor(row.tone)
@@ -199,6 +205,7 @@ fun SessionListRow(
                         maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp),
                     )
                 }
+                caption?.invoke()
                 val meta = sessionMetaLine(row)
                 if (meta.isNotBlank()) Text(
                     meta, color = Tok.tx2, style = TypeRole.metaMono,
@@ -208,6 +215,86 @@ fun SessionListRow(
         }
         // the loudest thing on the screen belongs to the row that actually owns the intervention
         if (action != null) StateActionBand(row.state, action, tint, onOpen, Modifier.padding(start = 19.dp, top = 14.dp))
+    }
+}
+
+// ── Rewind / fork lineage (issue #282, design frames D1/D2) ────────────────────────────────────────────
+
+/** The two lineage glyphs. Never interchangeable: ⑂ branches FORWARD off a peer that is still there,
+ *  ↩ points BACK from a folded original at whatever replaced it. */
+const val FORK_GLYPH = "⑂"
+const val REWOUND_GLYPH = "↩"
+
+/**
+ * One quiet line naming the OTHER end of a lineage edge.
+ *
+ * Both directions share this composable on purpose: "⑂ fork of X" and "↩ rewound → Y" are the same
+ * sentence read from opposite ends, so letting them drift apart in size, ink or spacing would make two
+ * unrelated-looking annotations out of one idea.
+ */
+@Composable
+fun LineageCaption(glyph: String, text: String, modifier: Modifier = Modifier) {
+    Row(
+        modifier.fillMaxWidth().padding(top = 7.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Text(glyph, color = Tok.muted, style = TypeRole.metaMono)
+        Text(
+            text, color = Tok.muted, fontSize = 13.sp, lineHeight = 18.sp,
+            maxLines = 2, overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** A fork child's caption: it names the peer it branched off, which is still in the list beside it. */
+@Composable
+fun ForkLineageCaption(parentTitle: String) =
+    LineageCaption(FORK_GLYPH, stringResource(Res.string.rewind_caption_fork, parentTitle))
+
+/**
+ * A session the list folded away because a rewind replaced it (design frame D2).
+ *
+ * Deliberately NOT a [SessionListRow]. A superseded original has no live state worth a coloured mark, no
+ * preview worth two more lines, and no metadata worth a line at all — the row is inside a group whose
+ * header already says what these are, and repeating "Complete · Claude · main · 2h ago" for each one
+ * would make the fold as loud as the list it was supposed to shorten. What remains is the only thing
+ * still worth reading: the title, in secondary ink behind a hollow ring, and the caption that says where
+ * the conversation actually continued.
+ *
+ * It still opens, and still long-presses. Folded is not deleted — that is the whole promise the group
+ * makes, and a row you cannot tap would break it.
+ */
+@Composable
+fun RewoundSessionRow(
+    session: SessionSummary,
+    successorTitle: String?,
+    onOpen: () -> Unit,
+    onLongPress: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val markSize = sessionStateMarkSize(LocalDensity.current.fontScale)
+    Row(
+        modifier.fillMaxWidth()
+            .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
+            .padding(vertical = Metric.gap),
+        horizontalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
+        // RING, in muted ink: the settled mark drained of its state colour. Same footprint as every other
+        // row's mark, so the folded titles stay on the list's optical left edge instead of stepping in.
+        Box(Modifier.padding(top = 7.dp)) {
+            StateMarkGlyph(StateMark.RING, Tok.muted, size = markSize, strokeWidth = SessionStateMarkStroke)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                session.title, color = Tok.tx2, style = TypeRole.rowTitle,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+            // null only when the successor left this view (another agent filter, another project). The row
+            // then reads as a plain quiet session rather than claiming a destination it cannot name.
+            successorTitle?.let {
+                LineageCaption(REWOUND_GLYPH, stringResource(Res.string.rewind_caption_rewound, it))
+            }
+        }
     }
 }
 

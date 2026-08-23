@@ -192,8 +192,10 @@ import dev.ccpocket.app.ui.entry.ComputersSurface
 import dev.ccpocket.app.ui.entry.EntrySecondaryButton
 import dev.ccpocket.app.ui.entry.connRecovery
 import dev.ccpocket.app.ui.session.ConnBadge
+import dev.ccpocket.app.ui.session.ForkLineageCaption
 import dev.ccpocket.app.ui.session.Hairline
 import dev.ccpocket.app.ui.session.NewSessionDock
+import dev.ccpocket.app.ui.session.RewoundSessionRow
 import dev.ccpocket.app.ui.session.SessionAttention
 import dev.ccpocket.app.ui.session.SessionListRow
 import dev.ccpocket.app.ui.session.SessionRowUi
@@ -2237,8 +2239,8 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                                 row,
                                 onOpen = { repo.openSession(dir, row.session.sessionId, title = row.session.title, agent = row.session.agent ?: AgentKind.CLAUDE) },
                                 onLongPress = if (hasRowMenu) ({ moveTarget = row.session }) else null,
+                                caption = forkCaptionOf(row.session, allForDir),
                             )
-                            ForkCaption(row.session, allForDir)
                         }
                     }
                 }
@@ -2287,8 +2289,8 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                                     SessionRowUi(s, SurfaceState.COMPLETE), // by construction: this half IS the settled one
                                     onOpen = { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) },
                                     onLongPress = if (hasRowMenu) ({ moveTarget = s }) else null,
+                                    caption = forkCaptionOf(s, allForDir),
                                 )
-                                ForkCaption(s, allForDir)
                             }
                         }
                     }
@@ -2320,21 +2322,15 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                         items(lineage.rewound, key = { "rw:" + it.sessionId }) { s ->
                             Column {
                                 Hairline()
-                                SessionListRow(
-                                    SessionRowUi(s, SurfaceState.COMPLETE),
+                                // the quiet D2 row, not a full SessionListRow: no state mark colour, no
+                                // preview, no meta line — just the title and where it went. A folded row
+                                // with no forward pointer is just a session that vanished.
+                                RewoundSessionRow(
+                                    s,
+                                    successorTitle = rewoundSuccessorTitle(s, allForDir),
                                     onOpen = { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) },
                                     onLongPress = if (hasRowMenu) ({ moveTarget = s }) else null,
                                 )
-                                // says WHERE it went — a folded row with no forward pointer is just a
-                                // session that vanished
-                                rewoundSuccessorTitle(s, allForDir)?.let { next ->
-                                    Text(
-                                        "↩ " + stringResource(Res.string.rewind_caption_rewound, next),
-                                        color = Tok.muted, fontSize = 12.sp,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(start = 4.dp, bottom = 10.dp),
-                                    )
-                                }
                             }
                         }
                     }
@@ -3412,19 +3408,17 @@ private fun FileCompletionMenu(
     }
 }
 
-/** A fork child's list caption (issue #282, design frame D): "⑂ fork of <original>". Rendered under the
- *  row rather than inside it so the shared [SessionListRow] keeps one shape for every list that uses it;
- *  absent when the parent isn't in this view, because a caption naming a session you can't reach is worse
- *  than none. A rewind child gets NO caption here — its lineage is told by the folded original instead. */
-@Composable
-private fun ForkCaption(s: SessionSummary, all: List<SessionSummary>) {
-    val parent = forkParentTitle(s, all) ?: return
-    Text(
-        "⑂ " + stringResource(Res.string.rewind_caption_fork, parent),
-        color = Tok.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.padding(start = 4.dp, bottom = 10.dp),
-    )
-}
+/**
+ * A fork child's list caption (issue #282, design frame D1): "⑂ fork of ‹original›", as a [SessionListRow]
+ * caption slot so it sits inside the row's text column — aligned under the title, above the metadata —
+ * instead of dangling below the row as an unowned line.
+ *
+ * Null (no slot at all) when [s] is not a fork, or when its parent is not in this view: a caption naming a
+ * session you cannot reach from here is worse than no caption. A rewind child gets none either — its
+ * lineage is told from the other end, by the folded original's own "↩ rewound → …".
+ */
+private fun forkCaptionOf(s: SessionSummary, all: List<SessionSummary>): (@Composable () -> Unit)? =
+    forkParentTitle(s, all)?.let { parent -> { ForkLineageCaption(parent) } }
 
 @Composable
 private fun MessageItem(

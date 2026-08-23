@@ -38,8 +38,29 @@ object RewindLineage {
     // (mirrors SpawnedSessions' SESSION_ID guard) so a hostile line can never reach a consumer.
     private val SESSION_ID = Regex("^[A-Za-z0-9_-]{1,64}$")
 
-    /** One recorded branch. [anchorSeq] is the transcript cursor of the user message the cut was made
-     *  at — kept for display ("forked at turn N") and for diagnosing a bad cut after the fact. */
+    /**
+     * One recorded branch.
+     *
+     * [anchorSeq] is the LINE NUMBER — as the parent transcript stood at the moment of the operation — of
+     * the user message the cut was made at. Here in the ledger it is an audit/display value only ("forked
+     * at turn N", diagnosing a bad cut after the fact). Two ways it has already been misread:
+     *
+     *  - **It is not a count of retained lines.** It addresses a row; it does not measure a length. Lining
+     *    it up against the child transcript's line count and finding it "one off" is comparing two
+     *    different quantities, not evidence of an off-by-one.
+     *  - **It drifts, legitimately.** [TranscriptPatcher.unhide] rewrites a transcript in place and drops
+     *    harness noise (pure task-notification turns, `queue-operation` rows, skill/command injections),
+     *    so a line number journalled before that pass no longer addresses the same row after it. A stored
+     *    seq that no longer matches the file is expected, not corruption.
+     *
+     * Truncation correctness never rests on this number. The cut handed to the CLI is
+     * `--resume-session-at <uuid>` ([RewindPlanner.Plan.anchorUuid]) — a message uuid, which survives the
+     * rewrite. The seq is load-bearing in exactly ONE place, and it is not this one: [RewindPlanner.plan]
+     * requires the caller's (uuid, seq) pair to match the SAME row, as a staleness guard against a phone
+     * acting on a replay that has since moved, and refuses with [dev.ccpocket.protocol.RewindRefusal.STALE]
+     * otherwise. So: if this recorded number ever disagrees with a transcript, the number is the stale
+     * thing — do not "fix" the cut to match it.
+     */
     data class Entry(val parentSid: String, val childSid: String, val anchorSeq: Long, val mode: String)
 
     /** Journal one branch. Idempotent per (parent, child): a relaunch of the same conversation that
