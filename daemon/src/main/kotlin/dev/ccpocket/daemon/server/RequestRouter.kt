@@ -596,11 +596,20 @@ class RequestRouter(
                     // route a guest's path scope through PermissionBridge, but that path is unverified (probe
                     // blocked on device-code auth), so a restricted credential must not open one yet. P2
                     // re-evaluates once the ACP approval face is proven end-to-end.
-                    // DSH (issue #255): fail-closed for the STRONGEST version of this reason — v1 does not
-                    // bridge dsh's approvals at all (its `approval/requested` frames are logged and left
-                    // unanswered), so PermissionBridge is never consulted for a dsh tool call and a guest's
-                    // path scope / a bridge's command policy would simply not apply. Revisit only together
-                    // with the approval bridge, never before.
+                    // DSH: still fail-closed AFTER the approval bridge landed (issue #291) — the old reason
+                    // ("no approvals are bridged at all") has expired, and this is deliberately NOT the
+                    // moment to lift it. A dsh ask now reaches PermissionBridge, but the three walls a
+                    // restricted session depends on all key on CLAUDE tool spellings and Claude-shaped
+                    // inputs, and dsh matches none of them:
+                    //   - `handoffWriteBanned` matches Write/Edit/… ; dsh names its own tools.
+                    //   - the guest/bridge path wall reads `file_path`/`path`/`notebook_path` out of the
+                    //     tool input; a dsh `approval/requested` carries NO tool arguments at all (only a
+                    //     model-authored `reason`), so `pathTargets` is always empty and the wall passes
+                    //     vacuously on every call.
+                    //   - `BridgeCommandPolicy` only classifies `toolName == "Bash"` with an `input.command`.
+                    // A guest/bridge would therefore self-approve tool calls the daemon cannot even name.
+                    // Lifting this needs tool-name normalization + real target extraction FIRST, not just
+                    // the presence of an approval channel.
                     (guestScope != null || origin != null) &&
                         (
                             frame.agent == AgentKind.OPENCODE || frame.agent == AgentKind.KIMI ||
@@ -857,8 +866,9 @@ class RequestRouter(
                             code = "handoff_agent_unsupported",
                         ),
                     )
-                    // Same for DSH (issue #255) — CollaboratorGuard fails its open closed, so creating the
-                    // offer would only strand the recipient at the door after they accepted.
+                    // Same for DSH — CollaboratorGuard fails its open closed (and still does after the #291
+                    // approval bridge; see the reason there), so creating the offer would only strand the
+                    // recipient at the door after they accepted.
                     frame.agent == AgentKind.DSH -> sink.emit(
                         HandoffCreated(
                             ok = false,

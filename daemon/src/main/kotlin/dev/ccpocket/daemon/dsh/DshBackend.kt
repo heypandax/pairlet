@@ -48,8 +48,9 @@ import java.nio.file.Path
  *
  * ## v1 scope (deliberately narrow)
  *
- * Session discovery, history replay, opening a session, and sending/receiving messages including live
- * streaming. NOT included: approvals, usage accounting, model switching, tool cards, the web UI, plugins.
+ * Session discovery, history replay, opening a session, sending/receiving messages including live
+ * streaming, and (issue #291) the question/approval bridge. NOT included: usage accounting, model
+ * switching, tool cards, the web UI, plugins.
  *
  * ## Two product constraints worth quoting in the follow-up work
  *
@@ -62,12 +63,16 @@ import java.nio.file.Path
  *     `permission/preset`) and a `/permission <preset>` typed into the chat moves it mid-session. Any
  *     future mode UI must read the session's projection rather than trusting the launch value.
  *
- * ## Approvals in v1: fail-closed, never auto-allowed
+ * ## Approvals and questions: bridged, and fail-CLOSED rather than fail-hang (issue #291)
  *
- * `approval/requested` and `question/requested` frames are LOGGED AND LEFT UNANSWERED. That is a
- * deliberate, safe default: dsh blocks the tool rather than running it. Auto-allowing would silently hand
- * a remote chat unreviewed shell access, which is precisely the property cc-pocket's approval bridge
- * exists to prevent — so it must not be added as a convenience without the real bridge behind it.
+ * `approval/requested` and `question/requested` become real [AgentEvent.ControlRequest]s, so they run the
+ * same [dev.ccpocket.daemon.agent.PermissionBridge] path every other backend uses — one card, one budget,
+ * one verdict route. Nothing is ever auto-allowed here.
+ *
+ * The window matters more for dsh than for any other backend: **dsh has no timeout of its own**. An
+ * unanswered request hangs the turn forever (probe-verified; the host source has no `setTimeout`), so the
+ * pre-#291 "log it and leave it" was fail-HANG, not fail-closed. The coordinator's budget now bounds it
+ * and an expired approval is answered `rejected`. See [DshAskLedger] for the rest of the contract.
  */
 class DshBackend(private val dshBin: String?) : AgentBackend {
     private val log = logger("DshBackend")
@@ -84,6 +89,17 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
     @Volatile private var api: DshApiClient? = null
     @Volatile private var port: Int = 0
     @Volatile private var sessionId: String? = null
+
+    /** issue #291: the pending question/approval table + the `/api/respond` return path. Lives for the
+     *  backend's whole life (not per process) and is [DshAskLedger.reset] on every attach, because an
+     *  rpcId only means anything to the host process that minted it. */
+    private val asks = DshAskLedger(
+        ourSession = { sessionId },
+        send = { rpcId, value -> api?.respond(rpcId, value) ?: DshRespond.UNREACHABLE },
+        // A refused reply is surfaced as a NOTICE, not a turn error: the dsh turn really is still running
+        // (that is the whole problem), and faking a TurnResult would tell the phone it had ended.
+        report = { message -> io?.inject?.invoke(syntheticNotice("⚠️ $message")) },
+    )
 
     /** Guards [sessionId] and [pendingPrompts] so the opening turn can never be lost to a race between
      *  "the session is not open yet, buffer it" and "the session just opened, flush the buffer". */
@@ -113,6 +129,9 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         // reset per-process state (attach runs on EVERY relaunch)
         teardownClient()
         port = 0
+        // Every pending rpcId died with the previous host process; the conversation retires their cards
+        // through PermissionBridge.cancelAll on the same relaunch.
+        asks.reset()
         bootstrap.withLock { sessionId = null; pendingPrompts.clear() }
         // Nothing else can happen yet: the port is only knowable from the child's boot line, which
         // arrives on stdout and lands in parse().
@@ -238,8 +257,13 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
                 AgentEvent.AssistantText("⚠️ ${root.str("message").orEmpty()}"),
                 AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
             )
+            // A message with no verdict about the turn — the turn is still running (issue #291).
+            SYNTHETIC_NOTICE -> return listOf(AgentEvent.AssistantText(root.str("message").orEmpty()))
         }
         val method = root.str("method") ?: return emptyList()
+        // issue #291: the envelope's rpcId is the ONLY correlation token an ask carries — the payload has
+        // none — and the answer must echo it back. It used to be dropped here.
+        val rpcId = root.str("rpcId")
         val payload = root.obj("payload") ?: return emptyList()
         // The mux is MULTIPLEXED across every session the host holds — including sub-agents' own
         // sessions. Without this filter another session's output would be spliced into this chat.
@@ -256,20 +280,14 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
                     AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
                 )
             }
-            // FAIL-CLOSED (see the class comment): v1 does not bridge approvals, so the request is logged
-            // and left unanswered. dsh then blocks the tool. Responding "allow" here without the approval
-            // bridge would give a remote chat unreviewed tool access.
-            "approval/requested" -> {
-                log.warn(
-                    "dsh approval requested and NOT answered (v1 has no approval bridge): " +
-                        "tool=${payload.str("toolName")} approvalId=${payload.str("approvalId")}",
-                )
-                listOf(AgentEvent.Ignored("approval/requested"))
-            }
-            "question/requested" -> {
-                log.warn("dsh question requested and NOT answered (v1 has no question bridge)")
-                listOf(AgentEvent.Ignored("question/requested"))
-            }
+            // issue #291. A card, on the same PermissionBridge every other backend uses. Null = nothing new
+            // to show: a mux replay of a card already pending, or a frame too malformed to answer.
+            DshAskLedger.QUESTION_REQUESTED, DshAskLedger.APPROVAL_REQUESTED ->
+                listOf(asks.requested(method, rpcId, payload) ?: AgentEvent.Ignored(method))
+            // Somebody else settled it (the desktop web UI answered, or the turn was cancelled): retire
+            // OUR card too, whatever the outcome. Our own answers left the table before this arrives.
+            DshAskLedger.QUESTION_RESOLVED, DshAskLedger.APPROVAL_RESOLVED ->
+                listOf(asks.resolved(method, payload) ?: AgentEvent.Ignored(method))
             else -> listOf(AgentEvent.Ignored(method))
         }
     }
@@ -348,6 +366,15 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         }
     }
 
+    /**
+     * VISIBLE FOR TESTS ONLY. The real session id is minted by a `session.create` RPC against a live dsh
+     * host, and until one exists the ask bridge refuses every frame (fail-closed, [DshAskLedger]) — so
+     * without this a test cannot reach the mux translation path at all.
+     */
+    internal fun bindSessionForTest(id: String) {
+        sessionId = id
+    }
+
     override suspend fun interrupt() {
         val sid = sessionId ?: return
         api?.rpc("session.cancel", buildJsonObject { put("sessionId", sid) })
@@ -370,9 +397,13 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         updatedInput: String?,
         denyMessage: String?,
     ) {
-        // Unreachable in v1: no ControlRequest is ever emitted, so nothing can be answered. Kept loud
-        // rather than silently wired up — see the class comment on why auto-allow is not an option.
-        log.warn("dsh respondPermission($askId) ignored — v1 emits no approval requests")
+        // issue #291. `remember` / `originalInput` are deliberately unused: dsh has no "always allow"
+        // (its outcome vocabulary is allowed-once / rejected, full stop), so the card is minted
+        // neverRemember and a remembered scope can never form. `denyMessage` has no counterpart either —
+        // dsh takes an outcome, not a sentence.
+        if (!asks.answer(askId, allow, updatedInput)) {
+            log.info("dsh respondPermission($askId) had nothing pending — already resolved or withdrawn")
+        }
     }
 
     /** dsh bakes the sandbox mode into the process environment at launch, so a mode change needs a
@@ -419,10 +450,16 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
     private fun syntheticError(message: String): String =
         buildJsonObject { put("type", SYNTHETIC_ERROR); put("message", message) }.toString()
 
+    /** Like [syntheticError] but WITHOUT a TurnResult: says something went wrong while leaving the turn's
+     *  state alone (issue #291 — a refused `/api/respond` leaves the dsh turn genuinely still running). */
+    private fun syntheticNotice(message: String): String =
+        buildJsonObject { put("type", SYNTHETIC_NOTICE); put("message", message) }.toString()
+
     private companion object {
         /** Namespaced so they can never collide with a real dsh frame type. */
         const val SYNTHETIC_INIT = "cc-pocket/dsh-init"
         const val SYNTHETIC_ERROR = "cc-pocket/dsh-error"
+        const val SYNTHETIC_NOTICE = "cc-pocket/dsh-notice"
 
         /** Readiness window for the mux socket: comfortably longer than the client's own retry budget,
          *  so this never gives up while that is still trying. */

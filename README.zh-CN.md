@@ -53,11 +53,12 @@ irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.p
 | OpenCode | ✓ 支持 | ✕ 不支持 —— 恒为 Full access | ✕ 不支持 | ✓ 支持 |
 | Kimi Code `Preview` | ✓ 支持 | ✓ 支持 | ✕ 不支持 | ✓ 支持 · v1.8.0 新增 |
 | ZCode | ✓ 支持 | ✓ 支持 | ✕ 不支持 | ✓ 支持 · v1.8.0 新增 |
-| DeepSeek Harness `有限 v1` | ✓ 支持 | △ 有限 | ✕ 不支持 | ✕ 不支持 |
+| DeepSeek Harness `有限 v1` | ✓ 支持 | ✓ 支持 | ✕ 不支持 | ✕ 不支持 |
 
 - **核心会话**指：发现、回放、新建、恢复、收发文本、实时流式。六个后端全都做得到。
 - **OpenCode 没有可执法的交互审批。** `opencode run` 本身就没有审批协议，所以这类会话恒为 **Full access**——App 会直接说明，而不是摆出一排它根本管不住的模式。
-- **Kimi Code 是 Preview。** DeepSeek 已支持，但很窄：`△ 有限` 指只有启动时的 sandbox 默认值，**远程审批没有桥接、失败即拒**；另外没有改动文件与 diff、没有用量统计、不支持切换模型。
+- **Kimi Code 是 Preview。** DeepSeek 已支持，但很窄：审批与选择题已桥接到 App，但 sandbox 模式在启动时定死（改模式会重启会话）；另外没有改动文件与 diff、没有用量统计、不支持切换模型。
+- **DeepSeek Harness 自己没有超时。** 放着不管，一条没人回答的审批或提问会让这一回合**一直挂着**——它不会自动拒绝。CC Pocket 把这类请求接到 daemon 统一的审批时限上：审批超时按**拒绝**回，提问超时按**跳过**回，让「没人回答」有个结果而不是永远等下去。DeepSeek 也没有「总是允许」——每次都是一次性决定。
 - 能力边界跟随正式 Release。完整说明见[能力页](https://heypandax.github.io/cc-pocket/features.html)与[用户手册](https://pocket.ark-nexus.cc/manual/zh/)。
 
 ## 架构与信任边界
