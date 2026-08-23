@@ -1,12 +1,6 @@
-What's new in 1.8.1
+What's new in 1.9.0 — Git, worktrees, rewind, and dsh answers
 
-New
-• A guided first run: install cc-pocket on your computer with per-platform steps, then pair — no more guessing
-• DeepSeek usage now appears in usage stats alongside every other backend
-
-Improved
-• Pairing failures explain what happened and what to do next — a stale code, network trouble, or a link that isn't a pairing link each get their own guidance
-• The setup guide and support chat are reachable before the first pairing succeeds
-
-Fixed
-• All agent-scoped requests respect the computer's supported backends when connected to an older daemon
+• Git panel: finish your review on the phone — status, stage, commit, push, pull and branch switching, with two-step confirms for anything destructive.
+• Worktrees: see every checkout of a repo, create one for a new or existing branch, and clean them up safely (live sessions are protected).
+• Rewind & fork: long-press one of your messages to retry it with different wording, or fork a parallel session from that point. Files are never rolled back — only the conversation.
+• dsh sessions: the agent's questions and permission requests now show up on the phone and can be answered there; unanswered requests time out safely instead of hanging the turn.
