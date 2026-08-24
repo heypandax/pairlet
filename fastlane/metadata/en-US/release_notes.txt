@@ -1,4 +1,4 @@
-What's new in 1.9.0 — Git, worktrees, rewind, and dsh answers
+What's new in 1.9.1 — Git, worktrees, rewind, and dsh answers
 
 • Git panel: finish your review on the phone — status, stage, commit, push, pull and branch switching, with two-step confirms for anything destructive.
 • Worktrees: see every checkout of a repo, create one for a new or existing branch, and clean them up safely (live sessions are protected).

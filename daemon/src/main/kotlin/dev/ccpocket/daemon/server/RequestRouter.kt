@@ -39,6 +39,7 @@ import dev.ccpocket.protocol.AGENT_WIRE_KIMI
 import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
 import dev.ccpocket.protocol.AGENT_WIRE_ZCODE
 import dev.ccpocket.protocol.ScheduleState
+import dev.ccpocket.protocol.ClaudeQuotaGet
 import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.AudioCancel
 import dev.ccpocket.protocol.AudioChunk
@@ -189,6 +190,10 @@ class RequestRouter(
     // passes one wired to the registry's live-session truth so a worktree with a running agent is
     // refused removal.
     private val git: dev.ccpocket.daemon.git.GitService = dev.ccpocket.daemon.git.GitService(),
+    // the Claude subscription-allowance reader (the numbers behind the CLI's `/usage` panel). Defaulted
+    // like [git] so a router test that never asks for quota needs no wiring; it holds only a short result
+    // cache, so one instance per router is fine and a second one would just fetch twice.
+    private val quota: dev.ccpocket.daemon.claude.ClaudeQuotaService = dev.ccpocket.daemon.claude.ClaudeQuotaService(),
     // the session-archive store's backing file (issue #202). Injectable like prefs/presets/schedules so a
     // test never reads or rewrites the developer's real ~/.cc-pocket/session-archive.json.
     private val archiveFile: java.io.File = SessionArchive.defaultFile(),
@@ -487,6 +492,24 @@ class RequestRouter(
             // gate the session rows use applies here — a peer that never declared the wire name would
             // hard-fail the whole Envelope on the unknown enum.
             is FetchUsage -> scope.launch { sink.emit(gateUsageAgents(UsageService.aggregate(frame.days, agent = frame.agent), caps)) }
+
+            // Claude subscription allowance (the 5h/7d windows behind the CLI's own `/usage` panel).
+            // A network round trip to Anthropic → off the inbound pump like FetchUsage, or the socket
+            // would stall for every device while api.anthropic.com is slow.
+            //
+            // OWNER-ONLY, guarded here as well as by the caps allow-lists: GuestCaps / BridgeCaps /
+            // CollaboratorCaps all default-deny an unlisted type, and this is the second door so a future
+            // ingress change cannot silently open the surface. "Owner" means all THREE credential classes
+            // are absent — a COLLABORATOR arrives with origin == null AND guestScope == null (only
+            // collabScope is set), so testing the first two alone is vacuous for exactly the weakest
+            // credential we hand out; [gitOwnerOnly] is that three-way judgement, shared rather than
+            // re-derived. This is account-wide BILLING state for the machine's owner, strictly wider than
+            // anything a scoped share covers, so a non-owner gets SILENCE (no reply frame at all) rather
+            // than an empty snapshot that would read as "your allowance is fine".
+            is ClaudeQuotaGet ->
+                if (gitOwnerOnly(origin, guestScope, collabScope)) {
+                    scope.launch { sink.emit(quota.get(frame.forceRefresh)) }
+                }
 
             // installed skills/plugins browse page (issue #132): a disk scan → off the inbound pump like
             // FetchUsage. Guests never reach here (GuestCaps denies the frame type at the choke point).

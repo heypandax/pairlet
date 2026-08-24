@@ -44,7 +44,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.quota_5h
+import dev.ccpocket.app.resources.quota_7d
+import dev.ccpocket.app.resources.quota_7d_model
+import dev.ccpocket.app.resources.quota_left
+import dev.ccpocket.app.resources.quota_reset_d
+import dev.ccpocket.app.resources.quota_reset_h
+import dev.ccpocket.app.resources.quota_reset_m
+import dev.ccpocket.app.resources.quota_reset_now
+import dev.ccpocket.app.resources.quota_title
 import dev.ccpocket.app.resources.usage_agent_all
 import dev.ccpocket.app.resources.usage_by_model
 import dev.ccpocket.app.resources.usage_cache
@@ -70,6 +80,10 @@ import dev.ccpocket.app.resources.usage_vs_prev_days
 import dev.ccpocket.app.resources.usage_vs_yesterday
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.CLAUDE_QUOTA_KIND_SESSION
+import dev.ccpocket.protocol.CLAUDE_QUOTA_OK
+import dev.ccpocket.protocol.CLAUDE_QUOTA_SEVERITY_WARNING
+import dev.ccpocket.protocol.ClaudeQuotaLimit
 import dev.ccpocket.protocol.Usage
 import dev.ccpocket.protocol.UsageDay
 import dev.ccpocket.protocol.UsageModel
@@ -152,12 +166,127 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         }
 
+        // The SUBSCRIPTION allowance sits above the token dashboard because it answers the more urgent
+        // question ("can I keep working right now?"). It is deliberately outside the four-state `when`
+        // below: the allowance is real even on a machine with zero local transcripts, so it must not
+        // disappear into the empty/loading branches of a different data source.
+        QuotaBlock(repo)
+
         when {
             u != null && (u.tokensToday > 0 || u.models.isNotEmpty() || u.days.any { it.tokens > 0 }) -> Populated(u)
             u != null -> Empty(u.days.size)
             !connected || timedOut -> Offline()
             else -> Loading()
         }
+    }
+}
+
+/**
+ * The Claude SUBSCRIPTION allowance — the 5-hour and 7-day windows behind the CLI's own `/usage` panel.
+ *
+ * Distinct from everything under it: the rest of this page counts tokens the daemon read out of local
+ * transcripts, while these percentages are Anthropic's own server-side accounting of the plan. One row
+ * per window, `limits[]` order (which puts the 5h window first and the per-model 7-day rows last).
+ *
+ * Absent data is INVISIBLE, never an error: an API-key account has no allowance to report, a daemon that
+ * predates the frame silently drops the request, and a transient network failure is nobody's problem to
+ * act on from a phone. Each of those lands as "no OK snapshot" and the whole block simply isn't drawn —
+ * the token dashboard below is unaffected either way.
+ */
+@Composable
+private fun QuotaBlock(repo: PocketRepository) {
+    LaunchedEffect(Unit) { repo.fetchClaudeQuota() }
+    val q = repo.claudeQuota.value
+    val rows = q?.takeIf { it.status == CLAUDE_QUOTA_OK }?.limits.orEmpty()
+    if (rows.isEmpty()) return
+
+    // One shared clock for every countdown, ticked a minute at a time — these are hour-scale windows, so
+    // a per-second tick would only cost recompositions nobody can see.
+    var now by remember { mutableStateOf(epochMillis()) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(60_000); now = epochMillis() } }
+
+    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)) {
+        Text(stringResource(Res.string.quota_title), color = Tok.muted, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        // bounded on purpose: the per-model weekly rows are open-ended upstream and this is a header
+        // strip, not a list page — a pinned block that can grow past the fold would push the dashboard off
+        for (row in rows.take(MAX_QUOTA_ROWS)) {
+            QuotaRow(row, now)
+            Spacer(Modifier.height(7.dp))
+        }
+    }
+    Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+}
+
+/** Soft cap on the allowance strip — see [QuotaBlock]. */
+private const val MAX_QUOTA_ROWS = 4
+
+@Composable
+private fun QuotaRow(row: ClaudeQuotaLimit, now: Long) {
+    // Anthropic's own escalation is authoritative when present, but a payload that stops sending
+    // `severity` (or sends a value we don't know) must still color a nearly-spent window — hence the
+    // local percentage threshold as well. Erring toward "warn" is the safe direction here.
+    val warn = row.severity == CLAUDE_QUOTA_SEVERITY_WARNING || row.percent >= QUOTA_WARN_PCT
+    val fill = if (warn) Tok.warn else Tok.accent
+    // `percent` is what's CONSUMED; people plan against what is LEFT.
+    val left = (100 - row.percent).coerceIn(0, 100)
+
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            quotaLabel(row),
+            color = Tok.tx2,
+            fontSize = 11.sp,
+            // the window upstream calls "active" is the one actually binding right now — worth a glance
+            fontWeight = if (row.isActive) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1,
+            modifier = Modifier.width(96.dp),
+        )
+        Box(Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(999.dp)).background(Tok.hair)) {
+            // fraction of the TRACK, so a 0% window draws nothing rather than a stray dot
+            if (row.percent > 0) Box(Modifier.fillMaxWidth(row.percent / 100f).fillMaxHeight().background(fill))
+        }
+        Text(
+            stringResource(Res.string.quota_left, "$left%"),
+            color = if (warn) Tok.warn else Tok.tx,
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            modifier = Modifier.padding(start = 10.dp),
+        )
+        resetText(row.resetsAt, now)?.let {
+            Text(it, color = Tok.muted, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(start = 8.dp))
+        }
+    }
+}
+
+/** Anthropic marks a window `warning` before it is spent; below that we still warn from ~80% up. */
+private const val QUOTA_WARN_PCT = 80
+
+/** Which window a row is, tolerant of a vocabulary that is upstream's to grow: a scoped row is named by
+ *  its model, otherwise the `group`/`kind` pair decides, and an unrecognized row shows its raw `kind`
+ *  rather than being hidden (a window we can't name is still a window that can run out). */
+@Composable
+private fun quotaLabel(row: ClaudeQuotaLimit): String = when {
+    row.modelDisplayName != null -> stringResource(Res.string.quota_7d_model, row.modelDisplayName!!)
+    row.kind == CLAUDE_QUOTA_KIND_SESSION || row.group == "session" -> stringResource(Res.string.quota_5h)
+    row.kind.startsWith("weekly") || row.group == "weekly" -> stringResource(Res.string.quota_7d)
+    else -> row.kind
+}
+
+/** "resets in 3h 20m" from an epoch-ms moment, or null when there is nothing trustworthy to say — an
+ *  unparseable/absent `resets_at` must show NO countdown rather than a wrong one. */
+@Composable
+private fun resetText(resetsAt: Long?, now: Long): String? {
+    if (resetsAt == null) return null
+    val left = resetsAt - now
+    if (left <= 0) return stringResource(Res.string.quota_reset_now)
+    val mins = left / 60_000
+    val hours = mins / 60
+    val days = hours / 24
+    return when {
+        days > 0 -> stringResource(Res.string.quota_reset_d, days.toInt(), (hours % 24).toInt())
+        hours > 0 -> stringResource(Res.string.quota_reset_h, hours.toInt(), (mins % 60).toInt())
+        else -> stringResource(Res.string.quota_reset_m, mins.toInt().coerceAtLeast(1))
     }
 }
 

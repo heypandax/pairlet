@@ -64,6 +64,8 @@ import dev.ccpocket.protocol.ReadGitDiff
 import dev.ccpocket.protocol.RemoveWorktree
 import dev.ccpocket.protocol.WorktreeList
 import dev.ccpocket.protocol.ChatRole
+import dev.ccpocket.protocol.ClaudeQuota
+import dev.ccpocket.protocol.ClaudeQuotaGet
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.AccessTier
@@ -2394,6 +2396,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         daemonSupportedAgents.value = emptySet() // reverse agent capability: no stale ZCode across machines
         daemonAgentsKnown = false // #276: back to "not told yet" — the guard must not deny during reconnect
         daemonUsageAgentFilter.value = false // ditto (issue #258): the next machine re-advertises its own
+        // per-daemon truth: the allowance belongs to the ACCOUNT on the machine we just left. Showing it
+        // under the next machine's name would be a straight lie about a billing number.
+        claudeQuotaDeadline?.cancel(); claudeQuota.value = null; claudeQuotaLoading.value = false
         daemonOwnsPromptRecovery = false // ditto: an older next daemon still needs the legacy fallback
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
@@ -2896,6 +2901,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 archivedRefreshing.value = false
             }
             is Usage -> { usage.value = f; usageLoading.value = false }
+            // the Claude subscription allowance behind the CLI's `/usage` panel. Land it whatever the
+            // status says — a non-OK reply is how the page learns to HIDE the block instead of waiting
+            // out its deadline. Silence (an older daemon dropping the unknown frame) stays silence.
+            is ClaudeQuota -> { claudeQuotaDeadline?.cancel(); claudeQuota.value = f; claudeQuotaLoading.value = false }
             is SkillCatalog -> {
                 skillCatalogDeadline?.cancel()
                 skillCatalog.value = f; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
@@ -4106,6 +4115,27 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun fetchUsage(days: Int = 7, agent: AgentKind? = null) {
         usageLoading.value = true
         scope.launch { send(FetchUsage(days, agent)) }
+    }
+
+    // ── Claude subscription allowance (the 5h/7d windows behind the CLI's own `/usage` panel) ──
+    /** The daemon's latest [ClaudeQuota]. Null = we have not been told: either the fetch is still in
+     *  flight, or this daemon predates the frame and silently dropped the request — indistinguishable on
+     *  the wire, which is why the page hides the block in BOTH cases rather than showing an error. */
+    val claudeQuota = mutableStateOf<ClaudeQuota?>(null)
+    val claudeQuotaLoading = mutableStateOf(false)
+    private var claudeQuotaDeadline: Job? = null
+
+    /** Ask the daemon for the subscription allowance; the reply lands in [claudeQuota]. The daemon caches
+     *  briefly on its side, so re-entering the usage page is cheap and [forceRefresh] is the manual
+     *  override. A deadline clears the in-flight flag so an old daemon's silence does not spin forever. */
+    fun fetchClaudeQuota(forceRefresh: Boolean = false) {
+        claudeQuotaLoading.value = true
+        claudeQuotaDeadline?.cancel()
+        scope.launch { send(ClaudeQuotaGet(forceRefresh)) }
+        claudeQuotaDeadline = scope.launch {
+            delay(12_000)
+            claudeQuotaLoading.value = false
+        }
     }
 
     // ── installed skills/plugins catalog (issue #132): the desktop browse page ──
