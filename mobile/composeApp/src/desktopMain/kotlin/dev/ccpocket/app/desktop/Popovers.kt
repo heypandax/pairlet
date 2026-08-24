@@ -551,6 +551,18 @@ internal class AboveAnchorEndPopupPositionProvider(private val gapPx: Int) : Pop
     }
 }
 
+/** The left-edge mirror of [AboveAnchorEndPopupPositionProvider], for anchors on the LEFT side of the
+ *  window — the sidebar footer's allowance strip. Right-aligning there would push a popover wider than
+ *  the sidebar off its anchor entirely (clamped to x=0), which reads as a floating panel rather than
+ *  something growing out of the strip. */
+internal class AboveAnchorStartPopupPositionProvider(private val gapPx: Int) : PopupPositionProvider {
+    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
+        val x = anchorBounds.left.coerceIn(0, maxOf(0, windowSize.width - popupContentSize.width))
+        val y = (anchorBounds.top - gapPx - popupContentSize.height).coerceAtLeast(0)
+        return IntOffset(x, y)
+    }
+}
+
 @Composable
 private fun QaRow(label: String, value: String? = null, danger: Boolean = false, chevron: Boolean = false, onClick: () -> Unit) {
     Row(

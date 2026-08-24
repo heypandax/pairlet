@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DataUsage
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Keyboard
@@ -96,6 +97,7 @@ import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
+import dev.ccpocket.app.ui.UsageScreen
 import kotlinx.coroutines.delay
 import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.app.ui.agentColor
@@ -112,6 +114,9 @@ import dev.ccpocket.protocol.PresetsState
 private enum class SettingsTab(val label: StringResource, val icon: ImageVector) {
     GENERAL(Res.string.settings_tab_general, Icons.Outlined.Tune),
     ACCOUNT(Res.string.settings_tab_account, Icons.Rounded.Person),
+    // right after Account on purpose: both token spend and the subscription allowance are properties of
+    // the signed-in ACCOUNT, not of this machine
+    USAGE(Res.string.settings_usage, Icons.Rounded.DataUsage),
     COMPUTERS(Res.string.settings_tab_computers, Icons.Rounded.Devices),
     SCHEDULES(Res.string.settings_tab_schedules, Icons.Rounded.Schedule),
     SHARES(Res.string.settings_tab_shared, Icons.Rounded.Share),
@@ -149,10 +154,22 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
                 SettingsTab.entries.forEach { t -> RailItem(t, selected = t == tab) { tab = t } }
             }
             Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
-            Box(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(24.dp)) {
+            // Every pane rides the shared content scroller EXCEPT Token usage. [UsageScreen] is a
+            // full-height page that scrolls itself (and sizes a trend chart against the viewport), and a
+            // scroller nested in a scroller is measured with INFINITE height — the classic "vertical
+            // viewport was given unbounded height" crash, not a cosmetic issue. It brings its own padding
+            // too, so the 24.dp inset goes with the scroll. The state is remembered unconditionally: a
+            // conditional remember would shift composition slots on every tab switch.
+            val contentScroll = rememberScrollState()
+            val paneScrollsItself = tab == SettingsTab.USAGE
+            Box(
+                Modifier.weight(1f).fillMaxHeight()
+                    .then(if (paneScrollsItself) Modifier else Modifier.verticalScroll(contentScroll).padding(24.dp)),
+            ) {
                 when (tab) {
                     SettingsTab.GENERAL -> GeneralPane(model)
                     SettingsTab.ACCOUNT -> AccountPane(model)
+                    SettingsTab.USAGE -> UsagePane(model)
                     SettingsTab.COMPUTERS -> ComputersPane(model)
                     SettingsTab.SCHEDULES -> SchedulesPane(model)
                     SettingsTab.SHARES -> SharesPane(model)
@@ -165,6 +182,29 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * Token usage + the Claude subscription allowance — the mobile [UsageScreen] rendered verbatim as a
+ * settings pane, in the [ReviewCenterOverlay] idiom (hand the live repository over whole rather than
+ * re-projecting a dozen fields through [DesktopModel]). Until now this page had NO desktop entry point at
+ * all: the desktop replaces mobile's Settings.kt with this modal, and the modal never mounted it.
+ *
+ * `embedded = true` drops the page's own back arrow and title, which the modal's header already provides;
+ * its range toggle and agent chips stay, being controls rather than chrome.
+ */
+@Composable
+private fun UsagePane(model: DesktopModel) {
+    val repo = model.usageRepo
+    if (repo == null) {
+        // a seed/preview model has no daemon behind it — and a usage dashboard is the last place to
+        // invent numbers for a screenshot
+        Box(Modifier.fillMaxWidth().fillMaxHeight(), contentAlignment = Alignment.Center) {
+            Text(stringResource(Res.string.usage_offline), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp)
+        }
+        return
+    }
+    UsageScreen(repo, onBack = {}, embedded = true)
 }
 
 @Composable

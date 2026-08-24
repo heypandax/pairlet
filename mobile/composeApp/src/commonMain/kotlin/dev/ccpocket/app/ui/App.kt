@@ -318,6 +318,10 @@ fun App(scope: CoroutineScope) {
     // obscured (before the OS app-switcher snapshot) so a session is never visible in the task switcher.
     dev.ccpocket.app.OnAppBackground { appForeground = false; appLock.onBackground() }
     dev.ccpocket.app.OnAppObscured { appLock.onWillObscure() }
+    // The Claude allowance refresh rules, mounted ONCE here rather than inside the pill: two instances
+    // would mean two policies and two in-flight latches, i.e. double the traffic the de-duplication
+    // exists to prevent — and the pill must keep refreshing on screens that are not currently showing it.
+    ClaudeQuotaRefreshEffect(repo, appForeground)
     // Push is alert-only: while the app is visible, pull each live daemon's authoritative queue. The first
     // pull is immediate; a missed APNs notification therefore becomes visible within one foreground sync.
     LaunchedEffect(appForeground, repo.sessionActive.value) {
@@ -1081,6 +1085,7 @@ internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header aga
     if (showHelp) { HelpCenterScreen(HelpEntryPoint.PROJECTS, onBack = { showHelp = false }); return }
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return }
+    var showQuota by remember { mutableStateOf(false) }
     ProjectsHeader(
         title = stringResource(Res.string.dir_projects),
         phase = repo.phase.value,
@@ -1096,15 +1101,24 @@ internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header aga
         searchEnabled = false,
         waitingForProjects = true,
     ) {
-        // the list's own geometry: same gutter, same 6 dp between rows — the swap moves nothing
+        // the list's own geometry: same gutter, same 6 dp between rows — the swap moves nothing.
+        // weight, not fillMaxSize, for the same reason as the real list below: the docked strip needs
+        // its height back. Identical measurement while the strip is absent.
         Column(
-            Modifier.testTag("dir-skeleton").fillMaxSize().padding(horizontal = 16.dp),
+            Modifier.testTag("dir-skeleton").fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             SkeletonSectionLabel()
             repeat(LoadingMotion.ROWS) { i -> SkeletonProjectRow(i) }
         }
+        // the skeleton carries the strip too: on a RECONNECT the previous link's snapshot is already in
+        // hand, and a strip that only appeared once the list landed would be exactly the skeleton→list
+        // shift this header is built to avoid (EntryFlowUiTest pins it)
+        QuotaStrip(repo) { showQuota = true }
     }
+    // AFTER the header content, so the sheet paints over everything the skeleton drew (z-order bug
+    // otherwise: composed first = painted under). AnimatedVisibility's scope stacks these two like a Box.
+    if (showQuota) QuotaSheet(repo) { showQuota = false }
 }
 
 /** The breath, phase-shifted by [LoadingMotion.STAGGER_MS] per row. Flat (no animation at all, at the
@@ -1329,6 +1343,10 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     }
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
+    // The docked strip opens this sheet. Rendered at the overlay END of the screen's Box (with the other
+    // sheets), NOT here — composed this early it painted UNDER the FAB stack/scrim (same z-order bug as
+    // the strip itself).
+    var showQuota by remember { mutableStateOf(false) }
     // long-press a project → "Share this folder…" opens the owner invite flow full-screen (issue #115)
     var shareTarget by remember { mutableStateOf<DirectoryEntry?>(null) }
     shareTarget?.let { ShareFolderScreen(repo, it, onBack = { shareTarget = null }); return }
@@ -1388,6 +1406,13 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     val openFolderEntry = { if (isGuestDirView(dirsSnapshot)) showNewPath = true else showDirPicker = true }
     // the FAB's sheet (issue #260) — the screen's one new-task entry
     var showNewTask by remember { mutableStateOf(false) }
+    // The docked allowance strip's measured height. The bottom overlays (FAB scrim, FAB stack, archive
+    // toast) are aligned to the WHOLE screen's bottom edge, which is the strip's row once a snapshot is
+    // in hand — without this lift the opaque end of the scrim paints straight over the strip (the phone
+    // bug: skeleton showed it, the landed list "swallowed" it). 0 when the strip is absent, so the
+    // no-snapshot layout stays pixel-identical.
+    var quotaStripPx by remember { mutableStateOf(0) }
+    val quotaStripLift = with(LocalDensity.current) { quotaStripPx.toDp() }
 
     // typing in the filter then scrolling the list dismisses the keyboard (fires once per scroll gesture)
     val focus = LocalFocusManager.current
@@ -1435,7 +1460,10 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                 onSegment = { i -> repo.browsePath.value = segs.getOrNull(i)?.second?.takeIf { it != root } },
             )
         }
-        PullToRefreshBox(isRefreshing = repo.refreshing.value, onRefresh = { repo.refreshDirectories() }, modifier = Modifier.fillMaxSize()) {
+        // weight instead of fillMaxSize so the docked allowance strip below can claim its 48dp. With the
+        // strip absent (no snapshot) this is the identical measurement: a lone weighted child in a Column
+        // gets exactly the remaining height fillMaxSize was taking.
+        PullToRefreshBox(isRefreshing = repo.refreshing.value, onRefresh = { repo.refreshDirectories() }, modifier = Modifier.fillMaxWidth().weight(1f)) {
             // #250: one classifier decides WHICH empty state, so no branch can print «matched ""» or offer a
             // button that clears a filter the user never set. `nothingToShow` keeps both old conditions.
             val nothingToShow = visibleDirs.isEmpty() || (!treeMode && flatRows.isEmpty())
@@ -1561,6 +1589,12 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                 }
             }
         }
+        // Direction B's docked strip: outside the scrolling list, permanent, zero height when there is
+        // no snapshot. Last child of the header's Column, so it sits on the window's bottom edge.
+        // Measured so the bottom overlays (scrim / FABs / toast) lift off it instead of painting over it.
+        Box(Modifier.fillMaxWidth().onSizeChanged { quotaStripPx = it.height }) {
+            QuotaStrip(repo) { showQuota = true }
+        }
     }
         // ── the bottom-right stack: the approval pill above the new-task FAB ──
         // Both want the same corner. The FAB anchors it (it is always there and always means the same
@@ -1575,12 +1609,12 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
             // on the 92dp clearance read as a dead band of wasted space.
             val scrimAlpha by animateFloatAsState(if (listState.canScrollForward) 1f else 0f, label = "fabScrim")
             if (scrimAlpha > 0f) Box(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(96.dp)
+                Modifier.align(Alignment.BottomCenter).padding(bottom = quotaStripLift).fillMaxWidth().height(96.dp)
                     .graphicsLayer { alpha = scrimAlpha }
                     .background(Brush.verticalGradient(0f to Color.Transparent, 0.62f to Tok.base, 1f to Tok.base)),
             )
             Column(
-                Modifier.align(Alignment.BottomEnd).padding(end = Metric.gutter, bottom = Metric.gutter),
+                Modifier.align(Alignment.BottomEnd).padding(end = Metric.gutter, bottom = Metric.gutter + quotaStripLift),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(Metric.gap),
             ) {
@@ -1596,6 +1630,7 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
             onBrowseOther = { showNewTask = false; openFolderEntry() },
             onDismiss = { showNewTask = false },
         )
+        if (showQuota) QuotaSheet(repo) { showQuota = false }
         // Entering the new conversation needs no navigation call: the root router renders ChatScreen the
         // moment convoId lands, and the sheet closed on send — so a delivered prompt IS the chat opening.
         // The FAILURE direction is the one that needs wiring: nothing opened, so this screen is still here
@@ -2171,6 +2206,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
     // here; there is no gating-order problem to solve.
     var showArchived by remember { mutableStateOf(false) }
     if (showArchived) { ArchivedSessionsScreen(repo, onBack = { showArchived = false }); return }
+    var showQuota by remember { mutableStateOf(false) } // the allowance pill's detail sheet
     // Session groups (issue #119). Membership + the group list are daemon-owned; these hold only the
     // transient UI: which manage-sheet/dialog is open, and (client-only) which sections are collapsed —
     // kept per group id and reset per project (keyed on [dir]), so folding a group doesn't leak across projects.
@@ -2372,12 +2408,19 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
             // toast is the only thing that says where it went — and its action is the reverse verb, not Undo.
             ArchiveToastBar(repo, Modifier.align(Alignment.BottomCenter).padding(bottom = if (approvalCount > 0) 88.dp else 12.dp))
             }
+            // Direction B's docked strip, ABOVE the new-session dock rather than under it. The handoff's
+            // Sessions frame has no dock and puts the strip on the bare bottom edge; this screen does have
+            // one, and the board's own rule for that case is that the strip merges with the bottom bar
+            // instead of stacking below it — two docked bands fighting for the same edge is exactly what
+            // that note forbids. Zero height when there is no snapshot.
+            QuotaStrip(repo) { showQuota = true }
             // one tap starts right away with the persisted defaults (openSession's own fallbacks); the
             // trailing chip shows those defaults and opens the full agent+mode picker instead
             NewSessionDock(starting = starting, onStart = { repo.openSession(dir) }) {
                 SessionDefaultsChip(repo.sessionDefaultAgent, repo.defaultMode.value, enabled = !starting) { pickMode = true }
             }
         }
+        if (showQuota) QuotaSheet(repo) { showQuota = false }
         if (pickMode) {
             LaunchedEffect(Unit) { repo.fetchModels(AgentKind.CLAUDE) }
             StartSessionModeSheet(

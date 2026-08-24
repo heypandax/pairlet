@@ -85,11 +85,12 @@ object Dk {
  *
  * 只设行高相关字段、不设 fontSize，所以调用方照旧写 `fontSize = 11.sp` 参数，两者不打架
  * （Text 的显式参数覆盖 style 同名字段）。
+ *
+ * 实现已上提到 commonMain（`theme/TightText.kt`）——手机端的额度胶囊踩了同一个坑，而这条规则
+ * 与平台无关。这里保留桌面端的名字做一层直通，纯粹为了不动二十来处既有调用点；
+ * `TightCenterTest` 照旧钉在这个入口上。
  */
-fun tightCenter(fontSize: TextUnit): TextStyle = TextStyle(
-    lineHeight = (fontSize.value * 1.15f).roundToInt().sp,
-    lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
-)
+fun tightCenter(fontSize: TextUnit): TextStyle = dev.ccpocket.app.theme.tightCenter(fontSize)
 
 /** A small keycap chip — a mono pill with a hairline border, e.g. ⌘K / ⏎ / ⌘⏎. */
 @Composable

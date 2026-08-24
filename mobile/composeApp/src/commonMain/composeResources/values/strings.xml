@@ -517,15 +517,21 @@
     <string name="usage_na">not available yet</string>
     <string name="usage_agent_all">All</string>
     <!-- ── Claude subscription allowance (the 5h/7d windows behind the CLI's own /usage panel) ── -->
-    <string name="quota_title">Plan allowance</string>
+    <string name="quota_title">Claude plan allowance</string>
     <string name="quota_5h">5-hour</string>
     <string name="quota_7d">7-day</string>
     <string name="quota_7d_model">7-day · %1$s</string>
-    <string name="quota_left">%1$s left</string>
+    <string name="quota_used">%1$s used</string>
     <string name="quota_reset_d">resets in %1$dd %2$dh</string>
     <string name="quota_reset_h">resets in %1$dh %2$dm</string>
     <string name="quota_reset_m">resets in %1$dm</string>
     <string name="quota_reset_now">resetting now</string>
+    <string name="quota_reset_at">resets %1$s</string>
+    <string name="quota_updated_now">updated just now</string>
+    <string name="quota_updated_min">updated %1$d min ago</string>
+    <string name="quota_5h_short">5h</string>
+    <string name="quota_7d_short">7d</string>
+    <string name="quota_refresh">Refresh</string>
     <string name="terminal_open">Terminal</string>
     <string name="terminal_title">Terminal</string>
     <string name="terminal_hint">git status</string>

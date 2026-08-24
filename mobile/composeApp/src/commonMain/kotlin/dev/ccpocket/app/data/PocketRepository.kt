@@ -63,6 +63,8 @@ import dev.ccpocket.protocol.ListWorktrees
 import dev.ccpocket.protocol.ReadGitDiff
 import dev.ccpocket.protocol.RemoveWorktree
 import dev.ccpocket.protocol.WorktreeList
+import dev.ccpocket.protocol.CLAUDE_QUOTA_NO_TOKEN
+import dev.ccpocket.protocol.CLAUDE_QUOTA_OK
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ClaudeQuota
 import dev.ccpocket.protocol.ClaudeQuotaGet
@@ -2398,7 +2400,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         daemonUsageAgentFilter.value = false // ditto (issue #258): the next machine re-advertises its own
         // per-daemon truth: the allowance belongs to the ACCOUNT on the machine we just left. Showing it
         // under the next machine's name would be a straight lie about a billing number.
-        claudeQuotaDeadline?.cancel(); claudeQuota.value = null; claudeQuotaLoading.value = false
+        claudeQuotaDeadline?.cancel(); claudeQuota.value = null; claudeQuotaLoading.value = false; claudeQuotaStatus.value = null
         daemonOwnsPromptRecovery = false // ditto: an older next daemon still needs the legacy fallback
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
@@ -2869,6 +2871,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     internal fun receiveDeafForTest() = onDeafLink()
 
     private fun handle(f: Frame) {
+        // A completed turn is the moment the subscription allowance actually moves, so it is one of the
+        // quota refresh triggers. Counted HERE rather than inside the `is TurnDone` branch below, because
+        // that branch is filtered to the currently-open conversation (chat-state bookkeeping) and would
+        // miss a turn finishing in another session/window on the same machine.
+        if (f is TurnDone) turnCompletions.value++
         when (f) {
             is Directories -> {
                 replace(directories, f.entries); refreshing.value = false
@@ -2901,10 +2908,22 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 archivedRefreshing.value = false
             }
             is Usage -> { usage.value = f; usageLoading.value = false }
-            // the Claude subscription allowance behind the CLI's `/usage` panel. Land it whatever the
-            // status says — a non-OK reply is how the page learns to HIDE the block instead of waiting
-            // out its deadline. Silence (an older daemon dropping the unknown frame) stays silence.
-            is ClaudeQuota -> { claudeQuotaDeadline?.cancel(); claudeQuota.value = f; claudeQuotaLoading.value = false }
+            // The Claude subscription allowance behind the CLI's `/usage` panel. Two different kinds of
+            // non-OK reply, deliberately handled differently:
+            //  · NO_TOKEN is AUTHORITATIVE — the machine signed out, or authenticates with an API key.
+            //    There is no allowance any more, so the old snapshot must go; keeping it would leave a
+            //    stale bar promising headroom on an account that is no longer in play.
+            //  · NETWORK / HTTP are TRANSIENT — we simply failed to ask. Keep the last good snapshot and
+            //    its original fetchedAt (which is what ages the "updated N min ago" line honestly) and
+            //    wait for the next trigger. Blanking the bar every time a laptop's wifi blips would make
+            //    a persistent indicator useless.
+            is ClaudeQuota -> {
+                claudeQuotaDeadline?.cancel()
+                claudeQuotaStatus.value = f.status
+                if (f.status == CLAUDE_QUOTA_OK || f.status == CLAUDE_QUOTA_NO_TOKEN) claudeQuota.value = f
+                claudeQuotaLoading.value = false
+                onClaudeQuotaReply?.invoke()
+            }
             is SkillCatalog -> {
                 skillCatalogDeadline?.cancel()
                 skillCatalog.value = f; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
@@ -4117,12 +4136,26 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch { send(FetchUsage(days, agent)) }
     }
 
+    /** Monotonic count of turns that FINISHED on this machine, in any conversation (see [handle]). A
+     *  change is the "some agent just spent tokens" edge the quota refresh policy debounces on; the
+     *  absolute value is meaningless and it is never persisted. */
+    val turnCompletions = mutableStateOf(0L)
+
     // ── Claude subscription allowance (the 5h/7d windows behind the CLI's own `/usage` panel) ──
     /** The daemon's latest [ClaudeQuota]. Null = we have not been told: either the fetch is still in
      *  flight, or this daemon predates the frame and silently dropped the request — indistinguishable on
      *  the wire, which is why the page hides the block in BOTH cases rather than showing an error. */
     val claudeQuota = mutableStateOf<ClaudeQuota?>(null)
     val claudeQuotaLoading = mutableStateOf(false)
+
+    /** The status of the LAST reply, including the transient failures [claudeQuota] deliberately does not
+     *  absorb. Null = never answered. Diagnostics only — no UI should turn a blip into an alarm. */
+    val claudeQuotaStatus = mutableStateOf<String?>(null)
+
+    /** Fired whenever a [ClaudeQuota] lands, success or failure. The refresh policy clears its in-flight
+     *  latch here; a callback rather than a state read so a dropped reply cannot look like a fresh one. */
+    internal var onClaudeQuotaReply: (() -> Unit)? = null
+
     private var claudeQuotaDeadline: Job? = null
 
     /** Ask the daemon for the subscription allowance; the reply lands in [claudeQuota]. The daemon caches

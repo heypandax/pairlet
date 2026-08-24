@@ -517,15 +517,21 @@
     <string name="usage_na">暂无数据</string>
     <string name="usage_agent_all">全部</string>
     <!-- ── Claude 订阅额度（CLI /usage 面板背后的 5 小时 / 7 天窗口）── -->
-    <string name="quota_title">订阅额度</string>
+    <string name="quota_title">Claude 订阅额度</string>
     <string name="quota_5h">5 小时</string>
     <string name="quota_7d">7 天</string>
     <string name="quota_7d_model">7 天 · %1$s</string>
-    <string name="quota_left">剩余 %1$s</string>
+    <string name="quota_used">已用 %1$s</string>
     <string name="quota_reset_d">%1$d 天 %2$d 小时后重置</string>
     <string name="quota_reset_h">%1$d 小时 %2$d 分后重置</string>
     <string name="quota_reset_m">%1$d 分钟后重置</string>
     <string name="quota_reset_now">即将重置</string>
+    <string name="quota_reset_at">%1$s 重置</string>
+    <string name="quota_updated_now">刚刚更新</string>
+    <string name="quota_updated_min">%1$d 分钟前更新</string>
+    <string name="quota_5h_short">5h</string>
+    <string name="quota_7d_short">7d</string>
+    <string name="quota_refresh">刷新</string>
     <string name="terminal_open">终端</string>
     <string name="terminal_title">终端</string>
     <string name="terminal_hint">git status</string>

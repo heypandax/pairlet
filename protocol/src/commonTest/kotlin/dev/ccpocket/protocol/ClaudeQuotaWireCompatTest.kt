@@ -90,6 +90,30 @@ class ClaudeQuotaWireCompatTest {
     }
 
     @Test
+    fun a_structurally_unknown_future_field_is_skipped_without_damaging_the_known_ones() {
+        // `ignoreUnknownKeys` has to skip a whole SUBTREE, not just a scalar: the upstream payload this
+        // frame mirrors already grows nested experiment objects, so the first field a future daemon adds
+        // is as likely to be an array of objects as a string. If the skip were shallow the decoder would
+        // desynchronise and take the known fields down with it — the failure would look like corruption,
+        // not like a version gap.
+        val json = """
+            {"status":"$CLAUDE_QUOTA_OK","fetchedAt":42,
+             "future":[{"a":1,"b":{"c":2}}],
+             "limits":[{"kind":"session","group":"session","percent":18,"resetsAt":7,
+                        "future":[{"a":1,"b":{"c":2}}]}],
+             "alsoFuture":{"deep":{"deeper":[null,true,"x"]}}}
+        """.trimIndent()
+        val q = PocketJson.decodeFromString<ClaudeQuota>(json)
+        assertEquals(CLAUDE_QUOTA_OK, q.status)
+        assertEquals(42L, q.fetchedAt)
+        assertEquals(1, q.limits.size)
+        assertEquals(CLAUDE_QUOTA_KIND_SESSION, q.limits[0].kind)
+        assertEquals("session", q.limits[0].group)
+        assertEquals(18, q.limits[0].percent)
+        assertEquals(7L, q.limits[0].resetsAt, "a field AFTER the unknown subtree still decodes")
+    }
+
+    @Test
     fun a_failure_reply_carries_no_limits_and_a_null_error_is_omitted_from_the_wire() {
         val ok = PocketJson.encodeToString(ClaudeQuota(status = CLAUDE_QUOTA_OK))
         assertTrue("error" !in ok, ok) // explicitNulls = false

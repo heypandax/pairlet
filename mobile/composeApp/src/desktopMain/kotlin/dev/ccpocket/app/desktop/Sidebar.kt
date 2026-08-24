@@ -177,6 +177,7 @@ fun Sidebar(model: DesktopModel, width: Dp = Dk.sidebarWidth, modifier: Modifier
         // The Review Center row came off (demoted 08-16, with the mobile header entry): the P2P review
         // flow saw no real use. The centre itself still opens via ⌘⇧R while its future form is decided.
         FooterActions(
+            model = model,
             updateAvailable = model.updateState is DkUpdateState.Available,
             onHelp = { openWebUrl(SUPPORT_URL) },
             onSettings = { model.showSettings = true },
@@ -723,6 +724,7 @@ private fun GroupHeader(
             Text(
                 g.name, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                style = tightCenter(11.5.sp),
             )
             // #211: the currently-listed dir is always present (it re-enters as the synthetic live group
             // even after "clear"), which read as "the last row won't clear". This quiet chip names it as
@@ -1138,9 +1140,13 @@ private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean,
  *  this dim mono line is the only place a waiting update would otherwise be invisible. Settings ▸ About
  *  is one click away behind the same row. */
 @Composable
-private fun FooterActions(updateAvailable: Boolean, onHelp: () -> Unit, onSettings: () -> Unit) {
+private fun FooterActions(model: DesktopModel, updateAvailable: Boolean, onHelp: () -> Unit, onSettings: () -> Unit) {
     Column {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+        // The Claude allowance strip rides INSIDE the footer, under the same single hairline, so it reads
+        // as the footer's top line rather than as a third docked row with its own divider. Zero height
+        // when there is nothing to say (no daemon, API-key account, no snapshot yet) — see [QuotaBar].
+        QuotaBar(model)
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,

@@ -150,6 +150,7 @@ class RepoDesktopModel(
     }
     override fun dismissHandoffInvite() { repo.lastHandoffInvite.value = null }
     override var showModelPopover by mutableStateOf(false)
+    override var showQuotaPopover by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
     override var showGit by mutableStateOf(false)
     override var showWorktrees by mutableStateOf(false)

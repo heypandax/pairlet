@@ -7,6 +7,7 @@ import dev.ccpocket.daemon.bridge.PathScope
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.claude.ClaudeModelService
 import dev.ccpocket.daemon.conversation.OutboundSink
+import dev.ccpocket.daemon.conversation.sinkKey
 import dev.ccpocket.daemon.codex.CodexModelService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
@@ -161,6 +162,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /** Maps an inbound [Frame] to the registry/services. Returns fast; turns run on conversation scopes. */
+/** Diagnostic tap for the subscription-quota reply path (phone-not-showing investigation, 2026-08-24). */
+private val quotaLog = dev.ccpocket.daemon.util.logger("QuotaRoute")
+
 class RequestRouter(
     private val registry: SessionRegistry,
     private val dirs: DirectoryService,
@@ -508,7 +512,15 @@ class RequestRouter(
             // than an empty snapshot that would read as "your allowance is fine".
             is ClaudeQuotaGet ->
                 if (gitOwnerOnly(origin, guestScope, collabScope)) {
-                    scope.launch { sink.emit(quota.get(frame.forceRefresh)) }
+                    scope.launch {
+                        val reply = quota.get(frame.forceRefresh)
+                        // status + row count only — never the payload (it is billing state, and error
+                        // strings must stay token-free by ClaudeQuotaService's contract anyway)
+                        quotaLog.info("quota → ${sinkKey(sink)} status=${reply.status} limits=${reply.limits.size}")
+                        sink.emit(reply)
+                    }
+                } else {
+                    quotaLog.info("quota REFUSED origin=$origin guest=${guestScope != null} collab=${collabScope != null}")
                 }
 
             // installed skills/plugins browse page (issue #132): a disk scan → off the inbound pump like
