@@ -77,6 +77,7 @@ import dev.ccpocket.protocol.GIT_OP_PUSH
 import dev.ccpocket.protocol.GIT_OP_REVERT
 import dev.ccpocket.protocol.GIT_OP_STAGE
 import dev.ccpocket.protocol.GIT_OP_UNSTAGE
+import dev.ccpocket.protocol.GIT_OP_WORKTREE_ADD
 import dev.ccpocket.protocol.GIT_OP_WORKTREE_REMOVE
 import dev.ccpocket.protocol.GitActionPreview
 import dev.ccpocket.protocol.GitBranchInfo
@@ -161,12 +162,17 @@ fun GitOverlay(model: DesktopModel, onDismiss: () -> Unit) {
                 }
                 status?.upstream?.let { Text(it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp) }
                 Box(Modifier.weight(1f))
-                if ((status?.worktreeCount ?: 0) > 1) Text(
-                    stringResource(Res.string.wt_count, status?.worktreeCount ?: 0),
-                    color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
-                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
-                        .clickable { model.openWorktrees() }.padding(horizontal = 9.dp, vertical = 4.dp),
-                )
+                // #294: the chip is the only door to the worktree surface, so a single-checkout repo
+                // must still get it — otherwise the first worktree can never be created from here
+                if (status?.notARepo == false) {
+                    val wtCount = status.worktreeCount ?: 1
+                    Text(
+                        if (wtCount > 1) stringResource(Res.string.wt_count, wtCount) else stringResource(Res.string.wt_count_one),
+                        color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
+                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
+                            .clickable { model.openWorktrees() }.padding(horizontal = 9.dp, vertical = 4.dp),
+                    )
+                }
                 if (model.gitStatusLoading) CircularProgressIndicator(Modifier.size(14.dp), color = Tok.tx2, strokeWidth = 1.6.dp)
                 else Icon(
                     Icons.Rounded.Refresh, stringResource(Res.string.git_refresh), tint = Tok.tx2,
@@ -625,6 +631,13 @@ fun WorktreesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
     val list = model.worktrees
     val trees = list?.worktrees.orEmpty()
     var showNew by remember { mutableStateOf(false) }
+    // #295: filter, not navigation — same contract as the mobile surface
+    var query by remember { mutableStateOf("") }
+    val shown = remember(trees, query) {
+        val q = query.trim()
+        if (q.isEmpty()) trees
+        else trees.filter { it.branch?.contains(q, ignoreCase = true) == true || it.path.contains(q, ignoreCase = true) }
+    }
 
     Box(
         Modifier.widthIn(max = 720.dp).fillMaxWidth(0.7f).heightIn(max = 560.dp).fillMaxHeight(0.8f)
@@ -654,6 +667,32 @@ fun WorktreesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
                 )
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+            // #294: worktree failures render HERE — GitFooter's strip belongs to the git overlay,
+            // which is a different surface, so ok=false used to be invisible from this one
+            model.gitError?.let { err ->
+                Box(Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp)) {
+                    GitErrorStrip(
+                        title = stringResource(Res.string.git_action_failed),
+                        detail = err.stderr.ifBlank { err.error },
+                        amber = false,
+                        onDismiss = { model.dismissGitError() },
+                    )
+                }
+            }
+            // #295: branch or path, either substring
+            if (trees.size > 1) Box(
+                Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 10.dp)
+                    .height(32.dp).clip(RoundedCornerShape(9.dp)).background(Tok.surface)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(9.dp)).padding(horizontal = 10.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (query.isEmpty()) Text(stringResource(Res.string.wt_search), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp)
+                BasicTextField(
+                    query, { query = it }, singleLine = true,
+                    textStyle = TextStyle(color = Tok.tx, fontSize = 11.5.sp, fontFamily = Dk.mono),
+                    cursorBrush = SolidColor(Tok.accent), modifier = Modifier.fillMaxWidth(),
+                )
+            }
             when {
                 list == null && model.worktreesStale ->
                     Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -675,13 +714,30 @@ fun WorktreesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
                             Text(stringResource(Res.string.wt_new), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
+                    // #294: the in-flight receipt — the 1–2s void between Create and the list reply
+                    // used to read as failure and invite a second Create
+                    model.gitBusyOp?.takeIf { it == GIT_OP_WORKTREE_ADD || it == GIT_OP_WORKTREE_REMOVE }?.let { op ->
+                        item(key = "__pending") {
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                CircularProgressIndicator(Modifier.size(12.dp), color = Tok.accent, strokeWidth = 1.6.dp)
+                                Text(
+                                    stringResource(if (op == GIT_OP_WORKTREE_ADD) Res.string.wt_creating else Res.string.wt_removing),
+                                    color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                                )
+                            }
+                        }
+                    }
                     if (trees.size == 1) item(key = "__hint") {
                         Text(
                             stringResource(Res.string.wt_hint_single), color = Tok.tx2, fontFamily = Dk.ui,
                             fontSize = 11.5.sp, lineHeight = 17.5.sp, modifier = Modifier.padding(top = 12.dp),
                         )
                     }
-                    items(trees, key = { it.path }) { w -> DesktopWorktreeCard(model, w) }
+                    items(shown, key = { it.path }) { w -> DesktopWorktreeCard(model, w) }
                     if (trees.any { it.dirty == null }) item(key = "__foot") {
                         Text(
                             stringResource(Res.string.wt_foot_unknown), color = Tok.muted, fontFamily = Dk.ui,

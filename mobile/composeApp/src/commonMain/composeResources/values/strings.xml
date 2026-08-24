@@ -1940,4 +1940,7 @@
     <string name="wt_remove">Remove</string>
     <string name="wt_part_of">part of %1$s</string>
     <string name="wt_unavailable">This computer can\'t answer worktrees yet — update the desktop app.</string>
+    <string name="wt_creating">Creating worktree…</string>
+    <string name="wt_removing">Removing worktree…</string>
+    <string name="wt_search">Search worktrees</string>
 </resources>

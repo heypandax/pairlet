@@ -58,6 +58,8 @@ import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.DiffEmptyState
 import dev.ccpocket.app.ui.PocketSheet
 import dev.ccpocket.app.ui.relativeTime
+import dev.ccpocket.protocol.GIT_OP_WORKTREE_ADD
+import dev.ccpocket.protocol.GIT_OP_WORKTREE_REMOVE
 import dev.ccpocket.protocol.GitBranchInfo
 import dev.ccpocket.protocol.WorktreeEntry
 import org.jetbrains.compose.resources.stringResource
@@ -76,6 +78,13 @@ fun WorktreesScreen(repo: PocketRepository, onOpenSessionHere: (String) -> Unit,
     val trees = list?.worktrees.orEmpty()
     var menuFor by remember { mutableStateOf<String?>(null) }
     var showNew by remember { mutableStateOf(false) }
+    // #295: filter, not navigation — clearing it must cost one tap and lose nothing
+    var query by remember(repo.convoId.value) { mutableStateOf("") }
+    val shown = remember(trees, query) {
+        val q = query.trim()
+        if (q.isEmpty()) trees
+        else trees.filter { it.branch?.contains(q, ignoreCase = true) == true || it.path.contains(q, ignoreCase = true) }
+    }
     val clipboard = LocalClipboardManager.current
 
     LaunchedEffect(repo.convoId.value) { repo.fetchWorktrees() }
@@ -124,6 +133,38 @@ fun WorktreesScreen(repo: PocketRepository, onOpenSessionHere: (String) -> Unit,
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
 
+            // #294: the ONLY render point worktree failures have — GitPanelScreen's strip is a
+            // different screen, so an ok=false reply used to die silently under this surface
+            repo.gitError.value?.let { err ->
+                Box(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) {
+                    GitErrorStrip(
+                        title = stringResource(Res.string.git_action_failed),
+                        detail = err.stderr.ifBlank { err.error },
+                        amber = false,
+                        onDismiss = { repo.dismissGitError() },
+                    )
+                }
+            }
+
+            // #295: the search box — branch or path, either substring. Two checkouts is when a list
+            // first becomes two things to tell apart, so that is when the box appears.
+            if (trees.size > 1) Box(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp)
+                    .height(42.dp).clip(RoundedCornerShape(11.dp)).background(Tok.raised)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(11.dp)).padding(horizontal = 12.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (query.isEmpty()) Text(
+                    stringResource(Res.string.wt_search), color = Tok.muted,
+                    fontFamily = FontFamily.Monospace, fontSize = 13.sp,
+                )
+                BasicTextField(
+                    query, { query = it }, singleLine = true,
+                    textStyle = TextStyle(color = Tok.tx, fontSize = 13.sp, fontFamily = FontFamily.Monospace),
+                    cursorBrush = SolidColor(Tok.accent), modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
             when {
                 repo.worktreesUnavailable.value && list == null ->
                     DiffEmptyState(glyph = ">_", title = stringResource(Res.string.wt_unavailable), caption = null)
@@ -133,6 +174,11 @@ fun WorktreesScreen(repo: PocketRepository, onOpenSessionHere: (String) -> Unit,
                     DiffEmptyState(glyph = "!", title = stringResource(Res.string.git_action_failed), caption = list.error)
                 else -> LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                     item(key = "__new") { NewWorktreeRow { showNew = true } }
+                    // #294: the 1–2s between Create and the list reply used to be a void the user read
+                    // as failure (and retried) — the pending row holds the spot the new card will take.
+                    repo.gitBusyOp.value?.takeIf { it == GIT_OP_WORKTREE_ADD || it == GIT_OP_WORKTREE_REMOVE }?.let { op ->
+                        item(key = "__pending") { WorktreePendingRow(creating = op == GIT_OP_WORKTREE_ADD) }
+                    }
                     // A2: one checkout is not an empty state — it is a repository that has not needed a
                     // second one yet, so it gets a sentence rather than an illustration.
                     if (trees.size == 1) item(key = "__hint") {
@@ -142,7 +188,7 @@ fun WorktreesScreen(repo: PocketRepository, onOpenSessionHere: (String) -> Unit,
                         )
                     }
                     if (list == null && repo.worktreesLoading.value) item(key = "__skeleton") { WorktreeSkeleton() }
-                    items(trees, key = { it.path }) { w ->
+                    items(shown, key = { it.path }) { w ->
                         Box(Modifier.padding(horizontal = 16.dp, vertical = 5.dp)) {
                             WorktreeCard(w) { menuFor = w.path }
                         }
@@ -204,6 +250,23 @@ private fun NewWorktreeRow(onClick: () -> Unit) {
             Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tok.accent.copy(alpha = 0.6f), modifier = Modifier.size(15.dp))
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+    }
+}
+
+/** #294: the in-flight receipt. It sits where the new card will land, so success reads as the row
+ *  resolving into a card rather than an indicator vanishing. */
+@Composable
+private fun WorktreePendingRow(creating: Boolean) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        CircularProgressIndicator(Modifier.size(13.dp), color = Tok.accent, strokeWidth = 1.6.dp)
+        Text(
+            stringResource(if (creating) Res.string.wt_creating else Res.string.wt_removing),
+            color = Tok.tx2, fontSize = 12.5.sp,
+        )
     }
 }
 
