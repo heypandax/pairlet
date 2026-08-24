@@ -31,6 +31,10 @@ on:
         description: "Also build and attach the signed HarmonyOS HAP on the dedicated self-hosted macOS/ARM64/harmony runner. Off by default: GitHub-hosted runners do not provide DevEco Studio."
         type: boolean
         default: false
+      only_harmony:
+        description: "Only run the Harmony job against an existing release (implies include_harmony): attaches the signed HAP + retains the AGC App Pack, then regenerates SHA256SUMS. Skips every other platform job so their published assets (and the Homebrew cask / Scoop sha256 pins) stay byte-identical. Must still be dispatched from the release tag."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -53,12 +57,17 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
           ONLY_ANDROID: ${{ inputs.only_android }}
           ONLY_MACOS_DESKTOP: ${{ inputs.only_macos_desktop }}
+          ONLY_HARMONY: ${{ inputs.only_harmony }}
         run: |
           bash scripts/check-release-version.sh "$RELEASE_VERSION"
           [ "$ONLY_ANDROID" != "true" ] || [ "$ONLY_MACOS_DESKTOP" != "true" ] || {
             echo "::error::only_android and only_macos_desktop cannot both be true"
             exit 1
           }
+          if [ "$ONLY_HARMONY" = "true" ] && { [ "$ONLY_ANDROID" = "true" ] || [ "$ONLY_MACOS_DESKTOP" = "true" ]; }; then
+            echo "::error::only_harmony cannot be combined with only_android or only_macos_desktop"
+            exit 1
+          fi
           TAG="v${RELEASE_VERSION}"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null || {
             echo "::error::GitHub Release ${TAG} must exist before the artifact workflow starts"
@@ -73,7 +82,7 @@ jobs:
 
   macos:
     needs: preflight
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
     strategy:
       fail-fast: false
       matrix:
@@ -138,7 +147,7 @@ jobs:
 
   windows:
     needs: preflight
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -163,7 +172,7 @@ jobs:
 
   linux:
     needs: preflight
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -202,7 +211,7 @@ jobs:
     # website's "newest .apk" link always resolves to a current, release-signed build. The signing
     # key is injected from repo secrets; if any are missing the build.gradle signing config is
     # skipped and we FAIL the job rather than ship an unsigned APK (apksigner verify is the gate).
-    if: ${{ !inputs.only_macos_desktop }}
+    if: ${{ !inputs.only_macos_desktop && !inputs.only_harmony }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -281,7 +290,7 @@ jobs:
     # job; we AVOID the retiring macos-13 Intel runner (jobs there queue indefinitely).
     # composeApp applies the Android + googleServices plugins, so the build needs the Android SDK at configure
     # time and a google-services.json to exist — the desktop target never touches Firebase, so a placeholder is fine.
-    if: ${{ !inputs.only_android }}
+    if: ${{ !inputs.only_android && !inputs.only_harmony }}
     strategy:
       fail-fast: false
       matrix:
@@ -354,7 +363,7 @@ jobs:
     # The Compose Desktop APP (.msi installer) for Windows, attached to the release under a stable version-less
     # name. jpackage can't cross-compile, so this runs on windows-latest (which ships WiX, so the MSI builds).
     # Mirrors build-windows.yml's windows-app job but uploads to the release instead of a workflow artifact.
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -403,7 +412,7 @@ jobs:
     # DevEco Studio is not available on GitHub-hosted macOS runners. This job is deliberately opt-in and
     # targets only the trusted ephemeral/JIT runner documented in harmony/README.md. A normal release
     # keeps include_harmony=false, so it neither queues for that runner nor fails when the runner is offline.
-    if: ${{ inputs.include_harmony && !inputs.only_android && !inputs.only_macos_desktop }}
+    if: ${{ (inputs.include_harmony || inputs.only_harmony) && !inputs.only_android && !inputs.only_macos_desktop }}
     runs-on: [self-hosted, macOS, ARM64, harmony]
     environment: harmony-release
     timeout-minutes: 90
@@ -582,7 +591,7 @@ jobs:
     # inherit SKIPPED from anything upstream of `checksums` (harmony is skipped on normal releases),
     # which is exactly how the scoop bump silently vanished from green release runs (issue #243).
     # `needs.checksums.result == 'success'` keeps the "never point at a partial release" guarantee.
-    if: ${{ !cancelled() && !failure() && needs.checksums.result == 'success' && !inputs.only_android && !inputs.only_macos_desktop }}
+    if: ${{ !cancelled() && !failure() && needs.checksums.result == 'success' && !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
     # Do not publish a package-manager pointer until every requested artifact and the
     # aggregate checksum manifest have completed successfully.
     needs: [checksums]

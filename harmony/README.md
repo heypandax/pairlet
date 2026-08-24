@@ -151,7 +151,19 @@ git tag v1.7.7 <reviewed-commit-sha>
 git push origin refs/tags/v1.7.7
 gh release create v1.7.7 --verify-tag --generate-notes
 gh workflow run release.yml --ref v1.7.7 -f version=1.7.7 -f include_harmony=true
+bash scripts/harmony-jit-runner.sh   # 起单 job JIT runner 承接 Harmony job（job 结束自动注销）
+# 最后在 GitHub UI 批准 harmony-release environment 的部署审核
 ```
+
+对**已经发过、当时跳过了 Harmony** 的版本补发 HAP：改传 `-f only_harmony=true`（隐含
+include_harmony），其余平台 job 全部跳过，已发资产与 Homebrew cask / Scoop 的 sha256 指纹保持
+逐字节不变；`SHA256SUMS` 会在 HAP 上传后重算一次以覆盖新资产。注意 dispatch 的 `--ref` 仍必须是
+该版本 tag 本身，且该 tag 里的 workflow 已含 `only_harmony` 输入（v1.9.0 及更早的 tag 没有，
+只能随后续版本走）。
+
+`scripts/harmony-jit-runner.sh` 用 `generate-jitconfig` 做一次性注册：恰好承接一个 job，
+job 结束进程退出、注册记录自动移除，工作目录一次一建、退出即删。它完成的是「JIT 注册＋单任务＋
+自动注销」这半边；宿主机 job 后销毁仍是仓库外门禁（见上文），在个人 Mac 上运行时应全程有人值守。
 
 job 在 checkout 前严格校验 `x.y.z`，解析 `refs/tags/v<version>` 的实际 commit，检查 Release 的
 `tagName`、`targetCommitish` 与 tag 谱系，再 checkout 已验证 tag；因此不能用功能分支代码覆盖正式
