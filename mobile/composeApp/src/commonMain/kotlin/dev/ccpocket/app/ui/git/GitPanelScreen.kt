@@ -268,17 +268,19 @@ private fun RepoHeader(
                 else Icon(Icons.Rounded.Refresh, stringResource(Res.string.git_refresh), tint = Tok.tx2, modifier = Modifier.size(17.dp))
             }
         }
-        // #281 composition: only a repository with a second checkout earns the line — a single-worktree
-        // repo never sees an entrance to a surface that would show it one row.
-        if ((status?.worktreeCount ?: 0) > 1) Row(
+        // #294: every repository gets the entrance — gating it on a second checkout locked single-worktree
+        // repos out of the only surface that can CREATE the second one. The single-checkout case shows
+        // its own hint inside (#281 A2), so one row is not what the door opens onto.
+        if (status?.notARepo == false) Row(
             Modifier.fillMaxWidth().clickable(onClick = onOpenWorktrees)
                 .padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("⎇", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+            val wtCount = status.worktreeCount ?: 1
             Text(
-                stringResource(Res.string.wt_count, status?.worktreeCount ?: 0),
+                if (wtCount > 1) stringResource(Res.string.wt_count, wtCount) else stringResource(Res.string.wt_count_one),
                 color = Tok.tx2, fontSize = 11.5.sp, modifier = Modifier.weight(1f),
             )
             Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(15.dp))

@@ -1929,4 +1929,7 @@
     <string name="wt_remove">删除</string>
     <string name="wt_part_of">属于 %1$s</string>
     <string name="wt_unavailable">这台电脑还答不了 worktree——升级桌面端后再用。</string>
+    <string name="wt_creating">正在创建 worktree…</string>
+    <string name="wt_removing">正在移除 worktree…</string>
+    <string name="wt_search">搜索 worktree</string>
 </resources>
