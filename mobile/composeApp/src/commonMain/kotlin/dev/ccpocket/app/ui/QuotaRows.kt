@@ -37,6 +37,13 @@ import dev.ccpocket.app.resources.quota_7d
 import dev.ccpocket.app.resources.quota_7d_model
 import dev.ccpocket.app.resources.quota_7d_short
 import dev.ccpocket.app.resources.quota_used
+import dev.ccpocket.app.resources.schedule_wd_1
+import dev.ccpocket.app.resources.schedule_wd_2
+import dev.ccpocket.app.resources.schedule_wd_3
+import dev.ccpocket.app.resources.schedule_wd_4
+import dev.ccpocket.app.resources.schedule_wd_5
+import dev.ccpocket.app.resources.schedule_wd_6
+import dev.ccpocket.app.resources.schedule_wd_7
 import dev.ccpocket.app.resources.quota_refresh
 import dev.ccpocket.app.resources.quota_reset_at
 import dev.ccpocket.app.resources.quota_reset_d
@@ -174,11 +181,22 @@ fun stripResetText(resetsAt: Long?, now: Long): String? {
     val r = dev.ccpocket.app.localClock(resetsAt)
     val n = dev.ccpocket.app.localClock(now)
     val sameDay = r.year == n.year && r.monthOfYear == n.monthOfYear && r.dayOfMonth == n.dayOfMonth
-    if (!sameDay) return resetText(resetsAt, now)
     val hh = r.hour.toString().padStart(2, '0')
     val mm = r.minute.toString().padStart(2, '0')
-    return stringResource(Res.string.quota_reset_at, "$hh:$mm")
+    // cross-day (a weekly window): weekday + clock, the official panel's own "Resets Mon 1:00 AM" shape —
+    // the countdown fallback ("6 天 7 小时后重置") was exactly the long tail the strip cannot afford
+    val clock = if (sameDay) "$hh:$mm" else "${quotaWeekday(r.isoDayOfWeek)} $hh:$mm"
+    return stringResource(Res.string.quota_reset_at, clock)
 }
+
+@Composable
+private fun quotaWeekday(iso: Int): String = stringResource(
+    when (iso) {
+        1 -> Res.string.schedule_wd_1; 2 -> Res.string.schedule_wd_2; 3 -> Res.string.schedule_wd_3
+        4 -> Res.string.schedule_wd_4; 5 -> Res.string.schedule_wd_5; 6 -> Res.string.schedule_wd_6
+        else -> Res.string.schedule_wd_7
+    },
+)
 
 /** How old the numbers are. Ages from the DAEMON's fetch moment, so a reply served out of its own 60s
  *  cache reports the age of the DATA rather than the age of our request. */

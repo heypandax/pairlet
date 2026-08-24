@@ -76,7 +76,9 @@ fun QuotaStrip(repo: PocketRepository, onOpen: () -> Unit) {
     val weekly = worstWeekly(rows)
     val segments = listOfNotNull(session, weekly)
     if (segments.isEmpty()) return
-    val tightest = tightestLimit(rows)
+    // the reset caption follows the tightest of the two DISPLAYED segments — captioning a hidden scoped
+    // row's reset next to numbers that don't include it read as a mismatch
+    val tightest = tightestLimit(segments)
     val now by rememberQuotaClock()
 
     Column(Modifier.fillMaxWidth()) {
