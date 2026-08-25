@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -41,6 +42,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -49,7 +52,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.data.WorktreeCreated
 import dev.ccpocket.app.data.midTruncatePath
+import dev.ccpocket.app.data.worktreeDisplayOrder
 import dev.ccpocket.app.data.repoBasename
 import dev.ccpocket.app.data.worktreeLocationPreview
 import dev.ccpocket.app.data.worktreeRemovable
@@ -75,7 +80,8 @@ import org.jetbrains.compose.resources.stringResource
 fun WorktreesScreen(repo: PocketRepository, onOpenSessionHere: (String) -> Unit, onBack: () -> Unit) {
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     val list = repo.worktrees.value
-    val trees = list?.worktrees.orEmpty()
+    // newest linked checkout first, main pinned on top (#294 真机反馈: fresh worktrees sank to the bottom)
+    val trees = remember(list) { worktreeDisplayOrder(list?.worktrees.orEmpty()) }
     var menuFor by remember { mutableStateOf<String?>(null) }
     var showNew by remember { mutableStateOf(false) }
     // #295: filter, not navigation — clearing it must cost one tap and lose nothing
@@ -86,6 +92,16 @@ fun WorktreesScreen(repo: PocketRepository, onOpenSessionHere: (String) -> Unit,
         else trees.filter { it.branch?.contains(q, ignoreCase = true) == true || it.path.contains(q, ignoreCase = true) }
     }
     val clipboard = LocalClipboardManager.current
+
+    // #295 真机反馈: the search box costs a third of the screen while the keyboard is up, and the
+    // gesture that means "let me see the list" IS the scroll — same contract GitPanelScreen's
+    // composer already keeps (#280 真机反馈 3). Hoisted so the field's focus and the list's motion meet.
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) { focus.clearFocus(); keyboard?.hide() }
+    }
 
     LaunchedEffect(repo.convoId.value) { repo.fetchWorktrees() }
 
@@ -172,7 +188,7 @@ fun WorktreesScreen(repo: PocketRepository, onOpenSessionHere: (String) -> Unit,
                     DiffEmptyState(glyph = "⎇", title = stringResource(Res.string.git_not_a_repo), caption = null)
                 list?.ok == false ->
                     DiffEmptyState(glyph = "!", title = stringResource(Res.string.git_action_failed), caption = list.error)
-                else -> LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                else -> LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
                     item(key = "__new") { NewWorktreeRow { showNew = true } }
                     // #294: the 1–2s between Create and the list reply used to be a void the user read
                     // as failure (and retried) — the pending row holds the spot the new card will take.
@@ -233,6 +249,13 @@ fun WorktreesScreen(repo: PocketRepository, onOpenSessionHere: (String) -> Unit,
     }
 
     if (showNew) NewWorktreeSheet(repo) { showNew = false }
+    repo.worktreeCreated.value?.let { note ->
+        WorktreeCreatedSheet(
+            note,
+            onOpen = { path -> repo.dismissWorktreeCreated(); onOpenSessionHere(path) },
+            onDismiss = { repo.dismissWorktreeCreated() },
+        )
+    }
     repo.gitPendingConfirm.value?.let { GitConfirmSheet(repo, it) }
 }
 
@@ -250,6 +273,57 @@ private fun NewWorktreeRow(onClick: () -> Unit) {
             Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tok.accent.copy(alpha = 0.6f), modifier = Modifier.size(15.dp))
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+    }
+}
+
+/**
+ * The post-create receipt (#281 功能范围「在新建 worktree 中启动会话」, restored by #294 真机反馈):
+ * success stated in words, then the one question the moment actually asks — work there now, or later.
+ * "Later" costs nothing; the checkout exists either way and the card is already in the list behind
+ * this sheet. The open-here verb is the SAME OpenSession the card overflow sends, absent (not
+ * disabled) when an older daemon answered without the created path.
+ */
+@Composable
+private fun WorktreeCreatedSheet(note: WorktreeCreated, onOpen: (String) -> Unit, onDismiss: () -> Unit) {
+    PocketSheet(onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                Modifier.size(44.dp).clip(CircleShape).background(Tok.ok.copy(alpha = 0.10f))
+                    .border(1.4.dp, Tok.ok.copy(alpha = 0.45f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) { Text("✓", color = Tok.ok, fontSize = 19.sp) }
+            Text(
+                stringResource(Res.string.wt_created_title), color = Tok.tx, fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp),
+            )
+            note.branch?.let {
+                Text(
+                    it, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 13.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            note.path?.let { GitPathText(it, max = 40, color = Tok.muted, fontSize = 11.5.sp, modifier = Modifier.padding(top = 5.dp)) }
+            note.path?.let { path ->
+                Box(
+                    Modifier.fillMaxWidth().padding(top = 16.dp).height(50.dp).clip(RoundedCornerShape(12.dp))
+                        .background(Tok.accent).clickable { onOpen(path) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        stringResource(Res.string.wt_menu_open), color = Tok.base,
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+            Box(
+                Modifier.fillMaxWidth().padding(top = 9.dp).height(46.dp).clip(RoundedCornerShape(12.dp))
+                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).clickable(onClick = onDismiss),
+                contentAlignment = Alignment.Center,
+            ) { Text(stringResource(Res.string.wt_created_later), color = Tok.tx2, fontSize = 14.sp) }
+        }
     }
 }
 

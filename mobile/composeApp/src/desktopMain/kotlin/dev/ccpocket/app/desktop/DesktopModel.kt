@@ -706,6 +706,10 @@ interface DesktopModel {
     val worktreesStale: Boolean get() = false
     fun fetchWorktrees() {}
     fun addWorktree(branch: String, createBranch: Boolean) {}
+    // the post-create receipt (#281 功能范围, restored by #294 真机反馈) and its one verb
+    val worktreeCreated: dev.ccpocket.app.data.WorktreeCreated? get() = null
+    fun dismissWorktreeCreated() {}
+    fun openWorktreeSession(path: String) {}
     fun removeWorktree(path: String) {}
     fun openWorktrees() { showWorktrees = true; fetchWorktrees() }
 

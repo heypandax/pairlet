@@ -180,6 +180,13 @@ data class WorktreeEntry(
     val dirtyCount: Int? = null,
     val activeSessionId: String? = null,
     val activeSessionTitle: String? = null,
+    /**
+     * When this checkout was created (epoch millis), read from its `.git` entry — the newest one first
+     * is the order the surface wants, and `git worktree list` only ever answers in registration order.
+     * 0 means "not known": an older daemon that predates the field, or a stat that failed. The client
+     * treats 0 as "keep git's order for this row" rather than sorting it to either end.
+     */
+    val createdAt: Long = 0,
 )
 
 // ---- phone -> daemon ----
@@ -456,6 +463,14 @@ data class GitActionResult(
     /** The workdir of the request this answers — see [GitActionPreview.workdir] for why convoId alone is
      *  not a sufficient identity. Trailing optional, same two-way degradation. */
     val workdir: String? = null,
+    /**
+     * For a successful `worktree.add` only: the checkout directory the daemon created — the fact the
+     * post-create "open a session here?" layer needs (#281 功能范围, restored by #294 真机反馈). The
+     * daemon computed this path itself (policy dir + slug), so echoing it is not client input coming
+     * back. Trailing optional: an older daemon omits it and the client shows the receipt without the
+     * open-here verb rather than guessing at a path.
+     */
+    val path: String? = null,
 ) : ToPhone
 
 /**

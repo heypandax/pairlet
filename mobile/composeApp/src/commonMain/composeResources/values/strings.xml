@@ -1926,6 +1926,8 @@
     <string name="wt_seg_existing">Existing branch</string>
     <string name="wt_seg_new">New branch</string>
     <string name="wt_search_branches">Search branches</string>
+    <string name="wt_created_title">Worktree created</string>
+    <string name="wt_created_later">Later</string>
     <string name="wt_branch_name">Branch name</string>
     <string name="wt_branched_from">Branched from %1$s · does not exist yet</string>
     <string name="wt_in_use">in use · %1$s</string>

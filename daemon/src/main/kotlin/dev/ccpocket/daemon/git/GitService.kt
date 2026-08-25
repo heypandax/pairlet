@@ -42,6 +42,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -193,7 +194,8 @@ class GitService(
         val withStatus = if (f.withStatus) enrichDirty(exe, parsed) else parsed
         val entries = withStatus.map { w ->
             val hit = live[ProjectPaths.canonicalKey(w.path)]
-            if (hit == null) w else w.copy(activeSessionId = hit.sessionId, activeSessionTitle = hit.title)
+            val stamped = w.copy(createdAt = createdAtOf(w.path))
+            if (hit == null) stamped else stamped.copy(activeSessionId = hit.sessionId, activeSessionTitle = hit.title)
         }
         return WorktreeList(
             f.convoId, f.workdir,
@@ -201,6 +203,19 @@ class GitService(
             worktrees = entries,
         )
     }
+
+    /**
+     * When a checkout came into being, from its own `.git` entry — a file for a linked worktree (written
+     * once, at creation) and a directory for the main one. One stat per row, no git process: `git worktree
+     * list` answers in registration order only, and the surface wants the newest first (#295 真机反馈).
+     *
+     * 0 when the filesystem cannot say (creationTime is not universal — ext4 without statx returns epoch),
+     * and the client keeps git's order for that row instead of guessing.
+     */
+    private fun createdAtOf(path: String): Long = runCatching {
+        val attrs = Files.readAttributes(Path.of(path).resolve(".git"), BasicFileAttributes::class.java)
+        attrs.creationTime().toMillis().takeIf { it > 0 } ?: attrs.lastModifiedTime().toMillis()
+    }.getOrDefault(0L)
 
     // ----------------------------------------------------------------- writes
 
@@ -377,6 +392,9 @@ class GitService(
                 stdout = r.out.take(MAX_OUT),
                 stderr = (if (r.code == 0) r.err else gitStderrHighlight(r.err)).take(MAX_OUT),
                 error = if (r.code == 0) null else "git worktree add failed",
+                // the created checkout, for the client's "open a session here?" layer — our own
+                // computed target, never an echo of client text
+                path = if (r.code == 0) target.toString() else null,
             )
         } catch (e: Exception) {
             log.warn("git worktree add failed", e)
