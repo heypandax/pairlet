@@ -41,7 +41,9 @@ import dev.ccpocket.app.resources.cfg_start
 import dev.ccpocket.app.resources.cfm_cta
 import dev.ccpocket.app.resources.cfm_title
 import dev.ccpocket.app.resources.cfm_workdir
+import dev.ccpocket.app.resources.codex_preset_autonomous
 import dev.ccpocket.app.resources.codex_preset_balanced
+import dev.ccpocket.app.resources.codex_preset_cautious
 import dev.ccpocket.app.resources.dir_picker_options
 import dev.ccpocket.app.resources.dir_picker_use_here
 import dev.ccpocket.app.resources.label_mode
@@ -70,6 +72,7 @@ import dev.ccpocket.app.ui.PairingScreen
 import dev.ccpocket.app.ui.DirectoryScreen
 import dev.ccpocket.app.ui.DirectorySkeleton
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AgentModePreset
 import dev.ccpocket.protocol.PermissionMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -436,6 +439,7 @@ class EntryFlowUiTest {
     private fun configure(
         agent: AgentKind = AgentKind.CLAUDE,
         fontScale: Float = 1f,
+        codexPresets: List<AgentModePreset> = emptyList(),
         onPicked: (PermissionMode, AgentKind, String?, String?) -> Unit = { _, _, _, _ -> },
         assertions: SkikoComposeUiTest.() -> Unit,
     ) = runDesktopComposeUiTest(W, H) {
@@ -444,6 +448,7 @@ class EntryFlowUiTest {
                 PocketTheme {
                     ConfigureSessionSheet(
                         workdir = dir, agent = agent, computer = "alex-macbook",
+                        modePresetsFor = { a -> if (a == AgentKind.CODEX) codexPresets else emptyList() },
                         onPick = onPicked, onDismiss = {},
                     )
                 }
@@ -489,6 +494,69 @@ class EntryFlowUiTest {
             assertTrue(p != null && p.second == AgentKind.CODEX)
             assertEquals(agentDefaultMode(AgentKind.CODEX), p!!.first, "the mode reset to Codex's default")
             assertNull(p.third, "and the model reset to 'follow the computer's default'")
+        }
+    }
+
+    /**
+     * The new-session ladder follows the daemon's advertised vocabulary too — not just the in-chat sheet.
+     *
+     * This is the half of the anti-skew feature that was built and then not connected: `modePresets` reached
+     * [dev.ccpocket.app.ui.ModeSheet] but no production caller ever handed one to this surface, so a daemon
+     * that added, removed or reordered a Codex preset changed the mid-session sheet and left the surface that
+     * STARTS the session offering rows the backend no longer has.
+     */
+    @Test
+    fun theNewSessionLadderFollowsTheDaemonAdvertisedVocabulary() {
+        // deliberately NOT the built-in order (cautious, balanced, autonomous, full), and one rung short
+        val advertised = listOf(
+            AgentModePreset(PermissionMode.DEFAULT, "balanced", "Balanced", recommended = true),
+            AgentModePreset(PermissionMode.BYPASS_PERMISSIONS, "full", "Full access"),
+            AgentModePreset(PermissionMode.PLAN, "cautious", "Cautious", danger = true),
+        )
+        configure(agent = AgentKind.CODEX, codexPresets = advertised) {
+            fun topOf(text: String) = onAllNodes(hasText(text)).onFirst().getUnclippedBoundsInRoot().top.value
+            assertFalse(
+                present(str(Res.string.codex_preset_autonomous)),
+                "a rung this daemon does not advertise must not be offered — it would start under a preset the backend dropped",
+            )
+            assertTrue(present(str(Res.string.codex_preset_balanced)), "…while the ones it does advertise are all here")
+            assertTrue(present(str(Res.string.codex_preset_cautious)))
+            assertTrue(present(str(Res.string.cfg_mode_full)))
+            // the daemon owns the ORDER, and the App renders it verbatim rather than re-sorting to its own table
+            assertTrue(
+                topOf(str(Res.string.codex_preset_balanced)) < topOf(str(Res.string.cfg_mode_full)),
+                "the advertised order leads with Balanced",
+            )
+            assertTrue(
+                topOf(str(Res.string.cfg_mode_full)) < topOf(str(Res.string.codex_preset_cautious)),
+                "…and puts Cautious last, where the daemon put it",
+            )
+        }
+    }
+
+    /**
+     * …and the one thing the daemon does NOT get to own: the Full-access confirmation.
+     *
+     * `danger` is emphasis, and the advertisement above carries no danger flag on its bypass row. Keying the
+     * gate on that flag would let a daemon (older, misconfigured or hostile) delete the single confirmation
+     * standing between one tap and unrestricted filesystem access, so the gate keys on the MODE instead —
+     * the same split [dev.ccpocket.app.ui.ModeSheet]'s Codex branch already makes.
+     */
+    @Test
+    fun anAdvertisedBypassRowStillCannotSkipTheFullAccessConfirmation() {
+        var picks = 0
+        val advertised = listOf(
+            AgentModePreset(PermissionMode.DEFAULT, "balanced", "Balanced", recommended = true),
+            AgentModePreset(PermissionMode.BYPASS_PERMISSIONS, "full", "Full access"), // no danger flag
+        )
+        configure(agent = AgentKind.CODEX, codexPresets = advertised, onPicked = { _, _, _, _ -> picks++ }) {
+            onAllNodes(hasText(str(Res.string.cfg_mode_full))).onFirst()
+                .performSemanticsAction(SemanticsActions.OnClick)
+            waitForIdle()
+            onAllNodes(hasText(str(Res.string.cfg_start), substring = true)).onFirst().performClick()
+            waitForIdle()
+            assertTrue(present(str(Res.string.cfm_title)), "Full access confirms first, whatever the wire said about danger")
+            assertEquals(0, picks, "…and nothing has started yet")
         }
     }
 

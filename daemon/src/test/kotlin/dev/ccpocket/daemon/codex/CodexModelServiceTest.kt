@@ -10,6 +10,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 class CodexModelServiceTest {
     @Test
@@ -123,6 +124,84 @@ class CodexModelServiceTest {
         assertEquals("full", result.modePresets.single { it.danger }.id)
         // English fallback copy is what an App that doesn't know the id renders verbatim — never blank
         assertTrue(result.modePresets.all { it.label.isNotBlank() && !it.detail.isNullOrBlank() })
+    }
+
+    /**
+     * The drift gate between the copy the daemon BROADCASTS and the translation a session actually RUNS.
+     *
+     * `CodexModelService.MODE_PRESETS` is a promise made with the daemon's authority ("this row means
+     * read-only"), while `CodexBackend.approvalPolicyFor`/`sandboxFor` is what a turn is really launched
+     * with. Until now the two were only wired together by KDoc pointing at each other, so editing one
+     * alone shipped a daemon-authority LIE: the phone would render an emphasis/description the local
+     * session does not honour. This test makes either side moving alone turn red.
+     *
+     * Copy is asserted with case-insensitive `contains` on purpose — the point is the SEMANTIC pairing
+     * (this row must still describe untrusted + read-only), not the exact wording, which stays free to be
+     * polished or reworded around those anchors.
+     */
+    @Test
+    fun advertised_mode_presets_stay_paired_with_the_backend_translation() {
+        // (approvalPolicy, sandbox.flat) → phrases the English fallback copy MUST still carry.
+        // Change the translation without the copy (or the copy without the translation) and this table
+        // stops matching, which is exactly the drift we want to be loud.
+        val expectedDetailPhrases = mapOf(
+            ("untrusted" to "read-only") to listOf("Ask before every", "read-only"),
+            ("on-request" to "workspace-write") to listOf("Ask when needed", "workspace"),
+            ("never" to "workspace-write") to listOf("Never ask", "workspace"),
+            ("never" to "danger-full-access") to listOf("Never ask", "full filesystem"),
+        )
+
+        val presets = CodexModelService.MODE_PRESETS
+
+        // 1) the advertised table covers every mode the backend can translate — and only those, once each
+        assertEquals(
+            PermissionMode.entries.toSet(),
+            presets.map { it.mode }.toSet(),
+            "every PermissionMode CodexBackend translates needs exactly one advertised row",
+        )
+        assertEquals(presets.size, presets.map { it.mode }.toSet().size, "no mode may be advertised twice")
+
+        for (preset in presets) {
+            val approvalPolicy = CodexBackend.approvalPolicyFor(preset.mode)
+            val sandbox = CodexBackend.sandboxFor(preset.mode).flat
+
+            // 2) the danger badge is the full-access sandbox, and nothing else
+            assertEquals(
+                sandbox == "danger-full-access",
+                preset.danger,
+                "preset '${preset.id}' runs as sandbox=$sandbox — the danger badge must mark exactly the full-access row",
+            )
+
+            // 3) the recommended badge is the ask-when-needed policy, and nothing else
+            assertEquals(
+                approvalPolicy == "on-request",
+                preset.recommended,
+                "preset '${preset.id}' runs as approvalPolicy=$approvalPolicy — recommended must mark exactly the on-request row",
+            )
+
+            // 4) the fallback copy must describe BOTH axes this mode really runs on
+            val phrases = expectedDetailPhrases[approvalPolicy to sandbox]
+                ?: fail(
+                    "preset '${preset.id}' translates to ($approvalPolicy, $sandbox) which this test has no expected " +
+                        "copy for — the translation changed, so review MODE_PRESETS' wording and extend this table",
+                )
+            val detail = preset.detail.orEmpty()
+            for (phrase in phrases) {
+                assertTrue(
+                    detail.contains(phrase, ignoreCase = true),
+                    "preset '${preset.id}' runs as ($approvalPolicy, $sandbox) but its detail \"$detail\" " +
+                        "no longer says \"$phrase\" — the advertised copy and the real translation drifted apart",
+                )
+            }
+        }
+
+        // the table itself must not rot: an entry nobody reaches is a stale expectation, not a guard
+        val livePairs = presets.map { CodexBackend.approvalPolicyFor(it.mode) to CodexBackend.sandboxFor(it.mode).flat }.toSet()
+        assertEquals(
+            expectedDetailPhrases.keys,
+            livePairs,
+            "the expected-copy table must describe exactly the (approvalPolicy, sandbox) pairs the backend produces",
+        )
     }
 
     /** The error branch says "I could not inspect this backend" — advertising a vocabulary there would

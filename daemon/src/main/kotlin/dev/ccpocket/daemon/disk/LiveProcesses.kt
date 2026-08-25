@@ -115,8 +115,14 @@ object LiveProcesses {
      * Windows (no lsof), enumeration failure, or an lsof failure/timeout all return UNKNOWN.
      */
     fun externalClaudeAt(workdir: String, transcript: Path): ExternalClaude {
-        return externalAgentAt(workdir, transcript, matchesCommand = { it.contains("/claude") })
+        return externalAgentAt(workdir, transcript, matchesCommand = ::isClaudeCommand)
     }
+
+    /** Separator-agnostic like [isCodexExecutable]: a slash-only match can never see `C:\...\claude.exe`,
+     *  which turned every Windows verdict into ABSENT ("no external claude") and waved a second writer
+     *  through the take-over gate — the exact clobber UNKNOWN existed to prevent (PR #296 re-review). */
+    internal fun isClaudeCommand(command: String): Boolean =
+        command.replace('\\', '/').contains("/claude")
 
     /**
      * Codex counterpart of [externalClaudeAt], used by read-only observe / safe take-over.
@@ -130,8 +136,10 @@ object LiveProcesses {
      */
     fun externalCodexAt(workdir: String, transcript: Path): ExternalClaude {
         val recent = runCatching {
+            // the CODEX scanner's window: this freshness feeds the write-gate below, and borrowing
+            // Claude's constant let an unrelated backend's display tuning move a safety input
             System.currentTimeMillis() - java.nio.file.Files.getLastModifiedTime(transcript).toMillis() <
-                TranscriptScanner.LIVE_WINDOW_MS
+                dev.ccpocket.daemon.codex.CodexTranscriptScanner.LIVE_WINDOW_MS
         }.getOrDefault(false)
         return externalAgentAt(workdir, transcript, ::isCodexExecutable, allowCwdMatch = recent)
     }

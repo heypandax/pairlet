@@ -432,7 +432,9 @@ class CodexBackendTest {
         b.sendPrompt("keep going with the batch", emptyList()) // → turn/steer (id 3)
         assertTrue(w.last { "turn/steer" in it }.contains("\"expectedTurnId\":\"turn-live\""))
 
-        // the turn completed server-side while the steer was in flight → stale expectedTurnId rejection
+        // the turn completed server-side while the steer was in flight: on the ordered pipe the completion
+        // is parsed FIRST, then the stale-expectedTurnId rejection — that pairing is what "stale" means
+        b.parse("""{"method":"turn/completed","params":{"turn":{"id":"turn-live","status":"completed"}}}""")
         val ev = b.parse("""{"id":3,"error":{"code":-32602,"message":"expectedTurnId does not match the active turn"}}""")
 
         assertTrue(ev.isEmpty(), "the retry is silent — no error surfaces for a recovered prompt")
@@ -503,6 +505,94 @@ class CodexBackendTest {
         val r = ev.filterIsInstance<AgentEvent.TurnResult>().single()
         assertTrue(r.isError)
         assertEquals("boom", r.finalText)
+    }
+
+    @Test
+    fun a_null_id_error_response_is_tolerated_without_an_exception() = runBlocking {
+        val b = ready(mutableListOf())
+        // JSON-RPC's mandated reply to an invalid request: "id":null. Must not NPE the pending maps
+        // (which would be swallowed upstream and mislogged as a parse failure).
+        val ev = b.parse("""{"id":null,"error":{"code":-32700,"message":"parse error"}}""")
+        assertTrue(ev.isEmpty(), ev.toString())
+    }
+
+    @Test
+    fun a_steer_rejected_before_the_sender_registers_it_is_still_retried() = runBlocking {
+        // The pump can parse an instant rejection while the sender is still inside rpcRequest. Pin that
+        // registration happens BEFORE the write by replaying the server's pipe — turn/completed, then the
+        // rejection — synchronously from within writeLine itself: with register-after-write neither map
+        // has the id yet and the acked prompt would fall to the log-and-drop path.
+        val w = mutableListOf<String>()
+        var fired = false
+        lateinit var b: CodexBackend
+        b = CodexBackend(null)
+        b.attach(
+            AgentIo(
+                writeLine = { line ->
+                    w += line
+                    if ("turn/steer" in line && !fired) {
+                        fired = true
+                        val id = Json.parseToJsonElement(line).jsonObject["id"]!!.jsonPrimitive.content
+                        b.parse("""{"method":"turn/completed","params":{"turn":{"id":"turn-live","status":"completed"}}}""")
+                        b.parse("""{"id":$id,"error":{"code":-32602,"message":"expectedTurnId mismatch"}}""")
+                    }
+                },
+                emit = {},
+            ),
+            AgentSpec(Path.of("/repo")),
+        )
+        b.parse(initResponse(1))
+        b.parse(threadStartResponse(2, "thr-1"))
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"turn-live"}}}""")
+
+        b.sendPrompt("recover me", emptyList())
+
+        val start = w.lastOrNull { "\"method\":\"turn/start\"" in it && "recover me" in it }
+        assertTrue(start != null, w.joinToString("\n"))
+    }
+
+    @Test
+    fun a_steer_rejected_while_its_turn_still_runs_surfaces_instead_of_colliding() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"turn-live"}}}""")
+        b.sendPrompt("mid-turn note", emptyList()) // → turn/steer (id 3)
+
+        // rejection arrives while turn-live is STILL the current turn — not a staleness race
+        val ev = b.parse("""{"id":3,"error":{"code":-32000,"message":"input rejected"}}""")
+
+        val t = ev.filterIsInstance<AgentEvent.AssistantText>().single()
+        assertTrue("input rejected" in t.text, t.text)
+        assertTrue(w.none { "\"method\":\"turn/start\"" in it }, "no blind turn/start against a live turn")
+    }
+
+    @Test
+    fun an_image_prompt_sent_mid_turn_waits_for_the_boundary_instead_of_losing_its_image() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"t1"}}}""")
+
+        b.sendPrompt("look at this", listOf(ImageData("image/png", "iVBORw==")))
+
+        assertTrue(w.none { "turn/steer" in it }, "an image prompt must not ride the image-less steer")
+        b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t1","status":"completed"}}}""")
+        val start = w.last { "\"method\":\"turn/start\"" in it }
+        assertTrue("look at this" in start && "iVBORw==" in start, start)
+    }
+
+    @Test
+    fun a_failed_turn_with_partial_text_still_reports_why_it_failed() = runBlocking {
+        val b = ready(mutableListOf())
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"t1"}}}""")
+        b.parse("""{"method":"item/agentMessage/delta","params":{"itemId":"m1","delta":"partial answer…"}}""")
+        b.parse("""{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"m1","text":"partial answer…"}}}""")
+        b.parse("""{"method":"error","params":{"error":{"message":"usage limit reached"}}}""")
+
+        val ev = b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t1","status":"failed"}}}""")
+
+        val r = ev.filterIsInstance<AgentEvent.TurnResult>().single()
+        assertTrue(r.isError)
+        assertEquals("usage limit reached", r.finalText, "the reason, not the already-streamed partial text")
     }
 
     @Test

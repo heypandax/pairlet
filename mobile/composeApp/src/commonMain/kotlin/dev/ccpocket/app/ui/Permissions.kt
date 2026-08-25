@@ -213,7 +213,7 @@ fun ModeSheet(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         codexPresetRows(modePresets).forEach { p ->
-                            PresetRow(p, selected = current == p.mode) {
+                            PresetRow(p, selected = current == p.mode, enabled = !switching) {
                                 // the confirmation gate keys on the MODE, not on the advertised danger flag:
                                 // BypassConfirm commits BYPASS_PERMISSIONS, so routing any other mode through
                                 // it would start a session under a mode the row never named
@@ -279,6 +279,11 @@ private fun BypassConfirm(workdir: String?, onCancel: () -> Unit, onConfirm: () 
  *
  * [computer] is the connected machine's display name — the Full-access confirmation names it, because a
  * blast radius is a place. Null simply drops that clause rather than inventing a host.
+ *
+ * [modePresetsFor] is the connected daemon's advertised permission vocabulary, per agent (Codex only today).
+ * It is a lambda rather than a list because the agent chips switch backends inside the sheet. Leaving it at
+ * the default means the new-session ladder silently ignores what the daemon says it supports — the exact
+ * version-skew the advertisement exists to prevent.
  */
 @Composable
 fun StartSessionModeSheet(
@@ -291,6 +296,7 @@ fun StartSessionModeSheet(
     availableAgents: List<AgentKind> = AgentKind.entries,
     modelsFor: (AgentKind) -> List<ModelChoice> = { emptyList() },
     defaultModelFor: (AgentKind) -> String? = { null },
+    modePresetsFor: (AgentKind) -> List<AgentModePreset> = { emptyList() },
     onAgentPicked: (AgentKind) -> Unit = {},
     onPick: (PermissionMode, AgentKind, String?, String?) -> Unit,
     onDismiss: () -> Unit,
@@ -304,6 +310,7 @@ fun StartSessionModeSheet(
     availableAgents = availableAgents,
     modelsFor = modelsFor,
     defaultModelFor = defaultModelFor,
+    modePresetsFor = modePresetsFor,
     onAgentPicked = onAgentPicked,
     onPick = onPick,
     onDismiss = onDismiss,
@@ -492,9 +499,13 @@ fun MonoChip(text: String, c: Color = Tok.tx2) {
     )
 }
 
-/** One Codex preset row: name + RECOMMENDED/warning + plain-language desc + the two raw-axis mono chips. */
+/** One Codex preset row: name + RECOMMENDED/warning + plain-language desc + the two raw-axis mono chips.
+ *
+ *  [enabled] false is the *switch in flight* state: the 0.55 alpha the caller paints is a statement, and a row
+ *  that still accepts taps under it would let a second (or third) `switchMode` race the first — on the control
+ *  that decides real filesystem access. Same gate [ModeRow] has always had. */
 @Composable
-private fun PresetRow(p: PresetRowUi, selected: Boolean, onClick: () -> Unit) {
+private fun PresetRow(p: PresetRowUi, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     val outline = if (p.danger) Tok.danger else if (selected) Tok.codex else Tok.hair
     val fill = when {
@@ -504,7 +515,7 @@ private fun PresetRow(p: PresetRowUi, selected: Boolean, onClick: () -> Unit) {
     }
     Column(
         Modifier.fillMaxWidth().clip(shape).background(fill).border(1.5.dp, outline, shape)
-            .clickable(onClick = onClick).padding(12.dp),
+            .clickable(enabled = enabled, onClick = onClick).padding(12.dp),
     ) {
         // name (14sp) + warning icon + RECOMMENDED pill (9.5sp) share one CenterVertically row — every Text here
         // needs tightCenter or the mixed font metrics push the glyphs off the shared baseline (project CLAUDE.md).

@@ -266,6 +266,45 @@ class EntryUiTest {
     }
 
     @Test
+    fun theSeedFollowsTheAdvertisedVocabularyToo() {
+        // the ladder and the row it OPENS on must come from the same list, or the sheet highlights a rung
+        // that isn't on screen (or none at all) while Start prints a mode the daemon never offered
+        val advertised = listOf(
+            AgentModePreset(PermissionMode.ACCEPT_EDITS, "autonomous", "Autonomous", recommended = true),
+            AgentModePreset(PermissionMode.BYPASS_PERMISSIONS, "full", "Full access"),
+        )
+        val seeded = seedModeChoice(
+            agent = AgentKind.CODEX, openedAgent = AgentKind.CODEX,
+            persisted = PermissionMode.DEFAULT, persistedNative = null, codexPresets = advertised,
+        )
+        assertTrue(
+            seeded in agentModeChoices(AgentKind.CODEX, codexPresets = advertised),
+            "the seed must be one of the rows actually rendered",
+        )
+        assertEquals(
+            PermissionMode.ACCEPT_EDITS, seeded.mode,
+            "DEFAULT is not advertised any more, so the seed falls to the first row this daemon does offer " +
+                "— never to a preset it dropped, and never to nothing",
+        )
+        // …and a persisted mode the daemon still offers is still inherited by the opening agent
+        assertEquals(
+            PermissionMode.ACCEPT_EDITS,
+            seedModeChoice(
+                agent = AgentKind.CODEX, openedAgent = AgentKind.CODEX,
+                persisted = PermissionMode.ACCEPT_EDITS, persistedNative = null, codexPresets = advertised,
+            ).mode,
+        )
+        // an unadvertised daemon leaves the seed exactly where it is today
+        assertEquals(
+            agentDefaultMode(AgentKind.CODEX),
+            seedModeChoice(
+                agent = AgentKind.CODEX, openedAgent = AgentKind.CLAUDE,
+                persisted = PermissionMode.PLAN, persistedNative = null,
+            ).mode,
+        )
+    }
+
+    @Test
     fun fullAccessAlwaysRoutesThroughTheConfirmation() {
         for (agent in listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.KIMI, AgentKind.ZCODE)) {
             val full = agentModeChoices(agent, autoAvailable = true)
@@ -277,6 +316,19 @@ class EntryUiTest {
         assertTrue(
             safe.none { it.needsFullAccessConfirm(AgentKind.CLAUDE) },
             "an ordinary mode must not borrow the danger gate",
+        )
+        // The gate keys on the MODE, never on the advertised `danger` flag: `danger` is emphasis and the
+        // daemon owns it, so keying on it would let a daemon delete the confirmation entirely by shipping
+        // its bypass row unflagged. (ModeSheet's Codex branch already routes on the mode for the same
+        // reason.) The flag still drives how the row LOOKS — just not whether the guard runs.
+        val unflaggedFullAccess = agentModeChoices(
+            AgentKind.CODEX,
+            codexPresets = listOf(AgentModePreset(PermissionMode.BYPASS_PERMISSIONS, "full", "Full access")),
+        ).single()
+        assertFalse(unflaggedFullAccess.danger, "the wire really did drop the emphasis…")
+        assertTrue(
+            unflaggedFullAccess.needsFullAccessConfirm(AgentKind.CODEX),
+            "…and the confirmation still runs — a daemon cannot talk the App out of guarding full access",
         )
     }
 

@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -204,13 +205,19 @@ fun ImageViewer(images: List<ByteArray>, startIndex: Int, onClose: () -> Unit) {
     if (images.isEmpty()) return
     val pager = rememberPagerState(initialPage = startIndex.coerceIn(0, images.size - 1)) { images.size }
     var dragY by remember { mutableStateOf(0f) }
+    // `pointerInput(Unit)` never restarts, so the lambda it captured on FIRST composition is the one that
+    // runs forever — a later [onClose] (callers pass inline lambdas that close over changing state) would
+    // never be seen, and the pull-down would dismiss through a stale closure. Re-keying on [onClose] is the
+    // wrong fix: an identity flip mid-drag cancels the coroutine, and detectVerticalDragGestures does not
+    // run onDragCancel in that path, leaving [dragY] parked. Same resolution as PocketSheet's drag handle.
+    val currentOnClose by rememberUpdatedState(onClose)
     Box(
         Modifier.fillMaxSize().background(Color(0xFF08090A))
             .graphicsLayer { translationY = dragY; alpha = 1f - (dragY / 900f).coerceIn(0f, 0.55f) }
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
                     onVerticalDrag = { _, d -> dragY = (dragY + d).coerceAtLeast(0f) },
-                    onDragEnd = { if (dragY > 90f) onClose() else dragY = 0f },
+                    onDragEnd = { if (dragY > 90f) currentOnClose() else dragY = 0f },
                     onDragCancel = { dragY = 0f },
                 )
             },

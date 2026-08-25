@@ -220,15 +220,27 @@ fun agentDefaultMode(agent: AgentKind): PermissionMode = when (agent) {
     else -> PermissionMode.DEFAULT
 }
 
-/** True when [choice] must pass the existing Full-access confirmation before a session may start. */
+/**
+ * True when [choice] must pass the existing Full-access confirmation before a session may start.
+ *
+ * The gate keys on the MODE, never on [ModeChoice.danger] — the same split the mode-switch sheet already
+ * makes. `danger` is EMPHASIS and the daemon owns it; a daemon that advertises its bypass row without the
+ * flag (or an older/hostile one) would otherwise silently remove the one confirmation standing between a tap
+ * and unrestricted filesystem access. OpenCode stays out because there [PermissionMode.BYPASS_PERMISSIONS]
+ * is a statement of what the CLI already does, not a choice being made.
+ */
 fun ModeChoice.needsFullAccessConfirm(agent: AgentKind): Boolean =
-    danger && mode == PermissionMode.BYPASS_PERMISSIONS && agent != AgentKind.OPENCODE
+    mode == PermissionMode.BYPASS_PERMISSIONS && agent != AgentKind.OPENCODE
 
 /**
  * The selection to open the configuration on for [agent].
  *
  * Only the agent the sheet OPENED on may inherit the caller's persisted default — every other agent is a
  * switch, and a switch resets (see [agentDefaultMode]).
+ *
+ * [codexPresets] is the connected daemon's advertised vocabulary, and it decides the seed too: a persisted
+ * mode the daemon no longer offers must not be resurrected here, and when a newer daemon drops the rung
+ * [agentDefaultMode] names, the fallback lands on the first row it DOES advertise rather than on nothing.
  */
 fun seedModeChoice(
     agent: AgentKind,
@@ -236,8 +248,9 @@ fun seedModeChoice(
     persisted: PermissionMode,
     persistedNative: String?,
     autoAvailable: Boolean = false,
+    codexPresets: List<AgentModePreset> = emptyList(),
 ): ModeChoice {
-    val choices = agentModeChoices(agent, autoAvailable)
+    val choices = agentModeChoices(agent, autoAvailable, codexPresets)
     if (agent == openedAgent) {
         choices.firstOrNull { it.mode == persisted && it.nativeMode == persistedNative }?.let { return it }
     }

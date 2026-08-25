@@ -5198,7 +5198,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // remembered backend, then the default) rather than only the caller's seed. This is synchronous like
         // the idempotence refusals below: unsupported ZCode never clears the current chat, flips opening
         // state or reaches the wire.
-        val targetAgent = agent ?: resumeId?.let { sessionParams[it]?.agent } ?: defaultAgent.value
+        // sessionDefaultAgent (NOT the raw preference): an unsupported persisted default must degrade to
+        // a Claude open like it always did, not silently refuse the tap (PR #296 re-review) — the hard
+        // supportsAgent refusal below is for EXPLICIT asks the daemon can't serve, not for the fallback.
+        val targetAgent = agent ?: resumeId?.let { sessionParams[it]?.agent } ?: sessionDefaultAgent
         if (!supportsAgent(targetAgent)) return false
         val attempt = OpenAttempt(wd, resumeId, startMode, title, agent, startPermissionMode, startModel)
         // #235: the two refusals, both decided SYNCHRONOUSLY — the defect they fix is two clicks landing in
@@ -5269,7 +5272,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // (default = the persisted Settings mode), so "continue here" honors what Settings says instead of
         // silently reviving a stale per-session mode (issue #50). Model/effort/agent still restore per-session.
         val openMode = startMode
-        val openAgent = agent ?: saved?.agent ?: defaultAgent.value
+        val openAgent = agent ?: saved?.agent ?: sessionDefaultAgent // same degrade-to-Claude ladder as the gate above
         val openPermissionMode =
             startPermissionMode?.takeIf { openAgent == AgentKind.CLAUDE && it == CLAUDE_PERMISSION_MODE_AUTO }
         // Each backend seeds from its own persisted default. The compatibility guard is the final defence against

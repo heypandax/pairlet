@@ -67,9 +67,14 @@ class CodexBackend(
     // Outstanding writes whose ERROR response must not be swallowed (PR #296 review): a steer that raced
     // turn completion retries as turn/start, a rejected turn/start settles the turn it never started, and
     // a control-plane op reports its failure instead of no-oping. Cleared on the success response.
-    private val pendingSteers = ConcurrentHashMap<Long, Prompt>() // turn/steer id → prompt to re-deliver
+    private val pendingSteers = ConcurrentHashMap<Long, SteerAttempt>() // turn/steer id → what rode it
     private val pendingStarts = ConcurrentHashMap.newKeySet<Long>() // turn/start ids in flight
     private val pendingControls = ConcurrentHashMap<Long, String>() // compact/review id → op label
+    // Prompts that arrived mid-turn but can't ride turn/steer (it has no image transport — Tier C):
+    // parked until the turn boundary instead of silently dropping their images (PR #296 re-review).
+    private val queuedStarts = ArrayDeque<Prompt>() // guarded by [bootstrap]
+
+    private data class SteerAttempt(val prompt: Prompt, val expectedTurnId: String)
 
     // a turn's running state, reset on turn/completed
     @Volatile private var lastAgentText: String? = null
@@ -106,6 +111,7 @@ class CodexBackend(
         lastAgentText = null; lastErrorText = null; lastUsage = Usage(); usageSeen = false
         deltaSeen.clear(); fileChangePaths.clear(); fileChangeDiffs.clear(); pendingApprovals.clear()
         pendingSteers.clear(); pendingStarts.clear(); pendingControls.clear()
+        bootstrap.withLock { queuedStarts.clear() }
         // kick off the handshake — initialized + thread open happen when the response lands (see handleResponse)
         initializeId = rpcRequest("initialize", buildJsonObject {
             putJsonObject("clientInfo") { put("name", "cc-pocket"); put("version", CLIENT_VERSION) }
@@ -158,13 +164,26 @@ class CodexBackend(
     private suspend fun handleErrorResponse(idEl: JsonElement?, error: JsonObject?): List<AgentEvent> {
         val id = (idEl as? JsonPrimitive)?.longOrNull
         val msg = error?.str("message") ?: error?.toString() ?: "unknown error"
-        pendingSteers.remove(id)?.let { prompt ->
+        if (id == null) {
+            // JSON-RPC's mandated reply to an unparseable/invalid request is `"id":null` — nothing of ours
+            // to correlate, and the maps below reject null keys (ConcurrentHashMap NPEs on them).
+            log.warn("codex error (no id): $error")
+            return emptyList()
+        }
+        pendingSteers.remove(id)?.let { attempt ->
+            if (currentTurnId == attempt.expectedTurnId) {
+                // Rejected while — by this pipe's own ordering — the steered turn is STILL running (its
+                // turn/completed would have been processed before this response). Not staleness: a blind
+                // turn/start retry would hit the active-writer conflict and its rejection would falsely
+                // settle a live turn. Surface it instead.
+                return listOf(AgentEvent.AssistantText("⚠️ Codex rejected the mid-turn message: $msg"))
+            }
             // The steer raced the turn's completion: [currentTurnId] was read before turn/completed landed,
             // so the server saw a stale expectedTurnId. That turn is over, which makes a plain turn/start
             // the correct delivery now. One bounded hop — the retry registers in [pendingStarts], so a
             // second rejection surfaces below instead of looping.
             log.info("codex steer rejected (${msg.take(120)}) — re-delivering as turn/start")
-            writeTurnStart(prompt.text, prompt.images)
+            writeTurnStart(attempt.prompt.text, attempt.prompt.images)
             return emptyList()
         }
         if (pendingStarts.remove(id)) {
@@ -175,14 +194,14 @@ class CodexBackend(
         pendingControls.remove(id)?.let { op ->
             return listOf(AgentEvent.AssistantText("⚠️ Codex /$op failed: $msg"))
         }
-        if (id != null && id == threadOpenId) {
+        if (id == threadOpenId) {
             // Deliberately NO silent thread/resume fallback for a failed fork: fork exists so a take-over
             // never becomes a second writer on a rollout another codex may still own. Surface it instead —
             // a buffered first prompt would otherwise wait forever behind a thread that will never open.
             val op = if (resumeId == null) "start" else if (forkSession) "fork" else "resume"
             return listOf(AgentEvent.TurnResult("⚠️ Codex could not $op this session: $msg", usage = null, isError = true))
         }
-        if (id != null && id == initializeId) {
+        if (id == initializeId) {
             return listOf(AgentEvent.TurnResult("⚠️ Codex failed to initialize: $msg", usage = null, isError = true))
         }
         log.warn("codex error: $error")
@@ -260,7 +279,12 @@ class CodexBackend(
                 captureUsage(tu?.obj("last") ?: tu?.obj("total"))
                 emptyList()
             }
-            "turn/completed" -> onTurnCompleted(params.obj("turn"))
+            "turn/completed" -> {
+                val events = onTurnCompleted(params.obj("turn"))
+                // one parked image-prompt per boundary: it becomes the NEXT turn; any others wait their own
+                bootstrap.withLock { queuedStarts.removeFirstOrNull() }?.let { writeTurnStart(it.text, it.images) }
+                events
+            }
             "error" -> {
                 val msg = params.obj("error")?.str("message") ?: "codex error"
                 // Mid-turn: the v2 protocol guarantees turn.error on a failed completion, so stash rather
@@ -329,7 +353,9 @@ class CodexBackend(
         val failure = turn?.obj("error")?.str("message") ?: lastErrorText?.takeIf { status == "failed" }
         val u = lastUsage
         val ev = AgentEvent.TurnResult(
-            finalText = lastAgentText ?: failure,
+            // A FAILED turn reports its reason even when partial text streamed first: the deltas already
+            // reached the phone, but `partial ?: failure` hid WHY the turn died (PR #296 re-review).
+            finalText = if (status == "failed") failure ?: lastAgentText else lastAgentText,
             // a turn that never saw a tokenUsage event reports "unknown" (null), not an empty window
             usage = if (usageSeen) TokenUsage(u.input, u.output, null, u.cached) else null,
             isError = status == "failed",
@@ -402,8 +428,22 @@ class CodexBackend(
         }
         if (ready) {
             val activeTurn = currentTurnId
-            if (activeTurn != null) writeTurnSteer(promptText, images, activeTurn)
-            else writeTurnStart(promptText, images)
+            when {
+                activeTurn != null && images.isNotEmpty() -> {
+                    // turn/steer has no image transport (Tier C): steering would silently drop the images
+                    // and answer the question without them. Park the whole prompt for the turn boundary —
+                    // delivered as its own turn/start from onTurnCompleted's drain, images intact.
+                    bootstrap.withLock { queuedStarts.addLast(Prompt(promptText, images)) }
+                    // The turn can complete between the activeTurn read and the enqueue — then no future
+                    // turn/completed exists to drain this. Re-check and drain ourselves; the lock makes
+                    // the two drains take each prompt exactly once.
+                    if (currentTurnId == null) {
+                        bootstrap.withLock { queuedStarts.removeFirstOrNull() }?.let { writeTurnStart(it.text, it.images) }
+                    }
+                }
+                activeTurn != null -> writeTurnSteer(promptText, images, activeTurn)
+                else -> writeTurnStart(promptText, images)
+            }
         }
     }
 
@@ -422,7 +462,7 @@ class CodexBackend(
 
     private suspend fun writeTurnStart(text: String, images: List<ImageData>) {
         val tid = threadId ?: return
-        pendingStarts.add(rpcRequest("turn/start", buildJsonObject {
+        rpcRequest("turn/start", register = { pendingStarts.add(it) }, params = buildJsonObject {
             put("threadId", tid)
             putJsonArray("input") {
                 addJsonObject { put("type", "text"); put("text", text) }
@@ -441,23 +481,23 @@ class CodexBackend(
             codexModel()?.let { put("model", it) }
             effort?.let { put("effort", it) }
             serviceTier?.let { put("serviceTier", it) }
-        }))
+        })
     }
 
     /** Append input to the turn Codex is already running. Starting a second turn on the same thread is
      * rejected by app-server as an active-writer conflict; turn/steer is its native in-flight input API. */
     private suspend fun writeTurnSteer(text: String, images: List<ImageData>, turnId: String) {
         val tid = threadId ?: return
-        val id = rpcRequest("turn/steer", buildJsonObject {
+        // registered BEFORE the write: a stale-expectedTurnId rejection re-delivers this as turn/start
+        rpcRequest("turn/steer", register = { pendingSteers[it] = SteerAttempt(Prompt(text, images), turnId) }, params = buildJsonObject {
             put("threadId", tid)
             putJsonArray("input") {
                 addJsonObject { put("type", "text"); put("text", text) }
-                // images: Codex takes image{url}/localImage{path}, not base64 inline — deferred (Tier C)
+                // images: Codex takes image{url}/localImage{path}, not base64 inline — deferred (Tier C);
+                // sendPrompt routes image-carrying prompts around this path entirely (queuedStarts)
             }
             put("expectedTurnId", turnId)
         })
-        // remember what rode this steer: a stale-expectedTurnId rejection re-delivers it as turn/start
-        pendingSteers[id] = Prompt(text, images)
     }
 
     override suspend fun interrupt() {
@@ -475,7 +515,7 @@ class CodexBackend(
     }
 
     private suspend fun requestCompact(tid: String) {
-        pendingControls[rpcRequest("thread/compact/start", buildJsonObject { put("threadId", tid) })] = "compact"
+        rpcRequest("thread/compact/start", register = { pendingControls[it] = "compact" }, params = buildJsonObject { put("threadId", tid) })
     }
 
     override suspend fun review(instructions: String?): Boolean {
@@ -488,7 +528,7 @@ class CodexBackend(
     }
 
     private suspend fun requestReview(tid: String, instructions: String) {
-        pendingControls[rpcRequest("review/start", buildJsonObject {
+        rpcRequest("review/start", register = { pendingControls[it] = "review" }, params = buildJsonObject {
             put("threadId", tid)
             put("delivery", "inline")
             putJsonObject("target") {
@@ -498,7 +538,7 @@ class CodexBackend(
                     put("instructions", instructions)
                 }
             }
-        })] = "review"
+        })
     }
 
     override suspend fun respondPermission(
@@ -580,30 +620,21 @@ class CodexBackend(
     // ---- mode mapping (Claude's single mode → Codex's approvalPolicy × sandbox axes) ----
 
     // The 4 PermissionMode values are the phone's Codex presets (Cautious/Balanced/Autonomous/Full auto).
-    private fun approvalPolicy(): String = when (mode) {
-        PermissionMode.PLAN -> "untrusted"             // Cautious: ask every step (paired with read-only)
-        PermissionMode.DEFAULT -> "on-request"         // Balanced: ask when needed (the recommended default)
-        PermissionMode.ACCEPT_EDITS -> "never"         // Autonomous: never ask, writes in the workspace
-        PermissionMode.BYPASS_PERMISSIONS -> "never"   // Full auto: never ask + full access
-    }
+    private fun approvalPolicy(): String = approvalPolicyFor(mode)
 
-    /** The sandbox for the current mode in both spellings codex needs: flat SandboxMode string (thread/start)
-     *  + the SandboxPolicy object tag (turn/start). One source so the two can't desync. */
-    private data class Sandbox(val flat: String, val tag: String)
-
-    private fun sandbox(): Sandbox = when (mode) {
-        PermissionMode.PLAN -> Sandbox("read-only", "readOnly")
-        PermissionMode.BYPASS_PERMISSIONS -> Sandbox("danger-full-access", "dangerFullAccess")
-        else -> Sandbox("workspace-write", "workspaceWrite")
-    }
+    private fun sandbox(): Sandbox = sandboxFor(mode)
 
     /** Drop Claude model aliases (opus/sonnet/haiku) — they're meaningless to codex and would error. */
     private fun codexModel(): String? = model?.takeIf { it.lowercase() !in CLAUDE_ALIASES }
 
     // ---- JSON-RPC plumbing ----
 
-    private suspend fun rpcRequest(method: String, params: JsonObject?): Long {
+    /** [register] runs between id allocation and the WRITE: an instant rejection is parsed on the pump
+     *  coroutine, so registering after the write races it — the error would find no pending entry and
+     *  fall to the log-and-drop path, resurrecting the swallowed-prompt class (PR #296 re-review). */
+    private suspend fun rpcRequest(method: String, params: JsonObject?, register: ((Long) -> Unit)? = null): Long {
         val id = idSeq.getAndIncrement()
+        register?.invoke(id)
         write(buildJsonObject {
             put("id", id)
             put("method", method)
@@ -625,10 +656,30 @@ class CodexBackend(
         io?.writeLine(obj.toString())
     }
 
-    private companion object {
+    companion object {
         // the daemon's real build version (single runtime source — no per-release manual bump here)
-        val CLIENT_VERSION: String get() = dev.ccpocket.daemon.util.DaemonVersion.CURRENT
-        const val MAX_DIFF_CHARS = 6000 // approval diff cap — keeps the PermissionAsk frame well under the relay's 256 KiB limit
-        val CLAUDE_ALIASES = setOf("opus", "sonnet", "haiku")
+        private val CLIENT_VERSION: String get() = dev.ccpocket.daemon.util.DaemonVersion.CURRENT
+        private const val MAX_DIFF_CHARS = 6000 // approval diff cap — keeps the PermissionAsk frame well under the relay's 256 KiB limit
+        private val CLAUDE_ALIASES = setOf("opus", "sonnet", "haiku")
+
+        /** The sandbox for a mode in both spellings codex needs: flat SandboxMode string (thread/start)
+         *  + the SandboxPolicy object tag (turn/start). One source so the two can't desync. */
+        internal data class Sandbox(val flat: String, val tag: String)
+
+        // internal (not private) so CodexModelServiceTest can assert the advertised MODE_PRESETS rows
+        // stay paired with THIS translation — the copy the daemon broadcasts must describe what a session
+        // under that mode actually runs as (PR #296 review: drift here is a daemon-authority lie).
+        internal fun approvalPolicyFor(mode: PermissionMode): String = when (mode) {
+            PermissionMode.PLAN -> "untrusted"             // Cautious: ask every step (paired with read-only)
+            PermissionMode.DEFAULT -> "on-request"         // Balanced: ask when needed (the recommended default)
+            PermissionMode.ACCEPT_EDITS -> "never"         // Autonomous: never ask, writes in the workspace
+            PermissionMode.BYPASS_PERMISSIONS -> "never"   // Full auto: never ask + full access
+        }
+
+        internal fun sandboxFor(mode: PermissionMode): Sandbox = when (mode) {
+            PermissionMode.PLAN -> Sandbox("read-only", "readOnly")
+            PermissionMode.BYPASS_PERMISSIONS -> Sandbox("danger-full-access", "dangerFullAccess")
+            else -> Sandbox("workspace-write", "workspaceWrite")
+        }
     }
 }
