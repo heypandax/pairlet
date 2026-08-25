@@ -11,12 +11,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -384,10 +388,16 @@ fun NewSessionDock(
 ) {
     val shape = RoundedCornerShape(13.dp)
     val cta = stringResource(Res.string.new_session_cta)
-    Column(modifier.fillMaxWidth().background(Tok.base)) {
+    // The dock owns the screen's bottom edge: its base fill runs to the physical edge and the
+    // nav-bar/home-indicator inset REPLACES the bottom gap (union = max, not sum) — the button rides
+    // just above the indicator instead of stacking gap + inset. Inset-less devices keep the plain gap.
+    Column(
+        modifier.fillMaxWidth().background(Tok.base)
+            .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets(bottom = Metric.gap))),
+    ) {
         Hairline()
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = Metric.gutter, vertical = Metric.gap),
+            Modifier.fillMaxWidth().padding(start = Metric.gutter, end = Metric.gutter, top = Metric.gap),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
