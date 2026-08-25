@@ -1,5 +1,6 @@
 package dev.ccpocket.app.net
 
+import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.util.B64Url
 import dev.ccpocket.protocol.Attached
@@ -95,6 +96,15 @@ class RelayE2EConnection {
             // collapse them before the writer flushes (issue #143)
             outbox.dedupeBacklog()
 
+            // #298 silence-deafness: the OTHER half of #146. When the daemon loses this device's session
+            // (relay blip re-attaches the stream, daemon restarts, …) our sealed frames are dropped
+            // pre-handshake on its side and NOTHING comes back — zero inbound means the decrypt-failure
+            // counter below never moves, and the link zombies until the process dies (observed: 28 min on
+            // desktop, would be a full outage on a relay-only phone). Sends with no inbound for too long
+            // trip the SAME [deaf] recovery. Benignly racy across the writer/reader coroutines: an off-by-
+            // one send count or a late reset costs at most one extra (cheap, invisible) re-handshake.
+            var sentSinceInbound = 0
+            var lastInboundAt = epochMillis() // the completed handshake IS inbound proof
             val writer = launch {
                 for (f in outbox) {
                     // superseded mid-drain: hand the frame back to the live connection instead of sending
@@ -102,6 +112,12 @@ class RelayE2EConnection {
                     if (gen != connSeq) { outbox.send(f); throw DeadLinkException() }
                     val json = PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f))
                     sendOrDie { outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray())))) }
+                    if (silenceDeafTripped(++sentSinceInbound, epochMillis() - lastInboundAt)) {
+                        sentSinceInbound = 0 // signal once, then let the forced re-handshake take over
+                        // gen recheck (review, Low): sendOrDie can stall ~10s, long enough for a #142
+                        // supersede — a dying writer must not tear down its healthy successor
+                        if (gen == connSeq) deaf.emit(Unit)
+                    }
                 }
             }
             // control frames (e.g. RegisterPush) ride the TEXT plane in the clear — the relay parses these
@@ -130,6 +146,9 @@ class RelayE2EConnection {
                                 continue
                             }
                             deafRun = 0 // a good decrypt proves the link is not deaf
+                            // …and disarms the silence watchdog: the daemon demonstrably holds our session
+                            sentSinceInbound = 0
+                            lastInboundAt = epochMillis()
                             runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }.getOrNull()?.let { inbound.emit(it.body) }
                         }
                         // relay control frames ride the TEXT plane after the handshake (e.g. PeerPresence)
@@ -184,6 +203,20 @@ class RelayE2EConnection {
         /** Pure (for tests): a live socket is DEAF once this many inbound transport frames fail to decrypt
          *  consecutively — a re-keyed/overwritten daemon session (#146), not a lone stray frame. */
         fun deafTripped(consecutiveFailures: Int): Boolean = consecutiveFailures >= DEAF_DECRYPT_FAILURES
+
+        // #298: the silence half. BOTH thresholds must hold — a count alone would trip on any send burst
+        // while the daemon is legitimately quiet, a clock alone would trip on an idle background link that
+        // sent nothing at all. Wide enough that a slow turn with no pushes never trips (the daemon acks
+        // prompts and streams work product well inside 20s); narrow enough that a zombied link heals in
+        // roughly half a minute instead of "until the user kills the app".
+        const val SILENCE_DEAF_MIN_SENDS = 3
+        const val SILENCE_DEAF_WINDOW_MS = 20_000L
+
+        /** Pure (for tests): sealed sends with ZERO inbound transport decrypts for too long = the daemon
+         *  no longer holds our session (it drops our frames pre-handshake and has nothing to say back).
+         *  The decrypt-failure counter can't see this — silence produces no failures (#298). */
+        fun silenceDeafTripped(sendsSinceInbound: Int, silenceMs: Long): Boolean =
+            sendsSinceInbound >= SILENCE_DEAF_MIN_SENDS && silenceMs >= SILENCE_DEAF_WINDOW_MS
     }
 }
 

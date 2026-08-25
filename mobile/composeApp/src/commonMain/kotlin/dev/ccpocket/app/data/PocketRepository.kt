@@ -2204,7 +2204,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     // frames optimistically queued for the direct leg (incl. this attempt's ListDirectories)
                     // ride the relay instead — nothing silently evaporates in the fallback
                     directE2E.drainPending().forEach { relay.send(it) }
-                    relay.connect(p, Pairing.deviceKeys(), firstTicket).also { firstTicket = null }
+                    // Consumed per ATTEMPT, not per normal return (#298 security review, Medium 2): an
+                    // abnormal socket death — DeadLinkException, or the forced relaunch #146/#298 fire —
+                    // used to skip a trailing `.also` and re-feed the STALE ticket into every retry. The
+                    // daemon burns its pskFor on first confirm (#161), so each retry then handshook with
+                    // mismatched PSKs: silent zombie on pairing day, which the silence watchdog would
+                    // re-trip forever without converging. The daemon's #161 twin exists to absorb exactly
+                    // this asymmetry — consuming on attempt is the contract its comment already assumes.
+                    val t = firstTicket
+                    firstTicket = null
+                    relay.connect(p, Pairing.deviceKeys(), t)
                 } else {
                     direct.connect(lastDirectUrl ?: error("no direct url"))
                 }
