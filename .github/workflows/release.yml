@@ -27,13 +27,62 @@ on:
         description: "Only rebuild & re-attach the macOS DESKTOP app (.dmg, both arches) + regenerate SHA256SUMS, leaving the daemon tarballs / Windows / Android untouched. For a desktop-only hotfix onto an existing release WITHOUT changing the daemon sha256 (which would break the published Homebrew cask / Scoop manifest)."
         type: boolean
         default: false
+      include_harmony:
+        description: "Also build and attach the signed HarmonyOS HAP on the dedicated self-hosted macOS/ARM64/harmony runner. Off by default: GitHub-hosted runners do not provide DevEco Studio."
+        type: boolean
+        default: false
+      only_harmony:
+        description: "Only run the Harmony job against an existing release (implies include_harmony): attaches the signed HAP + retains the AGC App Pack, then regenerates SHA256SUMS. Skips every other platform job so their published assets (and the Homebrew cask / Scoop sha256 pins) stay byte-identical. Must still be dispatched from the release tag."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+# A second dispatch for the same version must wait. Otherwise one run can replace a platform asset while
+# the other is rebuilding SHA256SUMS, leaving the release with a checksum for the losing artifact set.
+concurrency:
+  group: release-${{ github.repository }}-${{ inputs.version }}
+  cancel-in-progress: false
+
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify immutable release source and version lockstep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          ONLY_ANDROID: ${{ inputs.only_android }}
+          ONLY_MACOS_DESKTOP: ${{ inputs.only_macos_desktop }}
+          ONLY_HARMONY: ${{ inputs.only_harmony }}
+        run: |
+          bash scripts/check-release-version.sh "$RELEASE_VERSION"
+          [ "$ONLY_ANDROID" != "true" ] || [ "$ONLY_MACOS_DESKTOP" != "true" ] || {
+            echo "::error::only_android and only_macos_desktop cannot both be true"
+            exit 1
+          }
+          if [ "$ONLY_HARMONY" = "true" ] && { [ "$ONLY_ANDROID" = "true" ] || [ "$ONLY_MACOS_DESKTOP" = "true" ]; }; then
+            echo "::error::only_harmony cannot be combined with only_android or only_macos_desktop"
+            exit 1
+          fi
+          TAG="v${RELEASE_VERSION}"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null || {
+            echo "::error::GitHub Release ${TAG} must exist before the artifact workflow starts"
+            exit 1
+          }
+          if [ "$ONLY_ANDROID" != "true" ] && [ "$ONLY_MACOS_DESKTOP" != "true" ]; then
+            [ "$GITHUB_REF" = "refs/tags/${TAG}" ] || {
+              echo "::error::full releases must run from immutable tag ${TAG}; got ${GITHUB_REF}"
+              exit 1
+            }
+          fi
+
   macos:
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
+    needs: preflight
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
     strategy:
       fail-fast: false
       matrix:
@@ -44,14 +93,14 @@ jobs:
             jdk_arch: x64       # cross-build via Rosetta
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rosetta (for the x86_64 JDK)
         if: matrix.arch == 'x86_64'
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
       - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -97,13 +146,14 @@ jobs:
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
 
   windows:
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
+    needs: preflight
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17 (with jpackage)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -121,7 +171,8 @@ jobs:
           gh release upload "v${{ inputs.version }}" $artifact --clobber
 
   linux:
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
+    needs: preflight
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -133,10 +184,10 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17 (with jpackage)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -155,17 +206,18 @@ jobs:
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
 
   android:
+    needs: preflight
     # Builds the signed phone app (:mobile:composeApp) and attaches the APK to the release, so the
     # website's "newest .apk" link always resolves to a current, release-signed build. The signing
     # key is injected from repo secrets; if any are missing the build.gradle signing config is
     # skipped and we FAIL the job rather than ship an unsigned APK (apksigner verify is the gate).
-    if: ${{ !inputs.only_macos_desktop }}
+    if: ${{ !inputs.only_macos_desktop && !inputs.only_harmony }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -230,6 +282,7 @@ jobs:
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
 
   macos-desktop:
+    needs: preflight
     # The Compose Desktop APP (.dmg) for macOS — signed + notarized, attached to the release under a stable
     # version-less name (so releases/latest/download/cc-pocket-desktop-macos-<arch>.dmg is a permanent link).
     # BOTH arches build on Apple Silicon (macos-14): an x86_64 Temurin JDK under Rosetta makes packageDmg
@@ -237,7 +290,7 @@ jobs:
     # job; we AVOID the retiring macos-13 Intel runner (jobs there queue indefinitely).
     # composeApp applies the Android + googleServices plugins, so the build needs the Android SDK at configure
     # time and a google-services.json to exist — the desktop target never touches Firebase, so a placeholder is fine.
-    if: ${{ !inputs.only_android }}
+    if: ${{ !inputs.only_android && !inputs.only_harmony }}
     strategy:
       fail-fast: false
       matrix:
@@ -248,41 +301,24 @@ jobs:
             jdk_arch: x64       # cross-build via Rosetta
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rosetta (for the x86_64 JDK)
         if: matrix.arch == 'x86_64'
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
       - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
           architecture: ${{ matrix.jdk_arch }}
 
       - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
-      - name: Write placeholder google-services.json (gitignored; desktop target never uses Firebase)
-        run: |
-          cat > mobile/composeApp/google-services.json <<'JSON'
-          {
-            "project_info": { "project_number": "000000000000", "project_id": "ccpocket-ci-placeholder" },
-            "client": [
-              {
-                "client_info": {
-                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
-                  "android_client_info": { "package_name": "com.panda.ccpocket" }
-                },
-                "api_key": [ { "current_key": "AIzaPlaceholderKeyForCiDesktopBuildOnly0000" } ],
-                "oauth_client": [],
-                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
-              }
-            ],
-            "configuration_version": "1"
-          }
-          JSON
+      - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
+        run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
 
       - name: Import Developer ID signing certificate
         env:
@@ -323,43 +359,27 @@ jobs:
           gh release upload "v${VER}" "$VERSIONED" "cc-pocket-desktop-macos-${ARCH}.dmg" --clobber
 
   windows-desktop:
+    needs: preflight
     # The Compose Desktop APP (.msi installer) for Windows, attached to the release under a stable version-less
     # name. jpackage can't cross-compile, so this runs on windows-latest (which ships WiX, so the MSI builds).
     # Mirrors build-windows.yml's windows-app job but uploads to the release instead of a workflow artifact.
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17 (with jpackage)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
-      - name: Write placeholder google-services.json (gitignored; desktop target never uses Firebase)
+      - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
         shell: bash
-        run: |
-          cat > mobile/composeApp/google-services.json <<'JSON'
-          {
-            "project_info": { "project_number": "000000000000", "project_id": "ccpocket-ci-placeholder" },
-            "client": [
-              {
-                "client_info": {
-                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
-                  "android_client_info": { "package_name": "com.panda.ccpocket" }
-                },
-                "api_key": [ { "current_key": "AIzaPlaceholderKeyForCiDesktopBuildOnly0000" } ],
-                "oauth_client": [],
-                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
-              }
-            ],
-            "configuration_version": "1"
-          }
-          JSON
+        run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
 
       - name: Unpin the macOS-only JDK path (gradle.properties pins it for local dev; CI uses the runner JDK)
         shell: bash
@@ -387,25 +407,205 @@ jobs:
           cp "$MSI" cc-pocket-desktop-windows-x86_64.msi
           gh release upload "v${{ inputs.version }}" cc-pocket-desktop-windows-x86_64.msi --clobber
 
+  harmony:
+    needs: preflight
+    # DevEco Studio is not available on GitHub-hosted macOS runners. This job is deliberately opt-in and
+    # targets only the trusted ephemeral/JIT runner documented in harmony/README.md. A normal release
+    # keeps include_harmony=false, so it neither queues for that runner nor fails when the runner is offline.
+    if: ${{ (inputs.include_harmony || inputs.only_harmony) && !inputs.only_android && !inputs.only_macos_desktop }}
+    runs-on: [self-hosted, macOS, ARM64, harmony]
+    environment: harmony-release
+    timeout-minutes: 90
+    env:
+      # Keep workflow inputs out of generated shell source. Every run step reads the literal value
+      # from this environment variable and validates it before any signing secret is restored.
+      RELEASE_VERSION: ${{ inputs.version }}
+      # Optional repository variable; an empty value falls back to /Applications/DevEco-Studio.app/Contents.
+      DEVECO_HOME: ${{ vars.HARMONY_DEVECO_HOME }}
+    steps:
+      - name: Validate runner, version and immutable release source
+        id: release_target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Harmony release version must be strict x.y.z without leading zeroes"
+            exit 1
+          fi
+          TAG="v${RELEASE_VERSION}"
+          TAG_REF="refs/tags/${TAG}"
+          [ "$GITHUB_REF" = "$TAG_REF" ] || {
+            echo "::error::Harmony release must be dispatched with --ref ${TAG}; got ${GITHUB_REF}"
+            exit 1
+          }
+          [ "$GITHUB_REF_PROTECTED" = "true" ] || {
+            echo "::error::Harmony release tag must be protected by a GitHub tag ruleset"
+            exit 1
+          }
+          [ "$(uname -s)" = "Darwin" ] || { echo "::error::Harmony release requires macOS"; exit 1; }
+          [ "$(uname -m)" = "arm64" ] || { echo "::error::Harmony release requires an ARM64 runner"; exit 1; }
+          DEVECO="${DEVECO_HOME:-/Applications/DevEco-Studio.app/Contents}"
+          [ -d "$DEVECO" ] || { echo "::error::DevEco Studio not found at $DEVECO"; exit 1; }
+          command -v gh >/dev/null || { echo "::error::GitHub CLI (gh) is required on the Harmony runner"; exit 1; }
+          command -v unzip >/dev/null || { echo "::error::unzip is required on the Harmony runner"; exit 1; }
+          command -v openssl >/dev/null || { echo "::error::openssl is required on the Harmony runner"; exit 1; }
+          [ -x /usr/bin/plutil ] || { echo "::error::macOS plutil is required on the Harmony runner"; exit 1; }
+
+          RELEASE_TAG=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          RELEASE_TARGET=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq .targetCommitish)
+          [ "$RELEASE_TAG" = "$TAG" ] || {
+            echo "::error::Release tag mismatch: expected ${TAG}, got ${RELEASE_TAG}"
+            exit 1
+          }
+          [ -n "$RELEASE_TARGET" ] || { echo "::error::Release targetCommitish is empty"; exit 1; }
+
+          # The release's tag ref is the immutable build source. Resolve it to a commit, then prove
+          # targetCommitish still resolves to that commit or to a descendant (for the usual `main`
+          # target after later releases). This rejects unrelated/retargeted release branches while
+          # keeping safe re-runs of an older tag possible.
+          gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null
+          TAG_COMMIT=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/commits" \
+            -f sha="$TAG" -F per_page=1 --jq '.[0].sha')
+          TARGET_COMMIT=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/commits" \
+            -f sha="$RELEASE_TARGET" -F per_page=1 --jq '.[0].sha')
+          [[ "$TAG_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Could not resolve ${TAG} to a commit"; exit 1; }
+          [[ "$TARGET_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Could not resolve targetCommitish ${RELEASE_TARGET}"; exit 1; }
+
+          if [[ "$RELEASE_TARGET" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            NORMALIZED_RELEASE_TARGET=$(printf '%s' "$RELEASE_TARGET" | tr '[:upper:]' '[:lower:]')
+            [ "$NORMALIZED_RELEASE_TARGET" = "$TAG_COMMIT" ] || {
+              echo "::error::Release target commit ${RELEASE_TARGET} does not equal tag commit ${TAG_COMMIT}"
+              exit 1
+            }
+          else
+            TARGET_STATUS=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TAG_COMMIT}...${TARGET_COMMIT}" --jq .status)
+            case "$TARGET_STATUS" in
+              identical|ahead) ;;
+              *)
+                echo "::error::Release target ${RELEASE_TARGET} is not the tag commit or its descendant (status=${TARGET_STATUS})"
+                exit 1
+                ;;
+            esac
+          fi
+          [ "$GITHUB_SHA" = "$TAG_COMMIT" ] || {
+            echo "::error::Workflow ref resolved to ${GITHUB_SHA}, but ${TAG} resolves to ${TAG_COMMIT}"
+            exit 1
+          }
+          printf 'tag_ref=%s\ncommit_sha=%s\n' "$TAG_REF" "$TAG_COMMIT" >> "$GITHUB_OUTPUT"
+
+      # Pin the high-value signing boundary, rather than trusting the mutable v7 tag.
+      # actions/checkout v7.0.1, verified commit (queried 2026-08-14).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ steps.release_target.outputs.tag_ref }}
+          persist-credentials: false
+
+      - name: Verify tag checkout and Harmony release build contract
+        env:
+          EXPECTED_COMMIT_SHA: ${{ steps.release_target.outputs.commit_sha }}
+        run: |
+          [ "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT_SHA" ] || {
+            echo "::error::Checked-out commit does not match the validated release tag"
+            exit 1
+          }
+          bash scripts/check-harmony-release.sh
+
+      - name: Restore Harmony signing material into runner temp
+        env:
+          HARMONY_P12_BASE64: ${{ secrets.HARMONY_P12_BASE64 }}
+          HARMONY_CER_BASE64: ${{ secrets.HARMONY_CER_BASE64 }}
+          HARMONY_P7B_BASE64: ${{ secrets.HARMONY_P7B_BASE64 }}
+        run: |
+          if [ -z "$HARMONY_P12_BASE64" ] || [ -z "$HARMONY_CER_BASE64" ] || [ -z "$HARMONY_P7B_BASE64" ]; then
+            echo "::error::HARMONY_P12_BASE64, HARMONY_CER_BASE64 and HARMONY_P7B_BASE64 must all be set"
+            exit 1
+          fi
+          SIGNING_DIR="$RUNNER_TEMP/cc-pocket-harmony-signing"
+          mkdir -p "$SIGNING_DIR"
+          chmod 700 "$SIGNING_DIR"
+          rm -f "$SIGNING_DIR/cc-pocket-harmony.p12" "$SIGNING_DIR/cc-pocket-harmony-release.cer" "$SIGNING_DIR/cc-pocket-harmony-release.p7b"
+          umask 077
+          printf '%s' "$HARMONY_P12_BASE64" | base64 --decode > "$SIGNING_DIR/cc-pocket-harmony.p12"
+          printf '%s' "$HARMONY_CER_BASE64" | base64 --decode > "$SIGNING_DIR/cc-pocket-harmony-release.cer"
+          printf '%s' "$HARMONY_P7B_BASE64" | base64 --decode > "$SIGNING_DIR/cc-pocket-harmony-release.p7b"
+
+      - name: Build, sign and verify HarmonyOS packages
+        env:
+          # CI must use only the injected secrets above, never a persistent .env from a self-hosted machine.
+          HARMONY_LOAD_ENV: "0"
+          HARMONY_P12: ${{ runner.temp }}/cc-pocket-harmony-signing/cc-pocket-harmony.p12
+          HARMONY_CER: ${{ runner.temp }}/cc-pocket-harmony-signing/cc-pocket-harmony-release.cer
+          HARMONY_P7B: ${{ runner.temp }}/cc-pocket-harmony-signing/cc-pocket-harmony-release.p7b
+          Harmony_Keystore_Password: ${{ secrets.HARMONY_KEYSTORE_PASSWORD }}
+          Harmony_Key_Alias: ${{ secrets.HARMONY_KEY_ALIAS }}
+          Harmony_Key_Password: ${{ secrets.HARMONY_KEY_PASSWORD }}
+        run: |
+          bash scripts/release-harmony.sh "$RELEASE_VERSION"
+
+      - name: Upload signed HAP to the validated release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_COMMIT_SHA: ${{ steps.release_target.outputs.commit_sha }}
+        run: |
+          CURRENT_TAG_COMMIT=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/commits" \
+            -f sha="v${RELEASE_VERSION}" -F per_page=1 --jq '.[0].sha')
+          [ "$CURRENT_TAG_COMMIT" = "$EXPECTED_COMMIT_SHA" ] || {
+            echo "::error::Release tag moved during the job; refusing to upload"
+            exit 1
+          }
+          HAP="harmony/release/cc-pocket-harmony-${RELEASE_VERSION}-signed.hap"
+          [ -f "$HAP" ] || { echo "::error::signed Harmony HAP not found: $HAP"; exit 1; }
+          echo "sha256: $(shasum -a 256 "$HAP" | awk '{print $1}')"
+          gh release upload "v${RELEASE_VERSION}" "$HAP" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Remove Harmony signing material
+        if: ${{ always() }}
+        run: |
+          SIGNING_DIR="$RUNNER_TEMP/cc-pocket-harmony-signing"
+          rm -f "$SIGNING_DIR/cc-pocket-harmony.p12" "$SIGNING_DIR/cc-pocket-harmony-release.cer" "$SIGNING_DIR/cc-pocket-harmony-release.p7b"
+          rmdir "$SIGNING_DIR" 2>/dev/null || true
+
+      # The signed .app is the ONLY artifact AppGallery Connect accepts, and it is not attached to the
+      # public release (users cannot sideload it — HarmonyOS NEXT has no sideloading, so the .hap above
+      # is for debugging/install only). Without this step the App Pack dies with the ephemeral runner and
+      # AGC has to be fed a locally re-signed package, i.e. NOT the one this job built and verified.
+      # Runs after the secrets are wiped so no third-party action executes while key material is on disk.
+      - name: Retain signed AGC App Pack
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # Read through RELEASE_VERSION, never `inputs.version` again: the job pins the workflow input
+          # to exactly one interpolation site (enforced by scripts/check-harmony-release.sh).
+          name: cc-pocket-harmony-${{ env.RELEASE_VERSION }}-agc-app-pack
+          path: harmony/release/cc-pocket-harmony-${{ env.RELEASE_VERSION }}-signed.app
+          if-no-files-found: error
+          retention-days: 90
+
   # Keep the Scoop bucket (heypandax/scoop-bucket) on the release we just published: without this the
   # manifest stays pinned to an old version forever (its checkver/autoupdate fields are inert — no
   # excavator runs on a personal bucket), which stranded every Windows user on 1.1.9 (issue #25).
   # Needs a repo secret SCOOP_BUCKET_TOKEN: a fine-grained PAT with contents:write on
-  # heypandax/scoop-bucket. Skips gracefully (with a warning) when the secret is absent.
+  # heypandax/scoop-bucket. Fails loudly when the secret is absent — a silent green here stranded
+  # Windows users on a stale manifest four separate releases in a row (issue #243).
   bump-scoop:
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
-    needs: [windows]
+    # Explicit status functions are required: without them the implicit success() makes this job
+    # inherit SKIPPED from anything upstream of `checksums` (harmony is skipped on normal releases),
+    # which is exactly how the scoop bump silently vanished from green release runs (issue #243).
+    # `needs.checksums.result == 'success'` keeps the "never point at a partial release" guarantee.
+    if: ${{ !cancelled() && !failure() && needs.checksums.result == 'success' && !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
+    # Do not publish a package-manager pointer until every requested artifact and the
+    # aggregate checksum manifest have completed successfully.
+    needs: [checksums]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Update scoop manifest to v${{ inputs.version }}
         env:
           GH_TOKEN: ${{ github.token }}
           BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
         run: |
           if [ -z "$BUCKET_TOKEN" ]; then
-            echo "::warning::SCOOP_BUCKET_TOKEN not set — scoop bucket NOT bumped. Update heypandax/scoop-bucket by hand (bucket/cc-pocket-daemon.json: version/url/hash)."
-            exit 0
+            echo "::error::SCOOP_BUCKET_TOKEN not set — scoop bucket NOT bumped, Windows users stay on the previous version. Configure the secret (fine-grained PAT, contents:write on heypandax/scoop-bucket), or update bucket/cc-pocket-daemon.json by hand (version/url/hash) and re-run this job."
+            exit 1
           fi
           VER="${{ inputs.version }}"
           ZIP="cc-pocket-daemon-$VER-windows-x86_64.zip"
@@ -430,10 +630,10 @@ jobs:
   # (the Claude Code pattern: manifest + per-platform checksum). Runs after all uploads so the sums
   # cover the final artifacts; --clobber makes re-runs safe.
   checksums:
-    # !cancelled() (not the default success()) so this still runs when the daemon/windows/android jobs
-    # are SKIPPED in only_macos_desktop mode — it re-sums whatever assets are on the release now.
-    if: ${{ !cancelled() && !inputs.only_android }}
-    needs: [macos, windows, linux, android, macos-desktop, windows-desktop]
+    # The explicit status condition lets this run past intentionally SKIPPED jobs in
+    # only_macos_desktop mode, but never rewrite SHA256SUMS for a partially failed release.
+    if: ${{ !cancelled() && !failure() && !inputs.only_android }}
+    needs: [macos, windows, linux, android, macos-desktop, windows-desktop, harmony]
     runs-on: ubuntu-latest
     steps:
       - name: Generate + upload SHA256SUMS for v${{ inputs.version }}

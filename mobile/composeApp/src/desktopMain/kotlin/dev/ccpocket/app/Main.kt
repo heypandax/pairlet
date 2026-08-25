@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -19,11 +21,16 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.ApplicationScope
+import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowExceptionHandler
+import androidx.compose.ui.window.WindowExceptionHandlerFactory
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
@@ -31,6 +38,7 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.desktop.AddComputerModal
 import dev.ccpocket.app.desktop.ConnectPanel
 import dev.ccpocket.app.desktop.DesktopApp
+import dev.ccpocket.app.desktop.DesktopCrashGuard
 import dev.ccpocket.app.desktop.openFolderAction
 import dev.ccpocket.app.desktop.DesktopNotify
 import dev.ccpocket.app.desktop.DkTitleBar
@@ -56,11 +64,24 @@ import java.awt.Toolkit
 
 private const val K_WIN_BOUNDS = "desktop_window_bounds" // "x,y,w,h[,zoomed]" — restored on the next launch
 
+/** How often the shell re-pulls the daemon's project list while its window is on screen. Slow on purpose:
+ *  it exists to keep the sidebar's live dots from freezing, not to animate them — a "running" state that
+ *  settles within a few seconds reads as live, and the pull is a whole-machine directory scan on the host. */
+private const val DIRECTORY_POLL_MS = 15_000L
+
 /** Issue #189: close-to-tray is safe only when Windows can actually keep a reachable tray icon alive.
  *  Disabling the menu-bar setting or running without SystemTray support preserves the old exit behavior,
  *  so a hidden window can never strand an un-exitable process. */
 internal fun shouldCloseMainWindowToTray(isWindows: Boolean, menuBarEnabled: Boolean, trayReady: Boolean): Boolean =
     isWindows && menuBarEnabled && trayReady
+
+/** The sidebar's live dots read the daemon's project list, and that list is PULL-only: until now the only
+ *  pulls were foregrounding and ⌘R, so a desktop window simply left open showed dots frozen at whatever the
+ *  last pull said. Poll it — but only while the sidebar can actually be SEEN. A window hidden to the tray
+ *  (#189 keeps it composed on purpose) or minimized has no dots to keep honest, and polling for nobody would
+ *  just keep waking the link. */
+internal fun shouldPollDirectories(windowVisible: Boolean, minimized: Boolean): Boolean =
+    windowVisible && !minimized
 
 /**
  * Desktop entry point — the two-pane "mission control": one host driving Claude Code / Codex on another.
@@ -68,7 +89,56 @@ internal fun shouldCloseMainWindowToTray(isWindows: Boolean, menuBarEnabled: Boo
  * then the [DesktopApp] shell. Undecorated so the app paints its own title bar. ⌘K / Ctrl+K opens the
  * command palette (Esc closes it) — handled at the window level so it works regardless of focus.
  */
-fun main() = application {
+fun main() {
+    // #251 FIRST, before anything can throw: without it an escape from composition took the default AWT
+    // path — a native box reading only "Unknown error" on the packaged Windows launcher — after which the
+    // window was gone but the non-daemon SystemTray thread kept the process alive as an unquittable
+    // zombie. Installed outside application{} so a failure during Compose start-up is covered too.
+    DesktopCrashGuard.install()
+    application { PocketApplication() }
+}
+
+/**
+ * The second net, one layer in from [DesktopCrashGuard.install] (#251). Compose Desktop routes anything
+ * thrown out of a window's composition / layout / draw through [LocalWindowExceptionHandlerFactory];
+ * the DEFAULT factory is what produced the contentless native error dialog and then left the window
+ * dead but the process alive. Replacing it means such an escape is logged with a code, named to the
+ * user, and followed by a real exit.
+ *
+ * Kept as its own composable so the shell below keeps its shape — the provider must simply be an
+ * ancestor of the `Window` call, which is where the local is read.
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+@Composable
+private fun ApplicationScope.PocketApplication() {
+    val factory = remember {
+        object : WindowExceptionHandlerFactory {
+            override fun exceptionHandler(window: java.awt.Window) = WindowExceptionHandler { t ->
+                DesktopCrashGuard.note(DesktopCrashGuard.ERR_WINDOW, t)
+                // Tell the user WHICH failure and WHERE the log is before leaving — the whole complaint
+                // in #251 is that the old dialog said neither. Best-effort: never let the notice itself
+                // become the crash, and never let a wedged dialog stop the exit.
+                runCatching {
+                    javax.swing.JOptionPane.showMessageDialog(
+                        window,
+                        "CC Pocket hit an unexpected error and has to close.\n\n" +
+                            DesktopCrashGuard.oneLineSummary(DesktopCrashGuard.ERR_WINDOW, t) + "\n\n" +
+                            "Details were written to:\n" + DesktopCrashGuard.logFile.path,
+                        "CC Pocket",
+                        javax.swing.JOptionPane.ERROR_MESSAGE,
+                    )
+                }
+                DesktopCrashGuard.exitCrashed(DesktopCrashGuard.ERR_WINDOW, t)
+            }
+        }
+    }
+    CompositionLocalProvider(LocalWindowExceptionHandlerFactory provides factory) {
+        PocketShell()
+    }
+}
+
+@Composable
+private fun ApplicationScope.PocketShell() {
     // GA4 Measurement Protocol backend for desktop analytics — resolves credentials (env / ga4.properties)
     // up front so a missing config logs at launch. No-op when unconfigured. Every PocketRepository event
     // (pair / connect / conn_failed / session / prompt / approval) fires automatically since desktop drives
@@ -203,6 +273,11 @@ fun main() = application {
                 // the one it has. While the SHELL owns the keyboard AWT keeps the keystroke — the
                 // engine's own dispatcher forwards it, so the toggle works from either side.
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.J && connected -> { model.toggleEmbeddedTerminal(); true }
+                // ⌘⇧R (the Review Center) must be tested BEFORE plain ⌘R: the refresh branch below
+                // matches Key.R whatever the modifiers, so the shifted case has to claim it first.
+                e.type == KeyEventType.KeyDown && mod && e.isShiftPressed && e.key == Key.R && connected -> {
+                    model.openReviewCenter(); true
+                }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.R && connected -> { model.refresh(); true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.Zero && connected -> { model.switcherOpen = !model.switcherOpen; true }
                 e.type == KeyEventType.KeyDown && digit >= 0 && connected && model.switcherOpen -> {
@@ -329,6 +404,18 @@ fun main() = application {
         LaunchedEffect(windowFocused) {
             if (windowFocused && unseenDone > 0) { unseenDone = 0; DesktopNotify.badge(0) }
         }
+        // Keep the daemon's project list — and with it the sidebar's live dots — from going stale while the
+        // window just sits there. KEYED on the predicate rather than wrapped in an `if`, so coming back
+        // (un-minimize, tray → Open) restarts the loop and its leading sync pulls at once instead of waiting
+        // out a tick; going away cancels it outright, leaving nothing ticking behind a hidden window.
+        val pollDirectories = shouldPollDirectories(mainWindowVisible, windowState.isMinimized)
+        LaunchedEffect(pollDirectories) {
+            if (!pollDirectories) return@LaunchedEffect
+            while (true) {
+                model.syncDirectories()
+                delay(DIRECTORY_POLL_MS)
+            }
+        }
         LaunchedEffect(Unit) {
             window.minimumSize = Dimension(720, 480)
             // multi-display: Alignment.Center places over the VIRTUAL bounds union, which in an L-shaped
@@ -349,7 +436,7 @@ fun main() = application {
         }
         // appearance (issue #63): PocketTheme resolves the persisted mode against the OS, so a SYSTEM pick
         // tracks a live OS light/dark flip and Settings' setThemeMode() re-themes the whole shell.
-        PocketTheme(mode = repo.themeMode.value) {
+        PocketTheme(mode = repo.themeMode.value, accent = repo.accentTheme.value) {
             androidx.compose.runtime.CompositionLocalProvider(
                 dev.ccpocket.app.ui.LocalPathOpener provides dev.ccpocket.app.desktop.DesktopPathOpener(),
             ) {

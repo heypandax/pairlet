@@ -2,9 +2,14 @@ package dev.ccpocket.app.data
 
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.protocol.AssistantChunk
+import dev.ccpocket.protocol.ChatRole
+import dev.ccpocket.protocol.ConvoHistory
+import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.PromptAck
 import dev.ccpocket.protocol.SendPrompt
+import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.TurnDone
 import kotlinx.coroutines.CoroutineScope
@@ -161,6 +166,204 @@ class PromptDeliveryTest {
         r.receiveForTest(TurnDone("c1"))
         assertFalse(r.turnStalled.value)
         assertFalse(r.streaming.value)
+    }
+
+    @Test
+    fun aRealTurnFrameThatRacesAheadOfItsAckDoesNotRearmTheWatchdog() = runBlocking {
+        val r = repo()
+        r.convoId.value = "c1"
+        r.workdir.value = "/tmp/proj"
+
+        assertTrue(r.sendPrompt("fast first token"))
+        val pid = lastUserPromptId(r)
+
+        // Conversation's stdout pump runs concurrently with sendPrompt's stdin write. A fast backend can
+        // therefore put real output on the wire before the router emits PromptAck for that same write.
+        r.receiveForTest(AssistantChunk("c1", 0, StreamPiece.Text("already answering")))
+        r.receiveForTest(PromptAck("c1", pid))
+
+        delay(200) // well past the legacy fallback's 80ms deadline
+        assertFalse(r.turnStalled.value, "a late receipt must not revive a watchdog retired by real output")
+        assertFalse(r.turnQueued.value)
+        assertTrue((r.messages.filterIsInstance<ChatItem.User>().last()).delivered)
+    }
+
+    @Test
+    fun aReceiptForAnOlderPromptCannotAdvanceTheNewestPromptsWatchdog() = runBlocking {
+        val r = repo()
+        r.convoId.value = "c1"
+        r.workdir.value = "/tmp/proj"
+
+        assertTrue(r.sendPrompt("first"))
+        val firstId = lastUserPromptId(r)
+        assertTrue(r.sendPrompt("second"))
+
+        r.receiveForTest(PromptAck("c1", firstId))
+        delay(200)
+
+        val users = r.messages.filterIsInstance<ChatItem.User>()
+        assertTrue(users[0].delivered, "the matching older bubble still receives its delivery marker")
+        assertTrue(users[1].pending, "an older receipt must not mark the newest prompt globally delivered")
+        assertTrue(r.sendStalled.value, "the newest prompt's own missing receipt remains visible")
+        assertFalse(r.turnStalled.value, "an older receipt must not arm a turn watchdog for the newest prompt")
+        assertFalse(r.turnQueued.value)
+    }
+
+    @Test
+    fun aReattachSnapshotClearsAStallThatFiredWhileThePhoneMissedStreamFrames() = runBlocking {
+        val running = repo().apply {
+            convoId.value = "c1"
+            workdir.value = "/tmp/proj"
+        }
+        assertTrue(running.sendPrompt("long turn"))
+        running.receiveForTest(PromptAck("c1", lastUserPromptId(running)))
+        awaitCue("the pre-reconnect resend cue") { running.turnStalled.value }
+
+        // The daemon always replays SessionLive before ConvoHistory. Its fresh executing truth must retire the
+        // local silence inference, regardless of whether the turn is still running or already finished.
+        running.receiveForTest(SessionLive("c1", "/tmp/proj", "sid-1", executing = true))
+        assertFalse(running.turnStalled.value, "a live reattach must return to the ordinary running indicator")
+        assertTrue(running.streaming.value)
+
+        val finished = repo().apply {
+            convoId.value = "c2"
+            workdir.value = "/tmp/proj"
+        }
+        assertTrue(finished.sendPrompt("turn completed while offline"))
+        finished.receiveForTest(PromptAck("c2", lastUserPromptId(finished)))
+        awaitCue("the pre-reconnect resend cue") { finished.turnStalled.value }
+        finished.receiveForTest(SessionLive("c2", "/tmp/proj", "sid-2", executing = false))
+        assertFalse(finished.turnStalled.value, "an idle reattach must not leave the cue below replayed output")
+        assertFalse(finished.streaming.value)
+    }
+
+    @Test
+    fun aDaemonWithPromptRecoveryNeverOffersBlindResendForFirstTokenSilence() = runBlocking {
+        val r = repo()
+        r.receiveForTest(DaemonInfo(supportsPromptRecovery = true))
+        r.convoId.value = "c1"
+        r.workdir.value = "/tmp/proj"
+
+        assertTrue(r.sendPrompt("large context turn"))
+        r.receiveForTest(PromptAck("c1", lastUserPromptId(r)))
+        delay(200) // silence beyond the old 80ms fallback is legitimate; daemon owns unconsumed recovery
+
+        assertFalse(r.turnStalled.value)
+        assertFalse(r.turnQueued.value)
+        assertTrue(r.streaming.value, "the ordinary running state remains until real output/TurnDone arrives")
+    }
+
+    @Test
+    fun replayedUserRowRetiresTheInvisibleReceiptStallToo() = runBlocking {
+        val r = repo()
+        r.phase.value = ConnPhase.Ready
+        r.convoId.value = "c1"
+        r.workdir.value = "/tmp/proj"
+
+        assertTrue(r.sendPrompt("completed while the phone was offline"))
+        awaitCue("the delivery warning") { r.sendStalled.value }
+
+        // Reattach history is authoritative evidence that the daemon persisted/consumed this prompt. The
+        // merge already resolves the pending bubble; the receipt watchdog state must follow that same truth.
+        r.receiveForTest(
+            ConvoHistory(
+                "c1",
+                listOf(HistoryMessage(ChatRole.USER, "completed while the phone was offline")),
+            ),
+        )
+
+        assertFalse(r.sendStalled.value, "history proof must retire the no-receipt warning, not just its bubble")
+        assertFalse((r.messages.last() as ChatItem.User).pending)
+
+        assertTrue(r.sendPrompt("next prompt"))
+        assertFalse(r.sendStalled.value, "a fresh prompt must not inherit the previous prompt's warning")
+        assertFalse(r.turnStalled.value)
+        assertFalse(r.turnQueued.value)
+    }
+
+    @Test
+    fun outputFromTheAlreadyRunningTurnDoesNotReceiptANewQueuedPrompt() = runBlocking {
+        val r = repo()
+        r.convoId.value = "c1"
+        r.workdir.value = "/tmp/proj"
+
+        assertTrue(r.sendPrompt("long first turn"))
+        r.receiveForTest(PromptAck("c1", lastUserPromptId(r)))
+        r.receiveForTest(AssistantChunk("c1", 0, StreamPiece.Text("first turn output")))
+
+        assertTrue(r.sendPrompt("queued follow-up"))
+        val queuedId = lastUserPromptId(r)
+        r.receiveForTest(AssistantChunk("c1", 0, StreamPiece.Text("more first-turn output")))
+
+        val stillWaiting = r.messages.filterIsInstance<ChatItem.User>().last()
+        assertTrue(stillWaiting.pending, "an older turn's output does not prove the queued SendPrompt arrived")
+        assertFalse(stillWaiting.delivered)
+
+        r.receiveForTest(PromptAck("c1", queuedId))
+        val receipted = r.messages.filterIsInstance<ChatItem.User>().last()
+        assertFalse(receipted.pending)
+        assertTrue(receipted.delivered, "only the queued prompt's own receipt advances its delivery label")
+    }
+
+    @Test
+    fun outputAfterTheOldTurnBoundaryCanConfirmAQueuedPromptWhoseAckWasLost() = runBlocking {
+        val r = repo()
+        r.convoId.value = "c1"
+        r.workdir.value = "/tmp/proj"
+
+        assertTrue(r.sendPrompt("long first turn"))
+        r.receiveForTest(PromptAck("c1", lastUserPromptId(r)))
+        r.receiveForTest(AssistantChunk("c1", 0, StreamPiece.Text("first turn output")))
+        assertTrue(r.sendPrompt("queued follow-up"))
+
+        r.receiveForTest(TurnDone("c1"))
+        assertTrue(
+            r.messages.filterIsInstance<ChatItem.User>().last().pending,
+            "the old turn ending is only a boundary, not a receipt for the queued prompt",
+        )
+
+        r.receiveForTest(AssistantChunk("c1", 0, StreamPiece.Text("follow-up answer")))
+        assertFalse(
+            r.messages.filterIsInstance<ChatItem.User>().last().pending,
+            "after the boundary, first output is safe fallback evidence when PromptAck was lost",
+        )
+        assertFalse(r.sendStalled.value)
+    }
+
+    @Test
+    fun aManualNewSendClearsEveryPreviousTurnCue() = runBlocking {
+        val r = repo()
+        r.convoId.value = "c1"
+        r.workdir.value = "/tmp/proj"
+
+        assertTrue(r.sendPrompt("possibly swallowed"))
+        r.receiveForTest(PromptAck("c1", lastUserPromptId(r)))
+        awaitCue("the old resend cue") { r.turnStalled.value }
+
+        assertTrue(r.sendPrompt("manual replacement"))
+        assertFalse(r.turnStalled.value, "the replacement must not inherit the old resend cue")
+        assertFalse(r.turnQueued.value, "the replacement must wait for its own queued deadline")
+        assertFalse(r.sendStalled.value, "the replacement must wait for its own receipt deadline")
+    }
+
+    @Test
+    fun clearingTheConversationRetiresInvisiblePromptTimers() = runBlocking {
+        val r = repo()
+        r.convoId.value = "c1"
+        r.workdir.value = "/tmp/proj"
+
+        assertTrue(r.sendPrompt("will be cleared"))
+        awaitCue("the old delivery warning") { r.sendStalled.value }
+
+        r.clearConversation()
+        assertTrue(r.messages.isEmpty())
+        assertFalse(r.sendStalled.value)
+        assertFalse(r.turnStalled.value)
+        assertFalse(r.turnQueued.value)
+
+        // The cancelled deadline must stay dead after enough time for its old callback to have fired again.
+        delay(150)
+        assertFalse(r.sendStalled.value)
     }
 
     @Test

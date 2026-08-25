@@ -179,6 +179,63 @@ class HandoffRouterWiringTest {
     }
 
     @Test
+    fun zcode_is_refused_before_a_handoff_offer_is_persisted() = runBlocking {
+        val fx = Fixture(CoroutineScope(Dispatchers.Default))
+        val seen = frames()
+
+        fx.route(
+            CreateHandoff(
+                fx.workdir,
+                Fixture.SESSION_ID,
+                HandoffBrief(request = "review this ZCode session"),
+                agent = AgentKind.ZCODE,
+                recipientDeviceId = "dev-b",
+            ),
+            "dev-a",
+            seen,
+        )
+
+        val refused = seen.filterIsInstance<HandoffCreated>().single()
+        assertTrue(!refused.ok)
+        assertEquals("handoff_agent_unsupported", refused.code)
+        assertNull(refused.handoff)
+        assertTrue(fx.handoffs.registry.list().isEmpty(), "an offer the recipient cannot open must not exist")
+    }
+
+    /**
+     * dsh stays refused even though issue #291 bridged its approvals — and THAT is the point of pinning
+     * it here. The old reason ("dsh emits no approval requests, so the REVIEW ceiling has nothing to
+     * enforce") expired when the bridge landed, but the ceiling still cannot be enforced: it is
+     * `PermissionBridge.handoffWriteBanned`, which matches Claude/Codex write-tool SPELLINGS, and dsh
+     * names its own tools. A recipient — who answers its own asks — would approve its own writes under a
+     * review/read-only grant. Deleting this test is the tell that someone lifted the gate on the strength
+     * of the bridge alone.
+     */
+    @Test
+    fun dsh_is_refused_even_though_its_approvals_are_now_bridged() = runBlocking {
+        val fx = Fixture(CoroutineScope(Dispatchers.Default))
+        val seen = frames()
+
+        fx.route(
+            CreateHandoff(
+                fx.workdir,
+                Fixture.SESSION_ID,
+                HandoffBrief(request = "review this DeepSeek session"),
+                agent = AgentKind.DSH,
+                recipientDeviceId = "dev-b",
+            ),
+            "dev-a",
+            seen,
+        )
+
+        val refused = seen.filterIsInstance<HandoffCreated>().single()
+        assertTrue(!refused.ok)
+        assertEquals("handoff_agent_unsupported", refused.code)
+        assertNull(refused.handoff)
+        assertTrue(fx.handoffs.registry.list().isEmpty(), "an offer the recipient cannot open must not exist")
+    }
+
+    @Test
     fun waiting_locks_every_device_out_of_the_session() = runBlocking {
         val fx = Fixture(CoroutineScope(Dispatchers.Default))
         val a = frames(); val b = frames()

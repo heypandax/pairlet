@@ -72,7 +72,7 @@ class SessionWorkingSetTest {
     @Test
     fun runningRowsFollowTheHomeScreenActiveRule() {
         val dirs = listOf(
-            dir("/w/proj-a", ActiveSession("s1", "Fix parser", executing = true, agent = AgentKind.CLAUDE)),
+            dir("/w/proj-a", ActiveSession("s1", "Fix parser", executing = true, agent = AgentKind.CLAUDE, executingAuthoritative = true)),
             dir("/w/proj-b", ActiveSession("s2", "Docs", busy = true), ActiveSession("s3", "Tests")),
             dir("/w/idle", open = false),                                     // not live at all → absent
             DirectoryEntry(path = "/w/legacy", name = "legacy", isDir = true, // older daemon: legacy fields only
@@ -83,6 +83,60 @@ class SessionWorkingSetTest {
         assertEquals("proj-b", r.first { it.sessionId == "s2" }.project)
         assertTrue(r.first { it.sessionId == "s1" }.executing)
         assertNull(r.first { it.sessionId == "s9" }.agent, "an older daemon's live row has no known backend")
+    }
+
+    @Test
+    fun executingStateIsPreservedForEveryDaemonBackedAgentAndNeverInferredFromHistoryAlone() {
+        val agents = AgentKind.entries.toList()
+        val dirs = agents.mapIndexed { i, agent ->
+            dir(
+                "/w/${agent.name.lowercase()}",
+                ActiveSession("s$i", agent = agent, executing = true, executingAuthoritative = true),
+            )
+        } + DirectoryEntry(
+            path = "/w/history-only", name = "history-only", isDir = true,
+            open = false, hasSessions = true, sessionAgents = listOf(AgentKind.CODEX),
+        )
+
+        val running = runningSessions(dirs)
+        assertEquals(agents, running.mapNotNull { it.agent })
+        assertTrue(running.all { it.executing })
+        assertTrue(running.none { it.dirKey == "/w/history-only" }, "unknown process state must stay unlabelled")
+    }
+
+    @Test
+    fun completionTrackingUsesRealWorkNotMerelyALiveConversation() {
+        val dirs = listOf(
+            dir("/w/turn", ActiveSession("turn", executing = true, executingAuthoritative = true)),
+            dir("/w/background", ActiveSession("background", busy = true)),
+            dir("/w/idle", ActiveSession("idle", executing = false, busy = false)),
+        )
+
+        assertEquals(listOf("turn", "background"), workingSessions(dirs).map { it.sessionId })
+        assertTrue("idle" in runningSessions(dirs).map { it.sessionId }, "idle remains switchable")
+    }
+
+    @Test
+    fun terminalMtimeHeuristicStaysVisibleButCannotInventACompletionEdge() {
+        val dirs = listOf(
+            dir("/w/terminal", ActiveSession("terminal", executing = true, executingAuthoritative = false)),
+        )
+
+        assertEquals(listOf("terminal"), runningSessions(dirs).map { it.sessionId }, "terminal session remains switchable")
+        assertTrue(workingSessions(dirs).isEmpty(), "a recency heuristic is not authoritative completion evidence")
+    }
+
+    @Test
+    fun scalarOnlyOldDaemonRowsStaySwitchableButFailClosedForCompletion() {
+        val legacy = DirectoryEntry(
+            path = "/w/legacy", name = "legacy", isDir = true, open = true,
+            busy = false, executing = true, activeSessionId = "legacy-sid", activeSessionTitle = "Legacy",
+        )
+
+        val row = runningSessions(listOf(legacy)).single()
+        assertTrue(row.executing, "the existing Running affordance remains visible")
+        assertFalse(row.workStateAuthoritative, "project-level legacy flags cannot be attributed to one session")
+        assertTrue(workingSessions(listOf(legacy)).isEmpty(), "legacy scalar state never arms a completion edge")
     }
 
     /**
@@ -157,7 +211,12 @@ class SessionWorkingSetTest {
     @Test
     fun sessionThatFinishedWhileAwayIsMarkedUnseenUntilOpened() {
         val was = setOf("s1", "s2")
-        val unseen = markFinishedAway(prevWorking = was, nowWorking = setOf("s1"), currentSessionId = "cur", unseen = emptySet())
+        val unseen = markFinishedAway(
+            prevWorking = was,
+            nowAuthoritativelySettled = setOf("s2"),
+            currentSessionId = "cur",
+            unseen = emptySet(),
+        )
         assertEquals(setOf("s2"), unseen)
 
         val mru = listOf(entry("s2", 5))
@@ -173,8 +232,28 @@ class SessionWorkingSetTest {
 
     @Test
     fun theSessionOnScreenIsNeverMarkedAndStillRunningOnesAreLeftAlone() {
-        val unseen = markFinishedAway(setOf("cur", "s1"), nowWorking = setOf("s1"), currentSessionId = "cur", unseen = emptySet())
+        val unseen = markFinishedAway(
+            setOf("cur", "s1"),
+            nowAuthoritativelySettled = setOf("cur"),
+            currentSessionId = "cur",
+            unseen = emptySet(),
+        )
         assertTrue(unseen.isEmpty(), "you watched the current session finish; a still-running one hasn't finished")
+    }
+
+    @Test
+    fun unknownOrMissingRowsNeverCountAsFinished() {
+        val was = setOf("unknown", "missing", "settled")
+        assertEquals(
+            setOf("settled"),
+            markFinishedAway(
+                prevWorking = was,
+                nowAuthoritativelySettled = setOf("settled"),
+                currentSessionId = null,
+                unseen = emptySet(),
+            ),
+            "only an explicit authoritative settled observation completes an armed session",
+        )
     }
 
     @Test

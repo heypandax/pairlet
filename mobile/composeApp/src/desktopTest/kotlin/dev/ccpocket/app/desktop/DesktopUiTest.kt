@@ -57,7 +57,11 @@ class DesktopUiTest {
         assertPresent("Lidapeng-MacBook")      // machine switcher header
         assertPresent("Refactor auth module")  // selected session (sidebar + chat header)
         assertPresent("Tidy CI workflow")      // a Codex session in the list
-        assertPresent("Bump maxFrame to 4MB")  // a previously visited project's session — no expanding needed
+        // the docked rows above Settings (Archived, Reviews) each take a row off the RECENT viewport, so
+        // the last group sits below the fold at test size — the claim is that no EXPANDING is needed
+        onNodeWithTag("sidebar-list").performScrollToNode(hasText("Bump maxFrame to 4MB"))
+        waitForIdle()
+        assertPresent("Bump maxFrame to 4MB")  // a previously visited project's session, already listed
         assertPresent("sonnet", substring = true) // Claude session header model line
     }
 
@@ -82,6 +86,10 @@ class DesktopUiTest {
     @Test
     fun recentGroupsCollapse() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
+        // the last RECENT group sits below the fold at test size (the docked Archived/Reviews rows take
+        // the space) — scroll it in, then the assertion is about EXPANDED vs collapsed, not visibility
+        onNodeWithTag("sidebar-list").performScrollToNode(hasText("Bump maxFrame to 4MB"))
+        waitForIdle()
         assertPresent("Bump maxFrame to 4MB")                // the relay group renders expanded
         // "relay" labels a RUNNING row first, then the RECENT group header — the header composes last
         onAllNodes(hasText("relay")).onLast().performClick()
@@ -318,6 +326,40 @@ class DesktopUiTest {
         waitForIdle()
         assertTrue(!present("notes"))
         assertPresent("Port parser to Rust")
+    }
+
+    /** A pinned project is a doorway to its RECENT session list. If that group was folded, opening the
+     *  pin must unfold it again; otherwise the click appears to do nothing and the sessions stay hidden. */
+    @Test
+    fun pinnedProjectOpensItsCollapsedSessionList() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { pinProject("~/code/relay", "relay") }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+
+        // PINNED and RUNNING both contain "relay" before the RECENT header, so the latter is last.
+        onAllNodes(hasText("relay")).onLast().performClick()
+        waitForIdle()
+        assertTrue(!present("Bump maxFrame to 4MB"), "precondition: the project's sessions are folded")
+
+        // Open the actual pinned-project row. It must reveal the RECENT group it represents.
+        onNodeWithTag("project-pin:~/code/relay").performClick()
+        waitForIdle()
+        // The fixed-order seed keeps relay below a tall custom-group project; scroll the now-emitted row
+        // into the test viewport. Before the fix it is absent from the lazy layout, so this cannot succeed.
+        onNodeWithTag("sidebar-list").performScrollToNode(hasText("Bump maxFrame to 4MB"))
+        waitForIdle()
+        assertPresent("Bump maxFrame to 4MB")
+
+        // Fold it once more and open the SAME pin again. The reveal is an event, not a path value that
+        // gets stuck equal after its first use.
+        onAllNodes(hasText("relay")).onLast().performClick()
+        waitForIdle()
+        assertTrue(!present("Bump maxFrame to 4MB"))
+        onNodeWithTag("project-pin:~/code/relay").performClick()
+        waitForIdle()
+        onNodeWithTag("sidebar-list").performScrollToNode(hasText("Bump maxFrame to 4MB"))
+        waitForIdle()
+        assertPresent("Bump maxFrame to 4MB")
     }
 
     @Test
@@ -573,7 +615,7 @@ class DesktopUiTest {
         waitForIdle()
         assertPresent(str(Res.string.settings_paired_computers))
         assertPresent(str(Res.string.device_rename))              // per-computer actions (also fixes the accountId-label gap)
-        assertPresent(str(Res.string.share_revoke))
+        assertPresent(str(Res.string.device_remove))
     }
 
     @Test
@@ -599,7 +641,9 @@ class DesktopUiTest {
         setContent { PocketTheme { SettingsModal(model) {} } }
 
         assertPresent("Fable")
-        onAllNodes(hasText("Codex")).onFirst().performClick()
+        // by tag, not hasText("Codex"): the Appearance ▸ Accent color picker now also carries a "Codex"
+        // option (issue #204), so the bare text is ambiguous — target the agent card explicitly
+        onNodeWithTag("agent-card-CODEX").performScrollTo().performClick()
         waitForIdle()
         assertPresent("gpt-5.6-sol")
         assertTrue(!present("Fable"), "Codex must not show Claude model choices")
@@ -819,6 +863,25 @@ class DesktopUiTest {
     }
 
     @Test
+    fun desktopSettingsScopesDefaultEffortToTheSelectedAgent() = runComposeUiTest {
+        val m = SeedDesktopModel().apply {
+            defaultAgent = AgentKind.CLAUDE
+            defaultEffort = "high"
+            defaultAgent = AgentKind.CODEX
+            settingsEffortOptions = listOf("low", "ultra")
+        }
+        setContent { PocketTheme { SettingsModal(m) {} } }
+        waitForIdle()
+
+        onAllNodes(hasText("ultra")).onFirst().performScrollTo().performClick()
+        waitForIdle()
+
+        assertEquals("ultra", m.defaultEffort)
+        m.defaultAgent = AgentKind.CLAUDE
+        assertEquals("high", m.defaultEffort, "choosing a Codex effort must not rewrite Claude")
+    }
+
+    @Test
     fun seedDataInvariants() {
         val m = SeedDesktopModel()
         assertTrue(m.sessions.isNotEmpty())
@@ -839,7 +902,7 @@ class DesktopUiTest {
                 androidx.compose.foundation.layout.Box(
                     androidx.compose.ui.Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
                 ) {
-                    NewBridgeForm(onCancel = {}, onCreate = { _, _, _, _, _ -> })
+                    NewBridgeForm(model = SeedDesktopModel(), onCancel = {}, onCreate = { _, _, _, _, _ -> })
                 }
             }
         }
@@ -903,5 +966,29 @@ class DesktopUiTest {
         onNodeWithTag("palette-secondary").performClick()
         waitForIdle()
         assertEquals("a1", unarchived, "the row's second verb restores that exact session")
+    }
+
+    // ── Review Center (REVIEW-REQUEST.md §12) ─────────────────────────────────────────────────────
+
+    @Test
+    fun reviewCenterOverlayRendersOnTheModelFlag() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { showReviewCenter = true }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent(str(Res.string.rv_title))
+        // the seed has no daemon behind it, and a canned ledger would be the one place this feature is
+        // allowed to show rows nobody's machine holds — so it states the absence instead
+        assertPresent(str(Res.string.rv_offline))
+    }
+
+    @Test
+    fun sidebarCarriesNoReviewsRow() = runComposeUiTest {
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        // Demoted 08-16: the P2P review flow saw no real use, so its sidebar row came off — the Center
+        // stays reachable via ⌘⇧R only. This pins the demotion so the row cannot quietly creep back.
+        assertTrue(!model.showReviewCenter, "the Center is closed until asked for")
+        assertTrue(!present(str(Res.string.rv_title)), "no sidebar row advertises the Review Center")
     }
 }

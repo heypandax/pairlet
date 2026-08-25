@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+  a { color: #B4522F; text-decoration: none; }
+  a:hover { color: #8E3F23; }
+  @keyframes ccpulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+  @keyframes ccskel { 0%, 100% { opacity: .55 } 50% { opacity: .28 } }
+</style>
+</helmet>
+
+<div style="position:fixed;inset:0;z-index:-1;background:{{ boardBg }}"></div>
+
+<div style="width:1920px;margin:0 auto;padding:64px 72px 96px;font-family:'Public Sans',system-ui,sans-serif;color:#1B1A18">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:880px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · mobile ui 2.0 · entry flow · direction stage</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">Entry Flow Direction v1</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Direction A extended backwards from Sessions to the path that reaches them: pair, choose or recover a computer, choose a project or browse for a directory, then start with defaults or configure Agent, Model and Mode. Same tokens, same hairline hierarchy, no second visual language and no new brand skin. Sessions, Chat and Secure Approval are unchanged and are not restated here.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div>
+        <div style="color:#1B1A18">13 frames</div>
+        <div>402 × 874 · 1:1</div>
+      </div>
+      <div>
+        <div style="color:#1B1A18">iPhone 17</div>
+        <div>dark first · light proof</div>
+      </div>
+      <div>
+        <div style="color:#1B1A18">no new tokens</div>
+        <div>no protocol change</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ F · FLOW MAP ═══════════════ -->
+  <div style="padding-top:46px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">F</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Flow map</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Five surfaces. One canonical action each, and an exit condition that is a real state, not a screen the user must remember to leave.</span>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0;border-top:1px solid #C9C5BD;border-bottom:1px solid #C9C5BD">
+      <div style="padding:20px 24px 22px 0;border-right:1px solid #DAD6CE">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">01 · entered when no owner binding</div>
+        <div style="font:600 18px/1.25 'Public Sans',sans-serif;letter-spacing:-.015em;margin-top:10px">Pair a computer</div>
+        <div style="font:400 13px/1.6 'Public Sans',sans-serif;color:#54504A;margin-top:7px;text-wrap:pretty">Six-digit code is the spine. Scan, paste link and direct LAN are alternatives that never become the hierarchy.</div>
+        <div style="margin-top:12px;font:400 12px/1.7 'JetBrains Mono',monospace;color:#6E695F">action · Pair computer<br />exit · binding stored<br />route · PairingScreen.kt</div>
+      </div>
+      <div style="padding:20px 24px 22px;border-right:1px solid #DAD6CE">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">02 · entered when not Ready</div>
+        <div style="font:600 18px/1.25 'Public Sans',sans-serif;letter-spacing:-.015em;margin-top:10px">Choose / recover a computer</div>
+        <div style="font:400 13px/1.6 'Public Sans',sans-serif;color:#54504A;margin-top:7px;text-wrap:pretty">Paired computers as rows. The failing phase names itself and owns the recovery action; nothing is merged into a generic error.</div>
+        <div style="margin-top:12px;font:400 12px/1.7 'JetBrains Mono',monospace;color:#6E695F">action · phase-specific<br />exit · ConnPhase.Ready<br />route · ConnectionGate / ConnectScreen</div>
+      </div>
+      <div style="padding:20px 24px 22px;border-right:1px solid #DAD6CE">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">03 · home surface</div>
+        <div style="font:600 18px/1.25 'Public Sans',sans-serif;letter-spacing:-.015em;margin-top:10px">Projects</div>
+        <div style="font:400 13px/1.6 'Public Sans',sans-serif;color:#54504A;margin-top:7px;text-wrap:pretty">Title, machine state, quiet utilities, then work. Current work outranks history. One open-folder entry, no second plus control.</div>
+        <div style="margin-top:12px;font:400 12px/1.7 'JetBrains Mono',monospace;color:#6E695F">action · New session<br />exit · session opened or picker<br />route · DirectoryScreen</div>
+      </div>
+      <div style="padding:20px 24px 22px;border-right:1px solid #DAD6CE">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">04 · bounded sheet</div>
+        <div style="font:600 18px/1.25 'Public Sans',sans-serif;letter-spacing:-.015em;margin-top:10px">Directory picker</div>
+        <div style="font:400 13px/1.6 'Public Sans',sans-serif;color:#54504A;margin-top:7px;text-wrap:pretty">Recents pinned at the home root, then Browse. The full path stays visible, and the decision region is pinned to the bottom.</div>
+        <div style="margin-top:12px;font:400 12px/1.7 'JetBrains Mono',monospace;color:#6E695F">action · Start here<br />exit · workdir chosen<br />route · DirectoryPickerSheet</div>
+      </div>
+      <div style="padding:20px 0 22px 24px">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">05 · bounded sheet</div>
+        <div style="font:600 18px/1.25 'Public Sans',sans-serif;letter-spacing:-.015em;margin-top:10px">Configure session</div>
+        <div style="font:400 13px/1.6 'Public Sans',sans-serif;color:#54504A;margin-top:7px;text-wrap:pretty">Workdir, then Agent, then Model, then Mode. One Start that spells out the combination it is about to run.</div>
+        <div style="margin-top:12px;font:400 12px/1.7 'JetBrains Mono',monospace;color:#6E695F">action · Start · agent · mode<br />exit · session started once<br />route · StartSessionModeSheet</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-bottom:1px solid #C9C5BD">
+      <div style="padding:16px 24px 18px 0;border-right:1px solid #DAD6CE">
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">The fast path is the default path</div>
+        <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">New session still starts immediately on persisted defaults. Surface 05 exists only because the user asked for it: the defaults control opens configuration and starts nothing.</p>
+      </div>
+      <div style="padding:16px 24px 18px;border-right:1px solid #DAD6CE">
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Back paths are unchanged</div>
+        <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Repository-driven root routing still decides the first surface. Every existing dismiss, system back and breadcrumb return survives; the refactor adds no navigation ownership.</p>
+      </div>
+      <div style="padding:16px 0 18px 24px">
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Specialist surfaces stay put</div>
+        <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Fleet, Review Center, Settings, Help, folder sharing, guest-share terminal states and Demo keep their current designs. This file changes how they are reached, not what they are.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ G · GRAMMAR ═══════════════ -->
+  <div style="padding-top:46px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">G</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Shared grammar</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Five components carry every frame, and six connection phases carry every state sentence.</span>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0;border-top:1px solid #C9C5BD;border-bottom:1px solid #C9C5BD">
+      <div style="padding:20px 24px 22px 0;border-right:1px solid #DAD6CE">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:12px">Entity row</div>
+        <div style="background:#0B0B0C;border-radius:10px;padding:12px 14px;font-family:system-ui,-apple-system,sans-serif">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <span style="width:8px;height:8px;border-radius:50%;background:#5CB582;margin-top:6px;flex:none"></span>
+            <div style="flex:1;min-width:0">
+              <div style="font:600 16px/1.3 system-ui,sans-serif;color:#F3F3F4">cc-pocket</div>
+              <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px;letter-spacing:-.01em">/Users/alex/code/cc-pocket</div>
+            </div>
+            <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76;margin-top:3px">›</span>
+          </div>
+        </div>
+        <p style="margin:11px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Name first, then only facts the backend supplies. No container, no fixed height, hairline above. Mark plus wording, never colour alone.</p>
+      </div>
+      <div style="padding:20px 24px 22px;border-right:1px solid #DAD6CE">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:12px">State region</div>
+        <div style="background:#0B0B0C;border-radius:10px;padding:12px 14px;font-family:system-ui,-apple-system,sans-serif">
+          <div style="display:flex;align-items:center;gap:9px">
+            <span style="width:8px;height:8px;background:#E97462;flex:none"></span>
+            <span style="font:600 14.5px/1.2 system-ui,sans-serif;color:#F0A08F">Computer offline</span>
+          </div>
+          <div style="font:400 12.5px/1.5 system-ui,sans-serif;color:#B4B5BC;margin-top:8px">The relay answered. The daemon on this computer is not running.</div>
+          <div style="display:flex;gap:8px;margin-top:11px">
+            <span style="flex:1;height:36px;border-radius:9px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:600 13.5px/1 system-ui,sans-serif;color:#160C07">Retry</span>
+            <span style="flex:1;height:36px;border-radius:9px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;font:600 13.5px/1 system-ui,sans-serif;color:#E6E6E9">Exit</span>
+          </div>
+        </div>
+        <p style="margin:11px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">One shape, one sentence in plain words, one canonical action and at most one secondary. It sits where content would have been, never as a toast.</p>
+      </div>
+      <div style="padding:20px 24px 22px;border-right:1px solid #DAD6CE">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:12px">Disclosure</div>
+        <div style="background:#0B0B0C;border-radius:10px;padding:6px 14px;font-family:system-ui,-apple-system,sans-serif">
+          <div style="min-height:48px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(255,255,255,.14)">
+            <span style="flex:1;font:500 15px/1.3 system-ui,sans-serif;color:#E6E6E9">Paste pairing link</span>
+            <span style="font:300 15px/1 system-ui,sans-serif;color:#8C8D95">▾</span>
+          </div>
+          <div style="min-height:48px;display:flex;align-items:center;gap:10px">
+            <span style="flex:1;font:500 15px/1.3 system-ui,sans-serif;color:#E6E6E9">Direct LAN address</span>
+            <span style="font:300 15px/1 system-ui,sans-serif;color:#8C8D95">▾</span>
+          </div>
+        </div>
+        <p style="margin:11px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Advanced routes stay reachable at 48pt and stay closed. Opening one is never an action with consequences.</p>
+      </div>
+      <div style="padding:20px 24px 22px;border-right:1px solid #DAD6CE">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:12px">Technical value</div>
+        <div style="background:#0B0B0C;border-radius:10px;padding:12px 14px;font-family:system-ui,-apple-system,sans-serif">
+          <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">On the computer</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:9px">
+            <span style="flex:1;min-width:0;font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#E6E6E9;letter-spacing:-.01em;word-break:break-all">cc-pocket-daemon pair</span>
+            <span style="width:32px;height:32px;border:1px solid rgba(255,255,255,.22);border-radius:8px;display:flex;align-items:center;justify-content:center;flex:none"><span style="width:9px;height:11px;border:1.2px solid #B4B5BC;border-radius:2px;margin:-3px 0 0 -3px"></span></span>
+          </div>
+        </div>
+        <p style="margin:11px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Monospace, verbatim, copyable at 48pt of hit area. Long paths wrap on characters rather than truncating away the end.</p>
+      </div>
+      <div style="padding:20px 0 22px 24px">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:12px">Decision region</div>
+        <div style="background:#0B0B0C;border-radius:10px;padding:12px 14px;font-family:system-ui,-apple-system,sans-serif">
+          <div style="font:400 12px/1.45 'JetBrains Mono',monospace;color:#8C8D95;letter-spacing:-.01em">~/code/cc-pocket</div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <span style="flex:1;height:44px;border-radius:11px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:600 15px/1 system-ui,sans-serif;color:#160C07">Start here</span>
+            <span style="width:96px;height:44px;border-radius:11px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;font:600 15px/1 system-ui,sans-serif;color:#E6E6E9;flex:none">Options</span>
+          </div>
+        </div>
+        <p style="margin:11px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Pinned to the bottom of every sheet. The filled control is the only thing on the screen that starts work; Options only opens configuration.</p>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:0;border-bottom:1px solid #C9C5BD">
+      <div style="padding:18px 20px 20px 0;border-right:1px solid #DAD6CE">
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;border-radius:50%;border:1.5px solid #6B6970;flex:none"></span><span style="font:600 14px/1.2 'Public Sans',sans-serif">Connecting</span></div>
+        <div style="font:400 12.5px/1.55 'Public Sans',sans-serif;color:#54504A;margin-top:8px;text-wrap:pretty">First attempt. Projects-shaped skeleton until directories arrive.</div>
+        <div style="font:400 11.5px/1.6 'JetBrains Mono',monospace;color:#8A857C;margin-top:8px">no action · wait</div>
+      </div>
+      <div style="padding:18px 20px 20px;border-right:1px solid #DAD6CE">
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;background:#8A5A08;transform:rotate(45deg);flex:none"></span><span style="font:600 14px/1.2 'Public Sans',sans-serif">Reconnecting</span></div>
+        <div style="font:400 12.5px/1.55 'Public Sans',sans-serif;color:#54504A;margin-top:8px;text-wrap:pretty">Was ready, dropped. Previous content stays under a slim warning.</div>
+        <div style="font:400 11.5px/1.6 'JetBrains Mono',monospace;color:#8A857C;margin-top:8px">no action · content kept</div>
+      </div>
+      <div style="padding:18px 20px 20px;border-right:1px solid #DAD6CE">
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;background:#A3311F;flex:none"></span><span style="font:600 14px/1.2 'Public Sans',sans-serif">Relay unreachable</span></div>
+        <div style="font:400 12.5px/1.55 'Public Sans',sans-serif;color:#54504A;margin-top:8px;text-wrap:pretty">The relay itself was never reached. Says so, and blames neither daemon nor credential.</div>
+        <div style="font:400 11.5px/1.6 'JetBrains Mono',monospace;color:#8A857C;margin-top:8px">Retry · Exit</div>
+      </div>
+      <div style="padding:18px 20px 20px;border-right:1px solid #DAD6CE">
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;background:#A3311F;flex:none"></span><span style="font:600 14px/1.2 'Public Sans',sans-serif">Computer offline</span></div>
+        <div style="font:400 12.5px/1.55 'Public Sans',sans-serif;color:#54504A;margin-top:8px;text-wrap:pretty">Relay reachable, daemon not running. Existing hint kept. In Chat, history stays under a slim banner.</div>
+        <div style="font:400 11.5px/1.6 'JetBrains Mono',monospace;color:#8A857C;margin-top:8px">Retry · Exit</div>
+      </div>
+      <div style="padding:18px 20px 20px;border-right:1px solid #DAD6CE">
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;background:#A3311F;flex:none"></span><span style="font:600 14px/1.2 'Public Sans',sans-serif">Pairing invalid</span></div>
+        <div style="font:400 12.5px/1.55 'Public Sans',sans-serif;color:#54504A;margin-top:8px;text-wrap:pretty">The credential was rejected. Retry is not offered, because retrying cannot help.</div>
+        <div style="font:400 11.5px/1.6 'JetBrains Mono',monospace;color:#8A857C;margin-top:8px">Pair again · Remove</div>
+      </div>
+      <div style="padding:18px 0 20px 20px">
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;border-radius:50%;background:#1F7A4D;flex:none"></span><span style="font:600 14px/1.2 'Public Sans',sans-serif">Ready</span></div>
+        <div style="font:400 12.5px/1.55 'Public Sans',sans-serif;color:#54504A;margin-top:8px;text-wrap:pretty">Relay attached, daemon online, directories received. Never shown ahead of the directory list.</div>
+        <div style="font:400 11.5px/1.6 'JetBrains Mono',monospace;color:#8A857C;margin-top:8px">Projects renders</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ A · FRAMES 01–04 ═══════════════ -->
+  <div style="padding-top:52px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">A</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Pair and reach a computer</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Camera-free by construction. The scanner is a room the user enters on purpose.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <!-- 01 · PAIR -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">01 · Pair a computer · dark</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+          <div style="height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none"><span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span><span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #F3F3F4;border-radius:2px;opacity:.7"></span><span style="width:22px;height:10px;border:1.3px solid #F3F3F4;border-radius:3px;opacity:.7"></span></span></div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;padding:8px 20px 0;display:flex;flex-direction:column">
+            <h1 style="margin:0;font:600 33px/1.1 system-ui,sans-serif;letter-spacing:-.025em;text-wrap:pretty">Pair a computer</h1>
+            <p style="margin:12px 0 0;font:400 15.5px/1.5 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">Run the pairing command on the computer you want to control. It prints a six-digit code.</p>
+
+            <div style="display:flex;gap:8px;margin-top:26px">
+              <span style="flex:1;height:60px;border-radius:11px;border:1px solid rgba(255,255,255,.24);background:#141417;display:flex;align-items:center;justify-content:center;font:500 26px/1 'JetBrains Mono',monospace;color:#F3F3F4">4</span>
+              <span style="flex:1;height:60px;border-radius:11px;border:1px solid rgba(255,255,255,.24);background:#141417;display:flex;align-items:center;justify-content:center;font:500 26px/1 'JetBrains Mono',monospace;color:#F3F3F4">2</span>
+              <span style="flex:1;height:60px;border-radius:11px;border:1px solid rgba(255,255,255,.24);background:#141417;display:flex;align-items:center;justify-content:center;font:500 26px/1 'JetBrains Mono',monospace;color:#F3F3F4">7</span>
+              <span style="flex:1;height:60px;border-radius:11px;border:1px solid rgba(255,255,255,.24);background:#141417;display:flex;align-items:center;justify-content:center;font:500 26px/1 'JetBrains Mono',monospace;color:#F3F3F4">9</span>
+              <span style="flex:1;height:60px;border-radius:11px;border:1px solid rgba(255,255,255,.24);background:#141417;display:flex;align-items:center;justify-content:center;font:500 26px/1 'JetBrains Mono',monospace;color:#F3F3F4">0</span>
+              <span style="flex:1;height:60px;border-radius:11px;border:1px solid #E2795A;background:#141417;display:flex;align-items:center;justify-content:center;font:500 26px/1 'JetBrains Mono',monospace;color:#F3F3F4">3</span>
+            </div>
+
+            <div style="height:52px;border-radius:13px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:600 17px/1 system-ui,sans-serif;color:#160C07;letter-spacing:-.01em;margin-top:16px">Pair computer</div>
+            <div style="font:400 12.5px/1.5 system-ui,sans-serif;color:#8C8D95;margin-top:10px;text-wrap:pretty">The code stays valid only while the computer is still showing it.</div>
+
+            <div style="margin-top:22px;border-top:1px solid rgba(255,255,255,.14)">
+              <div style="min-height:56px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="width:26px;height:26px;border:1px solid rgba(255,255,255,.28);border-radius:6px;flex:none;display:flex;align-items:center;justify-content:center"><span style="width:10px;height:10px;border:1.2px solid #B4B5BC"></span></span>
+                <span style="flex:1;font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">Scan QR code</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+              </div>
+              <div style="min-height:56px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="width:26px;height:26px;flex:none"></span>
+                <span style="flex:1;font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">Paste pairing link</span>
+                <span style="font:300 15px/1 system-ui,sans-serif;color:#8C8D95">▾</span>
+              </div>
+              <div style="min-height:56px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="width:26px;height:26px;flex:none"></span>
+                <span style="flex:1;font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">Direct LAN address</span>
+                <span style="font:300 15px/1 system-ui,sans-serif;color:#8C8D95">▾</span>
+              </div>
+            </div>
+
+            <div style="margin-top:22px;background:#141417;border-radius:11px;padding:14px 16px">
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">On the computer</div>
+              <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+                <span style="flex:1;min-width:0;font:400 13.5px/1.45 'JetBrains Mono',monospace;color:#E6E6E9;letter-spacing:-.01em;word-break:break-all">cc-pocket-daemon pair</span>
+                <span style="width:48px;height:48px;margin:-8px -12px -8px 0;display:flex;align-items:center;justify-content:center;flex:none"><span style="width:30px;height:30px;border:1px solid rgba(255,255,255,.22);border-radius:8px;display:flex;align-items:center;justify-content:center"><span style="width:10px;height:12px;border:1.2px solid #B4B5BC;border-radius:2px;margin:-3px 0 0 -3px"></span></span></span>
+              </div>
+            </div>
+          </div>
+
+          <div style="flex:none;min-height:56px;display:flex;align-items:center;justify-content:center;padding:0 20px;border-top:1px solid rgba(255,255,255,.14)">
+            <span style="font:500 15px/1.3 system-ui,sans-serif;color:#8C8D95">Explore the demo instead</span>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          No camera is opened, previewed or requested on this screen. Nothing here depends on what the phone can see.<br /><br />
+          The code field is the only filled-in element above the fold; scan, paste and LAN are peers below a hairline, in that order of expected use.<br /><br />
+          Demo sits at the bottom in secondary text. It is reachable and it never competes with pairing.<br /><br />
+          When this screen is opened from an existing binding, the title row gains a back chevron and Cancel — specimen in section D.
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- 02 · SCANNER DENIED -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">02 · Scan QR · camera denied · dark</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+          <div style="height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none"><span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span><span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #F3F3F4;border-radius:2px;opacity:.7"></span><span style="width:22px;height:10px;border:1.3px solid #F3F3F4;border-radius:3px;opacity:.7"></span></span></div>
+
+          <div style="flex:none;display:flex;align-items:center;gap:4px;padding:0 8px 10px;border-bottom:1px solid rgba(255,255,255,.14)">
+            <span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;flex:none;font:300 26px/1 system-ui,sans-serif;color:#E2795A">‹</span>
+            <span style="flex:1;min-width:0;font:600 19px/1.25 system-ui,sans-serif;letter-spacing:-.015em">Scan QR code</span>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;padding:20px 20px 0;display:flex;flex-direction:column">
+            <div style="height:250px;border-radius:14px;background:#141417;border:1px solid rgba(255,255,255,.14);position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 28px;flex:none">
+              <span style="position:absolute;top:16px;left:16px;width:26px;height:26px;border-left:2px solid rgba(255,255,255,.22);border-top:2px solid rgba(255,255,255,.22);border-radius:6px 0 0 0"></span>
+              <span style="position:absolute;top:16px;right:16px;width:26px;height:26px;border-right:2px solid rgba(255,255,255,.22);border-top:2px solid rgba(255,255,255,.22);border-radius:0 6px 0 0"></span>
+              <span style="position:absolute;bottom:16px;left:16px;width:26px;height:26px;border-left:2px solid rgba(255,255,255,.22);border-bottom:2px solid rgba(255,255,255,.22);border-radius:0 0 0 6px"></span>
+              <span style="position:absolute;bottom:16px;right:16px;width:26px;height:26px;border-right:2px solid rgba(255,255,255,.22);border-bottom:2px solid rgba(255,255,255,.22);border-radius:0 0 6px 0"></span>
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:9px;height:9px;background:#E9B45C;transform:rotate(45deg);flex:none"></span><span style="font:600 16px/1.25 system-ui,sans-serif;color:#F0C079">Camera unavailable</span></div>
+              <div style="font:400 14.5px/1.5 system-ui,sans-serif;color:#B4B5BC;margin-top:10px;text-align:center;text-wrap:pretty">cc-pocket does not have permission to use the camera on this device.</div>
+              <div style="min-height:48px;padding:0 18px;margin-top:16px;border-radius:11px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;font:600 15px/1 system-ui,sans-serif;color:#E6E6E9">Open Settings</div>
+            </div>
+
+            <div style="margin-top:24px">
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">Pair without the camera</div>
+              <p style="margin:10px 0 0;font:400 15px/1.5 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">Scanning is one way in, not the way in. Both alternatives complete pairing on their own.</p>
+              <div style="height:52px;border-radius:13px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:600 17px/1 system-ui,sans-serif;color:#160C07;letter-spacing:-.01em;margin-top:18px">Enter six-digit code</div>
+              <div style="min-height:56px;display:flex;align-items:center;gap:12px;margin-top:14px;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="flex:1;font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">Paste pairing link</span>
+                <span style="font:300 15px/1 system-ui,sans-serif;color:#8C8D95">▾</span>
+              </div>
+            </div>
+
+            <div style="margin-top:22px;background:#141417;border-radius:11px;padding:14px 16px">
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">On the computer</div>
+              <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+                <span style="flex:1;min-width:0;font:400 13.5px/1.45 'JetBrains Mono',monospace;color:#E6E6E9;letter-spacing:-.01em;word-break:break-all">cc-pocket-daemon pair</span>
+                <span style="width:48px;height:48px;margin:-8px -12px -8px 0;display:flex;align-items:center;justify-content:center;flex:none"><span style="width:30px;height:30px;border:1px solid rgba(255,255,255,.22);border-radius:8px;display:flex;align-items:center;justify-content:center"><span style="width:10px;height:12px;border:1.2px solid #B4B5BC;border-radius:2px;margin:-3px 0 0 -3px"></span></span></span>
+              </div>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          Unavailable and denied share this layout; only the sentence changes. Neither is an error screen — the viewfinder simply states why it is empty.<br /><br />
+          Back returns to 01 with the entered digits intact. The scanner never becomes a dead end.<br /><br />
+          The same code and paste routes are repeated here rather than linked away, so the user never has to reconstruct where they came from.
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- 03 · CONNECTING SKELETON -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">03 · Connecting · Projects skeleton · dark</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+          <div style="height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none"><span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span><span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #F3F3F4;border-radius:2px;opacity:.7"></span><span style="width:22px;height:10px;border:1.3px solid #F3F3F4;border-radius:3px;opacity:.7"></span></span></div>
+
+          <div style="flex:none;padding:8px 20px 0">
+            <h1 style="margin:0;font:600 33px/1.1 system-ui,sans-serif;letter-spacing:-.025em">Projects</h1>
+            <div style="min-height:48px;display:flex;align-items:center;gap:10px;margin-top:6px">
+              <span style="width:9px;height:9px;border-radius:50%;border:1.5px solid #8C8D95;flex:none;animation:ccpulse 1.6s ease-in-out infinite"></span>
+              <span style="flex:1;min-width:0;font:400 14px/1.35 system-ui,sans-serif;color:#B4B5BC">Panda · MacBook Pro · connecting</span>
+              <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+            </div>
+            <div style="min-height:44px;display:flex;align-items:center;gap:18px;border-top:1px solid rgba(255,255,255,.14)">
+              <span style="font:400 13.5px/1 system-ui,sans-serif;color:#8C8D95">Review</span>
+              <span style="font:400 13.5px/1 system-ui,sans-serif;color:#8C8D95">Help</span>
+              <span style="font:400 13.5px/1 system-ui,sans-serif;color:#8C8D95">Settings</span>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <span style="flex:1;height:48px;border-radius:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10)"></span>
+              <span style="width:88px;height:48px;border-radius:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);flex:none"></span>
+            </div>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;padding:22px 20px 0">
+            <span style="display:block;width:64px;height:9px;border-radius:3px;background:rgba(255,255,255,.14);animation:ccskel 1.5s ease-in-out infinite"></span>
+            <div style="margin-top:16px;border-top:1px solid rgba(255,255,255,.14);padding-top:16px;display:flex;gap:11px">
+              <span style="width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.14);flex:none;margin-top:5px"></span>
+              <div style="flex:1">
+                <span style="display:block;width:62%;height:15px;border-radius:4px;background:rgba(255,255,255,.14);animation:ccskel 1.5s ease-in-out infinite"></span>
+                <span style="display:block;width:84%;height:11px;border-radius:4px;background:rgba(255,255,255,.09);margin-top:10px;animation:ccskel 1.5s ease-in-out .1s infinite"></span>
+                <span style="display:block;width:46%;height:11px;border-radius:4px;background:rgba(255,255,255,.09);margin-top:8px;animation:ccskel 1.5s ease-in-out .2s infinite"></span>
+              </div>
+            </div>
+            <div style="margin-top:20px;border-top:1px solid rgba(255,255,255,.14);padding-top:16px;display:flex;gap:11px">
+              <span style="width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.10);flex:none;margin-top:5px"></span>
+              <div style="flex:1">
+                <span style="display:block;width:48%;height:15px;border-radius:4px;background:rgba(255,255,255,.12);animation:ccskel 1.5s ease-in-out .15s infinite"></span>
+                <span style="display:block;width:72%;height:11px;border-radius:4px;background:rgba(255,255,255,.08);margin-top:10px;animation:ccskel 1.5s ease-in-out .25s infinite"></span>
+              </div>
+            </div>
+            <div style="margin-top:20px;border-top:1px solid rgba(255,255,255,.14);padding-top:16px;display:flex;gap:11px">
+              <span style="width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.10);flex:none;margin-top:5px"></span>
+              <div style="flex:1">
+                <span style="display:block;width:56%;height:15px;border-radius:4px;background:rgba(255,255,255,.12);animation:ccskel 1.5s ease-in-out .2s infinite"></span>
+                <span style="display:block;width:66%;height:11px;border-radius:4px;background:rgba(255,255,255,.08);margin-top:10px;animation:ccskel 1.5s ease-in-out .3s infinite"></span>
+              </div>
+            </div>
+            <div style="margin-top:20px;border-top:1px solid rgba(255,255,255,.14);padding-top:16px;display:flex;gap:11px">
+              <span style="width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.08);flex:none;margin-top:5px"></span>
+              <div style="flex:1">
+                <span style="display:block;width:42%;height:15px;border-radius:4px;background:rgba(255,255,255,.10);animation:ccskel 1.5s ease-in-out .25s infinite"></span>
+                <span style="display:block;width:60%;height:11px;border-radius:4px;background:rgba(255,255,255,.07);margin-top:10px;animation:ccskel 1.5s ease-in-out .35s infinite"></span>
+              </div>
+            </div>
+            <div style="margin-top:26px;font:400 13px/1.5 system-ui,sans-serif;color:#8C8D95;text-wrap:pretty">Waiting for the directory list. Nothing is claimed as ready until it arrives.</div>
+          </div>
+
+          <div style="flex:none;padding:12px 20px;border-top:1px solid rgba(255,255,255,.14)">
+            <div style="height:52px;border-radius:13px;border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font:600 17px/1 system-ui,sans-serif;color:#6E6E76;letter-spacing:-.01em">New session</div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          Header geometry is identical to frame 05 — title, machine row, utility row, search row, dock — so arriving directories replace bars in place with no jump.<br /><br />
+          The skeleton has the shape of the real list, not a spinner. It stops at four rows because the real count is unknown.<br /><br />
+          The dock stays present and inert. Removing it would move every row when Ready lands.
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- 04 · COMPUTERS -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">04 · Computers · offline recovery · dark</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+          <div style="height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none"><span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span><span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #F3F3F4;border-radius:2px;opacity:.7"></span><span style="width:22px;height:10px;border:1.3px solid #F3F3F4;border-radius:3px;opacity:.7"></span></span></div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;padding:8px 20px 0">
+            <h1 style="margin:0;font:600 33px/1.1 system-ui,sans-serif;letter-spacing:-.025em">Computers</h1>
+
+            <div style="margin-top:20px;background:#141417;border-radius:12px;padding:16px 16px 14px">
+              <div style="display:flex;align-items:center;gap:9px">
+                <span style="width:9px;height:9px;background:#E97462;flex:none"></span>
+                <span style="font:600 16px/1.2 system-ui,sans-serif;color:#F0A08F;flex:1">Computer offline</span>
+              </div>
+              <div style="font:600 15.5px/1.35 system-ui,sans-serif;color:#F3F3F4;margin-top:11px">Panda · MacBook Pro</div>
+              <div style="font:400 14.5px/1.5 system-ui,sans-serif;color:#B4B5BC;margin-top:6px;text-wrap:pretty">The relay answered, but the daemon is not running. Start cc-pocket on that computer, or wake it and try again.</div>
+              <div style="display:flex;gap:10px;margin-top:14px">
+                <span style="flex:1;height:48px;border-radius:11px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:600 16px/1 system-ui,sans-serif;color:#160C07">Retry</span>
+                <span style="width:110px;height:48px;border-radius:11px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;font:600 16px/1 system-ui,sans-serif;color:#E6E6E9;flex:none">Exit</span>
+              </div>
+            </div>
+
+            <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;margin-top:26px">Paired computers</div>
+
+            <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.14);min-height:72px;display:flex;align-items:center;gap:11px;padding:14px 0">
+              <div style="flex:1;min-width:0">
+                <div style="font:600 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em">Panda · MacBook Pro</div>
+                <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px;letter-spacing:-.01em">acct 9f3a…c21 · owner</div>
+                <div style="font:400 13px/1.4 system-ui,sans-serif;color:#B4B5BC;margin-top:5px">Active binding</div>
+              </div>
+              <span style="width:48px;height:48px;margin-right:-12px;display:flex;align-items:center;justify-content:center;flex:none;font:500 20px/1 system-ui,sans-serif;color:#8C8D95">⋯</span>
+            </div>
+
+            <div style="border-top:1px solid rgba(255,255,255,.14);min-height:72px;display:flex;align-items:center;gap:11px;padding:14px 0">
+              <div style="flex:1;min-width:0">
+                <div style="font:500 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em;color:#E6E6E9">studio-mini.local</div>
+                <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px;letter-spacing:-.01em">acct 9f3a…c21 · owner</div>
+              </div>
+              <span style="width:48px;height:48px;margin-right:-12px;display:flex;align-items:center;justify-content:center;flex:none;font:500 20px/1 system-ui,sans-serif;color:#8C8D95">⋯</span>
+            </div>
+
+            <div style="border-top:1px solid rgba(255,255,255,.14);min-height:72px;display:flex;align-items:center;gap:11px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.14)">
+              <div style="flex:1;min-width:0">
+                <div style="font:500 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em;color:#E6E6E9;word-break:break-all">4c8e…a17</div>
+                <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px;letter-spacing:-.01em">acct 4c8e…a17 · guest</div>
+              </div>
+              <span style="width:48px;height:48px;margin-right:-12px;display:flex;align-items:center;justify-content:center;flex:none;font:500 20px/1 system-ui,sans-serif;color:#8C8D95">⋯</span>
+            </div>
+
+            <div style="font:400 12.5px/1.5 system-ui,sans-serif;color:#8C8D95;margin-top:12px;text-wrap:pretty">Tap a computer to connect to it. Rename and remove live under the row menu.</div>
+
+            <div style="margin-top:20px;border-top:1px solid rgba(255,255,255,.14)">
+              <div style="min-height:56px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="font:300 21px/1 system-ui,sans-serif;color:#B4B5BC;width:26px;flex:none">+</span>
+                <span style="flex:1;font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">Add computer</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+              </div>
+              <div style="min-height:56px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="width:26px;flex:none"></span>
+                <span style="flex:1;font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">Direct LAN address</span>
+                <span style="font:300 15px/1 system-ui,sans-serif;color:#8C8D95">▾</span>
+              </div>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          Rows carry only what PairedDaemon supplies: display name by the label → hostName → truncated accountId fallback, an account caption, role, and which binding is active. No latency, no last seen, no OS.<br /><br />
+          The failing phase gets the one raised surface on the screen; the list below stays flat, so switching computers reads as a normal choice rather than a second alarm.<br /><br />
+          Only the active binding states that it is active. The other rows state nothing they cannot prove.
+        </div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ B · FRAMES 05–08 ═══════════════ -->
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">B</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Projects and the directory picker</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Current work outranks history. One open-folder entry, one dock, no second equal-weight plus.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <!-- 05 · PROJECTS DARK -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">05 · Projects · ready · dark</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+          <div style="height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none"><span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span><span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #F3F3F4;border-radius:2px;opacity:.7"></span><span style="width:22px;height:10px;border:1.3px solid #F3F3F4;border-radius:3px;opacity:.7"></span></span></div>
+
+          <div style="flex:none;padding:8px 20px 0">
+            <h1 style="margin:0;font:600 33px/1.1 system-ui,sans-serif;letter-spacing:-.025em">Projects</h1>
+            <div style="min-height:48px;display:flex;align-items:center;gap:10px;margin-top:6px">
+              <span style="width:9px;height:9px;border-radius:50%;background:#5CB582;flex:none"></span>
+              <span style="flex:1;min-width:0;font:400 14px/1.35 system-ui,sans-serif;color:#B4B5BC">Panda · MacBook Pro · online</span>
+              <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+            </div>
+            <div style="min-height:44px;display:flex;align-items:center;gap:18px;border-top:1px solid rgba(255,255,255,.14)">
+              <span style="display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;background:#E9B45C;transform:rotate(45deg)"></span><span style="font:500 13.5px/1 system-ui,sans-serif;color:#B4B5BC">Review 2</span></span>
+              <span style="font:400 13.5px/1 system-ui,sans-serif;color:#8C8D95">Help</span>
+              <span style="font:400 13.5px/1 system-ui,sans-serif;color:#8C8D95">Settings</span>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <span style="flex:1;min-width:0;height:48px;border-radius:11px;background:#141417;border:1px solid rgba(255,255,255,.16);display:flex;align-items:center;padding:0 14px;font:400 15.5px/1 system-ui,sans-serif;color:#8C8D95">Filter projects</span>
+              <span style="width:88px;height:48px;border-radius:11px;border:1px solid rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;gap:7px;flex:none"><span style="font:500 13px/1 system-ui,sans-serif;color:#F3F3F4">Tree</span><span style="font:400 13px/1 system-ui,sans-serif;color:#6E6E76">Flat</span></span>
+            </div>
+            <div style="min-height:52px;display:flex;align-items:center;gap:12px;margin-top:8px;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14)">
+              <span style="width:22px;height:17px;border:1.3px solid #B4B5BC;border-radius:3px;flex:none;position:relative"><span style="position:absolute;top:-4px;left:0;width:9px;height:4px;background:#0B0B0C;border-top:1.3px solid #B4B5BC;border-left:1.3px solid #B4B5BC;border-right:1.3px solid #B4B5BC;border-radius:2px 2px 0 0"></span></span>
+              <span style="flex:1;font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">Open any folder…</span>
+              <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+            </div>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;padding:16px 20px 0">
+            <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">Active</div>
+            <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.14);padding:14px 0 16px;display:flex;gap:11px">
+              <span style="width:9px;height:9px;border-radius:50%;background:#5CB582;flex:none;margin-top:7px"></span>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 18px/1.3 system-ui,sans-serif;letter-spacing:-.015em">cc-pocket</span><span style="font:500 13px/1.3 system-ui,sans-serif;color:#7ECBA0">Running</span></div>
+                <div style="font:400 15px/1.45 system-ui,sans-serif;color:#E6E6E9;margin-top:6px;text-wrap:pretty">Add demo mode for App Review</div>
+                <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#B4B5BC;margin-top:8px;letter-spacing:-.01em">main · 1 session</div>
+                <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:4px;letter-spacing:-.01em;word-break:break-all">/Users/alex/code/cc-pocket</div>
+              </div>
+            </div>
+
+            <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;margin-top:14px">Pinned</div>
+            <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.14);padding:13px 0;display:flex;gap:11px">
+              <span style="width:9px;height:9px;border-radius:50%;border:1.5px solid #6E6E76;flex:none;margin-top:6px"></span>
+              <div style="flex:1;min-width:0">
+                <div style="font:500 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em;color:#E6E6E9">cc-pocket-site</div>
+                <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px;letter-spacing:-.01em;word-break:break-all">/Users/alex/code/cc-pocket-site · 2h ago</div>
+              </div>
+            </div>
+
+            <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;margin-top:14px">Projects</div>
+            <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.14);padding:13px 0;display:flex;gap:11px">
+              <span style="width:9px;height:9px;border-radius:50%;border:1.5px solid #6E6E76;flex:none;margin-top:6px"></span>
+              <div style="flex:1;min-width:0">
+                <div style="font:500 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em;color:#E6E6E9">relay-server</div>
+                <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px;letter-spacing:-.01em;word-break:break-all">/Users/alex/code/relay-server · yesterday</div>
+              </div>
+            </div>
+            <div style="border-top:1px solid rgba(255,255,255,.14);padding:13px 0;display:flex;gap:11px">
+              <span style="width:9px;height:9px;border-radius:50%;border:1.5px solid #6E6E76;flex:none;margin-top:6px"></span>
+              <div style="flex:1;min-width:0">
+                <div style="font:500 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em;color:#E6E6E9;text-wrap:pretty">notes-cli</div>
+                <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px;letter-spacing:-.01em;word-break:break-all">/Users/alex/Library/Mobile Documents/com~apple~CloudDocs/notes-cli · Mar 4</div>
+              </div>
+            </div>
+            <div style="border-top:1px solid rgba(255,255,255,.14);padding:13px 0;display:flex;gap:11px">
+              <span style="width:9px;height:9px;border-radius:50%;border:1.5px solid #6E6E76;flex:none;margin-top:6px"></span>
+              <div style="flex:1;min-width:0">
+                <div style="font:500 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em;color:#E6E6E9">dotfiles</div>
+                <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px;letter-spacing:-.01em;word-break:break-all">/Users/alex/dotfiles · Feb 19</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="flex:none;padding:10px 20px 12px;border-top:1px solid rgba(255,255,255,.14);background:#0B0B0C">
+            <div style="display:flex;gap:8px">
+              <div style="flex:1;min-width:0;height:52px;border-radius:13px;border:1px solid rgba(255,255,255,.24);display:flex;flex-direction:column;align-items:center;justify-content:center">
+                <span style="font:600 17px/1.1 system-ui,sans-serif;color:#F3F3F4;letter-spacing:-.01em">New session</span>
+                <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#8C8D95;margin-top:3px;letter-spacing:-.01em">cc-pocket · Claude · Default</span>
+              </div>
+              <span style="width:56px;height:52px;border-radius:13px;border:1px solid rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;flex:none;font:400 14px/1 system-ui,sans-serif;color:#B4B5BC">▾</span>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          Hierarchy runs title → machine state → utilities → search → work. Utilities are 48pt tall but hold the muted weight, so they never read as the next step.<br /><br />
+          Active is the only row with a filled dot, a written Running, a live session title and a branch. Branch is printed for the active row alone, because that is the only row that has one.<br /><br />
+          Open any folder… is the single doorway to the picker. The dock is New session plus a quiet defaults chevron — the chevron opens configuration and starts nothing.<br /><br />
+          Long paths wrap on characters instead of ellipsing, so the end of the path — the part that identifies it — survives.
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- 06 · PROJECTS LIGHT NO RESULTS -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">06 · Projects · no matches · light</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;background:#FCFBFA;color:#17161A;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.28)">
+          <div style="height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none"><span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span><span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #17161A;border-radius:2px;opacity:.6"></span><span style="width:22px;height:10px;border:1.3px solid #17161A;border-radius:3px;opacity:.6"></span></span></div>
+
+          <div style="flex:none;padding:8px 20px 0">
+            <h1 style="margin:0;font:600 33px/1.1 system-ui,sans-serif;letter-spacing:-.025em">Projects</h1>
+            <div style="min-height:48px;display:flex;align-items:center;gap:10px;margin-top:6px">
+              <span style="width:9px;height:9px;border-radius:50%;background:#1F7A4D;flex:none"></span>
+              <span style="flex:1;min-width:0;font:400 14px/1.35 system-ui,sans-serif;color:#4B4A50">Panda · MacBook Pro · online</span>
+              <span style="font:300 18px/1 system-ui,sans-serif;color:#8E8C92">›</span>
+            </div>
+            <div style="min-height:44px;display:flex;align-items:center;gap:18px;border-top:1px solid rgba(20,18,16,.16)">
+              <span style="display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;background:#8A5A08;transform:rotate(45deg)"></span><span style="font:500 13.5px/1 system-ui,sans-serif;color:#4B4A50">Review 2</span></span>
+              <span style="font:400 13.5px/1 system-ui,sans-serif;color:#6B6970">Help</span>
+              <span style="font:400 13.5px/1 system-ui,sans-serif;color:#6B6970">Settings</span>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <span style="flex:1;min-width:0;height:48px;border-radius:11px;background:#F4F2EF;border:1px solid rgba(20,18,16,.18);display:flex;align-items:center;padding:0 14px;font:400 15.5px/1 system-ui,sans-serif;color:#17161A">kubern</span>
+              <span style="width:88px;height:48px;border-radius:11px;border:1px solid rgba(20,18,16,.18);display:flex;align-items:center;justify-content:center;gap:7px;flex:none"><span style="font:500 13px/1 system-ui,sans-serif;color:#17161A">Tree</span><span style="font:400 13px/1 system-ui,sans-serif;color:#8E8C92">Flat</span></span>
+            </div>
+            <div style="min-height:52px;display:flex;align-items:center;gap:12px;margin-top:8px;border-top:1px solid rgba(20,18,16,.16);border-bottom:1px solid rgba(20,18,16,.16)">
+              <span style="width:22px;height:17px;border:1.3px solid #4B4A50;border-radius:3px;flex:none;position:relative"><span style="position:absolute;top:-4px;left:0;width:9px;height:4px;background:#FCFBFA;border-top:1.3px solid #4B4A50;border-left:1.3px solid #4B4A50;border-right:1.3px solid #4B4A50;border-radius:2px 2px 0 0"></span></span>
+              <span style="flex:1;font:500 15.5px/1.3 system-ui,sans-serif;color:#17161A">Open any folder…</span>
+              <span style="font:300 18px/1 system-ui,sans-serif;color:#8E8C92">›</span>
+            </div>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;padding:40px 20px 0;display:flex;flex-direction:column;align-items:flex-start">
+            <div style="display:flex;align-items:center;gap:9px"><span style="width:9px;height:9px;border-radius:50%;border:1.5px solid #6B6970;flex:none"></span><span style="font:600 19px/1.25 system-ui,sans-serif;letter-spacing:-.015em">No projects match “kubern”</span></div>
+            <p style="margin:12px 0 0;font:400 15.5px/1.5 system-ui,sans-serif;color:#4B4A50;text-wrap:pretty">The filter searches the names and paths this computer reported. Nothing here matched.</p>
+            <div style="display:flex;gap:10px;margin-top:22px">
+              <span style="min-height:48px;padding:0 18px;border-radius:11px;border:1px solid rgba(20,18,16,.24);display:flex;align-items:center;font:600 15px/1 system-ui,sans-serif;color:#17161A">Clear filter</span>
+              <span style="min-height:48px;padding:0 18px;border-radius:11px;border:1px solid rgba(20,18,16,.24);display:flex;align-items:center;font:600 15px/1 system-ui,sans-serif;color:#17161A">Open any folder…</span>
+            </div>
+            <div style="font:400 13px/1.55 system-ui,sans-serif;color:#6B6970;margin-top:20px;text-wrap:pretty">Pinned and active work is hidden while a filter is applied, and returns when it is cleared.</div>
+          </div>
+
+          <div style="flex:none;padding:10px 20px 12px;border-top:1px solid rgba(20,18,16,.16)">
+            <div style="display:flex;gap:8px">
+              <div style="flex:1;min-width:0;height:52px;border-radius:13px;border:1px solid rgba(20,18,16,.28);display:flex;flex-direction:column;align-items:center;justify-content:center">
+                <span style="font:600 17px/1.1 system-ui,sans-serif;color:#17161A;letter-spacing:-.01em">New session</span>
+                <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#6B6970;margin-top:3px;letter-spacing:-.01em">cc-pocket · Claude · Default</span>
+              </div>
+              <span style="width:56px;height:52px;border-radius:13px;border:1px solid rgba(20,18,16,.20);display:flex;align-items:center;justify-content:center;flex:none;font:400 14px/1 system-ui,sans-serif;color:#4B4A50">▾</span>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none"><span style="width:132px;height:5px;border-radius:3px;background:#17161A;opacity:.22"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          The light proof keeps the same geometry and the same state priority; only the token pair changes. Ring, diamond and filled dot carry state in both themes.<br /><br />
+          An empty result is not an illustration. It names the query, says what was searched, and offers the two things that can actually help.<br /><br />
+          The machine row and the dock stay visible while filtering, so the user is never stranded in a result set with no context and no way out.
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- 07 · DIRECTORY PICKER HOME -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">07 · Directory picker · home · dark</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+          <div style="position:absolute;inset:0;opacity:.26;display:flex;flex-direction:column">
+            <div style="height:48px;display:flex;align-items:center;padding:0 20px;font:600 14px/1 'JetBrains Mono',monospace">9:41</div>
+            <div style="padding:8px 20px"><div style="font:600 33px/1.1 system-ui,sans-serif;letter-spacing:-.025em">Projects</div></div>
+          </div>
+          <div style="position:absolute;inset:0;background:rgba(5,5,6,.72)"></div>
+
+          <div style="margin-top:120px;position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:#141417;border-radius:22px 22px 18px 18px;border-top:1px solid rgba(255,255,255,.16)">
+            <div style="flex:none;padding:16px 20px 12px;border-bottom:1px solid rgba(255,255,255,.14)">
+              <div style="font:600 19px/1.25 system-ui,sans-serif;letter-spacing:-.015em">Choose a directory</div>
+              <div style="font:400 13.5px/1.45 system-ui,sans-serif;color:#B4B5BC;margin-top:5px">on Panda · MacBook Pro</div>
+              <div style="display:flex;gap:8px;margin-top:12px">
+                <span style="min-height:44px;padding:0 16px;border-radius:10px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;font:500 13.5px/1 'JetBrains Mono',monospace;color:#F3F3F4">~</span>
+                <span style="min-height:44px;padding:0 16px;border-radius:10px;border:1px solid rgba(255,255,255,.16);display:flex;align-items:center;font:500 13.5px/1 'JetBrains Mono',monospace;color:#8C8D95">/</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:12px;min-height:24px">
+                <span style="font:400 13px/1.4 'JetBrains Mono',monospace;color:#B4B5BC;letter-spacing:-.01em">~</span>
+              </div>
+            </div>
+
+            <div style="flex:1;min-height:0;overflow:hidden;padding:14px 20px 0">
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">Recents</div>
+              <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.14);min-height:56px;display:flex;align-items:center;gap:11px;padding:10px 0">
+                <div style="flex:1;min-width:0">
+                  <div style="font:500 16px/1.3 system-ui,sans-serif;color:#F3F3F4">cc-pocket</div>
+                  <div style="font:400 12px/1.4 'JetBrains Mono',monospace;color:#8C8D95;margin-top:4px;letter-spacing:-.01em;word-break:break-all">/Users/alex/code/cc-pocket</div>
+                </div>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,.14);min-height:56px;display:flex;align-items:center;gap:11px;padding:10px 0">
+                <div style="flex:1;min-width:0">
+                  <div style="font:500 16px/1.3 system-ui,sans-serif;color:#E6E6E9">cc-pocket-site</div>
+                  <div style="font:400 12px/1.4 'JetBrains Mono',monospace;color:#8C8D95;margin-top:4px;letter-spacing:-.01em;word-break:break-all">/Users/alex/code/cc-pocket-site</div>
+                </div>
+              </div>
+
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;margin-top:20px">Browse</div>
+              <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.14);min-height:52px;display:flex;align-items:center;gap:12px">
+                <span style="font:400 13px/1 'JetBrains Mono',monospace;color:#8C8D95;width:14px;flex:none">/</span>
+                <span style="flex:1;font:500 16px/1.3 system-ui,sans-serif;color:#E6E6E9">code</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,.14);min-height:52px;display:flex;align-items:center;gap:12px">
+                <span style="font:400 13px/1 'JetBrains Mono',monospace;color:#8C8D95;width:14px;flex:none">/</span>
+                <span style="flex:1;font:500 16px/1.3 system-ui,sans-serif;color:#E6E6E9">Documents</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,.14);min-height:52px;display:flex;align-items:center;gap:12px">
+                <span style="font:400 13px/1 'JetBrains Mono',monospace;color:#8C8D95;width:14px;flex:none">/</span>
+                <span style="flex:1;font:500 16px/1.3 system-ui,sans-serif;color:#E6E6E9">Downloads</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+              </div>
+              <div style="min-height:52px;display:flex;align-items:center;gap:12px;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="flex:1;font:500 15.5px/1.3 system-ui,sans-serif;color:#B4B5BC">Enter a path manually</span>
+                <span style="font:300 15px/1 system-ui,sans-serif;color:#8C8D95">▾</span>
+              </div>
+            </div>
+
+            <div style="flex:none;padding:12px 20px 12px;border-top:1px solid rgba(255,255,255,.14);background:#17171B">
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">Selected directory</div>
+              <div style="font:400 13px/1.45 'JetBrains Mono',monospace;color:#E6E6E9;margin-top:7px;letter-spacing:-.01em;word-break:break-all">/Users/alex</div>
+              <div style="display:flex;gap:8px;margin-top:12px">
+                <span style="flex:1;height:52px;border-radius:13px;background:#E2795A;display:flex;flex-direction:column;align-items:center;justify-content:center;font:600 16px/1.1 system-ui,sans-serif;color:#160C07">Start here<span style="font:400 11px/1.2 'JetBrains Mono',monospace;margin-top:3px;letter-spacing:-.01em">Claude · Default</span></span>
+                <span style="width:112px;height:52px;border-radius:13px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;font:600 16px/1 system-ui,sans-serif;color:#E6E6E9;flex:none">Options</span>
+              </div>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none;position:relative"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          The header says whose filesystem this is. A directory list without a computer name is the fastest way to start work in the wrong place.<br /><br />
+          Recents are pinned at the home root only, and disappear once the user drills, because they are not children of the current folder.<br /><br />
+          Start here names the defaults it will use. Options opens configuration with this directory already chosen, and starts nothing.<br /><br />
+          Dismissing the sheet — scrim, swipe or system back — selects nothing and starts nothing.
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- 08 · DIRECTORY PICKER DRILLED -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">08 · Directory picker · drilled · long path</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+          <div style="position:absolute;inset:0;opacity:.26;display:flex;flex-direction:column">
+            <div style="height:48px;display:flex;align-items:center;padding:0 20px;font:600 14px/1 'JetBrains Mono',monospace">9:41</div>
+            <div style="padding:8px 20px"><div style="font:600 33px/1.1 system-ui,sans-serif;letter-spacing:-.025em">Projects</div></div>
+          </div>
+          <div style="position:absolute;inset:0;background:rgba(5,5,6,.72)"></div>
+
+          <div style="margin-top:120px;position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:#141417;border-radius:22px 22px 18px 18px;border-top:1px solid rgba(255,255,255,.16)">
+            <div style="flex:none;padding:16px 20px 12px;border-bottom:1px solid rgba(255,255,255,.14)">
+              <div style="font:600 19px/1.25 system-ui,sans-serif;letter-spacing:-.015em">Choose a directory</div>
+              <div style="font:400 13.5px/1.45 system-ui,sans-serif;color:#B4B5BC;margin-top:5px">on Panda · MacBook Pro</div>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:12px;flex-wrap:wrap">
+                <span style="width:48px;height:44px;margin-left:-12px;display:flex;align-items:center;justify-content:center;flex:none;font:300 22px/1 system-ui,sans-serif;color:#E2795A">‹</span>
+                <span style="font:400 13px/1.5 'JetBrains Mono',monospace;color:#8C8D95;letter-spacing:-.01em;word-break:break-all">~ / Library / Mobile&nbsp;Documents / <span style="color:#F3F3F4">com~apple~CloudDocs</span></span>
+              </div>
+            </div>
+
+            <div style="flex:1;min-height:0;overflow:hidden;padding:14px 20px 0">
+              <div style="min-height:52px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="font:400 13px/1 'JetBrains Mono',monospace;color:#8C8D95;width:14px;flex:none">/</span>
+                <span style="flex:1;font:500 16px/1.35 system-ui,sans-serif;color:#E6E6E9;word-break:break-all">Documents</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+              </div>
+              <div style="min-height:52px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.14);padding:8px 0">
+                <span style="font:400 13px/1 'JetBrains Mono',monospace;color:#8C8D95;width:14px;flex:none">/</span>
+                <span style="flex:1;font:500 16px/1.35 system-ui,sans-serif;color:#E6E6E9;word-break:break-all">notes-cli</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+              </div>
+              <div style="min-height:52px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.14);padding:8px 0">
+                <span style="font:400 13px/1 'JetBrains Mono',monospace;color:#8C8D95;width:14px;flex:none">/</span>
+                <span style="flex:1;font:500 16px/1.35 system-ui,sans-serif;color:#E6E6E9;word-break:break-all">scratch-and-archive-2024</span>
+                <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+              </div>
+              <div style="font:400 13px/1.55 system-ui,sans-serif;color:#8C8D95;margin-top:16px;text-wrap:pretty">Directories only. Files are never listed, because a session cannot open one.</div>
+              <div style="min-height:52px;display:flex;align-items:center;gap:12px;margin-top:14px;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="flex:1;font:500 15.5px/1.3 system-ui,sans-serif;color:#B4B5BC">Enter a path manually</span>
+                <span style="font:300 15px/1 system-ui,sans-serif;color:#8C8D95">▾</span>
+              </div>
+            </div>
+
+            <div style="flex:none;padding:12px 20px 12px;border-top:1px solid rgba(255,255,255,.14);background:#17171B">
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="flex:1;font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">Selected directory</span>
+                <span style="width:48px;height:32px;margin:-8px -12px -8px 0;display:flex;align-items:center;justify-content:center;flex:none"><span style="width:26px;height:26px;border:1px solid rgba(255,255,255,.22);border-radius:7px;display:flex;align-items:center;justify-content:center"><span style="width:9px;height:11px;border:1.2px solid #B4B5BC;border-radius:2px;margin:-3px 0 0 -3px"></span></span></span>
+              </div>
+              <div style="font:400 13px/1.5 'JetBrains Mono',monospace;color:#E6E6E9;margin-top:5px;letter-spacing:-.01em;word-break:break-all">/Users/alex/Library/Mobile Documents/com~apple~CloudDocs</div>
+              <div style="display:flex;gap:8px;margin-top:12px">
+                <span style="flex:1;height:52px;border-radius:13px;background:#E2795A;display:flex;flex-direction:column;align-items:center;justify-content:center;font:600 16px/1.1 system-ui,sans-serif;color:#160C07">Start here<span style="font:400 11px/1.2 'JetBrains Mono',monospace;margin-top:3px;letter-spacing:-.01em">Claude · Default</span></span>
+                <span style="width:112px;height:52px;border-radius:13px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;font:600 16px/1 system-ui,sans-serif;color:#E6E6E9;flex:none">Options</span>
+              </div>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none;position:relative"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          The breadcrumb wraps rather than scrolls sideways, and the last crumb is the only one in primary ink. Up is a real 48pt control, not the breadcrumb itself.<br /><br />
+          The selected path is shown in full and stays copyable. Character wrapping is deliberate: <span style="font:400 12px/1 'JetBrains Mono',monospace">com~apple~CloudDocs</span> must not be ellipsed away.<br /><br />
+          Loading, empty and unreadable folders replace the list only — the header and the decision region never move. Specimens in section D.
+        </div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ C · FRAMES 09–12 ═══════════════ -->
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">C</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Configure a session</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Workdir, Agent, Model, Mode — in that order, and only one control starts anything.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <!-- 09 · CONFIGURE CLAUDE -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">09 · Configure · Claude · dark</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+          <div style="position:absolute;inset:0;opacity:.26;display:flex;flex-direction:column">
+            <div style="height:48px;display:flex;align-items:center;padding:0 20px;font:600 14px/1 'JetBrains Mono',monospace">9:41</div>
+            <div style="padding:8px 20px"><div style="font:600 33px/1.1 system-ui,sans-serif;letter-spacing:-.025em">Projects</div></div>
+          </div>
+          <div style="position:absolute;inset:0;background:rgba(5,5,6,.72)"></div>
+
+          <div style="margin-top:92px;position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:#141417;border-radius:22px 22px 18px 18px;border-top:1px solid rgba(255,255,255,.16)">
+            <div style="flex:none;padding:16px 20px 12px;border-bottom:1px solid rgba(255,255,255,.14)">
+              <div style="font:600 19px/1.25 system-ui,sans-serif;letter-spacing:-.015em">New session</div>
+              <div style="font:500 16px/1.3 system-ui,sans-serif;color:#F3F3F4;margin-top:9px">cc-pocket</div>
+              <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:4px;letter-spacing:-.01em;word-break:break-all">/Users/alex/code/cc-pocket</div>
+            </div>
+
+            <div style="flex:1;min-height:0;overflow:hidden;padding:16px 20px 0">
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">Agent</div>
+              <div style="display:flex;gap:7px;margin-top:10px">
+                <span style="flex:1;min-height:48px;border-radius:11px;background:rgba(226,121,90,.14);border:1px solid #E2795A;display:flex;align-items:center;justify-content:center;font:600 14.5px/1 system-ui,sans-serif;color:#F0A184">Claude</span>
+                <span style="flex:1;min-height:48px;border-radius:11px;border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font:500 14.5px/1 system-ui,sans-serif;color:#B4B5BC">Codex</span>
+                <span style="flex:1;min-height:48px;border-radius:11px;border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font:500 13px/1 system-ui,sans-serif;color:#B4B5BC">OpenCode</span>
+                <span style="flex:1;min-height:48px;border-radius:11px;border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font:500 14.5px/1 system-ui,sans-serif;color:#B4B5BC">Kimi</span>
+              </div>
+
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;margin-top:20px">Model</div>
+              <div style="min-height:56px;display:flex;align-items:center;gap:12px;margin-top:10px;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14)">
+                <div style="flex:1;min-width:0">
+                  <div style="font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">Follow the computer's default</div>
+                  <div style="font:400 12px/1.4 'JetBrains Mono',monospace;color:#8C8D95;margin-top:4px;letter-spacing:-.01em">this computer reported no model list</div>
+                </div>
+                <span style="font:300 15px/1 system-ui,sans-serif;color:#8C8D95">▾</span>
+              </div>
+
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;margin-top:20px">Mode</div>
+              <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.14);padding:12px 0;display:flex;gap:11px">
+                <span style="width:18px;flex:none;font:500 15px/1.3 system-ui,sans-serif;color:#E2795A;margin-top:1px">✓</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font:600 16px/1.3 system-ui,sans-serif;color:#F3F3F4">Default</div>
+                  <div style="font:400 13.5px/1.45 system-ui,sans-serif;color:#B4B5BC;margin-top:4px;text-wrap:pretty">Asks before anything that changes files or runs a command.</div>
+                </div>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,.14);padding:12px 0;display:flex;gap:11px">
+                <span style="width:18px;flex:none"></span>
+                <div style="flex:1;min-width:0">
+                  <div style="font:500 16px/1.3 system-ui,sans-serif;color:#E6E6E9">Accept edits</div>
+                  <div style="font:400 13.5px/1.45 system-ui,sans-serif;color:#8C8D95;margin-top:4px;text-wrap:pretty">Edits files without asking. Still asks before running commands.</div>
+                </div>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,.14);padding:12px 0;display:flex;gap:11px">
+                <span style="width:18px;flex:none"></span>
+                <div style="flex:1;min-width:0">
+                  <div style="font:500 16px/1.3 system-ui,sans-serif;color:#E6E6E9">Plan</div>
+                  <div style="font:400 13.5px/1.45 system-ui,sans-serif;color:#8C8D95;margin-top:4px;text-wrap:pretty">Reads and proposes. Changes nothing until you leave Plan.</div>
+                </div>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14);padding:12px 0;display:flex;gap:11px">
+                <span style="width:18px;flex:none"></span>
+                <div style="flex:1;min-width:0">
+                  <div style="display:flex;align-items:center;gap:8px"><span style="font:500 16px/1.3 system-ui,sans-serif;color:#E6E6E9">Full access</span><span style="width:8px;height:8px;background:#E97462;flex:none"></span></div>
+                  <div style="font:400 13.5px/1.45 system-ui,sans-serif;color:#8C8D95;margin-top:4px;text-wrap:pretty">Never asks. Confirmation required before it starts.</div>
+                </div>
+              </div>
+              <div style="font:400 12.5px/1.5 system-ui,sans-serif;color:#8C8D95;margin-top:12px;text-wrap:pretty">Auto appears here only when this computer reports that it supports it.</div>
+            </div>
+
+            <div style="flex:none;padding:12px 20px 12px;border-top:1px solid rgba(255,255,255,.14);background:#17171B">
+              <div style="height:56px;border-radius:13px;background:#E2795A;display:flex;flex-direction:column;align-items:center;justify-content:center;font:600 17px/1.1 system-ui,sans-serif;color:#160C07;letter-spacing:-.01em">Start session<span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;margin-top:4px;letter-spacing:-.01em">cc-pocket · Claude · Default</span></div>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none;position:relative"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          Agent is four chips, not four cards: a name is all the agent needs at this width, and the explanation belongs to the mode rows.<br /><br />
+          Mode rows are selection, and they read as selection — a check mark, no chevron, no button ink. The one filled control is Start, and it prints the exact combination it will run.<br /><br />
+          Model states its fallback in words. When the computer reports no list, the row says so rather than showing an invented model name.
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- 10 · CONFIGURE CODEX -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">10 · Configure · Codex · dark</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+          <div style="position:absolute;inset:0;opacity:.26;display:flex;flex-direction:column">
+            <div style="height:48px;display:flex;align-items:center;padding:0 20px;font:600 14px/1 'JetBrains Mono',monospace">9:41</div>
+            <div style="padding:8px 20px"><div style="font:600 33px/1.1 system-ui,sans-serif;letter-spacing:-.025em">Projects</div></div>
+          </div>
+          <div style="position:absolute;inset:0;background:rgba(5,5,6,.72)"></div>
+
+          <div style="margin-top:92px;position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:#141417;border-radius:22px 22px 18px 18px;border-top:1px solid rgba(255,255,255,.16)">
+            <div style="flex:none;padding:16px 20px 12px;border-bottom:1px solid rgba(255,255,255,.14)">
+              <div style="font:600 19px/1.25 system-ui,sans-serif;letter-spacing:-.015em">New session</div>
+              <div style="font:500 16px/1.3 system-ui,sans-serif;color:#F3F3F4;margin-top:9px">cc-pocket</div>
+              <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:4px;letter-spacing:-.01em;word-break:break-all">/Users/alex/code/cc-pocket</div>
+            </div>
+
+            <div style="flex:1;min-height:0;overflow:hidden;padding:16px 20px 0">
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">Agent</div>
+              <div style="display:flex;gap:7px;margin-top:10px">
+                <span style="flex:1;min-height:48px;border-radius:11px;border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font:500 14.5px/1 system-ui,sans-serif;color:#B4B5BC">Claude</span>
+                <span style="flex:1;min-height:48px;border-radius:11px;background:rgba(226,121,90,.14);border:1px solid #E2795A;display:flex;align-items:center;justify-content:center;font:600 14.5px/1 system-ui,sans-serif;color:#F0A184">Codex</span>
+                <span style="flex:1;min-height:48px;border-radius:11px;border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font:500 13px/1 system-ui,sans-serif;color:#B4B5BC">OpenCode</span>
+              </div>
+              <div style="font:400 12.5px/1.5 system-ui,sans-serif;color:#8C8D95;margin-top:9px;text-wrap:pretty">Kimi is hidden because this computer did not report support for it.</div>
+
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;margin-top:18px">Model · reported by this computer</div>
+              <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.14);min-height:48px;display:flex;align-items:center;gap:11px;padding:8px 0">
+                <span style="width:18px;flex:none;font:500 15px/1.3 system-ui,sans-serif;color:#E2795A">✓</span>
+                <span style="flex:1;min-width:0;font:400 13.5px/1.4 'JetBrains Mono',monospace;color:#F3F3F4;letter-spacing:-.01em;word-break:break-all">⟨model id 1⟩</span>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14);min-height:48px;display:flex;align-items:center;gap:11px;padding:8px 0">
+                <span style="width:18px;flex:none"></span>
+                <span style="flex:1;min-width:0;font:400 13.5px/1.4 system-ui,sans-serif;color:#B4B5BC">Follow the computer's default</span>
+              </div>
+
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;margin-top:18px">Mode</div>
+              <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.14);padding:8px 0;display:flex;gap:11px">
+                <span style="width:18px;flex:none"></span>
+                <div style="flex:1;min-width:0">
+                  <div style="font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">Cautious</div>
+                  <div style="font:400 13px/1.4 system-ui,sans-serif;color:#8C8D95;margin-top:3px;text-wrap:pretty">Asks first and cannot write outside the workdir.</div>
+                </div>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,.14);padding:8px 0;display:flex;gap:11px">
+                <span style="width:18px;flex:none;font:500 15px/1.3 system-ui,sans-serif;color:#E2795A;margin-top:1px">✓</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font:600 15.5px/1.3 system-ui,sans-serif;color:#F3F3F4">Balanced</div>
+                  <div style="font:400 13px/1.4 system-ui,sans-serif;color:#B4B5BC;margin-top:3px;text-wrap:pretty">Works inside the workdir and asks before anything beyond it.</div>
+                </div>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,.14);padding:8px 0;display:flex;gap:11px">
+                <span style="width:18px;flex:none"></span>
+                <div style="flex:1;min-width:0">
+                  <div style="font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">Autonomous</div>
+                  <div style="font:400 13px/1.4 system-ui,sans-serif;color:#8C8D95;margin-top:3px;text-wrap:pretty">Runs without asking, still confined to the workdir.</div>
+                </div>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14);padding:8px 0;display:flex;gap:11px">
+                <span style="width:18px;flex:none"></span>
+                <div style="flex:1;min-width:0">
+                  <div style="display:flex;align-items:center;gap:8px"><span style="font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">Full access</span><span style="width:8px;height:8px;background:#E97462;flex:none"></span></div>
+                  <div style="font:400 13px/1.4 system-ui,sans-serif;color:#8C8D95;margin-top:3px;text-wrap:pretty">No sandbox and no approvals. Confirmation required.</div>
+                </div>
+              </div>
+              <div style="font:400 11.5px/1.5 'JetBrains Mono',monospace;color:#6E6E76;margin-top:10px;letter-spacing:-.01em;text-wrap:pretty">approval × sandbox pairs come from CODEX_PRESETS</div>
+            </div>
+
+            <div style="flex:none;padding:12px 20px 12px;border-top:1px solid rgba(255,255,255,.14);background:#17171B">
+              <div style="height:56px;border-radius:13px;background:#E2795A;display:flex;flex-direction:column;align-items:center;justify-content:center;font:600 17px/1.1 system-ui,sans-serif;color:#160C07;letter-spacing:-.01em">Start session<span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;margin-top:4px;letter-spacing:-.01em">cc-pocket · Codex · Balanced</span></div>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none;position:relative"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          Model ids are drawn verbatim from what the computer reported; none are written into the design. The angle-bracket slots mark where those strings land.<br /><br />
+          Switching agent resets Model and Mode to that agent's own defaults, and Start reprints the new combination before it can be tapped.<br /><br />
+          Codex mode names are the product's four presets. Their approval and sandbox axes stay in code — this screen explains behaviour, not configuration syntax.
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- 11 · OPENCODE -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">11 · Configure · OpenCode · dark</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+          <div style="position:absolute;inset:0;opacity:.26;display:flex;flex-direction:column">
+            <div style="height:48px;display:flex;align-items:center;padding:0 20px;font:600 14px/1 'JetBrains Mono',monospace">9:41</div>
+            <div style="padding:8px 20px"><div style="font:600 33px/1.1 system-ui,sans-serif;letter-spacing:-.025em">Projects</div></div>
+          </div>
+          <div style="position:absolute;inset:0;background:rgba(5,5,6,.72)"></div>
+
+          <div style="margin-top:92px;position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:#141417;border-radius:22px 22px 18px 18px;border-top:1px solid rgba(255,255,255,.16)">
+            <div style="flex:none;padding:16px 20px 12px;border-bottom:1px solid rgba(255,255,255,.14)">
+              <div style="font:600 19px/1.25 system-ui,sans-serif;letter-spacing:-.015em">New session</div>
+              <div style="font:500 16px/1.3 system-ui,sans-serif;color:#F3F3F4;margin-top:9px">cc-pocket</div>
+              <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:4px;letter-spacing:-.01em;word-break:break-all">/Users/alex/code/cc-pocket</div>
+            </div>
+
+            <div style="flex:1;min-height:0;overflow:hidden;padding:16px 20px 0">
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">Agent</div>
+              <div style="display:flex;gap:7px;margin-top:10px">
+                <span style="flex:1;min-height:48px;border-radius:11px;border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font:500 14.5px/1 system-ui,sans-serif;color:#B4B5BC">Claude</span>
+                <span style="flex:1;min-height:48px;border-radius:11px;border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font:500 14.5px/1 system-ui,sans-serif;color:#B4B5BC">Codex</span>
+                <span style="flex:1;min-height:48px;border-radius:11px;background:rgba(226,121,90,.14);border:1px solid #E2795A;display:flex;align-items:center;justify-content:center;font:600 13px/1 system-ui,sans-serif;color:#F0A184">OpenCode</span>
+                <span style="flex:1;min-height:48px;border-radius:11px;border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font:500 14.5px/1 system-ui,sans-serif;color:#B4B5BC">Kimi</span>
+              </div>
+
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;margin-top:20px">Model · reported by this computer</div>
+              <div style="min-height:56px;display:flex;align-items:center;gap:12px;margin-top:10px;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="flex:1;min-width:0;font:400 13.5px/1.4 'JetBrains Mono',monospace;color:#F3F3F4;letter-spacing:-.01em;word-break:break-all">⟨model id 1⟩</span>
+                <span style="font:300 15px/1 system-ui,sans-serif;color:#8C8D95">▾</span>
+              </div>
+
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;margin-top:22px">Permission</div>
+              <div style="margin-top:10px;background:#1B1B1F;border-radius:12px;padding:16px">
+                <div style="display:flex;align-items:center;gap:9px">
+                  <span style="width:9px;height:9px;background:#E9B45C;transform:rotate(45deg);flex:none"></span>
+                  <span style="font:600 16px/1.25 system-ui,sans-serif;color:#F0C079">Runs fully automatically</span>
+                </div>
+                <p style="margin:11px 0 0;font:400 14.5px/1.5 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">OpenCode does not support approvals. It will read, write and run commands in this directory without pausing, and cc-pocket cannot interrupt it for permission.</p>
+                <p style="margin:11px 0 0;font:400 13px/1.5 system-ui,sans-serif;color:#8C8D95;text-wrap:pretty">There is no mode to choose here. Choose a different agent if you want to be asked.</p>
+              </div>
+
+              <div style="font:400 12.5px/1.55 system-ui,sans-serif;color:#8C8D95;margin-top:16px;text-wrap:pretty">Approval requests, the queue and the secure approval sheet play no part in an OpenCode session.</div>
+            </div>
+
+            <div style="flex:none;padding:12px 20px 12px;border-top:1px solid rgba(255,255,255,.14);background:#17171B">
+              <div style="height:56px;border-radius:13px;background:#E2795A;display:flex;flex-direction:column;align-items:center;justify-content:center;font:600 17px/1.1 system-ui,sans-serif;color:#160C07;letter-spacing:-.01em">Start session<span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;margin-top:4px;letter-spacing:-.01em">cc-pocket · OpenCode · automatic</span></div>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none;position:relative"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          The Mode section is replaced by a statement, not filled with disabled rows. A greyed-out ladder would imply the ladder exists.<br /><br />
+          The mark is attention, not danger: this is honest behaviour of the backend, not a hazardous choice the user is making.<br /><br />
+          Start still prints the combination, and the word it prints is automatic — the same word the section uses.
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- 12 · FULL ACCESS CONFIRMATION -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">12 · Full access confirmation · dark</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+          <div style="position:absolute;inset:0;opacity:.22;display:flex;flex-direction:column">
+            <div style="height:48px;display:flex;align-items:center;padding:0 20px;font:600 14px/1 'JetBrains Mono',monospace">9:41</div>
+            <div style="margin-top:44px;flex:1;background:#141417;border-radius:22px 22px 0 0;padding:16px 20px">
+              <div style="font:600 19px/1.25 system-ui,sans-serif">New session</div>
+              <div style="font:500 16px/1.3 system-ui,sans-serif;margin-top:9px">cc-pocket</div>
+              <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:4px">/Users/alex/code/cc-pocket</div>
+            </div>
+          </div>
+          <div style="position:absolute;inset:0;background:rgba(5,5,6,.82)"></div>
+
+          <div style="position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:0 20px">
+            <div style="width:100%;background:#1B1B1F;border-radius:18px;border:1px solid rgba(233,116,98,.42);overflow:hidden">
+              <div style="padding:20px 20px 0">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span style="width:10px;height:10px;background:#E97462;flex:none"></span>
+                  <span style="font:600 20px/1.25 system-ui,sans-serif;color:#F0A08F;letter-spacing:-.015em">Start with full access?</span>
+                </div>
+                <p style="margin:14px 0 0;font:400 15.5px/1.5 system-ui,sans-serif;color:#E6E6E9;text-wrap:pretty">Claude will read, write and run commands without asking for approval, for the whole session.</p>
+
+                <div style="margin-top:16px;border-top:1px solid rgba(255,255,255,.14);padding-top:14px">
+                  <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">Working directory</div>
+                  <div style="font:400 13.5px/1.5 'JetBrains Mono',monospace;color:#F3F3F4;margin-top:7px;letter-spacing:-.01em;word-break:break-all">/Users/alex/code/cc-pocket</div>
+                </div>
+                <div style="margin-top:14px;border-top:1px solid rgba(255,255,255,.14);padding-top:14px">
+                  <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">Reach</div>
+                  <p style="margin:7px 0 0;font:400 14.5px/1.5 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">Anything reachable from that directory on Panda · MacBook Pro, including files outside it that a command can touch.</p>
+                </div>
+                <p style="margin:14px 0 0;font:400 13px/1.5 system-ui,sans-serif;color:#8C8D95;text-wrap:pretty">You will not be asked again during this session. Change it by starting a new session in another mode.</p>
+              </div>
+              <div style="display:flex;gap:8px;padding:18px 20px 20px">
+                <span style="flex:1;height:52px;border-radius:13px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;font:600 16px/1 system-ui,sans-serif;color:#E6E6E9">Cancel</span>
+                <span style="flex:1.35;height:52px;border-radius:13px;background:#E97462;display:flex;align-items:center;justify-content:center;font:600 16px/1 system-ui,sans-serif;color:#1A0906;text-align:center">Start full access</span>
+              </div>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none;position:relative"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          This is the existing confirmation, restyled — not a new gate. It names the agent, the workdir and the computer, because blast radius is a place, not an adjective.<br /><br />
+          Cancel returns to configuration with Full access still selected and nothing started. Dismissing the confirmation is Cancel.<br /><br />
+          Danger ink appears here and on the Full access mark only. It is never used for Codex Autonomous or for OpenCode.
+        </div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ D · 200% + SPECIMENS ═══════════════ -->
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">D</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Stress and conditional regions</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">200% type in the light palette, and the regions that appear only when a real condition is true.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <!-- 13 · 200% -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">13 · Configure · 200% type · light</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#FCFBFA;color:#17161A;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.28)">
+          <div style="position:absolute;inset:0;opacity:.3;display:flex;flex-direction:column">
+            <div style="height:48px;display:flex;align-items:center;padding:0 20px;font:600 14px/1 'JetBrains Mono',monospace">9:41</div>
+          </div>
+          <div style="position:absolute;inset:0;background:rgba(252,251,250,.7)"></div>
+
+          <div style="margin-top:56px;position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:#F4F2EF;border-radius:22px 22px 18px 18px;border-top:1px solid rgba(20,18,16,.18)">
+            <div style="flex:none;padding:16px 20px 14px;border-bottom:1px solid rgba(20,18,16,.16);background:#F4F2EF">
+              <div style="font:600 30px/1.2 system-ui,sans-serif;letter-spacing:-.015em">New session</div>
+              <div style="font:500 26px/1.25 system-ui,sans-serif;margin-top:10px;text-wrap:pretty">cc-pocket</div>
+              <div style="font:400 19px/1.4 'JetBrains Mono',monospace;color:#4B4A50;margin-top:6px;letter-spacing:-.01em;word-break:break-all">/Users/alex/code/cc-pocket</div>
+            </div>
+
+            <div style="flex:1;min-height:0;overflow:hidden;padding:16px 20px 0;position:relative">
+              <div style="font:500 17px/1.2 system-ui,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#6B6970">Agent</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
+                <span style="min-height:56px;padding:0 20px;border-radius:12px;background:rgba(169,72,42,.10);border:1px solid #A9482A;display:flex;align-items:center;font:600 23px/1.2 system-ui,sans-serif;color:#A9482A">Claude</span>
+                <span style="min-height:56px;padding:0 20px;border-radius:12px;border:1px solid rgba(20,18,16,.20);display:flex;align-items:center;font:500 23px/1.2 system-ui,sans-serif;color:#4B4A50">Codex</span>
+                <span style="min-height:56px;padding:0 20px;border-radius:12px;border:1px solid rgba(20,18,16,.20);display:flex;align-items:center;font:500 23px/1.2 system-ui,sans-serif;color:#4B4A50">OpenCode</span>
+              </div>
+
+              <div style="font:500 17px/1.2 system-ui,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#6B6970;margin-top:24px">Mode</div>
+              <div style="margin-top:12px;border-top:1px solid rgba(20,18,16,.16);padding:16px 0;display:flex;gap:12px">
+                <span style="width:24px;flex:none;font:500 23px/1.3 system-ui,sans-serif;color:#A9482A">✓</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font:600 25px/1.25 system-ui,sans-serif;text-wrap:pretty">Default</div>
+                  <div style="font:400 21px/1.45 system-ui,sans-serif;color:#4B4A50;margin-top:7px;text-wrap:pretty">Asks before anything that changes files or runs a command.</div>
+                </div>
+              </div>
+              <div style="border-top:1px solid rgba(20,18,16,.16);padding:16px 0 40px;display:flex;gap:12px">
+                <span style="width:24px;flex:none"></span>
+                <div style="flex:1;min-width:0">
+                  <div style="font:500 25px/1.25 system-ui,sans-serif;color:#17161A;text-wrap:pretty">Accept edits</div>
+                  <div style="font:400 21px/1.45 system-ui,sans-serif;color:#4B4A50;margin-top:7px;text-wrap:pretty">Edits files without asking. Still asks before</div>
+                </div>
+              </div>
+              <span style="position:absolute;top:16px;bottom:8px;right:6px;width:4px;border-radius:2px;background:rgba(20,18,16,.10)"><span style="display:block;width:4px;height:44%;border-radius:2px;background:rgba(20,18,16,.30)"></span></span>
+              <div style="position:absolute;left:0;right:0;bottom:0;height:28px;background:linear-gradient(to bottom,rgba(244,242,239,0),#F4F2EF)"></div>
+            </div>
+
+            <div style="flex:none;padding:14px 20px 14px;border-top:1px solid rgba(20,18,16,.16);background:#FFFFFF">
+              <div style="min-height:72px;border-radius:14px;background:#A9482A;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 14px;font:600 25px/1.2 system-ui,sans-serif;color:#FFF4EF;text-align:center">Start session<span style="font:400 16px/1.35 'JetBrains Mono',monospace;margin-top:6px;letter-spacing:-.01em;word-break:break-all">cc-pocket · Claude · Default</span></div>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none;position:relative"><span style="width:132px;height:5px;border-radius:3px;background:#17161A;opacity:.22"></span></div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Rules</div>
+          Context and Start are pinned; only the middle scrolls. At 200% the user can still see which directory they are in and still reach the button that starts it.<br /><br />
+          Agent chips wrap to a second line rather than shrinking their labels. Truncating an agent name is not an option.<br /><br />
+          The Start caption wraps on characters and the control grows to fit. No text on this screen is clipped to keep a fixed height.
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- SPECIMENS -->
+      <div style="flex:1;min-width:0">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Conditional regions · shown only when the condition is real</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px">
+
+          <div>
+            <div style="background:#0B0B0C;border-radius:12px;padding:14px 16px;font-family:system-ui,-apple-system,sans-serif">
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:9px;height:9px;background:#A3311F;flex:none"></span><span style="font:600 15px/1.2 system-ui,sans-serif;color:#F0A08F">Relay unreachable</span></div>
+              <div style="font:400 13.5px/1.5 system-ui,sans-serif;color:#B4B5BC;margin-top:8px;text-wrap:pretty">cc-pocket could not reach the relay. This says nothing about the computer itself.</div>
+              <div style="display:flex;gap:8px;margin-top:12px">
+                <span style="flex:1;min-height:44px;border-radius:10px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:600 14.5px/1 system-ui,sans-serif;color:#160C07">Retry</span>
+                <span style="width:92px;min-height:44px;border-radius:10px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;font:600 14.5px/1 system-ui,sans-serif;color:#E6E6E9;flex:none">Exit</span>
+              </div>
+            </div>
+            <div style="font:400 12px/1.55 'Public Sans',sans-serif;color:#6E695F;margin-top:9px;text-wrap:pretty">ConnPhase.RelayUnreachable · outside Chat</div>
+          </div>
+
+          <div>
+            <div style="background:#0B0B0C;border-radius:12px;padding:14px 16px;font-family:system-ui,-apple-system,sans-serif">
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:9px;height:9px;background:#A3311F;flex:none"></span><span style="font:600 15px/1.2 system-ui,sans-serif;color:#F0A08F">Pairing invalid</span></div>
+              <div style="font:400 13.5px/1.5 system-ui,sans-serif;color:#B4B5BC;margin-top:8px;text-wrap:pretty">This computer rejected the stored credential. Retrying will not fix it.</div>
+              <div style="display:flex;gap:8px;margin-top:12px">
+                <span style="flex:1;min-height:44px;border-radius:10px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:600 14.5px/1 system-ui,sans-serif;color:#160C07">Pair again</span>
+                <span style="width:110px;min-height:44px;border-radius:10px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;font:600 14.5px/1 system-ui,sans-serif;color:#E6E6E9;flex:none">Remove</span>
+              </div>
+            </div>
+            <div style="font:400 12px/1.55 'Public Sans',sans-serif;color:#6E695F;margin-top:9px;text-wrap:pretty">ConnPhase.PairingInvalid · no Retry offered</div>
+          </div>
+
+          <div>
+            <div style="background:#0B0B0C;border-radius:12px;padding:12px 16px;font-family:system-ui,-apple-system,sans-serif">
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:8px;height:8px;background:#E9B45C;transform:rotate(45deg);flex:none"></span><span style="flex:1;font:500 13.5px/1.35 system-ui,sans-serif;color:#F0C079">Reconnecting — showing the last known list</span></div>
+            </div>
+            <div style="background:#0B0B0C;border-radius:12px;padding:12px 16px;font-family:system-ui,-apple-system,sans-serif;margin-top:10px">
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:8px;height:8px;background:#E97462;flex:none"></span><span style="flex:1;font:500 13.5px/1.35 system-ui,sans-serif;color:#F0A08F">Computer offline — history stays readable</span></div>
+            </div>
+            <div style="font:400 12px/1.55 'Public Sans',sans-serif;color:#6E695F;margin-top:9px;text-wrap:pretty">Slim banners · inside Chat, content is never replaced</div>
+          </div>
+
+          <div>
+            <div style="background:#0B0B0C;border-radius:12px;padding:14px 16px;font-family:system-ui,-apple-system,sans-serif">
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:9px;height:9px;background:#E9B45C;transform:rotate(45deg);flex:none"></span><span style="font:600 15px/1.2 system-ui,sans-serif;color:#F0C079">Shared with you</span></div>
+              <div style="font:400 13.5px/1.5 system-ui,sans-serif;color:#B4B5BC;margin-top:8px;text-wrap:pretty">You have collaborator links but no computer of your own yet. Pair one to start your own sessions.</div>
+            </div>
+            <div style="font:400 12px/1.55 'Public Sans',sans-serif;color:#6E695F;margin-top:9px;text-wrap:pretty">Collaborator links exist · no owner binding · banner only, never a block</div>
+          </div>
+
+          <div>
+            <div style="background:#0B0B0C;border-radius:12px;padding:8px 8px 14px;font-family:system-ui,-apple-system,sans-serif">
+              <div style="display:flex;align-items:center;gap:4px">
+                <span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;flex:none;font:300 24px/1 system-ui,sans-serif;color:#E2795A">‹</span>
+                <span style="flex:1;min-width:0;font:600 18px/1.25 system-ui,sans-serif;color:#F3F3F4">Add a computer</span>
+                <span style="min-height:44px;padding:0 12px;display:flex;align-items:center;font:500 15px/1 system-ui,sans-serif;color:#B4B5BC;flex:none">Cancel</span>
+              </div>
+              <div style="font:400 13.5px/1.5 system-ui,sans-serif;color:#B4B5BC;margin-top:10px;padding:0 8px;text-wrap:pretty">Pairing from an existing binding keeps a real way back. The current computer stays connected.</div>
+            </div>
+            <div style="font:400 12px/1.55 'Public Sans',sans-serif;color:#6E695F;margin-top:9px;text-wrap:pretty">Frame 01 header · entered from Computers</div>
+          </div>
+
+          <div>
+            <div style="background:#0B0B0C;border-radius:12px;padding:14px 16px;font-family:system-ui,-apple-system,sans-serif">
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:9px;height:9px;background:#A3311F;flex:none"></span><span style="font:600 15px/1.2 system-ui,sans-serif;color:#F0A08F">Can't read this folder</span></div>
+              <div style="font:400 13px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:8px;letter-spacing:-.01em;word-break:break-all">/Users/alex/Library/Application Support</div>
+              <div style="min-height:44px;margin-top:12px;border-radius:10px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;font:600 14.5px/1 system-ui,sans-serif;color:#E6E6E9">Retry</div>
+              <div style="border-top:1px solid rgba(255,255,255,.14);margin-top:14px;padding-top:12px;font:400 13.5px/1.45 system-ui,sans-serif;color:#B4B5BC">No subfolders here.</div>
+            </div>
+            <div style="font:400 12px/1.55 'Public Sans',sans-serif;color:#6E695F;margin-top:9px;text-wrap:pretty">Picker list region only · header and decision region hold still</div>
+          </div>
+        </div>
+
+        <div style="margin-top:26px;background:#E4E1DA;border-radius:11px;padding:16px 18px">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Deliberately absent</div>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0 28px;margin-top:12px;font:400 13px/1.7 'Public Sans',sans-serif;color:#54504A">
+            <div>
+              A live camera preview anywhere in the pairing hierarchy<br />
+              Per-device latency, last seen, OS or battery on computer rows<br />
+              Repository health, test results or file counts on project rows<br />
+              A branch on any row that is not the active one
+            </div>
+            <div>
+              Invented model names — ids render verbatim or the row says default<br />
+              A permission ladder for OpenCode<br />
+              A second plus control, a card stack or a bottom navigation bar<br />
+              Any new protocol field, enum value or daemon command
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ E · FIELD MATRIX ═══════════════ -->
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">E</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Field sources</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Every value drawn in these frames, and the field it must come from.</span>
+    </div>
+
+    <div style="border-top:1px solid #C9C5BD;font:400 13.5px/1.55 'Public Sans',sans-serif;color:#3A3730">
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:10px 0;border-bottom:1px solid #DAD6CE;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">
+        <div>Element</div><div>Source</div><div>Rule</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Computer name</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">PairedDaemon.label → hostName → accountId</div><div style="color:#6E695F;text-wrap:pretty">First non-empty wins. A truncated accountId is a legitimate name and is set in monospace.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Account caption · role</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">PairedDaemon.accountId · owner|guest</div><div style="color:#6E695F;text-wrap:pretty">Caption only. Never an online indicator, and never expanded into an identity claim.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Active binding line</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">active binding identity</div><div style="color:#6E695F;text-wrap:pretty">Printed on the active row alone. Absence of the line is not a state.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Direct LAN address</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">PairedDaemon.directUrl · optional</div><div style="color:#6E695F;text-wrap:pretty">Advanced disclosure. Its presence never implies the computer is online.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Connection sentence</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">ConnPhase</div><div style="color:#6E695F;text-wrap:pretty">Six phases, six sentences, six action sets. Never collapsed into a generic failure, never Ready before directories arrive.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Project name · path</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">DirectoryEntry.name · path</div><div style="color:#6E695F;text-wrap:pretty">Name in system font, path in monospace, wrapping on characters and copyable.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Running · session title</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">open · executing · busy · activeSessions</div><div style="color:#6E695F;text-wrap:pretty">Filled dot plus the word Running plus the live title. Zero sessions prints nothing rather than a zero.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Branch</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">DirectoryEntry.gitBranch · optional</div><div style="color:#6E695F;text-wrap:pretty">Only where the backend supplies one, which in practice is the active row. Never inferred for history.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Time on a row</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">DirectoryEntry.lastModified</div><div style="color:#6E695F;text-wrap:pretty">The authoritative modification time, not a session time and not a guess at recency.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Recents in the picker</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">DirectoryEntry.recent</div><div style="color:#6E695F;text-wrap:pretty">Pinned at the home root only. Never merged into the browse list of another folder.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Agent chips</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">Claude · Codex · OpenCode · Kimi</div><div style="color:#6E695F;text-wrap:pretty">Exactly these four. Capability hides unsupported agents; hiding is stated in words, not by disabling.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Model row</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">daemon / repository model list</div><div style="color:#6E695F;text-wrap:pretty">Ids render verbatim. When the list is missing the row reads as following the configured default — no model name is invented here.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #DAD6CE">
+        <div>Mode rows</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">per-agent mode set · CODEX_PRESETS</div><div style="color:#6E695F;text-wrap:pretty">Claude four plus optional Auto, Codex four presets, Kimi three, OpenCode none. Plain-language behaviour is the label; the approval and sandbox axes stay in code.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:12px 0;border-bottom:1px solid #C9C5BD">
+        <div>Start caption</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">workdir · agent · mode</div><div style="color:#6E695F;text-wrap:pretty">Composed at render time from the current selection, so it cannot drift from what will actually run.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ H · CHECKLIST ═══════════════ -->
+  <div style="padding-top:52px;display:flex;gap:52px;align-items:flex-start">
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+        <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">H</span>
+        <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Interaction checklist</h2>
+      </div>
+      <div style="border-top:1px solid #C9C5BD;font:400 13.5px/1.55 'Public Sans',sans-serif;color:#3A3730">
+        <div style="display:grid;grid-template-columns:26px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 12px/1.5 'JetBrains Mono',monospace;color:#8A857C">01</span><span style="text-wrap:pretty">Unpaired launch → six digits → Connecting, with the camera never requested.</span></div>
+        <div style="display:grid;grid-template-columns:26px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 12px/1.5 'JetBrains Mono',monospace;color:#8A857C">02</span><span style="text-wrap:pretty">Scan QR opened explicitly, camera denied, back to the same code and paste routes with digits intact.</span></div>
+        <div style="display:grid;grid-template-columns:26px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 12px/1.5 'JetBrains Mono',monospace;color:#8A857C">03</span><span style="text-wrap:pretty">Paired but disconnected → choose another computer → Projects-shaped skeleton → Ready, with no header shift.</span></div>
+        <div style="display:grid;grid-template-columns:26px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 12px/1.5 'JetBrains Mono',monospace;color:#8A857C">04</span><span style="text-wrap:pretty">Relay unreachable → Retry; Computer offline → Retry or Exit; Pairing invalid → Pair again or Remove.</span></div>
+        <div style="display:grid;grid-template-columns:26px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 12px/1.5 'JetBrains Mono',monospace;color:#8A857C">05</span><span style="text-wrap:pretty">Projects: filter, tree/flat, drill and breadcrumb back, fleet doorway, and exactly one open-folder entry.</span></div>
+        <div style="display:grid;grid-template-columns:26px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 12px/1.5 'JetBrains Mono',monospace;color:#8A857C">06</span><span style="text-wrap:pretty">Picker: use a recent, drill a child, switch root, enter a manual path, open Options — no session started.</span></div>
+        <div style="display:grid;grid-template-columns:26px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 12px/1.5 'JetBrains Mono',monospace;color:#8A857C">07</span><span style="text-wrap:pretty">Switch agent → Model and Mode reset to that agent's real options → start exactly once.</span></div>
+        <div style="display:grid;grid-template-columns:26px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 12px/1.5 'JetBrains Mono',monospace;color:#8A857C">08</span><span style="text-wrap:pretty">Full access → confirmation naming workdir and reach → Cancel leaves the session unopened.</span></div>
+        <div style="display:grid;grid-template-columns:26px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid #C9C5BD"><span style="font:500 12px/1.5 'JetBrains Mono',monospace;color:#8A857C">09</span><span style="text-wrap:pretty">Camera-free pairing, Projects and configuration all pass at 200% type and in the light palette.</span></div>
+      </div>
+    </div>
+
+    <div style="width:520px;flex:none">
+      <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+        <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">I</span>
+        <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Status of this file</h2>
+      </div>
+      <div style="border-top:1px solid #C9C5BD">
+        <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Direction stage, not production</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">These are wireframe-fidelity frames in the locked Direction A skin. Geometry, hierarchy and wording are the deliverable; no production HTML or CSS is copied from the design export.</p>
+        </div>
+        <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Fixtures are the brief's own</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Paths, project names, the live session title, the branch and the pairing command are the supplied fixtures. Digits, account fragments and the 9:41 clock are placeholders and carry no meaning.</p>
+        </div>
+        <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Localisation</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">The brief supplies no localised strings, so every label here is its English product label verbatim. Translated copy drops in from the product's own resource file — nothing is translated in this file, and rows are already free of fixed heights so longer strings can grow.</p>
+        </div>
+        <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Unchanged surfaces</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Sessions, Chat and Secure Approval keep their contracts in A Master Core v1, A Master Proofs v1 and Approval Protocol Handoff v1. Fleet, Review Center, Settings, Help, folder sharing, guest-share terminal states and Demo are reached from here but not redesigned.</p>
+        </div>
+        <div style="padding:12px 0;border-bottom:1px solid #C9C5BD">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Open for implementation</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Three things must be read from code rather than from this file: the exact CODEX_PRESETS axis pairs, the capability flags that hide an agent or reveal Claude's Auto mode, and the real model ids. Each has a marked slot in the frames.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;boardBg&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#EDEBE6&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#EDEBE6&quot;,&quot;#E4E1DA&quot;,&quot;#F4F2EF&quot;,&quot;#D9D5CC&quot;]},&quot;showNotes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      boardBg: this.props.boardBg ?? '#EDEBE6',
+      showNotes: this.props.showNotes ?? true
+    };
+  }
+}
+</script>
+</body>
+</html>
+

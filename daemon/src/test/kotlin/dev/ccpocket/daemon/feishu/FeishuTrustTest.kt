@@ -7,10 +7,11 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** The versioned three-mode trust store: migration, fail-closed reads, distinguishable writes, snapshots. */
+/** The versioned trust store: migration, fail-closed reads, distinguishable writes, snapshots. */
 class FeishuTrustTest {
     private val tmp: File = Files.createTempDirectory("ccp-trust").toFile()
     private val f = File(tmp, "trust.json")
@@ -24,31 +25,64 @@ class FeishuTrustTest {
     // ── migration ──
 
     @Test
-    fun legacy_chatId_to_workdir_map_migrates_to_TRUSTED_records() {
-        // the old rows were the owner's explicit /trust — the upgrade must not silently change their meaning
+    fun legacy_chatId_to_workdir_map_is_retained_but_requires_new_full_confirmation() {
+        // the old /trust promised a restricted ceiling; keep the row visible but execute fail-closed
         f.writeText("""{"oc_1":"/p/alpha","oc_2":"/p/Beta"}""")
         val t = FeishuTrust(f)
-        assertTrue(t.isTrusted("oc_1", "/p/alpha"))
-        assertEquals(FeishuTrustMode.TRUSTED, t.modeFor("oc_2", "/p/Beta"))
+        assertFalse(t.isTrusted("oc_1", "/p/alpha"))
+        assertEquals(FeishuTrustMode.UNTRUSTED, t.modeFor("oc_2", "/p/Beta"))
+        assertEquals(FeishuTrustMode.TRUSTED, t.recordFor("oc_1")?.mode)
+        assertFalse(t.recordFor("oc_1")?.fullAuthorityConfirmed ?: true)
         assertEquals(1, t.recordFor("oc_1")?.contractVersion)
         assertNull(t.recordFor("oc_1")?.purpose)
         // migration is lazy: the file is not rewritten by the read itself…
         assertTrue("version" !in f.readText())
-        // …but the next successful write regenerates it as v2 WITH the migrated rows intact
+        // …but the next successful explicit write regenerates it as v3 WITH the migrated rows intact
         assertEquals(TrustWrite.CHANGED, t.setReviewed("oc_3", "/p/gamma", null))
         val reloaded = FeishuTrust(f)
-        assertTrue(reloaded.isTrusted("oc_1", "/p/alpha"))
+        assertFalse(reloaded.isTrusted("oc_1", "/p/alpha"))
         assertEquals(FeishuTrustMode.REVIEWED, reloaded.modeFor("oc_3", "/p/gamma"))
+        assertTrue("\"version\":3" in f.readText())
     }
 
     @Test
-    fun v2_reviewed_record_survives_reload() {
+    fun old_v2_trusted_requires_new_full_confirmation_while_reviewed_keeps_its_mode() {
+        f.writeText(
+            """{"version":2,"chats":{"oc_trusted":{"workdir":"/p/alpha","mode":"TRUSTED","fullAuthorityConfirmed":true,"contractVersion":4},"oc_reviewed":{"workdir":"/p/beta","mode":"REVIEWED","purpose":"只做评审","contractVersion":7}}}""",
+        )
         val t = FeishuTrust(f)
-        assertEquals(TrustWrite.CHANGED, t.setReviewed("oc_1", "/p/alpha", "只用于代码评审"))
+        assertEquals(FeishuTrustMode.UNTRUSTED, t.modeFor("oc_trusted", "/p/alpha"))
+        assertEquals(FeishuTrustMode.TRUSTED, t.recordFor("oc_trusted")?.mode)
+        assertFalse(t.recordFor("oc_trusted")?.fullAuthorityConfirmed ?: true)
+        assertEquals(FeishuTrustMode.REVIEWED, t.modeFor("oc_reviewed", "/p/beta"))
+        assertEquals("只做评审", t.recordFor("oc_reviewed")?.purpose)
+        assertFalse(t.recordFor("oc_trusted")?.mode == FeishuTrustMode.FULL_AUTO)
+        assertFalse(t.recordFor("oc_reviewed")?.mode == FeishuTrustMode.FULL_AUTO)
+        assertTrue("\"version\":2" in f.readText(), "a read must not rewrite or migrate the file")
+    }
+
+    @Test
+    fun v3_legacy_full_auto_normalizes_to_trusted_without_rewriting_the_file() {
+        val body =
+            """{"version":3,"chats":{"oc_1":{"workdir":"/p/alpha","mode":"FULL_AUTO","purpose":"只用于代码评审","contractVersion":4,"policyRevision":"11111111-1111-4111-8111-111111111111"}}}"""
+        f.writeText(body)
         val r = FeishuTrust(f).recordFor("oc_1")!!
-        assertEquals(FeishuTrustMode.REVIEWED, r.mode)
-        assertEquals("只用于代码评审", r.purpose)
-        assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(f.toPath())))
+        assertEquals(FeishuTrustMode.TRUSTED, r.mode)
+        assertFalse(r.fullAuthorityConfirmed)
+        assertNull(r.purpose, "TRUSTED has no Guardian contract")
+        assertEquals(4, r.contractVersion)
+        assertEquals("11111111-1111-4111-8111-111111111111", r.policyRevision)
+        assertEquals(body, f.readText(), "compatibility reads must not rewrite owner state")
+    }
+
+    @Test
+    fun a_v2_file_cannot_smuggle_the_new_full_auto_mode() {
+        val body = """{"version":2,"chats":{"oc_1":{"workdir":"/p/alpha","mode":"FULL_AUTO"}}}"""
+        f.writeText(body)
+        val t = FeishuTrust(f)
+        assertEquals(0, t.size())
+        assertEquals(FeishuTrustMode.UNTRUSTED, t.modeFor("oc_1", "/p/alpha"))
+        assertEquals(body, f.readText())
     }
 
     @Test
@@ -62,9 +96,9 @@ class FeishuTrustTest {
 
     @Test
     fun unsupported_schema_versions_fail_closed_without_touching_the_file() {
-        // a future v3 may hang new safety conditions on fields this build ignores — applying its rows
-        // anyway would grant more than the owner agreed to, so anything but integer 2 reads as no trust
-        for (version in listOf("1", "3", "999", "\"2\"", "null", "-2")) {
+        // a future schema may hang new safety conditions on fields this build ignores — applying its rows
+        // anyway would grant more than the owner agreed to, so anything but supported integers 2/3 is empty
+        for (version in listOf("1", "4", "999", "\"2\"", "\"3\"", "null", "-2")) {
             val body = """{"version":$version,"chats":{"oc_1":{"workdir":"/p/alpha","mode":"TRUSTED"}}}"""
             f.writeText(body)
             val t = FeishuTrust(f)
@@ -80,6 +114,8 @@ class FeishuTrustTest {
     fun repeat_of_the_same_state_is_UNCHANGED_not_a_failure() {
         val t = FeishuTrust(f)
         assertEquals(TrustWrite.CHANGED, t.trust("oc_1", "/p/alpha"))
+        assertTrue(t.recordFor("oc_1")?.fullAuthorityConfirmed == true)
+        assertTrue(FeishuTrust(f).isTrusted("oc_1", "/p/alpha"), "current v3 confirmation must survive restart")
         assertEquals(TrustWrite.UNCHANGED, t.trust("oc_1", "/p/alpha"))
         assertEquals(TrustWrite.CHANGED, t.setReviewed("oc_1", "/p/alpha", "评审"))
         assertEquals(TrustWrite.UNCHANGED, t.setReviewed("oc_1", "/p/alpha", "评审"))
@@ -158,17 +194,32 @@ class FeishuTrustTest {
 
     @Test
     fun revoke_and_regrant_with_identical_args_still_voids_an_old_snapshot() {
-        // /untrust deletes the record, so a same-args /review restarts at contractVersion 1 — every FIELD
-        // the old snapshot saw can come back identical (ABA). The write timestamp is what must differ.
-        val t = FeishuTrust(f)
+        // Pin the wall clock so timestamp-based identity DEFINITELY collides. The persisted UUID must be the
+        // only changing identity; no sleeps or scheduler timing make this regression probabilistic.
+        val revisions = listOf(
+            "11111111-1111-4111-8111-111111111111",
+            "22222222-2222-4222-8222-222222222222",
+        ).iterator()
+        val t = FeishuTrust(
+            path = f,
+            nowEpochMs = { 1234L },
+            newPolicyRevision = { revisions.next() },
+        )
         t.setReviewed("oc_1", "/p/alpha", "评审")
         val snap = t.snapshot("oc_1", "/p/alpha")
         assertTrue(t.stillMatches("oc_1", "/p/alpha", snap))
         t.untrust("oc_1")
-        Thread.sleep(2) // the millisecond clock must tick between the two writes for the test to mean anything
         t.setReviewed("oc_1", "/p/alpha", "评审")
-        assertEquals(snap.contractVersion, t.snapshot("oc_1", "/p/alpha").contractVersion, "ABA precondition")
-        assertFalse(t.stillMatches("oc_1", "/p/alpha", snap), "a revoked-and-rebuilt policy is NOT the one reviewed")
+
+        // Reload to prove the differentiator is on disk rather than process-local state.
+        val reloaded = FeishuTrust(f)
+        val rebuilt = reloaded.snapshot("oc_1", "/p/alpha")
+        assertEquals(snap.contractVersion, rebuilt.contractVersion, "ABA precondition: version repeats")
+        assertEquals(snap.updatedAtEpochMs, rebuilt.updatedAtEpochMs, "ABA precondition: clock is constant")
+        assertEquals(snap.mode, rebuilt.mode)
+        assertEquals(snap.purpose, rebuilt.purpose)
+        assertNotEquals(snap.policyRevision, rebuilt.policyRevision, "each grant must carry a unique revision")
+        assertFalse(reloaded.stillMatches("oc_1", "/p/alpha", snap), "a revoked-and-rebuilt policy is NOT the one reviewed")
     }
 
     @Test

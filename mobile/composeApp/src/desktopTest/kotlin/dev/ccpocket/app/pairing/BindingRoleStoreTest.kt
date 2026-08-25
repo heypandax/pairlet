@@ -96,6 +96,18 @@ class BindingRoleStoreTest {
     }
 
     @Test
+    fun removingDaemonBindingDropsItsCredentialAndChoosesAnotherActiveComputer() {
+        Pairing.upsert(binding("acct-a", "dev-a"))
+        Pairing.upsert(binding("acct-b", "dev-b"))
+        Pairing.setActive("acct-a")
+
+        val remaining = Pairing.remove("acct-a")
+
+        assertEquals(listOf("acct-b"), remaining.map { it.accountId })
+        assertEquals("acct-b", Pairing.active()?.accountId)
+    }
+
+    @Test
     fun theOwnerBindingWinsWhenSeveralShareAnAccount() {
         Pairing.upsert(binding("acct-a", "dev-guest", BindingRole.GUEST))
         Pairing.upsert(binding("acct-a", "dev-owner", BindingRole.OWNER))

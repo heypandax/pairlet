@@ -39,7 +39,7 @@ jobs:
   public-link:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4  # fastlane/metadata (What to Test) + Info.plist (version fallback)
+      - uses: actions/checkout@v7  # fastlane/metadata (What to Test) + Info.plist (version fallback)
 
       - name: Resolve version
         id: ver

@@ -31,11 +31,13 @@ class RequestRouterDirectoryCapsTest {
 
     private val projects = Files.createTempDirectory("ccp-projects") // empty → no claude rows in the way
     private val ocDir = Files.createTempDirectory("ccp-ocdir")
+    private val zcodeDir = Files.createTempDirectory("ccp-zcodedir")
 
     @AfterTest
     fun cleanup() {
         projects.toFile().deleteRecursively()
         ocDir.toFile().deleteRecursively()
+        zcodeDir.toFile().deleteRecursively()
     }
 
     private fun router(scope: CoroutineScope): RequestRouter {
@@ -46,6 +48,10 @@ class RequestRouterDirectoryCapsTest {
                 projectsRoot = { projects },
                 codexCwds = { emptyMap() },
                 opencodeCwds = { mapOf(ocDir.toString() to 42L) }, // one opencode-ONLY project
+                kimiCwds = { emptyMap() },
+                zcodeCwds = { mapOf(zcodeDir.toString() to 43L) },
+                dshCwds = { emptyMap() }, // pinned: the default would read the developer's real ~/.dsh
+                tempNoiseRoots = emptyList(), // fixture dirs live under the real system temp — opt out of #290's noise filter
             ),
             transcribe = TranscribeService(scope) { null },
             inbox = FileInboxService { null },
@@ -76,6 +82,15 @@ class RequestRouterDirectoryCapsTest {
             listOf(ocDir.toString()),
             listWith(RequestRouter.ClientCapsHolder().apply { supportsOpencode = true }),
             "a declared client keeps the row",
+        )
+    }
+
+    @Test
+    fun zcode_only_rows_reach_only_clients_that_declared_support() {
+        assertEquals(emptyList(), listWith(RequestRouter.ClientCapsHolder()))
+        assertEquals(
+            listOf(zcodeDir.toString()),
+            listWith(RequestRouter.ClientCapsHolder().apply { supportsZcode = true }),
         )
     }
 }

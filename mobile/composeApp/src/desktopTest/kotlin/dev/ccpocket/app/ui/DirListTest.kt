@@ -1,5 +1,6 @@
 package dev.ccpocket.app.ui
 
+import dev.ccpocket.app.data.ALL_AGENTS
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
@@ -81,9 +82,9 @@ class DirListTest {
 
         assertEquals(
             listOf("/p/opencode", "/p/mixed", "/p/old-daemon", "/shared/new"),
-            filterDirectoriesByAgent(dirs, "opencode").map { it.path },
+            filterDirectoriesByAgent(dirs, setOf(AgentKind.OPENCODE)).map { it.path },
         )
-        assertEquals(dirs, filterDirectoriesByAgent(dirs, "both"))
+        assertEquals(dirs, filterDirectoriesByAgent(dirs, ALL_AGENTS))
     }
 
     @Test
@@ -97,7 +98,7 @@ class DirListTest {
             activeSessions = listOf(claude, opencode),
         )
 
-        val filtered = filterDirectoriesByAgent(listOf(row), "opencode").single()
+        val filtered = filterDirectoriesByAgent(listOf(row), setOf(AgentKind.OPENCODE)).single()
         assertEquals(listOf(opencode), filtered.activeSessions)
         assertEquals("o1", filtered.activeSessionId)
         assertEquals("OpenCode turn", filtered.activeSessionTitle)
@@ -117,5 +118,31 @@ class DirListTest {
             sessionAgents = listOf(AgentKind.CODEX, AgentKind.CLAUDE, AgentKind.CODEX),
         )
         assertEquals(listOf(AgentKind.CLAUDE, AgentKind.CODEX), projectActionAgents(historical))
+    }
+
+    // ── search as a mode of the Projects screen (issue #260) ─────────────────────────────────────────
+
+    /**
+     * Collapsing the search field CLEARS the query. This is the invariant that keeps the #250 empty states
+     * honest: a collapsed field holding a live term would filter the list from a control that is not on
+     * screen, and would be the one way to reach «no project matches "…"» with no search to explain it.
+     */
+    @Test
+    fun collapsing_the_search_field_always_clears_the_query() {
+        val typed = ProjectSearch().expanded().typed("relay")
+        assertEquals(true, typed.open)
+        assertEquals("relay", typed.query)
+
+        val collapsed = typed.collapsed()
+        assertEquals(false, collapsed.open)
+        assertEquals("", collapsed.query, "a closed field never keeps a term the user cannot see")
+
+        // …and re-opening starts clean rather than restoring the last search
+        assertEquals("", collapsed.expanded().query)
+    }
+
+    @Test
+    fun the_collapsed_default_is_closed_and_empty() {
+        assertEquals(ProjectSearch(open = false, query = ""), ProjectSearch())
     }
 }

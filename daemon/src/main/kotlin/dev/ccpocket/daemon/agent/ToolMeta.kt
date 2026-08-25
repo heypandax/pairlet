@@ -81,6 +81,19 @@ object ToolMetadata {
         }
     }
 
+    /** Whether a machine-owner full-turn grant may auto-run this tool family. Keep this list explicit so a
+     *  future CLI tool that represents a new human decision or system capability fails closed to an ask.
+     *  MCP is intentionally namespace-based: full trust explicitly includes the owner's configured MCP tools. */
+    fun broadGrantEligible(tool: String): Boolean =
+        tool in BROAD_EXECUTION_TOOLS || tool.startsWith("mcp__")
+
+    private val BROAD_EXECUTION_TOOLS = setOf(
+        "Bash",
+        "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "TodoWrite",
+        "WebFetch", "WebSearch",
+        "Task", "Agent", "Skill",
+    )
+
     private fun tilde(p: String): String {
         val home = System.getProperty("user.home") ?: return p
         return if (p.startsWith(home)) "~" + p.removePrefix(home) else p

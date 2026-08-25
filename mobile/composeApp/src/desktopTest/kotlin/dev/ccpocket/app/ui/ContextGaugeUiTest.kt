@@ -35,8 +35,9 @@ import kotlin.test.assertTrue
 class ContextGaugeUiTest {
     private val wide = 300.dp
     private val tight = 120.dp
-    private val midTurnReserve = 96.dp // ■ stop + gap + send
-    private val idleReserve = 44.dp
+    // the action slot's real widths since the accessory row went to 48dp targets (Chat Master v2)
+    private val midTurnReserve = 104.dp // ■ stop + gap + send
+    private val idleReserve = 48.dp
 
     private fun gaugeDesc() = runBlocking { getString(Res.string.qa_context_gauge) }
 
@@ -148,14 +149,14 @@ class ContextGaugeUiTest {
     fun accessoryRowShedsTheNumberOnlyWhenItActuallyRunsOut() = runComposeUiTest {
         setContent {
             PocketTheme {
-                // 375pt screen, row insets start 8 / end 10; attach 44 + chip ~135 + stack ~50 + gaps 18
-                Row(Modifier.width(357.dp)) {
-                    Box(Modifier.width(44.dp))
+                // 375pt screen, row insets start 6 / end 8; attach 48 + chip ~135 + stack ~50 + gaps 18
+                Row(Modifier.width(361.dp)) {
+                    Box(Modifier.width(48.dp))
                     Box(Modifier.width(141.dp))
                     Box(Modifier.width(56.dp))
                     ContextGauge(used = 176_000, window = 200_000, reserveEnd = midTurnReserve) {}
                     Spacer(Modifier.weight(1f))
-                    Box(Modifier.width(96.dp))
+                    Box(Modifier.width(104.dp))
                 }
             }
         }
@@ -165,12 +166,12 @@ class ContextGaugeUiTest {
         setContent {
             PocketTheme {
                 // 390pt idle: no stack chip, no stop button — the number has all the room it needs
-                Row(Modifier.width(372.dp)) {
-                    Box(Modifier.width(44.dp))
+                Row(Modifier.width(376.dp)) {
+                    Box(Modifier.width(48.dp))
                     Box(Modifier.width(76.dp))
                     ContextGauge(used = 176_000, window = 200_000, reserveEnd = idleReserve) {}
                     Spacer(Modifier.weight(1f))
-                    Box(Modifier.width(44.dp))
+                    Box(Modifier.width(48.dp))
                 }
             }
         }

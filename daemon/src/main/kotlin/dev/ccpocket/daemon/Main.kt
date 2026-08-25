@@ -89,10 +89,10 @@ fun daemonHostName(): String? {
  * boot with claude missing (and vice versa) — but with NEITHER resolvable the daemon has nothing to drive,
  * so refuse to start with an actionable message. Null = at least one agent found, start normally.
  */
-internal fun missingAgentsMessage(claudeExe: java.nio.file.Path?, codexExe: java.nio.file.Path?, opencodeExe: java.nio.file.Path?): String? =
-    if (claudeExe == null && codexExe == null && opencodeExe == null) {
-        "none of claude, codex, or opencode was found — install Claude Code, the Codex CLI, or OpenCode, " +
-            "or point the daemon at one with --claude-bin / --codex-bin / --opencode-bin."
+internal fun missingAgentsMessage(claudeExe: java.nio.file.Path?, codexExe: java.nio.file.Path?, opencodeExe: java.nio.file.Path?, kimiExe: java.nio.file.Path? = null, zcodeExe: java.nio.file.Path? = null, dshExe: java.nio.file.Path? = null): String? =
+    if (claudeExe == null && codexExe == null && opencodeExe == null && kimiExe == null && zcodeExe == null && dshExe == null) {
+        "none of claude, codex, opencode, kimi, zcode, or dsh was found — install a supported agent CLI or ZCode, " +
+            "or point the daemon at one with --claude-bin / --codex-bin / --opencode-bin / --kimi-bin / --zcode-bin / --dsh-bin."
     } else {
         null
     }
@@ -153,6 +153,9 @@ private class RunCmd : CliktCommand(name = "run") {
     private val claudeBin by option("--claude-bin", help = "claude executable (default: auto-detect the installed Claude Code)")
     private val codexBin by option("--codex-bin", help = "codex executable (default: auto-detect the installed Codex CLI)")
     private val opencodeBin by option("--opencode-bin", help = "opencode executable (default: auto-detect the installed OpenCode)")
+    private val kimiBin by option("--kimi-bin", help = "kimi executable (default: auto-detect the installed Kimi Code CLI)")
+    private val zcodeBin by option("--zcode-bin", help = "zcode executable (default: auto-detect the official ZCode app/CLI)")
+    private val dshBin by option("--dsh-bin", help = "dsh executable (default: auto-detect the installed DeepSeek Harness)")
     private val relay by option("--relay", help = "relay wss base").default(DEFAULT_RELAY)
     private val local by option("--local", help = "run a LAN-only WebSocket server instead of dialing the relay").flag()
     private val directBind by option(
@@ -162,7 +165,12 @@ private class RunCmd : CliktCommand(name = "run") {
     ).default("127.0.0.1")
     private val pairPort by option("--pair-port", help = "loopback port for the `pair` command").int().default(8799)
     private val takeover by option("--takeover", help = "if another cc-pocket daemon is already running, stop it and run this one instead (default: exit and leave it running)").flag()
-    private val autoUpdate by option("--auto-update", help = "apply daemon updates automatically (installer-managed macOS/Linux installs; others get a notification)").flag()
+    private val autoUpdate by option(
+        "--auto-update",
+        help = "force automatic daemon updates on — already the default for installer-managed macOS/Linux " +
+            "installs (Homebrew/Scoop/dev builds and Windows always just get a notification). " +
+            "Opt out with `cc-pocket-daemon config --auto-update off`",
+    ).flag()
 
     override fun run() {
         // Both agent CLIs are optional individually (issue #130): probe each for the banner, but resolve
@@ -172,7 +180,10 @@ private class RunCmd : CliktCommand(name = "run") {
         val exe = runCatching { ClaudeLauncher.resolveExecutable(claudeBin) }.getOrNull()
         val codexExe = runCatching { CodexLauncher.resolveExecutable(codexBin) }.getOrNull()
         val opencodeExe = runCatching { dev.ccpocket.daemon.opencode.OpenCodeLauncher.resolveExecutable(opencodeBin) }.getOrNull()
-        missingAgentsMessage(exe, codexExe, opencodeExe)?.let { throw com.github.ajalt.clikt.core.CliktError(it) }
+        val kimiExe = runCatching { dev.ccpocket.daemon.kimi.KimiLauncher.resolveExecutable(kimiBin) }.getOrNull()
+        val zcodeExe = runCatching { dev.ccpocket.daemon.zcode.ZCodeLauncher.resolveExecutable(zcodeBin) }.getOrNull()
+        val dshExe = runCatching { dev.ccpocket.daemon.dsh.DshLauncher.resolveExecutable(dshBin) }.getOrNull()
+        missingAgentsMessage(exe, codexExe, opencodeExe, kimiExe, zcodeExe, dshExe)?.let { throw com.github.ajalt.clikt.core.CliktError(it) }
         // credential isolation (issue #69, opt-in via `config --isolated-claude-auth on` or the env
         // toggle): the daemon's claude gets its own CLAUDE_CONFIG_DIR — its OAuth token refreshes can't
         // log out a terminal claude sharing the machine. History/settings stay shared (symlinks).
@@ -190,12 +201,19 @@ private class RunCmd : CliktCommand(name = "run") {
                 AgentKind.CLAUDE to AgentBackendFactory { ClaudeBackend(claudeBin, claudeHome, presetStore::activeEnv) }, // resolves the binary lazily on first launch
                 AgentKind.CODEX to AgentBackendFactory { CodexBackend(codexBin) }, // resolves the binary lazily on first launch
                 AgentKind.OPENCODE to AgentBackendFactory { dev.ccpocket.daemon.opencode.OpenCodeBackend(opencodeBin) }, // resolves the binary lazily on first launch
+                AgentKind.KIMI to AgentBackendFactory { dev.ccpocket.daemon.kimi.KimiBackend(kimiBin) }, // resolves the binary lazily on first launch
+                AgentKind.ZCODE to AgentBackendFactory { dev.ccpocket.daemon.zcode.ZCodeBackend(zcodeBin) },
+                AgentKind.DSH to AgentBackendFactory { dev.ccpocket.daemon.dsh.DshBackend(dshBin) }, // resolves the binary lazily on first launch
             ),
             prefs = prefs,
             claudeConfigDir = claudeHome,
             claudeBin = claudeBin,
             presetStore = presetStore,
             openCodeModels = dev.ccpocket.daemon.opencode.OpenCodeModelService(opencodeBin),
+            kimiModels = dev.ccpocket.daemon.kimi.KimiModelService(kimiBin),
+            zcodeModels = dev.ccpocket.daemon.zcode.ZCodeModelService(),
+            reviews = dev.ccpocket.daemon.review.ReviewService(),
+            peerInboxFactory = { dev.ccpocket.daemon.review.PeerInboxService(it) },
         )
         if (claudeHome != null) {
             echo("claude credential isolation: ON — daemon login store: $claudeHome")
@@ -233,7 +251,7 @@ private class RunCmd : CliktCommand(name = "run") {
                 }.getOrNull()
             }
             val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl, hostname = hostName, gatewayBaseUrl = gatewayUrl)
-            echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — relay=$relay")
+            echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"} — relay=$relay")
             echo("account id: ${identity.accountId}")
             echo("(run `cc-pocket-daemon pair` in another terminal to add a phone)")
             // E2E-gated direct listener beside the relay: paired devices on this machine/LAN connect
@@ -254,16 +272,22 @@ private class RunCmd : CliktCommand(name = "run") {
                     add("run"); add("--relay"); add(relay)
                     claudeBin?.let { add("--claude-bin"); add(it) }
                     codexBin?.let { add("--codex-bin"); add(it) }
+                    zcodeBin?.let { add("--zcode-bin"); add(it) }
                 },
             )?.let { echo(it) }
             // A daemon is a singleton (owns the pair port + one relay identity). If another instance is
             // already up — the cask's KeepAlive LaunchAgent, or a stray dev run — don't bind/attach a
             // duplicate that fights it on the relay; exit cleanly (or --takeover to replace it).
             SingleInstance.ensureSolo(pairPort, takeover) { echo(it) }
-            PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort).start()
-            // daily new-version check: log + one phone push per version; --auto-update (or the env
-            // toggle, so the flag survives service reinstalls) hot-swaps installer-managed installs
-            val auto = autoUpdate || System.getenv("CC_POCKET_AUTO_UPDATE") == "1"
+            PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort, core).start()
+            // daily new-version check: log + one phone push per version, and — for installer-managed
+            // installs — a hot-swap to the new version. On by default (issue #244); --auto-update / the
+            // env toggle / `config --auto-update off` override, see UpdateChecker.resolveAutoApply.
+            val auto = dev.ccpocket.daemon.update.UpdateChecker.resolveAutoApply(
+                flag = autoUpdate,
+                env = System.getenv("CC_POCKET_AUTO_UPDATE"),
+                pref = prefs.autoUpdate,
+            )
             dev.ccpocket.daemon.update.UpdateChecker.start(relayClient, auto)
             Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
             runBlocking { relayClient.run() }
@@ -273,7 +297,7 @@ private class RunCmd : CliktCommand(name = "run") {
             // phone can only reach us once the user explicitly binds beyond loopback — show the
             // pairing URL/QR only then, never for a loopback bind the phone can't connect to.
             val lan = lanIp()
-            echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"}")
+            echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"}")
             echo("")
             if (host == "127.0.0.1") {
                 echo("  Bound to 127.0.0.1 (loopback only) — not reachable from your phone.")
@@ -649,6 +673,10 @@ private class ShareCmd : CliktCommand(name = "share") {
 
 private class UpdateCmd : CliktCommand(name = "update") {
     private val check by option("--check", help = "only report whether a newer release exists").flag()
+    private val pairPort by option(
+        "--pair-port",
+        help = "loopback port of the running daemon (used for the Windows update handoff)",
+    ).int().default(8799)
 
     override fun run() {
         val current = dev.ccpocket.daemon.update.UpdateService.currentVersion()
@@ -667,7 +695,7 @@ private class UpdateCmd : CliktCommand(name = "update") {
         val newLauncher = dev.ccpocket.daemon.update.UpdateService.apply(latest, install)
         echo("installed ${latest.version} → ${install.versionsDir.resolve(latest.version)}")
         echo("restarting the background service onto it…")
-        dev.ccpocket.daemon.update.UpdateService.restartService(newLauncher)
+        dev.ccpocket.daemon.update.UpdateService.restartService(newLauncher, pairPort)
         echo("✅ updated to ${latest.version}")
     }
 }
@@ -733,6 +761,13 @@ private class ConfigCmd : CliktCommand(name = "config") {
             "from the app afterwards (macOS — file-based credentials elsewhere migrate automatically).",
     )
 
+    private val autoUpdate by option(
+        "--auto-update",
+        help = "on|off — apply new daemon versions automatically (issue #244). ON by default for " +
+            "installer-managed installs; turn it off to pick your own upgrade moment. Homebrew/Scoop/dev " +
+            "builds and Windows never auto-apply regardless. Takes effect on daemon restart.",
+    )
+
     override fun run() {
         val prefs = DaemonPrefs.load()
         when (isolatedClaudeAuth?.lowercase()) {
@@ -741,8 +776,21 @@ private class ConfigCmd : CliktCommand(name = "config") {
             "off", "false", "0" -> prefs.setIsolatedClaudeAuth(false)
             else -> throw com.github.ajalt.clikt.core.CliktError("--isolated-claude-auth takes on|off")
         }
+        when (autoUpdate?.lowercase()) {
+            null -> {}
+            "on", "true", "1" -> prefs.setAutoUpdate(true)
+            "off", "false", "0" -> prefs.setAutoUpdate(false)
+            "default", "unset" -> prefs.setAutoUpdate(null)
+            else -> throw com.github.ajalt.clikt.core.CliktError("--auto-update takes on|off")
+        }
         echo("isolated-claude-auth: ${if (prefs.isolatedClaudeAuth) "on" else "off"}")
-        if (isolatedClaudeAuth != null) {
+        val autoEffective = dev.ccpocket.daemon.update.UpdateChecker.resolveAutoApply(
+            flag = false, // the `run` flag isn't in scope here; show what a plain `run` would resolve to
+            env = System.getenv("CC_POCKET_AUTO_UPDATE"),
+            pref = prefs.autoUpdate,
+        )
+        echo("auto-update: ${if (autoEffective) "on" else "off"}${if (prefs.autoUpdate == null) " (default)" else ""}")
+        if (isolatedClaudeAuth != null || autoUpdate != null) {
             echo("restart the daemon for this to take effect — e.g.:")
             echo("  ${daemonStartHint().substringAfter("start it:  ")}")
         }
@@ -754,15 +802,26 @@ private class ServiceInstallCmd : CliktCommand(name = "service-install") {
     private val relay by option("--relay").default(DEFAULT_RELAY)
     private val claudeBin by option("--claude-bin")
     private val codexBin by option("--codex-bin")
+    private val opencodeBin by option("--opencode-bin")
+    private val kimiBin by option("--kimi-bin")
+    private val zcodeBin by option("--zcode-bin")
+    private val dshBin by option("--dsh-bin")
     private val apply by option("--apply", help = "actually write + load the service (default: print only)").flag()
 
     override fun run() {
         val launcher = exec ?: resolveLauncher()
+        // Every backend `run` accepts a --*-bin for must pass through here (issue #286): the launcher
+        // resolvers tell users to "pass --dsh-bin", and for a service-managed daemon THIS command is the
+        // only place that flag can be baked in.
         val runArgs = buildList {
             add("run")
             add("--relay"); add(relay)
             claudeBin?.let { add("--claude-bin"); add(it) }
             codexBin?.let { add("--codex-bin"); add(it) }
+            opencodeBin?.let { add("--opencode-bin"); add(it) }
+            kimiBin?.let { add("--kimi-bin"); add(it) }
+            zcodeBin?.let { add("--zcode-bin"); add(it) }
+            dshBin?.let { add("--dsh-bin"); add(it) }
         }
         echo(ServiceInstaller.install(launcher, runArgs, apply))
     }
@@ -788,5 +847,12 @@ fun main(args: Array<String>) {
     // timestamp-less lines made the 07-04 observe/fork incident unreconstructable from the logs
     System.setProperty("org.slf4j.simpleLogger.showDateTime", "true")
     System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "MM-dd HH:mm:ss.SSS")
-    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), BridgesCmd(), ShareCmd(), StatusCmd(), VersionCmd(), UpdateCmd(), ConfigCmd(), ServiceInstallCmd()).main(args)
+    Root().subcommands(
+        RunCmd(), TestClientCmd(), PairCmd(), BridgesCmd(), ShareCmd(), StatusCmd(), VersionCmd(),
+        UpdateCmd(), ConfigCmd(), ServiceInstallCmd(),
+        // ReviewRequest M1 (REVIEW-REQUEST.md §4): the daemon-only collaboration loop — establish a
+        // contact, send a task, answer one. Both talk to the ALREADY-RUNNING daemon over its
+        // token-authenticated local control API; neither can start a second daemon.
+        collaboratorCommand(), reviewCommand(),
+    ).main(args)
 }

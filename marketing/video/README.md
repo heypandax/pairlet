@@ -29,9 +29,10 @@
 `scene.render(tNanos)` 推进、CSS 动画被 rig/scene.css 冻结、rig.js 驱动 HTML 侧动效。
 同一份剧本渲染两次，逐帧相同。
 
-## v3 管线（segments+shots，134.5s 正片用；仓库根 `./video.sh` 统一入口）
+## v3 管线（segments+shots，134.5s 正片用；本目录 `./video.sh` 统一入口）
 
 ```bash
+cd marketing/video
 ./video.sh lock-facts                        # git 采数 → output/facts.lock.json（显式执行才更新）
 ./video.sh resolve-timeline storyboard-v3.json   # 分段 TTS → output/timeline.lock.json（时长唯一权威）
 ./video.sh validate storyboard-v3.json --allow-placeholder   # 红线词 + 素材检查

@@ -13,7 +13,7 @@ plugins {
 // Single source of truth for the app version: the Android versionName AND the in-app "About" version both
 // derive from this (the latter via the generated constant below, so it can never drift — which is how it
 // got stuck at 0.1.0). Keep in lockstep with the iOS CFBundleShortVersionString in iosApp/iosApp/Info.plist.
-val appVersionName = "1.6.0"
+val appVersionName = "1.9.1"
 
 // Emit a commonMain constant from [appVersionName] so the displayed version always matches the build.
 val generateAppVersion by tasks.registering {
@@ -110,7 +110,7 @@ android {
         applicationId = "com.panda.ccpocket" // matches the iOS bundle id + the Firebase google-services.json client
         minSdk = libs.versions.androidMinSdk.get().toInt()
         targetSdk = libs.versions.androidTargetSdk.get().toInt()
-        versionCode = 17
+        versionCode = 25
         versionName = appVersionName // single source of truth (see top); lockstep with iOS CFBundleShortVersionString
     }
     // release signing comes from ~/.gradle/gradle.properties (CCPOCKET_KEYSTORE*) — keys never
@@ -154,7 +154,7 @@ compose.desktop {
             // the release scripts rename the jpackage output, but local paths ARE affected: the bundle is now
             // "CC Pocket.app" / app/CC Pocket (see scripts/update-local-desktop.sh and build-windows.yml).
             packageName = "CC Pocket"
-            packageVersion = "1.6.0"
+            packageVersion = "1.9.1"
             windows {
                 iconFile.set(project.file("desktop-icons/cc-pocket.ico"))
             }
@@ -186,5 +186,18 @@ tasks.withType(org.gradle.api.tasks.testing.Test::class.java).configureEach {
     systemProperty("ccpocket.live", providers.gradleProperty("ccpocketLive").getOrElse("0"))
     val testStore = temporaryDir.resolve("secure-store.properties")
     systemProperty("ccpocket.secureStore.file", testStore.absolutePath)
-    doFirst { testStore.delete() }
+    // Same reasoning for DesktopCrashGuard (#251): its `note()` path is exercised by tests, and it must
+    // not append to the developer's real ~/Library/Logs/cc-pocket/desktop.err.log while doing so.
+    val testCrashLog = temporaryDir.resolve("desktop.err.log")
+    systemProperty("ccpocket.desktopLog.file", testCrashLog.absolutePath)
+    // The offscreen screenshot generators resolve Compose resources through the test JVM's default
+    // locale, so a capture silently inherits whatever the developer's machine is set to (a zh_CN
+    // laptop produced a half-Chinese English screenshot). marketing/site/generate-assets.sh pins it
+    // per language; unset, nothing changes.
+    providers.environmentVariable("CCP_CAPTURE_LOCALE").orNull?.let { tag ->
+        val zh = tag.startsWith("zh")
+        systemProperty("user.language", if (zh) "zh" else "en")
+        systemProperty("user.country", if (zh) "CN" else "US")
+    }
+    doFirst { testStore.delete(); testCrashLog.delete() }
 }

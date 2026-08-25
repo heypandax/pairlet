@@ -669,6 +669,69 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun kimi_agent_kind_and_caps_pin_wire_names() {
+        // issue #206: KIMI's @SerialName is the wire contract both ends agree on. A rename would silently
+        // desync daemon and app, so pin it.
+        val list = ModelsList(agent = AgentKind.KIMI, models = listOf("kimi-k2"))
+        val listJson = PocketJson.encodeToString(list)
+        assertTrue("\"agent\":\"kimi\"" in listJson, listJson)
+        assertEquals(list, PocketJson.decodeFromString<ModelsList>(listJson))
+
+        assertEquals("kimi", AGENT_WIRE_KIMI)
+        val caps = ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI))
+        assertEquals(caps, PocketJson.decodeFromString<ClientCaps>(PocketJson.encodeToString(caps)))
+
+        // a KIMI session row round-trips whole (the app declares supportsAgents=[opencode,kimi])
+        val row = SessionSummary("s1", "t", "p", 1, "/w", 1, agent = AgentKind.KIMI)
+        assertEquals(row, PocketJson.decodeFromString<SessionSummary>(PocketJson.encodeToString(row)))
+    }
+
+    @Test
+    fun zcode_agent_kind_and_caps_pin_wire_names() {
+        val list = ModelsList(agent = AgentKind.ZCODE, models = listOf("zai/glm-5"))
+        val listJson = PocketJson.encodeToString(list)
+        assertTrue("\"agent\":\"zcode\"" in listJson, listJson)
+        assertEquals(list, PocketJson.decodeFromString<ModelsList>(listJson))
+
+        assertEquals("zcode", AGENT_WIRE_ZCODE)
+        val caps = ClientCaps(
+            supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE),
+        )
+        assertEquals(caps, PocketJson.decodeFromString<ClientCaps>(PocketJson.encodeToString(caps)))
+
+        val row = SessionSummary("s1", "t", "p", 1, "/w", 1, agent = AgentKind.ZCODE)
+        assertEquals(row, PocketJson.decodeFromString<SessionSummary>(PocketJson.encodeToString(row)))
+    }
+
+    @Test
+    fun dsh_agent_kind_and_caps_pin_wire_names() {
+        // issue #255: DSH is the newest post-baseline agent, appended at the TAIL of AgentKind so no
+        // existing constant's ordinal moves. Same contract as kimi/zcode above — the @SerialName IS the
+        // cross-build agreement, and DAEMON_SUPPORTED_AGENT_WIRES must advertise it or a newer App would
+        // send `agent:"dsh"` to an older daemon that silently coerces the open back to Claude.
+        // TAIL INSERTION, pinned rather than merely documented. A new AgentKind must be APPENDED: the
+        // enum's ordinals are what an ordinal-based encoder (and any peer that ever compares by index)
+        // relies on, so inserting in the middle silently renumbers every later constant. Whoever adds the
+        // NEXT agent has to edit this line, which is exactly the moment to be reminded of the rule.
+        assertEquals(AgentKind.DSH, AgentKind.entries.last())
+
+        val list = ModelsList(agent = AgentKind.DSH, models = listOf("deepseek-chat"))
+        val listJson = PocketJson.encodeToString(list)
+        assertTrue("\"agent\":\"dsh\"" in listJson, listJson)
+        assertEquals(list, PocketJson.decodeFromString<ModelsList>(listJson))
+
+        assertEquals("dsh", AGENT_WIRE_DSH)
+        assertTrue(AGENT_WIRE_DSH in DAEMON_SUPPORTED_AGENT_WIRES, DAEMON_SUPPORTED_AGENT_WIRES.toString())
+        val caps = ClientCaps(
+            supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH),
+        )
+        assertEquals(caps, PocketJson.decodeFromString<ClientCaps>(PocketJson.encodeToString(caps)))
+
+        val row = SessionSummary("s1", "t", "p", 1, "/w", 1, agent = AgentKind.DSH)
+        assertEquals(row, PocketJson.decodeFromString<SessionSummary>(PocketJson.encodeToString(row)))
+    }
+
+    @Test
     fun unknown_agent_kind_value_degrades_to_default_instead_of_failing_the_frame() {
         // THE wire hazard of adding an AgentKind constant: a peer built before it receives
         // `"agent":"<new>"` inside frames it already understands. coerceInputValues + the per-field
@@ -1136,6 +1199,26 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun approvalPrefs_fullControlExpiry_roundtrips_and_defaults_for_old_peers() {
+        // issue #220 trailing optionals. New→new: the chosen duration survives both directions.
+        val set = Envelope(id = "fce1", ts = 0, body = SetApprovalPrefs(fullControlExpiryMs = 3_600_000L))
+        val setJson = PocketJson.encodeToString(set)
+        assertTrue("\"fullControlExpiryMs\":3600000" in setJson, setJson)
+        assertEquals(set, PocketJson.decodeFromString<Envelope>(setJson))
+
+        val state = Envelope(id = "fce2", ts = 0, body = ApprovalPrefs(noAutoDeny = false, fullControlExpiryMs = 1_800_000L))
+        assertEquals(state, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(state)))
+
+        // OLD client → new daemon: SetApprovalPrefs with no expiry key ⇒ null (leave unchanged).
+        val oldSet = PocketJson.decodeFromString<SetApprovalPrefs>("""{"noAutoDeny":true}""")
+        assertEquals(null, oldSet.fullControlExpiryMs)
+
+        // OLD daemon → new client: ApprovalPrefs with no expiry key ⇒ 0L (= never expires, the sane default).
+        val oldState = PocketJson.decodeFromString<ApprovalPrefs>("""{"noAutoDeny":true}""")
+        assertEquals(0L, oldState.fullControlExpiryMs)
+    }
+
+    @Test
     fun permissionAsk_noAutoDeny_roundtrips_and_defaults_off_for_old_daemons() {
         // issue #201 trailing optional. New→new: the flag survives.
         val ask = PermissionAsk("c1", "a1", "Bash", "git status", timeoutSec = 86_400, noAutoDeny = true)
@@ -1168,18 +1251,23 @@ class SerializationRoundTripTest {
             path = "/p", name = "p", isDir = true, open = true, executing = true,
             activeSessionId = "s1", activeSessionTitle = "fix bug",
             activeSessions = listOf(
-                ActiveSession("s1", "fix bug", executing = true, gitBranch = "main"),
+                ActiveSession("s1", "fix bug", executing = true, gitBranch = "main", executingAuthoritative = true),
                 ActiveSession("s2", "write docs", busy = true, agent = AgentKind.CODEX),
             ),
         )
         val json = PocketJson.encodeToString(entry)
         assertEquals(entry, PocketJson.decodeFromString<DirectoryEntry>(json))
+        assertTrue(PocketJson.decodeFromString<DirectoryEntry>(json).activeSessions.first().executingAuthoritative)
 
         // old daemon → new app: no activeSessions key at all → empty list, legacy single fields intact
         val old = """{"path":"/p","name":"p","isDir":true,"open":true,"activeSessionId":"s1","activeSessionTitle":"fix bug"}"""
         val back = PocketJson.decodeFromString<DirectoryEntry>(old)
         assertEquals(emptyList(), back.activeSessions)
         assertEquals("s1", back.activeSessionId)
+
+        val oldActive = PocketJson.decodeFromString<ActiveSession>("""{"sessionId":"terminal","executing":true}""")
+        assertTrue(oldActive.executing)
+        assertFalse(oldActive.executingAuthoritative, "old daemons fail closed for completion inference")
     }
 
     @Test
@@ -1410,6 +1498,35 @@ class SerializationRoundTripTest {
         assertFalse(isWorkflowTool("Agent"))
     }
 
+    @Test
+    fun historyMessage_prompt_images_trail_and_old_peers_stay_compatible() {
+        // issue #254. new daemon → new app: a replayed USER turn carries its attachments plus the
+        // "some were shed by the frame budget" flag, both surviving a full round trip
+        val row = HistoryMessage(
+            ChatRole.USER, "what is wrong here?",
+            images = listOf(ImageData("image/png", "AAA"), ImageData("image/jpeg", "BBB")),
+            imagesTruncated = true,
+        )
+        assertEquals(row, PocketJson.decodeFromString<HistoryMessage>(PocketJson.encodeToString(row)))
+
+        // old daemon → new app: neither key is on the wire, so the app sees today's text-only replay.
+        // (encodeDefaults means OUR encoder always writes images:[] — this pins the DECODE direction,
+        // which is the one an old peer exercises.)
+        val legacy = PocketJson.decodeFromString<HistoryMessage>("""{"role":"user","text":"hi"}""")
+        assertTrue(legacy.images.isEmpty())
+        assertFalse(legacy.imagesTruncated)
+
+        // new daemon → old app: an unknown key is skipped without throwing — including a structured
+        // ARRAY-OF-OBJECTS shape, the form a future attachment field would most likely take, since
+        // that is what a naive skipper is most likely to choke on
+        val skipped = PocketJson.decodeFromString<HistoryMessage>(
+            """{"role":"user","text":"hi","images":[{"mediaType":"image/png","base64":"AAA"}],""" +
+                """"imagesTruncated":true,"futureAttachments":[{"k":1},{"k":2}]}""",
+        )
+        assertEquals(listOf(ImageData("image/png", "AAA")), skipped.images)
+        assertTrue(skipped.imagesTruncated)
+    }
+
     // ── API presets (issue #113) ─────────────────────────────────────────
 
     @Test
@@ -1617,6 +1734,14 @@ class SerializationRoundTripTest {
         val tolerant = PocketJson.decodeFromString<Envelope>(fromFuture).body as Attached
         assertEquals(9, tolerant.relayProtoV)
         assertEquals(Role.DEVICE, tolerant.role)
+    }
+
+    @Test
+    fun deviceReplayComplete_is_an_additive_control_barrier() {
+        val env = Envelope(id = "replay", ts = 0, to = Route.RELAY, body = DeviceReplayComplete)
+        val json = PocketJson.encodeToString(env)
+        assertTrue("pocket/device.replayComplete" in json, json)
+        assertEquals(DeviceReplayComplete, PocketJson.decodeFromString<Envelope>(json).body)
     }
 
     @Test
@@ -2244,6 +2369,90 @@ class SerializationRoundTripTest {
         assertEquals("h1", tolerant.items.single().eventId)
     }
 
+    /**
+     * ReviewRequest's contact PURPOSE (REVIEW-REQUEST.md §13.3). The whole security argument rests on one
+     * decode rule: a row minted before this field existed is a SESSION HANDOFF contact — that is what it
+     * has always meant — and an upgrade must not re-scope it into anything else.
+     */
+    @Test
+    fun collaborator_purpose_defaults_to_session_handoff_and_is_tolerant() {
+        for (purpose in listOf(CollaboratorPurpose.SESSION_HANDOFF, CollaboratorPurpose.REVIEW)) {
+            val row = Collaborator(deviceId = "dev1", label = "Frank", connectedAt = 7, purpose = purpose)
+            val env = Envelope(id = "c-$purpose", ts = 0, body = CollaboratorUpdated(row))
+            val json = PocketJson.encodeToString(env)
+            assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+        }
+
+        // a PRE-PURPOSE row on the wire: no `purpose` key at all
+        val legacy = """{"id":"old","ts":0,"body":{"t":"pocket/collaborator.updated","collaborator":{"deviceId":"devOld","label":"from an old build","connectedAt":3}}}"""
+        val decodedLegacy = (PocketJson.decodeFromString<Envelope>(legacy).body as CollaboratorUpdated).collaborator
+        assertEquals(CollaboratorPurpose.SESSION_HANDOFF, decodedLegacy.purpose, "the historical meaning, unchanged")
+        assertTrue(decodedLegacy.acceptsSessionHandoff)
+        assertFalse(decodedLegacy.acceptsReviewRequest, "an upgrade must not widen an existing link")
+
+        // a NEWER peer's purpose decodes to UNKNOWN and is eligible for NEITHER feature (fail closed)
+        val future = """{"id":"new","ts":0,"body":{"t":"pocket/collaborator.updated","collaborator":{"deviceId":"devNew","label":"Frank","purpose":"pair_programming"}}}"""
+        val decodedFuture = (PocketJson.decodeFromString<Envelope>(future).body as CollaboratorUpdated).collaborator
+        assertEquals(CollaboratorPurpose.UNKNOWN, decodedFuture.purpose)
+        assertFalse(decodedFuture.acceptsSessionHandoff)
+        assertFalse(decodedFuture.acceptsReviewRequest)
+
+        // a removed REVIEW contact is not a review recipient either
+        assertFalse(Collaborator(deviceId = "d", purpose = CollaboratorPurpose.REVIEW, removed = true).acceptsReviewRequest)
+    }
+
+    /** The OWNER-LOCAL review frames (§6 + §12): additive defaults, tolerant enums, unknown-key skip. */
+    @Test
+    fun review_owner_frames_roundtrip_and_stay_additive() {
+        val contact = ReviewContact(
+            id = "pl_1", label = "Frank", direction = CollaboratorDirection.INBOUND,
+            fingerprint = "tiger-brick-mango-void · ember-delta-canvas-orbit",
+            connectedAt = 12, purpose = CollaboratorPurpose.REVIEW, canSend = false,
+        )
+        val request = ReviewRequest(
+            id = "rr_1", senderDeviceId = "devA", recipientDeviceId = "devB", title = "the wire",
+            brief = ReviewBrief(request = "check the fence"),
+            artifacts = listOf(ArtifactRef(ArtifactKind.MERGE_REQUEST, url = "https://git.example/mr/1")),
+            status = ReviewStatus.DELIVERED, revision = 2, createdAt = 1, updatedAt = 2,
+        )
+        val frames = listOf<Frame>(
+            ListReviewContacts,
+            ReviewContactsListing(listOf(contact)),
+            CreateReviewInvite("Frank"),
+            ReviewInviteCreated(ok = true, invite = "ccpocket://review-contact#abc", ttlSec = 120, label = "Frank"),
+            JoinReviewContact("ccpocket://review-contact#abc", "Panda"),
+            RemoveReviewContact("pl_1", CollaboratorDirection.INBOUND),
+            ReviewContactUpdated(ok = true, contact = contact),
+            ListReviewInbox(ReviewStatus.DELIVERED),
+            ReviewInboxListing(listOf(ReviewInboxItem("pl_1", "Frank", "tiger-brick", request, listOf("acknowledge")))),
+            PrepareReviewRequest("rr_1"),
+            ActOnReviewInbox("rr_1", ReviewInboxAction.ACKNOWLEDGE),
+            ReviewInboxActed(ok = true, requestId = "rr_1", queued = true, status = ReviewStatus.ACKNOWLEDGED),
+        )
+        for (frame in frames) {
+            val env = Envelope(id = "rv-${frame::class.simpleName}", ts = 0, body = frame)
+            val json = PocketJson.encodeToString(env)
+            assertEquals(env, PocketJson.decodeFromString<Envelope>(json), json)
+            // an old peer that predates the type drops the single frame — the family's stated contract
+            val unknownT = Regex("\"t\":\"([^\"]+)\"").replace(json) { "\"t\":\"${it.groupValues[1]}-future\"" }
+            assertTrue(runCatching { PocketJson.decodeFromString<Envelope>(unknownT) }.isFailure)
+        }
+
+        // OMITTED trailing fields take their defaults, and a FUTURE key is skipped rather than fatal
+        val sparse = """{"id":"sparse","ts":0,"body":{"t":"pocket/review.contacts_listing","items":[{"id":"pl_2","future":{"x":1}}]}}"""
+        val row = (PocketJson.decodeFromString<Envelope>(sparse).body as ReviewContactsListing).items.single()
+        assertEquals("pl_2", row.id)
+        assertEquals(CollaboratorPurpose.REVIEW, row.purpose, "an inbound peer link is a review link by construction")
+        assertFalse(row.canSend, "eligibility must default to NO — the daemon says yes explicitly or not at all")
+        assertEquals(CollaboratorDirection.UNKNOWN, row.direction)
+
+        // tolerant enums: a verb/status only a newer build knows reads as UNKNOWN, which acts as no-op
+        val futureAction = """{"id":"fa","ts":0,"body":{"t":"pocket/review.inbox_act","requestId":"rr_1","action":"delegate"}}"""
+        assertEquals(ReviewInboxAction.UNKNOWN, (PocketJson.decodeFromString<Envelope>(futureAction).body as ActOnReviewInbox).action)
+        val futureStatus = """{"id":"fs","ts":0,"body":{"t":"pocket/review.inbox_acted","ok":true,"status":"escalated"}}"""
+        assertEquals(ReviewStatus.UNKNOWN, (PocketJson.decodeFromString<Envelope>(futureStatus).body as ReviewInboxActed).status)
+    }
+
     @Test
     fun clientCaps_approvalV2_flag_is_additive() {
         val caps = ClientCaps(supportsAgents = listOf("opencode"), supportsApprovalV2 = true)
@@ -2253,5 +2462,59 @@ class SerializationRoundTripTest {
         val old = PocketJson.encodeToString(Envelope(id = "cap2", ts = 0, body = ClientCaps(supportsAgents = listOf("opencode"))))
         val decoded = PocketJson.decodeFromString<Envelope>(old).body as ClientCaps
         assertFalse(decoded.supportsApprovalV2)
+    }
+
+    /** issue #258: FetchUsage.agent is a trailing optional — an OLD App's frame (no key) must still decode
+     *  as the unfiltered "All" request, and a new App's narrowed frame must round-trip. */
+    @Test
+    fun fetchUsage_agent_filter_is_additive() {
+        val old = """{"id":"fu1","ts":0,"body":{"t":"pocket/usage.fetch","days":7}}"""
+        assertNull((PocketJson.decodeFromString<Envelope>(old).body as FetchUsage).agent, "no agent key = every backend")
+
+        val narrowed = FetchUsage(days = 30, agent = AgentKind.ZCODE)
+        val json = PocketJson.encodeToString(Envelope(id = "fu2", ts = 0, body = narrowed))
+        assertEquals(narrowed, PocketJson.decodeFromString<Envelope>(json).body)
+
+        // The BYTES of an unfiltered request must stay identical to the pre-#258 frame (explicitNulls=false
+        // omits the null): a new App asking for "All" is indistinguishable from an old App to any daemon.
+        val unfiltered = PocketJson.encodeToString(Envelope(id = "fu4", ts = 0, body = FetchUsage(days = 7)))
+        assertFalse("agent" in unfiltered, "an unfiltered request must not put an agent key on the wire")
+
+        // a FUTURE agent this build has no name for coerces to null (= All) instead of failing the Envelope
+        val future = """{"id":"fu3","ts":0,"body":{"t":"pocket/usage.fetch","days":7,"agent":"someagent"}}"""
+        assertNull((PocketJson.decodeFromString<Envelope>(future).body as FetchUsage).agent)
+    }
+
+    /**
+     * issue #258: [DaemonInfo.supportsUsageAgentFilter] is a trailing capability field with the same
+     * deny-by-omission contract as bridgeControl. The old-shape case is the POINT of the field: a v1.7.7
+     * daemon already advertises a full supportedAgents list, so its DaemonInfo must still decode to
+     * `false` here — that is what stops the App from offering a filter that daemon silently ignores.
+     */
+    @Test
+    fun daemonInfo_usageAgentFilter_flag_is_additive() {
+        val info = DaemonInfo(hostname = "mac", supportedAgents = listOf("opencode", "kimi", "zcode"), supportsUsageAgentFilter = true)
+        val json = PocketJson.encodeToString(Envelope(id = "di1", ts = 0, body = info))
+        assertEquals(info, PocketJson.decodeFromString<Envelope>(json).body)
+
+        val v177 = """{"id":"di2","ts":0,"body":{"t":"pocket/daemon.info","hostname":"mac","supportedAgents":["opencode","kimi","zcode"]}}"""
+        val decoded = PocketJson.decodeFromString<Envelope>(v177).body as DaemonInfo
+        assertEquals(3, decoded.supportedAgents.size, "the older advertisement still decodes")
+        assertFalse(decoded.supportsUsageAgentFilter, "a daemon that predates the filter must never look capable")
+    }
+
+    /** The by-model rows can now carry KIMI/ZCODE (issue #258); both must survive a round trip so the
+     *  App's badge colors are the daemon's classification, not a re-guess from the model string. */
+    @Test
+    fun usage_models_round_trip_every_agent_badge() {
+        val usage = Usage(
+            models = listOf(
+                UsageModel("claude-opus-5", 10, AgentKind.CLAUDE),
+                UsageModel("anthropic/glm-5", 20, AgentKind.ZCODE),
+                UsageModel("kimi-code/k3", 30, AgentKind.KIMI),
+            ),
+        )
+        val json = PocketJson.encodeToString(Envelope(id = "us1", ts = 0, body = usage))
+        assertEquals(usage, PocketJson.decodeFromString<Envelope>(json).body)
     }
 }

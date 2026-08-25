@@ -110,6 +110,7 @@ fun ChangesPill(model: DesktopModel) {
     Text(
         "± $n",
         color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+        style = tightCenter(11.sp),
         modifier = Modifier.clip(RoundedCornerShape(999.dp))
             .background(Tok.accent.copy(alpha = 0.12f))
             .border(1.dp, Tok.accent.copy(alpha = 0.4f), RoundedCornerShape(999.dp))

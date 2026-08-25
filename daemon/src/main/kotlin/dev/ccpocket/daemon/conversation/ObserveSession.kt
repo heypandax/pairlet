@@ -96,7 +96,7 @@ class ObserveSession(
             AgentKind.CODEX -> CodexTranscriptScanner.threadNames()[sessionId]?.takeIf { it.isNotBlank() }
                 ?: runCatching { CodexTranscriptScanner.summarize(file, workdir)?.title }.getOrNull()
             AgentKind.CLAUDE -> runCatching { TranscriptScanner.summarize(file)?.title }.getOrNull()
-            AgentKind.OPENCODE -> null // OpenCode sessions are never opened through ObserveSession.
+            else -> null // OpenCode/Kimi/ZCode/DSH sessions are never opened through ObserveSession.
         }
         val model = codex?.model
             ?: if (agent == AgentKind.CLAUDE) runCatching { TranscriptScanner.lastModel(file) }.getOrNull() else null

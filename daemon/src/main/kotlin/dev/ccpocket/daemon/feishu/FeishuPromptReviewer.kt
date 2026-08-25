@@ -1,15 +1,14 @@
 package dev.ccpocket.daemon.feishu
 
 /**
- * The Guardian Reviewer seam for a [FeishuTrustMode.REVIEWED] chat: an INDEPENDENT classifier that answers
+ * The Guardian Reviewer seam for a REVIEWED chat: an INDEPENDENT classifier that answers
  * one question about one prompt — "does this match the owner's Trust Contract for the group, and is it
  * clearly low-risk within the fixed capability ceiling?" — before that prompt reaches the agent.
  *
  * The reviewer is a CONDITION MATCHER, never an authorizer (design §4): it emits a classification signal
  * only. The daemon decides what that signal is worth ([PromptReviewPolicy.mayAutoRun]), re-validates the
- * chat's policy afterwards (revoke race), and the resulting authority is capped at the same closed
- * AUTO_TRUSTED tool ceiling regardless of anything the model says. No output field can name tools, grants
- * or permission modes — the shape simply has nowhere to put them.
+ * chat's policy afterwards (revoke race), and the engine applies the fixed REVIEWED ceiling. No output field
+ * can name tools, grants or permission modes — the model can classify one prompt, never widen that ceiling.
  */
 interface FeishuPromptReviewer {
     suspend fun review(input: PromptReviewInput): PromptReviewResult
@@ -27,21 +26,20 @@ data class PromptReviewInput(
     /** The fixed description of what an auto-passed request may at most do — so "low-risk" is judged
      *  against the real ceiling, not the model's imagination of it. */
     val capabilityCeiling: String = CAPABILITY_CEILING,
-    /** The owner's configured Bash allowlist (command patterns, not secrets) — the one hole in the "no
-     *  shell" ceiling, surfaced to the reviewer so it judges risk against what CAN actually run
-     *  zero-click instead of a rosier fiction (design §21.6). */
+    /** The owner's configured Bash allowlist (command patterns, not secrets). It is the only shell exception
+     *  under REVIEWED. */
     val allowedCommands: List<String> = emptyList(),
 ) {
     companion object {
-        // honest about the allowlist hole: an owner-whitelisted command runs zero-click and MAY reach the
-        // network or run project scripts, so the ceiling must not claim "no network" absolutes the
-        // reviewer would then price risk against (design §21.6)
+        // The legacy REVIEWED ceiling. Existing REVIEWED records retain this restricted authority; widening
+        // it would silently upgrade a durable policy the owner established under an older promise.
         const val CAPABILITY_CEILING =
             "Auto-approved requests may only: read/search/edit files INSIDE the bound project directory, " +
                 "plus run shell commands the machine owner explicitly whitelisted (see the allowed_commands " +
                 "field) — those run with zero clicks and may access the network or run project scripts. " +
                 "Everything else — any other shell command, MCP tools, network access, writes to " +
                 ".git/.claude/.envrc, anything outside the project — still requires the machine owner's approval."
+
     }
 }
 
@@ -134,8 +132,8 @@ object PromptReviewPolicy {
 }
 
 /**
- * The REVIEWED request preflight — the one place the pieces compose, kept free of Feishu/engine types so
- * the whole flow (prescreen → review → policy → revalidation → audit) is unit-testable with fakes:
+ * The Guardian request preflight for REVIEWED — the one place the pieces compose, kept free of
+ * Feishu/engine types so the whole flow (prescreen → review → policy → revalidation → audit) is unit-testable with fakes:
  *
  *  1. deterministic [PromptThreatSignals] prescreen (force-to-owner only, never auto-pass);
  *  2. the async Guardian review, failure-normalized ([PromptReviewPolicy.forcedAskOwner]);

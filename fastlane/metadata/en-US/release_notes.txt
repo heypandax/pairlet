@@ -1,10 +1,6 @@
-What's new in 1.6.0
+What's new in 1.9.1 — Git, worktrees, rewind, and dsh answers
 
-Added
-• Session handoff: a session running on one device can be handed to another and continued there, with context and approval state carried over
-• Collaborator links: invite someone into a specific session with a one-time credential — read-only or allowed to drive — and the offer lands directly on their device
-• Approvals, upgraded: permission prompts can wait for you indefinitely ("keep waiting for me") instead of auto-denying after 10 minutes, and every approval lands in one reviewable history
-• Archivable sessions: tuck away sessions you rarely open; browse and unarchive them all from one place
-• Project entry points: pin projects, start a new session right from the recents list, and pick the model when creating one
-• Version visibility: check the daemon's version, get update reminders on the phone, one-tap update on desktop/Android
-• Feishu groups gain Smart Review (/review), between per-request approval and full trust: an AI screens each request against the group's declared purpose first — clearly low-risk ones run directly (still confined to in-project tools), everything else still asks you. Off by default; enable it on the bridge first, /trust-status to inspect
+• Git panel: finish your review on the phone — status, stage, commit, push, pull and branch switching, with two-step confirms for anything destructive.
+• Worktrees: see every checkout of a repo, create one for a new or existing branch, and clean them up safely (live sessions are protected).
+• Rewind & fork: long-press one of your messages to retry it with different wording, or fork a parallel session from that point. Files are never rolled back — only the conversation.
+• dsh sessions: the agent's questions and permission requests now show up on the phone and can be answered there; unanswered requests time out safely instead of hanging the turn.

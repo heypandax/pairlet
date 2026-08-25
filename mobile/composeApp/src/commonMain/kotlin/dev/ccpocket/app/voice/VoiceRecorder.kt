@@ -17,7 +17,15 @@ expect class VoiceRecorder() {
     /** 0..1 volume envelope, ~12 Hz — drives the recording-bar waveform. */
     val levels: Flow<Float>
 
-    /** Begins capturing. Throws [VoicePermissionDenied] if the user refuses the mic. */
+    /**
+     * Emits once when the OS killed the capture mid-flight (incoming call / another app grabbing the
+     * mic / encoder death). The recorder has already torn itself down; the collector should surface
+     * the error and leave S2 — otherwise the composer's stopwatch keeps ticking on dead audio.
+     */
+    val interruptions: Flow<Unit>
+
+    /** Begins capturing. Throws [VoicePermissionDenied] if the user refuses the mic.
+     *  Starting while a capture is live safely drops that one first (no orphaned recorder on the mic). */
     suspend fun start()
 
     /** Ends capturing and returns the encoded audio. */

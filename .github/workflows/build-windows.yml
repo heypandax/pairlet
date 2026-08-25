@@ -7,7 +7,7 @@ name: build-windows
 #   - windows-app (desktop GUI): Compose Desktop app — portable zip (always) + MSI installer (if WiX present).
 # The composeApp module applies the Android + googleServices plugins, so the desktop build needs the Android
 # SDK to configure and a google-services.json to exist; the desktop target never uses Firebase, so a
-# placeholder file is written on the runner (the real one is gitignored and stays out of the public repo).
+# committed placeholder template is copied on the runner (the real config is gitignored and stays private).
 
 on:
   workflow_dispatch:
@@ -28,10 +28,10 @@ jobs:
     if: ${{ inputs.skip_daemon != 'true' }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17 (with jpackage)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -40,7 +40,7 @@ jobs:
         run: pwsh scripts/release-windows.ps1 "${{ inputs.version }}"
 
       - name: Upload zip as a downloadable workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cc-pocket-daemon-${{ inputs.version }}-windows-x86_64
           path: cc-pocket-daemon-${{ inputs.version }}-windows-x86_64.zip
@@ -49,37 +49,20 @@ jobs:
   windows-app:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17 (with jpackage)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
-      - name: Write placeholder google-services.json (gitignored; desktop target never uses Firebase)
+      - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
         shell: bash
-        run: |
-          cat > mobile/composeApp/google-services.json <<'JSON'
-          {
-            "project_info": { "project_number": "000000000000", "project_id": "ccpocket-ci-placeholder" },
-            "client": [
-              {
-                "client_info": {
-                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
-                  "android_client_info": { "package_name": "com.panda.ccpocket" }
-                },
-                "api_key": [ { "current_key": "AIzaPlaceholderKeyForCiDesktopBuildOnly0000" } ],
-                "oauth_client": [],
-                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
-              }
-            ],
-            "configuration_version": "1"
-          }
-          JSON
+        run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
 
       - name: Unpin the macOS-only JDK path (gradle.properties pins it for local dev; CI uses the runner JDK via JAVA_HOME)
         shell: bash
@@ -111,7 +94,7 @@ jobs:
           ls -la out
 
       - name: Upload desktop app artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cc-pocket-desktop-${{ inputs.version }}-windows
           path: out/*

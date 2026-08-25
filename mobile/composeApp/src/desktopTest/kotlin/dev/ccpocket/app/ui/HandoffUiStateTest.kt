@@ -1,5 +1,6 @@
 package dev.ccpocket.app.ui
 
+import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
@@ -41,9 +42,12 @@ import dev.ccpocket.app.ui.handoff.HandoffLockBanner
 import dev.ccpocket.app.ui.handoff.HandoffOfferCard
 import dev.ccpocket.app.ui.handoff.HandoffResultCard
 import dev.ccpocket.app.ui.handoff.HandoffResultUi
+import dev.ccpocket.app.ui.handoff.handoffRecipients
+import dev.ccpocket.app.ui.handoff.recentHandoffRecipients
 import dev.ccpocket.protocol.Collaborator
 import dev.ccpocket.protocol.CollaboratorDirection
 import dev.ccpocket.protocol.CollaboratorInvite
+import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.HandoffAccess
 import dev.ccpocket.protocol.HandoffKind
 import dev.ccpocket.protocol.SessionHandoff
@@ -71,6 +75,17 @@ class HandoffUiStateTest {
     private val frank = Collaborator("dev-frank", "Frank", CollaboratorDirection.MUTUAL, connectedAt = 1, lastHandoffAt = 5)
     private val aiko = Collaborator("dev-aiko", "Aiko", CollaboratorDirection.OUTBOUND, connectedAt = 2, hasDaemon = false)
 
+    // a ReviewRequest peer (somebody's DAEMON) and a purpose this build can't read — neither is a
+    // Session Handoff recipient (§13.3). Mika deliberately carries the NEWEST lastHandoffAt.
+    private val mika = Collaborator(
+        "dev-mika", "Mika", CollaboratorDirection.OUTBOUND, connectedAt = 3, lastHandoffAt = 9,
+        purpose = CollaboratorPurpose.REVIEW,
+    )
+    private val nova = Collaborator(
+        "dev-nova", "Nova", CollaboratorDirection.OUTBOUND, connectedAt = 4,
+        purpose = CollaboratorPurpose.UNKNOWN,
+    )
+
     // ── Frame 1: picker rows select-and-pop; the QR path is exactly one row ──
 
     @Test
@@ -83,6 +98,44 @@ class HandoffUiStateTest {
         assertEquals("dev-aiko", picked?.deviceId)
         onAllNodes(hasText(str(Res.string.co_connect_new))).assertCountEquals(1) // the only QR doorway
         onAllNodes(hasText(str(Res.string.co_no_daemon))).assertCountEquals(1)   // quiet fact, still selectable
+    }
+
+    // ── §13.3 boundary: the picker offers RECIPIENTS, and a REVIEW peer is not one ──
+
+    @Test
+    fun recipientHelpers_offerOnlySessionHandoffContacts() {
+        val gone = frank.copy(deviceId = "dev-gone", label = "Gone", removed = true)
+        val all = listOf(frank, aiko, mika, nova, gone)
+        assertEquals(
+            listOf("dev-frank", "dev-aiko"), handoffRecipients(all).map { it.deviceId },
+            "a legacy/default SESSION_HANDOFF contact stays offered; REVIEW, UNKNOWN and removed do not",
+        )
+        assertEquals(listOf("dev-frank"), handoffRecipients(all, "fra").map { it.deviceId }, "search filters the SAME set")
+        assertEquals(
+            listOf("dev-frank"), recentHandoffRecipients(all).map { it.deviceId },
+            "RECENT ranks by lastHandoffAt but never promotes an ineligible contact into the picker",
+        )
+    }
+
+    @Test
+    fun picker_hidesReviewPeers_andKeepsLegacyContacts() = runComposeUiTest {
+        setContent {
+            PocketTheme { CollaboratorPickerPage(listOf(frank, mika, nova), onPick = {}, onConnectNew = {}, onBack = {}) }
+        }
+        assertTrue(present("Frank"), "a contact minted before `purpose` existed is still a handoff recipient")
+        assertFalse(present("Mika"), "a REVIEW contact is a colleague's daemon — selecting it could only fail at send")
+        assertFalse(present("Nova"), "an unreadable purpose fails closed")
+    }
+
+    @Test
+    fun picker_reviewOnlyContacts_showTheConnectEmptyState() = runComposeUiTest {
+        var connect = false
+        setContent {
+            PocketTheme { CollaboratorPickerPage(listOf(mika), onPick = {}, onConnectNew = { connect = true }, onBack = {}) }
+        }
+        assertFalse(present("Mika"))
+        onAllNodes(hasText(str(Res.string.co_connect_cta))).onFirst().performClick()
+        assertTrue(connect, "with no eligible recipient the picker is the first-run empty state, not an empty list")
     }
 
     @Test
@@ -220,44 +273,52 @@ class HandoffUiStateTest {
     }
 
     // ── §2.2: a Bash approval during a REVIEW handoff loses "Always allow" and says it's recorded ──
+    // (now asserted on the Mobile UI 2.0 SecureApprovalSheet — same rule, new component)
 
-    @Test
-    fun permissionSheet_bashUnderReviewHandoffIsPerCommandAndRecorded() = runComposeUiTest {
+    /** Render the Secure Approval sheet for [ask] with the review-handoff flag the route would pass. */
+    @OptIn(ExperimentalTestApi::class)
+    private fun ComposeUiTest.approvalSheet(ask: dev.ccpocket.protocol.PermissionAsk, handoffReview: Boolean) {
         // the card runs a live auto-deny countdown; let it tick and the sheet flips to its terminal
         // state mid-assertion — freeze the clock so we are looking at the DECISION card
         mainClock.autoAdvance = false
+        setContent {
+            PocketTheme {
+                dev.ccpocket.app.ui.approval.SecureApprovalSheet(
+                    dev.ccpocket.app.ui.approval.approvalUi(ask, workdir = "/w", handoffReview = handoffReview),
+                    onDeny = {}, onAllowOnce = {},
+                )
+            }
+        }
+    }
+
+    @Test
+    fun approvalSheet_bashUnderReviewHandoffIsPerCommandAndRecorded() = runComposeUiTest {
         val ask = dev.ccpocket.protocol.PermissionAsk(
             askId = "a1", convoId = "c1", tool = "Bash", title = "Run command",
             inputPreview = "rm -rf build", rule = "Bash(rm:*)",
         )
-        setContent { PocketTheme { PermissionSheet(ask, "/w", handoffReview = true, onDeny = {}, onOnce = {}, onAlways = {}, onDismiss = {}) } }
+        approvalSheet(ask, handoffReview = true)
         assertTrue(present(str(Res.string.ho_bash_recorded)))
         assertFalse(present(str(Res.string.always_allow)), "a remembered shell rule would undo \"confirmed one by one\"")
     }
 
     @Test
-    fun permissionSheet_bashOutsideAHandoffKeepsAlwaysAllow() = runComposeUiTest {
-        // the card runs a live auto-deny countdown; let it tick and the sheet flips to its terminal
-        // state mid-assertion — freeze the clock so we are looking at the DECISION card
-        mainClock.autoAdvance = false
+    fun approvalSheet_bashOutsideAHandoffKeepsAlwaysAllow() = runComposeUiTest {
         val ask = dev.ccpocket.protocol.PermissionAsk(
             askId = "a1", convoId = "c1", tool = "Bash", title = "Run command",
             inputPreview = "ls", rule = "Bash(ls:*)",
         )
-        setContent { PocketTheme { PermissionSheet(ask, "/w", onDeny = {}, onOnce = {}, onAlways = {}, onDismiss = {}) } }
+        approvalSheet(ask, handoffReview = false)
         assertTrue(present(str(Res.string.always_allow)), "the ordinary approval card is untouched")
         assertFalse(present(str(Res.string.ho_bash_recorded)))
     }
 
     @Test
-    fun permissionSheet_nonShellToolsUnderAHandoffKeepAlwaysAllow() = runComposeUiTest {
-        // the card runs a live auto-deny countdown; let it tick and the sheet flips to its terminal
-        // state mid-assertion — freeze the clock so we are looking at the DECISION card
-        mainClock.autoAdvance = false
+    fun approvalSheet_nonShellToolsUnderAHandoffKeepAlwaysAllow() = runComposeUiTest {
         val ask = dev.ccpocket.protocol.PermissionAsk(
             askId = "a1", convoId = "c1", tool = "WebFetch", title = "Fetch", inputPreview = "https://x", rule = "WebFetch",
         )
-        setContent { PocketTheme { PermissionSheet(ask, "/w", handoffReview = true, onDeny = {}, onOnce = {}, onAlways = {}, onDismiss = {}) } }
+        approvalSheet(ask, handoffReview = true)
         assertTrue(present(str(Res.string.always_allow)), "only the command runner loses the standing rule")
     }
 

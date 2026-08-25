@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.session.distinctPreview
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.SessionSummary
 import org.jetbrains.compose.resources.stringResource
@@ -56,6 +57,9 @@ import org.jetbrains.compose.resources.stringResource
 internal fun ArchivedSessionsScreen(repo: PocketRepository, onBack: () -> Unit) {
     LaunchedEffect(Unit) { repo.listArchivedSessions() }
     val rows = repo.archivedSessions.toList()
+    // #257: a full-screen route off Sessions — without its own handler the Android back gesture fell
+    // through to the app-level navigation. Same target as the ‹.
+    dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
 
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         Row(
@@ -138,10 +142,12 @@ private fun ArchivedRow(repo: PocketRepository, s: SessionSummary) {
                     Text(stringResource(Res.string.running), color = Tok.ok, fontSize = 11.sp)
                 }
             }
-            if (s.firstPrompt.isNotBlank()) Text(
-                s.firstPrompt, color = Tok.tx2, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp),
-            )
+            s.distinctPreview()?.let {
+                Text(
+                    it, color = Tok.tx2, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
             Text(
                 "💬 ${s.messageCount} · ⑂ ${s.gitBranch ?: "-"} · ${relativeTime(s.lastModified)}",
                 color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp,

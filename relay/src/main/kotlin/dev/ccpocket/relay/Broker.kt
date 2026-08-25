@@ -106,6 +106,14 @@ class Broker {
         d?.let { runCatching { it.sendText(text) } }
     }
 
+    /** Send to the daemon socket that started an operation, but only while it is still current. This
+     * prevents a slow attach replay from crossing a supersede boundary and delivering an old snapshot
+     * (or its completion marker) to the replacement daemon connection. */
+    suspend fun controlToDaemon(conn: Conn, text: String) {
+        val current = mutex.withLock { daemons[conn.account] }
+        if (current === conn) runCatching { conn.sendText(text) }
+    }
+
     /** relay -> all the account's devices control frame (e.g. PeerPresence). */
     suspend fun controlToDevices(account: String, text: String) {
         val ds = mutex.withLock { devices[account]?.toList().orEmpty() }

@@ -106,7 +106,7 @@ fun FrameWindowScope.DkTitleBar(
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(Icons.Rounded.Search, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
-                Text(stringResource(Res.string.search), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
+                Text(stringResource(Res.string.search), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
                 Key("⌘K")
             }
             Box(Modifier.size(14.dp).clip(RoundedCornerShape(999.dp)).clickable(onClick = onTray), contentAlignment = Alignment.Center) {
@@ -170,7 +170,7 @@ fun FullscreenExitStrip(onExit: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(Icons.Rounded.FullscreenExit, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
-                Text(stringResource(Res.string.exit_fullscreen), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
+                Text(stringResource(Res.string.exit_fullscreen), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
             }
         }
     }

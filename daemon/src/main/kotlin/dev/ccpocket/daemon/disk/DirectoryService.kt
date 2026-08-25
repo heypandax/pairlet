@@ -25,9 +25,17 @@ class DirectoryService(
     private val projectsRoot: () -> Path = ProjectPaths::projectsRoot,
     private val codexCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.codex.CodexTranscriptScanner.cwdsByNewest() },
     private val opencodeCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.cwdsByNewest() },
+    private val kimiCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.kimi.KimiTranscriptScanner.cwdsByNewest() },
+    private val zcodeCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.zcode.ZCodeTranscriptScanner.cwdsByNewest() },
+    private val dshCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.dsh.DshTranscriptScanner.cwdsByNewest() },
+    private val liveClaudeCwds: () -> Set<String> = LiveProcesses::claudeCwds,
     private val liveCodexCwds: () -> Set<String> = LiveProcesses::codexCwds,
     private val activeCodexSessions: (Set<String>) -> Map<String, dev.ccpocket.protocol.SessionSummary> =
         dev.ccpocket.daemon.codex.CodexTranscriptScanner::activeSummaries,
+    private val nowMillis: () -> Long = System::currentTimeMillis,
+    // issue #290 test seam: tests create their fixture workdirs UNDER the real system temp, so they pin
+    // this to emptyList() to opt out of the noise filter; production uses the machine's temp roots.
+    private val tempNoiseRoots: List<String>? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val recents = LinkedHashSet<String>()
@@ -67,11 +75,17 @@ class DirectoryService(
         // the daemon's OWN live conversations per cwd (exact turn state, any backend) — see SessionRegistry.liveByCwd
         liveByCwd: Map<String, List<ActiveSession>> = emptyMap(),
         includeOpencode: Boolean = true,
+        includeKimi: Boolean = true,
+        includeZcode: Boolean = true,
+        includeDsh: Boolean = true,
     ): List<DirectoryEntry> {
         // canonical-keyed so ANY spelling mismatch (tilde, symlink, separators) between OpenSession's
         // workdir and a transcript's recorded cwd still matches
         val codex = runCatching(codexCwds).getOrDefault(emptyMap())
         val opencode = if (includeOpencode) runCatching(opencodeCwds).getOrDefault(emptyMap()) else emptyMap()
+        val kimi = if (includeKimi) runCatching(kimiCwds).getOrDefault(emptyMap()) else emptyMap()
+        val zcode = if (includeZcode) runCatching(zcodeCwds).getOrDefault(emptyMap()) else emptyMap()
+        val dsh = if (includeDsh) runCatching(dshCwds).getOrDefault(emptyMap()) else emptyMap()
         val daemonLive = liveByCwd.entries
             .groupBy({ ProjectPaths.canonicalKey(it.key) }, { it.value })
             .mapValues { (_, v) -> v.flatten() }
@@ -79,10 +93,9 @@ class DirectoryService(
         // project list from its process cwd and the newest rollout for that cwd. Process presence means
         // `open`; transcript freshness only decides `executing`. The daemon-owned row wins on a duplicate
         // session id because it has exact turn state, while this external probe is necessarily heuristic.
+        val codexTranscriptKeys = codex.keys.mapTo(HashSet()) { ProjectPaths.canonicalKey(it) }
         val externalCodexCwds = runCatching { liveCodexCwds() }.getOrDefault(emptySet())
-            .filterTo(linkedSetOf()) { cwd ->
-                codex.keys.any { ProjectPaths.canonicalKey(it) == ProjectPaths.canonicalKey(cwd) }
-            }
+            .filterTo(linkedSetOf()) { cwd -> ProjectPaths.canonicalKey(cwd) in codexTranscriptKeys }
         // A daemon-owned Codex process is already authoritative proof that this session is live. Include
         // those workdirs even when no separate Terminal/Codex Desktop process exists; otherwise the
         // transcript probe never runs and the exact daemon row keeps its intentionally-null title.
@@ -118,7 +131,17 @@ class DirectoryService(
             (authoritative + external.filterNot { probe -> authoritative.any { it.sessionId == probe.sessionId } })
                 .sortedByDescending { it.executing }
         }
-        val claude = claudeDirectories(busyCwds, liveNorm)
+        // SessionRegistry keys background work by its canonical OpenSession path, while transcript/index
+        // sources may retain a symlink spelling. Busy is project identity, so normalize it at the same merge
+        // boundary as live sessions; otherwise ActiveSession.busy=true can coexist with a false project scalar.
+        val busyNorm = busyCwds.mapTo(HashSet()) { ProjectPaths.canonicalKey(it) }
+        val claude = claudeDirectories(busyNorm, liveNorm)
+        // issue #290: programmatic one-shot sessions (a dsh plugin driving OpenCode per image, …) leave
+        // dozens of throwaway cwds under the system temp dir and drown the project list. Hide temp rows
+        // unless something keeps them relevant — a live/busy conversation, or the user having opened the
+        // dir themselves (recent). Sessions stay on disk; only the list denoises.
+        fun keep(e: DirectoryEntry): Boolean = e.open || e.busy || e.recent ||
+            !(tempNoiseRoots?.let { TempDirs.isUnderSystemTemp(e.path, it) } ?: TempDirs.isUnderSystemTemp(e.path))
         // issue #188: the App's agent filter needs PROJECT-level provenance, not just the backend of any
         // currently-live session. Keep it additive on DirectoryEntry so each client can apply its own
         // persisted filter without turning that preference into daemon-global state.
@@ -129,11 +152,26 @@ class DirectoryService(
         opencode.keys.forEach { cwd ->
             externalAgentsByKey.getOrPut(ProjectPaths.canonicalKey(cwd)) { linkedSetOf() }.add(AgentKind.OPENCODE)
         }
-        // merge both external sources; keys keep each source's raw spelling here — grouped canonically below
+        kimi.keys.forEach { cwd ->
+            externalAgentsByKey.getOrPut(ProjectPaths.canonicalKey(cwd)) { linkedSetOf() }.add(AgentKind.KIMI)
+        }
+        zcode.keys.forEach { cwd ->
+            externalAgentsByKey.getOrPut(ProjectPaths.canonicalKey(cwd)) { linkedSetOf() }.add(AgentKind.ZCODE)
+        }
+        dsh.keys.forEach { cwd ->
+            externalAgentsByKey.getOrPut(ProjectPaths.canonicalKey(cwd)) { linkedSetOf() }.add(AgentKind.DSH)
+        }
+        // merge every external source; keys keep each source's raw spelling here — grouped canonically below
         val allExternal = HashMap<String, Long>()
         codex.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
         opencode.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
-        if (allExternal.isEmpty()) return claude
+        kimi.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
+        zcode.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
+        dsh.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
+        // issue #281: a linked worktree row gets its "part of <repo>" caption. Read off the `.git` file,
+        // no git process — see WorktreeMarks. Display only: grouping and transcript attribution are
+        // untouched, because different checkouts are genuinely different cwds.
+        if (allExternal.isEmpty()) return dev.ccpocket.daemon.git.WorktreeMarks.stamp(claude.filter(::keep))
         val known = claude.mapTo(HashSet()) { ProjectPaths.canonicalKey(it.path) }
         // spelling variants of one dir collapse into a group; the group's mtime is its max
         val externalByKey = allExternal.entries.groupBy({ ProjectPaths.canonicalKey(it.key) }, { it.value })
@@ -153,7 +191,7 @@ class DirectoryService(
                     lastModified = externalByKey[key]?.max() ?: 0L,
                     open = live.isNotEmpty(),
                     executing = live.any { it.executing },
-                    busy = cwd in busyCwds,
+                    busy = key in busyNorm,
                     activeSessionId = live.firstOrNull()?.sessionId,
                     activeSessionTitle = live.firstOrNull()?.title,
                     activeSessions = live,
@@ -171,7 +209,9 @@ class DirectoryService(
                     .distinct().sortedBy { it.ordinal },
             )
         }
-        return (merged + externalOnly).sortedByDescending { it.lastModified }
+        return dev.ccpocket.daemon.git.WorktreeMarks.stamp(
+            (merged + externalOnly).filter(::keep).sortedByDescending { it.lastModified },
+        )
     }
 
     /** Directories with Claude history, newest-first, deduped per cwd. [liveNorm] = daemon conversations
@@ -180,13 +220,16 @@ class DirectoryService(
         val projects = projectsRoot()
         if (!projects.isDirectory()) return emptyList()
         val dirs = Files.newDirectoryStream(projects).use { it.toList() }.filter { it.isDirectory() }
-        val now = System.currentTimeMillis()
+        val now = nowMillis()
         // open = a claude process is alive here (idle or active); executing = a session here is mid-turn;
         // busy = a daemon conversation here has running background work (keep it "active" even when idle).
-        val liveCwds = LiveProcesses.claudeCwds()
+        // lsof reports resolved real paths while a transcript may record a symlink spelling. Match by the
+        // same canonical identity the cross-backend merge uses, or a real terminal Claude can disappear
+        // from the Active section solely because it was launched through a symlink.
+        val liveCwdKeys = liveClaudeCwds().mapTo(HashSet()) { ProjectPaths.canonicalKey(it) }
         return dirs.mapNotNull { dir -> scanProject(dir) }
             .map { (cwd, mtime, newest) ->
-                val osOpen = cwd in liveCwds
+                val osOpen = ProjectPaths.canonicalKey(cwd) in liveCwdKeys
                 // the daemon's own conversations here carry EXACT turn state (isExecuting) — the mtime window
                 // below can't see turn boundaries, which kept "running" on for ~30s after a turn finished.
                 // Claude ones get their title/branch from their own transcript; Codex rollouts live outside
@@ -205,7 +248,15 @@ class DirectoryService(
                 val external = if (osOpen && daemonLive.none { it.sessionId == newestSid }) {
                     runCatching { TranscriptScanner.summarize(newest) }.getOrNull()
                         ?.takeIf { s -> daemonLive.none { it.sessionId == s.sessionId } }
-                        ?.let { ActiveSession(it.sessionId, it.title, executing = now - mtime < ACTIVE_WINDOW_MS, gitBranch = it.gitBranch) }
+                        ?.let {
+                            ActiveSession(
+                                it.sessionId,
+                                it.title,
+                                executing = now - mtime < ACTIVE_WINDOW_MS,
+                                gitBranch = it.gitBranch,
+                                executingAuthoritative = false,
+                            )
+                        }
                 } else null
                 val active = (daemonLive + listOfNotNull(external)).sortedByDescending { it.executing }
                 val first = active.firstOrNull()
@@ -218,7 +269,7 @@ class DirectoryService(
                     lastModified = mtime,
                     open = osOpen || daemonLive.isNotEmpty(),
                     executing = active.any { it.executing },
-                    busy = cwd in busyCwds,
+                    busy = ProjectPaths.canonicalKey(cwd) in busyCwds,
                     activeSessionId = first?.sessionId,
                     activeSessionTitle = first?.title,
                     gitBranch = first?.gitBranch,

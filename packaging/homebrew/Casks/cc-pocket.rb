@@ -10,9 +10,9 @@ cask "cc-pocket" do
   # bit-reproducible, so even the arm64 sha changes on a rebuild).
   arch arm: "arm64", intel: "x86_64"
 
-  version "1.6.0"
-  sha256 arm:   "d650841121b09c1e965bcc5942436e9b14809fbe41debbec8caf6fbeae089ed9",
-         intel: "0c210d32794e15807f317768f377eee443f6fa8c142a5ca1a06216bca3748928"
+  version "1.9.1"
+  sha256 arm:   "dc5cc841faee0eed3004b41ae924ebd5d1b91bff277e36d60827a0b9fa126593",
+         intel: "2a1e6db80ab359c56db00932b76432c5b44f9fbc0231db61dce8ce2ecb5c7635"
 
   url "https://github.com/heypandax/cc-pocket/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-#{arch}.tar.gz"
   name "CC Pocket daemon"

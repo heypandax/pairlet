@@ -23,17 +23,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -47,27 +57,33 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Reorder
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material3.AlertDialog
@@ -80,7 +96,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -95,6 +110,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.unit.TextUnit
 import kotlinx.coroutines.flow.first
 import dev.ccpocket.app.media.rememberFileAttacher
 import dev.ccpocket.app.media.rememberImageAttacher
@@ -105,18 +122,27 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.collapse
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.expand
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import dev.ccpocket.app.epochMillis
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -124,6 +150,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -131,19 +158,56 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.SupportContext
-import dev.ccpocket.app.defaultDaemonUrl
 import dev.ccpocket.app.supportPlatformLabel
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ConnPhase
+import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.StatusMsg
 import dev.ccpocket.app.data.VoiceState
+import dev.ccpocket.app.data.agentFilterIsAll
 import dev.ccpocket.app.pairing.displayName
+import dev.ccpocket.app.ui.chat.ChatHeader
+import dev.ccpocket.app.ui.chat.ChatStateBlock
+import dev.ccpocket.app.ui.chat.CONTEXT_SEP
+import dev.ccpocket.app.ui.chat.ContextLine
+import dev.ccpocket.app.ui.chat.LineageBanner
+import dev.ccpocket.app.ui.chat.RewindConfirmBody
+import dev.ccpocket.app.ui.chat.RewindErrorBar
+import dev.ccpocket.app.ui.chat.RewindMenuItems
+import dev.ccpocket.app.ui.chat.RewindSheetActionRow
+import dev.ccpocket.app.ui.chat.ToolTurnBand
+import dev.ccpocket.app.ui.session.forkParentTitle
+import dev.ccpocket.app.ui.session.rewoundSuccessorTitle
+import dev.ccpocket.app.ui.session.splitRewound
+import dev.ccpocket.app.ui.chat.TurnSourceLabel
+import dev.ccpocket.app.ui.chat.chatStateUi
+import dev.ccpocket.app.ui.fleet.attentionAsk
 import dev.ccpocket.app.ui.fleet.crossMachineAttention
 import dev.ccpocket.app.ui.fleet.ApprovalQueueFab
 import dev.ccpocket.app.ui.fleet.fleetAttention
 import dev.ccpocket.app.ui.fleet.fleetMachines
 import dev.ccpocket.app.ui.fleet.MachineStatus
+import dev.ccpocket.app.ui.entry.ComputersSurface
+import dev.ccpocket.app.ui.entry.EntrySecondaryButton
+import dev.ccpocket.app.ui.entry.connRecovery
+import dev.ccpocket.app.ui.session.ConnBadge
+import dev.ccpocket.app.ui.session.ForkLineageCaption
+import dev.ccpocket.app.ui.session.Hairline
+import dev.ccpocket.app.ui.session.NewSessionDock
+import dev.ccpocket.app.ui.session.RewoundSessionRow
+import dev.ccpocket.app.ui.session.SessionAttention
+import dev.ccpocket.app.ui.session.SessionListRow
+import dev.ccpocket.app.ui.session.SessionRowUi
+import dev.ccpocket.app.ui.session.SessionSectionLabel
+import dev.ccpocket.app.ui.session.SessionsContextHeader
+import dev.ccpocket.app.ui.session.SessionsEmptyState
+import dev.ccpocket.app.ui.session.StateMark
+import dev.ccpocket.app.ui.session.StateMarkGlyph
+import dev.ccpocket.app.ui.session.SurfaceState
+import dev.ccpocket.app.ui.session.stateColor
+import dev.ccpocket.app.ui.session.sessionRows
+import dev.ccpocket.app.ui.session.splitSessions
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.ui.handoff.ConnectColleagueFlow
 import dev.ccpocket.app.ui.handoff.HandoffAcceptScreen
@@ -161,6 +225,7 @@ import dev.ccpocket.app.ui.handoff.HandoffRibbon
 import dev.ccpocket.app.ui.handoff.HandoffStatusChip
 import dev.ccpocket.app.ui.handoff.HandoffUiStatus
 import dev.ccpocket.app.ui.handoff.HandoffWatchBar
+import dev.ccpocket.app.ui.handoff.canInitiateSessionHandoff
 import dev.ccpocket.app.ui.handoff.elapsedLabel
 import dev.ccpocket.app.ui.handoff.expiresCountdown
 import dev.ccpocket.app.ui.handoff.inviteBlob
@@ -175,8 +240,12 @@ import dev.ccpocket.app.ui.share.SharedPill
 import dev.ccpocket.app.ui.share.expiryLeft
 import dev.ccpocket.app.ui.share.expiryLeftText
 import dev.ccpocket.app.theme.LocalFontScale
+import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.TypeRole
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.semantics.Role
 import dev.ccpocket.app.voice.openAppSettings
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.SessionGroup
@@ -204,6 +273,9 @@ fun App(scope: CoroutineScope) {
     // name → Fleet home; attention banner / cross-machine banner → inbox. UI-local like the sheets.
     var fleetOpen by remember { mutableStateOf(false) }
     var inboxOpen by remember { mutableStateOf(false) }
+    // the ReviewRequest centre (REVIEW-REQUEST.md §12) — a full-screen route on the same overlay footing
+    // as the fleet surfaces, because it is about the ACTIVE machine's ledger and follows the same switch
+    var reviewsOpen by remember { mutableStateOf(false) }
     var appForeground by remember { mutableStateOf(true) }
     // Collaborator Links are contacts, not computers (SESSION-HANDOFF.md §4.1): their links live in their
     // own always-on inbox rather than the fleet, and they carry exactly one thing — Handoff offers.
@@ -219,6 +291,10 @@ fun App(scope: CoroutineScope) {
     // §7: ONE parse for every entry point. A collaborator link parks in pendingCollabInvite for the
     // fingerprint confirm screen below — a deep link must never redeem on sight.
     LaunchedEffect(pendingLink) { pendingLink?.let { repo.handleIncomingLink(it); dev.ccpocket.app.DeepLink.pending.value = null } }
+    // …and a review-contact link is addressed to the Review Center rather than the pairing door
+    // (REVIEW-REQUEST.md §13.3): open it so the Center's join page can show the fingerprint. The ticket
+    // is still redeemed by the DAEMON, and only after the human accepts these words.
+    LaunchedEffect(repo.pendingReviewInvite.value) { if (repo.pendingReviewInvite.value != null) reviewsOpen = true }
     // a tapped task-complete push deep-links straight into its session (connecting first if needed)
     val pushOpen by dev.ccpocket.app.PushRoute.pending.collectAsState()
     LaunchedEffect(pushOpen) { pushOpen?.let { repo.requestOpenSession(it.workdir, it.sessionId); dev.ccpocket.app.PushRoute.pending.value = null } }
@@ -242,6 +318,10 @@ fun App(scope: CoroutineScope) {
     // obscured (before the OS app-switcher snapshot) so a session is never visible in the task switcher.
     dev.ccpocket.app.OnAppBackground { appForeground = false; appLock.onBackground() }
     dev.ccpocket.app.OnAppObscured { appLock.onWillObscure() }
+    // The Claude allowance refresh rules, mounted ONCE here rather than inside the pill: two instances
+    // would mean two policies and two in-flight latches, i.e. double the traffic the de-duplication
+    // exists to prevent — and the pill must keep refreshing on screens that are not currently showing it.
+    ClaudeQuotaRefreshEffect(repo, appForeground)
     // Push is alert-only: while the app is visible, pull each live daemon's authoritative queue. The first
     // pull is immediate; a missed APNs notification therefore becomes visible within one foreground sync.
     LaunchedEffect(appForeground, repo.sessionActive.value) {
@@ -249,6 +329,20 @@ fun App(scope: CoroutineScope) {
         while (true) {
             (dev.ccpocket.app.data.FleetRuntime.coordinator?.repos() ?: listOf(repo)).forEach { it.refreshPendingApprovals() }
             delay(3_000)
+        }
+    }
+    // #239: completion visibility is needed while the user is in Chat or Sessions too, not only while
+    // the Projects screen happens to be mounted. The daemon's directory snapshot is the authoritative
+    // cross-session executing/busy source; a quiet foreground poll lets the repository observe the edge.
+    LaunchedEffect(appForeground, repo.sessionActive.value, repo.phase.value) {
+        if (!appForeground || !repo.sessionActive.value || repo.phase.value != ConnPhase.Ready) return@LaunchedEffect
+        while (true) {
+            // #267: each refresh is a full-machine scan on the daemon (allProcesses + lsof fork + per-backend
+            // transcript walks), so keep the cadence well clear of a hot loop, and skip it entirely while the
+            // open chat is streaming — the live turn's own SessionLive is the authoritative state then, and a
+            // machine scan per turn is exactly the self-inflicted amplification this repo has been bitten by.
+            if (!repo.streaming.value) repo.refreshDirectoriesSilently()
+            delay(12_000)
         }
     }
     // Android system back walks the in-app stack (chat → sessions → directories) instead of leaving
@@ -265,10 +359,17 @@ fun App(scope: CoroutineScope) {
     }
     // appearance (issue #63): PocketTheme resolves the persisted mode against the OS, so a SYSTEM pick tracks a
     // live system flip while the app is foregrounded and LIGHT/DARK force it.
-    PocketTheme(mode = repo.themeMode.value, fontScale = repo.fontScale.value) {
+    PocketTheme(mode = repo.themeMode.value, accent = repo.accentTheme.value, fontScale = repo.fontScale.value) {
       Box(Modifier.fillMaxSize()) {
+        val approvalAsk = repo.pendingAsk.value?.takeIf { !it.isQuestion }
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
-            Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
+            // Secure Approval is pointer-modal by itself. Clearing the covered tree here also makes it
+            // modal to TalkBack/VoiceOver: focus cannot traverse into chat/navigation under the scrim.
+            val coveredContent = if (approvalAsk != null) Modifier.clearAndSetSemantics { } else Modifier
+            Column(
+                Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()
+                    .then(coveredContent),
+            ) {
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
                 // preview/recording mode hides the demo banner for a clean marketing capture
                 if (repo.demoMode.value && !dev.ccpocket.app.isPreviewMode()) StatusBanner(Tok.accent, stringResource(Res.string.demo_banner))
@@ -282,11 +383,25 @@ fun App(scope: CoroutineScope) {
                 Box(Modifier.weight(1f)) {
                     when {
                         // a dead transport does NOT leave the content screens — ConnectionGate + auto-retry handle it
-                        !repo.sessionActive.value ->
-                            if (repo.addingDevice.value || repo.pairedList.isEmpty()) PairingScreen(repo) else ConnectScreen(repo)
+                        // issue #278 batch 2: a first run lands on the install guide, not on a code field for
+                        // a code nothing is printing yet. entryLanding() holds that decision as a pure rule.
+                        !repo.sessionActive.value -> when (
+                            dev.ccpocket.app.ui.entry.entryLanding(
+                                hasBindings = repo.pairedList.isNotEmpty(),
+                                addingDevice = repo.addingDevice.value,
+                                hasCollaboratorLinks = repo.collaboratorLinks.isNotEmpty(),
+                            )
+                        ) {
+                            dev.ccpocket.app.ui.entry.EntryLanding.FIRST_RUN_CONNECT -> PairingScreen(repo, firstRun = true)
+                            dev.ccpocket.app.ui.entry.EntryLanding.PAIR -> PairingScreen(repo)
+                            dev.ccpocket.app.ui.entry.EntryLanding.COMPUTERS -> ConnectScreen(repo)
+                        }
                         repo.demoConnecting.value -> DemoConnectScreen { repo.finishDemoConnect() } // PREVIEW opener
                         else -> Box(Modifier.fillMaxSize()) {
-                            ConnectionGate(repo) {
+                            ConnectionGate(
+                                repo,
+                                onOpenComputers = { fleetOpen = true },
+                            ) {
                                 when {
                                     // switchingSession keeps the chat mounted across a chat→chat switch:
                                     // openSession nulls convoId while it waits for the daemon, and without
@@ -294,26 +409,32 @@ fun App(scope: CoroutineScope) {
                                     repo.convoId.value != null || repo.switchingSession.value ->
                                         ChatScreen(repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true })
                                     repo.sessionsDir.value != null -> SessionsScreen(repo, onOpenInbox = { inboxOpen = true })
-                                    else -> DirectoryScreen(repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true })
+                                    else -> DirectoryScreen(
+                                        repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true },
+                                    )
                                 }
                             }
                             // fleet overlays ride ABOVE the gate: the fleet view is exactly where you
                             // want to be while this machine is reconnecting or another one has news
                             if (fleetOpen) dev.ccpocket.app.ui.fleet.FleetHomeScreen(repo, onBack = { fleetOpen = false }, onOpenInbox = { inboxOpen = true })
                             if (inboxOpen) dev.ccpocket.app.ui.fleet.AttentionInboxScreen(repo) { inboxOpen = false }
+                            // registered after the fleet surfaces, so its back handler wins while it is up.
+                            // Demoted (08-16): no header entry sets this any more — the only openers left
+                            // are the review-contact deep link above and the Settings row's own mount.
+                            if (reviewsOpen) dev.ccpocket.app.ui.review.ReviewCenterRoute(repo) { reviewsOpen = false }
                         }
                     }
                 }
             }
             // a permission decision never needs typing — drop the keyboard so the sheet isn't cramped
             val rootFocus = LocalFocusManager.current
-            LaunchedEffect(repo.pendingAsk.value?.askId) {
+            LaunchedEffect(repo.pendingAsk.value?.convoId, repo.pendingAsk.value?.askId) {
                 if (repo.pendingAsk.value != null) rootFocus.clearFocus()
             }
             // AskUserQuestion (ask.questions != null) renders as the docked QuestionCard inside
             // ChatScreen instead — questions are conversation, not a safety gate, and the user
             // should be able to scroll the chat for context while answering.
-            repo.pendingAsk.value?.takeIf { !it.isQuestion }?.let { ask ->
+            approvalAsk?.let { ask ->
                 // M2 AttentionLease: while THIS card is on screen AND the app is foregrounded, a 30s
                 // heartbeat pauses the daemon's no-response budget (grant-aware asks only). Backgrounding
                 // releases the lease explicitly, so an Android process idling behind the launcher can't
@@ -321,7 +442,7 @@ fun App(scope: CoroutineScope) {
                 // under the Compose test clock an unconditional infinite delay-loop would keep the virtual
                 // frame clock busy forever (desktopTest hang, 08-02).
                 if (ask.grantOptions != null) {
-                    LaunchedEffect(ask.askId, appForeground) {
+                    LaunchedEffect(ask.convoId, ask.askId, appForeground) {
                         if (!appForeground) {
                             repo.sendAskHeartbeat(visible = false)
                             return@LaunchedEffect
@@ -332,25 +453,31 @@ fun App(scope: CoroutineScope) {
                         }
                     }
                 }
-                PermissionSheet(
-                    ask, repo.workdir.value,
-                    agent = repo.sessionAgent.value ?: AgentKind.CLAUDE,
-                    timedOutSignal = repo.askTimedOut(ask), // issue #100: daemon said this ask timed out (composite-matched, P1-3)
+                // route adapter: the repository is read HERE and collapsed into one immutable value, so the
+                // Secure Approval renderer stays a pure function of what the daemon actually said
+                val approvalUi = dev.ccpocket.app.ui.approval.approvalUi(
+                    ask = ask,
+                    workdir = repo.workdir.value,
+                    risk = repo.riskDetailFor(ask), // M3: the FULL event (level + reason + codes + assessed)
+                    queueProgress = repo.askQueueProgress.value, // "n of m" while a burst is queued (design M1)
                     // §2.2/§4.3: during a REVIEW handoff a shell command is the one way a "read-only"
                     // review can still touch files — so it's confirmed each time (no standing rule) and
                     // the card says it leaves a record
                     handoffReview = repo.activeHandoff.value?.let {
                         it.status == HandoffStatus.IN_PROGRESS && repo.isHandoffRecipient(it)
                     } == true,
-                    queuePosition = repo.askQueueProgress.value, // "n / m" while a burst is queued (design M1)
-                    risk = repo.riskFor(ask), // M3 advisory badge, updated in place
-                    onAllowTask = { repo.resolve(Decision.ALLOW, grantScope = "task") },
-                    onRetrySafer = { constraints -> repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints) },
+                    timedOutSignal = repo.askTimedOut(ask), // issue #100 (composite-matched, P1-3)
+                )
+                dev.ccpocket.app.ui.approval.SecureApprovalSheet(
+                    approvalUi,
                     onDeny = { repo.resolve(Decision.DENY) },
-                    onOnce = { repo.resolve(Decision.ALLOW) },
-                    // "Always allow" (legacy card) / "本会话内总是允许" (V2 ⋯More): remember for old
-                    // daemons + the M2 session scope for new ones — same effect either way
-                    onAlways = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session") },
+                    onAllowOnce = { repo.resolve(Decision.ALLOW) },
+                    onAllowTask = { repo.resolve(Decision.ALLOW, grantScope = "task") },
+                    // legacy "Always allow" and the V2 session scope are the same effect: remember for old
+                    // daemons, the M2 session grant for new ones
+                    onAllowSession = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session") },
+                    onAlwaysAllow = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session") },
+                    onRetrySafer = { constraints -> repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints) },
                     onDismiss = { repo.dismissAsk() },
                 )
             }
@@ -490,7 +617,14 @@ private fun DemoConnectScreen(onDone: () -> Unit) {
  * failure persists. Reconnecting/Ready just show the content (the slim banner rides above it).
  */
 @Composable
-private fun ConnectionGate(repo: PocketRepository, content: @Composable () -> Unit) {
+private fun ConnectionGate(
+    repo: PocketRepository,
+    // the skeleton wears the real Projects header, so it needs the same route the list has. Passed
+    // through rather than invented here: this is the app root's existing overlay, not a new destination.
+    onOpenComputers: () -> Unit = {},
+    content: @Composable () -> Unit,
+) {
+    val recovery = connRecovery(repo.phase.value)
     when (repo.phase.value) {
         ConnPhase.PairingInvalid -> {
             val ended = repo.shareEnded.value
@@ -509,112 +643,607 @@ private fun ConnectionGate(repo: PocketRepository, content: @Composable () -> Un
                     onRemove = { repo.unpairActive() },
                     onAskNew = { repo.unpairActive() }, // drops the dead binding → lands on Connect to paste a fresh invite
                 )
-                else -> CenteredState(
-                    Tok.danger,
-                    stringResource(Res.string.conn_pairing_invalid_title),
-                    stringResource(Res.string.conn_pairing_invalid_body),
-                    stringResource(Res.string.conn_repair), { repo.unpairActive() },
-                )
+                else -> RecoverySurface(repo, recovery)
             }
         }
-        ConnPhase.RelayUnreachable -> CenteredState(
-            Tok.warn,
-            stringResource(Res.string.conn_relay_unreachable_title),
-            stringResource(Res.string.conn_relay_unreachable_body),
-            stringResource(Res.string.conn_retry), { repo.retryConnection() }, onExit = { repo.disconnect() },
-        )
+        ConnPhase.RelayUnreachable -> RecoverySurface(repo, recovery)
         ConnPhase.ComputerOffline ->
-            if (repo.convoId.value != null) { StatusBanner(Tok.warn, stringResource(Res.string.conn_computer_offline_banner)); content() } // mid-chat: keep history
-            else CenteredState(
-                Tok.warn,
-                stringResource(Res.string.conn_computer_offline_title),
-                stringResource(Res.string.conn_computer_offline_body),
-                stringResource(Res.string.conn_retry), { repo.retryConnection() }, onExit = { repo.disconnect() },
-                hint = stringResource(Res.string.conn_computer_offline_hint),
-            )
-        ConnPhase.Connecting ->
-            if (repo.directoriesLoaded.value || repo.convoId.value != null) content() else DirectorySkeleton(repo)
-        ConnPhase.Reconnecting, ConnPhase.Ready -> content()
-    }
-}
-
-/** A centered dot + title + body + primary action (+ optional hint / exit). Shared by the gate states. */
-@Composable
-private fun CenteredState(
-    dot: Color, title: String, body: String, primary: String, onPrimary: () -> Unit,
-    onExit: (() -> Unit)? = null, hint: String? = null,
-) {
-    Column(
-        Modifier.fillMaxSize().padding(32.dp),
-        verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        PulseDot(dot, size = 10.dp)
-        Spacer(Modifier.height(16.dp))
-        Text(title, color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(8.dp))
-        Text(body, color = Tok.tx2, fontSize = 14.sp, textAlign = TextAlign.Center, lineHeight = 20.sp)
-        if (hint != null) {
-            Spacer(Modifier.height(6.dp))
-            Text(hint, color = Tok.muted, fontSize = 12.sp, textAlign = TextAlign.Center)
-        }
-        Spacer(Modifier.height(24.dp))
-        Button(onPrimary, Modifier.fillMaxWidth()) { Text(primary) }
-        if (onExit != null) {
-            Spacer(Modifier.height(8.dp))
-            TextButton(onExit) { Text(stringResource(Res.string.exit), color = Tok.muted, fontSize = 12.sp) }
-        }
-    }
-}
-
-/** The Projects top bar (title + status dot + monospace machine line, then [actions]) — ONE implementation
- *  shared by [DirectoryScreen] and its connect/switch skeleton, so the skeleton→list swap can never drift. */
-@Composable
-private fun ProjectsTopBar(
-    title: String,
-    dotColor: Color,
-    machine: String?,
-    machineLineModifier: Modifier = Modifier,
-    machineTrailing: @Composable RowScope.() -> Unit = {},
-    actions: @Composable RowScope.() -> Unit = {},
-) {
-    Row(Modifier.fillMaxWidth().background(Tok.surface).padding(start = 16.dp, end = 6.dp, top = 14.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Tok.tx, fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp).then(machineLineModifier)) {
-                PulseDot(dotColor, size = 6.dp)
-                Spacer(Modifier.width(6.dp))
-                machine?.let {
-                    Text(it, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // mid-chat: keep the history readable under a slim banner instead of a takeover
+            if (repo.convoId.value != null) { StatusBanner(Tok.warn, stringResource(Res.string.conn_computer_offline_banner)); content() }
+            else RecoverySurface(repo, recovery)
+        // Connecting/Reconnecting/Ready share ONE call site (issue #261): the moment the list arrives, the
+        // phase flips to Ready in the same event, so a skeleton composed inside the Connecting branch alone
+        // would be torn out before it could fade. Here the same node survives the flip and the skeleton
+        // fades out over the list that has already landed underneath it — a change of clothes, in place.
+        ConnPhase.Connecting, ConnPhase.Reconnecting, ConnPhase.Ready -> {
+            val waiting = repo.phase.value == ConnPhase.Connecting &&
+                !repo.directoriesLoaded.value && repo.convoId.value == null
+            val landing = remember { ProjectsLandingGate() }
+            // what the list replaces is a skeleton only if one was actually shown
+            LaunchedEffect(waiting) { if (waiting) landing.arm() }
+            CompositionLocalProvider(LocalProjectsLanding provides landing) {
+                Box(Modifier.fillMaxSize()) {
+                    if (!waiting) content()
+                    AnimatedVisibility(
+                        visible = waiting,
+                        enter = EnterTransition.None, // it is the FIRST thing on screen; it does not arrive
+                        exit = fadeOut(tween(LoadingMotion.SKELETON_FADE_MS)),
+                    ) { DirectorySkeleton(repo, onOpenComputers) }
                 }
-                machineTrailing()
             }
         }
-        actions()
     }
 }
 
-/** Connect/switch placeholder: the REAL Projects header (amber dot while the link comes up) over
- *  shimmering rows — so landing on a machine only swaps skeleton→list and amber→green, instead of
- *  flashing a differently-shaped "Choose a directory" screen first. */
+/** A failing phase lands on Computers: its own recovery region, with the paired list flat underneath —
+ *  so switching machines reads as an ordinary choice rather than a second alarm (Entry Flow frames 09-11). */
 @Composable
-private fun DirectorySkeleton(repo: PocketRepository) {
-    val shimmer by rememberInfiniteTransition().animateFloat(
-        initialValue = 0.25f, targetValue = 0.6f,
-        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+private fun RecoverySurface(repo: PocketRepository, recovery: dev.ccpocket.app.ui.entry.ConnRecoveryUi) {
+    ComputersSurface(
+        repo, recovery = recovery,
+        onSwitch = { repo.switchDaemon(it) },
+        onAdd = { repo.beginAddDevice() },
     )
-    Column(Modifier.fillMaxSize()) {
-        ProjectsTopBar(stringResource(Res.string.dir_projects), Tok.warn, repo.paired.value?.displayName())
-        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(5) {
-                Box(Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(10.dp)).graphicsLayer { alpha = shimmer }.background(Tok.surface))
+}
+
+/**
+ * The Projects header (Entry Flow UI 2.0 · Master **v2** — the confirmed header amendment).
+ *
+ * Two rows, so the top-right of the 402 pt release frame carries page-level actions instead of the empty
+ * band the first pass left there:
+ *
+ * ```
+ *   Projects                                          [🖵] [⋯]
+ *   ● alex-macbook · online
+ * ```
+ *
+ * Row 1 is the screen's name plus exactly two 48 dp controls: the computer doorway (an outlined display,
+ * not a plus — it SWITCHES machines rather than creating anything) carrying the fleet's real waiting count,
+ * and the overflow carrying the version-update dot. Row 2 keeps the state MARK beside the state WORD, so
+ * the connection is legible in greyscale. (The review queue used to ride row 2's trailing edge; demoted
+ * 08-16 with the whole P2P review surface — the Review Center now lives behind Settings only.)
+ *
+ * Help and Settings moved into the overflow: they are doorways to specialist surfaces, and as a leading
+ * text band they competed with the machine state and the work below it.
+ *
+ * ONE implementation, shared by [DirectoryScreen] and its connecting skeleton, so the skeleton → list swap
+ * can never shift the geometry. [body] is the rest of the screen — the header owns the column so the
+ * overflow can be an ordinary in-tree overlay above it, the same grammar [PocketSheet] already uses.
+ */
+@Composable
+private fun ProjectsHeader(
+    title: String,
+    phase: ConnPhase,
+    machine: String?,
+    fleetWaiting: Int,
+    updateAvailable: Boolean,
+    onOpenComputers: () -> Unit,
+    onHelp: () -> Unit,
+    onSettings: () -> Unit,
+    // ── inline search (issue #260) ──
+    // The always-on filter field is gone from under the header: it cost a permanent row for a control most
+    // sessions never touch, and the list is what the screen is for. It lives here now as a 48dp icon that
+    // EXPANDS IN PLACE over the title row — search is a mode of this screen, not a second surface.
+    searchOpen: Boolean = false,
+    searchEnabled: Boolean = true,
+    query: String = "",
+    onQueryChange: (String) -> Unit = {},
+    onOpenSearch: () -> Unit = {},
+    onCloseSearch: () -> Unit = {},
+    // ── the wait, told once (issue #261) ──
+    // While the directory list is still on its way, this line IS the whole wait narrative: it names the
+    // computer being read rather than reporting the transport ("connecting…"), and nothing under the rows
+    // repeats it. It also withholds Review — a queue whose count this machine has not reported yet.
+    waitingForProjects: Boolean = false,
+    body: @Composable ColumnScope.() -> Unit,
+) {
+    val recovery = connRecovery(phase)
+    val state = stringResource(
+        when (phase) {
+            ConnPhase.Ready -> Res.string.ses_conn_online
+            ConnPhase.Connecting -> Res.string.ses_conn_connecting
+            ConnPhase.Reconnecting -> Res.string.proj_state_reconnecting
+            else -> Res.string.ses_conn_offline
+        },
+    )
+    val machineName = machine?.takeIf { it.isNotBlank() }
+    val stateLine = when {
+        !waitingForProjects -> machineName?.let { stringResource(Res.string.proj_machine_line, it, state) } ?: state
+        machineName != null -> stringResource(Res.string.proj_loading_on_machine, machineName)
+        else -> stringResource(Res.string.proj_loading_projects)
+    }
+    var menuOpen by remember { mutableStateOf(false) }
+    var titleRowPx by remember { mutableStateOf(0) }
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = Metric.gutter).padding(top = Metric.gapS)) {
+                // ── row 1: the screen's name, and the page-level controls it leaves room for ──
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = Metric.touch).onSizeChanged { titleRowPx = it.height },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (searchOpen) {
+                        // the field takes the whole row: while searching, the list below IS the answer, so
+                        // nothing else on this row can compete for the space
+                        HeaderSearchField(query, onQueryChange, Modifier.weight(1f))
+                        Spacer(Modifier.width(Metric.gapS))
+                        Text(
+                            stringResource(Res.string.proj_search_cancel), color = Tok.accent, style = TypeRole.action,
+                            maxLines = 1,
+                            modifier = Modifier.heightIn(min = Metric.touch).clip(RoundedCornerShape(Metric.radiusS))
+                                .clickable(role = Role.Button, onClick = onCloseSearch)
+                                .padding(horizontal = Metric.gapS)
+                                .wrapContentHeight(Alignment.CenterVertically),
+                        )
+                        return@Row
+                    }
+                    Text(
+                        title, color = Tok.tx, style = TypeRole.screenTitle,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
+                    HeaderIconAction(
+                        Icons.Rounded.Search, stringResource(Res.string.proj_search),
+                        enabled = searchEnabled, onClick = onOpenSearch,
+                    )
+                    HeaderIconAction(
+                        Icons.Outlined.Computer, stringResource(Res.string.proj_open_computers),
+                        onClick = onOpenComputers,
+                    ) {
+                        // the fleet's real waiting count rides its own doorway: one number, one target
+                        if (fleetWaiting > 0) dev.ccpocket.app.ui.fleet.AttentionBadge(
+                            fleetWaiting, Modifier.align(Alignment.TopEnd).padding(top = 4.dp),
+                        )
+                    }
+                    HeaderIconAction(
+                        Icons.Rounded.MoreHoriz, stringResource(Res.string.proj_more),
+                        expanded = menuOpen, onClick = { menuOpen = !menuOpen },
+                    ) {
+                        // issue #200: the version nudge rides the entry to Settings, where the update
+                        // instructions live. A DOT, not the review diamond — "there is an update" and
+                        // "somebody is waiting" are different facts; the menu row below spells this one out.
+                        if (updateAvailable) Box(
+                            Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp)
+                                .size(8.dp).clip(CircleShape).background(Tok.accent),
+                        )
+                    }
+                }
+                // ── row 2: the written machine state ──
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = Metric.gapXs),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    // the mark rides the FIRST line of the sentence: centred against a wrapped
+                    // block it drifts into the gutter between lines and stops reading as its mark
+                    // …and while the list is still coming it breathes on the skeleton's own cycle
+                    // (issue #261), so the one thing the header says about waiting is visibly alive
+                    val markAlpha = if (waitingForProjects) breathingAlpha(0) else 1f
+                    Box(
+                        Modifier.height(with(LocalDensity.current) { TypeRole.preview.lineHeight.toDp() })
+                            .graphicsLayer { alpha = markAlpha },
+                        contentAlignment = Alignment.Center,
+                    ) { StateMarkGlyph(recovery.mark, stateColor(recovery.tone)) }
+                    Spacer(Modifier.width(Metric.gapS))
+                    Text(
+                        stateLine,
+                        color = Tok.tx2, style = TypeRole.preview,
+                        maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
+            body()
+        }
+        if (menuOpen) ProjectsOverflowMenu(
+            below = Metric.gapS + with(LocalDensity.current) { titleRowPx.toDp() },
+            updateAvailable = updateAvailable,
+            onHelp = { menuOpen = false; onHelp() },
+            onSettings = { menuOpen = false; onSettings() },
+            onDismiss = { menuOpen = false },
+        )
+    }
+}
+
+/** A 48 dp page-level control in the header: an icon, its localized name, and room for one real mark.
+ *  [enabled] = false keeps the control's BOX (the connecting skeleton must place the same geometry the
+ *  loaded list does — EntryFlowUiTest pins exactly that) while making it inert and dimmed. */
+@Composable
+private fun HeaderIconAction(
+    icon: ImageVector,
+    label: String,
+    expanded: Boolean? = null,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    badge: @Composable BoxScope.() -> Unit = {},
+) {
+    Box(
+        Modifier.size(Metric.touch).clip(RoundedCornerShape(Metric.radiusS))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            // a disclosure announces whether it is already open, so a screen reader is never told to
+            // "activate" a menu that is on screen in front of it
+            .semantics { if (expanded == true) collapse { onClick(); true } else if (expanded == false) expand { onClick(); true } },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, label, tint = if (enabled) Tok.tx2 else Tok.muted, modifier = Modifier.size(21.dp))
+        badge()
+    }
+}
+
+/**
+ * The expanded search field (issue #260) — the title row, in its other mode.
+ *
+ * It lands focused, because expanding it IS the request to type; the caller clears the query when it
+ * collapses, so leaving search can never strand the list under a filter nobody can see.
+ */
+@Composable
+private fun HeaderSearchField(query: String, onQueryChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val shape = RoundedCornerShape(11.dp)
+    Row(
+        modifier.heightIn(min = 44.dp).clip(shape).background(Tok.surface)
+            .border(Metric.hairline, Tok.accent, shape)
+            .padding(horizontal = Metric.gap),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.Search, null, tint = Tok.tx2, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(9.dp))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text(stringResource(Res.string.filter_hint), color = Tok.muted, style = TypeRole.preview)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = TypeRole.preview.copy(color = Tok.tx),
+                cursorBrush = SolidColor(Tok.accent),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus).testTag("projects-search"),
+            )
         }
     }
 }
 
-/** Real empty-list state — connected, but the computer has no projects open yet (not a blank screen). */
+/**
+ * The overflow: Help and Settings, one tap under the title row.
+ *
+ * A low container — hairline and raised fill, no glass and no card stack — with 48 dp rows that grow with
+ * their labels. Opening it decides nothing: an outside tap anywhere, a second tap on the trigger, system
+ * back, or choosing a row all close it.
+ */
 @Composable
-private fun EmptyDirectories(onRefresh: () -> Unit) {
+private fun ProjectsOverflowMenu(
+    below: Dp,
+    updateAvailable: Boolean,
+    onHelp: () -> Unit,
+    onSettings: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    dev.ccpocket.app.SystemBackHandler(enabled = true) { onDismiss() }
+    val shape = RoundedCornerShape(Metric.radius)
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { onDismiss() } })
+        Column(
+            Modifier.align(Alignment.TopEnd).padding(top = below, end = Metric.gap)
+                .widthIn(min = 196.dp, max = 280.dp)
+                .clip(shape).background(Tok.raised).border(Metric.hairline, Tok.hair, shape),
+        ) {
+            OverflowMenuRow(stringResource(Res.string.proj_help), onClick = onHelp)
+            Hairline()
+            // the version nudge is repeated here in WORDS — the dot on the trigger only points at it
+            OverflowMenuRow(
+                stringResource(Res.string.proj_settings),
+                note = stringResource(Res.string.update_available).takeIf { updateAvailable },
+                onClick = onSettings,
+            )
+        }
+    }
+}
+
+@Composable
+private fun OverflowMenuRow(label: String, note: String? = null, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = Metric.touch)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = Metric.gapL, vertical = Metric.gapS),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = Tok.tx, style = TypeRole.body, modifier = Modifier.weight(1f))
+        if (note != null) {
+            Spacer(Modifier.width(Metric.gapS))
+            Box(Modifier.size(7.dp).clip(CircleShape).background(Tok.accent))
+            Spacer(Modifier.width(6.dp))
+            Text(note, color = Tok.tx2, style = TypeRole.caption)
+        }
+    }
+}
+
+/**
+ * The new-task FAB (issue #260) — the Projects screen's one and only way to start work.
+ *
+ * A filled 56 dp accent circle: deliberately the loudest thing on the screen, because everything else here
+ * is a way back INTO existing work and this is the way to make new work. It is the only control on Projects
+ * that is accent-filled, so "create" is never confused with "resume".
+ *
+ * The scrim it sits on is drawn by the caller (it has to span the whole frame, not just this circle).
+ */
+@Composable
+private fun NewTaskFab(onClick: () -> Unit) {
+    val label = stringResource(Res.string.new_task)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    Box(
+        Modifier.size(56.dp)
+            // lifts the circle off the rows it overlaps — the shadow, not a border, is what separates it
+            .shadow(10.dp, CircleShape, ambientColor = Tok.accent, spotColor = Tok.accent)
+            .clip(CircleShape)
+            .background(if (pressed) Tok.accentPressed else Tok.accent)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label }
+            .testTag("new-task-fab"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Rounded.Add, null, tint = Tok.base, modifier = Modifier.size(26.dp))
+    }
+}
+
+// The standalone "open any folder" ROW is gone from Projects (issue #260). Its capability did not go with
+// it: the new-task sheet's project picker pins "Browse other folders…" to its bottom and triggers the very
+// same [openFolderEntry] flow, and the empty-list state (#250) keeps its own anchor — with no projects, that
+// is still the action that ends the state. What the row cost was a permanent band of chrome above the list
+// for a doorway that belongs INSIDE the moment you are choosing a project.
+
+/**
+ * The wait, and the landing (issue #261) — transcribed from the design's board H
+ * (`docs/design/claude-design-handoff/fast-start-260/FastStartDevice.dc.html`).
+ *
+ * Two decisions are worth keeping stated, because both are easy to "improve" back into what they replaced:
+ *  · the skeleton BREATHES (alpha), it does not sweep. A shimmer sweep on a mono/rectangle skeleton reads
+ *    as a second material laid over the surface; a breath is the SAME fill the loaded list already uses.
+ *  · rows are staggered by [STAGGER_MS]. In phase they read as a broken screen; out of phase they read as
+ *    a list arriving.
+ */
+private object LoadingMotion {
+    /** Five, matching the design board — and the count the landing reveal staggers before it stops. */
+    const val ROWS = 5
+    const val STAGGER_MS = 90
+    /** `fsbreathe 1.4s ease-in-out infinite`, i.e. half a cycle per leg with [RepeatMode.Reverse]. */
+    const val BREATHE_HALF_MS = 700
+    const val BREATHE_MIN = 0.34f
+    const val BREATHE_MAX = 0.72f
+    /** `fsland 220ms cubic-bezier(.2,0,0,1)` — opacity 0→1 with a 3 dp lift. */
+    const val LAND_MS = 220
+    /** The skeleton's own exit, over the list that has already landed underneath it. */
+    const val SKELETON_FADE_MS = 180
+    val LIFT = 3.dp
+    /** CSS `ease-in-out`. */
+    val breathe = CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
+    val land = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+}
+
+/**
+ * "The system is set to reduce motion."
+ *
+ * Compose Multiplatform exposes no common accessibility signal for this (there is no `LocalAccessibility`
+ * carrying it, and the platform APIs behind it — `UIAccessibility.isReduceMotionEnabled`,
+ * `Settings.Global.ANIMATOR_DURATION_SCALE` — are not surfaced to common code by the framework). Rather than
+ * guess per platform inside this screen, the switch is a composition local with a conservative default:
+ * provide `true` at the app root once a platform probe exists (an `expect fun systemReducesMotion()`), and
+ * everything below degrades in one place. `true` ⇒ no breathing, no stagger, no lift: an instant swap.
+ */
+internal val LocalReduceMotion = staticCompositionLocalOf { false }
+
+/**
+ * The one-shot gate for the landing reveal: the project list animates in the FIRST time it reaches the
+ * screen and never again, so a pull-to-refresh — or coming back to Projects from a session — does not
+ * replay an entrance for a list that was already there.
+ *
+ * Held by [ConnectionGate] (which outlives the skeleton→list swap) and read through [LocalProjectsLanding].
+ */
+internal class ProjectsLandingGate {
+    private var armed = false
+    private var spent = false
+
+    /** A skeleton is on screen: what replaces it is a LANDING. Until this is said, the list is simply
+     *  there (a cached list on open, a screenshot, the desktop shell) and an entrance would be a flicker
+     *  on a screen nobody was waiting on. */
+    fun arm() { armed = true }
+
+    /** True at most once per gate — and never when motion is reduced (the claim is still spent, so the
+     *  answer does not flip to `true` later just because the setting changed mid-flight). */
+    fun claimFirstLanding(reduceMotion: Boolean = false): Boolean {
+        val play = armed && !spent && !reduceMotion
+        spent = true
+        return play
+    }
+
+    private val rowPlayed = BooleanArray(LoadingMotion.ROWS)
+
+    /** One-shot PER ROW, held here rather than in the item composition: LazyColumn disposes items that
+     *  scroll away, so state remembered inside them restarts from zero on the way back — which replayed
+     *  the reveal (alpha 0 + stagger delay) every time the top rows re-entered the viewport. A claim that
+     *  outlives the item makes the reveal literally once (owner-reported flicker, issue #261 follow-up). */
+    fun claimRow(index: Int): Boolean {
+        if (index !in rowPlayed.indices || rowPlayed[index]) return false
+        rowPlayed[index] = true
+        return true
+    }
+}
+
+internal val LocalProjectsLanding = staticCompositionLocalOf { ProjectsLandingGate() }
+
+/** Connect/switch placeholder: the REAL Projects header over breathing rows shaped like project rows — so
+ *  landing on a machine only swaps skeleton→list, instead of flashing a differently-shaped screen first.
+ *  It claims nothing, and it says so ONCE: the header's own state line ("Reading projects on <computer>…")
+ *  is the whole wait narrative, which is why nothing is written under the rows and why Review — a count
+ *  this machine has not reported yet — is not offered until the list lands. The header's other controls are
+ *  REAL here: waiting for a directory list is no reason to lose the way back to the computers or to Help. */
+@Composable
+internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header against the Ready list's
+    repo: PocketRepository,
+    onOpenComputers: () -> Unit = {},
+) {
+    var showHelp by remember { mutableStateOf(false) }
+    if (showHelp) { HelpCenterScreen(HelpEntryPoint.PROJECTS, onBack = { showHelp = false }); return }
+    var showSettings by remember { mutableStateOf(false) }
+    if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return }
+    var showQuota by remember { mutableStateOf(false) }
+    ProjectsHeader(
+        title = stringResource(Res.string.dir_projects),
+        phase = repo.phase.value,
+        machine = repo.paired.value?.displayName(),
+        // this machine has told us NOTHING yet: the label without a count, rather than a stale number
+        fleetWaiting = 0,
+        updateAvailable = repo.versionStatus.value.anyBehind, // a local fact — true with or without a link
+        onOpenComputers = onOpenComputers,
+        onHelp = { showHelp = true },
+        onSettings = { showSettings = true },
+        // the search control keeps its BOX here so skeleton → list never shifts the header (EntryFlowUiTest
+        // pins exactly that), but it is inert: there is no list yet for a filter to act on
+        searchEnabled = false,
+        waitingForProjects = true,
+    ) {
+        // the list's own geometry: same gutter, same 6 dp between rows — the swap moves nothing.
+        // weight, not fillMaxSize, for the same reason as the real list below: the docked strip needs
+        // its height back. Identical measurement while the strip is absent.
+        Column(
+            Modifier.testTag("dir-skeleton").fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SkeletonSectionLabel()
+            repeat(LoadingMotion.ROWS) { i -> SkeletonProjectRow(i) }
+        }
+        // the skeleton carries the strip too: on a RECONNECT the previous link's snapshot is already in
+        // hand, and a strip that only appeared once the list landed would be exactly the skeleton→list
+        // shift this header is built to avoid (EntryFlowUiTest pins it)
+        QuotaStrip(repo) { showQuota = true }
+    }
+    // AFTER the header content, so the sheet paints over everything the skeleton drew (z-order bug
+    // otherwise: composed first = painted under). AnimatedVisibility's scope stacks these two like a Box.
+    if (showQuota) QuotaSheet(repo) { showQuota = false }
+}
+
+/** The breath, phase-shifted by [LoadingMotion.STAGGER_MS] per row. Flat (no animation at all, at the
+ *  midpoint of the range) when motion is reduced — a still skeleton is a skeleton, not a broken one. */
+@Composable
+private fun breathingAlpha(index: Int): Float {
+    if (LocalReduceMotion.current) return (LoadingMotion.BREATHE_MIN + LoadingMotion.BREATHE_MAX) / 2f
+    val alpha by rememberInfiniteTransition(label = "skeletonBreathe").animateFloat(
+        initialValue = LoadingMotion.BREATHE_MIN,
+        targetValue = LoadingMotion.BREATHE_MAX,
+        animationSpec = infiniteRepeatable(
+            animation = tween(LoadingMotion.BREATHE_HALF_MS, easing = LoadingMotion.breathe),
+            repeatMode = RepeatMode.Reverse,
+            initialStartOffset = StartOffset(index * LoadingMotion.STAGGER_MS),
+        ),
+        label = "skeletonBreatheRow$index",
+    )
+    return alpha
+}
+
+/** The placeholder for the first section label the list will print (it always prints one — the view
+ *  toggle rides it), so the rows below start where the real rows start. */
+@Composable
+private fun SkeletonSectionLabel() {
+    val alpha = breathingAlpha(0)
+    Box(
+        Modifier.testTag("skeleton-label").heightIn(min = 44.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(Modifier.height(9.dp).width(62.dp).clip(RoundedCornerShape(3.dp)).graphicsLayer { this.alpha = alpha }.background(Tok.hair))
+    }
+}
+
+/**
+ * One skeleton row: the anatomy of a real project row ([DirCell]) with its content withheld — the name
+ * line, the mono path line under it, and the trailing affordance box the ＋ occupies. Same fill, same
+ * radius, same paddings, so the row that replaces it needs no space it did not already have.
+ *
+ * Each bar rides an INVISIBLE line of the type it stands in for, rather than a hand-picked dp height: the
+ * row then measures exactly what [DirCell] measures, by construction, at any font scale.
+ */
+@Composable
+private fun SkeletonProjectRow(index: Int) {
+    val alpha = breathingAlpha(index)
+    Row(
+        Modifier.testTag("skeleton-row").fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            .graphicsLayer { this.alpha = alpha }
+            .background(Tok.surface)
+            // DirCell's paddings, with its ＋-bearing end inset — every project row carries one
+            .padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            // widths vary per row: five identical bars read as a table, not as projects
+            SkeletonBar(
+                barHeight = 15.dp, radius = 4.dp, fraction = SKELETON_TITLE_W[index % SKELETON_TITLE_W.size],
+                color = Tok.hair, lineSize = 14.sp, mono = false, // DirCell's name line
+            )
+            SkeletonBar(
+                barHeight = 11.dp, radius = 3.dp, fraction = SKELETON_PATH_W[index % SKELETON_PATH_W.size],
+                color = Tok.raised, lineSize = 11.sp, mono = true, // …and its mono path line
+            )
+        }
+        // where the ＋ lands: the same 32 dp box the real glyph holds open
+        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.height(11.dp).width(6.dp).clip(RoundedCornerShape(2.dp)).background(Tok.raised))
+        }
+    }
+}
+
+/** A bar on the baseline of the (blank) line of type it replaces. */
+@Composable
+private fun SkeletonBar(barHeight: Dp, radius: Dp, fraction: Float, color: Color, lineSize: TextUnit, mono: Boolean) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+        Text(
+            " ", color = Color.Transparent, fontSize = lineSize, maxLines = 1,
+            fontFamily = if (mono) FontFamily.Monospace else null,
+            fontWeight = if (mono) null else FontWeight.Medium,
+        )
+        Box(Modifier.height(barHeight).fillMaxWidth(fraction).clip(RoundedCornerShape(radius)).background(color))
+    }
+}
+
+private val SKELETON_TITLE_W = listOf(0.54f, 0.43f, 0.61f, 0.38f, 0.50f)
+private val SKELETON_PATH_W = listOf(0.76f, 0.64f, 0.82f, 0.58f, 0.71f)
+
+/**
+ * The landing (issue #261): the real row fades in over 220 ms with a 3 dp lift, on the SAME 90 ms stagger
+ * the skeleton was breathing on, while the skeleton fades out above it — an in-place change of clothes, not
+ * a screen transition. Rows past the skeleton's five, and every later composition (scrolling, refresh), get
+ * the row unwrapped: an entrance animation on a row that scrolls into view months later is a glitch.
+ */
+@Composable
+private fun LandingReveal(index: Int, play: Boolean, content: @Composable () -> Unit) {
+    if (!play || index >= LoadingMotion.ROWS) { content(); return }
+    // Claimed from the GATE, not remembered here: this composable lives inside a LazyColumn item, and an
+    // item scrolled away is disposed — local state would restart the animation on every return trip.
+    val gate = LocalProjectsLanding.current
+    val playThis = remember { gate.claimRow(index) }
+    if (!playThis) { content(); return }
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        progress.animateTo(
+            1f,
+            tween(LoadingMotion.LAND_MS, delayMillis = index * LoadingMotion.STAGGER_MS, easing = LoadingMotion.land),
+        )
+    }
+    val lift = with(LocalDensity.current) { LoadingMotion.LIFT.toPx() }
+    // a draw-time transform only: the row occupies its final space from the first frame, so nothing reflows
+    Box(
+        Modifier.graphicsLayer {
+            alpha = progress.value
+            translationY = lift * (1f - progress.value)
+        },
+    ) { content() }
+}
+
+/**
+ * Real empty-list state — connected, but the computer has no projects to report yet (not a blank screen).
+ *
+ * It carries the open-folder doorway, not just Refresh (#250): with nothing in the list, "open a folder" is
+ * the action that ends this state, and refreshing an empty computer forever is the dead end it replaced.
+ */
+@Composable
+private fun EmptyDirectories(onRefresh: () -> Unit, onOpenFolder: () -> Unit) {
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
@@ -623,43 +1252,90 @@ private fun EmptyDirectories(onRefresh: () -> Unit) {
         Spacer(Modifier.height(8.dp))
         Text(stringResource(Res.string.dir_empty_body), color = Tok.tx2, fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 19.sp)
         Spacer(Modifier.height(20.dp))
+        OutlinedButton(onOpenFolder) { Text(stringResource(Res.string.proj_open_any)) }
+        Spacer(Modifier.height(10.dp))
         OutlinedButton(onRefresh) { Text(stringResource(Res.string.dir_refresh)) }
+    }
+}
+
+/**
+ * The agent filter — not a search term — emptied the list (issue #250).
+ *
+ * The old screen sent this case to [NoMatches], which read «No projects match ""» and offered a Clear
+ * filter button wired to the (empty) query: a button that did nothing, blaming a search nobody ran. Here
+ * the cause is named and the button clears the thing that is actually hiding the rows.
+ */
+@Composable
+private fun NoAgentMatches(filter: Set<AgentKind>, onClear: () -> Unit, onOpenFolder: () -> Unit) {
+    val shown = remember(filter) { AgentKind.entries.filter { it in filter } }
+    val names = remember(shown) { shown.joinToString(" · ") { agentName(it) } }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = Metric.gutter).padding(top = 32.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
+            StateMarkGlyph(StateMark.RING, Tok.muted)
+            Text(
+                stringResource(Res.string.proj_agent_filtered_title), color = Tok.tx, style = TypeRole.rowTitle,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Text(
+            stringResource(Res.string.proj_agent_filtered_body, names), color = Tok.tx2, style = TypeRole.preview,
+            modifier = Modifier.padding(top = Metric.gapS),
+        )
+        EntrySecondaryButton(stringResource(Res.string.proj_clear_agent_filter), Modifier.padding(top = Metric.gapL), onClick = onClear)
+        EntrySecondaryButton(stringResource(Res.string.proj_open_any), Modifier.padding(top = Metric.gap), onClick = onOpenFolder)
+    }
+}
+
+/**
+ * No project matched the filter. Not an illustration: it names the query, says what was actually searched,
+ * and offers the only two things that can help — clear the filter, or take the one open-folder doorway.
+ */
+@Composable
+private fun NoMatches(query: String, onClear: () -> Unit, onOpenFolder: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = Metric.gutter).padding(top = 32.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
+            StateMarkGlyph(StateMark.RING, Tok.muted)
+            Text(
+                stringResource(Res.string.proj_no_match_title, query), color = Tok.tx, style = TypeRole.rowTitle,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Text(
+            stringResource(Res.string.proj_no_match_body), color = Tok.tx2, style = TypeRole.preview,
+            modifier = Modifier.padding(top = Metric.gapS),
+        )
+        EntrySecondaryButton(stringResource(Res.string.proj_clear_filter), Modifier.padding(top = Metric.gapL), onClick = onClear)
+        EntrySecondaryButton(stringResource(Res.string.proj_open_any), Modifier.padding(top = Metric.gap), onClick = onOpenFolder)
     }
 }
 
 /** Disconnected, with at least one bound computer: the device picker. Tap one to connect, or add another. */
 @Composable
-private fun ConnectScreen(repo: PocketRepository) {
-    var url by remember { mutableStateOf(defaultDaemonUrl()) }
-    var advanced by remember { mutableStateOf(false) }
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("CC Pocket", color = Tok.tx, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(6.dp))
-        Text(stringResource(Res.string.choose_computer), color = Tok.tx2, fontSize = 14.sp)
-        Spacer(Modifier.height(20.dp))
-        DeviceList(repo, onSwitch = { repo.switchDaemon(it) }, onAdd = { repo.beginAddDevice() })
-        Spacer(Modifier.height(10.dp))
-        Text(repo.status.value.resolve(), color = Tok.muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-        Spacer(Modifier.height(16.dp))
-        TextButton({ advanced = !advanced }) {
-            Text(stringResource(if (advanced) Res.string.hide_advanced else Res.string.advanced_direct_lan), color = Tok.muted, fontSize = 12.sp)
-        }
-        if (advanced) {
-            OutlinedTextField(url, { url = it }, label = { Text(stringResource(Res.string.daemon_ws_url)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton({ repo.startDirect(url) }, Modifier.fillMaxWidth()) { Text(stringResource(Res.string.connect_direct)) }
-        }
-    }
-}
+private fun ConnectScreen(repo: PocketRepository) = ComputersSurface(
+    repo,
+    onSwitch = { repo.switchDaemon(it) },
+    onAdd = { repo.beginAddDevice() },
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onOpenInbox: () -> Unit = {}) {
-    var query by remember { mutableStateOf("") }
+internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted by EntryFlowUiTest (demo mode)
+    repo: PocketRepository,
+    onOpenFleet: () -> Unit = {},
+    onOpenInbox: () -> Unit = {},
+) {
+    // Search is a MODE of this screen now (issue #260): the field lives in the title row while it is open,
+    // and collapsing it clears the query — so the filtered-empty state can only ever be reached from a
+    // search that is visibly on screen, never inherited from a field nobody can see. The transitions live
+    // in [ProjectSearch] so that invariant is pinned without a screen.
+    var search by remember { mutableStateOf(ProjectSearch()) }
+    val query = search.query
     var showHelp by remember { mutableStateOf(false) }
     if (showHelp) {
         HelpCenterScreen(HelpEntryPoint.PROJECTS, onBack = { showHelp = false })
@@ -667,12 +1343,21 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
     }
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
+    // The docked strip opens this sheet. Rendered at the overlay END of the screen's Box (with the other
+    // sheets), NOT here — composed this early it painted UNDER the FAB stack/scrim (same z-order bug as
+    // the strip itself).
+    var showQuota by remember { mutableStateOf(false) }
     // long-press a project → "Share this folder…" opens the owner invite flow full-screen (issue #115)
     var shareTarget by remember { mutableStateOf<DirectoryEntry?>(null) }
     shareTarget?.let { ShareFolderScreen(repo, it, onBack = { shareTarget = null }); return }
-    // pull-only list: refresh NOW — entering (and RE-entering, back from a session) shows fresh state
-    // instead of the pre-session snapshot — then keep re-pulling quietly
-    LaunchedEffect(Unit) { while (true) { repo.refreshDirectoriesSilently(); delay(10_000) } }
+    // Pull-to-refresh remains available here; the app-level foreground poll keeps the same directory
+    // truth fresh while Projects, Sessions, Chat, Settings, or an overlay is mounted (#239).
+
+    // The landing reveal, claimed ONCE (issue #261): the first list to reach the screen animates in behind
+    // the fading skeleton; every later visit — and every refresh of this one — gets the rows unwrapped.
+    val reduceMotion = LocalReduceMotion.current
+    val landingGate = LocalProjectsLanding.current
+    val landing = remember { landingGate.claimFirstLanding(reduceMotion) }
 
     val tree = repo.treeView.value
     val dirsSnapshot = repo.directories.toList()
@@ -719,6 +1404,15 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
     // keeps the manual path sheet (its browse anchor "~" is outside the share and daemon-denied anyway)
     var showDirPicker by remember { mutableStateOf(false) }
     val openFolderEntry = { if (isGuestDirView(dirsSnapshot)) showNewPath = true else showDirPicker = true }
+    // the FAB's sheet (issue #260) — the screen's one new-task entry
+    var showNewTask by remember { mutableStateOf(false) }
+    // The docked allowance strip's measured height. The bottom overlays (FAB scrim, FAB stack, archive
+    // toast) are aligned to the WHOLE screen's bottom edge, which is the strip's row once a snapshot is
+    // in hand — without this lift the opaque end of the scrim paints straight over the strip (the phone
+    // bug: skeleton showed it, the landed list "swallowed" it). 0 when the strip is absent, so the
+    // no-snapshot layout stays pixel-identical.
+    var quotaStripPx by remember { mutableStateOf(0) }
+    val quotaStripLift = with(LocalDensity.current) { quotaStripPx.toDp() }
 
     // typing in the filter then scrolling the list dismisses the keyboard (fires once per scroll gesture)
     val focus = LocalFocusManager.current
@@ -726,54 +1420,35 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
     LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) focus.clearFocus() }
     val approvalCount = repo.fleetAttention().size
     val approvalsRefreshing = repo.fleetMachines().any { it.pending > 0 && it.status != MachineStatus.ONLINE }
-    val approvalClearance = if (approvalCount > 0) 72.dp else 0.dp
+    // Bottom clearance is now the sum of two stacked controls: the approval pill (when anything waits) and
+    // the new-task FAB. Without this the last project row sits UNDER the FAB and its gradient — reachable
+    // only by over-scrolling, which on a short list is not possible at all.
+    val fabClearance = 92.dp
+    val approvalClearance = (if (approvalCount > 0) 72.dp else 0.dp) + fabClearance
 
     Box(Modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize()) {
-        // ── top bar: "Projects" + connection sub-line · view toggle · settings ──
-        ProjectsTopBar(
-            headerTitle,
-            if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn,
-            repo.paired.value?.displayName(),
-            // the machine line is the doorway into the fleet: tap → Your computers (live overview)
-            machineLineModifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onOpenFleet).padding(vertical = 2.dp),
-            machineTrailing = {
-                val waiting = repo.fleetAttention().size
-                if (repo.pairedList.size > 1 || waiting > 0) {
-                    Spacer(Modifier.width(6.dp))
-                    Icon(Icons.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
-                }
-                if (waiting > 0) {
-                    Spacer(Modifier.width(4.dp))
-                    dev.ccpocket.app.ui.fleet.AttentionBadge(waiting)
-                }
-            },
-        ) {
-            IconButton(openFolderEntry, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Rounded.Add, stringResource(Res.string.new_path_open), tint = Tok.tx2, modifier = Modifier.size(22.dp))
-            }
-            ViewToggle(tree) { repo.setTreeView(!tree) }
-            Spacer(Modifier.width(4.dp))
-            IconButton({ showHelp = true }, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(Res.string.support_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
-            }
-            SettingsIconButton(repo, size = 36.dp) { showSettings = true }
-        }
-        OutlinedTextField(
-            query, { query = it }, placeholder = { Text(stringResource(Res.string.filter_hint)) }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-        // discoverable entry to open ANY folder — the project list only shows folders that already have
-        // history, and the top-bar "+" reads as "new", so this spells out how to reach a fresh folder
-        // (#32); both now land in the #152 browser (guests keep the manual sheet)
-        Row(
-            Modifier.fillMaxWidth().clickable(onClick = openFolderEntry).padding(horizontal = 16.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(Res.string.new_path_open_row), color = Tok.tx2, fontSize = 13.sp)
-        }
+    // ── the header (Master v2): title + Computers/overflow, then the machine state ──
+    // The machine line is no longer its own tap target: the Computers control beside the title is THE
+    // fleet doorway now, and it carries the same real waiting count the old chevron did.
+    ProjectsHeader(
+        title = headerTitle,
+        phase = repo.phase.value,
+        machine = repo.paired.value?.displayName(),
+        fleetWaiting = approvalCount,
+        updateAvailable = repo.versionStatus.value.anyBehind,
+        onOpenComputers = onOpenFleet,
+        onHelp = { showHelp = true },
+        onSettings = { showSettings = true },
+        searchOpen = search.open,
+        query = query,
+        onQueryChange = { search = search.typed(it) },
+        onOpenSearch = { search = search.expanded() },
+        onCloseSearch = { search = search.collapsed() },
+    ) {
+        // NOTE: the "was ready and dropped → keep the list under a slim warning" banner is NOT repeated
+        // here. The root already renders exactly one Reconnecting strip above every content screen, and a
+        // second copy on Projects would be the same sentence twice. Computer offline never reaches this
+        // list outside Chat — ConnectionGate routes it to the recovery surface instead.
         // ── breadcrumb (tree, drilled below root) ──
         if (treeMode && base != root) {
             // labels + real drill targets anchored at root — a reconstruction from display labels broke
@@ -785,59 +1460,104 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
                 onSegment = { i -> repo.browsePath.value = segs.getOrNull(i)?.second?.takeIf { it != root } },
             )
         }
-        PullToRefreshBox(isRefreshing = repo.refreshing.value, onRefresh = { repo.refreshDirectories() }, modifier = Modifier.fillMaxSize()) {
+        // weight instead of fillMaxSize so the docked allowance strip below can claim its 48dp. With the
+        // strip absent (no snapshot) this is the identical measurement: a lone weighted child in a Column
+        // gets exactly the remaining height fillMaxSize was taking.
+        PullToRefreshBox(isRefreshing = repo.refreshing.value, onRefresh = { repo.refreshDirectories() }, modifier = Modifier.fillMaxWidth().weight(1f)) {
+            // #250: one classifier decides WHICH empty state, so no branch can print «matched ""» or offer a
+            // button that clears a filter the user never set. `nothingToShow` keeps both old conditions.
+            val nothingToShow = visibleDirs.isEmpty() || (!treeMode && flatRows.isEmpty())
+            val emptyKind = dirEmptyKind(
+                loaded = repo.directoriesLoaded.value,
+                reportedCount = repo.directories.size,
+                nothingToShow = nothingToShow,
+                query = query,
+                agentFiltered = !agentFilterIsAll(agentFilter),
+            )
             when {
-                repo.directories.isEmpty() && repo.directoriesLoaded.value && query.isBlank() ->
-                    EmptyDirectories { repo.refreshDirectories() }
-                visibleDirs.isEmpty() && repo.directoriesLoaded.value ->
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(stringResource(Res.string.dir_no_matches), color = Tok.muted, fontSize = 13.sp)
-                    }
-                !treeMode && flatRows.isEmpty() && repo.directoriesLoaded.value ->
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(stringResource(Res.string.dir_no_matches), color = Tok.muted, fontSize = 13.sp)
-                    }
+                emptyKind == DirEmptyKind.NO_PROJECTS ->
+                    EmptyDirectories({ repo.refreshDirectories() }, openFolderEntry)
+                emptyKind == DirEmptyKind.AGENT_FILTERED ->
+                    NoAgentMatches(agentFilter, onClear = { repo.clearAgentFilter() }, onOpenFolder = openFolderEntry)
+                emptyKind == DirEmptyKind.NO_QUERY_MATCH ->
+                    NoMatches(query, onClear = { search = search.collapsed() }, onOpenFolder = openFolderEntry)
                 treeMode -> LazyColumn(
                     Modifier.fillMaxSize().padding(horizontal = 16.dp),
                     state = listState,
                     contentPadding = PaddingValues(bottom = approvalClearance),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
+                    // The view-mode toggle rides the FIRST section label (issue #260): it used to sit in the
+                    // search row, which no longer exists. `firstLabel` is claimed at list-BUILD time (this
+                    // lambda runs top-to-bottom on every rebuild), never from inside an item's composable —
+                    // item bodies compose lazily and out of order, so a flag flipped there would land on
+                    // whichever row scrolled into view first.
+                    var toggleFree = true
+                    fun claimToggle(): Boolean = toggleFree.also { toggleFree = false }
+                    // the landing reveal's running order (issue #261) — claimed at list-BUILD time for the
+                    // same reason the toggle is: an index taken inside an item body would follow scrolling,
+                    // not the list, and the cascade would replay from wherever the eye happens to be
+                    var revealSeq = 0
+                    fun reveal(n: Int = 1): Int = revealSeq.also { revealSeq += n }
                     if (base == root) { // PINNED + ACTIVE pinned on top at root
                         if (pinned.isNotEmpty()) {
-                            item { Label(pinnedLabel) }
-                            items(pinned, key = { "p:" + it.path }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) }
+                            val withToggle = claimToggle()
+                            val at = reveal()
+                            item { LandingReveal(at, landing) { SectionLabel(pinnedLabel, withToggle, tree) { repo.setTreeView(!tree) } } }
+                            val base0 = reveal(pinned.size)
+                            itemsIndexed(pinned, key = { _, e -> "p:" + e.path }) { i, e -> LandingReveal(base0 + i, landing) { ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) } }
                         }
                         if (live.isNotEmpty()) {
-                            item { Label(activeLabel) }
+                            val withToggle = claimToggle()
+                            val at = reveal()
+                            item { LandingReveal(at, landing) { SectionLabel(activeLabel, withToggle, tree) { repo.setTreeView(!tree) } } }
                             // key carries the session too — expansion can put the same project here several times
-                            items(live, key = { "a:" + it.path + ":" + (it.activeSessionId ?: "") }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) }
+                            val base0 = reveal(live.size)
+                            itemsIndexed(live, key = { _, e -> "a:" + e.path + ":" + (e.activeSessionId ?: "") }) { i, e -> LandingReveal(base0 + i, landing) { ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) } }
                         }
-                        if (pinned.isNotEmpty() || live.isNotEmpty()) item { Label(projectsLabel) }
+                        if (pinned.isNotEmpty() || live.isNotEmpty()) {
+                            val at = reveal()
+                            item { LandingReveal(at, landing) { Label(projectsLabel) } }
+                        }
                     }
                     // drilled into a folder that is itself a project → its own sessions lead as "current project"
                     if (currentLeaf != null) {
-                        item { Label(currentProjectLabel) }
+                        val withToggle = claimToggle()
+                        val atLabel = reveal()
+                        item { LandingReveal(atLabel, landing) { SectionLabel(currentProjectLabel, withToggle, tree) { repo.setTreeView(!tree) } } }
+                        val atLeaf = reveal()
                         item(key = "cur:" + currentLeaf.entry.path) {
                             val e = currentLeaf.entry
-                            LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) { repo.openProject(e) }
-                        }
-                        item { Label(projectsLabel) }
-                    }
-                    items(childRows, key = { r -> when (r) { is TreeRow.Folder -> "f:" + r.path; is TreeRow.Leaf -> "l:" + r.entry.path } }) { r ->
-                        when (r) {
-                            is TreeRow.Folder -> {
-                                val proj = r.project
-                                FolderRow(
-                                    name = r.name,
-                                    project = proj,
-                                    pinned = proj != null && repo.isPinned(proj.path),
-                                    onLongPress = proj?.let { e -> { actionTarget = e } },
-                                ) { repo.browsePath.value = r.path }
-                            }
-                            is TreeRow.Leaf -> {
-                                val e = r.entry
+                            LandingReveal(atLeaf, landing) {
                                 LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) { repo.openProject(e) }
+                            }
+                        }
+                        val atTail = reveal()
+                        item { LandingReveal(atTail, landing) { Label(projectsLabel) } }
+                    }
+                    // a root with neither pins nor live sessions prints no label at all — the toggle still
+                    // needs a home, or the only way back to the flat list would be to pin something first
+                    if (claimToggle()) {
+                        val at = reveal()
+                        item { LandingReveal(at, landing) { SectionLabel(null, true, tree) { repo.setTreeView(!tree) } } }
+                    }
+                    val childBase = reveal(childRows.size)
+                    itemsIndexed(childRows, key = { _, r -> when (r) { is TreeRow.Folder -> "f:" + r.path; is TreeRow.Leaf -> "l:" + r.entry.path } }) { i, r ->
+                        LandingReveal(childBase + i, landing) {
+                            when (r) {
+                                is TreeRow.Folder -> {
+                                    val proj = r.project
+                                    FolderRow(
+                                        name = r.name,
+                                        project = proj,
+                                        pinned = proj != null && repo.isPinned(proj.path),
+                                        onLongPress = proj?.let { e -> { actionTarget = e } },
+                                    ) { repo.browsePath.value = r.path }
+                                }
+                                is TreeRow.Leaf -> {
+                                    val e = r.entry
+                                    LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) { repo.openProject(e) }
+                                }
                             }
                         }
                     }
@@ -848,31 +1568,79 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
                     contentPadding = PaddingValues(bottom = approvalClearance),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    items(flatRows) { row ->
-                        when (row) {
-                            is DirRow.Header -> Label(row.label)
-                            is DirRow.Dir -> ProjectCell(
-                                repo, row.entry, showPath = row.showPath, direct = row.direct,
-                                onLongPress = { actionTarget = row.entry },
-                                onNewSession = { newPathTarget = row.entry.path },
-                            )
+                    // same rule as the tree list: the toggle rides the first header, and gets a bare row of
+                    // its own when the flat list leads straight into project rows (no pins, no live sessions)
+                    val leadingHeader = flatRows.firstOrNull() is DirRow.Header
+                    // the bare toggle row, when it exists, is row 0 of the landing cascade
+                    val flatBase = if (leadingHeader) 0 else 1
+                    if (!leadingHeader) item { LandingReveal(0, landing) { SectionLabel(null, true, tree) { repo.setTreeView(!tree) } } }
+                    itemsIndexed(flatRows) { i, row ->
+                        LandingReveal(flatBase + i, landing) {
+                            when (row) {
+                                is DirRow.Header -> SectionLabel(row.label, leadingHeader && i == 0, tree) { repo.setTreeView(!tree) }
+                                is DirRow.Dir -> ProjectCell(
+                                    repo, row.entry, showPath = row.showPath, direct = row.direct,
+                                    onLongPress = { actionTarget = row.entry },
+                                    onNewSession = { newPathTarget = row.entry.path },
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+        // Direction B's docked strip: outside the scrolling list, permanent, zero height when there is
+        // no snapshot. Last child of the header's Column, so it sits on the window's bottom edge.
+        // Measured so the bottom overlays (scrim / FABs / toast) lift off it instead of painting over it.
+        Box(Modifier.fillMaxWidth().onSizeChanged { quotaStripPx = it.height }) {
+            QuotaStrip(repo) { showQuota = true }
+        }
     }
-        ApprovalQueueFab(
-            count = approvalCount,
-            refreshing = approvalsRefreshing,
-            onClick = onOpenInbox,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+        // ── the bottom-right stack: the approval pill above the new-task FAB ──
+        // Both want the same corner. The FAB anchors it (it is always there and always means the same
+        // thing); the pill stacks above, so a growing approval queue never displaces the primary action.
+        // Hidden while searching: the field owns the screen then, and the list under it is the answer.
+        if (!search.open) {
+            // The scrim under the stack. Not decoration: the list scrolls beneath the FAB, and without it
+            // the last row reads as struck through by the circle. Fading the rows out is also what says
+            // there is more list down there. Untouchable, so it never steals a row's tap.
+            // Shown ONLY while rows actually continue beneath (owner feedback on #260): at the end of the
+            // list — and on a short list, always — nothing would be struck through, and the scrim stacked
+            // on the 92dp clearance read as a dead band of wasted space.
+            val scrimAlpha by animateFloatAsState(if (listState.canScrollForward) 1f else 0f, label = "fabScrim")
+            if (scrimAlpha > 0f) Box(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = quotaStripLift).fillMaxWidth().height(96.dp)
+                    .graphicsLayer { alpha = scrimAlpha }
+                    .background(Brush.verticalGradient(0f to Color.Transparent, 0.62f to Tok.base, 1f to Tok.base)),
+            )
+            Column(
+                Modifier.align(Alignment.BottomEnd).padding(end = Metric.gutter, bottom = Metric.gutter + quotaStripLift),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(Metric.gap),
+            ) {
+                ApprovalQueueFab(count = approvalCount, refreshing = approvalsRefreshing, onClick = onOpenInbox)
+                NewTaskFab { showNewTask = true }
+            }
+        }
+        if (showNewTask) NewTaskSheet(
+            repo = repo,
+            dirs = visibleDirs,
+            // the picker's pinned bottom row is the SAME doorway the removed standalone row used, guest
+            // fork included — one implementation, reached from where the choice is actually being made
+            onBrowseOther = { showNewTask = false; openFolderEntry() },
+            onDismiss = { showNewTask = false },
         )
+        if (showQuota) QuotaSheet(repo) { showQuota = false }
+        // Entering the new conversation needs no navigation call: the root router renders ChatScreen the
+        // moment convoId lands, and the sheet closed on send — so a delivered prompt IS the chat opening.
+        // The FAILURE direction is the one that needs wiring: nothing opened, so this screen is still here
+        // and the sheet has to come back carrying the draft and one inline line saying what happened.
+        LaunchedEffect(repo.newTaskError.value) { if (repo.newTaskError.value != null) showNewTask = true }
         actionTarget?.let { t -> ProjectActionsSheet(repo, t, onShare = { shareTarget = t }) { actionTarget = null } }
         if (showNewPath) NewPathSheet(
             // drilled into a folder → seed it as the parent so the user types only the new project's name (issue #7)
             parent = base.takeIf { it.length > 1 }, // seed the current location (root prefix or a drilled folder) so "type the rest of the path" is obvious (#32/#7)
-            agent = repo.defaultAgent.value,
+            agent = repo.sessionDefaultAgent,
             mode = repo.defaultMode.value,
             onDismiss = { showNewPath = false },
             onOptions = { p -> showNewPath = false; newPathTarget = p },
@@ -894,8 +1662,10 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
                 workdir = path,
                 selected = repo.defaultMode.value,
                 selectedNativeMode = repo.defaultPermissionMode.value,
-                agent = repo.defaultAgent.value,
+                agent = repo.sessionDefaultAgent,
+                computer = repo.paired.value?.displayName(),
                 autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+                availableAgents = repo.availableAgents,
                 modelsFor = { a -> repo.newSessionModelChoices(a) },
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
                 onAgentPicked = { a -> repo.fetchModels(a) },
@@ -1068,7 +1838,7 @@ private fun ProjectCell(
         direct && e.open && sid != null ->
             // the 历史 badge lists this project's sessions (issue #49) — the row itself keeps auto-resuming
             LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }, onNewSession = onNewSession) { repo.openProject(e) }
-        else -> DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, indent = false, pinned = pinned, onLongPress = onLongPress, onNewSession = onNewSession) { repo.listSessions(e.path) }
+        else -> DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, indent = false, pinned = pinned, worktreeOf = e.worktreeOf, onLongPress = onLongPress, onNewSession = onNewSession) { repo.listSessions(e.path) }
     }
 }
 
@@ -1274,7 +2044,7 @@ private fun FolderRow(
                 Spacer(Modifier.width(8.dp))
             }
         }
-        Icon(Icons.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(18.dp))
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -1310,6 +2080,10 @@ private fun DirCell(
     path: String?,
     indent: Boolean,
     pinned: Boolean = false,
+    /** #281 Screen D: the main worktree this directory is a linked checkout OF; null for an ordinary
+     *  folder. A one-line annotation, deliberately NOT a regrouping of the list — the family view is
+     *  the worktree surface's job, this only stops a `-worktrees/` row looking like a stray project. */
+    worktreeOf: String? = null,
     onLongPress: (() -> Unit)? = null,
     onNewSession: (() -> Unit)? = null,
     onClick: () -> Unit,
@@ -1323,6 +2097,7 @@ private fun DirCell(
         Column(Modifier.weight(1f)) {
             Text(name, color = Tok.tx, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1)
             if (path != null) Text(path, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
+            if (worktreeOf != null) WorktreeOfCaption(worktreeOf)
         }
         if (pinned) PinGlyph()
         onNewSession?.let { Spacer(Modifier.width(4.dp)); NewSessionGlyph(it) }
@@ -1377,25 +2152,37 @@ private fun LiveProjectCell(
             color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1,
             modifier = Modifier.padding(top = 4.dp),
         )
+        e.worktreeOf?.let { WorktreeOfCaption(it) }
     }
 }
 
-/** Removable filter chip pinned atop the Sessions list when a single agent is selected (issue #31). */
+/** "⎇ part of cc-pocket" — the one-line annotation a linked worktree's row carries (#281 Screen D).
+ *  Only the repository's BASENAME: the full path is already on the row above it, and what this line
+ *  answers is "which family is this", not "where is it". */
 @Composable
-private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
-    // one arm per non-"both" filter: opencode used to fall through to the Claude label + accent (mislabeled)
-    val color = when (filter) {
-        "codex" -> Tok.codex
-        "opencode" -> Tok.opencode
-        else -> Tok.accent
+private fun WorktreeOfCaption(mainWorktreePath: String) {
+    Row(
+        Modifier.padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("⎇", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+        Text(
+            stringResource(Res.string.wt_part_of, dev.ccpocket.app.data.repoBasename(mainWorktreePath)),
+            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
-    val label = stringResource(
-        when (filter) {
-            "codex" -> Res.string.af_codex_only
-            "opencode" -> Res.string.af_opencode_only
-            else -> Res.string.af_claude_only
-        }
-    )
+}
+
+/** Removable filter chip pinned atop the Sessions list whenever the agent filter hides something (#31/#248). */
+@Composable
+private fun AgentFilterChip(filter: Set<AgentKind>, onClear: () -> Unit) {
+    val shown = remember(filter) { AgentKind.entries.filter { it in filter } }
+    // one agent keeps its own identity color; a multi-agent selection has no single owner, so it reads in
+    // the neutral secondary ink rather than borrowing (and mislabeling) one member's color
+    val color = shown.singleOrNull()?.let(::agentColor) ?: Tok.tx2
+    val label = remember(shown) { shown.joinToString(" · ") { agentName(it) } }
     Row(
         Modifier.clip(RoundedCornerShape(999.dp)).background(color.copy(alpha = 0.12f))
             .border(1.dp, color.copy(alpha = 0.4f), RoundedCornerShape(999.dp))
@@ -1404,11 +2191,17 @@ private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
     ) {
         Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(color))
         Spacer(Modifier.width(7.dp))
-        Text(label, color = color, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = color, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         Spacer(Modifier.width(6.dp))
         Text("✕", color = color, fontSize = 12.sp)
     }
 }
+
+/** A session with no stamped backend is a Claude one (the field postdates Claude-only builds), so the
+ *  Claude arm of the filter must own the nulls — same rule as before, now expressed against a set. */
+internal fun filterSessionsByAgent(sessions: List<SessionSummary>, filter: Set<AgentKind>): List<SessionSummary> =
+    if (agentFilterIsAll(filter)) sessions
+    else sessions.filter { (it.agent ?: AgentKind.CLAUDE) in filter }
 
 @OptIn(ExperimentalMaterial3Api::class) // PullToRefreshBox
 @Composable
@@ -1431,6 +2224,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
     // here; there is no gating-order problem to solve.
     var showArchived by remember { mutableStateOf(false) }
     if (showArchived) { ArchivedSessionsScreen(repo, onBack = { showArchived = false }); return }
+    var showQuota by remember { mutableStateOf(false) } // the allowance pill's detail sheet
     // Session groups (issue #119). Membership + the group list are daemon-owned; these hold only the
     // transient UI: which manage-sheet/dialog is open, and (client-only) which sections are collapsed —
     // kept per group id and reset per project (keyed on [dir]), so folding a group doesn't leak across projects.
@@ -1440,80 +2234,115 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
     var manageTarget by remember { mutableStateOf<SessionGroup?>(null) }
     var moveTarget by remember { mutableStateOf<SessionSummary?>(null) }
     val collapsed = remember(dir) { mutableStateMapOf<String, Boolean>() }
+    // #282: the "rewound sessions" bucket, collapsed by default and per project like every other fold.
+    // Its default is the whole point of the group — a rewind must leave the visible list the size it was.
+    var rewoundOpen by remember(dir) { mutableStateOf(false) }
     val approvalCount = repo.fleetAttention().size
     val approvalsRefreshing = repo.fleetMachines().any { it.pending > 0 && it.status != MachineStatus.ONLINE }
+    // Mobile UI 2.0: the state a row may claim is decided once, by the pure mapper, from real facts only —
+    // a fleet attention row's own sessionId/workdir plus its real ask's isQuestion. Sessions and Chat read
+    // the same ladder, which is what keeps them from naming one session two different things in one frame.
+    val attention = repo.fleetAttention().map { e ->
+        SessionAttention(e.sessionId, e.workdir, isQuestion = repo.attentionAsk(e)?.isQuestion == true)
+    }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton({ repo.backToDirectories() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(Res.string.sessions_title), color = Tok.tx, fontWeight = FontWeight.SemiBold)
-                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: honest dot (green only when Ready) + workdir
-                        PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn)
-                        Spacer(Modifier.width(5.dp))
-                        TailPathText(dir)
-                    }
+            // quiet utility row: everything stays reachable at 48dp, nothing competes with the title below
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton({ repo.backToDirectories() }, modifier = Modifier.size(Metric.touch)) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowBack, stringResource(Res.string.ses_projects),
+                        tint = Tok.tx2, modifier = Modifier.size(20.dp),
+                    )
                 }
+                Spacer(Modifier.weight(1f))
                 if (repo.archiveSupported.value) {
-                    IconButton({ showArchived = true }, modifier = Modifier.size(40.dp)) {
+                    IconButton({ showArchived = true }, modifier = Modifier.size(Metric.touch)) {
                         Icon(Icons.Outlined.Inventory2, stringResource(Res.string.archive_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
                     }
                 }
-                IconButton({ showHelp = true }, modifier = Modifier.size(40.dp)) {
+                IconButton({ showHelp = true }, modifier = Modifier.size(Metric.touch)) {
                     Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(Res.string.support_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
                 }
-                SettingsIconButton(repo, size = 40.dp) { showSettings = true }
+                SettingsIconButton(repo, size = Metric.touch) { showSettings = true }
             }
+            SessionsContextHeader(
+                machine = repo.paired.value?.displayName(),
+                conn = when (repo.phase.value) {
+                    ConnPhase.Ready -> ConnBadge.ONLINE
+                    ConnPhase.Connecting, ConnPhase.Reconnecting -> ConnBadge.CONNECTING
+                    else -> ConnBadge.OFFLINE
+                },
+                workdir = dir,
+                modifier = Modifier.padding(top = 4.dp),
+            )
             val af = repo.agentFilter.value
-            val filtered = repo.sessions.filter {
-                when (af) {
-                    "claude" -> (it.agent ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
-                    "codex" -> it.agent == AgentKind.CODEX
-                    "opencode" -> it.agent == AgentKind.OPENCODE
-                    else -> true
-                }
-            }
+            val allForDir = filterSessionsByAgent(repo.sessions, af)
+            // #282: a rewound original is folded out of the default list BEFORE the Active/Recent split,
+            // not inside one of them — the session it was replaced by can land in either half, and the
+            // "a rewind never grows the list" rule has to hold across both.
+            val lineage = splitRewound(allForDir)
+            val filtered = lineage.visible
+            val split = splitSessions(
+                sessionRows(
+                    filtered,
+                    attention,
+                    repo.unseenSessions.value,
+                    repo.currentlyWorkingSessionIds().takeIf { repo.directoriesLoaded.value },
+                ),
+            )
+            // #202: the row menu is no longer gated on the project having groups — archive is available
+            // regardless, so a project with no groups still long-presses.
+            val grouped = repo.sessionGroups.isNotEmpty()
+            val hasRowMenu = grouped || repo.archiveSupported.value
+            Box(Modifier.weight(1f)) {
             PullToRefreshBox(isRefreshing = repo.sessionsRefreshing.value, onRefresh = { repo.refreshSessions() }, modifier = Modifier.fillMaxSize()) {
             LazyColumn(
-                Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                contentPadding = PaddingValues(top = 16.dp, bottom = if (approvalCount > 0) 88.dp else 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                Modifier.fillMaxSize().padding(horizontal = Metric.gutter),
+                contentPadding = PaddingValues(top = Metric.gapL, bottom = if (approvalCount > 0) 88.dp else Metric.gapL),
             ) {
-                if (af != "both") item { AgentFilterChip(af) { repo.setAgentFilter("both") } }
-                item {
-                    // one tap starts right away with the persisted defaults (openSession's own fallbacks);
-                    // the trailing chip shows those defaults and opens the full agent+mode picker instead
-                    Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.accent.copy(alpha = 0.16f))
-                            .clickable(enabled = !starting) { repo.openSession(dir) }.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(stringResource(Res.string.new_session_cta), color = Tok.accent, fontWeight = FontWeight.SemiBold)
-                                if (starting) {
-                                    Spacer(Modifier.width(8.dp))
-                                    CircularProgressIndicator(Modifier.size(12.dp), color = Tok.accent, strokeWidth = 1.5.dp)
-                                }
-                            }
-                            Text(
-                                stringResource(Res.string.start_agent_in, agentName(repo.defaultAgent.value), tilde(dir)),
-                                color = Tok.muted, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(top = 2.dp),
+                if (!agentFilterIsAll(af)) item { Box(Modifier.padding(bottom = Metric.gap)) { AgentFilterChip(af) { repo.clearAgentFilter() } } }
+                if (filtered.isEmpty()) item { SessionsEmptyState() }
+                // ── Active: everything that is not finished, flat. Group HEADERS are deliberately absent
+                // here (a session that needs a decision is not filed away first), but each row keeps its
+                // group membership — the long-press move/archive sheet is unchanged.
+                if (split.active.isNotEmpty()) {
+                    item(key = "hdr:active") { SessionSectionLabel(stringResource(Res.string.ses_active), Modifier.padding(bottom = 10.dp)) }
+                    items(split.active, key = { "act:" + it.session.sessionId }) { row ->
+                        Column {
+                            Hairline()
+                            SessionListRow(
+                                row,
+                                onOpen = { repo.openSession(dir, row.session.sessionId, title = row.session.title, agent = row.session.agent ?: AgentKind.CLAUDE) },
+                                onLongPress = if (hasRowMenu) ({ moveTarget = row.session }) else null,
+                                caption = forkCaptionOf(row.session, allForDir),
                             )
                         }
-                        Spacer(Modifier.width(10.dp))
-                        SessionDefaultsChip(repo.defaultAgent.value, repo.defaultMode.value, enabled = !starting) { pickMode = true }
                     }
                 }
-                // issue #119: when the project has groups, render each group as a collapsible section with an
-                // "Ungrouped" bucket at the end. The "+ New group" affordance shows whenever the daemon is
-                // group-aware (groupsSupported) — including zero groups yet, so the FIRST group is creatable —
-                // but hides on an older daemon / guest connection that omits groups entirely, keeping the list
-                // exactly as flat as before (sessionSections then returns one header-less section).
-                val grouped = repo.sessionGroups.isNotEmpty()
-                if (repo.groupsSupported.value) item { NewGroupRow { showNewGroup = true } }
-                for (section in sessionSections(filtered, repo.sessionGroups)) {
+                // ── Recent: the organisation half. Groups keep their headers here, including empty ones,
+                // so a freshly created group stays visible and manageable (issue #119).
+                // The "+ New group" affordance rides the section header's trailing edge — shown whenever the
+                // daemon is group-aware (groupsSupported), including zero groups yet so the FIRST group stays
+                // creatable, but hidden on an older daemon / guest connection that omits groups entirely
+                // (sessionSections then returns one flat section). Inline rather than a full-width row of its
+                // own: a bootstrap affordance must stay discoverable without owning a whole list line.
+                if (split.recent.isNotEmpty() || repo.groupsSupported.value) {
+                    item(key = "hdr:recent") {
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = if (split.active.isEmpty()) 0.dp else 14.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            SessionSectionLabel(stringResource(Res.string.ses_recent))
+                            Spacer(Modifier.weight(1f))
+                            if (repo.groupsSupported.value) NewGroupRow { showNewGroup = true }
+                        }
+                    }
+                }
+                for (section in sessionSections(split.recent.map { it.session }, repo.sessionGroups)) {
                     val g = section.group
                     val key = g?.id ?: UNGROUPED_KEY
                     val isCollapsed = collapsed[key] == true
@@ -1521,6 +2350,9 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                         item(key = "grp:$key") {
                             GroupHeader(
                                 name = g?.name ?: stringResource(Res.string.group_ungrouped),
+                                // rows filed HERE, not the group's whole membership: this header is a
+                                // collapse control, so its number has to match what folding it hides —
+                                // a member currently in Active is listed above, under its own state
                                 count = section.sessions.size,
                                 collapsed = isCollapsed,
                                 onToggle = { collapsed[key] = !isCollapsed },
@@ -1530,30 +2362,93 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                     }
                     if (!isCollapsed) {
                         items(section.sessions, key = { it.sessionId }) { s ->
-                            // #202: the row menu is no longer gated on the project having groups — archive
-                            // is available regardless, so a project with no groups still long-presses.
-                            val hasRowMenu = grouped || repo.archiveSupported.value
-                            SessionRow(repo, dir, s, onLongPress = if (hasRowMenu) ({ moveTarget = s }) else null)
+                            Column {
+                                Hairline()
+                                SessionListRow(
+                                    SessionRowUi(s, SurfaceState.COMPLETE), // by construction: this half IS the settled one
+                                    onOpen = { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) },
+                                    onLongPress = if (hasRowMenu) ({ moveTarget = s }) else null,
+                                    caption = forkCaptionOf(s, allForDir),
+                                )
+                            }
+                        }
+                    }
+                }
+                // ── Rewound sessions (issue #282, design frame D): the originals a rewind replaced.
+                // Last, collapsed by default, and counted in the header — the list did not get longer,
+                // the superseded rows just moved somewhere they can still be found.
+                if (lineage.rewound.isNotEmpty()) {
+                    item(key = "grp:rewound") {
+                        val open = rewoundOpen
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = Metric.gapS).clip(RoundedCornerShape(8.dp))
+                                .clickable { rewoundOpen = !open }
+                                .padding(horizontal = 4.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                if (open) Icons.Rounded.KeyboardArrowDown else Icons.Rounded.KeyboardArrowRight,
+                                null, tint = Tok.muted, modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                stringResource(Res.string.rewind_group_rewound, lineage.rewound.size),
+                                color = Tok.tx2, fontSize = 13.sp,
+                            )
+                        }
+                    }
+                    if (rewoundOpen) {
+                        items(lineage.rewound, key = { "rw:" + it.sessionId }) { s ->
+                            Column {
+                                Hairline()
+                                // the quiet D2 row, not a full SessionListRow: no state mark colour, no
+                                // preview, no meta line — just the title and where it went. A folded row
+                                // with no forward pointer is just a session that vanished.
+                                RewoundSessionRow(
+                                    s,
+                                    successorTitle = rewoundSuccessorTitle(s, allForDir),
+                                    onOpen = { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) },
+                                    onLongPress = if (hasRowMenu) ({ moveTarget = s }) else null,
+                                )
+                            }
                         }
                     }
                 }
             }
             }
+            ApprovalQueueFab(
+                count = approvalCount,
+                refreshing = approvalsRefreshing,
+                onClick = onOpenInbox,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+            )
+            // #202: the archive receipt. The row it refers to has already vanished from this list, so the
+            // toast is the only thing that says where it went — and its action is the reverse verb, not Undo.
+            ArchiveToastBar(repo, Modifier.align(Alignment.BottomCenter).padding(bottom = if (approvalCount > 0) 88.dp else 12.dp))
+            }
+            // Direction B's docked strip, ABOVE the new-session dock rather than under it. The handoff's
+            // Sessions frame has no dock and puts the strip on the bare bottom edge; this screen does have
+            // one, and the board's own rule for that case is that the strip merges with the bottom bar
+            // instead of stacking below it — two docked bands fighting for the same edge is exactly what
+            // that note forbids. Zero height when there is no snapshot.
+            QuotaStrip(repo) { showQuota = true }
+            // one tap starts right away with the persisted defaults (openSession's own fallbacks); the
+            // trailing chip shows those defaults and opens the full agent+mode picker instead
+            NewSessionDock(starting = starting, onStart = { repo.openSession(dir) }) {
+                SessionDefaultsChip(repo.sessionDefaultAgent, repo.defaultMode.value, enabled = !starting) { pickMode = true }
+            }
         }
-        ApprovalQueueFab(
-            count = approvalCount,
-            refreshing = approvalsRefreshing,
-            onClick = onOpenInbox,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
-        )
+        if (showQuota) QuotaSheet(repo) { showQuota = false }
         if (pickMode) {
             LaunchedEffect(Unit) { repo.fetchModels(AgentKind.CLAUDE) }
             StartSessionModeSheet(
                 workdir = dir,
                 selected = repo.defaultMode.value,
                 selectedNativeMode = repo.defaultPermissionMode.value,
-                agent = repo.defaultAgent.value,
+                agent = repo.sessionDefaultAgent,
+                computer = repo.paired.value?.displayName(),
                 autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+                availableAgents = repo.availableAgents,
                 modelsFor = { a -> repo.newSessionModelChoices(a) },
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
                 onAgentPicked = { a -> repo.fetchModels(a) },
@@ -1565,12 +2460,6 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 onDismiss = { pickMode = false },
             )
         }
-        // #202: the archive receipt. The row it refers to has already vanished from this list, so the toast
-        // is the only thing that says where it went — and its action is the reverse verb, not an Undo.
-        ArchiveToastBar(
-            repo,
-            Modifier.align(Alignment.BottomCenter).padding(bottom = if (approvalCount > 0) 88.dp else 12.dp),
-        )
         // issue #119 group management — the daemon re-pushes the Sessions frame after every mutation, so the
         // list/headers refresh themselves (no optimistic edit here).
         if (showNewGroup) NewGroupDialog(onConfirm = { repo.createGroup(it) }, onDismiss = { showNewGroup = false })
@@ -1630,11 +2519,22 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     var showSessions by remember { mutableStateOf(false) } // stack chip → cross-project session switcher (issue #165)
     var showModeSheet by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
+    // header context disclosure (Mobile UI 2.0): collapsed by default so the stream keeps the viewport;
+    // per conversation, so switching sessions never lands you inside the previous one's expanded context
+    var contextExpanded by remember(repo.convoId.value) { mutableStateOf(false) }
     var showQuickActions by remember { mutableStateOf(false) }
+    // the long-pressed user turn whose rewind/fork menu is up (issue #282). Reset per conversation:
+    // a menu left open across a session switch would act on a message that is no longer on screen.
+    var rewindMenuFor by remember(repo.convoId.value) { mutableStateOf<ChatItem.User?>(null) }
     var showModelSheet by remember { mutableStateOf(false) } // composer model chip → the picker, one tap (issue #157)
     var showBgJobs by remember { mutableStateOf(false) }
     var showTerminal by remember { mutableStateOf(false) }
     var showChangedFiles by remember { mutableStateOf(false) }
+    // the Git tab and the worktree surface (issues #280/#281) — per conversation, like the panel's own
+    // state in the repo: leaving a chat must not reopen on another repository's status
+    var showGit by remember(repo.convoId.value) { mutableStateOf(false) }
+    var showWorktrees by remember(repo.convoId.value) { mutableStateOf(false) }
+    var lastGitDiffPath by remember(repo.convoId.value) { mutableStateOf<String?>(null) }
     var showScheduleSheet by remember { mutableStateOf(false) } // send long-press → schedule send (issue #137)
     // ── session handoff (SESSION-HANDOFF.md; design session-handoff/) ──
     var showHandoffDraft by remember { mutableStateOf(false) }
@@ -1644,7 +2544,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     val activeHandoff = repo.activeHandoff.value
     val hoStatus = activeHandoff?.status
     val hoIsRecipient = activeHandoff?.let { repo.isHandoffRecipient(it) } == true
+    val canInitiateHandoff = (repo.sessionAgent.value ?: AgentKind.CLAUDE).canInitiateSessionHandoff()
     LaunchedEffect(repo.convoId.value) { if (repo.convoId.value != null) repo.listHandoffs() }
+    LaunchedEffect(canInitiateHandoff) { if (!canInitiateHandoff) showHandoffDraft = false }
     // a fresh invite closes the draft sheet and opens the invite sheet (lastHandoffInvite drives it)
     LaunchedEffect(repo.lastHandoffInvite.value) { if (repo.lastHandoffInvite.value != null) showHandoffDraft = false }
     // the recipient's return lands → their sheet closes on the daemon's state flip
@@ -1720,6 +2622,41 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
         return
     }
     if (showTerminal) { TerminalScreen(repo) { showTerminal = false }; return } // full-screen, replaces chat (issue #3)
+    // ── Git tab (#280) / worktrees (#281): full-screen, same early-return shape as the terminal.
+    // Order matters — the worktree surface is raised FROM the panel, and the diff screen from the
+    // list, so the innermost destination is tested first and Back unwinds one level at a time.
+    if (showWorktrees) {
+        dev.ccpocket.app.ui.git.WorktreesScreen(
+            repo,
+            // "Open session here" is the ordinary OpenSession at that cwd — leave the git surfaces
+            // first so the new session lands in the chat rather than behind two overlays
+            onOpenSessionHere = { path -> showWorktrees = false; showGit = false; repo.openSession(path) },
+            onBack = { showWorktrees = false },
+        )
+        return
+    }
+    if (repo.gitDiffPath.value != null) {
+        // the last path opened from the panel, so its Diff tab has somewhere to return to (the diff
+        // screen replaces the panel, taking the panel's own remembered state with it)
+        lastGitDiffPath = repo.gitDiffPath.value
+        dev.ccpocket.app.ui.git.GitDiffScreen(
+            repo,
+            onBack = { repo.closeGitDiff() },
+            onOpenFiles = { repo.closeGitDiff(); showGit = false; repo.fetchChangedFiles(); showChangedFiles = true },
+            onOpenTerminal = { repo.closeGitDiff(); showGit = false; showTerminal = true },
+        )
+        return
+    }
+    if (showGit) {
+        dev.ccpocket.app.ui.git.GitPanelScreen(
+            repo,
+            onBack = { showGit = false },
+            onOpenFiles = { showGit = false; repo.fetchChangedFiles(); showChangedFiles = true },
+            onOpenWorktrees = { showWorktrees = true },
+            lastDiffPath = lastGitDiffPath,
+        )
+        return
+    }
     if (repo.viewedFilePath.value != null) { // changed-file viewer (issue #36); back → the still-open files list, ✕ → chat (issue #53)
         FileViewerScreen(repo, onExit = if (showChangedFiles) ({ repo.closeFileViewer(); showChangedFiles = false }) else null) { repo.closeFileViewer() }
         return
@@ -1778,6 +2715,21 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             keyboard?.show()
         }
     }
+    // Voice result review (issue #221): a finished transcript no longer auto-sends — it lands in the
+    // composer for the user to confirm/fix first. Append it AFTER any existing draft (one space between
+    // when the draft doesn't already end on whitespace), route through ComposerState.setText so the caret
+    // lands at the end and a live IME composition is respected (#93/#118), then focus + raise the keyboard
+    // for immediate edits. Consume the slot so the same phrase spoken twice still re-fires.
+    val pendingVoice = repo.pendingVoiceText.value
+    LaunchedEffect(pendingVoice) {
+        if (pendingVoice != null) {
+            repo.pendingVoiceText.value = null
+            val existing = composer.text
+            composer.setText(appendVoiceTranscript(existing, pendingVoice))
+            runCatching { composerFocus.requestFocus() }
+            keyboard?.show()
+        }
+    }
     // Page in older history when the reader is genuinely parked at the top of the loaded window — NOT
     // when the loader row merely composes. Every transcript lands via clear()+addAll(), which clamps the
     // list to index 0, so composition fired on each history frame; each page prepended rows and clamped
@@ -1806,56 +2758,58 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) focus.clearFocus() } // scrolling dismisses the keyboard
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton({ repo.saveDraft(repo.workdir.value, composer.text); repo.backToBrowse() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
-                Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { showSessionInfo = true }.padding(vertical = 2.dp)) {
-                    // session title leads (design); the generic "Chat" only before the first prompt names it
-                    Text(
-                        repo.chatTitle.value ?: stringResource(Res.string.chat_title),
-                        color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            // ── header (Mobile UI 2.0 · Core frame 02) ──────────────────────────────────────────────
+            // The title leads and may wrap; everything that used to be crammed onto one mono line is now a
+            // collapsible context region. Only facts the daemon actually supplied appear — no branch (it is
+            // per-session truth, not a project fact), no timestamp, no duration.
+            val machineName = repo.paired.value?.displayName()
+            val modelLabel = modelLabelForAgent(repo.sessionAgent.value, repo.model.value)
+            val switchLabel = stringResource(Res.string.switcher_open)
+            val modeLabel = stringResource(
+                if (repo.permissionMode.value == dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO) AUTO_MODE.short
+                else MODE_BY[repo.mode.value]?.short ?: MODES[0].short,
+            )
+            // Grouped, not one fact per line. Listed vertically, an ordinary session's five short facts
+            // plus the path plus the action outgrew the expanded region's bound on a standard iPhone, and
+            // Session info ended up below the fold. Two rows of the SAME facts fit with room to spare.
+            val contextLines = buildList {
+                // what is answering, under which rules, as which model. The model joins only once it is
+                // known — a pre-first-turn session (lazy start #61) has none until init names it (#96).
+                add(
+                    ContextLine(
+                        listOfNotNull(
+                            agentName(repo.sessionAgent.value ?: AgentKind.CLAUDE),
+                            modeLabel,
+                            modelLabel.takeIf { it.isNotBlank() },
+                        ).joinToString(CONTEXT_SEP),
+                    ),
+                )
+                // where this conversation lives: computer, then project folder. Still one control — switch
+                // machines without leaving the chat — and only when a machine is really known; an unpaired
+                // view gets the folder as plain text rather than a switcher that switches nothing.
+                val place = listOfNotNull(machineName, repo.workdir.value?.let(::folderName)?.takeIf { it.isNotBlank() })
+                if (place.isNotEmpty()) {
+                    add(
+                        if (machineName != null) {
+                            ContextLine(place.joinToString(CONTEXT_SEP), onClick = { showSwitcher = true }, clickLabel = switchLabel)
+                        } else {
+                            ContextLine(place.joinToString(CONTEXT_SEP))
+                        },
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: honest dot (green only when Ready) + machine · folder · model
-                        PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn)
-                        Spacer(Modifier.width(5.dp))
-                        // ONE style for every segment — the machine name used to force lineHeight=11 while
-                        // the path/model kept the font's default, so the three never shared a baseline
-                        val metaStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp)
-                        // which computer this conversation lives on — its own tap target: switch machines
-                        // without leaving the chat (the surrounding column still opens session info)
-                        repo.paired.value?.let { d ->
-                            Text(
-                                d.displayName(), color = Tok.tx2, style = metaStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier
-                                    // bound the machine name so it yields the line to the project folder (#179)
-                                    .widthIn(max = 88.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .clickable { showSwitcher = true }
-                                    .padding(horizontal = 2.dp),
-                            )
-                            Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
-                        }
-                        // just the project FOLDER: the full path routinely ate the whole line on a phone,
-                        // and it's one tap away in the session-info sheet (this row opens it)
-                        Text(
-                            folderName(repo.workdir.value), color = Tok.tx2, style = metaStyle,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
-                        )
-                        // the effective model: the real alias once known, else an "account default"
-                        // placeholder — never a blank gap. A pre-first-turn session (lazy start #61) whose
-                        // model the daemon couldn't eager-resolve shows the placeholder until the first turn's
-                        // init names the CLI/account default (issue #96)
-                        val modelLabel = modelLabelForAgent(repo.sessionAgent.value, repo.model.value).ifBlank { stringResource(Res.string.value_model_default) }
-                        Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
-                        Text(modelLabel, color = Tok.muted, style = metaStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 88.dp))
-                        AgentBadge(repo.sessionAgent.value) // non-Claude agents get their tag; Claude stays quiet
-                        // external trigger source (issue #91): a bridge-opened session says so — the owner
-                        // should know an IM bot, not a person, is driving this conversation
-                        repo.sessionOrigin.value?.let { origin ->
-                            Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
-                            Text("via $origin", color = Tok.warn, style = metaStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
                 }
+                // external trigger source (issue #91): a bridge-opened session says so — the owner should
+                // know an IM bot, not a person, is driving this conversation
+                repo.sessionOrigin.value?.let { add(ContextLine("via $it")) }
+            }
+            ChatHeader(
+                title = repo.chatTitle.value ?: stringResource(Res.string.chat_title),
+                summary = contextLines,
+                workdir = repo.workdir.value,
+                expanded = contextExpanded,
+                onToggleContext = { contextExpanded = !contextExpanded },
+                onBack = { repo.saveDraft(repo.workdir.value, composer.text); repo.backToBrowse() },
+                onSessionInfo = { showSessionInfo = true },
+            ) {
                 if (!repo.observing.value) {
                     // handoff status chip (design 3b/7/9): WAITING mute · IN PROGRESS pulse · RETURNED green.
                     // On a device that ISN'T the initiator, tapping a WAITING chip opens the accept preview.
@@ -1867,26 +2821,27 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             },
                         ) { HandoffStatusChip(st) }
                     }
-                    // execution state gets its own persistent header chip (issue #52): re-entering a mid-turn
-                    // session showed nothing alive — the connection dot only says "linked", not "working",
-                    // and the composer stays enabled (queueing), which read as "disconnected".
-                    if (repo.streaming.value) Row(
-                        Modifier.padding(end = 6.dp).clip(RoundedCornerShape(10.dp)).background(Tok.raised)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        PulseDot(Tok.accent)
-                        Text(stringResource(Res.string.chat_running), color = Tok.accent, fontSize = 11.sp)
-                    }
-                    // mode switching moved into the ⋯ quick-actions sheet — the persistent badge was one
-                    // more thing crowding the header for a setting touched a few times per session
+                    // the streaming chip is gone from here: execution state (issue #52) is now the pinned
+                    // state block below, which states it in words instead of as one more header badge
                     Box(
-                        Modifier.size(32.dp).clip(CircleShape).clickable { showQuickActions = true },
+                        Modifier.size(Metric.touch).clip(CircleShape).clickable { showQuickActions = true },
                         contentAlignment = Alignment.Center,
                     ) { Text("⋯", color = Tok.tx2, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
                 }
             }
+            // Branch lineage (issue #282, design frame C): sits where the context line does, because it
+            // answers the same question — "which conversation am I in" — and right after a rewind that is
+            // the only question. Shown only while THIS app's own branch is on screen; a session opened
+            // from the list gets its lineage from the list row's caption instead.
+            repo.sessionLineage.value
+                ?.takeIf { it.convoId == repo.convoId.value }
+                ?.let { LineageBanner(it.mode, it.fromTitle) }
+            // ── the one pinned state, chosen by the shared ladder from real facts only ────────────────
+            // Approval/Answer lead; a streaming turn under them is demoted to a qualifying line, and
+            // streaming ALONE pins nothing — the composer note + Stop write it once, where the user acts.
+            // The block is actionless by design — Secure Approval (modal) and QuestionCard own their decisions.
+            chatStateUi(repo.pendingAsk.value, repo.sessionDegraded.value, repo.streaming.value)
+                ?.let { ChatStateBlock(it) }
             // Role ribbon (design Frames 6/7): terracotta only when THIS device is the acting recipient;
             // the spectating initiator gets the neutral strip. The trailing readout is elapsed-in-control.
             if (hoStatus == HandoffStatus.IN_PROGRESS && activeHandoff != null) {
@@ -1970,10 +2925,20 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             MessageItem(
                                 m,
                                 workflowRun = (m as? ChatItem.Tool)?.let(repo::workflowFor),
+                                agent = repo.sessionAgent.value,
+                                // short-circuit keeps non-tool rows from reading the list in their own
+                                // recompose scope — a whole-list read here re-runs every visible row on
+                                // every streaming delta
+                                toolSourceLabeled = m !is ChatItem.Tool || repo.messages.getOrNull(mi - 1) !is ChatItem.Tool,
                                 onOpenWorkflow = repo::openWorkflow,
                                 onOpenImages = { imgs, i -> viewer = imgs to i },
                                 onOpenVideo = { videoViewer = it },
                                 onTightenAutoRun = repo::tightenAutoRun,
+                                // rewind/fork (issue #282): offered only on rows the daemon gave
+                                // transcript coordinates to — see PocketRepository.canRewind
+                                onLongPressUser = if (m is ChatItem.User && repo.canRewind(m)) {
+                                    { u -> rewindMenuFor = u }
+                                } else null,
                             )
                             when {
                                 undelivered -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -2029,14 +2994,10 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp).padding(top = 8.dp),
                 )
             }
-            // session health (issue #65): a degraded session (recent turns all API failures) gets a
-            // persistent strip right above the composer — warn BEFORE the next prompt goes in, not
-            // after it fails. The context half of this strip is gone: the accessory-row gauge now
-            // carries ≥80% inline, so only the critical step still earns a line (see the caption
-            // inside the composer below).
-            if (repo.sessionDegraded.value) {
-                StatusBanner(Tok.danger, stringResource(Res.string.session_degraded_banner))
-            }
+            // session health (issue #65) no longer gets its own strip here: `sessionDegraded` is the
+            // Failure rung of the shared state ladder, so the pinned block above states it once, in the
+            // same grammar as every other state, and stays on screen for the whole session — the warning
+            // still precedes the next prompt without the same fact being drawn twice.
             // RETURNED result card (design Frame 9): docks above the composer until the initiator
             // acknowledges — "Mark reviewed" is the only transition to COMPLETED.
             val hoResult = activeHandoff?.result
@@ -2045,6 +3006,15 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     hoResult.toUi(activeHandoff.recipientLabel ?: "?", elapsedLabel(activeHandoff.returnedAt, hoNow)),
                     onMarkReviewed = { repo.completeHandoff(activeHandoff.id) },
                     onOpenFull = { showSessionInfo = true },
+                    modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 10.dp),
+                )
+            }
+            // A refused rewind (issue #282, design "State · stale anchor"). Docks above the composer
+            // like every other transient chat notice, and self-dismisses: the commonest refusal is a
+            // stale anchor, which is information ("reload and point again"), not a decision to make.
+            repo.rewindError.value?.let { reason ->
+                RewindErrorBar(
+                    reason, onDismiss = { repo.dismissRewindError() },
                     modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 10.dp),
                 )
             }
@@ -2169,9 +3139,22 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             onCancel = repo::cancelVoice,
                             onDone = repo::stopVoice,
                         )
+                        // RecordingBar's ✕/✓ own the voice capture. If an agent turn is also running,
+                        // keep its separate interrupt reachable instead of hiding it for the entire recording
+                        // and transcription window (#238). A dedicated row avoids putting a fourth 48dp
+                        // action into the already-tight recording bar on compact phones.
+                        if (repo.streaming.value) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
+                                    .heightIn(min = Metric.touch),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                StopButton { repo.cancelTurn() }
+                            }
+                        }
                     } else {
                         val failed = voiceState as? VoiceState.Failed
-                        if (failed != null) VoiceErrorChip(failed.detail ?: stringResource(failed.res))
                         // Two-layer composer (issue #157 follow-up, design: mobile-composer.jsx): the field
                         // owns the full width on top; attach + model chip + the action slot live on an
                         // accessory row below — the chip no longer squeezes what you type on narrow phones.
@@ -2185,96 +3168,120 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             ) {
                                 ContextCriticalCaption()
                             }
-                            val composerPlaceholder = when {
-                                repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() -> stringResource(Res.string.add_message_hint)
-                                repo.streaming.value -> stringResource(Res.string.message_queued_hint)
-                                else -> stringResource(
-                                    Res.string.message_agent_hint,
-                                    agentName(repo.sessionAgent.value ?: AgentKind.CLAUDE),
+                            // why the action slot reads the way it does, as a NOTE rather than a placeholder
+                            // (Chat Master v2). Mid-turn the field stays enabled because sends queue into the
+                            // running turn, and saying so is what keeps an editable composer under a "running"
+                            // session from reading as disconnected (issue #52) — but as a placeholder that
+                            // sentence vanished on the first character typed, which is exactly when it starts
+                            // being true. Uploading leads: send waits on the landing, queueing comes after.
+                            // Exactly one state ribbon owns this slot. Voice failure leads because Retry is
+                            // actionable now; upload progress remains written in the file strip/action slot,
+                            // and a running turn still keeps Stop below. Stacking multiple polite live regions
+                            // here made the same composer announce two competing states (#238).
+                            when {
+                                failed != null -> VoiceErrorChip(failed.detail ?: stringResource(failed.res))
+                                uploadsBusy -> ComposerNote(
+                                    stringResource(
+                                        Res.string.composer_uploading,
+                                        repo.pendingFiles.count { it.state == FileUpState.Uploading || it.state == FileUpState.Queued },
+                                        repo.pendingFiles.size,
+                                    ),
                                 )
+                                repo.streaming.value -> ComposerNote(stringResource(Res.string.message_queued_hint))
                             }
+                            val stagedContent = input.isNotBlank() || hasReady || hasLanded
                             ComposerField(
                                 composer,
-                                // mid-turn the field stays enabled (sends queue into the running turn) — say so,
-                                // or an editable composer under a "running" session reads as disconnected (issue #52)
-                                placeholder = composerPlaceholder,
+                                // the placeholder names the REAL backend of this session — a Codex/OpenCode/Kimi
+                                // conversation invited you to "Message Claude…" for as long as it was hardcoded
+                                placeholder = if (repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty()) {
+                                    stringResource(Res.string.add_message_hint)
+                                } else {
+                                    stringResource(Res.string.message_agent_hint, agentName(repo.sessionAgent.value ?: AgentKind.CLAUDE))
+                                },
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                                 focusRequester = composerFocus,
+                                // #238: neither Send nor Stop may evict voice. Mic lives inside the
+                                // full-width field rather than competing for the accessory lane's width, so
+                                // the ordinary composer offers it in every state it is shown — idle, staged,
+                                // uploading, and mid-turn with nothing typed, which is precisely when you
+                                // want to dictate the message the ribbon above promises to queue.
+                                trailingAction = {
+                                    VoiceActionButton(failed != null) { if (failed != null) repo.retryVoice() else repo.startVoice() }
+                                },
                             )
-                            Row(
-                                // start 8 / end 10: the 44dp targets carry their own inner padding, so the
-                                // glyphs sit optically on the field's 16dp edge (design values)
-                                Modifier.fillMaxWidth().padding(start = 8.dp, end = 10.dp, top = 6.dp).heightIn(min = 44.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                val attachInteraction = remember { MutableInteractionSource() }
-                                val attachPressed by attachInteraction.collectIsPressedAsState()
-                                // "+" now opens the attach sheet (Photo · File) and rotates into "×" while
-                                // it's up (issue #90, design: file-attach.jsx); the image flow is one tap
-                                // deeper but unchanged.
-                                IconButton(onClick = { attachSheet = !attachSheet }, interactionSource = attachInteraction, modifier = Modifier.size(44.dp)) {
-                                    AttachPlusGlyph(
-                                        open = attachSheet,
-                                        tint = if (attachSheet || repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
-                                    )
-                                }
-                                Spacer(Modifier.width(6.dp))
-                                // model chip (issue #157): the high-frequency switch rides the composer — one tap
-                                // straight to the picker (the ⋯ → Model path stays; this is the shallow entrance).
-                                // Dimmed mid-turn: the running turn keeps its model, so the entrance rests until
-                                // the next turn can take a switch.
-                                ModelChip(
-                                    label = modelChipLabel(repo.model.value).ifBlank { stringResource(Res.string.value_model_default) },
-                                    open = showModelSheet,
-                                    enabled = !repo.streaming.value,
-                                    contentDescription = stringResource(Res.string.qa_model),
-                                    labelMax = 120.dp, // relaxed on the accessory row (mobile-composer.jsx); desktop keeps 82
-                                ) { showModelSheet = true }
-                                // one tap to any other session you're juggling, across projects (issue #165).
-                                // Came DOWN here from the header, which had no width left to give and made a
-                                // bare count square read as a badge — same cure the model chip got, so the two
-                                // shallow entrances now share a lane. The flexible gap below absorbs it, so the
-                                // chip's 120dp label and the 44dp action button are never squeezed.
-                                val workingSet = repo.workingSet()
-                                if (workingSet.otherCount > 0) Spacer(Modifier.width(6.dp))
-                                SessionStackChip(workingSet.otherCount, workingSet.attention) { showSessions = true }
-                                // context occupancy came IN here from a pill that floated over the message
-                                // tail — unreadable as a control, and it covered the last line (design:
-                                // context-occupancy.jsx, Option C). Last in the left cluster, against the
-                                // elastic gap, so it is the natural thing to shed when width runs out.
-                                val stopShowing = repo.streaming.value && (input.isNotBlank() || hasReady || hasLanded)
-                                Spacer(Modifier.width(6.dp))
-                                ContextGauge(
-                                    repo.contextUsed.value,
-                                    repo.contextWindow.value,
-                                    // the action slot Row can't see: one 44dp button, plus the ■ and its gap mid-turn
-                                    reserveEnd = if (stopShowing) 96.dp else 44.dp,
-                                ) { showSessionInfo = true }
-                                Spacer(Modifier.weight(1f))
-                                // while a turn runs the ■ stays put; typed text adds Send NEXT TO it instead of
-                                // replacing it — mirrors Claude Code, where interrupt (Esc) and queue-a-message
-                                // (Enter) coexist. Claude's stream-json input queues a mid-turn user message and
-                                // weaves it into the running turn at the next tool boundary (verified on 2.1.201).
-                                if (stopShowing) {
-                                    StopButton { repo.cancelTurn() }
-                                    Spacer(Modifier.width(8.dp))
-                                }
-                                when {
-                                    // uploads still moving → send WAITS (spinner ring around a muted arrow,
-                                    // design: file-attach.jsx) — landing must finish before the @-refs exist
-                                    uploadsBusy -> {
-                                        Box(
-                                            Modifier.size(44.dp).clip(CircleShape).background(Tok.base).border(1.dp, Tok.hair, CircleShape),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            SpinnerRing(30.dp, 2.dp)
-                                            Icon(SendArrowIcon, null, tint = Tok.muted, modifier = Modifier.size(16.dp))
-                                        }
+                            // one tap to any other session you're juggling, across projects (issue #165).
+                            // Came DOWN here from the header, which had no width left to give and made a
+                            // bare count square read as a badge — same cure the model chip got, so the two
+                            // shallow entrances share the lane.
+                            val workingSet = repo.workingSet()
+                            // uploads still moving → send WAITS: the landing must finish before the
+                            // @-references exist. Staged content earns Send even mid-turn, because Claude's
+                            // stream-json input queues a mid-turn user message and weaves it into the
+                            // running turn at the next tool boundary (verified on 2.1.201).
+                            val showSend = stagedContent && !uploadsBusy
+                            val showStop = repo.streaming.value
+                            ComposerAccessoryLane(
+                                switcherVisible = workingSet.otherCount > 0,
+                                actionCount = (if (showStop) 1 else 0) + (if (uploadsBusy || showSend) 1 else 0),
+                                leading = {
+                                    val attachInteraction = remember { MutableInteractionSource() }
+                                    val attachPressed by attachInteraction.collectIsPressedAsState()
+                                    // "+" now opens the attach sheet (Photo · File) and rotates into "×" while
+                                    // it's up (issue #90, design: file-attach.jsx); the image flow is one tap
+                                    // deeper but unchanged. The glyph is drawn, so the button has to carry the
+                                    // name itself — icon-only actions get an accessible name (Chat Master v2).
+                                    val attachLabel = stringResource(Res.string.attach_menu)
+                                    IconButton(
+                                        onClick = { attachSheet = !attachSheet }, interactionSource = attachInteraction,
+                                        modifier = Modifier.size(Metric.touch).semantics { contentDescription = attachLabel },
+                                    ) {
+                                        AttachPlusGlyph(
+                                            open = attachSheet,
+                                            tint = if (attachSheet || repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
+                                        )
                                     }
-                                    // text/image/file staged -> SEND, even mid-turn (claude queues it; see above)
-                                    input.isNotBlank() || hasReady || hasLanded -> {
+                                    // model chip (issue #157): the high-frequency switch rides the composer — one tap
+                                    // straight to the picker (the ⋯ → Model path stays; this is the shallow entrance).
+                                    // Dimmed mid-turn: the running turn keeps its model, so the entrance rests until
+                                    // the next turn can take a switch.
+                                    ModelChip(
+                                        label = modelChipLabel(repo.model.value).ifBlank { stringResource(Res.string.value_model_default) },
+                                        open = showModelSheet,
+                                        enabled = !repo.streaming.value,
+                                        contentDescription = stringResource(Res.string.qa_model),
+                                        labelMax = 120.dp, // relaxed on the accessory row (mobile-composer.jsx); desktop keeps 82
+                                    ) { showModelSheet = true }
+                                    SessionStackChip(workingSet.otherCount, workingSet.attention) { showSessions = true }
+                                    // context occupancy came IN here from a pill that floated over the message
+                                    // tail — unreadable as a control, and it covered the last line (design:
+                                    // context-occupancy.jsx, Option C). Last in the leading group, so it is the
+                                    // first thing to WRAP — never the first thing to be dropped.
+                                    ContextGauge(
+                                        repo.contextUsed.value,
+                                        repo.contextWindow.value,
+                                        // the actions are a sibling group with their own width now, so nothing
+                                        // outside this group is hidden from the gauge's own constraints
+                                        reserveEnd = 0.dp,
+                                    ) { showSessionInfo = true }
+                                },
+                                actions = { actionModifier ->
+                                    // the ■ stays put while a turn runs; typed text adds Send NEXT TO it instead
+                                    // of replacing it — mirrors Claude Code, where interrupt (Esc) and
+                                    // queue-a-message (Enter) coexist
+                                    if (showStop) StopButton(actionModifier) { repo.cancelTurn() }
+                                    if (uploadsBusy) {
+                                        UploadStatusSlot(
+                                            stringResource(
+                                                Res.string.composer_uploading,
+                                                repo.pendingFiles.count { it.state == FileUpState.Uploading || it.state == FileUpState.Queued },
+                                                repo.pendingFiles.size,
+                                            ),
+                                            modifier = actionModifier,
+                                        )
+                                    } else if (showSend) {
                                         val sendLabel = stringResource(Res.string.send)
-                                        RoundActionButton(
+                                        ComposerLaneActionButton(
                                             onClick = {
                                                 // read the state at TAP time (composer.text), not the composition-captured
                                                 // `input` — a same-frame IME commit racing the tap must still be sent
@@ -2282,23 +3289,14 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                                 // a gated send (degraded session, issue #65) returns false — keep the text for the retry
                                                 if ((t.isNotBlank() || hasReady || hasLanded) && repo.sendPrompt(t)) { composer.clear(); repo.clearDraft(draftKey) }
                                             },
-                                            filled = true, contentDescription = sendLabel,
+                                            filled = true, contentDescription = sendLabel, modifier = actionModifier,
                                             // long-press → schedule this message for later (issue #137). Text-only:
                                             // images/files can't ride a schedule (nothing is uploaded at fire time).
                                             onLongClick = { if (composer.text.isNotBlank()) showScheduleSheet = true },
-                                        ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }
+                                        )
                                     }
-                                    // generating with an empty composer -> the slot is Stop (interrupts the turn, session stays)
-                                    repo.streaming.value -> StopButton { repo.cancelTurn() }
-                                    else -> {
-                                        val dictateLabel = stringResource(Res.string.dictate)
-                                        RoundActionButton(
-                                            onClick = { if (failed != null) repo.retryVoice() else repo.startVoice() },
-                                            filled = false, contentDescription = dictateLabel,
-                                        ) { Icon(MicIcon, dictateLabel, tint = if (failed != null) Tok.accent else Tok.tx2, modifier = Modifier.size(22.dp)) }
-                                    }
-                                }
-                            }
+                                },
+                            )
                         }
                     }
                 }
@@ -2338,20 +3336,54 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 onDismiss = { showScheduleSheet = false },
             )
         }
-        if (showSessionInfo) SessionInfoSheet(repo, onDismiss = { showSessionInfo = false }, onHandoff = { showHandoffDraft = true })
+        if (showSessionInfo) SessionInfoSheet(
+            repo,
+            onDismiss = { showSessionInfo = false },
+            onHandoff = if (canInitiateHandoff) ({ showHandoffDraft = true }) else null,
+        )
         if (showQuickActions) {
             QuickActionsSheet(
                 repo,
                 onTerminal = { showTerminal = true },
                 onMode = { showModeSheet = true },
                 onFiles = { repo.fetchChangedFiles(); showChangedFiles = true },
+                // the Git tab's entrance (issue #280). Owner-only on the wire; here it is simply the
+                // peer of Terminal and Changed files it is drawn as.
+                onGit = { showGit = true },
                 onHelp = { showHelp = true },
                 // entry only while the session is handoff-free — one non-terminal handoff per session
-                onHandoff = if (activeHandoff == null) ({ showHandoffDraft = true }) else null,
+                onHandoff = if (canInitiateHandoff && activeHandoff == null) ({ showHandoffDraft = true }) else null,
             ) { showQuickActions = false }
         }
+        // ── rewind / fork (issue #282, design frames A + B) ──
+        // Two sheets, never both: the long-press menu hands off to the confirmation, which is the only
+        // path to an actual cut. The menu carries Copy as well, so the gesture answers the whole "what
+        // can I do with this message" question rather than just the new half of it.
+        rewindMenuFor?.let { turn ->
+            val clip = LocalClipboardManager.current
+            PocketSheet({ rewindMenuFor = null }) {
+                Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp, top = 4.dp)) {
+                    Text(
+                        renderClip(turn.text), color = Tok.tx2, fontSize = 13.sp, lineHeight = 18.sp,
+                        maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    )
+                    RewindSheetActionRow(stringResource(Res.string.code_copy)) {
+                        clip.setText(AnnotatedString(turn.text)); rewindMenuFor = null
+                    }
+                    RewindMenuItems(enabled = !repo.rewindBlockedByTurn()) { mode ->
+                        rewindMenuFor = null
+                        repo.startRewind(turn, mode)
+                    }
+                }
+            }
+        }
+        repo.rewindSheet.value?.let { sheet ->
+            PocketSheet({ repo.cancelRewind() }) {
+                RewindConfirmBody(sheet, onCancel = { repo.cancelRewind() }, onConfirm = { repo.confirmRewind() })
+            }
+        }
         // ── session handoff sheets (design Frames 2 / 3a / 8; contacts increment Frames 1/2) ──
-        if (showHandoffDraft) {
+        if (showHandoffDraft && canInitiateHandoff) {
             val hoDefaultRequest = stringResource(Res.string.ho_default_request)
             LaunchedEffect(Unit) { repo.listCollaborators() }
             HandoffDraftSheet(
@@ -2505,30 +3537,70 @@ private fun FileCompletionMenu(
     }
 }
 
+/**
+ * A fork child's list caption (issue #282, design frame D1): "⑂ fork of ‹original›", as a [SessionListRow]
+ * caption slot so it sits inside the row's text column — aligned under the title, above the metadata —
+ * instead of dangling below the row as an unowned line.
+ *
+ * Null (no slot at all) when [s] is not a fork, or when its parent is not in this view: a caption naming a
+ * session you cannot reach from here is worse than no caption. A rewind child gets none either — its
+ * lineage is told from the other end, by the folded original's own "↩ rewound → …".
+ */
+private fun forkCaptionOf(s: SessionSummary, all: List<SessionSummary>): (@Composable () -> Unit)? =
+    forkParentTitle(s, all)?.let { parent -> { ForkLineageCaption(parent) } }
+
 @Composable
 private fun MessageItem(
     m: ChatItem,
     // Workflow run bound to a Workflow tool card (issue #106) — null with an old daemon or for other tools
     workflowRun: dev.ccpocket.protocol.WorkflowRun? = null,
+    // which backend is speaking — the Agent turn is labeled with its real name, never a generic "Assistant"
+    agent: AgentKind? = null,
+    // false inside a run of consecutive tool calls: the run shares ONE "Tool" source label, because each
+    // band's own tool chip already names its call and repeating the label between bands only cost air
+    toolSourceLabeled: Boolean = true,
     onOpenWorkflow: (String) -> Unit = {},
     onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> },
     onOpenVideo: (dev.ccpocket.app.data.SentFile) -> Unit = {},
     onTightenAutoRun: (ChatItem.AutoRun) -> Unit = {},
+    // long-press on a USER turn opens the rewind/fork menu (issue #282). Null = no entry at all: the
+    // caller passes null when the row has no transcript coordinates (old daemon / non-Claude backend),
+    // so the affordance is absent rather than present-and-broken.
+    onLongPressUser: ((ChatItem.User) -> Unit)? = null,
 ) {
     when (m) {
-        // accent-rail user turn (design: User Turn Styles.html, direction B) — the terracotta
-        // rail + warm tint mark "what I said" as a quote; no label, assistant flow untouched
-        is ChatItem.User -> Row(
-            Modifier.fillMaxWidth().height(IntrinsicSize.Min)
-                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 10.dp, bottomEnd = 10.dp, bottomStart = 4.dp))
-                .background(Tok.accent.copy(alpha = 0.05f)),
+        // Mobile UI 2.0: a quiet uppercase source label above each ordinary turn is all the structure the
+        // stream needs to tell User / Agent / Tool apart — no permanent timeline rail, no card stack.
+        // Chat Master v2: the user turn is a full-width LIST entry, not a bubble. The trailing source
+        // label is what says "you"; the container that used to say it cost a 300dp cap, so a pasted log or
+        // a long prompt reflowed into a narrow ribbon while the agent's reply beside it read at full
+        // measure — two grammars for the same conversation. Everything the turn carries is unchanged.
+        // The rewind/fork gesture (issue #282) rides the WHOLE turn — label, images, chips, gutters —
+        // but deliberately does NOT replace the inner SelectionContainer: drag-select-to-copy is the
+        // iOS text path (issue #5) and the project's selection contract is load-bearing, so a long press
+        // landing on the glyphs themselves still starts a selection. Indication is suppressed and the
+        // tap arm left empty so the row keeps behaving exactly as before for every non-long gesture.
+        is ChatItem.User -> Column(
+            Modifier.fillMaxWidth().let { base ->
+                if (onLongPressUser == null) base else base.combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                    onLongClick = { onLongPressUser(m) },
+                )
+            },
         ) {
-            Box(Modifier.fillMaxHeight().width(2.dp).clip(RoundedCornerShape(2.dp)).background(Tok.accent.copy(alpha = 0.6f)))
+            TurnSourceLabel(stringResource(Res.string.chat_you), alignEnd = true)
             Column(
-                Modifier.weight(1f).padding(start = 12.dp, end = 12.dp, top = 9.dp, bottom = 9.dp),
+                Modifier.fillMaxWidth().padding(top = 7.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
+                // images ride the turn whether it was composed here or at the computer (issue #254:
+                // the replay carries them now); imagesTruncated still renders with no tiles at all,
+                // because an image-ONLY prompt the budget shed would otherwise read as an empty turn
+                if (m.images.isNotEmpty() || m.imagesTruncated) {
+                    SentImages(m.images, m.imagesTruncated) { i -> onOpenImages(m.images, i) }
+                }
                 // uploaded files (issue #90): chip per file with its @inbox landing path. Videos (issue
                 // #98) render as a 16:9 card that opens the player; both share the "in workspace" grammar.
                 m.files.forEach { f ->
@@ -2546,7 +3618,9 @@ private fun MessageItem(
                 }
             }
         }
+        // the agent flows in the base surface: no container at all, so long prose reads as prose
         is ChatItem.Assistant -> Column {
+            TurnSourceLabel(agentName(agent ?: AgentKind.CLAUDE), Modifier.padding(bottom = 7.dp))
             SelectionContainer { MarkdownText(m.text, Tok.tx) } // drag-select any span to copy
             if (m.text.isNotBlank()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 CopyChip(m.text) // one-tap copy of the whole turn
@@ -2566,21 +3640,25 @@ private fun MessageItem(
             // tools and only when the preview truly reads as a path (Bash/other previews stay plain text).
             val opener = LocalPathOpener.current
             val openablePath = m.tool in TOOL_FILE_PATH_TOOLS && opener != null && looksLikePath(m.preview)
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.raised)
-                    .clickable { expanded = !expanded }.padding(8.dp),
-            ) {
-                Text(if (isPlan) "⚙ Plan" else "⚙ ${m.tool}", color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                if (m.preview.isNotBlank()) {
-                    if (openablePath) OpenablePathChip(m.preview, Modifier.padding(top = 6.dp)) { opener!!.open(m.preview) }
-                    else if (isPlan && expanded) Box(Modifier.padding(top = 4.dp)) { MarkdownText(m.preview, Tok.tx2) } // plan rendered as markdown
-                    else Text(
-                        m.preview, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
-                        maxLines = if (expanded) Int.MAX_VALUE else 1,
-                        overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
+            Column {
+                if (toolSourceLabeled) TurnSourceLabel(stringResource(Res.string.chat_src_tool), Modifier.padding(bottom = 7.dp))
+                ToolTurnBand(
+                    // the real tool token, verbatim — "Plan" is the one rename, because that is what
+                    // ExitPlanMode's payload actually is
+                    tool = if (isPlan) "Plan" else m.tool,
+                    preview = m.preview,
+                    // ONLY a real outcome. `ok == null` means running or unknown, and neither is a result
+                    // worth claiming — the row simply carries no status rather than inventing one.
+                    status = m.ok,
+                    expanded = expanded,
+                    onToggle = { expanded = !expanded },
+                    previewSlot = when {
+                        m.preview.isBlank() -> null
+                        openablePath -> ({ OpenablePathChip(m.preview) { opener!!.open(m.preview) } })
+                        isPlan && expanded -> ({ MarkdownText(m.preview, Tok.tx2) }) // plan rendered as markdown
+                        else -> null
+                    },
+                )
             }
         }
         is ChatItem.Sys -> Text(stringResource(Res.string.error_prefix, m.text), color = Tok.danger, fontSize = 12.sp)
@@ -2590,6 +3668,8 @@ private fun MessageItem(
         // the quiet residue of a question exchange: an expandable answered row / a muted withdrawn note
         is ChatItem.QuestionsAnswered -> QuestionsAnsweredRow(m.items)
         is ChatItem.QuestionsWithdrawn -> QuestionsWithdrawnRow()
+        // OpenCode asked a question — read-only card (no answer channel yet, issue #210)
+        is ChatItem.OpenCodeQuestion -> OpenCodeQuestionCard(m.questions)
         // a live turn's end: quiet ✓ line so "finished" stays visible in the transcript
         is ChatItem.TurnEnded -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             Text(
@@ -2640,16 +3720,115 @@ internal fun turnDurLabel(s: Int) = if (s >= 60) "${s / 60}m ${s % 60}s" else "$
 
 /** The ■ interrupt button in the composer action slot — same glyph whether it rides beside Send or stands alone. */
 @Composable
-private fun StopButton(onClick: () -> Unit) {
+private fun StopButton(modifier: Modifier? = null, onClick: () -> Unit) {
     val stopLabel = stringResource(Res.string.stop)
-    RoundActionButton(onClick = onClick, filled = false, contentDescription = stopLabel) {
-        Box(Modifier.size(12.dp).clip(RoundedCornerShape(2.dp)).background(Tok.accent))
+    if (modifier == null) {
+        // Capture mode keeps the existing compact circular interrupt beside the round recording controls.
+        RoundActionButton(onClick = onClick, filled = false, contentDescription = stopLabel) {
+            Box(Modifier.size(12.dp).clip(RoundedCornerShape(2.dp)).background(Tok.accent))
+        }
+    } else {
+        ComposerLaneActionButton(
+            onClick = onClick,
+            filled = false,
+            contentDescription = stopLabel,
+            modifier = modifier,
+        )
+    }
+}
+
+/**
+ * Uploads still moving: the trailing slot holds STATUS, not an action (#238 · V3).
+ *
+ * The spinner ring around a muted arrow is the design's own upload treatment (file-attach.jsx), and it
+ * keeps the same 48 dp slot the live actions use so the lane does not shift when the file lands. What it
+ * must never be is a Button: a disabled Send would announce itself as a send you are not allowed to make,
+ * when the truth is that there is nothing to send until the workspace path exists. So it carries the
+ * upload sentence as its name, offers no click, and claims no role.
+ */
+@Composable
+private fun UploadStatusSlot(label: String, modifier: Modifier = Modifier) {
+    val target = if (LocalDensity.current.fontScale >= 1.5f) 58.dp else Metric.touch
+    Box(
+        modifier.widthIn(min = 84.dp).height(target).semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.size(44.dp).clip(CircleShape).background(Tok.base).border(1.dp, Tok.hair, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            SpinnerRing(30.dp, 2.dp)
+            Icon(SendArrowIcon, null, tint = Tok.muted, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+/**
+ * The one named Mic action, riding the composer field's trailing slot (#238).
+ *
+ * Deliberately NOT a [RoundActionButton]. That button draws a 44dp hairline circle, which inside the field
+ * lands a second outline a couple of points inside the field's own rounded hairline — a frame within a
+ * frame, and the heaviest thing in a composer whose whole grammar is quiet. Here the visible mark is an
+ * inset 34dp plate with no border of its own; the [Metric.touch] target and the accessible name are
+ * unchanged. The bordered circle stays the grammar of the free-standing round actions (recording Done,
+ * capture Stop), which have no field around them to collide with.
+ */
+@Composable
+private fun VoiceActionButton(failed: Boolean, onClick: () -> Unit) {
+    // Failed always invokes retryVoice(): it re-transcribes a retained capture when available, or falls
+    // back to a new recording. Calling that action "Dictate" concealed the retry from screen readers.
+    val actionLabel = stringResource(if (failed) Res.string.retry_voice_input else Res.string.dictate)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val plate = RoundedCornerShape(11.dp)
+    // The target stays the full 48dp square, but it is transparent — so the default ripple would flood a
+    // block half again the size of the mark it belongs to. Press is drawn on the plate instead, the same
+    // interaction-source pattern the attach button and the approval FAB already use.
+    Box(
+        Modifier.size(Metric.touch)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .semantics { contentDescription = actionLabel },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.size(34.dp).clip(plate).background(
+                when {
+                    pressed -> Tok.accent.copy(alpha = 0.14f)
+                    // failure keeps the accent at rest: retrying is the one thing left to do here
+                    failed -> Tok.accent.copy(alpha = 0.10f)
+                    else -> Tok.raised
+                },
+            ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(MicIcon, null, tint = if (failed || pressed) Tok.accent else Tok.tx2, modifier = Modifier.size(20.dp))
+        }
     }
 }
 
 @Composable
 private fun Label(text: String) =
     Text(text, color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+
+/**
+ * A section label that can carry the list's view-mode toggle on its trailing edge (issue #260).
+ *
+ * The toggle used to live in the search row above the list; with that row gone it rides the FIRST group
+ * label instead — beside the thing it reshapes, rather than in chrome of its own. [label] may be null for
+ * the case where the list leads straight into rows and there is no group to name: the control still needs
+ * a home, and a bare 44 dp row is a smaller price than an invented heading.
+ */
+@Composable
+private fun SectionLabel(label: String?, showToggle: Boolean, tree: Boolean, onToggle: () -> Unit) {
+    if (!showToggle) { label?.let { Label(it) }; return }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 44.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f)) { label?.let { Label(it) } }
+        ViewToggle(tree, onToggle)
+    }
+}
 
 /**
  * "Thinking…" activity row: a pulsing dot + label shown while a turn is running but nothing live is on

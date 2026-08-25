@@ -4,11 +4,17 @@ import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.AuthorizedActionRecorded
+import dev.ccpocket.protocol.HandoffUpdated
 import dev.ccpocket.protocol.PermissionRiskUpdated
+import dev.ccpocket.protocol.SessionHandoff
+import dev.ccpocket.protocol.Usage
+import dev.ccpocket.protocol.UsageDay
+import dev.ccpocket.protocol.UsageModel
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -31,26 +37,49 @@ class ClientCapsFilterTest {
     private fun undeclared() = RequestRouter.ClientCapsHolder() // default: supportsOpencode = false
     private fun declared() = RequestRouter.ClientCapsHolder().apply { supportsOpencode = true }
 
-    private fun entry(vararg live: ActiveSession) = DirectoryEntry(
+    private fun entry(vararg live: ActiveSession, sessionAgents: List<AgentKind> = live.map { it.agent }) = DirectoryEntry(
         path = "/w/proj", name = "proj", isDir = true, hasSessions = true,
         open = live.isNotEmpty(),
         executing = live.any { it.executing },
+        busy = live.any { it.busy },
         activeSessionId = live.firstOrNull()?.sessionId,
         activeSessionTitle = live.firstOrNull()?.title,
         gitBranch = live.firstOrNull()?.gitBranch,
         activeSessions = live.toList(),
+        sessionAgents = sessionAgents,
     )
 
-    private fun oc(id: String, executing: Boolean = false) =
-        ActiveSession(sessionId = id, title = "oc", agent = AgentKind.OPENCODE, executing = executing, gitBranch = "main")
+    private fun oc(id: String, executing: Boolean = false, busy: Boolean = false) =
+        ActiveSession(
+            sessionId = id, title = "oc", agent = AgentKind.OPENCODE, executing = executing,
+            busy = busy, gitBranch = "main", executingAuthoritative = true,
+        )
 
-    private fun claude(id: String, executing: Boolean = false) =
-        ActiveSession(sessionId = id, title = "cl", agent = AgentKind.CLAUDE, executing = executing, gitBranch = "dev")
+    private fun zcode(id: String, executing: Boolean = false, busy: Boolean = false) =
+        ActiveSession(
+            sessionId = id, title = "zc", agent = AgentKind.ZCODE, executing = executing,
+            busy = busy, gitBranch = "zcode", executingAuthoritative = true,
+        )
+
+    private fun dsh(id: String, executing: Boolean = false, busy: Boolean = false) =
+        ActiveSession(
+            sessionId = id, title = "ds", agent = AgentKind.DSH, executing = executing,
+            busy = busy, gitBranch = "dsh", executingAuthoritative = true,
+        )
+
+    private fun claude(id: String, executing: Boolean = false, busy: Boolean = false) =
+        ActiveSession(
+            sessionId = id, title = "cl", agent = AgentKind.CLAUDE, executing = executing,
+            busy = busy, gitBranch = "dev", executingAuthoritative = true,
+        )
 
     /** THE P0 regression: an opencode-only project must reach an undeclared client with NO tap target. */
     @Test
     fun `an opencode-only project leaves no live session for an undeclared client`() {
-        val out = RequestRouter.filterDirs(listOf(entry(oc("oc-sid-1", executing = true))), undeclared())
+        val out = RequestRouter.filterDirs(
+            listOf(entry(oc("oc-sid-1", executing = true, busy = true))),
+            undeclared(),
+        )
         val e = out.single()
         assertTrue(e.activeSessions.isEmpty(), "opencode row must be stripped")
         assertNull(e.activeSessionId, "a stripped session must not stay reachable through the scalar")
@@ -58,6 +87,7 @@ class ClientCapsFilterTest {
         assertNull(e.gitBranch)
         assertFalse(e.open, "the row must not claim to be open — that is the tap target")
         assertFalse(e.executing, "executing came from the session that was stripped")
+        assertFalse(e.busy, "background work from the stripped session must not keep the row Running")
         assertEquals("/w/proj", e.path, "the project row itself stays visible")
     }
 
@@ -65,7 +95,10 @@ class ClientCapsFilterTest {
      *  opencode session that happened to sort first. */
     @Test
     fun `a mixed project keeps the surviving session and describes it in the scalars`() {
-        val out = RequestRouter.filterDirs(listOf(entry(oc("oc-sid", executing = true), claude("cl-sid"))), undeclared())
+        val out = RequestRouter.filterDirs(
+            listOf(entry(oc("oc-sid", executing = true, busy = true), claude("cl-sid"))),
+            undeclared(),
+        )
         val e = out.single()
         assertEquals(listOf("cl-sid"), e.activeSessions.map { it.sessionId })
         assertEquals("cl-sid", e.activeSessionId, "scalar must follow the survivor, not the stripped row")
@@ -73,6 +106,8 @@ class ClientCapsFilterTest {
         assertEquals("dev", e.gitBranch)
         assertTrue(e.open)
         assertFalse(e.executing, "only the stripped opencode session was executing")
+        assertFalse(e.busy, "only the stripped opencode session had background work")
+        assertTrue(e.activeSessions.single().executingAuthoritative, "filtering preserves the survivor's work source")
     }
 
     /** A declared client is untouched — the gate must cost nothing once support is announced. */
@@ -80,6 +115,67 @@ class ClientCapsFilterTest {
     fun `a declared client sees the opencode rows unchanged`() {
         val input = listOf(entry(oc("oc-sid", executing = true), claude("cl-sid")))
         assertEquals(input, RequestRouter.filterDirs(input, declared()))
+    }
+
+    @Test
+    fun `zcode live rows require the independent zcode capability`() {
+        val input = listOf(entry(zcode("zc-sid", executing = true), claude("cl-sid")))
+        val undeclared = RequestRouter.filterDirs(input, RequestRouter.ClientCapsHolder()).single()
+        assertEquals(listOf("cl-sid"), undeclared.activeSessions.map { it.sessionId })
+        assertEquals(listOf(AgentKind.CLAUDE), undeclared.sessionAgents)
+        assertEquals("cl-sid", undeclared.activeSessionId)
+        assertFalse(undeclared.executing)
+
+        val declared = RequestRouter.ClientCapsHolder().apply { supportsZcode = true }
+        assertEquals(input, RequestRouter.filterDirs(input, declared))
+    }
+
+    @Test
+    fun `zcode history provenance is stripped even when there is no live zcode row`() {
+        val input = listOf(entry(claude("cl-sid"), sessionAgents = listOf(AgentKind.CLAUDE, AgentKind.ZCODE)))
+        val out = RequestRouter.filterDirs(input, RequestRouter.ClientCapsHolder()).single()
+        assertEquals(listOf(AgentKind.CLAUDE), out.sessionAgents)
+        assertEquals(listOf("cl-sid"), out.activeSessions.map { it.sessionId })
+    }
+
+    @Test
+    fun `dsh live rows require the independent dsh capability`() {
+        val input = listOf(entry(dsh("ds-sid", executing = true), claude("cl-sid")))
+        val undeclared = RequestRouter.filterDirs(input, RequestRouter.ClientCapsHolder()).single()
+        assertEquals(listOf("cl-sid"), undeclared.activeSessions.map { it.sessionId })
+        assertEquals(listOf(AgentKind.CLAUDE), undeclared.sessionAgents)
+        assertEquals("cl-sid", undeclared.activeSessionId)
+        assertFalse(undeclared.executing)
+
+        // declaring a DIFFERENT post-baseline agent must not smuggle dsh through — each bit is its own gate
+        val zcodeOnly = RequestRouter.ClientCapsHolder().apply { supportsZcode = true }
+        assertEquals(listOf("cl-sid"), RequestRouter.filterDirs(input, zcodeOnly).single().activeSessions.map { it.sessionId })
+
+        val declared = RequestRouter.ClientCapsHolder().apply { supportsDsh = true }
+        assertEquals(input, RequestRouter.filterDirs(input, declared))
+    }
+
+    /**
+     * THE LOAD-BEARING ONE for issue #255's wire safety.
+     *
+     * `DirectoryEntry.sessionAgents` is a `List<AgentKind>`, and kotlinx-serialization's
+     * `coerceInputValues` does NOT protect list ELEMENTS — it only rescues a nullable/defaulted FIELD.
+     * So an older App that receives `"dsh"` inside this list fails the decode of the WHOLE Envelope,
+     * and every ingress wraps decode in `runCatching{}.getOrNull()`: the user's symptom is not an error
+     * but a silently vanished directory list. This daemon-side strip is therefore the only thing standing
+     * between a new daemon and every App shipped before dsh existed. Pin it on its own.
+     */
+    @Test
+    fun `dsh history provenance is stripped from the sessionAgents list even with no live dsh row`() {
+        val input = listOf(entry(claude("cl-sid"), sessionAgents = listOf(AgentKind.CLAUDE, AgentKind.DSH)))
+        val out = RequestRouter.filterDirs(input, RequestRouter.ClientCapsHolder()).single()
+        assertEquals(listOf(AgentKind.CLAUDE), out.sessionAgents, "an undeclared peer must never see `dsh` in the list")
+        assertEquals(listOf("cl-sid"), out.activeSessions.map { it.sessionId })
+        // a null holder (legacy ingress / bridge) is the same undeclared case, never fail-open
+        assertEquals(listOf(AgentKind.CLAUDE), RequestRouter.filterDirs(input, null).single().sessionAgents)
+        // and a peer that DID declare it keeps the provenance verbatim
+        val declared = RequestRouter.ClientCapsHolder().apply { supportsDsh = true }
+        assertEquals(input, RequestRouter.filterDirs(input, declared))
     }
 
     /** No opencode anywhere = identity, so ordinary fleets pay nothing for this. */
@@ -111,5 +207,102 @@ class ClientCapsFilterTest {
             assertFalse(RequestRouter.allowedForCaps(frame, legacy), "legacy sibling must not receive ${frame::class.simpleName}")
             assertTrue(RequestRouter.allowedForCaps(frame, modern), "modern sibling should receive ${frame::class.simpleName}")
         }
+    }
+
+    @Test
+    fun `handoff listings strip only zcode rows for an undeclared client`() {
+        val claude = SessionHandoff(id = "h-claude", sourceSessionId = "s-claude", agent = AgentKind.CLAUDE)
+        val zcode = SessionHandoff(id = "h-zcode", sourceSessionId = "s-zcode", agent = AgentKind.ZCODE)
+
+        assertEquals(
+            listOf(claude),
+            RequestRouter.filterHandoffs(listOf(zcode, claude), RequestRouter.ClientCapsHolder()),
+        )
+        assertEquals(
+            listOf(claude),
+            RequestRouter.filterHandoffs(listOf(zcode, claude), null),
+            "no caps holder is a legacy client and must fail closed",
+        )
+
+        val modern = RequestRouter.ClientCapsHolder().apply { supportsZcode = true }
+        assertEquals(listOf(zcode, claude), RequestRouter.filterHandoffs(listOf(zcode, claude), modern))
+    }
+
+    @Test
+    fun `zcode handoff updates are gated independently per connection`() {
+        val update = HandoffUpdated(SessionHandoff(id = "h-zcode", sourceSessionId = "s-zcode", agent = AgentKind.ZCODE))
+        val legacy = RequestRouter.ClientCapsHolder()
+        val modern = RequestRouter.ClientCapsHolder().apply { supportsZcode = true }
+
+        assertFalse(RequestRouter.allowedForCaps(update, legacy))
+        assertFalse(RequestRouter.allowedForCaps(update, null), "a legacy ingress without a holder must fail closed")
+        assertTrue(RequestRouter.allowedForCaps(update, modern))
+        assertTrue(
+            RequestRouter.allowedForCaps(
+                HandoffUpdated(SessionHandoff(id = "h-claude", sourceSessionId = "s-claude", agent = AgentKind.CLAUDE)),
+                legacy,
+            ),
+            "baseline-agent handoffs remain compatible",
+        )
+    }
+
+    // ── issue #258: the usage reply's by-model rows carry the same AgentKind vocabulary ──────────
+
+    private fun usage(vararg models: UsageModel) = Usage(
+        days = listOf(UsageDay("Mon", 300)),
+        models = models.toList(),
+        tokensToday = 300,
+    )
+
+    /**
+     * An undeclared peer gets the post-baseline badges DOWNGRADED to CLAUDE, not dropped: those tokens
+     * are already inside the hero total and the trend, so removing the bars would make the page
+     * contradict itself. Everything else about the reply must survive untouched.
+     */
+    @Test
+    fun `usage model badges degrade to the baseline agent for an undeclared peer`() {
+        val reply = usage(
+            UsageModel("claude-opus-5", 100, AgentKind.CLAUDE),
+            UsageModel("anthropic/glm-5", 120, AgentKind.ZCODE),
+            UsageModel("kimi-code/k3", 80, AgentKind.KIMI),
+            UsageModel("deepseek-chat", 40, AgentKind.DSH), // issue #255: newest post-baseline agent
+        )
+        for (caps in listOf(null, undeclared())) {
+            val gated = RequestRouter.gateUsageAgents(reply, caps)
+            assertEquals(4, gated.models.size, "row COUNT never changes — only the badge degrades")
+            assertTrue(gated.models.all { it.agent == AgentKind.CLAUDE })
+            // the honest parts of the row survive: model id, tokens, and the window statistics
+            assertEquals(
+                listOf("claude-opus-5", "anthropic/glm-5", "kimi-code/k3", "deepseek-chat"),
+                gated.models.map { it.model },
+            )
+            assertEquals(listOf(100L, 120L, 80L, 40L), gated.models.map { it.tokens })
+            assertEquals(reply.tokensToday, gated.tokensToday)
+            assertEquals(reply.days, gated.days)
+        }
+    }
+
+    @Test
+    fun `a peer that declared the vocabulary keeps every badge verbatim`() {
+        val reply = usage(
+            UsageModel("anthropic/glm-5", 120, AgentKind.ZCODE),
+            UsageModel("kimi-code/k3", 80, AgentKind.KIMI),
+            UsageModel("openai/gpt-5.1", 60, AgentKind.OPENCODE),
+            UsageModel("deepseek-chat", 40, AgentKind.DSH),
+        )
+        val modern = RequestRouter.ClientCapsHolder().apply {
+            supportsOpencode = true; supportsKimi = true; supportsZcode = true; supportsDsh = true
+        }
+        assertEquals(reply, RequestRouter.gateUsageAgents(reply, modern), "a declared peer's reply is returned as-is")
+    }
+
+    /** A Claude/Codex-only reply is baseline vocabulary, so the gate must not even copy the frame. */
+    @Test
+    fun `a baseline-only reply is passed through untouched`() {
+        val reply = usage(
+            UsageModel("claude-opus-5", 100, AgentKind.CLAUDE),
+            UsageModel("gpt-5.1-codex", 50, AgentKind.CODEX),
+        )
+        assertSame(reply, RequestRouter.gateUsageAgents(reply, undeclared()))
     }
 }

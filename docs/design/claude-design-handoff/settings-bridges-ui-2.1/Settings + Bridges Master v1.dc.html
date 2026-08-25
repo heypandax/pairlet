@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+  a { color: #B4522F; text-decoration: none; }
+  a:hover { color: #8E3F23; }
+</style>
+</helmet>
+
+<div style="position:fixed;inset:0;z-index:-1;background:{{ boardBg }}"></div>
+
+<div style="width:1920px;margin:0 auto;padding:64px 72px 96px;font-family:'Public Sans',system-ui,sans-serif;color:#1B1A18">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:940px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · mobile ui 2.1 · settings + bridges · master</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">Settings + Bridges Master v1</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The Compose handoff for direction A3 + C2. One state model renders every frame on this board — the live prototype and all fifteen proofs are the same component under different runtime state, so appearance, locale, font scale, pending badge and bridge fixture are switches rather than pictures. All copy is the repository's own; link state and runner state stay independent facts.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div><div style="color:#1B1A18">1 route</div><div>2 + 5 destinations</div></div>
+      <div><div style="color:#1B1A18">15 proofs</div><div>320 – 402 dp</div></div>
+      <div><div style="color:#1B1A18">96 / 48 dp</div><div>150 / 60 at 200%</div></div>
+    </div>
+  </div>
+
+  <div style="padding-top:40px;display:flex;align-items:baseline;gap:14px;padding-bottom:24px">
+    <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">A</span>
+    <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Live prototype and proofs</h2>
+    <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Drive the first frame with the panel; every other frame is the same component pinned to one state.</span>
+  </div>
+
+  <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+
+    <div style="width:288px;flex:none;padding-top:2px">
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">Runtime state · host chrome</div>
+      <div style="margin-top:14px;display:flex;flex-direction:column;gap:16px">
+        <sc-for list="{{ controlGroups }}" as="g" hint-placeholder-count="5">
+          <div>
+            <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.13em;text-transform:uppercase;color:#8A857C">{{ g.label }}</div>
+            <div style="margin-top:9px;display:flex;flex-wrap:wrap;gap:7px">
+              <sc-for list="{{ g.items }}" as="i" hint-placeholder-count="3">
+                <div onClick="{{ i.on }}" style="min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #C9C5BD;cursor:pointer;display:flex;align-items:center;background:{{ i.bg }};color:{{ i.ink }};font:500 11.5px/1 'JetBrains Mono',monospace">{{ i.label }}</div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+        <div style="background:#E4E1DA;border-radius:11px;padding:13px 15px">
+          <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">State</div>
+          <div style="font:400 11.5px/1.75 'JetBrains Mono',monospace;color:#54504A;margin-top:8px;word-break:break-all">{{ stateLine }}</div>
+        </div>
+      </div>
+    </div>
+
+    <sc-for list="{{ frames }}" as="f" hint-placeholder-count="4">
+      <div style="width:{{ f.w }};flex:none">
+        <div style="font:500 10.5px/1.4 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px;min-height:28px">{{ f.label }}</div>
+        <div style="width:{{ f.w }};height:{{ f.h }};border-radius:30px;overflow:hidden;border:1px solid #C9C5BD;background:{{ f.bg }};display:flex;flex-direction:column;position:relative">
+          <div style="height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font:500 12.5px/1 'JetBrains Mono',monospace;color:{{ f.statusInk }}"><span>9:41</span><span style="letter-spacing:.2em">▲ ▮</span></div>
+          <div style="flex:none;padding:0 20px">
+            <div onClick="{{ f.onBack }}" style="min-height:52px;display:flex;align-items:center;gap:6px;cursor:pointer;color:{{ f.backInk }};font-family:'Public Sans',sans-serif;font-weight:500;font-size:{{ f.backFs }};line-height:1.2"><span style="font-size:{{ f.backChevFs }};line-height:1">‹</span>{{ f.back }}</div>
+            <div style="padding:6px 0 4px;font-family:'Public Sans',sans-serif;font-weight:600;font-size:{{ f.titleFs }};line-height:1.14;color:{{ f.titleInk }}">{{ f.title }}</div>
+            <sc-if value="{{ f.hasSum }}" hint-placeholder-val="{{ true }}">
+              <div style="padding-bottom:16px;font-family:'Public Sans',sans-serif;font-size:{{ f.sumFs }};line-height:1.45;color:{{ f.sumInk }};text-wrap:pretty">{{ f.sum }}</div>
+            </sc-if>
+            <sc-if value="{{ f.noSum }}" hint-placeholder-val="{{ false }}"><div style="height:16px"></div></sc-if>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:auto;padding:0 20px 28px">
+
+            <sc-if value="{{ f.isSettings }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column">
+                <sc-for list="{{ f.utils }}" as="u" hint-placeholder-count="2">
+                  <div onClick="{{ u.on }}" style="min-height:{{ u.minH }};display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:{{ u.borderTop }};border-bottom:1px solid {{ u.line }};cursor:pointer"><span style="font-family:'Public Sans',sans-serif;font-weight:500;font-size:{{ u.fs }};line-height:1.35;color:{{ u.ink }}">{{ u.label }}</span><span style="color:{{ u.chevInk }};font-size:{{ u.chevFs }};flex:none">›</span></div>
+                </sc-for>
+              </div>
+              <div style="margin-top:26px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:{{ f.catLabelFs }};line-height:1.2;letter-spacing:.15em;text-transform:uppercase;color:{{ f.catLabelInk }}">{{ f.catLabel }}</div>
+              <div style="margin-top:12px;border-radius:{{ f.catRadius }};background:{{ f.catSurf }};padding:0 14px">
+                <sc-for list="{{ f.cats }}" as="c" hint-placeholder-count="5">
+                  <div onClick="{{ c.on }}" style="min-height:{{ c.minH }};display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:{{ c.border }};cursor:pointer">
+                    <div style="min-width:0">
+                      <div style="font-family:'Public Sans',sans-serif;font-weight:500;font-size:{{ c.fs }};line-height:1.35;color:{{ c.ink }};text-wrap:pretty">{{ c.label }}</div>
+                      <div style="font-family:'Public Sans',sans-serif;font-size:{{ c.subFs }};line-height:1.45;color:{{ c.subInk }};margin-top:3px;text-wrap:pretty">{{ c.sub }}</div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:9px;flex:none">
+                      <sc-if value="{{ c.hasBadge }}" hint-placeholder-val="{{ true }}">
+                        <span aria-label="{{ c.badgeA11y }}" style="min-width:{{ c.badgeSize }};height:{{ c.badgeSize }};padding:0 7px;border-radius:{{ c.badgeSize }};background:{{ c.badgeBg }};border:1px solid {{ c.badgeBrd }};color:{{ c.badgeInk }};font-family:'JetBrains Mono',monospace;font-weight:600;font-size:{{ c.badgeFs }};display:flex;align-items:center;justify-content:center">{{ c.badge }}</span>
+                      </sc-if>
+                      <span style="color:{{ c.chevInk }};font-size:{{ c.chevFs }}">›</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ f.isPass }}" hint-placeholder-val="{{ false }}">
+              <div style="padding-top:18px;border-top:1px solid {{ f.line }}">
+                <div style="font-family:'Public Sans',sans-serif;font-size:{{ f.passFs }};line-height:1.6;color:{{ f.passInk }};text-wrap:pretty">{{ f.passBody }}</div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ f.isBridges }}" hint-placeholder-val="{{ true }}">
+              <sc-if value="{{ f.hasBanner }}" hint-placeholder-val="{{ false }}">
+                <div style="border-radius:12px;background:{{ f.bannerBg }};border:1px solid {{ f.bannerLine }};padding:12px 14px;margin-bottom:14px;font-family:'JetBrains Mono',monospace;font-size:{{ f.bannerFs }};line-height:1.65;color:{{ f.bannerInk }};word-break:break-word">{{ f.banner }}</div>
+              </sc-if>
+              <sc-if value="{{ f.hasEmpty }}" hint-placeholder-val="{{ false }}">
+                <div style="padding-top:20px;border-top:1px solid {{ f.line }}">
+                  <div style="font-family:'Public Sans',sans-serif;font-weight:500;font-size:{{ f.emptyTFs }};line-height:1.4;color:{{ f.emptyTInk }};text-wrap:pretty">{{ f.emptyT }}</div>
+                  <div style="font-family:'Public Sans',sans-serif;font-size:{{ f.emptyBFs }};line-height:1.65;color:{{ f.emptyBInk }};margin-top:9px;text-wrap:pretty">{{ f.emptyB }}</div>
+                </div>
+              </sc-if>
+              <div style="display:flex;flex-direction:column;gap:{{ f.cardGap }}">
+                <sc-for list="{{ f.cards }}" as="c" hint-placeholder-count="3">
+                  <div style="border-radius:{{ c.radius }};background:{{ c.surf }};padding:{{ c.pad }}">
+                    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px">
+                      <span style="font-family:'JetBrains Mono',monospace;font-weight:500;font-size:{{ c.nameFs }};line-height:1.45;color:{{ c.nameInk }};word-break:break-word">{{ c.name }}</span>
+                      <span style="font-family:'Public Sans',sans-serif;font-size:{{ c.chipFs }};line-height:1.2;color:{{ c.tierInk }};border:1px solid {{ c.tierBrd }};border-radius:6px;padding:4px 7px;white-space:nowrap">{{ c.tier }}</span>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px">
+                      <span style="font-family:'Public Sans',sans-serif;font-size:{{ c.linkFs }};line-height:1.4;color:{{ c.linkInk }};text-wrap:pretty">{{ c.link }}</span>
+                      <sc-if value="{{ c.hasTrust }}" hint-placeholder-val="{{ true }}">
+                        <span style="font-family:'Public Sans',sans-serif;font-size:{{ c.chipFs }};line-height:1.2;color:{{ c.trustInk }};border:1px solid {{ c.trustBrd }};border-radius:6px;padding:4px 7px;white-space:nowrap">{{ c.trust }}</span>
+                      </sc-if>
+                      <sc-if value="{{ c.hasSess }}" hint-placeholder-val="{{ true }}">
+                        <span style="font-family:'Public Sans',sans-serif;font-size:{{ c.sessFs }};line-height:1.3;color:{{ c.sessInk }};white-space:nowrap">{{ c.sess }}</span>
+                      </sc-if>
+                    </div>
+                    <div style="margin-top:13px;padding-top:13px;border-top:1px solid {{ c.line }};display:flex;flex-wrap:wrap;gap:8px">
+                      <sc-for list="{{ c.actions }}" as="a" hint-placeholder-count="4">
+                        <div onClick="{{ a.on }}" style="flex:1 1 auto;min-width:{{ a.minW }};min-height:{{ a.minH }};padding:0 16px;border:1px solid {{ a.brd }};border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:'Public Sans',sans-serif;font-weight:500;font-size:{{ a.fs }};line-height:1;color:{{ a.ink }};white-space:nowrap;cursor:pointer">{{ a.label }}</div>
+                      </sc-for>
+                    </div>
+                    <div onClick="{{ c.toggle }}" aria-label="{{ c.toggleA11y }}" style="margin-top:4px;min-height:{{ c.toggleMinH }};display:flex;align-items:center;justify-content:flex-end;cursor:pointer;color:{{ c.caretInk }};font-size:{{ c.caretFs }}">{{ c.caret }}</div>
+                    <sc-if value="{{ c.open }}" hint-placeholder-val="{{ false }}">
+                      <div style="border-top:1px solid {{ c.line }};padding-top:12px;display:flex;flex-direction:column;gap:11px">
+                        <sc-for list="{{ c.blocks }}" as="b" hint-placeholder-count="2">
+                          <div>
+                            <div style="font-family:'JetBrains Mono',monospace;font-weight:500;font-size:{{ b.labelFs }};line-height:1.2;letter-spacing:.13em;text-transform:uppercase;color:{{ b.labelInk }}">{{ b.label }}</div>
+                            <sc-if value="{{ b.hasValue }}" hint-placeholder-val="{{ true }}"><div style="font-family:'JetBrains Mono',monospace;font-size:{{ b.valueFs }};line-height:1.65;color:{{ b.valueInk }};margin-top:5px;word-break:break-word">{{ b.value }}</div></sc-if>
+                          </div>
+                        </sc-for>
+                        <sc-if value="{{ c.hasExpText }}" hint-placeholder-val="{{ false }}">
+                          <div style="font-family:'Public Sans',sans-serif;font-size:{{ c.expTextFs }};line-height:1.6;color:{{ c.expTextInk }};text-wrap:pretty">{{ c.expText }}</div>
+                        </sc-if>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+
+          <sc-if value="{{ f.hasSheet }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute;left:0;right:0;bottom:0;background:{{ f.sheet.bg }};border-top:1px solid {{ f.sheet.line }};border-radius:20px 20px 0 0;padding:20px">
+              <div style="font-family:'Public Sans',sans-serif;font-weight:600;font-size:{{ f.sheet.titleFs }};line-height:1.3;color:{{ f.sheet.titleInk }}">{{ f.sheet.title }}</div>
+              <sc-if value="{{ f.sheet.hasBody }}" hint-placeholder-val="{{ true }}">
+                <div style="font-family:'Public Sans',sans-serif;font-size:{{ f.sheet.bodyFs }};line-height:1.6;color:{{ f.sheet.bodyInk }};margin-top:8px;text-wrap:pretty">{{ f.sheet.body }}</div>
+              </sc-if>
+              <div style="margin-top:14px;display:flex;flex-direction:column">
+                <sc-for list="{{ f.sheet.rows }}" as="r" hint-placeholder-count="2">
+                  <div style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:14px;border-top:{{ r.borderTop }};border-bottom:1px solid {{ r.line }}"><span style="font-family:'Public Sans',sans-serif;font-size:{{ r.kFs }};line-height:1.35;color:{{ r.kInk }}">{{ r.k }}</span><span style="font-family:'JetBrains Mono',monospace;font-size:{{ r.vFs }};line-height:1.4;color:{{ r.vInk }};text-align:right;word-break:break-word">{{ r.v }}</span></div>
+                </sc-for>
+              </div>
+              <div style="margin-top:16px;display:flex;flex-wrap:wrap;gap:8px">
+                <sc-for list="{{ f.sheet.actions }}" as="a" hint-placeholder-count="2">
+                  <div onClick="{{ a.on }}" style="flex:1 1 auto;min-width:110px;min-height:{{ a.minH }};padding:0 16px;border:1px solid {{ a.brd }};background:{{ a.bg }};border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:'Public Sans',sans-serif;font-weight:{{ a.weight }};font-size:{{ a.fs }};line-height:1;color:{{ a.ink }};white-space:nowrap;cursor:pointer">{{ a.label }}</div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+          <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">{{ f.note }}</div>
+        </sc-if>
+      </div>
+    </sc-for>
+  </div>
+
+  <!-- ═══ B · IMPLEMENTATION MAP ═══ -->
+  <div style="padding-top:60px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:24px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">B</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Field map</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Every rendered string on the board, and where it comes from.</span>
+    </div>
+    <div style="border-top:1px solid #C9C5BD;font:400 13px/1.55 'Public Sans',sans-serif">
+      <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:10px 0;border-bottom:1px solid #DAD6CE;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C"><div>Rendered</div><div>Source</div><div>Rule</div></div>
+      <sc-for list="{{ fieldMap }}" as="m" hint-placeholder-count="20">
+        <div style="display:grid;grid-template-columns:230px 300px 1fr;gap:24px;padding:11px 0;border-bottom:1px solid #DAD6CE"><div style="color:#3A3730">{{ m.a }}</div><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A;word-break:break-word">{{ m.b }}</div><div style="color:#6E695F;text-wrap:pretty">{{ m.c }}</div></div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- ═══ C · ACCEPTANCE + AUDIT ═══ -->
+  <div style="padding-top:56px;display:flex;gap:52px;align-items:flex-start">
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+        <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">C</span>
+        <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Acceptance</h2>
+      </div>
+      <div style="border-top:1px solid #C9C5BD;font:400 13.5px/1.5 'Public Sans',sans-serif;color:#3A3730">
+        <sc-for list="{{ acceptance }}" as="x" hint-placeholder-count="8">
+          <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 12px/1.4 'JetBrains Mono',monospace;color:#8A857C">{{ x.n }}</span><span style="text-wrap:pretty">{{ x.t }}</span></div>
+        </sc-for>
+      </div>
+      <div style="margin-top:24px;background:#E4E1DA;border-radius:11px;padding:16px 18px">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Selected geometry</div>
+        <div style="font:400 12.5px/1.9 'JetBrains Mono',monospace;color:#54504A;margin-top:9px">gutter 20dp · card radius 14dp · card pad 14dp<br />FlowRow gap 8dp · action widthIn(min=96dp)·weight(1)<br />action heightIn(min=48dp) · fontScale ≥1.5 → 150dp / 60dp<br />settings row min 64dp · utility row min 56dp<br />chevron target min 44dp · sheet button min 48dp<br />maxLines=1 softWrap=false on every action label</div>
+      </div>
+    </div>
+
+    <div style="width:620px;flex:none">
+      <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+        <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">✓</span>
+        <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Visual audit</h2>
+      </div>
+      <div style="border-top:1px solid #C9C5BD;font:400 13px/1.55 'Public Sans',sans-serif">
+        <sc-for list="{{ audit }}" as="x" hint-placeholder-count="6">
+          <div style="display:grid;grid-template-columns:160px 1fr;gap:20px;padding:11px 0;border-bottom:1px solid #DAD6CE"><div style="font:500 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">{{ x.k }}</div><div style="color:#6E695F;text-wrap:pretty">{{ x.v }}</div></div>
+        </sc-for>
+      </div>
+      <div style="margin-top:24px;background:#E4E1DA;border-radius:11px;padding:16px 18px">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Never rendered</div>
+        <div style="font:400 12.5px/1.85 'JetBrains Mono',monospace;color:#54504A;margin-top:9px">deviceId · env values · absolute or ~/ workdirs<br />runner state as link state · link health · counts in the summary<br />usage periods or figures · Retry or log actions on failures<br />Start / Stop / Restart / Edit on an unmanaged bridge</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;boardBg&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#EDEBE6&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#EDEBE6&quot;,&quot;#E4E1DA&quot;,&quot;#F4F2EF&quot;,&quot;#D9D5CC&quot;]},&quot;showNotes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;pendingCount&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:3,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:99}}">
+class Component extends DCLogic {
+  state = { route: 'settings', pass: '', theme: 'dark', locale: 'en', big: false, pending: 3, fixture: 'managed', sheet: null, open: {} };
+
+  TH(dark) {
+    return dark ? {
+      bg: '#0B0B0C', surf: '#141417', sheetBg: '#17171B', ink: '#F3F3F4', ink2: '#E6E6E9', ink3: '#B4B5BC', ink4: '#8C8D95', ink5: '#6E6E76',
+      line: 'rgba(255,255,255,.14)', line2: 'rgba(255,255,255,.24)', acc: '#E2795A', accInk: '#160C07',
+      ok: '#7ECBA0', warn: '#F0C079', warnLine: 'rgba(233,180,92,.5)', warnBg: 'rgba(233,180,92,.16)',
+      bad: '#F0A08F', badLine: 'rgba(233,116,98,.5)', badSolid: '#E97462', badSolidInk: '#160C07'
+    } : {
+      bg: '#FCFBFA', surf: '#F4F2EF', sheetBg: '#FFFFFF', ink: '#17161A', ink2: '#17161A', ink3: '#4B4A50', ink4: '#6B6970', ink5: '#8E8C92',
+      line: 'rgba(20,18,16,.16)', line2: 'rgba(20,18,16,.24)', acc: '#A9482A', accInk: '#FFF4EF',
+      ok: '#1F7A4D', warn: '#8A5A08', warnLine: 'rgba(138,90,8,.45)', warnBg: 'rgba(138,90,8,.12)',
+      bad: '#A3311F', badLine: 'rgba(163,49,31,.5)', badSolid: '#A3311F', badSolidInk: '#FFF4EF'
+    };
+  }
+
+  SC(big) {
+    return big ? {
+      title: '42px', back: '25px', backChev: '31px', sum: '22px', row: '26px', sub: '20px', catLabel: '18px', name: '23px', chip: '18px',
+      link: '22px', sess: '20px', btn: '23px', mono: '20px', blockLabel: '16px', empty: '25px', emptyB: '21px', pass: '22px', banner: '18px',
+      rowMin: '76px', rowSubMin: '88px', utilMin: '72px', btnW: '150px', btnH: '60px', caret: '26px', chev: '25px', toggleMin: '56px',
+      badge: '34px', badgeFs: '19px', catRadius: '16px', cardPad: '16px', cardRadius: '16px', cardGap: '14px', sheetTitle: '24px', sheetBody: '19px', sheetK: '19px', sheetV: '17px', sheetBtn: '20px', sheetBtnH: '60px'
+    } : {
+      title: '32px', back: '15px', backChev: '20px', sum: '13.5px', row: '15.5px', sub: '12.5px', catLabel: '11px', name: '15px', chip: '11.5px',
+      link: '13px', sess: '12.5px', btn: '14.5px', mono: '12.5px', blockLabel: '11px', empty: '16.5px', emptyB: '13.5px', pass: '14px', banner: '12.5px',
+      rowMin: '56px', rowSubMin: '64px', utilMin: '56px', btnW: '96px', btnH: '48px', caret: '17px', chev: '17px', toggleMin: '44px',
+      badge: '24px', badgeFs: '12px', catRadius: '14px', cardPad: '14px', cardRadius: '14px', cardGap: '12px', sheetTitle: '19px', sheetBody: '13.5px', sheetK: '15px', sheetV: '14px', sheetBtn: '15px', sheetBtnH: '48px'
+    };
+  }
+
+  STR(loc) {
+    return loc === 'zh' ? {
+      backProjects: '项目', settings: '设置', connected: '已连接 %s',
+      uToken: 'Token 用量', uSched: '定时任务', catLabel: '设置分类',
+      cGeneral: '通用', cAgent: 'Agent 与会话默认项', cConn: '连接与协作', cSec: '安全与审批', cSup: '帮助与关于',
+      sAgent: '权限模式、模型、思考强度、上下文窗口、Agent 筛选', sConn: '电脑、共享文件夹、协作者、评审、机器人桥',
+      sSec: '审批行为、Full Control 存续时长、应用锁', sSup: '帮助、手册、故障排查、版本、关于',
+      system: '跟随系统', light: '浅色', dark: '深色', textDefault: '默认字号', textN: '字号 %d%',
+      bridges: '机器人桥接', linkPending: '等待适配器连接', linkOnline: '在线', linkOffline: '离线',
+      tierReview: '审阅', tierColl: '协作', tierAuto: '自主', trust: '可设信任模式', live: '%d 个进行中',
+      aRestart: '重启', aStop: '停止', aStart: '启动', aEdit: '编辑', aRevoke: '撤销',
+      lProjects: '项目', lExited: '已退出（代码 %d）', lErr: '最近错误', lLog: '适配器日志',
+      unmanaged: '此桥接由你自行运行适配器。',
+      emptyT: '还没有机器人桥接', emptyB: '在桌面端创建。桥接让飞书 / Slack 机器人驱动这台电脑——你在这里监控和撤销它们。',
+      unavailB: '升级 daemon 后可管理桥接，然后重新打开。',
+      mergeLost: 'daemon 版本过旧，不支持增量编辑——这些值被清空而不是保留：%s。请升级 daemon 后重新编辑并补填。',
+      editT: '编辑桥接', fName: '名称', fProjects: '项目', cancel: '取消', save: '保存',
+      revokeT: '撤销此桥接？', revokeB: '该桥接将失去访问权限。此操作无法撤消。',
+      passBody: '此界面保持不变，由现有实现打开。', badgeA11y: '待处理评审', expand: '展开或收起'
+    } : {
+      backProjects: 'Projects', settings: 'Settings', connected: 'Connected to %s',
+      uToken: 'Token usage', uSched: 'Scheduled tasks', catLabel: 'Categories',
+      cGeneral: 'General', cAgent: 'Agent & session defaults', cConn: 'Connections & collaboration', cSec: 'Security & approvals', cSup: 'Support & about',
+      sAgent: 'Permission mode, model, effort, context window, agent filter', sConn: 'Computers, shared folders, collaborators, reviews, bridges',
+      sSec: 'Approval behavior, Full Control expiry, app lock', sSup: 'Help, manual, troubleshooting, versions, about',
+      system: 'System', light: 'Light', dark: 'Dark', textDefault: 'Default text size', textN: 'Text size %d%',
+      bridges: 'Bridges', linkPending: 'waiting for the adapter to connect', linkOnline: 'Online', linkOffline: 'Offline',
+      tierReview: 'Review', tierColl: 'Collaborate', tierAuto: 'Autonomous', trust: 'trust modes allowed', live: '%d live',
+      aRestart: 'Restart', aStop: 'Stop', aStart: 'Start', aEdit: 'Edit', aRevoke: 'Revoke',
+      lProjects: 'Projects', lExited: 'Exited (code %d)', lErr: 'Last error', lLog: 'Adapter log',
+      unmanaged: 'You run this adapter yourself.',
+      emptyT: 'No bridges yet', emptyB: 'Create one from the desktop app. Bridges let a Feishu / Slack bot drive this machine — you monitor and revoke them here.',
+      unavailB: 'Update the daemon to manage bridges, then reopen.',
+      mergeLost: 'The daemon is too old for partial edits — it CLEARED these values instead of keeping them: %s. Update the daemon, then edit again and re-enter them.',
+      editT: 'Edit bridge', fName: 'Name', fProjects: 'Projects', cancel: 'Cancel', save: 'Save',
+      revokeT: 'Revoke this bridge?', revokeB: 'This bridge will lose access. This cannot be undone.',
+      passBody: 'This screen is unchanged and opens from the existing implementation.', badgeA11y: 'reviews awaiting response', expand: 'Expand or collapse'
+    };
+  }
+
+  FIXTURES = {
+    managed: [
+      { name: 'research-adapter', tier: 'COLLABORATE', link: 'online', noApproval: true, sessions: 2, runner: { running: true }, projects: 'cc-pocket · pocket-nightly' },
+      { name: 'design-review-bot', tier: 'REVIEW', link: 'pending', noApproval: false, sessions: 0, runner: { running: false }, projects: 'cc-pocket' },
+      { name: 'ops-bot', tier: 'AUTONOMOUS', link: 'online', noApproval: false, sessions: 1, runner: null, projects: 'cc-pocket' }
+    ],
+    running: [
+      { name: 'research-adapter', tier: 'COLLABORATE', link: 'online', noApproval: true, sessions: 2, runner: { running: true }, projects: 'cc-pocket · pocket-nightly' }
+    ],
+    stopped: [
+      { name: 'research-adapter', tier: 'COLLABORATE', link: 'offline', noApproval: false, sessions: 0, runner: { running: false }, projects: 'cc-pocket · pocket-nightly' },
+      { name: 'ci-adapter', tier: 'UNKNOWN', link: 'offline', noApproval: false, sessions: 0, runner: { running: false }, projects: 'pocket-nightly' }
+    ],
+    unmanaged: [
+      { name: 'ops-bot', tier: 'AUTONOMOUS', link: 'online', noApproval: false, sessions: 1, runner: null, projects: 'cc-pocket', openDefault: true }
+    ],
+    diagnostics: [
+      { name: 'ci-adapter', tier: 'REVIEW', link: 'offline', noApproval: false, sessions: 0, runner: { running: false }, projects: 'cc-pocket · pocket-nightly', exit: 1, err: 'connect ECONNREFUSED 127.0.0.1:8787', log: 'runner exited (1)\nrestart scheduled in 30s', openDefault: true }
+    ],
+    empty: [], unavailable: [],
+    error: [{ name: 'research-adapter', tier: 'COLLABORATE', link: 'online', noApproval: true, sessions: 2, runner: { running: true }, projects: 'cc-pocket · pocket-nightly' }],
+    mergeLost: [{ name: 'ci-adapter', tier: 'REVIEW', link: 'offline', noApproval: false, sessions: 0, runner: { running: false }, projects: 'pocket-nightly' }]
+  };
+
+  fmt(tpl, v) { return tpl.replace('%s', v).replace('%d', v); }
+
+  toggle(key) { return () => this.setState(p => ({ open: Object.assign({}, p.open, { [key]: !p.open[key] }) })); }
+
+  isOpen(key, def) { const v = this.state.open[key]; return v === undefined ? !!def : v; }
+
+  card(def, o, t, z, s, fk, i, noop) {
+    const link = def.link === 'pending' ? { label: s.linkPending, ink: t.warn, mark: '◐' }
+      : def.link === 'online' ? { label: s.linkOnline, ink: t.ok, mark: '●' }
+      : { label: s.linkOffline, ink: t.bad, mark: '○' };
+    const tier = def.tier === 'COLLABORATE' ? s.tierColl : def.tier === 'AUTONOMOUS' ? s.tierAuto : s.tierReview;
+    const act = (label, danger, on) => ({
+      label: label, on: on || noop, minW: z.btnW, minH: z.btnH, fs: z.btn,
+      brd: danger ? t.badLine : t.line2, ink: danger ? t.bad : t.ink2
+    });
+    const revoke = act(s.aRevoke, true, o.live ? (() => this.setState({ sheet: 'revoke' })) : noop);
+    const edit = act(s.aEdit, false, o.live ? (() => this.setState({ sheet: 'edit' })) : noop);
+    let actions;
+    if (!def.runner) actions = [revoke];
+    else if (def.runner.running) actions = [act(s.aRestart), act(s.aStop), edit, revoke];
+    else actions = [act(s.aStart), edit, revoke];
+
+    const key = fk + ':' + i;
+    const open = this.isOpen(key, def.openDefault);
+    const blocks = [{ label: s.lProjects, value: def.projects }];
+    if (def.runner) {
+      if (def.exit !== undefined && def.exit !== null) blocks.push({ label: this.fmt(s.lExited, def.exit), value: '' });
+      if (def.err) blocks.push({ label: s.lErr, value: def.err });
+      if (def.log) blocks.push({ label: s.lLog, value: def.log });
+    }
+    return {
+      name: def.name, nameFs: z.name, nameInk: t.ink, surf: t.surf, line: t.line, pad: z.cardPad, radius: z.cardRadius,
+      tier: tier, tierInk: t.ink3, tierBrd: t.line2, chipFs: z.chip,
+      link: link.mark + ' ' + link.label, linkInk: link.ink, linkFs: z.link,
+      hasTrust: !!(def.runner && def.noApproval), trust: s.trust, trustInk: t.warn, trustBrd: t.warnLine,
+      hasSess: def.sessions > 0, sess: this.fmt(s.live, def.sessions), sessInk: t.ink4, sessFs: z.sess,
+      actions: actions, toggle: o.live ? this.toggle(key) : noop, toggleA11y: s.expand, toggleMinH: z.toggleMin,
+      caret: open ? '⌃' : '⌄', caretFs: z.caret, caretInk: t.ink4, open: open,
+      blocks: blocks.map(b => ({ label: b.label, value: b.value, hasValue: !!b.value, labelFs: z.blockLabel, valueFs: z.mono, labelInk: t.ink4, valueInk: t.ink3 })),
+      hasExpText: !def.runner, expText: s.unmanaged, expTextFs: z.link, expTextInk: t.ink3
+    };
+  }
+
+  frame(o) {
+    const t = this.TH(o.theme !== 'light'), z = this.SC(!!o.big), s = this.STR(o.locale), noop = () => {};
+    const machine = 'Panda · MacBook Pro';
+    const f = {
+      key: o.key, label: o.label, note: o.note || '', w: o.w || '402px', h: o.h || '874px',
+      bg: t.bg, line: t.line, statusInk: t.ink3, backInk: t.acc, backFs: z.back, backChevFs: z.backChev,
+      titleFs: z.title, titleInk: t.ink, sumFs: z.sum, sumInk: t.ink4,
+      hasSum: true, sum: this.fmt(s.connected, machine), noSum: false,
+      isSettings: false, isBridges: false, isPass: false, hasSheet: false, sheet: null,
+      onBack: o.live ? (o.onBack || noop) : noop
+    };
+
+    if (o.mode === 'settings') {
+      f.isSettings = true; f.back = s.backProjects; f.title = s.settings;
+      const appear = o.theme === 'light' ? s.light : s.dark;
+      const genSub = appear + ' · ' + (o.big ? this.fmt(s.textN, 200) : s.textDefault);
+      f.utils = [s.uToken, s.uSched].map((label, i) => ({
+        label: label, minH: z.utilMin, fs: '' + (parseFloat(z.row) + 0.5) + 'px', ink: t.ink, line: t.line,
+        chevInk: t.ink5, chevFs: z.chev, borderTop: i === 0 ? '1px solid ' + t.line : 'none',
+        on: o.live ? (() => this.setState({ route: 'pass', pass: label })) : noop
+      }));
+      f.catLabel = s.catLabel; f.catLabelFs = z.catLabel; f.catLabelInk = t.ink4; f.catSurf = t.surf; f.catRadius = z.catRadius;
+      const defs = [
+        [s.cGeneral, genSub, false], [s.cAgent, s.sAgent, false], [s.cConn, s.sConn, true],
+        [s.cSec, s.sSec, false], [s.cSup, s.sSup, false]
+      ];
+      f.cats = defs.map((d, i) => ({
+        label: d[0], sub: d[1], minH: z.rowSubMin, fs: z.row, subFs: z.sub, ink: t.ink, subInk: t.ink4,
+        border: i === defs.length - 1 ? 'none' : '1px solid ' + t.line, chevInk: t.ink5, chevFs: z.chev,
+        hasBadge: d[2] && o.pending > 0, badge: '' + o.pending, badgeSize: z.badge, badgeFs: z.badgeFs,
+        badgeBg: t.warnBg, badgeBrd: t.warnLine, badgeInk: t.warn, badgeA11y: o.pending + ' ' + s.badgeA11y,
+        on: o.live ? (d[2] ? (() => this.setState({ route: 'bridges' })) : (() => this.setState({ route: 'pass', pass: d[0] }))) : noop
+      }));
+    } else if (o.mode === 'pass') {
+      f.isPass = true; f.back = s.settings; f.title = o.pass; f.hasSum = false; f.noSum = true;
+      f.passBody = s.passBody; f.passFs = z.pass; f.passInk = t.ink3;
+    } else {
+      f.isBridges = true; f.back = s.cConn; f.title = s.bridges;
+      const fx = o.fixture || 'managed';
+      f.cardGap = z.cardGap;
+      f.cards = (this.FIXTURES[fx] || []).map((d, i) => this.card(d, o, t, z, s, o.key, i, noop));
+      f.hasEmpty = fx === 'empty' || fx === 'unavailable';
+      f.emptyT = fx === 'empty' ? s.emptyT : ''; f.emptyB = fx === 'empty' ? s.emptyB : s.unavailB;
+      f.emptyTFs = z.empty; f.emptyTInk = t.ink2; f.emptyBFs = z.emptyB; f.emptyBInk = t.ink4;
+      f.hasBanner = fx === 'error' || fx === 'mergeLost';
+      f.banner = fx === 'error' ? 'bridge list request failed: deadline exceeded after 10s'
+        : this.fmt(s.mergeLost, 'env, workdirs');
+      f.bannerFs = z.banner; f.bannerInk = fx === 'error' ? t.bad : t.warn;
+      f.bannerBg = fx === 'error' ? 'transparent' : t.warnBg; f.bannerLine = fx === 'error' ? t.badLine : t.warnLine;
+      const sheet = o.sheet;
+      if (sheet) {
+        const btn = (label, primary, danger) => ({
+          label: label, on: o.live ? (() => this.setState({ sheet: null })) : noop, minH: z.sheetBtnH, fs: z.sheetBtn,
+          weight: primary ? 600 : 500, bg: primary ? (danger ? t.badSolid : t.acc) : 'transparent',
+          brd: primary ? 'transparent' : t.line2, ink: primary ? (danger ? t.badSolidInk : t.accInk) : t.ink2
+        });
+        f.hasSheet = true;
+        f.sheet = sheet === 'edit' ? {
+          bg: t.sheetBg, line: t.line2, title: s.editT, titleFs: z.sheetTitle, titleInk: t.ink, hasBody: false, body: '', bodyFs: z.sheetBody, bodyInk: t.ink3,
+          rows: [[s.fName, 'ci-adapter'], [s.fProjects, 'cc-pocket · pocket-nightly']].map((r, i) => ({
+            k: r[0], v: r[1], kFs: z.sheetK, vFs: z.sheetV, kInk: t.ink, vInk: t.ink4, line: t.line,
+            borderTop: i === 0 ? '1px solid ' + t.line : 'none'
+          })),
+          actions: [btn(s.cancel, false, false), btn(s.save, true, false)]
+        } : {
+          bg: t.sheetBg, line: t.line2, title: s.revokeT, titleFs: z.sheetTitle, titleInk: t.ink, hasBody: true, body: s.revokeB, bodyFs: z.sheetBody, bodyInk: t.ink3,
+          rows: [], actions: [btn(s.cancel, false, false), btn(s.aRevoke, true, true)]
+        };
+      }
+    }
+    return f;
+  }
+
+  renderVals() {
+    const s = this.state;
+    const chip = (label, on, fn) => ({ label: label, bg: on ? '#1B1A18' : 'transparent', ink: on ? '#FCFBFA' : '#54504A', on: fn });
+    const live = this.frame({
+      key: 'live', live: true, label: 'live prototype · ' + s.route, w: '402px', h: '874px',
+      mode: s.route === 'settings' ? 'settings' : s.route === 'pass' ? 'pass' : 'bridges',
+      pass: s.pass, theme: s.theme, locale: s.locale, big: s.big, pending: s.pending, fixture: s.fixture, sheet: s.sheet,
+      onBack: () => this.setState({ route: s.route === 'bridges' ? 'settings' : 'settings', sheet: null }),
+      note: 'Settings → Connections & collaboration → Bridges → back, with the two utilities and the other four categories opening named passthroughs. Appearance, locale, font scale, pending badge and bridge fixture are the same runtime state the proofs below are pinned to.'
+    });
+
+    const P = [
+      { key: 'p1', mode: 'settings', theme: 'dark', locale: 'en', label: '01 · settings · dark · EN · 402 × 874', note: 'Two bare utility rows on the base, one 设置分类/Categories label, one low container of five category rows. Seven destinations above the fold; 56 and 64 dp rows against a 44 dp floor.' },
+      { key: 'p2', mode: 'settings', theme: 'light', locale: 'zh', w: '390px', h: '844px', label: '02 · settings · light · 中文 · 390 × 844', note: 'Repository titles including their latin words: Token 用量, 定时任务, Agent 与会话默认项. 通用 prints live appearance and text-size state; the header prints 已连接 %s from paired.displayName only.' },
+      { key: 'p3', mode: 'settings', theme: 'dark', locale: 'en', big: true, label: '03 · settings · 200% · fifth category below the fold', note: 'The header holds and the list scrolls, so Support & about is reached by scrolling rather than shortened. Rows grow to 88 dp, every label and subtitle wraps, the badge scales with the type.' },
+      { key: 'p4', mode: 'bridges', theme: 'dark', locale: 'zh', fixture: 'managed', w: '390px', h: '844px', label: '04 · bridges · 中文 · 390 × 844 · running + 可设信任模式', note: '在线 with a running runner and the trust tag; 等待适配器连接 with a stopped runner; 在线 with no runner at all — link state never borrows from runner.running. Access tier prints on all three cards.' },
+      { key: 'p5', mode: 'bridges', theme: 'dark', locale: 'zh', fixture: 'running', w: '320px', h: '720px', label: '05 · bridges · 320 dp stress · whole buttons wrap', note: '280 dp of content: four actions at 96 dp cannot share a line, so the FlowRow wraps two by two. 编辑 stays horizontal, every control keeps 48 dp, nothing shrinks or clips.' },
+      { key: 'p6', mode: 'bridges', theme: 'dark', locale: 'zh', fixture: 'running', big: true, label: '06 · bridges · 200% · 150 / 60 dp minimums', note: 'At fontScale ≥ 1.5 the action minimum widens to 150 dp and the height to 60 dp, so the row wraps two by two at 402 dp. Facts in zone 2 wrap as whole phrases; the chevron target grows to 56 dp.' },
+      { key: 'p7', mode: 'bridges', theme: 'light', locale: 'en', fixture: 'stopped', w: '390px', h: '844px', label: '07 · bridges · managed stopped · light EN', note: 'Stopped runners expose Start, Edit and Revoke — no Stop, no Restart. Both cards are offline links, and UNKNOWN falls back to the Review tier label.' },
+      { key: 'p8', mode: 'bridges', theme: 'light', locale: 'en', fixture: 'unmanaged', w: '390px', h: '844px', label: '08 · bridges · unmanaged · Revoke only', note: 'runner == null: Revoke is the only control, and the expansion carries the projects line plus the existing self-run sentence. No Start, Stop, Restart or Edit anywhere on the card or in a sheet.' },
+      { key: 'p9', mode: 'bridges', theme: 'dark', locale: 'en', fixture: 'diagnostics', label: '09 · bridges · managed diagnostics expanded', note: 'Expanded managed content in its exact labels: Projects, Exited (code 1), Last error, Adapter log. lastError and logTail print verbatim and wrap on characters; no recovery action is offered.' },
+      { key: 'p10', mode: 'bridges', theme: 'light', locale: 'zh', fixture: 'empty', w: '390px', h: '844px', label: '10 · bridges · empty', note: 'The exact empty copy, and no action: bridges are created from the desktop app, so the phone explains rather than pretends to create.' },
+      { key: 'p11', mode: 'bridges', theme: 'dark', locale: 'en', fixture: 'unavailable', w: '390px', h: '844px', label: '11 · bridges · unavailable', note: 'Unavailable is not an error and not an empty list: one sentence about updating the daemon, with no Retry and no list beneath it.' },
+      { key: 'p12', mode: 'bridges', theme: 'dark', locale: 'zh', fixture: 'error', w: '390px', h: '844px', label: '12 · bridges · bridgeError above the cards', note: 'bridgeError prints verbatim in monospace above whatever cards did arrive, which stay fully usable. No Retry, no log action, no invented explanation.' },
+      { key: 'p13', mode: 'bridges', theme: 'dark', locale: 'zh', fixture: 'mergeLost', label: '13 · bridges · bridgeMergeLost warning', note: 'The exact merge-loss template with its cleared-field list substituted, wrapping to as many lines as it needs above the cards. Warning colour, no action.' },
+      { key: 'p14', mode: 'bridges', theme: 'light', locale: 'en', fixture: 'diagnostics', sheet: 'edit', w: '390px', h: '844px', label: '14 · bridges · edit sheet', note: 'The existing edit sheet: name and basename-only projects, Cancel and Save at 48 dp, wrapping as whole buttons. Env values, deviceId and absolute paths never appear.' },
+      { key: 'p15', mode: 'bridges', theme: 'dark', locale: 'zh', fixture: 'running', sheet: 'revoke', w: '390px', h: '844px', label: '15 · bridges · revoke sheet', note: 'Revoke states the consequence and that it cannot be undone. The destructive confirm is the only filled button on the surface; the card beneath keeps its own Revoke visible.' }
+    ].map(p => this.frame(Object.assign({ theme: 'dark', locale: 'en', pending: 3, fixture: 'managed' }, p)));
+
+    return {
+      boardBg: this.props.boardBg ?? '#EDEBE6',
+      showNotes: this.props.showNotes ?? true,
+      frames: [live].concat(P),
+      stateLine: 'route ' + s.route + '\ntheme ' + s.theme + ' · locale ' + s.locale + '\nfontScale ' + (s.big ? '2.0' : '1.0') + '\npending ' + s.pending + ' · fixture ' + s.fixture,
+      controlGroups: [
+        { label: 'route', items: [chip('settings', s.route === 'settings', () => this.setState({ route: 'settings', sheet: null })), chip('bridges', s.route === 'bridges', () => this.setState({ route: 'bridges', sheet: null }))] },
+        { label: 'appearance · locale · type', items: [chip(s.theme, true, () => this.setState({ theme: s.theme === 'dark' ? 'light' : 'dark' })), chip(s.locale === 'en' ? 'EN' : '中文', true, () => this.setState({ locale: s.locale === 'en' ? 'zh' : 'en' })), chip(s.big ? 'text 200%' : 'text 100%', s.big, () => this.setState({ big: !s.big }))] },
+        { label: 'pending reviews', items: [chip('0', s.pending === 0, () => this.setState({ pending: 0 })), chip('3', s.pending === 3, () => this.setState({ pending: 3 })), chip('12', s.pending === 12, () => this.setState({ pending: 12 }))] },
+        { label: 'bridge fixture', items: ['managed', 'stopped', 'unmanaged', 'diagnostics', 'empty', 'unavailable', 'error', 'mergeLost'].map(k => chip(k, s.fixture === k, () => this.setState({ fixture: k, route: 'bridges' }))) },
+        { label: 'sheet', items: [chip('edit', s.sheet === 'edit', () => this.setState({ route: 'bridges', sheet: 'edit' })), chip('revoke', s.sheet === 'revoke', () => this.setState({ route: 'bridges', sheet: 'revoke' })), chip('none', !s.sheet, () => this.setState({ sheet: null }))] }
+      ],
+      fieldMap: [
+        { a: 'Header summary', b: 'paired.displayName · R.string.connected_to', c: 'Rendered only when a paired display name exists. Never link health, status or a count.' },
+        { a: 'Utility rows', b: 'R.string.token_usage · R.string.scheduled_tasks', c: 'Two rows on the base surface, no subtitle, existing destinations unchanged.' },
+        { a: 'Category label', b: 'R.string.settings_categories', c: 'One written group label above the low container.' },
+        { a: 'General summary', b: 'appearanceMode + fontScale (local prefs)', c: 'System / Light / Dark · Default text size, or Text size N% when the scale is not default.' },
+        { a: 'Category subtitles', b: 'R.string.settings_scope_agent / _connections / _security / _support', c: 'Static scope strings, printed as supplied. Nothing derived, counted or inferred.' },
+        { a: 'Pending badge', b: 'reviewsAwaitingResponse', c: 'Beside Connections only when greater than zero, with a spoken label. Never “0”.' },
+        { a: 'Bridge name', b: 'BridgeInfo.name', c: 'Zone 1, monospace, exactly once. Wraps on characters, never truncates.' },
+        { a: 'Access tier', b: 'BridgeInfo.accessTier', c: 'REVIEW or UNKNOWN → Review; COLLABORATE → Collaborate; AUTONOMOUS → Autonomous. Always present.' },
+        { a: 'Link state', b: 'BridgeInfo.pendingTicket, BridgeInfo.online', c: 'pendingTicket wins, then online, then offline. Mark plus written word, always both.' },
+        { a: 'Trust tag', b: 'BridgeInfo.runner.noApproval', c: 'Shown only when true. Means trust modes may be configured, not that approvals are skipped.' },
+        { a: 'Live sessions', b: 'BridgeInfo.activeSessions', c: 'Existing %d live plural string. Hidden at zero.' },
+        { a: 'Runner actions', b: 'BridgeInfo.runner, runner.running', c: 'running → Restart, Stop, Edit. stopped → Start, Edit. null → none. Never affects the link label.' },
+        { a: 'Revoke', b: 'BridgeInfo.deviceId (handle only)', c: 'Visible destructive secondary action on every card. The id itself is never rendered.' },
+        { a: 'Projects', b: 'BridgeInfo.workdirs', c: 'Basenames joined by interpuncts. No absolute or ~/ path reaches the phone.' },
+        { a: 'Exit code', b: 'runner.exitCode', c: 'Exited (code %d), inside the disclosure, only when the daemon reports one.' },
+        { a: 'Last error', b: 'runner.lastError', c: 'Verbatim, monospace, wrapping on characters. No advice appended.' },
+        { a: 'Adapter log', b: 'runner.logTail', c: 'Verbatim tail, monospace. Not a link and not a separate screen.' },
+        { a: 'Unmanaged line', b: 'R.string.bridge_self_run', c: 'The only expanded content for runner == null, beside the projects line.' },
+        { a: 'Empty state', b: 'R.string.bridges_empty_title / _body', c: 'Exact copy, no action — creation happens in the desktop app.' },
+        { a: 'Unavailable state', b: 'R.string.bridges_unavailable', c: 'One sentence, no Retry, no list.' },
+        { a: 'Load failure', b: 'viewModel.bridgeError', c: 'Verbatim warning above the cards. No Retry, no log action.' },
+        { a: 'Merge loss', b: 'viewModel.bridgeMergeLost', c: 'Existing localized template with the cleared-field list substituted. Warning colour, no action.' },
+        { a: 'Sheets', b: 'existing edit / revoke sheet actions', c: 'Same actions and consequences as today. Env values, deviceId, full workdirs and absolute paths are never exposed.' }
+      ],
+      acceptance: [
+        { n: '01', t: '编辑 renders horizontally at 390 dp, 320 dp and 200% — the FlowRow wraps whole buttons, and no action label wraps, shrinks or clips per glyph.' },
+        { n: '02', t: 'The AccessTier badge is present on every collapsed card in every fixture, including empty-runner and failure frames.' },
+        { n: '03', t: 'An unmanaged bridge exposes no Start, Stop, Restart or Edit — on the card, in the disclosure or in a sheet.' },
+        { n: '04', t: 'Link state comes only from pendingTicket and online; runner.running changes which actions appear and nothing else.' },
+        { n: '05', t: 'Workdirs render as basenames only; no absolute path, ~/ path, env value or deviceId appears anywhere.' },
+        { n: '06', t: 'No fabricated control or copy: failures offer no Retry or log action, and empty offers no create action.' },
+        { n: '07', t: 'All two utilities and five categories remain, in order, with the pending badge appearing only above zero.' },
+        { n: '08', t: 'Every consequential control is a labelled, focusable button; the disclosure chevron carries its own accessible label.' }
+      ],
+      audit: [
+        { k: 'overflow', v: 'No horizontal scroll at 320 dp or 200%: identity, facts and actions each wrap in their own zone, and monospace values break on characters.' },
+        { k: 'click targets', v: 'Actions 48 dp (60 dp at 200%); chevron 44 dp (56 dp); utility rows 56 dp; category rows 64 dp; sheet buttons 48 dp. Nothing shrinks to fit.' },
+        { k: 'overlays', v: 'Sheets are anchored to the device bottom, own the full width, and never cover the card they act on beyond its action row. Cancel is always first.' },
+        { k: 'scroll containment', v: 'The header is fixed and only the list scrolls, on both screens. Banners scroll with the list; sheets do not.' },
+        { k: 'contrast', v: 'Light mode uses #1F7A4D, #8A5A08 and #A3311F so online, pending and offline hold their meaning against paper; both themes state status in words as well as colour.' },
+        { k: '200% type', v: 'Nothing is truncated: rows grow, labels wrap, badges scale, action rows re-wrap. The fifth category and lower cards move below the fold rather than being compressed.' }
+      ]
+    };
+  }
+}
+
+</script>
+</body>
+</html>

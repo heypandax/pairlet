@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style data-omelette-injected>html,body{background:transparent}</style><script data-omelette-injected>(()=>{{const n=new URLSearchParams(location.search).get("theme");if(n==="light"||n==="dark"){document.documentElement.dataset.theme=n}}{if(new URLSearchParams(location.search).get("_omthumb")==="1"){const n=(f)=>{const g=f.focus;if(!g)return;f.focus=function(h){g.call(this,{...h,preventScroll:true})}};n(HTMLElement.prototype);n(SVGElement.prototype);if(typeof MathMLElement!=="undefined"){n(MathMLElement.prototype)}const d=(f)=>{f.removeAttribute("autofocus");f.inert=true;if(!(f instanceof HTMLElement))f.removeAttribute("tabindex")};const p=(f)=>{if(f.hasAttribute("autofocus"))d(f);for(const g of f.querySelectorAll("[autofocus]")){d(g)}};p(document.documentElement);new MutationObserver((f)=>{for(const g of f){for(const h of g.addedNodes){if(h.nodeType===1)p(h)}}}).observe(document,{childList:true,subtree:true})}}{const n=()=>{try{if(document.querySelector('meta[name="color-scheme"]'))return;const d=getComputedStyle(document.documentElement).getPropertyValue("color-scheme").trim();if(d&&d!=="normal")return;const p=(y)=>{if(!y)return null;const m=getComputedStyle(y).backgroundColor.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+%?))?\s*\)$/);if(!m)return null;const w=m[4]==null?1:parseFloat(m[4])/(m[4].endsWith("%")?100:1);if(w<0.99)return null;return[+m[1],+m[2],+m[3]]};const f=p(document.body)||p(document.documentElement);if(!f)return;const g=(y)=>{const m=y/255;return m<=0.04045?m/12.92:((m+0.055)/1.055)**2.4};const h=0.2126*g(f[0])+0.7152*g(f[1])+0.0722*g(f[2]);document.documentElement.style.setProperty("color-scheme",h<0.4?"dark":"light")}catch{}};if(document.readyState==="complete")n();else window.addEventListener("load",n)}var I=[];var B=false;var K=false;var C=()=>{};if(K===true){try{const n=setTimeout.bind(window);const d=1e4;const p=15;const f=1e4;const g=120000;const h=200;const y=(o)=>{try{let r;if(typeof o==="string")r=o;else if(o instanceof URL)r=o.href;else if(typeof Request!=="undefined"&&o instanceof Request)r=o.url;else return null;if(!r)return null;const l=document.baseURI;const i=new URL(r,l);if(i.protocol!=="http:"&&i.protocol!=="https:")return null;if(i.origin!==new URL(l).origin)return null;return i.origin+i.pathname}catch{return null}};const m=new Map;const w=(o)=>{let r=m.get(o);if(!r){if(m.size>=h){const l=m.keys().next().value;if(l!==undefined)m.delete(l)}r={fails:[],until:0,cooldown:f,hard:false};m.set(o,r)}return r};const R=(o)=>{const r=m.get(o);return r!==undefined&&r.until>Date.now()};const O=(o,r)=>{const l=Date.now();const i=w(o);if(r)i.hard=true;if(i.until>l)return;i.fails.push(l);while(i.fails.length>0&&i.fails[0]<=l-d)i.fails.shift();if(i.fails.length>=p){i.until=l+i.cooldown;if(i.hard)i.cooldown=Math.min(i.cooldown*2,g);i.fails.length=0;try{n(()=>{try{S(true)}catch{}},i.until-l+100)}catch{}console.warn("[omelette] asset circuit breaker: pausing requests to "+o+" for "+Math.round((i.until-l)/1000)+"s after "+p+" failures in "+d/1000+"s")}};const e=(o)=>{m.delete(o)};const t=100;const a=new WeakMap;const u=new Set;let s=null;const S=(o)=>{for(const r of Array.from(u)){try{const l=a.get(r);if(l===undefined){u.delete(r);continue}if(o){const i=y(l);if(i!==null&&R(i))continue}a.delete(r);u.delete(r);if(s!==null)s.call(r,l)}catch{}}};C=()=>{try{m.clear();S(false)}catch{}};document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")C()});const _=window.fetch;if(typeof _==="function"){const o=function(...r){let l=null;try{l=y(r[0])}catch{}if(l!==null&&R(l)){let c;try{if(r[1]&&r[1].signal!==undefined){c=r[1].signal||undefined}else if(typeof Request!=="undefined"&&r[0]instanceof Request){c=r[0].signal||undefined}}catch{c=undefined}return new Promise((k,b)=>{const E=()=>{try{return c.reason!==undefined?c.reason:new DOMException("The operation was aborted.","AbortError")}catch{return new DOMException("The operation was aborted.","AbortError")}};try{if(c&&c.aborted){b(E());return}}catch{}let T=false;const j=()=>{if(T)return;T=true;b(E())};try{if(c)c.addEventListener("abort",j,{once:true})}catch{}n(()=>{if(T)return;T=true;try{if(c)c.removeEventListener("abort",j)}catch{}let L;try{L=new Response(null,{status:429,statusText:"Too Many Requests",headers:{"Retry-After":"10"}})}catch{L={ok:false,status:429}}k(L)},250)})}const i=_.apply(window,r);if(l!==null){const c=l;i.then((k)=>{try{if(k.ok)e(c);else if(k.status===401||k.status===403||k.status===404||k.status===429){O(c,k.status!==404)}}catch{}},()=>{})}return i};window.fetch=o}const v=Object.getOwnPropertyDescriptor(HTMLImageElement.prototype,"src");if(v!==undefined&&v.set!==undefined&&v.get!==undefined){const o=v.set;s=o;Object.defineProperty(HTMLImageElement.prototype,"src",{configurable:true,enumerable:v.enumerable,get:v.get,set(r){const l=`${r}`;try{const i=y(l);if(i!==null&&R(i)){a.set(this,l);if(u.size<t)u.add(this);return}}catch{}try{a.delete(this);u.delete(this)}catch{}o.call(this,l)}})}try{const o=HTMLImageElement.prototype.setAttribute;HTMLImageElement.prototype.setAttribute=function(r,l){if(arguments.length<2){o.apply(this,arguments);return}if(typeof r==="string"&&r.toLowerCase()==="src"){const i=`${l}`;try{const c=y(i);if(c!==null&&R(c)){a.set(this,i);if(u.size<t)u.add(this);return}a.delete(this);u.delete(this)}catch{}o.call(this,r,i);return}o.call(this,r,l)}}catch{}window.addEventListener("error",(o)=>{try{const r=o.target;if(r instanceof HTMLImageElement){const l=y(r.currentSrc||r.src||"");if(l!==null)O(l,true)}}catch{}},true);window.addEventListener("load",(o)=>{try{const r=o.target;if(r instanceof HTMLImageElement){const l=y(r.currentSrc||r.src||"");if(l!==null)e(l);const i=a.get(r);if(i!==undefined){let c=false;try{c=new URL(i,document.baseURI).href===new URL(r.currentSrc||r.src||"",document.baseURI).href}catch{c=false}if(c){a.delete(r);u.delete(r)}}}}catch{}},true)}catch{}}var J=30000;var G=3000;document.addEventListener("DOMContentLoaded",()=>{const n=window.Babel;const d="om-src-id";if(n&&n.registerPlugin&&!(n.availablePlugins&&n.availablePlugins[d])){n.registerPlugin(d,({types:h})=>({visitor:{JSXOpeningElement(y,m){const w=y.node;if(w.name&&w.name.type==="JSXMemberExpression")return;for(let t=0;t<w.attributes.length;t++){const a=w.attributes[t];if(a.type==="JSXAttribute"&&a.name&&a.name.name==="data-om-id")return}const R=m.file&&m.file.opts&&m.file.opts.filename||"?";const O=w.loc&&w.loc.start;const e=`jsx:${R}:${w.start??0}:${O?O.line:0}:${O?O.column+1:0}`;w.attributes.push(h.jsxAttribute(h.jsxIdentifier("data-om-id"),h.stringLiteral(e)))}}}))}const p="om-text-extract";let f=false;if(B&&n&&n.registerPlugin&&!(n.availablePlugins&&n.availablePlugins[p])){const h=window.React;if(h&&h.useSyncExternalStore&&h.createElement){f=true;const y={};const m=new Set;let w=0;window.__omTextO=y;window.__omTextSet=(e)=>{for(const t in e){const a=e[t];if(a==null)delete y[t];else y[t]=a}w++;m.forEach((t)=>t())};const R=(e)=>{m.add(e);return()=>m.delete(e)};const O=()=>w;window.__OmT=function e(t){h.useSyncExternalStore(R,O,O);return h.createElement("span",{"data-om-text":t.i,className:"__om-t"},t.i in y?y[t.i]:t.children)};n.registerPlugin(p,({types:e})=>{const t={style:1,script:1,noscript:1,textarea:1,title:1,option:1,text:1,tspan:1,textPath:1};const a={placeholder:1,alt:1,title:1,label:1,"aria-label":1,"aria-description":1,"aria-placeholder":1};const u=(o,r)=>e.logicalExpression("??",e.memberExpression(e.logicalExpression("||",e.memberExpression(e.identifier("window"),e.identifier("__omTextO")),e.objectExpression([])),e.stringLiteral(o),true),r);const s=(o)=>o.file&&o.file.opts&&o.file.opts.filename||"?";const S=(o)=>o.file&&o.file.code||"";const _=(o,r)=>{const l=(c)=>c&&c.start!=null&&c.end!=null&&(c.type==="StringLiteral"||c.type==="TemplateLiteral"&&c.expressions.length===0)?[c.start,c.end]:null;const i=l(r);if(i)return i;if(r&&r.type==="Identifier"){const c=o.scope.getBinding(r.name);if(c&&c.constant&&c.path.node.type==="VariableDeclarator"){return l(c.path.node.init)}}return null};const v=(o,r,l)=>{const i=o.node;let c=false;const k=(E,T)=>{c=true;return e.jsxElement(e.jsxOpeningElement(e.jsxIdentifier("__OmT"),[e.jsxAttribute(e.jsxIdentifier("i"),e.stringLiteral(E))],false),e.jsxClosingElement(e.jsxIdentifier("__OmT")),[T],false)};const b=i.children.map((E)=>{if(E.type==="JSXText"){if(E.start==null||E.end==null)return E;const T=l.slice(E.start,E.end);const j=T.length-T.trimStart().length;const L=T.length-T.trimEnd().length;if(j+L>=T.length)return E;return k(`txt:${r}:${E.start+j}:${E.end-L}`,E)}if(E.type==="JSXExpressionContainer"){const T=_(o,E.expression);if(T)return k(`str:${r}:${T[0]}:${T[1]}`,E)}return E});if(c)i.children=b};return{visitor:{JSXOpeningElement(o,r){const l=o.node;const i=s(r);const c={};for(let k=0;k<l.attributes.length;k++){const b=l.attributes[k];if(b.type!=="JSXAttribute"||!b.name)continue;const E=b.name.name;if(!a[E])continue;if(!b.value||b.value.type!=="StringLiteral")continue;if(b.value.start==null||b.value.end==null)continue;const T=`txt:${i}:${b.value.start}:${b.value.end}`;c[E]=T;b.value=e.jsxExpressionContainer(u(T,e.stringLiteral(b.value.value)))}if(Object.keys(c).length){l.attributes.push(e.jsxAttribute(e.jsxIdentifier("data-om-text-attrs"),e.stringLiteral(JSON.stringify(c))))}},JSXElement(o,r){const l=o.node.openingElement;const i=l&&l.name&&l.name.name;if(i==="__OmT")return;if(typeof i==="string"&&t[i])return;v(o,s(r),S(r))},JSXFragment(o,r){v(o,s(r),S(r))}}}})}}const g=f?["transform-react-jsx-source",d,p]:["transform-react-jsx-source",d];document.querySelectorAll('script[type="text/babel"],script[type="text/jsx"]').forEach((h,y)=>{const m=h.getAttribute("data-plugins")||"";const w=g.filter((R)=>m.indexOf(R)<0);if(w.length){h.setAttribute("data-plugins",m?`${m},${w.join(",")}`:w.join(","))}if(!h.hasAttribute("data-filename")){h.setAttribute("data-filename",h.getAttribute("src")||`inline-${y}`)}})});var A=window.parent;var U="not editable here — open the project in the Claude Design editor to save";var W=()=>Promise.resolve({persisted:false,noHost:true,reason:U});var H=W;var M="data/storage.json";var z=()=>{try{const n=new URL(document.baseURI);const d=n.pathname.match(/\/projects\/([^/]+)\/serve\//);if(d)return d[1];return n.hostname.split(".")[0]||""}catch{return location.hostname.split(".")[0]||""}};var Z=()=>{try{const n=new URL(document.baseURI);const d=n.pathname.indexOf("/serve/");if(d>=0)return n.origin+n.pathname.slice(0,d+"/serve/".length)+M}catch{}return"./"+M};var x=null;var N=()=>{if(!x){x=fetch(Z(),{cache:"no-store"}).then((n)=>{if(n.ok)return n.text();return n.status===404?"":null}).catch(()=>null).then((n)=>{if(n===null){x=null;return null}const d=new Map;if(!n)return d;let p;try{p=JSON.parse(n)}catch{console.warn("[omelette.storage] "+M+" is not valid JSON; treating the store as unreadable so a save cannot overwrite the "+"hand-edited bytes. Fix the JSON (or delete the file) to re-enable persistence.");x=null;return null}if(p===null||typeof p!=="object"||Array.isArray(p)){console.warn("[omelette.storage] "+M+" doesn't hold a JSON object; treating the store as unreadable so a save cannot "+"overwrite the hand-edited bytes. Make the top level a JSON object to re-enable persistence.");x=null;return null}const f=p;if("data"in f){const g=f.data;if(g===null||typeof g!=="object"||Array.isArray(g)){console.warn("[omelette.storage] "+M+' has a "data" field that is not a JSON object; treating the store as unreadable so a '+'save cannot overwrite the hand-edited bytes. Make "data" a JSON object to re-enable persistence.');x=null;return null}const h=f._meta;const y=h!==null&&typeof h==="object"?h.project:undefined;if(typeof y==="string"&&y!==""&&y!==z())return d;for(const m of Object.keys(g))d.set(m,g[m]);return d}for(const g of Object.keys(f)){if(g!=="_meta")d.set(g,f[g])}return d})}return x};var F=(n)=>H(M,JSON.stringify({_meta:{project:z(),version:1},data:Object.fromEntries(n)},null,2));var D=Promise.resolve();var $=(n)=>{const d=D.then(n);D=d.then(()=>{return},()=>{return});return d};var V=/sk-(?:ant-)?[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|xox[a-z]-[A-Za-z0-9][A-Za-z0-9-]{9,}|AIza[0-9A-Za-z_-]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/;var Y=/password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token|credential/i;var Q=(n,d,p)=>{if(V.test(d)||Y.test(n)&&typeof p==="string"&&p.length>=8){console.warn('[omelette.storage] the value for "'+n+'" looks like a credential. The storage file is a plaintext project file — visible to '+"everyone with project access and copied when the project is duplicated. Do not store secrets here.")}};var q={persisted:false,reason:"could not load the existing store — not overwriting it"};var X={persisted:false,reason:"stored value changed since a failed read — re-read this key before saving"};var P=new Set;var ee={get:(n)=>{if(typeof n!=="string"){return Promise.reject(new TypeError("storage.get: key must be a string"))}return $(N).then((d)=>{if(d===null){P.add(n);return null}P.delete(n);if(!d.has(n))return null;const p=d.get(n);return p==null?null:JSON.parse(JSON.stringify(p))})},set:(n,d)=>{if(typeof n!=="string"){return Promise.reject(new TypeError("storage.set: key must be a string"))}let p;try{p=JSON.stringify(d)}catch(g){return Promise.reject(new TypeError("storage.set: value must be JSON-serializable ("+String(g)+")"))}if(p===undefined){return Promise.reject(new TypeError("storage.set: value must be JSON-serializable"))}Q(n,p,d);const f=JSON.parse(p);return $(()=>N().then((g)=>{if(g===null)return q;if(P.has(n)){if(g.has(n))return X;P.delete(n)}g.set(n,f);return F(g)}))},delete:(n)=>{if(typeof n!=="string"){return Promise.reject(new TypeError("storage.delete: key must be a string"))}return $(()=>N().then((d)=>{if(d===null)return q;if(P.has(n)){if(d.has(n))return X;P.delete(n)}d.delete(n);return F(d)}))},keys:()=>$(N).then((n)=>n===null?[]:Array.from(n.keys()))};window.omelette={writeFile:(n,d)=>H(n,d).then((p)=>{if(!p.persisted&&!p.noHost){throw new Error(p.reason||"write failed")}}),storage:ee};if(A&&A!==window){const n=(e,t)=>{try{A.postMessage({__omelette_log:true,type:e,data:t},"*")}catch{}};["log","warn","error"].forEach((e)=>{const t=console[e];console[e]=(...a)=>{const u=a.map((s)=>{try{return typeof s==="object"?JSON.stringify(s):String(s)}catch{try{return String(s)}catch{return"[unstringifiable]"}}}).join(" ");n(e,u);t.apply(console,a)}});window.addEventListener("error",(e)=>{const t=e.target;if(t&&t!==window&&t.tagName){const a=t.src||t.href||"";n("resource_error",`${t.tagName} failed to load: ${a}`)}else{n("error",`${e.message||"Unknown error"} at ${e.filename||"?"}:${e.lineno||0}:${e.colno||0}`)}},true);window.addEventListener("unhandledrejection",(e)=>{const t=e.reason;const a=t instanceof Error?`${t.message} ${t.stack}`:String(t);n("error",`Unhandled rejection: ${a}`)});window.addEventListener("click",(e)=>{if(e.defaultPrevented||e.button!==0)return;if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;const t=e.composedPath?e.composedPath():[];const a=["button","input","select","textarea","summary","label"];let u=null;for(const v of t){if(!(v instanceof Element))continue;if(v.localName==="a"){if(!(v instanceof HTMLAnchorElement))return;u=v;break}if(a.indexOf(v.localName)!==-1)return}if(!u)return;if(u.isContentEditable)return;const s=u.closest("[contenteditable]");if(s&&s.getAttribute("contenteditable")!=="false")return;const S=(u.getAttribute("target")||"_self").toLowerCase();if(S!=="_self"&&S!=="_top"&&S!=="_parent")return;let _;try{_=new URL(u.href)}catch{return}if(_.protocol!=="http:"&&_.protocol!=="https:")return;if(location.origin==="null")return;if(_.origin===location.origin)return;e.preventDefault();window.open(_.href,"_blank","noopener,noreferrer")});const d=()=>{try{A.postMessage({type:"omelette:height",height:document.documentElement.scrollHeight},"*")}catch{}};if(window.ResizeObserver)new ResizeObserver(d).observe(document.documentElement);const p=()=>{d();if(!document.querySelector('script[type="text/babel"],script[type="text/jsx"]'))return;const e=()=>document.getElementById("root")||document.querySelector("body > div[id]");const t=e()?.firstElementChild??null;let a=0;const u=()=>{const s=e();if(s&&s.firstElementChild!==t||++a>30){d();return}setTimeout(u,100)};setTimeout(u,100)};if(document.readyState==="complete")p();else window.addEventListener("load",p);const f={};let g=0;const h=(e)=>new Promise((t,a)=>{if(!I.length){a(new Error("claude.complete: no parent origin"));return}const u=`c${++g}`;const s=()=>setTimeout(()=>{delete f[u];a(new Error(`claude.complete: no data for ${J/1000}s`))},J);const S=s();f[u]={resolve:t,reject:a,text:"",t:S,arm:s};try{for(const _ of I){A.postMessage({__om_api:true,id:u,body:e},_)}}catch(_){clearTimeout(S);delete f[u];a(_)}});const y=8;const m=async(e,t)=>{if(!Array.isArray(e.messages)){throw new Error("claude.complete: tools require a messages array")}const a=e.messages.slice();const u={...e,tools:e.tools.map((_)=>{if(_===null||typeof _!=="object")return _;const v={};for(const o of Object.keys(_)){if(typeof _[o]!=="function")v[o]=_[o]}return v})};const s=u.tool_choice;const S=s!=null&&(s.type==="any"||s.type==="tool")?{...u,tool_choice:s.disable_parallel_tool_use!==undefined?{type:"auto",disable_parallel_tool_use:s.disable_parallel_tool_use}:{type:"auto"}}:u;for(let _=0;_<y;_++){const v=await h({..._===0?u:S,messages:a});const o=v.message;const r=o&&Array.isArray(o.content)?o.content:null;const l=r?r.filter((c)=>c?.type==="tool_use"):[];if(o?.stop_reason!=="tool_use"||l.length===0){return v.text}const i=[];for(const c of l){const k=t.get(c.name);if(!k){i.push({type:"tool_result",tool_use_id:c.id,content:`no handler for tool "${c.name}"`,is_error:true});continue}try{const b=await k(c.input);const E=typeof b==="string"?b:O(b)??"";i.push({type:"tool_result",tool_use_id:c.id,content:E})}catch(b){i.push({type:"tool_result",tool_use_id:c.id,content:String(b?.message??b??"tool handler failed"),is_error:true})}}a.push({role:"assistant",content:r},{role:"user",content:i})}throw new Error(`claude.complete: exceeded ${y} tool turns`)};window.claude={complete(e){const t=e;if(t!==null&&typeof t==="object"&&Array.isArray(t.tools)&&t.tools.some((a)=>a!==null&&typeof a==="object"&&typeof a.run==="function")){const a=new Map;for(const u of t.tools){if(u!==null&&typeof u==="object"&&typeof u.run==="function"){a.set(String(u.name),u.run)}}return m(t,a)}return h(e).then((a)=>a.text)}};const w={};let R=0;H=(e,t)=>new Promise((a)=>{if(!I.length){a({persisted:false,noHost:true,reason:U});return}const u=`f${++R}`;const s=setTimeout(()=>{delete w[u];a({persisted:false,noHost:true,reason:U})},G);w[u]={settle:a,t:s};try{for(const S of I){A.postMessage({__om_file:true,id:u,op:"write",path:e,content:t},S)}}catch{clearTimeout(s);delete w[u];a({persisted:false,noHost:true,reason:U})}});const O=(e)=>{try{return JSON.stringify(e)}catch{return JSON.stringify(String(e))}};window.addEventListener("message",(e)=>{if(I.indexOf(e.origin)<0)return;if(e.source!==A)return;const t=e.data;if(!t)return;if(t.type==="omelette-preview-refresh"){if(typeof t.token!=="string"||!/^[0-9a-f.-]+(\.(rc|pr-[0-9]+))?(\.[0-9]+\.[0-9a-f]{16})?$/.test(t.token))return;const s=Math.max(1,Math.floor((t.expiresAt||0)-Date.now()/1000));document.cookie="__Host-omelette-preview="+t.token+"; Path=/; Secure; SameSite=None; Partitioned; Max-Age="+s;C();return}if(t.__om_file_r){const s=w[t.id];if(!s)return;clearTimeout(s.t);delete w[t.id];s.settle(t.ok?{persisted:true}:{persisted:false,reason:t.error||"write failed"});return}if(t.__om_api_r){const s=f[t.id];if(!s)return;if(t.error!=null){clearTimeout(s.t);delete f[t.id];s.reject(new Error(t.error));return}if(t.chunk!=null){clearTimeout(s.t);s.t=s.arm();s.text+=t.chunk;return}if(t.done){clearTimeout(s.t);delete f[t.id];s.resolve({text:t.text!=null?t.text:s.text,message:t.message});return}return}if(!t.__om_eval)return;const a=t;const u=(s)=>{e.source.postMessage({...s,__om_eval_r:1,id:a.id},e.origin)};try{const s=(0,eval)(a.code);if(s&&typeof s.then==="function"){s.then((S)=>u({ok:1,v:O(S)}),(S)=>u({ok:0,e:String(S)}))}else{u({ok:1,v:O(s)})}}catch(s){u({ok:0,e:String(s)})}})}})();
+</script>
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div data-screen-label="{{ label }}" style="width:390px;height:844px;flex:none;position:relative;overflow:hidden;border-radius:16px;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5);display:flex;flex-direction:column">
+
+  <div style="height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 20px">
+    <span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span>
+    <span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #F3F3F4;border-radius:2px;opacity:.65"></span><span style="width:22px;height:10px;border:1.3px solid #F3F3F4;border-radius:3px;opacity:.65"></span></span>
+  </div>
+
+  <sc-if value="{{ isChat }}" hint-placeholder-val="{{ true }}">
+
+    <div style="flex:none;display:flex;align-items:flex-start;gap:6px;padding:0 20px 8px">
+      <span role="button" tabIndex="0" aria-label="Back" style="width:48px;height:48px;margin-left:-13px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+        <span aria-hidden="true" style="width:10px;height:10px;border-left:1.7px solid #E6E6E9;border-bottom:1.7px solid #E6E6E9;transform:rotate(45deg);margin-left:3px;display:block"></span>
+      </span>
+      <span style="flex:1;min-width:0;font-weight:600;font-size:17px;line-height:1.25;letter-spacing:-.01em;padding-top:13px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-wrap:pretty">{{ title }}</span>
+      <span role="button" tabIndex="0" aria-label="Quick actions" style="width:48px;height:48px;margin-right:-12px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;font-weight:500;font-size:21px;line-height:1;color:#B4B5BC">⋯</span>
+    </div>
+
+    <sc-if value="{{ hasLineage }}" hint-placeholder-val="{{ false }}">
+      <div role="button" tabIndex="0" aria-label="{{ lineageAria }}" style="flex:none;min-height:44px;display:flex;align-items:center;gap:9px;padding:2px 20px 8px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.14)">
+        <span aria-hidden="true" style="font:500 13px/1 'JetBrains Mono',monospace;color:#8C8D95;flex:none">⑂</span>
+        <span style="flex:1;min-width:0;font-size:13px;line-height:1.45;color:#8C8D95;text-wrap:pretty">{{ lineagePrefix }} <span style="color:#E2795A;font-weight:500">{{ lineageTitle }}</span> · turn 3</span>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ hasCtxRow }}" hint-placeholder-val="{{ true }}">
+      <div role="button" tabIndex="0" aria-expanded="false" aria-label="Show session context" style="flex:none;min-height:48px;display:flex;align-items:center;gap:10px;padding:2px 20px 10px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.14)">
+        <span style="flex:1;min-width:0;font-size:13px;line-height:1.45;color:#8C8D95;text-wrap:pretty">Claude · Ask every time · fable · MacBook-Pro · cc-pocket</span>
+        <span aria-hidden="true" style="width:9px;height:9px;margin-right:3px;border-right:1.6px solid #6E6E76;border-bottom:1.6px solid #6E6E76;transform:rotate(45deg) translate(-2px,-2px);flex:none;display:block"></span>
+      </div>
+    </sc-if>
+
+    <div style="flex:none;padding:14px 20px 0">
+      <sc-for list="{{ turns }}" as="turn" hint-placeholder-count="2">
+        <div style="padding-bottom:18px">
+          <sc-if value="{{ turn.isUser }}" hint-placeholder-val="{{ false }}">
+            <div>
+              <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.13em;color:#6E6E76;text-align:right">YOU</div>
+              <div style="margin-top:7px;font-size:15px;line-height:1.5;color:#E6E6E9;text-wrap:pretty">{{ turn.body }}</div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ turn.isAgent }}" hint-placeholder-val="{{ true }}">
+            <div>
+              <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.13em;color:#6E6E76">CLAUDE</div>
+              <div style="margin-top:7px;font-size:15px;line-height:1.55;color:#E6E6E9;text-wrap:pretty">{{ turn.body }}</div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ turn.isTool }}" hint-placeholder-val="{{ false }}">
+            <div style="border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14);padding:10px 0">
+              <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.13em;color:#6E6E76">TOOL · bash</div>
+              <div style="margin-top:7px;font:400 12.5px/1.55 'JetBrains Mono',monospace;color:#B4B5BC;word-break:break-word">{{ turn.body }}</div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+
+    <sc-if value="{{ showAnchor }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:none;position:relative;z-index:6;padding:0 20px">
+        <div style="border-radius:13px;background:#17171B;border:1px solid rgba(255,255,255,.16);padding:12px 14px;box-shadow:0 18px 40px -18px rgba(0,0,0,.75)">
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.13em;color:#8C8D95;text-align:right">YOU · TURN 3</div>
+          <div style="margin-top:7px;font-size:15px;line-height:1.5;color:#F3F3F4;text-wrap:pretty">{{ anchorBody }}</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showMenu }}" hint-placeholder-val="{{ false }}">
+      <div role="menu" aria-label="Message actions" style="flex:none;position:relative;z-index:6;padding:10px 20px 0;display:flex;justify-content:flex-end">
+        <div style="width:302px;border-radius:14px;background:#17171B;border:1px solid rgba(255,255,255,.16);overflow:hidden;box-shadow:0 22px 44px -18px rgba(0,0,0,.8)">
+          <div role="menuitem" tabIndex="0" style="min-height:48px;display:flex;align-items:center;gap:12px;padding:0 15px;cursor:pointer">
+            <span aria-hidden="true" style="width:18px;flex:none;font:500 13px/1 'JetBrains Mono',monospace;color:#B4B5BC">⧉</span>
+            <span style="flex:1;font-weight:500;font-size:15px;line-height:1.3;color:#E6E6E9">Copy</span>
+          </div>
+          <sc-for list="{{ menuItems }}" as="m" hint-placeholder-count="2">
+            <div role="menuitem" tabIndex="0" aria-disabled="{{ m.disabledAria }}" style="min-height:60px;display:flex;align-items:flex-start;gap:12px;padding:11px 15px;border-top:1px solid rgba(255,255,255,.14);cursor:pointer">
+              <span aria-hidden="true" style="width:18px;flex:none;font:500 14px/1.35 'JetBrains Mono',monospace;color:{{ m.glyphInk }}">{{ m.glyph }}</span>
+              <span style="flex:1;min-width:0">
+                <span style="display:block;font-weight:500;font-size:15px;line-height:1.3;color:{{ m.labelInk }}">{{ m.label }}</span>
+                <span style="display:block;margin-top:4px;font-size:13px;line-height:1.4;color:{{ m.capInk }};text-wrap:pretty">{{ m.caption }}</span>
+              </span>
+            </div>
+          </sc-for>
+          <sc-if value="{{ menuDisabled }}" hint-placeholder-val="{{ false }}">
+            <div style="min-height:44px;display:flex;align-items:center;gap:9px;padding:10px 15px;border-top:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.04)">
+              <span aria-hidden="true" style="width:7px;height:7px;border-radius:50%;background:#B4B5BC;flex:none"></span>
+              <span style="flex:1;font-size:13px;line-height:1.4;color:#8C8D95">Stop the current turn first</span>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <div style="flex:1;min-height:0"></div>
+
+    <sc-if value="{{ showToast }}" hint-placeholder-val="{{ false }}">
+      <div role="status" style="flex:none;position:relative;z-index:6;margin:0 20px 10px;border-radius:12px;background:#17171B;border:1px solid rgba(233,116,98,.38);padding:12px 14px;display:flex;align-items:flex-start;gap:10px;box-shadow:0 18px 36px -20px rgba(0,0,0,.8)">
+        <span aria-hidden="true" style="width:7px;height:7px;border-radius:50%;background:#E97462;margin-top:5px;flex:none"></span>
+        <span style="flex:1;font-size:13.5px;line-height:1.45;color:#E6E6E9;text-wrap:pretty">The transcript changed — reload and try again.</span>
+      </div>
+    </sc-if>
+
+    <div style="flex:none;border-top:1px solid rgba(255,255,255,.14);padding:12px 20px 0">
+      <div role="textbox" aria-multiline="true" aria-label="Message field" tabIndex="0" style="width:100%;min-height:46px;border-radius:14px;background:#141417;border:1px solid {{ fieldLine }};padding:12px 14px;display:flex;align-items:flex-start">
+        <sc-if value="{{ prefilled }}" hint-placeholder-val="{{ false }}">
+          <span style="font-size:15px;line-height:1.45;text-wrap:pretty"><span style="background:rgba(226,121,90,.30);color:#F3F3F4;padding:1px 2px;border-radius:2px">{{ anchorBody }}</span><span aria-hidden="true" style="display:inline-block;width:2px;height:17px;background:#E2795A;vertical-align:-3px;margin-left:1px"></span></span>
+        </sc-if>
+        <sc-if value="{{ emptyField }}" hint-placeholder-val="{{ true }}">
+          <span style="font-size:15px;line-height:1.45;color:#6E6E76">Message Claude…</span>
+        </sc-if>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;min-height:48px;margin-top:4px">
+        <span role="button" tabIndex="0" aria-label="Add attachment" style="width:48px;height:48px;margin-left:-9px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;font-weight:300;font-size:26px;line-height:1;color:#B4B5BC">+</span>
+        <span role="button" tabIndex="0" aria-label="Model, fable" style="min-height:30px;padding:0 11px;border-radius:9px;border:1px solid rgba(255,255,255,.14);display:flex;align-items:center;flex:none;cursor:pointer;font:500 11.5px/1 'JetBrains Mono',monospace;color:#B4B5BC">fable</span>
+        <span role="button" tabIndex="0" aria-label="Context used, 34%" style="min-height:30px;padding:0 11px;border-radius:9px;border:1px solid rgba(255,255,255,.14);display:flex;align-items:center;gap:7px;flex:none;cursor:pointer">
+          <span aria-hidden="true" style="width:26px;height:4px;border-radius:2px;background:rgba(255,255,255,.26);position:relative;overflow:hidden;display:block;flex:none"><span style="position:absolute;left:0;top:0;bottom:0;width:34%;background:#8C8D95;display:block"></span></span>
+          <span style="font:500 11.5px/1 'JetBrains Mono',monospace;color:#B4B5BC">34%</span>
+        </span>
+        <span style="flex:1"></span>
+        <sc-if value="{{ actMic }}" hint-placeholder-val="{{ true }}">
+          <span role="button" tabIndex="0" aria-label="Record voice message" style="width:48px;height:48px;margin-right:-6px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+            <span aria-hidden="true" style="width:12px;height:19px;border-radius:6px;border:1.6px solid #B4B5BC;display:block"></span>
+          </span>
+        </sc-if>
+        <sc-if value="{{ actStop }}" hint-placeholder-val="{{ false }}">
+          <span role="button" tabIndex="0" aria-label="Stop" style="min-width:48px;height:48px;padding:0 14px;border-radius:12px;border:1px solid rgba(255,255,255,.26);display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;font-weight:600;font-size:13px;line-height:1;color:#E6E6E9">Stop</span>
+        </sc-if>
+        <sc-if value="{{ actSend }}" hint-placeholder-val="{{ false }}">
+          <span role="button" tabIndex="0" aria-label="Send" style="min-width:48px;height:48px;padding:0 16px;border-radius:12px;background:#D97757;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;font-weight:600;font-size:13px;line-height:1;color:#160C07">Send</span>
+        </sc-if>
+      </div>
+      <div style="height:26px;display:flex;justify-content:center;align-items:flex-end;padding-bottom:8px"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.26"></span></div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isList }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:none;padding:8px 24px 0">
+      <h1 style="margin:0;font-weight:600;font-size:30px;line-height:1.1;letter-spacing:-.025em">Sessions</h1>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:11px">
+        <span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:#5CB582;flex:none"></span>
+        <span style="font-size:14px;line-height:1.3;color:#B4B5BC">Panda · MacBook-Pro · online</span>
+      </div>
+      <div style="margin-top:6px;font:400 12.5px/1.4 'JetBrains Mono',monospace;color:#8C8D95;letter-spacing:-.01em">cc-pocket · relay/replay</div>
+    </div>
+
+    <div style="flex:1;min-height:0;overflow:hidden;margin-top:14px">
+      <div>
+        <sc-for list="{{ groups }}" as="g" hint-placeholder-count="2">
+          <div>
+            <div style="padding:0 24px 10px;font-weight:500;font-size:11px;line-height:1;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">{{ g.label }}</div>
+            <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="2">
+              <div role="button" tabIndex="0" style="padding:14px 24px 16px;border-top:1px solid rgba(255,255,255,.14);display:flex;align-items:flex-start;gap:11px;cursor:pointer">
+                <span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:{{ r.dotFill }};border:1.5px solid {{ r.dotLine }};margin-top:6px;flex:none"></span>
+                <span style="flex:1;min-width:0">
+                  <span style="display:block;font-weight:{{ r.weight }};font-size:17px;line-height:1.3;letter-spacing:-.01em;color:{{ r.titleInk }};text-wrap:pretty">{{ r.title }}</span>
+                  <sc-if value="{{ r.hasBody }}" hint-placeholder-val="{{ true }}">
+                    <span style="display:block;margin-top:5px;font-size:15px;line-height:1.45;color:#8C8D95;text-wrap:pretty">{{ r.body }}</span>
+                  </sc-if>
+                  <sc-if value="{{ r.hasCaption }}" hint-placeholder-val="{{ false }}">
+                    <span style="display:flex;align-items:baseline;gap:7px;margin-top:7px">
+                      <span aria-hidden="true" style="font:500 12px/1.4 'JetBrains Mono',monospace;color:{{ r.capInk }};flex:none">{{ r.capGlyph }}</span>
+                      <span style="flex:1;min-width:0;font-size:13px;line-height:1.4;color:{{ r.capInk }};text-wrap:pretty">{{ r.caption }}</span>
+                    </span>
+                  </sc-if>
+                  <span style="display:block;margin-top:8px;font:400 12.5px/1.4 'JetBrains Mono',monospace;color:#8C8D95;letter-spacing:-.01em">{{ r.meta }}</span>
+                </span>
+                <sc-if value="{{ r.chev }}" hint-placeholder-val="{{ false }}">
+                  <span aria-hidden="true" style="width:8px;height:8px;margin:8px 3px 0 0;border-right:1.5px solid #6E6E76;border-top:1.5px solid #6E6E76;transform:rotate(45deg);flex:none;display:block"></span>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+
+        <div role="button" tabIndex="0" aria-expanded="{{ groupOpenAria }}" aria-label="Rewound sessions, 2" style="min-height:52px;margin-top:8px;border-top:1px solid rgba(255,255,255,.14);display:flex;align-items:center;gap:11px;padding:0 24px;cursor:pointer">
+          <span aria-hidden="true" style="font:400 11px/1 'JetBrains Mono',monospace;color:#6E6E76;flex:none">{{ groupGlyph }}</span>
+          <span style="flex:1;font-size:14.5px;line-height:1.3;color:#8C8D95">Rewound sessions (2)</span>
+        </div>
+
+        <sc-if value="{{ groupOpen }}" hint-placeholder-val="{{ false }}">
+          <sc-for list="{{ rewoundRows }}" as="r" hint-placeholder-count="2">
+            <div role="button" tabIndex="0" style="padding:13px 24px 15px;border-top:1px solid rgba(255,255,255,.14);display:flex;align-items:flex-start;gap:11px;cursor:pointer">
+              <span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;border:1.5px solid #6E6E76;margin-top:6px;flex:none"></span>
+              <span style="flex:1;min-width:0">
+                <span style="display:block;font-weight:500;font-size:17px;line-height:1.3;letter-spacing:-.01em;color:#B4B5BC;text-wrap:pretty">{{ r.title }}</span>
+                <span style="display:flex;align-items:baseline;gap:7px;margin-top:7px">
+                  <span aria-hidden="true" style="font:500 12px/1.4 'JetBrains Mono',monospace;color:#8C8D95;flex:none">↩</span>
+                  <span style="flex:1;min-width:0;font-size:13px;line-height:1.4;color:#8C8D95;text-wrap:pretty">{{ r.caption }}</span>
+                </span>
+              </span>
+              <span aria-hidden="true" style="width:8px;height:8px;margin:8px 3px 0 0;border-right:1.5px solid #6E6E76;border-top:1.5px solid #6E6E76;transform:rotate(45deg);flex:none;display:block"></span>
+            </div>
+          </sc-for>
+        </sc-if>
+      </div>
+    </div>
+
+    <div style="flex:none;padding:12px 24px 0;border-top:1px solid rgba(255,255,255,.14)">
+      <div role="button" tabIndex="0" style="height:52px;border-radius:13px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;font-weight:600;font-size:17px;line-height:1;letter-spacing:-.01em;color:#F3F3F4"><span aria-hidden="true" style="font-weight:300;font-size:21px;line-height:1;margin-top:-2px">+</span>New session</div>
+    </div>
+    <div style="height:26px;flex:none;display:flex;justify-content:center;align-items:flex-start"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.26"></span></div>
+  </sc-if>
+
+  <sc-if value="{{ showScrim }}" hint-placeholder-val="{{ false }}">
+    <div aria-hidden="true" style="position:absolute;inset:0;z-index:5;background:rgba(0,0,0,.66)"></div>
+  </sc-if>
+
+  <sc-if value="{{ showSheet }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-label="{{ sheetTitle }}" style="position:absolute;left:0;right:0;bottom:0;z-index:7;background:#17171B;border-top:1px solid rgba(255,255,255,.16);border-radius:20px 20px 0 0;display:flex;flex-direction:column">
+      <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><span style="width:38px;height:4px;border-radius:2px;background:#6E6E76;opacity:.7"></span></div>
+      <div style="padding:6px 20px 0">
+        <div style="font-weight:600;font-size:21px;line-height:1.2;letter-spacing:-.015em;color:#F3F3F4;text-wrap:pretty">{{ sheetTitle }}</div>
+
+        <div style="margin-top:14px;border-radius:13px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.12);padding:13px 15px 15px">
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8C8D95">Will drop</div>
+          <div style="display:flex;align-items:baseline;gap:16px;margin-top:11px">
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <span style="font-weight:600;font-size:30px;line-height:1;letter-spacing:-.02em;color:#F3F3F4">4</span>
+              <span style="font-size:14.5px;line-height:1;color:#B4B5BC">turns</span>
+            </div>
+            <span aria-hidden="true" style="width:1px;height:20px;background:rgba(255,255,255,.20);flex:none"></span>
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <span style="font-weight:600;font-size:30px;line-height:1;letter-spacing:-.02em;color:#F3F3F4">11</span>
+              <span style="font-size:14.5px;line-height:1;color:#B4B5BC">tool calls</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px;border-radius:13px;background:rgba(233,116,98,.10);border:1px solid rgba(233,116,98,.34);padding:13px 14px;display:flex;align-items:flex-start;gap:11px">
+          <span aria-hidden="true" style="font:500 15px/1.4 'JetBrains Mono',monospace;color:#F0A08F;flex:none;display:block">▤</span>
+          <span style="flex:1;min-width:0;font-size:14px;line-height:1.5;color:#E6E6E9;text-wrap:pretty"><span style="font-weight:600;color:#F0A08F">Files are NOT rolled back</span> — only the conversation rewinds. <span role="button" tabIndex="0" style="color:#E2795A;font-weight:500;cursor:pointer">Check the Git tab for file state.</span></span>
+        </div>
+
+        <div style="margin-top:12px;min-height:52px;border-top:1px solid rgba(255,255,255,.14);display:flex;align-items:center;gap:11px;padding-top:2px">
+          <span aria-hidden="true" style="font:500 14px/1 'JetBrains Mono',monospace;color:#8C8D95;flex:none;width:16px">{{ modeGlyph }}</span>
+          <span style="flex:1;min-width:0;font-size:14.5px;line-height:1.45;color:#B4B5BC;text-wrap:pretty">{{ modeText }}</span>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:10px;margin-top:6px">
+          <span role="button" tabIndex="0" style="height:52px;border-radius:13px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;cursor:pointer;font-weight:500;font-size:16.5px;line-height:1;color:#E6E6E9">Cancel</span>
+          <span role="button" tabIndex="0" style="height:52px;border-radius:13px;background:#D97757;display:flex;align-items:center;justify-content:center;cursor:pointer;font-weight:600;font-size:17px;line-height:1;letter-spacing:-.01em;color:#160C07">{{ sheetAction }}</span>
+        </div>
+      </div>
+      <div style="height:30px;flex:none;display:flex;justify-content:center;align-items:center"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.26"></span></div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:390,&quot;height&quot;:844},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;menu&quot;,&quot;options&quot;:[&quot;menu&quot;,&quot;menuDisabled&quot;,&quot;confirmRewind&quot;,&quot;confirmFork&quot;,&quot;afterRewind&quot;,&quot;afterFork&quot;,&quot;list&quot;,&quot;listExpanded&quot;,&quot;stale&quot;],&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  ANCHOR = 'Rewrite the replay path so it dedupes on attempt as well.';
+
+  renderVals() {
+    const s = this.props.screen || 'menu';
+    const chatScreens = ['menu', 'menuDisabled', 'confirmRewind', 'confirmFork', 'afterRewind', 'afterFork', 'stale'];
+    const isChat = chatScreens.indexOf(s) >= 0;
+    const isFork = s === 'confirmFork' || s === 'afterFork';
+    const showAnchor = ['menu', 'menuDisabled', 'confirmRewind', 'confirmFork'].indexOf(s) >= 0;
+    const showMenu = s === 'menu' || s === 'menuDisabled';
+    const menuDisabled = s === 'menuDisabled';
+    const showSheet = s === 'confirmRewind' || s === 'confirmFork';
+    const after = s === 'afterRewind' || s === 'afterFork';
+
+    const u1 = { isUser: true, body: 'Check whether message replay stays ordered after a reconnect.' };
+    const a1 = { isAgent: true, body: 'Reconnect is ordered: replay consumes by ascending seq and dedupes on (sessionId, seq).' };
+    const tool = { isTool: true, body: 'rg -n "relayReconnect" mobile/composeApp/src' };
+    const u2 = { isUser: true, body: 'Does that still hold when the daemon replays a batch it already sent?' };
+    const a2 = { isAgent: true, body: 'Yes — the dedupe key drops the repeat before it reaches the client.' };
+
+    const turns = s === 'stale' ? [u1, a1, u2, a2] : (after ? [u1, a1, tool] : [u1, a1]);
+
+    const labels = {
+      menu: 'A · Message menu', menuDisabled: 'A · Message menu, agent running',
+      confirmRewind: 'B · Confirm rewind', confirmFork: 'B · Confirm fork',
+      afterRewind: 'C · After rewind', afterFork: 'C · After fork',
+      list: 'D · Sessions, group collapsed', listExpanded: 'D · Sessions, group expanded',
+      stale: 'State · stale anchor'
+    };
+
+    const item = (glyph, label, caption) => ({
+      glyph, label, caption,
+      glyphInk: menuDisabled ? '#5E5E66' : '#E2795A',
+      labelInk: menuDisabled ? '#6E6E76' : '#E6E6E9',
+      capInk: menuDisabled ? '#5A5A62' : '#8C8D95',
+      disabledAria: menuDisabled ? 'true' : 'false'
+    });
+
+    const row = (o) => Object.assign({
+      dotFill: 'transparent', dotLine: '#6E6E76', weight: 500, titleInk: '#E6E6E9',
+      hasBody: true, body: '', hasCaption: false, caption: '', capGlyph: '⑂', capInk: '#8C8D95',
+      meta: '', chev: false
+    }, o);
+
+    const active = [
+      row({
+        title: 'Replay ordering, take 2', dotFill: '#5CB582', dotLine: '#5CB582', weight: 600, titleInk: '#F3F3F4',
+        body: 'Asked again without the attempt key.',
+        meta: 'Claude · relay/replay · 4 min ago'
+      }),
+      row({
+        title: 'Replay ordering — attempt key', dotFill: '#5CB582', dotLine: '#5CB582', weight: 600, titleInk: '#F3F3F4',
+        body: 'Attempt-keyed dedupe, on a copy.',
+        hasCaption: true, caption: 'fork of Review relay reconnect handling',
+        meta: 'Claude · relay/replay-attempt · 2 min ago'
+      })
+    ];
+    const recent = [
+      row({ title: 'Fix flaky socket test', body: 'Still fails intermittently on CI.', meta: 'Codex · fix/socket-test · 2h ago' })
+    ];
+    const rewound = [
+      { title: 'Review relay reconnect handling', caption: 'rewound → Replay ordering, take 2' },
+      { title: 'Settings scroll restore', caption: 'rewound → Settings scroll restore, take 2' }
+    ];
+
+    const expanded = s === 'listExpanded';
+    const groups = [{ label: 'Active', rows: active }, { label: 'Recent', rows: recent }];
+
+    return {
+      label: labels[s] || s,
+      isChat, isList: s === 'list' || s === 'listExpanded',
+      title: after ? (isFork ? 'Replay ordering — attempt key' : 'Replay ordering, take 2') : 'Review relay reconnect handling',
+      hasLineage: after, hasCtxRow: !after,
+      lineagePrefix: isFork ? 'Fork of' : 'Rewound from',
+      lineageTitle: 'Review relay reconnect handling',
+      lineageAria: (isFork ? 'Fork of' : 'Rewound from') + ' Review relay reconnect handling, turn 3. Open the original session.',
+      turns,
+      showAnchor, anchorBody: this.ANCHOR,
+      showMenu, menuDisabled,
+      menuItems: [
+        item('↩', 'Rewind from here', 'Retry this message with a different wording'),
+        item('⑂', 'Fork from here', 'Branch a parallel session from this point')
+      ],
+      showScrim: showMenu || showSheet,
+      showSheet,
+      sheetTitle: isFork ? 'Fork from this message?' : 'Rewind from this message?',
+      sheetAction: isFork ? 'Create fork' : 'Rewind',
+      modeGlyph: isFork ? '⑂' : '↩',
+      modeText: isFork ? 'The current session stays untouched' : 'The current session will be tucked away (recoverable)',
+      showToast: s === 'stale',
+      prefilled: after, emptyField: !after,
+      fieldLine: after ? 'rgba(226,121,90,.45)' : 'rgba(255,255,255,.14)',
+      actMic: !after && s !== 'menuDisabled',
+      actStop: s === 'menuDisabled',
+      actSend: after,
+      groups, rewoundRows: rewound, groupOpen: expanded,
+      groupGlyph: expanded ? '▾' : '▸', groupOpenAria: expanded ? 'true' : 'false'
+    };
+  }
+}
+</script>
+</body>
+</html>

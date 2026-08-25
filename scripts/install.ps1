@@ -8,31 +8,65 @@
 # registers the logon background service on that version (starts it right away), and drops straight
 # into pairing. Re-run the same line to upgrade — or just run `cc-pocket-daemon update`: the daemon
 # checks daily and can update itself. Scoop users can keep `scoop install cc-pocket-daemon` instead.
+#
+# Mainland-China note: the same script is mirrored (with the release artifacts) on our relay box,
+# so the whole install works at direct-link speed there:
+#
+#   irm https://pocket.ark-nexus.cc/dl/install.ps1 | iex
+#
+# Set CC_POCKET_MIRROR=off for GitHub only, or point it at an alternate mirror base URL.
 $ErrorActionPreference = "Stop"
 
 $repo = "heypandax/cc-pocket"
 $root = Join-Path $env:LOCALAPPDATA "cc-pocket"
+$mirror = if ($env:CC_POCKET_MIRROR) { $env:CC_POCKET_MIRROR } else { "https://pocket.ark-nexus.cc/dl" }
 
 Write-Host "-- cc-pocket daemon installer --"
-$rel = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
-$ver = $rel.tag_name -replace '^v', ''
-$asset = $rel.assets | Where-Object { $_.name -like "*windows-x86_64.zip" } | Select-Object -First 1
-if (-not $asset) { throw "no Windows asset on the latest release ($($rel.tag_name)) — see https://github.com/$repo/releases" }
+# resolve: mirror manifest first (kept in sync + checksum-verified by the relay box, see
+# deploy/mirror-sync.sh), GitHub as fallback and authority. latest.json carries the release's
+# complete asset map, so both paths yield the same shape: $ver / $assetName / $assetUrl / $sumsUrl.
+$assetUrl = $null
+if ($mirror -ne "off") {
+    try {
+        $man = Invoke-RestMethod "$mirror/latest.json" -TimeoutSec 5
+        $ver = $man.version -replace '^v', ''
+        $assetName = "cc-pocket-daemon-$ver-windows-x86_64.zip"
+        $assetUrl = $man.assets.$assetName
+        $sumsUrl = $man.assets.'SHA256SUMS'
+    } catch { Write-Host "mirror unreachable - resolving via GitHub" }
+}
+if (-not $assetUrl) {
+    $rel = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+    $ver = $rel.tag_name -replace '^v', ''
+    $asset = $rel.assets | Where-Object { $_.name -like "*windows-x86_64.zip" } | Select-Object -First 1
+    if (-not $asset) { throw "no Windows asset on the latest release ($($rel.tag_name)) — see https://github.com/$repo/releases" }
+    $assetName = $asset.name
+    $assetUrl = $asset.browser_download_url
+    $sumsUrl = ($rel.assets | Where-Object { $_.name -eq "SHA256SUMS" } | Select-Object -First 1).browser_download_url
+}
 
-$zip = Join-Path $env:TEMP $asset.name
-Write-Host "downloading $($asset.name) ($($rel.tag_name))..."
-Invoke-WebRequest $asset.browser_download_url -OutFile $zip
+$zip = Join-Path $env:TEMP $assetName
+Write-Host "downloading $assetName (v$ver)..."
+try {
+    Invoke-WebRequest $assetUrl -OutFile $zip
+} catch {
+    if ($mirror -ne "off" -and $assetUrl -like "$mirror/*") {
+        Write-Host "mirror download failed - falling back to GitHub"
+        $assetUrl = "https://github.com/$repo/releases/download/v$ver/$assetName"
+        $sumsUrl = "https://github.com/$repo/releases/download/v$ver/SHA256SUMS"
+        Invoke-WebRequest $assetUrl -OutFile $zip
+    } else { throw }
+}
 
 # verify against the release's SHA256SUMS (older releases may not have one — warn and continue)
-$sums = $rel.assets | Where-Object { $_.name -eq "SHA256SUMS" } | Select-Object -First 1
-if ($sums) {
-    $line = (Invoke-RestMethod $sums.browser_download_url) -split "`n" | Where-Object { $_ -match [regex]::Escape($asset.name) } | Select-Object -First 1
+if ($sumsUrl) {
+    $line = (Invoke-RestMethod $sumsUrl) -split "`n" | Where-Object { $_ -match [regex]::Escape($assetName) } | Select-Object -First 1
     if ($line -and $line -match '^([0-9a-fA-F]{64})') {
         $expected = $Matches[1].ToLower()
         $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-        if ($actual -ne $expected) { throw "checksum mismatch for $($asset.name) (expected $expected, got $actual) - corrupted download or tampered artifact" }
+        if ($actual -ne $expected) { throw "checksum mismatch for $assetName (expected $expected, got $actual) - corrupted download or tampered artifact" }
         Write-Host "checksum OK"
-    } else { Write-Host "warning: SHA256SUMS has no entry for $($asset.name) - skipping verification" }
+    } else { Write-Host "warning: SHA256SUMS has no entry for $assetName - skipping verification" }
 } else { Write-Host "warning: release has no SHA256SUMS - skipping verification" }
 
 # stop a running daemon so binaries can be replaced (the service restarts it below)

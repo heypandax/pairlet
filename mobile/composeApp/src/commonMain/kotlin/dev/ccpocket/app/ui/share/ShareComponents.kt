@@ -58,6 +58,18 @@ fun tierDesc(t: AccessTier): String = stringResource(
     },
 )
 
+/** The full-sentence "what the guest can do" line for the selected tier (#212) — a step up from the
+ *  terse card [tierDesc], shown inline under the tier pills in the compact desktop composer. */
+@Composable
+fun tierHelp(t: AccessTier): String = stringResource(
+    when (t) {
+        AccessTier.REVIEW -> Res.string.share_tier_review_help
+        AccessTier.COLLABORATE -> Res.string.share_tier_collaborate_help
+        AccessTier.AUTONOMOUS -> Res.string.share_tier_autonomous_help
+        AccessTier.UNKNOWN -> Res.string.share_tier_review_help
+    },
+)
+
 /** "6d left" / "4h left" / "12m left" / "expired" — the caption for a share's remaining validity. */
 @Composable
 fun expiryLeftText(left: ExpiryLeft): String = when (left) {

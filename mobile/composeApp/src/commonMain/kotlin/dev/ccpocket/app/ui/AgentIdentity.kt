@@ -47,17 +47,39 @@ import dev.ccpocket.protocol.AgentKind
 fun agentColor(agent: AgentKind): Color = when (agent) {
     AgentKind.CODEX -> Tok.codex
     AgentKind.OPENCODE -> Tok.opencode
-    else -> Tok.accent
+    AgentKind.KIMI -> Tok.kimi
+    AgentKind.ZCODE -> Tok.zcode
+    AgentKind.DSH -> Tok.dsh
+    AgentKind.CLAUDE -> Tok.accent
 }
 fun agentName(agent: AgentKind): String = when (agent) {
     AgentKind.CODEX -> "Codex"
     AgentKind.OPENCODE -> "OpenCode"
-    else -> "Claude"
+    AgentKind.KIMI -> "Kimi"
+    AgentKind.ZCODE -> "ZCode"
+    // "DeepSeek", not "DeepSeek Harness": these names render in the desktop AgentCard grid, whose
+    // autosize floor (9sp, #178) was already reached by "OpenCode" at 8 chars — a 16-char name bottoms
+    // out and then CLIPS mid-word. The tagline below carries the full product name.
+    AgentKind.DSH -> "DeepSeek"
+    AgentKind.CLAUDE -> "Claude"
+}
+/** A 2-letter code for the compact list-row badge (#211) — keeps the agent legible where the full
+ *  name-pill ("OpenCode") crowded the session title out. Color still carries the identity. */
+fun agentAbbrev(agent: AgentKind): String = when (agent) {
+    AgentKind.CODEX -> "CX"
+    AgentKind.OPENCODE -> "OC"
+    AgentKind.KIMI -> "CC"
+    AgentKind.ZCODE -> "ZC"
+    AgentKind.DSH -> "DS"
+    AgentKind.CLAUDE -> "CC"
 }
 fun agentTagline(agent: AgentKind): String = when (agent) {
     AgentKind.CODEX -> "Codex · OpenAI"
     AgentKind.OPENCODE -> "OpenCode · Open Source"
-    else -> "Claude Code · Anthropic"
+    AgentKind.KIMI -> "Kimi Code · Moonshot"
+    AgentKind.ZCODE -> "ZCode · Z.ai"
+    AgentKind.DSH -> "DeepSeek Harness · DeepSeek"
+    AgentKind.CLAUDE -> "Claude Code · Anthropic"
 }
 
 /** The two standard agent-color tints — a 12% fill + a 42% border — shared by the chip and the selection cards. */
@@ -90,6 +112,30 @@ fun AgentGlyph(agent: AgentKind, color: Color = agentColor(agent), size: Int = 1
                 color = innerColor, topLeft = p(5f, 10f), size = Size(10f * s, 7f * s),
                 cornerRadius = CornerRadius(1f * s, 1f * s)
             )
+        } else if (agent == AgentKind.KIMI) {
+            val w = 1.6f * s
+            // crescent moon (Moonshot): an outer disc arc with an inner bite arc, both open on the right
+            val box = Offset(3f * s, 2f * s)
+            val d = Size(15f * s, 15f * s)
+            drawArc(color, startAngle = 40f, sweepAngle = 280f, useCenter = false, topLeft = box, size = d, style = Stroke(width = w, cap = StrokeCap.Round))
+            val ibox = Offset(7f * s, 3.5f * s)
+            val id = Size(12f * s, 12f * s)
+            drawArc(color, startAngle = 60f, sweepAngle = 240f, useCenter = false, topLeft = ibox, size = id, style = Stroke(width = w, cap = StrokeCap.Round))
+        } else if (agent == AgentKind.ZCODE) {
+            val w = 1.7f * s
+            // A quiet geometric Z: recognizable at list-row size without importing a brand asset.
+            drawLine(color, p(4f, 5f), p(16f, 5f), strokeWidth = w, cap = StrokeCap.Round)
+            drawLine(color, p(16f, 5f), p(4f, 15f), strokeWidth = w, cap = StrokeCap.Round)
+            drawLine(color, p(4f, 15f), p(16f, 15f), strokeWidth = w, cap = StrokeCap.Round)
+        } else if (agent == AgentKind.DSH) {
+            val w = 1.6f * s
+            // A "deep dive" double chevron pointing down (issue #255): reads as descent/depth for DeepSeek,
+            // and its axis is vertical, so it never gets mistaken for Claude's rightward prompt chevron at
+            // list-row size — the only other stroke-only glyph in the set.
+            drawLine(color, p(5f, 5.5f), p(10f, 10.5f), strokeWidth = w, cap = StrokeCap.Round)
+            drawLine(color, p(10f, 10.5f), p(15f, 5.5f), strokeWidth = w, cap = StrokeCap.Round)
+            drawLine(color, p(5f, 10.5f), p(10f, 15.5f), strokeWidth = w, cap = StrokeCap.Round)
+            drawLine(color, p(10f, 15.5f), p(15f, 10.5f), strokeWidth = w, cap = StrokeCap.Round)
         } else {
             val w = 1.8f * s
             // chevron ">"
@@ -123,12 +169,30 @@ fun AgentTag(agent: AgentKind, small: Boolean = true) {
     }
 }
 
-/** Header / list-row badge: the DEFAULT Claude stays unmarked; every other agent (Codex, OpenCode, …) shows its tag, with a leading [gap]. */
+/**
+ * The compact list-row badge (#211): just the agent's 2-letter code in its tint, no name. In dense
+ * sidebar rows the full "OpenCode" name-pill crowded the session title to unreadable; the code + color
+ * still say which backend drives the row, while the full [AgentTag] stays in headers / session info.
+ */
 @Composable
-fun AgentBadge(agent: AgentKind?, gap: Dp = 6.dp) {
+fun AgentTagCompact(agent: AgentKind) {
+    val c = agentColor(agent)
+    Text(
+        agentAbbrev(agent), color = c, fontSize = 9.5.sp, fontWeight = FontWeight.Bold,
+        style = TightCenter, maxLines = 1,
+        modifier = Modifier
+            .background(c.agentTintFill(), RoundedCornerShape(5.dp))
+            .border(1.dp, c.agentTintBorder(), RoundedCornerShape(5.dp))
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+    )
+}
+
+/** Header / list-row badge: the DEFAULT Claude stays unmarked; every other agent (Codex, OpenCode, …) shows its tag, with a leading [gap]. Pass [compact] in dense rows to swap the name-pill for the 2-letter code (#211). */
+@Composable
+fun AgentBadge(agent: AgentKind?, gap: Dp = 6.dp, compact: Boolean = false) {
     if (agent != null && agent != AgentKind.CLAUDE) {
         Spacer(Modifier.width(gap))
-        AgentTag(agent)
+        if (compact) AgentTagCompact(agent) else AgentTag(agent)
     }
 }
 

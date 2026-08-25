@@ -38,6 +38,7 @@ import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.Collaborator
 import dev.ccpocket.protocol.CollaboratorDirection
+import dev.ccpocket.protocol.acceptsSessionHandoff
 import org.jetbrains.compose.resources.stringResource
 
 // ── direction glyph: muted mono, never accent (design red line) ──
@@ -219,5 +220,15 @@ fun ContactChip(c: Collaborator) {
 fun filterCollaborators(all: List<Collaborator>, query: String): List<Collaborator> =
     all.filter { !it.removed && (query.isBlank() || it.label.contains(query.trim(), ignoreCase = true)) }
 
-fun recentCollaborators(all: List<Collaborator>): List<Collaborator> =
-    all.filter { !it.removed && it.lastHandoffAt != null }.sortedByDescending { it.lastHandoffAt }.take(3)
+/**
+ * The contacts a Session Handoff may actually be BOUND to. Eligibility is the protocol's
+ * [acceptsSessionHandoff] — never a bare `!removed`: a REVIEW contact is a colleague's DAEMON holding a
+ * task-context link (REVIEW-REQUEST.md §13.3) and an unreadable purpose fails closed, so the daemon
+ * refuses both. Offering them here would only let the owner pick a recipient that fails at send time.
+ * A legacy contact carries the defaulted SESSION_HANDOFF purpose and stays offered.
+ */
+fun handoffRecipients(all: List<Collaborator>, query: String = ""): List<Collaborator> =
+    filterCollaborators(all, query).filter { it.acceptsSessionHandoff }
+
+fun recentHandoffRecipients(all: List<Collaborator>): List<Collaborator> =
+    handoffRecipients(all).filter { it.lastHandoffAt != null }.sortedByDescending { it.lastHandoffAt }.take(3)

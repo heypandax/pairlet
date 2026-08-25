@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.data.agentFilterIsAll
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
@@ -37,6 +38,23 @@ fun tilde(path: String): String =
 /** Drop a trailing separator so a session never opens at "/foo/bar/", keeping a bare root ("/",
  *  "C:\") intact — shared by the two new-session inputs (mobile NewPathSheet, desktop popover). */
 fun trimTrailingSep(s: String): String = s.trimEnd('/', '\\').ifEmpty { s }
+
+private val REPEAT_SLASH = Regex("/{2,}") // compiled once, not per normalizedDirKey call
+
+/** Canonical COMPARISON form of a workdir. Collapses $HOME → ~ (so a daemon's absolute cwd /Users/x/P and
+ *  the new-session popover's tilde reseed ~/P name the SAME directory instead of splitting — issue #58),
+ *  unifies separators, drops a trailing one, and squeezes repeats. [tilde] is structural (it matches
+ *  /Users|/home layouts), so it converges even against a REMOTE daemon whose $HOME this client can't
+ *  expand. Comparison-only — never stored, so case is left intact (a remote FS's case sensitivity is
+ *  unknown, and the daemon already toRealPath()-canonicalizes). */
+fun normalizedDirKey(path: String): String =
+    tilde(trimTrailingSep(path)).replace('\\', '/').replace(REPEAT_SLASH, "/")
+
+/** Whether two paths name the same directory (issue #58's identity, shared so the desktop's RECENT dedup
+ *  and the repo's already-open guard can never drift apart). A null is "no directory", which matches
+ *  nothing — not even another null. */
+fun sameDirPath(a: String?, b: String?): Boolean =
+    a != null && b != null && normalizedDirKey(a) == normalizedDirKey(b)
 
 /** Just the project folder ("cc-pocket") — for tight surfaces like the chat header's meta line, where
  *  even a tail-truncated path is noise. Handles both host separators and trailing slashes; a bare
@@ -128,17 +146,15 @@ fun liveOrigin(e: DirectoryEntry): String? =
  * Shared/bare roots with no history stay reachable: the filter governs existing sessions, not whether the
  * user may start a new one in an explicitly shared folder.
  */
-internal fun filterDirectoriesByAgent(dirs: List<DirectoryEntry>, filter: String): List<DirectoryEntry> {
-    val target = when (filter) {
-        "claude" -> AgentKind.CLAUDE
-        "codex" -> AgentKind.CODEX
-        "opencode" -> AgentKind.OPENCODE
-        else -> return dirs
-    }
+internal fun filterDirectoriesByAgent(dirs: List<DirectoryEntry>, filter: Set<AgentKind>): List<DirectoryEntry> {
+    // "every agent" returns the list UNTOUCHED rather than rebuilding each row through the copy() below —
+    // that rebuild re-picks activeSessionId from the first surviving session, which must not happen when
+    // nothing is being filtered out.
+    if (agentFilterIsAll(filter)) return dirs
     return dirs.mapNotNull { entry ->
-        val visibleLive = entry.activeSessions.filter { it.agent == target }
+        val visibleLive = entry.activeSessions.filter { it.agent in filter }
         val historyKnown = entry.sessionAgents.isNotEmpty()
-        val hasVisibleHistory = !entry.hasSessions || !historyKnown || target in entry.sessionAgents
+        val hasVisibleHistory = !entry.hasSessions || !historyKnown || entry.sessionAgents.any { it in filter }
         if (!hasVisibleHistory && visibleLive.isEmpty()) return@mapNotNull null
 
         // A pre-activeSessions daemon may expose only the legacy scalar fields. With no provenance either,
@@ -156,6 +172,81 @@ internal fun filterDirectoriesByAgent(dirs: List<DirectoryEntry>, filter: String
             gitBranch = first?.gitBranch,
         )
     }
+}
+
+/**
+ * The Projects screen's search MODE (issue #260) — the always-on filter field became an icon that expands
+ * in the title row, and this is the rule that makes that safe.
+ *
+ * The whole state is (is the field on screen, what does it hold), and it moves only through the three
+ * transitions below. [collapsed] clears the query BY CONSTRUCTION rather than by a caller remembering to:
+ * a collapsed field with a live query would filter the list from a control nobody can see — and would also
+ * be the one way to reach the text-search empty state (#250) without a search on screen to explain it.
+ */
+internal data class ProjectSearch(val open: Boolean = false, val query: String = "") {
+    fun expanded(): ProjectSearch = copy(open = true)
+    fun collapsed(): ProjectSearch = ProjectSearch(open = false, query = "")
+    fun typed(text: String): ProjectSearch = copy(query = text)
+}
+
+/**
+ * The "recently used" projects the new-task sheet prefills and lists (issue #260).
+ *
+ * There is no recent-PROJECTS store on the phone — the desktop's RECENT zone is a shell-local visit list and
+ * the repo's MRU is session-scoped — so recency is DERIVED from what the daemon already reports per project:
+ * [DirectoryEntry.recent] (the daemon's own recents flag) or any resumable history, ordered live-first and
+ * then by [DirectoryEntry.lastModified], the newest-transcript mtime the flat list is already sorted on.
+ *
+ * Live-first because a project with a session running right now is the one "recent" that is not a guess; the
+ * mtime ordering below it is the same signal the Projects list itself uses, so the sheet's top row and the
+ * list's top row agree by construction. Bare shared roots with no history are excluded: the sheet is a
+ * shortcut to work already under way, and "浏览其他文件夹…" is how anything else gets picked.
+ */
+internal fun recentProjects(dirs: List<DirectoryEntry>, limit: Int = 5): List<DirectoryEntry> =
+    dirs.filter { it.recent || it.hasSessions || it.open || it.busy }
+        .sortedWith(
+            compareByDescending<DirectoryEntry> { it.open || it.busy }
+                .thenByDescending { it.lastModified }
+                .thenBy { it.name },
+        )
+        .take(limit)
+
+/**
+ * Which empty state the Projects list owes the user (issue #250) — computed here so the three cases can be
+ * asserted without a screen.
+ *
+ * The bug this replaces: an agent filter that emptied the list fell into the text-search empty state, which
+ * printed «No projects match ""» and offered a "Clear filter" button that cleared the (already empty) query
+ * — a dead end naming a filter the user never typed. The kinds are therefore distinguished by WHAT is
+ * hiding the rows, and each one owns the action that can actually undo it.
+ */
+internal enum class DirEmptyKind {
+    /** Rows to show — no empty state at all. */
+    NONE,
+
+    /** The computer reported no projects (or none survive with nothing filtering): nothing to clear. */
+    NO_PROJECTS,
+
+    /** Projects exist, the agent filter hid them all, and no search text is involved. */
+    AGENT_FILTERED,
+
+    /** A search term matched nothing. Only here does "clear the search" mean anything. */
+    NO_QUERY_MATCH,
+}
+
+internal fun dirEmptyKind(
+    loaded: Boolean,
+    reportedCount: Int,
+    nothingToShow: Boolean,
+    query: String,
+    agentFiltered: Boolean,
+): DirEmptyKind = when {
+    !loaded -> DirEmptyKind.NONE // still loading: the skeleton owns the screen, never an empty state
+    reportedCount == 0 && query.isBlank() -> DirEmptyKind.NO_PROJECTS
+    !nothingToShow -> DirEmptyKind.NONE
+    query.isNotBlank() -> DirEmptyKind.NO_QUERY_MATCH
+    agentFiltered -> DirEmptyKind.AGENT_FILTERED
+    else -> DirEmptyKind.NO_PROJECTS // no query, no agent filter, still nothing renderable
 }
 
 fun buildDirRows(

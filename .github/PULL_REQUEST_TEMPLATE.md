@@ -4,6 +4,6 @@
 
 ## Checklist
 
-- [ ] `bash scripts/check-all.sh` passes locally (protocol + daemon + relay + mobile desktop tests — CI only runs the JVM suites)
+- [ ] `bash scripts/check-all.sh` passes locally (protocol + daemon + relay + mobile desktop; macOS also runs iOS Simulator tests — CI only runs JVM suites)
 - [ ] If this touches `:protocol`: the wire format stays backward-compatible — the daemon and the apps update on independent schedules
 - [ ] If this touches user-facing docs: **both** `README.md` and `README.zh-CN.md` updated

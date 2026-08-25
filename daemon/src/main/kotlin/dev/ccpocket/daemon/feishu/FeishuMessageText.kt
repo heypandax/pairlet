@@ -38,6 +38,15 @@ internal object FeishuMessageText {
         else -> null
     }
 
+    /** Remove Feishu's inline mention placeholders without joining the text on either side. A mention is
+     *  a token boundary, not an empty string: deleting it could turn `con@alicefirm` into the privileged
+     *  `/full-auto confirm` confirmation token. Keep a space in its place and trim only the outer edge. */
+    fun withoutMentionPlaceholders(text: String, keys: Iterable<String?>): String {
+        var out = text
+        for (key in keys) key?.takeIf { it.isNotEmpty() }?.let { out = out.replace(it, " ") }
+        return out.trim()
+    }
+
     /** [msgType] is the message's `msg_type`; [content] is the raw `body.content` JSON string. */
     fun plainText(msgType: String?, content: String?): String = when (msgType) {
         "text" -> textField(content) ?: PLACEHOLDER_OTHER
@@ -63,6 +72,10 @@ internal object FeishuMessageText {
     private fun collect(el: JsonElement, out: StringBuilder) {
         when (el) {
             is JsonObject -> {
+                // A rich-post mention is a structural node rather than text. Preserve it as a boundary:
+                // otherwise adjacent text nodes `con`, <at>, `firm` collapse into the privileged word
+                // `confirm` when harvested below.
+                if ((el["tag"] as? JsonPrimitive)?.contentOrNull == "at") out.append(' ')
                 // a title/text primitive on THIS node contributes once; recursion below skips primitives,
                 // so nothing is double-counted
                 (el["title"] as? JsonPrimitive)?.contentOrNull?.let { if (it.isNotBlank()) out.appendLine(it) }

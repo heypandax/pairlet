@@ -87,6 +87,32 @@ class BridgeRegistry(
         }
     }
 
+    // A claimed-but-not-yet-recorded mint slot (issue #207): non-zero while some mint's relay round-trip
+    // is in flight, so no second mint (of ANY class) can interleave into the suspension window. Expiry is
+    // a safety net for a caller that never reaches its `finally` releaseMint (process-level accidents) —
+    // the normal lifecycle is reserve → recordIntent/failure → release.
+    private var mintReservedUntil = 0L
+
+    /**
+     * Claim the ONE mint slot BEFORE the suspending relay round-trip (issue #207). The old shape —
+     * check [intentPending], suspend on the mint, then [recordIntent] — let two overlapping mints both
+     * pass the check: both tickets got PSK-armed (LIFO) while only one intent could be recorded, so the
+     * armed ticket and the recorded intent disagreed, the exact mis-promotion race #207 describes.
+     * Returns false while another mint holds the slot or an intent is pending; the winner MUST
+     * [releaseMint] in a `finally` once its [recordIntent] (or failure) settles.
+     */
+    @Synchronized
+    fun reserveMint(now: Long = System.currentTimeMillis()): Boolean {
+        purgeExpired(now)
+        if (now < mintReservedUntil || intents.isNotEmpty()) return false
+        mintReservedUntil = now + MINT_RESERVE_MS
+        return true
+    }
+
+    /** Release the [reserveMint] slot — idempotent, call in `finally` on every mint path. */
+    @Synchronized
+    fun releaseMint() { mintReservedUntil = 0L }
+
     /** Record a restricted pairing intent for a freshly minted ticket (kind rides in [spec]). Returns
      *  false (refusing) if any intent is already pending — the serialization rule that keeps the
      *  ticket→deviceId binding unambiguous across kinds. [ttlMs] should match the ticket TTL. */
@@ -99,8 +125,14 @@ class BridgeRegistry(
         return true
     }
 
+    /** True while a mint is CLAIMED ([reserveMint], round-trip in flight) or an intent is RECORDED —
+     *  the one predicate every "may another pairing start now?" gate reads, so a mint's suspension
+     *  window reads as busy exactly like its recorded intent does (issue #207). */
     @Synchronized
-    fun intentPending(now: Long = System.currentTimeMillis()): Boolean { purgeExpired(now); return intents.isNotEmpty() }
+    fun intentPending(now: Long = System.currentTimeMillis()): Boolean {
+        purgeExpired(now)
+        return now < mintReservedUntil || intents.isNotEmpty()
+    }
 
     @Synchronized
     fun looksHeadless(ticket: ByteArray, now: Long = System.currentTimeMillis()): Boolean {
@@ -287,6 +319,12 @@ class BridgeRegistry(
 
     companion object {
         private const val MAX_GUEST_SESSIONS = 512
+
+        /** How long a [reserveMint] claim survives without release — a safety net only (the relay mint
+         *  round-trip is bounded at ~10s and every caller releases in `finally`); generous enough that no
+         *  live mint ever loses its slot mid-flight, short enough that an orphaned claim can't wedge
+         *  minting for long. */
+        const val MINT_RESERVE_MS = 30_000L
 
         /**
          * Grace beyond a redeem ticket's TTL for its intent to stay bindable. The intent is recorded AFTER

@@ -6,6 +6,8 @@ import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.daemon.claude.StreamParser
+import dev.ccpocket.daemon.conversation.KeyedSink
+import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.HistoryMessage
@@ -74,11 +76,14 @@ class SessionRegistryReapTest {
 
     private fun isWindows() = System.getProperty("os.name").lowercase().contains("win")
 
-    /** Open + first prompt against [backend]; waits until [until] sees the collected frames. */
+    /** Open + first prompt against [backend]; waits until [until] sees the collected frames.
+     *  [wrapSink] lets a test attach as a specific client kind (e.g. a relay `dev:` view) — the
+     *  reaper's occupancy check (issue #216) reads the sink's key shape. */
     private fun harness(
         backend: ScriptedBackend,
         until: (List<Frame>) -> Boolean,
         mode: PermissionMode = PermissionMode.DEFAULT,
+        wrapSink: (OutboundSink) -> OutboundSink = { it },
         body: suspend (SessionRegistry, convoId: String) -> Unit,
     ) = runBlocking {
         val dir = Files.createTempDirectory("ccp-reap")
@@ -86,7 +91,7 @@ class SessionRegistryReapTest {
         val scope = CoroutineScope(Dispatchers.Default)
         val registry = SessionRegistry(scope, backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { backend }))
         try {
-            val convoId = registry.open(OpenSession(workdir = dir.toString(), mode = mode), { f -> synchronized(frames) { frames.add(f) } })
+            val convoId = registry.open(OpenSession(workdir = dir.toString(), mode = mode), wrapSink(OutboundSink { f -> synchronized(frames) { frames.add(f) } }))
             assertTrue(registry.sendPrompt(SendPrompt(convoId = convoId, text = "run the task")))
             withTimeout(10_000) {
                 while (!until(synchronized(frames) { frames.toList() })) delay(20)
@@ -159,6 +164,105 @@ class SessionRegistryReapTest {
             delay(600)
             assertEquals(0, registry.reapIdle(idleMs = 200), "a plan-mode turn end must be spared for the continuation")
             assertTrue(registry.sendPrompt(SendPrompt(convoId = convoId, text = "still there?")), "conversation must still be alive")
+        }
+    }
+
+    @Test
+    fun plan_mode_turn_end_publishes_settled_while_the_reaper_still_spares_it() {
+        if (isWindows()) return
+        // Issue #269: the two questions above and below must be answered by DIFFERENT predicates. The
+        // reaper asks "may I reclaim this?" and is held off by the 5-minute continuation grace (test
+        // above). The client asks "is it running?" — and answering that with the same grace kept a
+        // plan-mode session lit as Active for five minutes after its answer had landed, delaying #239's
+        // "new result while you were away" marker by the same window. Both halves are pinned in ONE
+        // test on ONE state so neither can be "fixed" by regressing the other.
+        val script = Files.createTempDirectory("ccp-reap-fx").resolve("stream.jsonl")
+            .apply { writeText(listOf(init, toolUse, result).joinToString("\n") + "\n") }
+        harness(ScriptedBackend(script, thenExit = false), until = { fs -> fs.any { it is TurnDone } }, mode = PermissionMode.PLAN) { registry, convoId ->
+            delay(600) // well inside the 5-min grace: the old publish path still read "running" here
+
+            val row = registry.liveByCwd().values.flatten().single()
+            assertFalse(row.executing, "the landed plan result must publish as settled, not ride the reaper grace")
+            assertFalse(row.busy, "no background shell is running either")
+            assertEquals(0, registry.reapIdle(idleMs = 200), "…and the grace must STILL shield it from the reaper")
+            assertTrue(registry.sendPrompt(SendPrompt(convoId = convoId, text = "still there?")), "conversation must still be alive")
+        }
+    }
+
+    // ---- per-session occupancy (issue #216): the reaper no longer gates on global presence — an idle
+    // session is spared only while a REACHABLE client view is attached, App online or not ----
+
+    @Test
+    fun attached_relay_view_shields_an_idle_session_only_while_the_peer_is_online() {
+        if (isWindows()) return
+        val script = Files.createTempDirectory("ccp-reap-fx").resolve("stream.jsonl")
+            .apply { writeText(listOf(init, toolUse, result).joinToString("\n") + "\n") } // turn completes, then idle
+        harness(
+            ScriptedBackend(script, thenExit = false), until = { fs -> fs.any { it is TurnDone } },
+            wrapSink = { KeyedSink("dev:phone-1", it) }, // a relay device view, as DeviceSessions mints them
+        ) { registry, convoId ->
+            delay(600)
+            assertEquals(0, registry.reapIdle(idleMs = 200, relayPeerOnline = true), "a session the online phone still views must stay warm")
+            // liveCountOf, not a probe prompt: a second prompt would leave the scripted process
+            // mid-"turn" forever (its stdout is spent), and the busy shield would mask the occupancy verdict
+            assertEquals(1, registry.liveCountOf(listOf(convoId)), "conversation must still be alive")
+            // the same stale view once the peer drops: relay sinks are never detached on disconnect, so
+            // a dead phone's view must not pin the session — this IS the pre-#216 offline reaper
+            assertEquals(1, registry.reapIdle(idleMs = 200, relayPeerOnline = false), "an unreachable view must not hold the session hostage")
+        }
+    }
+
+    @Test
+    fun idle_session_nobody_views_is_reaped_even_while_the_app_is_online() {
+        if (isWindows()) return
+        // the issue #216 headline: phone/desktop permanently connected (peer online), but the user tapped
+        // away from this session — its view detached, and nothing else occupies it. The old global gate
+        // (!peerOnline) kept it warm and picker-hidden forever; per-session occupancy releases it.
+        val script = Files.createTempDirectory("ccp-reap-fx").resolve("stream.jsonl")
+            .apply { writeText(listOf(init, toolUse, result).joinToString("\n") + "\n") }
+        harness(
+            ScriptedBackend(script, thenExit = false), until = { fs -> fs.any { it is TurnDone } },
+            wrapSink = { KeyedSink("dev:phone-1", it) },
+        ) { registry, convoId ->
+            registry.detachDevice(setOf(convoId), "phone-1") // the user left the session view
+            delay(600)
+            assertEquals(1, registry.reapIdle(idleMs = 200, relayPeerOnline = true), "unoccupied idle session must be released despite the app being online")
+            assertFalse(registry.sendPrompt(SendPrompt(convoId = convoId, text = "gone?")), "reaped conversation must be gone")
+        }
+    }
+
+    @Test
+    fun attached_lan_view_shields_an_idle_session_only_while_a_lan_socket_lives() {
+        if (isWindows()) return
+        val script = Files.createTempDirectory("ccp-reap-fx").resolve("stream.jsonl")
+            .apply { writeText(listOf(init, toolUse, result).joinToString("\n") + "\n") }
+        // plain (unkeyed) sink = a LAN view; reachability is "any LAN socket open at all"
+        harness(ScriptedBackend(script, thenExit = false), until = { fs -> fs.any { it is TurnDone } }) { registry, convoId ->
+            registry.onLanConnect()
+            try {
+                delay(600)
+                assertEquals(0, registry.reapIdle(idleMs = 200, relayPeerOnline = false), "a LAN-attached idle session must stay warm while its socket lives")
+                assertEquals(1, registry.liveCountOf(listOf(convoId)), "conversation must still be alive")
+            } finally {
+                registry.onLanDisconnect()
+            }
+            assertEquals(1, registry.reapIdle(idleMs = 200, relayPeerOnline = false), "socket gone -> the lingering view no longer occupies")
+        }
+    }
+
+    @Test
+    fun headless_scheduler_view_never_occupies_a_session() {
+        if (isWindows()) return
+        // the scheduler's fire sink is a black hole (watching = false): a settled scheduled run should
+        // surface in the desktop picker like any other leftover, App online or not
+        val script = Files.createTempDirectory("ccp-reap-fx").resolve("stream.jsonl")
+            .apply { writeText(listOf(init, toolUse, result).joinToString("\n") + "\n") }
+        harness(
+            ScriptedBackend(script, thenExit = false), until = { fs -> fs.any { it is TurnDone } },
+            wrapSink = { KeyedSink("scheduler", it, watching = false) },
+        ) { registry, _ ->
+            delay(600)
+            assertEquals(1, registry.reapIdle(idleMs = 200, relayPeerOnline = true), "a headless sink must not pin a settled scheduled session")
         }
     }
 

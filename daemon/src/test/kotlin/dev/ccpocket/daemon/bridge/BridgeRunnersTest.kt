@@ -5,6 +5,9 @@ import dev.ccpocket.protocol.BridgeRunnerSpec
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -28,9 +31,10 @@ class BridgeRunnersTest {
     private val python = listOf("/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3")
         .firstOrNull { File(it).canExecute() }
 
-    @AfterTest fun cleanup() {
+    @AfterTest fun cleanup(): Unit = runBlocking {
         runners.stopAll()
         tmp.deleteRecursively()
+        Unit
     }
 
     private fun cred(name: String = "feishu-bot") = BridgeCredential(
@@ -46,7 +50,7 @@ class BridgeRunnersTest {
     }
 
     @Test
-    fun attach_lands_the_credential_where_the_adapter_looks_and_at_0600() {
+    fun attach_lands_the_credential_where_the_adapter_looks_and_at_0600() = runBlocking {
         val spec = BridgeRunnerSpec(scriptPath = script("pass"))
         runners.attach("feishu-bot", spec, cred())
 
@@ -59,7 +63,7 @@ class BridgeRunnersTest {
     }
 
     @Test
-    fun state_never_exposes_env_values_only_key_names() {
+    fun state_never_exposes_env_values_only_key_names() = runBlocking {
         val spec = BridgeRunnerSpec(
             scriptPath = script("pass"),
             env = mapOf("FEISHU_APP_SECRET" to "s3cret-value", "FEISHU_APP_ID" to "cli_x"),
@@ -71,7 +75,7 @@ class BridgeRunnersTest {
     }
 
     @Test
-    fun persisted_store_is_owner_only_because_it_holds_the_im_secret() {
+    fun persisted_store_is_owner_only_because_it_holds_the_im_secret() = runBlocking {
         runners.attach("feishu-bot", BridgeRunnerSpec(scriptPath = script("pass"), env = mapOf("FEISHU_APP_SECRET" to "s3cret")), cred())
         assertTrue(store.isFile)
         assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(store.toPath())))
@@ -81,8 +85,8 @@ class BridgeRunnersTest {
     }
 
     @Test
-    fun start_injects_the_credential_path_and_the_im_env_into_the_process() {
-        val python = python ?: return // no interpreter on this box; the wiring is covered by the others
+    fun start_injects_the_credential_path_and_the_im_env_into_the_process() = runBlocking {
+        val python = python ?: return@runBlocking // no interpreter on this box; the wiring is covered by the others
         val out = File(tmp, "seen.txt")
         val spec = BridgeRunnerSpec(
             scriptPath = script(
@@ -114,8 +118,8 @@ class BridgeRunnersTest {
     }
 
     @Test
-    fun a_crashing_adapter_reports_its_exit_code_and_output_instead_of_failing_silently() {
-        val python = python ?: return
+    fun a_crashing_adapter_reports_its_exit_code_and_output_instead_of_failing_silently() = runBlocking {
+        val python = python ?: return@runBlocking
         val spec = BridgeRunnerSpec(
             scriptPath = script("import sys; print('boom: bad app secret'); sys.exit(3)"),
             interpreter = python,
@@ -132,7 +136,7 @@ class BridgeRunnersTest {
     }
 
     @Test
-    fun start_refuses_a_missing_script_rather_than_spawning_nothing() {
+    fun start_refuses_a_missing_script_rather_than_spawning_nothing() = runBlocking {
         runners.attach("feishu-bot", BridgeRunnerSpec(scriptPath = "/nope/not/here.py"), cred())
         val err = runners.start("feishu-bot")
         assertNotNull(err)
@@ -141,8 +145,8 @@ class BridgeRunnersTest {
     }
 
     @Test
-    fun detach_stops_the_process_and_destroys_the_credential() {
-        val python = python ?: return
+    fun detach_stops_the_process_and_destroys_the_credential() = runBlocking {
+        val python = python ?: return@runBlocking
         val spec = BridgeRunnerSpec(scriptPath = script("import time; time.sleep(60)"), interpreter = python)
         runners.attach("feishu-bot", spec, cred())
         assertNull(runners.start("feishu-bot"))
@@ -150,7 +154,7 @@ class BridgeRunnersTest {
         val dir = runners.dirFor("feishu-bot")
         assertTrue(File(dir, "bridge-credential.json").isFile)
 
-        assertNull(runBlocking { runners.detach("feishu-bot") })
+        assertNull(runners.detach("feishu-bot"))
         assertFalse(runners.isManaged("feishu-bot"))
         assertNull(runners.state("feishu-bot"))
         // the credential must not outlive the runner that was the only thing entitled to use it
@@ -158,7 +162,7 @@ class BridgeRunnersTest {
     }
 
     @Test
-    fun reconfigure_with_mergeEnv_overlays_typed_values_and_keeps_the_untyped_secret() {
+    fun reconfigure_with_mergeEnv_overlays_typed_values_and_keeps_the_untyped_secret() = runBlocking {
         val spec = BridgeRunnerSpec(
             scriptPath = script("pass"),
             env = mapOf("FEISHU_APP_ID" to "cli_x", "FEISHU_APP_SECRET" to "s3cret"),
@@ -186,7 +190,7 @@ class BridgeRunnersTest {
     }
 
     @Test
-    fun reconfigure_refuses_a_bridge_that_was_never_managed() {
+    fun reconfigure_refuses_a_bridge_that_was_never_managed() = runBlocking {
         val err = runners.reconfigure("never-managed", BridgeRunnerSpec(scriptPath = script("pass")))
         assertNotNull(err)
         // the message must explain the real constraint, not just say "no"
@@ -194,8 +198,188 @@ class BridgeRunnersTest {
     }
 
     @Test
-    fun a_name_cannot_traverse_out_of_the_runners_directory() {
+    fun an_unwritable_store_rejects_reconfigure_and_keeps_old_memory_and_disk_truth() = runBlocking {
+        val old = BridgeRunnerSpec(
+            scriptPath = script("pass"),
+            env = mapOf("FEISHU_NO_APPROVAL" to "true", "FEISHU_APP_SECRET" to "old-secret"),
+        )
+        runners.attach("feishu-bot", old, cred())
+        val durableBefore = store.readText()
+        assertTrue(assertNotNull(runners.state("feishu-bot")).noApproval)
+
+        // Atomic persistence needs to create its sibling temp file in this directory. Removing the write
+        // bit makes that fail before rename, deterministically leaving the old complete store untouched.
+        Files.setPosixFilePermissions(tmp.toPath(), PosixFilePermissions.fromString("r-xr-xr-x"))
+        try {
+            val error = runners.reconfigure(
+                "feishu-bot",
+                old.copy(env = mapOf("FEISHU_NO_APPROVAL" to "false", "FEISHU_APP_SECRET" to "new-secret")),
+            )
+            assertNotNull(error, "an authority edit that did not reach disk must not report success")
+            assertTrue("persist" in error, error)
+            assertTrue(assertNotNull(runners.state("feishu-bot")).noApproval, "memory must roll back to durable old truth")
+            assertEquals(durableBefore, store.readText(), "atomic failure must preserve the old complete JSON")
+        } finally {
+            Files.setPosixFilePermissions(tmp.toPath(), PosixFilePermissions.fromString("rwxr-xr-x"))
+        }
+
+        val reloaded = BridgeRunners(rootDir = root, store = store)
+        assertTrue(assertNotNull(reloaded.state("feishu-bot")).noApproval, "restart must agree with live memory after failure")
+        assertFalse(tmp.listFiles().orEmpty().any { it.name.startsWith(".${store.name}.") }, "failed atomic write left a temp secret")
+    }
+
+    @Test
+    fun in_process_reconfigure_drains_late_handler_before_origin_close_and_rebuild() = runBlocking {
+        val made = mutableListOf<GatedEngine>()
+        runners.registerEngine("test-in-process") { _, _, env, _, _ ->
+            GatedEngine(gated = made.isEmpty(), configEnv = env).also(made::add)
+        }
+        val runnerSpec = BridgeRunnerSpec(scriptPath = "", kind = "test-in-process")
+        runners.attachInProcess(
+            "feishu-bot",
+            runnerSpec,
+            BridgeSpec(name = "feishu-bot", workdirs = listOf("/p/alpha")),
+        )
+        assertNull(runners.start("feishu-bot"))
+        val old = made.single()
+
+        val edit = async(start = CoroutineStart.UNDISPATCHED) {
+            runners.reconfigure(
+                "feishu-bot",
+                runnerSpec.copy(env = mapOf("FEISHU_OWNER_BYPASS" to "false")),
+                mergeEnv = true,
+                restartIfRunning = true,
+            )
+        }
+        old.handlerEntered.await()
+
+        // A concurrent owner START used to slip into the revoke→entry-replace gap and rebuild the OLD
+        // config. It must wait on the same per-name lifecycle transaction.
+        val racingStart = async(start = CoroutineStart.UNDISPATCHED) { runners.start("feishu-bot") }
+
+        assertFalse(edit.isCompleted, "reconfigure must await already-admitted handlers")
+        assertFalse(racingStart.isCompleted, "start must not observe the half-reconfigured runner")
+        assertEquals(listOf("start", "quiesce"), old.events)
+        assertEquals(1, made.size, "a replacement engine must not be built while old authority is live")
+
+        old.allowHandler.complete(Unit)
+        assertNull(edit.await())
+        assertEquals(listOf("start", "quiesce", "handler-late-open", "close-origin", "release"), old.events)
+        assertEquals(0, old.activeConversations, "the close sweep must run after the late handler open")
+        assertFalse(old.running)
+
+        assertNull(edit.await())
+        assertNull(racingStart.await())
+        assertEquals(2, made.size, "the next start must build from the replacement config")
+        assertEquals("false", made.last().configEnv["FEISHU_OWNER_BYPASS"])
+    }
+
+    @Test
+    fun detach_serializes_a_racing_start_and_cannot_orphan_a_recreated_engine() = runBlocking {
+        val made = mutableListOf<GatedEngine>()
+        runners.registerEngine("test-detach-race") { _, _, env, _, _ ->
+            GatedEngine(gated = made.isEmpty(), configEnv = env).also(made::add)
+        }
+        val runnerSpec = BridgeRunnerSpec(scriptPath = "", kind = "test-detach-race")
+        runners.attachInProcess(
+            "feishu-bot",
+            runnerSpec,
+            BridgeSpec(name = "feishu-bot", workdirs = listOf("/p/alpha")),
+        )
+        assertNull(runners.start("feishu-bot"))
+        val old = made.single()
+
+        val detach = async(start = CoroutineStart.UNDISPATCHED) { runners.detach("feishu-bot") }
+        old.handlerEntered.await()
+        val racingStart = async(start = CoroutineStart.UNDISPATCHED) { runners.start("feishu-bot") }
+        assertFalse(racingStart.isCompleted, "start must wait until detach's durable removal completes")
+        assertEquals(1, made.size, "no replacement may be constructed while old authority is draining")
+
+        old.allowHandler.complete(Unit)
+        assertNull(detach.await())
+        val startError = assertNotNull(racingStart.await())
+        assertTrue("no managed adapter" in startError)
+        assertEquals(1, made.size, "a detached runner must not leave an orphan replacement engine")
+        assertFalse(runners.isManaged("feishu-bot"))
+        assertNull(runners.state("feishu-bot"))
+    }
+
+    @Test
+    fun a_failed_in_process_revoke_aborts_reconfigure_and_keeps_the_old_engine_mapped() = runBlocking {
+        val made = mutableListOf<FailOnceEngine>()
+        runners.registerEngine("test-failing-revoke") { _, _, _, _, _ ->
+            FailOnceEngine().also(made::add)
+        }
+        val runnerSpec = BridgeRunnerSpec(scriptPath = "", kind = "test-failing-revoke")
+        runners.attachInProcess(
+            "feishu-bot",
+            runnerSpec,
+            BridgeSpec(name = "feishu-bot", workdirs = listOf("/p/alpha")),
+        )
+        assertNull(runners.start("feishu-bot"))
+
+        val error = runners.reconfigure("feishu-bot", runnerSpec.copy(env = mapOf("changed" to "yes")), mergeEnv = true)
+        assertNotNull(error)
+        assertTrue("registry close failed" in error, error)
+        assertEquals(1, made.size, "failure must not construct a replacement engine")
+        assertTrue(runners.isManaged("feishu-bot"), "failed revoke must not discard the recoverable entry")
+        assertNotNull(runners.state("feishu-bot"), "failed revoke must keep the old engine mapped")
+    }
+
+    @Test
+    fun a_name_cannot_traverse_out_of_the_runners_directory() = runBlocking {
         val dir = runners.dirFor("../../etc/evil")
         assertTrue(dir.canonicalPath.startsWith(root.canonicalPath), "escaped the runners root: ${dir.canonicalPath}")
+    }
+
+    private class GatedEngine(
+        gated: Boolean,
+        val configEnv: Map<String, String> = emptyMap(),
+    ) : InProcessBridgeEngine {
+        val events = mutableListOf<String>()
+        val handlerEntered = CompletableDeferred<Unit>()
+        val allowHandler = CompletableDeferred<Unit>().also { if (!gated) it.complete(Unit) }
+        var activeConversations = 0
+        private var isRunning = false
+
+        override val running: Boolean get() = isRunning
+        override val lastError: String? = null
+        override fun ownedConvoIds(): Set<String> = setOf("owned-convo")
+
+        override fun start(): String? {
+            isRunning = true
+            events += "start"
+            return null
+        }
+
+        override fun stop() { isRunning = false }
+
+        override suspend fun revokeAndShutdown() {
+            isRunning = false
+            events += "quiesce"
+            handlerEntered.complete(Unit)
+            allowHandler.await()
+            // Models a handler admitted just before quiesce reaching its non-cancellable router open late.
+            activeConversations++
+            events += "handler-late-open"
+            activeConversations = 0
+            events += "close-origin"
+            events += "release"
+        }
+    }
+
+    private class FailOnceEngine : InProcessBridgeEngine {
+        private var isRunning = false
+        private var revokeAttempts = 0
+
+        override val running: Boolean get() = isRunning
+        override val lastError: String? = null
+        override fun ownedConvoIds(): Set<String> = setOf("owned-convo")
+        override fun start(): String? { isRunning = true; return null }
+        override fun stop() { isRunning = false }
+        override suspend fun revokeAndShutdown() {
+            isRunning = false
+            if (revokeAttempts++ == 0) error("registry close failed")
+        }
     }
 }

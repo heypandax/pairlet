@@ -1,0 +1,118 @@
+name: ios-store-metadata
+
+# Creates or updates an editable App Store version and syncs localized metadata + screenshots + previews.
+# No binary is uploaded, no build is attached, and the version is never submitted for review.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Editable App Store version to create or update (for example 1.8.1)."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate version and store content
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::version must be x.y.z, got: $VERSION"
+            exit 1
+          fi
+          if ! command -v ffprobe >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+          python3 scripts/check-appstore-content.py
+
+      - name: Set up Ruby + fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+      - run: gem install fastlane --no-document
+
+      - name: Stage App Store Connect API key
+        env:
+          ASC_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: |
+          if [ -z "$ASC_KEY_P8" ] || [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ]; then
+            echo "::error::App Store Connect API secrets are not set."
+            exit 1
+          fi
+          echo "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          jq -n --arg key_id "$ASC_KEY_ID" --arg issuer_id "$ASC_ISSUER_ID" \
+                --rawfile key "$RUNNER_TEMP/AuthKey.p8" \
+                '{key_id: $key_id, issuer_id: $issuer_id, key: $key, in_house: false}' \
+                > "$RUNNER_TEMP/asc_api_key.json"
+
+      - name: Stage store-page metadata only
+        # Do not copy release_notes.txt: the repo is still versioned 1.8.0, and 1.8.1 What's New
+        # must be written from the real binary diff when that release is ready to submit.
+        run: |
+          for locale in en-US zh-Hans; do
+            mkdir -p "$RUNNER_TEMP/store-metadata/$locale"
+            cp "fastlane/metadata/$locale/description.txt" \
+               "fastlane/metadata/$locale/keywords.txt" \
+               "fastlane/metadata/$locale/promotional_text.txt" \
+               "$RUNNER_TEMP/store-metadata/$locale/"
+          done
+
+      - name: Create or update App Store version ${{ inputs.version }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          fastlane deliver \
+            --api_key_path "$RUNNER_TEMP/asc_api_key.json" \
+            --app_version "$VERSION" \
+            --metadata_path "$RUNNER_TEMP/store-metadata" \
+            --skip_binary_upload true \
+            --skip_screenshots false \
+            --overwrite_screenshots true \
+            --skip_metadata false \
+            --submit_for_review false \
+            --force true
+
+      - name: Converge the visible 6.5-inch screenshot sets
+        env:
+          VERSION: ${{ inputs.version }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: ruby scripts/sync-appstore-screenshots.rb
+
+      - name: Replace localized App Previews after processing
+        env:
+          VERSION: ${{ inputs.version }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: ruby scripts/sync-appstore-previews.rb
+
+      - name: Verify media in the visible 6.5-inch slot
+        env:
+          VERSION: ${{ inputs.version }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: ruby scripts/verify-appstore-media.rb
+
+      - name: Summary
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          {
+            echo "## App Store page synced"
+            echo "- Version: $VERSION"
+            echo "- Locales: en-US, zh-Hans"
+            echo "- Screenshots: 6 per locale (6.5-inch slot)"
+            echo "- App Previews: 1 per locale"
+            echo "- Binary uploaded: no"
+            echo "- Submitted for review: no"
+          } >> "$GITHUB_STEP_SUMMARY"

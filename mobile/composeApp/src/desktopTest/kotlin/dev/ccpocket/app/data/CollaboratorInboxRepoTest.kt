@@ -296,12 +296,36 @@ class CollaboratorInboxRepoTest {
     fun aScannedCollaboratorLinkParksInTheConfirmScreenInsteadOfRedeeming() {
         val r = repo(BindingRole.OWNER)
         val invite = dev.ccpocket.protocol.CollaboratorInvite(
-            relay = "wss://127.0.0.1:9", accountId = "acct-colleague", daemonPub = "pk", ticket = "t", ownerLabel = "Panda",
+            relay = "wss://127.0.0.1:9", accountId = "acct-colleague", daemonPub = dev.ccpocket.app.TEST_DAEMON_PUB,
+            ticket = "t", ownerLabel = "Panda",
         )
         r.handleIncomingLink(invite.encode())
         assertEquals("acct-colleague", r.pendingCollabInvite.value?.accountId)
         assertTrue(r.collaboratorLinks.isEmpty(), "scanning is not consenting — the fingerprint screen decides")
         assertFalse(r.collabRedeeming.value)
+    }
+
+    /**
+     * A REVIEW invite is addressed to a colleague's DAEMON, not to this phone, and its ticket is single
+     * use. Redeeming it at the ordinary scanner would burn it into a phone binding that can never answer
+     * a review — while the daemon it was minted for is left re-scanning a ticket that no longer works.
+     */
+    @Test
+    fun aReviewInviteIsRefusedAtTheOrdinaryScannerInsteadOfBurningItsTicket() {
+        val r = repo(BindingRole.OWNER)
+        val invite = dev.ccpocket.protocol.CollaboratorInvite(
+            relay = "wss://127.0.0.1:9", accountId = "acct-colleague", daemonPub = dev.ccpocket.app.TEST_DAEMON_PUB,
+            ticket = "t", ownerLabel = "Panda",
+            purpose = dev.ccpocket.protocol.CollaboratorPurpose.REVIEW,
+        )
+        r.handleIncomingLink(invite.encode())
+        assertNull(r.pendingCollabInvite.value, "it must not even reach the confirm screen")
+        assertFalse(r.collabRedeeming.value, "and nothing may be redeemed")
+        assertTrue(r.collaboratorLinks.isEmpty())
+
+        // the same invite WITHOUT a review purpose is the historical path, unchanged
+        r.handleIncomingLink(invite.copy(purpose = dev.ccpocket.protocol.CollaboratorPurpose.SESSION_HANDOFF).encode())
+        assertEquals("acct-colleague", r.pendingCollabInvite.value?.accountId)
     }
 
     @Test

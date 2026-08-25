@@ -1,14 +1,35 @@
-# Session Handoff —— 跨用户协作接力实现方案
+# Session Handoff —— 运行时上下文协作接力
 
-> 状态：**已确认，作为后续实现依据**  
-> 决策日期：2026-08-01  
-> 首发场景：把当前 coding session 临时交给同事做代码评审  
-> 取代方案：[`PEER-CALL.md`](./PEER-CALL.md) 中的 daemon-to-daemon Agent 互调主线  
-> 实施状态：本文已定稿；完成度必须以本文验收项和测试结果为准，存在代码草稿不等于已经实现
+> 状态：**已实现并保留，作为运行时上下文交接能力**
+>
+> 决策日期：2026-08-01
+>
+> 调整日期：2026-08-02
+>
+> 适用场景：同事必须使用发起人电脑上的原始 Session、进程、未提交状态或设备现场
+>
+> 并列能力：[`REVIEW-REQUEST.md`](./REVIEW-REQUEST.md) —— 任务上下文交接，由接收者使用自己的 Agent 和本地上下文评审
+>
+> 取代方案：[`PEER-CALL.md`](./PEER-CALL.md) 中的 daemon-to-daemon Agent 互调主线
+>
+> 产品关系：两者同时保留；Session Handoff 交接运行时上下文，ReviewRequest 交接任务上下文
 
 ---
 
-## 0. 已确认结论
+## 0. 双能力分工说明
+
+cc-pocket 同时保留两类跨用户协作：
+
+- **Session Handoff（本文）**：交接运行时上下文。接收者进入发起人电脑上的原始 Session，在同一份
+  代码、进程和运行状态上接续；适合难以复现的问题、设备现场、事故处理和同步联合调试。
+- **ReviewRequest**：交接任务上下文。发送 MR、文档、背景、约束和完成标准，接收者使用自己的电脑、
+  Agent、Skills 和历史上下文处理；适合常规代码评审和文档评审。
+
+Session Handoff 已经实现，因此继续保留现有入口、协议和安全边界，不因新增 ReviewRequest 而隐藏或删除。
+两者可以共享联系人、E2E 投递、通知和历史基础设施，但不能混用 Controller Lease、Session Grant 或
+ReviewRequest capability。
+
+## 0.1 运行时上下文方案结论
 
 cc-pocket 不发布长期可调用的 Agent，也不建设 Agent 通讯录、AgentSpace 或 daemon-to-daemon
 互调网络。只增加一个轻量的私有“协作联系人”列表：双方首次通过二维码/深链建立 E2E 信任，

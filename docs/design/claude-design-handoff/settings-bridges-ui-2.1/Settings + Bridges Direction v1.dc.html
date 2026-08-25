@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+  a { color: #B4522F; text-decoration: none; }
+  a:hover { color: #8E3F23; }
+</style>
+</helmet>
+
+<div style="position:fixed;inset:0;z-index:-1;background:{{ boardBg }}"></div>
+
+<div style="width:1920px;margin:0 auto;padding:64px 72px 96px;font-family:'Public Sans',system-ui,sans-serif;color:#1B1A18">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:940px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · mobile ui 2.1 · settings + bridges · direction · corrected</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">Settings + Bridges Direction v1</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Two bounded problems, one visual language inherited from Supporting Surfaces Master v1: restore scan hierarchy on the Settings landing, and stop the bridge card from stacking 编 over 辑 at narrow Chinese width. Directions A3 and C2 stand; every frame, note and rule now uses the repository's own copy and the real BridgeInfo model. Link state and runner state are two independent facts here, as they are in the product.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div><div style="color:#1B1A18">2 problems</div><div>A3 + C2 selected</div></div>
+      <div><div style="color:#1B1A18">2 + 5</div><div>utilities + categories</div></div>
+      <div><div style="color:#1B1A18">320 – 402 pt</div><div>100% / 200% text</div></div>
+    </div>
+  </div>
+
+  <!-- ═══ CORRECTIONS ═══ -->
+  <div style="padding-top:34px">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0 36px;border-top:1px solid #C9C5BD;border-bottom:1px solid #C9C5BD;padding:18px 0 20px">
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Corrected · repository copy</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Chinese titles are the existing ones: Token 用量, 定时任务, 通用, Agent 与会话默认项, 连接与协作, 安全与审批, 帮助与关于. Invented subtitles — trusted contacts, passcode, diagnostics — are gone; where a category's existing scope string is not in hand, the subtitle is simply absent rather than guessed.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Corrected · one identity field</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">BridgeInfo carries one display identity: <span style="font:400 12px/1.5 'JetBrains Mono',monospace">name</span>. The invented friendly-label-plus-id pair is removed, deviceId is never printed, and the AccessTier badge — a security-relevant existing field dropped by mistake — is back on every collapsed card.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Corrected · two independent facts</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Link state is pendingTicket, then online, then offline, in the product's own words. <span style="font:400 12px/1.5 'JetBrains Mono',monospace">runner.running</span> only chooses which runner actions exist; Running, Stopped and Pending no longer masquerade as link labels. With <span style="font:400 12px/1.5 'JetBrains Mono',monospace">runner == null</span> there are no runner controls at all, Edit included.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Corrected · tags, paths, recovery</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The noApproval tag reads “trust modes allowed / 可设信任模式” and means configuration is permitted, not that approvals are skipped. Workdirs print as basenames. Revoke is a visible action on every card, never inside the disclosure. bridgeError and bridgeMergeLost print above the cards with no Retry and no log action.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ A · SETTINGS: THE CHOICE ═══ -->
+  <div style="padding-top:48px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:10px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">A</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Settings landing · three candidate hierarchies</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Same seven destinations every time. Only the hierarchy between them changes.</span>
+    </div>
+    <p style="margin:0 0 26px;max-width:1180px;font:400 13.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The flat list fails for one reason: seven equal rows with seven static scope subtitles give the eye no place to land, so the two things people came for — usage and schedule — read as the first two of seven categories. Live: tap the tabs to switch, tap any row to see it register.</p>
+
+    <div style="display:flex;gap:12px;padding-bottom:26px">
+      <sc-for list="{{ optTabs }}" as="o" hint-placeholder-count="3">
+        <div onClick="{{ o.set }}" style="min-height:40px;padding:0 18px;border-radius:9px;display:flex;align-items:center;gap:10px;cursor:pointer;border:1px solid #C9C5BD;background:{{ o.bg }};color:{{ o.ink }};font:500 12.5px/1 'JetBrains Mono',monospace;letter-spacing:.06em">{{ o.label }}</div>
+      </sc-for>
+      <div style="display:flex;align-items:center;font:400 12.5px/1 'JetBrains Mono',monospace;color:#8A857C;padding-left:6px">last tap · {{ lastTap }}</div>
+    </div>
+
+    <div style="display:flex;gap:56px;align-items:flex-start;flex-wrap:wrap">
+
+      <!-- A1 -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">A1 · flat list · production today</div>
+        <div style="width:402px;border-radius:26px;overflow:hidden;border:1px solid #C9C5BD;background:#0B0B0C;padding:26px 20px 20px">
+          <div style="font:600 30px/1.12 'Public Sans',sans-serif;color:#F3F3F4;letter-spacing:-.02em">Settings</div>
+          <div style="margin-top:7px;font:400 13.5px/1.45 'Public Sans',sans-serif;color:#8C8D95">Connected to Panda · MacBook Pro</div>
+          <div style="margin-top:20px;display:flex;flex-direction:column">
+            <div onClick="{{ tap }}" style="min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Token usage</div><div style="font:400 12.5px/1.4 'Public Sans',sans-serif;color:#8C8D95;margin-top:3px">This computer</div></div><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Scheduled tasks</div><div style="font:400 12.5px/1.4 'Public Sans',sans-serif;color:#8C8D95;margin-top:3px">Recurring prompts</div></div><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">General</div><div style="font:400 12.5px/1.4 'Public Sans',sans-serif;color:#8C8D95;margin-top:3px">Appearance, text size, notifications</div></div><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Agent &amp; session defaults</div><div style="font:400 12.5px/1.4 'Public Sans',sans-serif;color:#8C8D95;margin-top:3px">Agent, model, permission mode</div></div><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Connections &amp; collaboration</div><div style="font:400 12.5px/1.4 'Public Sans',sans-serif;color:#8C8D95;margin-top:3px">Computers, shared folders, collaborators, bridges</div></div><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Security &amp; approvals</div></div><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;cursor:pointer"><div><div style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Support &amp; about</div></div><span style="color:#6E6E76;font-size:17px">›</span></div>
+          </div>
+        </div>
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><b style="font-weight:600">Rejected.</b> Seven identical rows, one weight. The two utilities are indistinguishable from the five categories, and the subtitles compete with the titles instead of supporting them. This is the state we are fixing.</div>
+      </div>
+
+      <!-- A2 -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">A2 · utility tiles + category list</div>
+        <div style="width:402px;border-radius:26px;overflow:hidden;border:1px solid #C9C5BD;background:#0B0B0C;padding:26px 20px 20px">
+          <div style="font:600 30px/1.12 'Public Sans',sans-serif;color:#F3F3F4;letter-spacing:-.02em">Settings</div>
+          <div style="margin-top:7px;font:400 13.5px/1.45 'Public Sans',sans-serif;color:#8C8D95">Connected to Panda · MacBook Pro</div>
+          <div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div onClick="{{ tap }}" style="min-height:96px;border-radius:14px;background:#141417;border:1px solid rgba(255,255,255,.14);padding:14px;display:flex;flex-direction:column;justify-content:flex-end;cursor:pointer"><span style="font:600 16px/1.25 'Public Sans',sans-serif;color:#F3F3F4">Token usage</span></div>
+            <div onClick="{{ tap }}" style="min-height:96px;border-radius:14px;background:#141417;border:1px solid rgba(255,255,255,.14);padding:14px;display:flex;flex-direction:column;justify-content:flex-end;cursor:pointer"><span style="font:600 16px/1.25 'Public Sans',sans-serif;color:#F3F3F4">Scheduled tasks</span></div>
+          </div>
+          <div style="margin-top:24px;display:flex;flex-direction:column">
+            <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><span style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">General</span><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><span style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Agent &amp; session defaults</span><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><span style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Connections &amp; collaboration</span><span style="display:flex;align-items:center;gap:9px"><span style="min-width:24px;height:24px;padding:0 7px;border-radius:12px;background:rgba(233,180,92,.16);border:1px solid rgba(233,180,92,.5);color:#F0C079;font:600 12px/1 'JetBrains Mono',monospace;display:flex;align-items:center;justify-content:center">{{ pending }}</span><span style="color:#6E6E76;font-size:17px">›</span></span></div>
+            <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><span style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Security &amp; approvals</span><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;cursor:pointer"><span style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Support &amp; about</span><span style="color:#6E6E76;font-size:17px">›</span></div>
+          </div>
+        </div>
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><b style="font-weight:600">Rejected.</b> The separation works, but two containers of dashboard-shaped tiles are exactly the nested-card chrome UI 2.0 forbids, and an empty tile invites a figure the product cannot supply here. At 200% the pair breaks to one column and the page loses its top third to two words.</div>
+      </div>
+
+      <!-- A3 -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">A3 · labelled groups · selected</div>
+        <div style="width:402px;border-radius:26px;overflow:hidden;border:2px solid #B4522F;background:#0B0B0C;padding:26px 20px 20px">
+          <div style="font:600 30px/1.12 'Public Sans',sans-serif;color:#F3F3F4;letter-spacing:-.02em">Settings</div>
+          <div style="margin-top:7px;font:400 13.5px/1.45 'Public Sans',sans-serif;color:#8C8D95">Connected to Panda · MacBook Pro</div>
+          <div style="margin-top:22px;display:flex;flex-direction:column">
+            <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><span style="font:500 16px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Token usage</span><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><span style="font:500 16px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Scheduled tasks</span><span style="color:#6E6E76;font-size:17px">›</span></div>
+          </div>
+          <div style="margin-top:26px;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8C8D95">Categories</div>
+          <div style="margin-top:12px;border-radius:14px;background:#141417;padding:0 14px">
+            <div onClick="{{ tap }}" style="min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">General</div><div style="font:400 12.5px/1.4 'Public Sans',sans-serif;color:#8C8D95;margin-top:3px">Dark · Default text size</div></div><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Agent &amp; session defaults</div><div style="font:400 12.5px/1.4 'Public Sans',sans-serif;color:#8C8D95;margin-top:3px">Agent, model, permission mode</div></div><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Connections &amp; collaboration</div><div style="font:400 12.5px/1.4 'Public Sans',sans-serif;color:#8C8D95;margin-top:3px">Computers, shared folders, collaborators, bridges</div></div><span style="display:flex;align-items:center;gap:9px;flex:none"><span style="min-width:24px;height:24px;padding:0 7px;border-radius:12px;background:rgba(233,180,92,.16);border:1px solid rgba(233,180,92,.5);color:#F0C079;font:600 12px/1 'JetBrains Mono',monospace;display:flex;align-items:center;justify-content:center">{{ pending }}</span><span style="color:#6E6E76;font-size:17px">›</span></span></div>
+            <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Security &amp; approvals</div><span style="color:#6E6E76;font-size:17px">›</span></div>
+            <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;cursor:pointer"><div style="font:500 15.5px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Support &amp; about</div><span style="color:#6E6E76;font-size:17px">›</span></div>
+          </div>
+        </div>
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><b style="font-weight:600">Selected.</b> Two utilities sit on the paper base as bare title rows directly under the existing summary. The five categories sit inside one low container under a written <span style="font:400 12px/1 'JetBrains Mono',monospace">Categories</span> label. A subtitle appears only where the product already has the words for one — General reads real local state; the last two rows carry no subtitle at all rather than an invented list.</div>
+      </div>
+    </div>
+
+    <div style="margin-top:34px;display:grid;grid-template-columns:repeat(3,1fr);gap:0 40px;border-top:1px solid #C9C5BD;border-bottom:1px solid #C9C5BD;padding:18px 0 20px">
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Why A3 and not A2</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">A2 buys separation with a second container type. A3 buys the same separation with contrast the surface already owns — paper versus low container, subtitle versus no subtitle, one group label. It survives 200% text and Chinese without re-flowing, because nothing sits side by side.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Which subtitles are allowed</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">General prints real resolved local state — appearance and text size. Agent and Connections print scope copy taken from the settings they already contain. Security &amp; approvals and Support &amp; about print none until their existing scope strings are pulled from the repository; a subtitle is never authored on this board. Utilities print none by rule.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">What stays exactly as it is</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Large title, the existing <span style="font:400 12px/1 'JetBrains Mono',monospace">Connected to &lt;computer&gt;</span> summary derived from paired.displayName with no link health or counts, the two utilities, the five categories in order, and the pending-review badge beside Connections above zero.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ B · SETTINGS PROOFS ═══ -->
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">B</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Settings · layout proofs</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Full device boxes with the header behaviour and the scroll clip in place.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start;flex-wrap:wrap">
+
+      <!-- B1 -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">01 · dark · EN · 402 × 874</div>
+        <div style="width:402px;height:874px;border-radius:30px;overflow:hidden;border:1px solid #C9C5BD;background:#0B0B0C;display:flex;flex-direction:column;position:relative">
+          <div style="height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font:500 13px/1 'JetBrains Mono',monospace;color:#B4B5BC"><span>9:41</span><span style="letter-spacing:.2em">▲ ▮</span></div>
+          <div style="flex:none;padding:0 20px">
+            <div onClick="{{ tap }}" style="height:52px;display:flex;align-items:center;gap:6px;cursor:pointer;color:#E2795A;font:500 15px/1 'Public Sans',sans-serif"><span style="font-size:20px;line-height:1">‹</span>Projects</div>
+            <div style="padding:6px 0 4px;font:600 32px/1.1 'Public Sans',sans-serif;color:#F3F3F4;letter-spacing:-.022em">Settings</div>
+            <div style="padding-bottom:18px;font:400 13.5px/1.45 'Public Sans',sans-serif;color:#8C8D95">Connected to Panda · MacBook Pro</div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:0 20px 28px">
+            <div style="display:flex;flex-direction:column">
+              <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><span style="font:500 16px/1.35 'Public Sans',sans-serif;color:#F3F3F4">Token usage</span><span style="color:#6E6E76;font-size:17px">›</span></div>
+              <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><span style="font:500 16px/1.35 'Public Sans',sans-serif;color:#F3F3F4">Scheduled tasks</span><span style="color:#6E6E76;font-size:17px">›</span></div>
+            </div>
+            <div style="margin-top:28px;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8C8D95">Categories</div>
+            <div style="margin-top:12px;border-radius:14px;background:#141417;padding:0 14px">
+              <div onClick="{{ tap }}" style="min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 15.5px/1.35 'Public Sans',sans-serif;color:#F3F3F4">General</div><div style="font:400 12.5px/1.45 'Public Sans',sans-serif;color:#8C8D95;margin-top:3px">Dark · Default text size</div></div><span style="color:#6E6E76;font-size:17px">›</span></div>
+              <div onClick="{{ tap }}" style="min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 15.5px/1.35 'Public Sans',sans-serif;color:#F3F3F4">Agent &amp; session defaults</div><div style="font:400 12.5px/1.45 'Public Sans',sans-serif;color:#8C8D95;margin-top:3px">Agent, model, permission mode</div></div><span style="color:#6E6E76;font-size:17px">›</span></div>
+              <div onClick="{{ tap }}" style="min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 15.5px/1.35 'Public Sans',sans-serif;color:#F3F3F4">Connections &amp; collaboration</div><div style="font:400 12.5px/1.45 'Public Sans',sans-serif;color:#8C8D95;margin-top:3px">Computers, shared folders, collaborators, bridges</div></div><span style="display:flex;align-items:center;gap:9px;flex:none"><span aria-label="3 reviews awaiting response" style="min-width:24px;height:24px;padding:0 7px;border-radius:12px;background:rgba(233,180,92,.16);border:1px solid rgba(233,180,92,.5);color:#F0C079;font:600 12px/1 'JetBrains Mono',monospace;display:flex;align-items:center;justify-content:center">{{ pending }}</span><span style="color:#6E6E76;font-size:17px">›</span></span></div>
+              <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div style="font:500 15.5px/1.35 'Public Sans',sans-serif;color:#F3F3F4">Security &amp; approvals</div><span style="color:#6E6E76;font-size:17px">›</span></div>
+              <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;cursor:pointer"><div style="font:500 15.5px/1.35 'Public Sans',sans-serif;color:#F3F3F4">Support &amp; about</div><span style="color:#6E6E76;font-size:17px">›</span></div>
+            </div>
+          </div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">All seven destinations fit above the fold at default size. Utilities are hairline-bounded on paper; categories are one container. Rows without a subtitle relax to 56 pt, those with one hold 64 — both above the 44 pt floor.</div>
+        </sc-if>
+      </div>
+
+      <!-- B2 -->
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">02 · light · 简体中文 · 390 × 844</div>
+        <div style="width:390px;height:844px;border-radius:30px;overflow:hidden;border:1px solid #C9C5BD;background:#FCFBFA;display:flex;flex-direction:column;position:relative">
+          <div style="height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font:500 13px/1 'JetBrains Mono',monospace;color:#6B6970"><span>9:41</span><span style="letter-spacing:.2em">▲ ▮</span></div>
+          <div style="flex:none;padding:0 20px">
+            <div onClick="{{ tap }}" style="height:52px;display:flex;align-items:center;gap:6px;cursor:pointer;color:#A9482A;font:500 15px/1 'Public Sans',sans-serif"><span style="font-size:20px;line-height:1">‹</span>项目</div>
+            <div style="padding:6px 0 4px;font:600 32px/1.15 'Public Sans',sans-serif;color:#17161A">设置</div>
+            <div style="padding-bottom:18px;font:400 13.5px/1.5 'Public Sans',sans-serif;color:#6B6970">已连接 Panda · MacBook Pro</div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:0 20px 28px">
+            <div style="display:flex;flex-direction:column">
+              <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid rgba(20,18,16,.16);border-bottom:1px solid rgba(20,18,16,.16);cursor:pointer"><span style="font:500 16px/1.4 'Public Sans',sans-serif;color:#17161A">Token 用量</span><span style="color:#8E8C92;font-size:17px">›</span></div>
+              <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(20,18,16,.16);cursor:pointer"><span style="font:500 16px/1.4 'Public Sans',sans-serif;color:#17161A">定时任务</span><span style="color:#8E8C92;font-size:17px">›</span></div>
+            </div>
+            <div style="margin-top:28px;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#6B6970">分类</div>
+            <div style="margin-top:12px;border-radius:14px;background:#F4F2EF;padding:0 14px">
+              <div onClick="{{ tap }}" style="min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(20,18,16,.16);cursor:pointer"><div><div style="font:500 15.5px/1.4 'Public Sans',sans-serif;color:#17161A">通用</div><div style="font:400 12.5px/1.5 'Public Sans',sans-serif;color:#6B6970;margin-top:3px">浅色 · 默认字号</div></div><span style="color:#8E8C92;font-size:17px">›</span></div>
+              <div onClick="{{ tap }}" style="min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(20,18,16,.16);cursor:pointer"><div><div style="font:500 15.5px/1.4 'Public Sans',sans-serif;color:#17161A">Agent 与会话默认项</div><div style="font:400 12.5px/1.5 'Public Sans',sans-serif;color:#6B6970;margin-top:3px">Agent · 模型 · 权限模式</div></div><span style="color:#8E8C92;font-size:17px">›</span></div>
+              <div onClick="{{ tap }}" style="min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(20,18,16,.16);cursor:pointer"><div><div style="font:500 15.5px/1.4 'Public Sans',sans-serif;color:#17161A">连接与协作</div><div style="font:400 12.5px/1.5 'Public Sans',sans-serif;color:#6B6970;margin-top:3px">电脑 · 共享文件夹 · 协作者 · 桥接</div></div><span style="display:flex;align-items:center;gap:9px;flex:none"><span aria-label="3 条待处理审阅" style="min-width:24px;height:24px;padding:0 7px;border-radius:12px;background:rgba(138,90,8,.12);border:1px solid rgba(138,90,8,.45);color:#8A5A08;font:600 12px/1 'JetBrains Mono',monospace;display:flex;align-items:center;justify-content:center">{{ pending }}</span><span style="color:#8E8C92;font-size:17px">›</span></span></div>
+              <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(20,18,16,.16);cursor:pointer"><div style="font:500 15.5px/1.4 'Public Sans',sans-serif;color:#17161A">安全与审批</div><span style="color:#8E8C92;font-size:17px">›</span></div>
+              <div onClick="{{ tap }}" style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;cursor:pointer"><div style="font:500 15.5px/1.4 'Public Sans',sans-serif;color:#17161A">帮助与关于</div><span style="color:#8E8C92;font-size:17px">›</span></div>
+            </div>
+          </div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The repository's own titles, latin words included: Token 用量, 定时任务, Agent 与会话默认项. Chinese is shorter, so the group label carries more of the hierarchy. Computer names stay literal; the 通用 line reads real local state in Chinese.</div>
+        </sc-if>
+      </div>
+
+      <!-- B3 -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">03 · dark · EN · text 200% · fifth category below the fold</div>
+        <div style="width:402px;height:874px;border-radius:30px;overflow:hidden;border:1px solid #C9C5BD;background:#0B0B0C;display:flex;flex-direction:column;position:relative">
+          <div style="height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font:500 13px/1 'JetBrains Mono',monospace;color:#B4B5BC"><span>9:41</span><span style="letter-spacing:.2em">▲ ▮</span></div>
+          <div style="flex:none;padding:0 20px">
+            <div onClick="{{ tap }}" style="min-height:60px;display:flex;align-items:center;gap:8px;cursor:pointer;color:#E2795A;font:500 26px/1.2 'Public Sans',sans-serif"><span style="font-size:32px;line-height:1">‹</span>Projects</div>
+            <div style="padding:8px 0 6px;font:600 44px/1.1 'Public Sans',sans-serif;color:#F3F3F4;letter-spacing:-.02em">Settings</div>
+            <div style="padding-bottom:16px;font:400 23px/1.4 'Public Sans',sans-serif;color:#8C8D95;text-wrap:pretty">Connected to Panda · MacBook Pro</div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:0 20px 28px">
+            <div style="display:flex;flex-direction:column">
+              <div onClick="{{ tap }}" style="min-height:72px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 0;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><span style="font:500 27px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Token usage</span><span style="color:#6E6E76;font-size:26px">›</span></div>
+              <div onClick="{{ tap }}" style="min-height:72px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><span style="font:500 27px/1.3 'Public Sans',sans-serif;color:#F3F3F4">Scheduled tasks</span><span style="color:#6E6E76;font-size:26px">›</span></div>
+            </div>
+            <div style="margin-top:30px;font:500 19px/1.2 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#8C8D95">Categories</div>
+            <div style="margin-top:14px;border-radius:16px;background:#141417;padding:0 16px">
+              <div onClick="{{ tap }}" style="min-height:88px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 26px/1.3 'Public Sans',sans-serif;color:#F3F3F4;text-wrap:pretty">General</div><div style="font:400 21px/1.4 'Public Sans',sans-serif;color:#8C8D95;margin-top:5px;text-wrap:pretty">Dark · Default text size</div></div><span style="color:#6E6E76;font-size:26px;flex:none">›</span></div>
+              <div onClick="{{ tap }}" style="min-height:88px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 26px/1.3 'Public Sans',sans-serif;color:#F3F3F4;text-wrap:pretty">Agent &amp; session defaults</div><div style="font:400 21px/1.4 'Public Sans',sans-serif;color:#8C8D95;margin-top:5px;text-wrap:pretty">Agent, model, permission mode</div></div><span style="color:#6E6E76;font-size:26px;flex:none">›</span></div>
+              <div onClick="{{ tap }}" style="min-height:88px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div><div style="font:500 26px/1.3 'Public Sans',sans-serif;color:#F3F3F4;text-wrap:pretty">Connections &amp; collaboration</div><div style="font:400 21px/1.4 'Public Sans',sans-serif;color:#8C8D95;margin-top:5px;text-wrap:pretty">Computers, shared folders, collaborators, bridges</div></div><span style="display:flex;align-items:center;gap:11px;flex:none"><span aria-label="3 reviews awaiting response" style="min-width:34px;height:34px;padding:0 9px;border-radius:17px;background:rgba(233,180,92,.16);border:1px solid rgba(233,180,92,.5);color:#F0C079;font:600 19px/1 'JetBrains Mono',monospace;display:flex;align-items:center;justify-content:center">{{ pending }}</span><span style="color:#6E6E76;font-size:26px">›</span></span></div>
+              <div onClick="{{ tap }}" style="min-height:76px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer"><div style="font:500 26px/1.3 'Public Sans',sans-serif;color:#F3F3F4;text-wrap:pretty">Security &amp; approvals</div><span style="color:#6E6E76;font-size:26px;flex:none">›</span></div>
+              <div onClick="{{ tap }}" style="min-height:76px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 0;cursor:pointer"><div style="font:500 26px/1.3 'Public Sans',sans-serif;color:#F3F3F4;text-wrap:pretty">Support &amp; about</div><span style="color:#6E6E76;font-size:26px;flex:none">›</span></div>
+            </div>
+          </div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The list scrolls under a held header, so Support &amp; about sits below the fold rather than being shortened — scroll the frame to reach it. Rows grow to 72 – 88 pt, labels wrap, the badge grows with the text, and nothing truncates or shrinks.</div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ C · BRIDGE CARD: THE CHOICE ═══ -->
+  <div style="padding-top:60px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:10px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">C</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Bridge card · two candidate zonings</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Both shown at the 320 pt stress width, where the break actually happens.</span>
+    </div>
+    <p style="margin:0 0 26px;max-width:1180px;font:400 13.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Today name, link state, access tier, the trust tag and the runner actions share one row. At 320 pt minus a 20 pt gutter there are 280 pt of content, and the last flex child is squeezed until 编辑 breaks between its two characters. A button that wraps its own label is the failure; a button row that wraps as whole buttons is the fix.</p>
+
+    <div style="display:flex;gap:56px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:420px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">C0 · today · 320 pt · the bug</div>
+        <div style="width:320px;border-radius:26px;overflow:hidden;border:1px solid #C9C5BD;background:#0B0B0C;padding:20px">
+          <div style="border-radius:14px;background:#141417;padding:14px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="flex:1;min-width:0;font:500 14.5px/1.4 'JetBrains Mono',monospace;color:#F3F3F4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">研发适配器</div>
+              <span style="flex:none;font:400 12.5px/1.3 'Public Sans',sans-serif;color:#7ECBA0">● 在线</span>
+              <span style="flex:none;font:400 11.5px/1.2 'Public Sans',sans-serif;color:#F0C079;border:1px solid rgba(233,180,92,.5);border-radius:6px;padding:3px 5px">可设信任模式</span>
+              <div style="flex:1 1 0;min-width:0;display:flex;gap:5px">
+                <div style="flex:1 1 0;min-width:0;min-height:44px;border:1px solid rgba(255,255,255,.24);border-radius:9px;display:flex;align-items:center;justify-content:center;font:500 13.5px/1.2 'Public Sans',sans-serif;color:#E6E6E9;word-break:break-all;text-align:center">重启</div>
+                <div style="flex:1 1 0;min-width:0;min-height:44px;border:1px solid rgba(255,255,255,.24);border-radius:9px;display:flex;align-items:center;justify-content:center;font:500 13.5px/1.2 'Public Sans',sans-serif;color:#E6E6E9;word-break:break-all;text-align:center">停止</div>
+                <div style="flex:1 1 0;min-width:0;min-height:44px;border:1px solid rgba(255,255,255,.24);border-radius:9px;display:flex;align-items:center;justify-content:center;font:500 13.5px/1.2 'Public Sans',sans-serif;color:#E6E6E9;word-break:break-all;text-align:center">编辑</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Reproduced honestly: one row, competing children, 编 over 辑 in the last one, and the access tier squeezed out of the row entirely. Link state and trust also compete with the actions for the same horizontal space, so the card has no reading order at all.</div>
+      </div>
+
+      <div style="width:420px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">C1 · actions into an overflow menu</div>
+        <div style="width:320px;border-radius:26px;overflow:hidden;border:1px solid #C9C5BD;background:#0B0B0C;padding:20px">
+          <div style="border-radius:14px;background:#141417;padding:14px">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <div style="flex:1;min-width:0">
+                <div style="font:500 14.5px/1.45 'JetBrains Mono',monospace;color:#F3F3F4;word-break:break-word">研发适配器</div>
+                <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:9px">
+                  <span style="font:400 13px/1.3 'Public Sans',sans-serif;color:#7ECBA0;white-space:nowrap">● 在线</span>
+                  <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#B4B5BC;border:1px solid rgba(255,255,255,.24);border-radius:6px;padding:4px 6px;white-space:nowrap">full</span>
+                  <span style="font:400 12px/1.2 'Public Sans',sans-serif;color:#F0C079;border:1px solid rgba(233,180,92,.5);border-radius:6px;padding:4px 6px;white-space:nowrap">可设信任模式</span>
+                </div>
+              </div>
+              <div onClick="{{ tap }}" style="flex:none;width:48px;height:48px;border-radius:10px;border:1px solid rgba(255,255,255,.24);display:flex;align-items:center;justify-content:center;color:#B4B5BC;font-size:19px;cursor:pointer">···</div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><b style="font-weight:600">Rejected.</b> It fixes the wrap and the card becomes calm. But Restart and Stop are the reason this screen is opened when an adapter misbehaves, and burying them behind an unlabelled glyph costs a tap and all discoverability. It also hides whether a bridge has a managed runner at all, and Revoke — a destructive action that must stay visible — would go with them.</div>
+      </div>
+
+      <div style="width:420px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">C2 · three stacked zones · selected</div>
+        <div style="width:320px;border-radius:26px;overflow:hidden;border:2px solid #B4522F;background:#0B0B0C;padding:20px">
+          <div style="border-radius:14px;background:#141417;padding:14px">
+            <div style="font:500 14.5px/1.45 'JetBrains Mono',monospace;color:#F3F3F4;word-break:break-word">研发适配器</div>
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px">
+              <span style="font:400 13px/1.3 'Public Sans',sans-serif;color:#7ECBA0;white-space:nowrap">● 在线</span>
+              <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#B4B5BC;border:1px solid rgba(255,255,255,.24);border-radius:6px;padding:4px 6px;white-space:nowrap">full</span>
+              <span style="font:400 12px/1.2 'Public Sans',sans-serif;color:#F0C079;border:1px solid rgba(233,180,92,.5);border-radius:6px;padding:4px 6px;white-space:nowrap">可设信任模式</span>
+              <span style="font:400 12.5px/1.3 'Public Sans',sans-serif;color:#8C8D95;white-space:nowrap">2 个进行中</span>
+            </div>
+            <div style="margin-top:13px;padding-top:13px;border-top:1px solid rgba(255,255,255,.14);display:flex;flex-wrap:wrap;gap:8px">
+              <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">重启</div>
+              <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">停止</div>
+              <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">编辑</div>
+              <div onClick="{{ openRevoke }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(233,116,98,.5);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#F0A08F;white-space:nowrap;cursor:pointer">撤销</div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><b style="font-weight:600">Selected.</b> Name, then link state with access tier and trust, then actions below a hairline. Four controls at 96 pt minimum plus 8 pt gaps cannot share 280 pt, so the row wraps two by two — every label single-line at 48 pt, 编辑 horizontal, Revoke visible.</div>
+      </div>
+    </div>
+
+    <div style="margin-top:34px;display:grid;grid-template-columns:repeat(4,1fr);gap:0 36px;border-top:1px solid #C9C5BD;border-bottom:1px solid #C9C5BD;padding:18px 0 20px">
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Exact responsive rule</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Action row: <span style="font:400 12px/1.5 'JetBrains Mono',monospace">flex; wrap; gap 8</span>. Each control <span style="font:400 12px/1.5 'JetBrains Mono',monospace">flex 1 1 auto; min-width 96; min-height 48; padding 0 16; white-space nowrap</span>. No <span style="font:400 12px/1.5 'JetBrains Mono',monospace">min-width 0</span> and no <span style="font:400 12px/1.5 'JetBrains Mono',monospace">word-break</span> inside a control, so the row breaks before a label can.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Zone contract</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Zone 1: <span style="font:400 12px/1.5 'JetBrains Mono',monospace">name</span>, once, monospace — no second identity line and never deviceId. Zone 2: link state beside its mark, the AccessTier badge, the optional trust tag, the live-session count — one wrapping run, no controls. Zone 3: actions below a hairline.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Targets</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">48 pt on every runner action, Revoke and every sheet button; 44 pt floor on the disclosure control and the card. At 200% controls grow to 60 pt and the row wraps further. Targets never shrink to make a row fit.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Localisation</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">96 pt holds two-character Chinese labels and the longest English equivalent (Restart) at both text sizes. Only fixed grammar localises; <span style="font:400 12px/1.5 'JetBrains Mono',monospace">name</span>, workdir basenames, exit codes and error text are data and print as supplied.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ D · BRIDGE PROOFS ═══ -->
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">D</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Bridges · variant proofs</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Live: the chevron expands each card on its own, and Revoke opens the existing sheet.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start;flex-wrap:wrap">
+
+      <!-- D1 -->
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">04 · 简体中文 · 390 × 844 · 在线 + runner.running</div>
+        <div style="width:390px;height:844px;border-radius:30px;overflow:hidden;border:1px solid #C9C5BD;background:#0B0B0C;display:flex;flex-direction:column;position:relative">
+          <div style="height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font:500 13px/1 'JetBrains Mono',monospace;color:#B4B5BC"><span>9:41</span><span style="letter-spacing:.2em">▲ ▮</span></div>
+          <div style="flex:none;padding:0 20px">
+            <div onClick="{{ tap }}" style="height:52px;display:flex;align-items:center;gap:6px;cursor:pointer;color:#E2795A;font:500 15px/1 'Public Sans',sans-serif"><span style="font-size:20px;line-height:1">‹</span>连接与协作</div>
+            <div style="padding:6px 0 4px;font:600 32px/1.15 'Public Sans',sans-serif;color:#F3F3F4">机器人桥接</div>
+            <div style="padding-bottom:18px;font:400 13.5px/1.5 'Public Sans',sans-serif;color:#8C8D95">已连接 Panda · MacBook Pro</div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:0 20px 28px;display:flex;flex-direction:column;gap:12px">
+            <div style="border-radius:14px;background:#141417;padding:14px">
+              <div style="font:500 15px/1.45 'JetBrains Mono',monospace;color:#F3F3F4;word-break:break-word">研发适配器</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px">
+                <span style="font:400 13px/1.3 'Public Sans',sans-serif;color:#7ECBA0;white-space:nowrap">● 在线</span>
+                <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#B4B5BC;border:1px solid rgba(255,255,255,.24);border-radius:6px;padding:4px 6px;white-space:nowrap">full</span>
+                <span style="font:400 12px/1.2 'Public Sans',sans-serif;color:#F0C079;border:1px solid rgba(233,180,92,.5);border-radius:6px;padding:4px 6px;white-space:nowrap">可设信任模式</span>
+                <span style="font:400 12.5px/1.3 'Public Sans',sans-serif;color:#8C8D95;white-space:nowrap">2 个进行中</span>
+              </div>
+              <div style="margin-top:13px;padding-top:13px;border-top:1px solid rgba(255,255,255,.14);display:flex;flex-wrap:wrap;gap:8px">
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">重启</div>
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">停止</div>
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">编辑</div>
+                <div onClick="{{ openRevoke }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(233,116,98,.5);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#F0A08F;white-space:nowrap;cursor:pointer">撤销</div>
+              </div>
+              <div onClick="{{ toggle.a }}" aria-label="展开" style="margin-top:4px;min-height:44px;display:flex;align-items:center;justify-content:flex-end;cursor:pointer;color:#8C8D95;font-size:17px">{{ caret.a }}</div>
+              <sc-if value="{{ open.a }}" hint-placeholder-val="{{ false }}">
+              <div style="border-top:1px solid rgba(255,255,255,.14);padding-top:12px;display:flex;flex-direction:column;gap:11px">
+                <div><div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8C8D95">项目</div><div style="font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#B4B5BC;margin-top:5px;word-break:break-word">cc-pocket · pocket-nightly</div></div>
+                <div><div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8C8D95">日志</div><div style="font:400 12px/1.7 'JetBrains Mono',monospace;color:#B4B5BC;margin-top:5px;word-break:break-all">adapter connected<br />session 2 attached</div></div>
+              </div>
+              </sc-if>
+            </div>
+
+            <div style="border-radius:14px;background:#141417;padding:14px">
+              <div style="font:500 15px/1.45 'JetBrains Mono',monospace;color:#F3F3F4;word-break:break-word">design-review-bot</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px">
+                <span style="font:400 13px/1.45 'Public Sans',sans-serif;color:#F0C079">◐ 等待适配器连接</span>
+                <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#B4B5BC;border:1px solid rgba(255,255,255,.24);border-radius:6px;padding:4px 6px;white-space:nowrap">limited</span>
+              </div>
+              <div style="margin-top:13px;padding-top:13px;border-top:1px solid rgba(255,255,255,.14);display:flex;flex-wrap:wrap;gap:8px">
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">启动</div>
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">编辑</div>
+                <div onClick="{{ openRevoke }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(233,116,98,.5);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#F0A08F;white-space:nowrap;cursor:pointer">撤销</div>
+              </div>
+            </div>
+
+            <div style="border-radius:14px;background:#141417;padding:14px">
+              <div style="font:500 15px/1.45 'JetBrains Mono',monospace;color:#F3F3F4;word-break:break-word">ci-adapter</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px">
+                <span style="font:400 13px/1.3 'Public Sans',sans-serif;color:#F0A08F;white-space:nowrap">○ 离线</span>
+                <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#B4B5BC;border:1px solid rgba(255,255,255,.24);border-radius:6px;padding:4px 6px;white-space:nowrap">full</span>
+              </div>
+              <div style="margin-top:13px;padding-top:13px;border-top:1px solid rgba(255,255,255,.14);display:flex;flex-wrap:wrap;gap:8px">
+                <div onClick="{{ openRevoke }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(233,116,98,.5);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#F0A08F;white-space:nowrap;cursor:pointer">撤销</div>
+              </div>
+              <div onClick="{{ toggle.d }}" aria-label="展开" style="margin-top:4px;min-height:44px;display:flex;align-items:center;justify-content:flex-end;cursor:pointer;color:#8C8D95;font-size:17px">{{ caret.d }}</div>
+              <sc-if value="{{ open.d }}" hint-placeholder-val="{{ true }}">
+              <div style="border-top:1px solid rgba(255,255,255,.14);padding-top:12px;display:flex;flex-direction:column;gap:11px">
+                <div><div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8C8D95">项目</div><div style="font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#B4B5BC;margin-top:5px;word-break:break-word">pocket-nightly</div></div>
+                <div style="font:400 13px/1.6 'Public Sans',sans-serif;color:#B4B5BC;text-wrap:pretty">此桥接由你自行运行适配器。</div>
+              </div>
+              </sc-if>
+            </div>
+          </div>
+          <sc-if value="{{ sheetRevoke }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;left:0;right:0;bottom:0;background:#17171B;border-top:1px solid rgba(255,255,255,.24);border-radius:20px 20px 0 0;padding:20px">
+            <div style="font:600 19px/1.3 'Public Sans',sans-serif;color:#F3F3F4">撤销此桥接？</div>
+            <div style="font:400 13.5px/1.6 'Public Sans',sans-serif;color:#B4B5BC;margin-top:8px;text-wrap:pretty">该桥接将失去访问权限。此操作无法撤消。</div>
+            <div style="margin-top:16px;display:flex;flex-wrap:wrap;gap:8px">
+              <div onClick="{{ closeSheet }}" style="flex:1 1 auto;min-width:110px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 15px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">取消</div>
+              <div onClick="{{ closeSheet }}" style="flex:1 1 auto;min-width:110px;min-height:48px;padding:0 16px;border-radius:10px;background:#E97462;display:flex;align-items:center;justify-content:center;font:600 15px/1 'Public Sans',sans-serif;color:#160C07;white-space:nowrap;cursor:pointer">撤销</div>
+            </div>
+          </div>
+          </sc-if>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Three link states in the product's own words — 在线, 等待适配器连接, 离线 — none of them derived from the runner. Card one is a running managed runner (重启 · 停止 · 编辑 · 撤销, wrapping 3 + 1 at 350 pt of content); card two is stopped (启动 · 编辑 · 撤销); card three has no runner, so Revoke is the only control and the expansion carries just the existing self-run sentence. AccessTier prints on every card.</div>
+        </sc-if>
+      </div>
+
+      <!-- D2 -->
+      <div style="width:320px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">05 · 320 pt · whole buttons wrap</div>
+        <div style="width:320px;height:720px;border-radius:30px;overflow:hidden;border:1px solid #C9C5BD;background:#0B0B0C;display:flex;flex-direction:column;position:relative">
+          <div style="height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 20px;font:500 12.5px/1 'JetBrains Mono',monospace;color:#B4B5BC"><span>9:41</span><span style="letter-spacing:.2em">▲ ▮</span></div>
+          <div style="flex:none;padding:0 20px">
+            <div onClick="{{ tap }}" style="height:52px;display:flex;align-items:center;gap:6px;cursor:pointer;color:#E2795A;font:500 15px/1 'Public Sans',sans-serif"><span style="font-size:20px;line-height:1">‹</span>连接与协作</div>
+            <div style="padding:6px 0 16px;font:600 28px/1.15 'Public Sans',sans-serif;color:#F3F3F4">机器人桥接</div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:0 20px 24px;display:flex;flex-direction:column;gap:12px">
+            <div style="border-radius:14px;background:#141417;padding:14px">
+              <div style="font:500 15px/1.45 'JetBrains Mono',monospace;color:#F3F3F4;word-break:break-word">研发适配器</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px">
+                <span style="font:400 13px/1.3 'Public Sans',sans-serif;color:#7ECBA0;white-space:nowrap">● 在线</span>
+                <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#B4B5BC;border:1px solid rgba(255,255,255,.24);border-radius:6px;padding:4px 6px;white-space:nowrap">full</span>
+                <span style="font:400 12px/1.2 'Public Sans',sans-serif;color:#F0C079;border:1px solid rgba(233,180,92,.5);border-radius:6px;padding:4px 6px;white-space:nowrap">可设信任模式</span>
+                <span style="font:400 12.5px/1.3 'Public Sans',sans-serif;color:#8C8D95;white-space:nowrap">2 个进行中</span>
+              </div>
+              <div style="margin-top:13px;padding-top:13px;border-top:1px solid rgba(255,255,255,.14);display:flex;flex-wrap:wrap;gap:8px">
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">重启</div>
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">停止</div>
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">编辑</div>
+                <div onClick="{{ openRevoke }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(233,116,98,.5);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#F0A08F;white-space:nowrap;cursor:pointer">撤销</div>
+              </div>
+            </div>
+            <div style="border-radius:14px;background:#141417;padding:14px">
+              <div style="font:500 15px/1.45 'JetBrains Mono',monospace;color:#F3F3F4;word-break:break-word">ci-adapter</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px">
+                <span style="font:400 13px/1.3 'Public Sans',sans-serif;color:#F0A08F;white-space:nowrap">○ 离线</span>
+                <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#B4B5BC;border:1px solid rgba(255,255,255,.24);border-radius:6px;padding:4px 6px;white-space:nowrap">full</span>
+              </div>
+              <div style="margin-top:13px;padding-top:13px;border-top:1px solid rgba(255,255,255,.14);display:flex;flex-wrap:wrap;gap:8px">
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">启动</div>
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">编辑</div>
+                <div onClick="{{ openRevoke }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(233,116,98,.5);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#F0A08F;white-space:nowrap;cursor:pointer">撤销</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">280 pt of content: the running card wraps two by two, the stopped card two then one. 编辑 stays horizontal in both, every control holds 48 pt, and no row scrolls sideways or shrinks a label.</div>
+        </sc-if>
+      </div>
+
+      <!-- D3 -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">06 · 402 pt · text 200% · one control per line</div>
+        <div style="width:402px;height:874px;border-radius:30px;overflow:hidden;border:1px solid #C9C5BD;background:#0B0B0C;display:flex;flex-direction:column;position:relative">
+          <div style="height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font:500 13px/1 'JetBrains Mono',monospace;color:#B4B5BC"><span>9:41</span><span style="letter-spacing:.2em">▲ ▮</span></div>
+          <div style="flex:none;padding:0 20px">
+            <div onClick="{{ tap }}" style="min-height:60px;display:flex;align-items:center;gap:8px;cursor:pointer;color:#E2795A;font:500 26px/1.2 'Public Sans',sans-serif"><span style="font-size:32px;line-height:1">‹</span>连接与协作</div>
+            <div style="padding:8px 0 18px;font:600 42px/1.15 'Public Sans',sans-serif;color:#F3F3F4">机器人桥接</div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:0 20px 28px;display:flex;flex-direction:column;gap:14px">
+            <div style="border-radius:16px;background:#141417;padding:16px">
+              <div style="font:500 24px/1.5 'JetBrains Mono',monospace;color:#F3F3F4;word-break:break-word">研发适配器</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;margin-top:12px">
+                <span style="font:400 22px/1.3 'Public Sans',sans-serif;color:#7ECBA0;white-space:nowrap">● 在线</span>
+                <span style="font:400 19px/1.2 'JetBrains Mono',monospace;color:#B4B5BC;border:1px solid rgba(255,255,255,.24);border-radius:8px;padding:6px 9px;white-space:nowrap">full</span>
+                <span style="font:400 20px/1.2 'Public Sans',sans-serif;color:#F0C079;border:1px solid rgba(233,180,92,.5);border-radius:8px;padding:6px 9px;white-space:nowrap">可设信任模式</span>
+                <span style="font:400 21px/1.3 'Public Sans',sans-serif;color:#8C8D95;white-space:nowrap">2 个进行中</span>
+              </div>
+              <div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.14);display:flex;flex-wrap:wrap;gap:10px">
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:150px;min-height:60px;padding:0 20px;border:1px solid rgba(255,255,255,.24);border-radius:12px;display:flex;align-items:center;justify-content:center;font:500 24px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">重启</div>
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:150px;min-height:60px;padding:0 20px;border:1px solid rgba(255,255,255,.24);border-radius:12px;display:flex;align-items:center;justify-content:center;font:500 24px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">停止</div>
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:150px;min-height:60px;padding:0 20px;border:1px solid rgba(255,255,255,.24);border-radius:12px;display:flex;align-items:center;justify-content:center;font:500 24px/1 'Public Sans',sans-serif;color:#E6E6E9;white-space:nowrap;cursor:pointer">编辑</div>
+                <div onClick="{{ openRevoke }}" style="flex:1 1 auto;min-width:150px;min-height:60px;padding:0 20px;border:1px solid rgba(233,116,98,.5);border-radius:12px;display:flex;align-items:center;justify-content:center;font:500 24px/1 'Public Sans',sans-serif;color:#F0A08F;white-space:nowrap;cursor:pointer">撤销</div>
+              </div>
+              <div onClick="{{ toggle.b }}" aria-label="展开" style="margin-top:6px;min-height:56px;display:flex;align-items:center;justify-content:flex-end;cursor:pointer;color:#8C8D95;font-size:26px">{{ caret.b }}</div>
+              <sc-if value="{{ open.b }}" hint-placeholder-val="{{ false }}">
+              <div style="border-top:1px solid rgba(255,255,255,.14);padding-top:14px">
+                <div style="font:500 17px/1.2 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#8C8D95">项目</div>
+                <div style="font:400 21px/1.6 'JetBrains Mono',monospace;color:#B4B5BC;margin-top:6px;word-break:break-word">cc-pocket · pocket-nightly</div>
+              </div>
+              </sc-if>
+            </div>
+          </div>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">At 200% the minimum widens to 150 pt and targets to 60, so the four controls wrap two by two. Link state, tier, trust tag and live count wrap as a run of whole phrases. The disclosure control grows to 56 pt.</div>
+        </sc-if>
+      </div>
+
+      <!-- D4 -->
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">07 · light · EN · stopped · unmanaged · expanded</div>
+        <div style="width:402px;height:874px;border-radius:30px;overflow:hidden;border:1px solid #C9C5BD;background:#FCFBFA;display:flex;flex-direction:column;position:relative">
+          <div style="height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font:500 13px/1 'JetBrains Mono',monospace;color:#6B6970"><span>9:41</span><span style="letter-spacing:.2em">▲ ▮</span></div>
+          <div style="flex:none;padding:0 20px">
+            <div onClick="{{ tap }}" style="height:52px;display:flex;align-items:center;gap:6px;cursor:pointer;color:#A9482A;font:500 15px/1 'Public Sans',sans-serif"><span style="font-size:20px;line-height:1">‹</span>Connections</div>
+            <div style="padding:6px 0 4px;font:600 32px/1.12 'Public Sans',sans-serif;color:#17161A;letter-spacing:-.022em">Bridges</div>
+            <div style="padding-bottom:18px;font:400 13.5px/1.45 'Public Sans',sans-serif;color:#6B6970">Connected to Panda · MacBook Pro</div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:0 20px 28px;display:flex;flex-direction:column;gap:12px">
+            <div style="border-radius:14px;background:#F4F2EF;padding:14px">
+              <div style="font:500 15px/1.45 'JetBrains Mono',monospace;color:#17161A;word-break:break-word">research-adapter</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px">
+                <span style="font:400 13px/1.3 'Public Sans',sans-serif;color:#1F7A4D;white-space:nowrap">● Online</span>
+                <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#4B4A50;border:1px solid rgba(20,18,16,.24);border-radius:6px;padding:4px 6px;white-space:nowrap">full</span>
+                <span style="font:400 12.5px/1.3 'Public Sans',sans-serif;color:#6B6970;white-space:nowrap">1 live</span>
+              </div>
+              <div style="margin-top:13px;padding-top:13px;border-top:1px solid rgba(20,18,16,.16);display:flex;flex-wrap:wrap;gap:8px">
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(20,18,16,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#17161A;white-space:nowrap;cursor:pointer">Start</div>
+                <div onClick="{{ openEdit }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(20,18,16,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#17161A;white-space:nowrap;cursor:pointer">Edit</div>
+                <div onClick="{{ openRevokeEn }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(163,49,31,.5);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#A3311F;white-space:nowrap;cursor:pointer">Revoke</div>
+              </div>
+              <div onClick="{{ toggle.e }}" aria-label="Expand" style="margin-top:4px;min-height:44px;display:flex;align-items:center;justify-content:flex-end;cursor:pointer;color:#6B6970;font-size:17px">{{ caret.e }}</div>
+              <sc-if value="{{ open.e }}" hint-placeholder-val="{{ true }}">
+              <div style="border-top:1px solid rgba(20,18,16,.16);padding-top:12px;display:flex;flex-direction:column;gap:11px">
+                <div><div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#6B6970">Projects</div><div style="font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#4B4A50;margin-top:5px;word-break:break-word">cc-pocket · pocket-nightly</div></div>
+                <div><div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#6B6970">Exit code</div><div style="font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#4B4A50;margin-top:5px">1</div></div>
+                <div><div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#6B6970">Last error</div><div style="font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#4B4A50;margin-top:5px;word-break:break-all">connect ECONNREFUSED 127.0.0.1:8787</div></div>
+                <div><div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#6B6970">Log</div><div style="font:400 12px/1.7 'JetBrains Mono',monospace;color:#4B4A50;margin-top:5px;word-break:break-all">runner exited (1)<br />retry scheduled</div></div>
+              </div>
+              </sc-if>
+            </div>
+
+            <div style="border-radius:14px;background:#F4F2EF;padding:14px">
+              <div style="font:500 15px/1.45 'JetBrains Mono',monospace;color:#17161A;word-break:break-word">ops-bot</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px">
+                <span style="font:400 13px/1.3 'Public Sans',sans-serif;color:#1F7A4D;white-space:nowrap">● Online</span>
+                <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#4B4A50;border:1px solid rgba(20,18,16,.24);border-radius:6px;padding:4px 6px;white-space:nowrap">limited</span>
+                <span style="font:400 12.5px/1.3 'Public Sans',sans-serif;color:#6B6970;white-space:nowrap">2 live</span>
+              </div>
+              <div style="margin-top:13px;padding-top:13px;border-top:1px solid rgba(20,18,16,.16);display:flex;flex-wrap:wrap;gap:8px">
+                <div onClick="{{ openRevokeEn }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(163,49,31,.5);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#A3311F;white-space:nowrap;cursor:pointer">Revoke</div>
+              </div>
+              <div onClick="{{ toggle.f }}" aria-label="Expand" style="margin-top:4px;min-height:44px;display:flex;align-items:center;justify-content:flex-end;cursor:pointer;color:#6B6970;font-size:17px">{{ caret.f }}</div>
+              <sc-if value="{{ open.f }}" hint-placeholder-val="{{ true }}">
+              <div style="border-top:1px solid rgba(20,18,16,.16);padding-top:12px;display:flex;flex-direction:column;gap:11px">
+                <div><div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#6B6970">Projects</div><div style="font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#4B4A50;margin-top:5px;word-break:break-word">cc-pocket</div></div>
+                <div style="font:400 13px/1.6 'Public Sans',sans-serif;color:#4B4A50;text-wrap:pretty">You run this adapter yourself</div>
+              </div>
+              </sc-if>
+            </div>
+
+            <div style="border-radius:14px;background:#F4F2EF;padding:14px">
+              <div style="font:500 15px/1.45 'JetBrains Mono',monospace;color:#17161A;word-break:break-word">ci-adapter</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px">
+                <span style="font:400 13px/1.4 'Public Sans',sans-serif;color:#8A5A08">◐ Waiting for the adapter to connect</span>
+                <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#4B4A50;border:1px solid rgba(20,18,16,.24);border-radius:6px;padding:4px 6px;white-space:nowrap">full</span>
+                <span style="font:400 12px/1.2 'Public Sans',sans-serif;color:#8A5A08;border:1px solid rgba(138,90,8,.45);border-radius:6px;padding:4px 6px;white-space:nowrap">trust modes allowed</span>
+              </div>
+              <div style="margin-top:13px;padding-top:13px;border-top:1px solid rgba(20,18,16,.16);display:flex;flex-wrap:wrap;gap:8px">
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(20,18,16,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#17161A;white-space:nowrap;cursor:pointer">Restart</div>
+                <div onClick="{{ tap }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(20,18,16,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#17161A;white-space:nowrap;cursor:pointer">Stop</div>
+                <div onClick="{{ openEdit }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(20,18,16,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#17161A;white-space:nowrap;cursor:pointer">Edit</div>
+                <div onClick="{{ openRevokeEn }}" style="flex:1 1 auto;min-width:96px;min-height:48px;padding:0 16px;border:1px solid rgba(163,49,31,.5);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 14.5px/1 'Public Sans',sans-serif;color:#A3311F;white-space:nowrap;cursor:pointer">Revoke</div>
+              </div>
+            </div>
+          </div>
+          <sc-if value="{{ sheetEdit }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;left:0;right:0;bottom:0;background:#FFFFFF;border-top:1px solid rgba(20,18,16,.24);border-radius:20px 20px 0 0;padding:20px">
+            <div style="font:600 19px/1.3 'Public Sans',sans-serif;color:#17161A">Edit bridge</div>
+            <div style="margin-top:14px;display:flex;flex-direction:column">
+              <div style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid rgba(20,18,16,.16);border-bottom:1px solid rgba(20,18,16,.16)"><span style="font:400 15px/1.3 'Public Sans',sans-serif;color:#17161A">Name</span><span style="font:400 14px/1.3 'JetBrains Mono',monospace;color:#6B6970">ci-adapter</span></div>
+              <div style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(20,18,16,.16)"><span style="font:400 15px/1.3 'Public Sans',sans-serif;color:#17161A">Projects</span><span style="font:400 14px/1.3 'JetBrains Mono',monospace;color:#6B6970">cc-pocket · pocket-nightly</span></div>
+            </div>
+            <div style="margin-top:16px;display:flex;flex-wrap:wrap;gap:8px">
+              <div onClick="{{ closeSheet }}" style="flex:1 1 auto;min-width:110px;min-height:48px;padding:0 16px;border:1px solid rgba(20,18,16,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 15px/1 'Public Sans',sans-serif;color:#17161A;white-space:nowrap;cursor:pointer">Cancel</div>
+              <div onClick="{{ closeSheet }}" style="flex:1 1 auto;min-width:110px;min-height:48px;padding:0 16px;border-radius:10px;background:#A9482A;display:flex;align-items:center;justify-content:center;font:600 15px/1 'Public Sans',sans-serif;color:#FFF4EF;white-space:nowrap;cursor:pointer">Save</div>
+            </div>
+          </div>
+          </sc-if>
+          <sc-if value="{{ sheetRevokeEn }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;left:0;right:0;bottom:0;background:#FFFFFF;border-top:1px solid rgba(20,18,16,.24);border-radius:20px 20px 0 0;padding:20px">
+            <div style="font:600 19px/1.3 'Public Sans',sans-serif;color:#17161A">Revoke this bridge?</div>
+            <div style="font:400 13.5px/1.6 'Public Sans',sans-serif;color:#4B4A50;margin-top:8px;text-wrap:pretty">This bridge will lose access. This cannot be undone.</div>
+            <div style="margin-top:16px;display:flex;flex-wrap:wrap;gap:8px">
+              <div onClick="{{ closeSheet }}" style="flex:1 1 auto;min-width:110px;min-height:48px;padding:0 16px;border:1px solid rgba(20,18,16,.24);border-radius:10px;display:flex;align-items:center;justify-content:center;font:500 15px/1 'Public Sans',sans-serif;color:#17161A;white-space:nowrap;cursor:pointer">Cancel</div>
+              <div onClick="{{ closeSheet }}" style="flex:1 1 auto;min-width:110px;min-height:48px;padding:0 16px;border-radius:10px;background:#A3311F;display:flex;align-items:center;justify-content:center;font:600 15px/1 'Public Sans',sans-serif;color:#FFF4EF;white-space:nowrap;cursor:pointer">Revoke</div>
+            </div>
+          </div>
+          </sc-if>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Card one: online link, stopped runner — Start, Edit, Revoke — expanded with projects, exit code, last error and log tail. Card two: online link, no runner — Revoke only, and the expansion holds nothing but the existing self-run sentence. Card three: pendingTicket with a running runner, proving the two facts are independent. Edit and Revoke open their existing sheets.</div>
+        </sc-if>
+      </div>
+
+      <!-- D5 -->
+      <div style="width:390px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">08 · empty · unavailable · error banner · merge-loss banner</div>
+        <div style="display:flex;flex-direction:column;gap:20px">
+          <sc-for list="{{ states }}" as="e" hint-placeholder-count="4">
+          <div style="width:390px;border-radius:26px;overflow:hidden;border:1px solid #C9C5BD;background:#0B0B0C;padding:20px">
+            <div style="font:600 24px/1.15 'Public Sans',sans-serif;color:#F3F3F4">机器人桥接</div>
+            <div style="margin-top:22px;padding-top:20px;border-top:1px solid rgba(255,255,255,.14)">
+              <div style="font:400 13.5px/1.65 'Public Sans',sans-serif;color:#B4B5BC;text-wrap:pretty">{{ e.body }}</div>
+              <sc-if value="{{ e.card }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:16px;border-radius:14px;background:#141417;padding:14px">
+                <div style="font:500 15px/1.45 'JetBrains Mono',monospace;color:#F3F3F4">研发适配器</div>
+                <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px">
+                  <span style="font:400 13px/1.3 'Public Sans',sans-serif;color:#7ECBA0;white-space:nowrap">● 在线</span>
+                  <span style="font:400 11.5px/1.2 'JetBrains Mono',monospace;color:#B4B5BC;border:1px solid rgba(255,255,255,.24);border-radius:6px;padding:4px 6px;white-space:nowrap">full</span>
+                </div>
+              </div>
+              </sc-if>
+            </div>
+            <div style="margin-top:14px;font:400 11px/1.4 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#6E6E76">{{ e.tag }}</div>
+          </div>
+          </sc-for>
+        </div>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Empty and unavailable are sentences with no action. bridgeError prints verbatim above the list and bridgeMergeLost prints its localized warning above the list — both leave whatever cards did arrive visible beneath them, and neither offers Retry or a log. The empty and unavailable strings on this board are placeholders to be replaced with the repository's exact copy in the master.</div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ E · RULES ═══ -->
+  <div style="padding-top:56px;display:flex;gap:52px;align-items:flex-start">
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+        <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">E</span>
+        <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Rules to implement against</h2>
+      </div>
+      <div style="border-top:1px solid #C9C5BD;font:400 13px/1.55 'Public Sans',sans-serif">
+        <div style="display:grid;grid-template-columns:200px 1fr;gap:20px;padding:10px 0;border-bottom:1px solid #DAD6CE;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C"><div>Rule</div><div>Definition</div></div>
+        <sc-for list="{{ rules }}" as="r" hint-placeholder-count="14">
+        <div style="display:grid;grid-template-columns:200px 1fr;gap:20px;padding:11px 0;border-bottom:1px solid #DAD6CE"><div style="font:400 12.5px/1.5 'JetBrains Mono',monospace;color:#54504A">{{ r.k }}</div><div style="color:#6E695F;text-wrap:pretty">{{ r.v }}</div></div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="width:560px;flex:none">
+      <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+        <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">✓</span>
+        <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Boundaries</h2>
+      </div>
+      <div style="border-top:1px solid #C9C5BD;font:400 13.5px/1.5 'Public Sans',sans-serif;color:#3A3730">
+        <sc-for list="{{ bounds }}" as="b" hint-placeholder-count="8">
+        <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 12px/1.4 'JetBrains Mono',monospace;color:#8A857C">{{ b.n }}</span><span style="text-wrap:pretty">{{ b.t }}</span></div>
+        </sc-for>
+      </div>
+
+      <div style="margin-top:22px;background:#E4E1DA;border-radius:11px;padding:16px 18px">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Not claimed anywhere</div>
+        <div style="font:400 12.5px/1.85 'JetBrains Mono',monospace;color:#54504A;margin-top:9px">usage periods, figures or limits<br />category counts or update status<br />deviceId · absolute paths · link health<br />runner state dressed as link state<br />approvals skipped · recovery advice</div>
+      </div>
+
+      <div style="margin-top:22px;border-top:1px solid #C9C5BD;padding-top:16px">
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">To confirm against the repository</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Three items are placeholders on this board and must be pulled verbatim before the master: the empty and unavailable strings, the localized bridgeMergeLost warning, and the AccessTier enum values (shown here as <span style="font:400 12px/1 'JetBrains Mono',monospace">full</span> / <span style="font:400 12px/1 'JetBrains Mono',monospace">limited</span>). Scope subtitles for Security &amp; approvals and Support &amp; about are deliberately absent for the same reason.</p>
+      </div>
+
+      <div style="margin-top:22px;border-top:1px solid #C9C5BD;padding-top:16px">
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Next step, not taken here</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">This board is the direction only. The master prototype — one live device component driving Settings, the five categories and Bridges with theme, locale, text size and bridge fixtures as runtime state — comes next, on approval of A3 and C2.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;boardBg&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#EDEBE6&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#EDEBE6&quot;,&quot;#E4E1DA&quot;,&quot;#F4F2EF&quot;,&quot;#D9D5CC&quot;]},&quot;showNotes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;pendingCount&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:3,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:99}}">
+class Component extends DCLogic {
+  state = { opt: 'A3', lastTap: 'none', open: { a: false, b: false, d: true, e: true, f: true }, sheet: null };
+
+  renderVals() {
+    const s = this.state;
+    const tog = k => () => this.setState(p => ({ open: Object.assign({}, p.open, { [k]: !p.open[k] }) }));
+    const car = k => s.open[k] ? '⌃' : '⌄';
+    return {
+      boardBg: this.props.boardBg ?? '#EDEBE6',
+      showNotes: this.props.showNotes ?? true,
+      pending: this.props.pendingCount ?? 3,
+      lastTap: s.lastTap,
+      tap: () => this.setState({ lastTap: 'control ' + (Date.now() % 1000) }),
+      optTabs: ['A1', 'A2', 'A3'].map(k => ({
+        label: k === 'A1' ? 'A1 flat' : k === 'A2' ? 'A2 tiles' : 'A3 groups',
+        bg: s.opt === k ? '#1B1A18' : 'transparent',
+        ink: s.opt === k ? '#FCFBFA' : '#54504A',
+        set: () => this.setState({ opt: k })
+      })),
+      open: s.open,
+      caret: { a: car('a'), b: car('b'), d: car('d'), e: car('e'), f: car('f') },
+      toggle: { a: tog('a'), b: tog('b'), d: tog('d'), e: tog('e'), f: tog('f') },
+      sheetRevoke: s.sheet === 'revoke',
+      sheetRevokeEn: s.sheet === 'revokeEn',
+      sheetEdit: s.sheet === 'edit',
+      openRevoke: () => this.setState({ sheet: 'revoke' }),
+      openRevokeEn: () => this.setState({ sheet: 'revokeEn' }),
+      openEdit: () => this.setState({ sheet: 'edit' }),
+      closeSheet: () => this.setState({ sheet: null }),
+      states: [
+        { tag: 'empty · repository string to confirm', body: '还没有桥接。', card: false },
+        { tag: 'unavailable · repository string to confirm', body: '此电脑不支持桥接。', card: false },
+        { tag: 'bridgeError · printed verbatim above the cards', body: 'bridge list request failed: timeout after 10s', card: true },
+        { tag: 'bridgeMergeLost · localized warning above the cards', body: '部分桥接记录未能保留。', card: true }
+      ],
+      rules: [
+        { k: 'settings.titles', v: 'Existing copy only: Token 用量, 定时任务, 通用, Agent 与会话默认项, 连接与协作, 安全与审批, 帮助与关于.' },
+        { k: 'settings.summary', v: 'The existing Connected to / 已连接 <computer> line, derived from paired.displayName. Never link health, status or counts.' },
+        { k: 'settings.utilities', v: 'Exactly Token usage and Scheduled tasks, on the paper base, hairline-bounded, no subtitle, 56 pt minimum.' },
+        { k: 'settings.categories', v: 'Exactly five, current order, inside one low container under a written Categories label. Dynamic height, 56 pt floor.' },
+        { k: 'settings.subtitle', v: 'General may print real local appearance and text-size state. Others print only their existing scope strings, or nothing. Never authored on this board.' },
+        { k: 'settings.badge', v: 'Pending review count beside Connections above zero, with an explicit accessible label. Hidden at zero, never “0”.' },
+        { k: 'bridge.identity', v: 'Zone 1 prints BridgeInfo.name once, in monospace. There is no second identity line; deviceId is a revoke handle and is never printed.' },
+        { k: 'bridge.accessTier', v: 'AccessTier prints as a badge on every collapsed card, verbatim from the model. Security-relevant, never omitted.' },
+        { k: 'bridge.linkState', v: 'pendingTicket → waiting for the adapter to connect / 等待适配器连接; else online → Online / 在线; else Offline / 离线. Mark plus written word.' },
+        { k: 'bridge.runner', v: 'runner.running only selects actions: running → Restart, Stop, Edit; stopped → Start, Edit; runner == null → none. It never becomes a link label.' },
+        { k: 'bridge.noApproval', v: 'Shown only when runner.noApproval is true, reading trust modes allowed / 可设信任模式 — configuration is permitted, approvals are not skipped.' },
+        { k: 'bridge.sessions', v: 'Existing %d live / %d 个进行中 string. Hidden at zero.' },
+        { k: 'bridge.revoke', v: 'A visible destructive secondary action on every card, in the action zone, opening the existing confirmation sheet. Never inside the disclosure.' },
+        { k: 'bridge.disclosure', v: 'Per card, collapsed by default. Content is workdir basenames; for managed runners optional exit code, last error and log tail; for unmanaged only the existing self-run sentence. No new action is introduced.' },
+        { k: 'bridge.workdirs', v: 'Basenames only, joined by interpuncts. No absolute or ~/ paths on the phone.' },
+        { k: 'bridge.failures', v: 'bridgeError prints verbatim above the cards; bridgeMergeLost prints its existing localized warning above the cards. Neither offers Retry or a log action. Empty and unavailable use the current copy, with no action.' },
+        { k: 'bridge.actionRow', v: 'flex-wrap, 8 pt gap; controls flex 1 1 auto, min-width 96 (150 at 200%), min-height 48, white-space nowrap. Wrapping is structural, never inside a label.' }
+      ],
+      bounds: [
+        { n: '01', t: 'No protocol field, enum value, route or daemon call is added, removed or renamed.' },
+        { n: '02', t: 'Desktop and daemon behaviour is untouched; runner actions call exactly what they call today.' },
+        { n: '03', t: 'All seven Settings destinations are preserved, in order, with their existing screens behind them.' },
+        { n: '04', t: 'Link state and runner state stay independent facts and are never derived from one another.' },
+        { n: '05', t: 'AccessTier, live-session count, Revoke, expand/collapse, projects, exit code, last error and log tail all present.' },
+        { n: '06', t: 'Unmanaged bridges expose no Start, Stop, Restart or Edit anywhere, including sheets.' },
+        { n: '07', t: 'No label is truncated, shrunk or allowed to wrap inside a control at any width or text size.' },
+        { n: '08', t: 'Every consequential control is a labelled, focusable button answering Enter and Space; the disclosure control carries an accessible label.' }
+      ]
+    };
+  }
+}
+
+</script>
+</body>
+</html>

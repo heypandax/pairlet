@@ -19,6 +19,7 @@ import dev.ccpocket.protocol.ShareInvite
  * ccpocket://pair?relay=…&acct=…&dpk=…&ticket=…   → Pair      (full pairing link)
  * ccpocket://pair?code=123456                     → Code      (relay-assisted short code)
  * ccpocket://collab#<b64url>                      → Collab    (Collaborator Link — CONFIRM, never redeem)
+ * ccpocket://review-contact#<b64url>              → ReviewContact (Review peer link — the DAEMON redeems)
  * ccpocket://share#<b64url>                       → Share     (folder-share invite)
  * ccpocket://session?wd=…&sid=…                   → Session   (a push/handoff tap routing into a session)
  * ccpocket://handoff?id=…                         → Handoff   (a push tap routing into the offer inbox)
@@ -37,6 +38,16 @@ sealed interface IncomingLink {
 
     /** A Collaborator Link ticket. MUST go through the fingerprint confirm screen before redeeming. */
     data class Collab(val invite: CollaboratorInvite) : IncomingLink
+
+    /**
+     * A ReviewRequest contact ticket (REVIEW-REQUEST.md §13.3) — its own host precisely so an older app,
+     * which reads the trailing `purpose` as its default, cannot redeem it at the Collab door and burn the
+     * single-use ticket a colleague's daemon was waiting for.
+     *
+     * [uri] is carried verbatim because the App never redeems this: it hands the line to its own daemon,
+     * which holds the resulting credential (that is what keeps reviews arriving with the app closed).
+     */
+    data class ReviewContact(val invite: CollaboratorInvite, val uri: String) : IncomingLink
 
     /** A folder-share invite. Goes through the guest accept-preview before redeeming. */
     data class Share(val invite: ShareInvite) : IncomingLink
@@ -81,6 +92,10 @@ fun parseIncomingLink(raw: String, allowBareBlob: Boolean = false): IncomingLink
         // a collaborator/share blob is invalid rather than "maybe a pair link": we KNOW what it claimed
         // to be, so a truncated fragment or corrupt base64 must fail loudly instead of falling through
         "collab" -> decodeCollaboratorInvite(t)?.let(IncomingLink::Collab) ?: IncomingLink.Unknown
+        // its own lane, so a Review ticket never reaches the Collab confirm screen and the two doors
+        // can't be crossed by putting the other's blob under this host (the codec re-checks `purpose`)
+        "review-contact" -> decodeReviewContactInvite(t)?.let { IncomingLink.ReviewContact(it, t) }
+            ?: IncomingLink.Unknown
         "share" -> decodeShareInvite(t)?.let(IncomingLink::Share) ?: IncomingLink.Unknown
         "pair" -> {
             val q = queryOf(t)
@@ -100,11 +115,13 @@ fun parseIncomingLink(raw: String, allowBareBlob: Boolean = false): IncomingLink
         "handoff" -> queryOf(t)["id"]?.let(::pctDecode)?.takeIf { it.isNotBlank() }
             ?.let(IncomingLink::Handoff) ?: IncomingLink.Unknown
         // no scheme: only an EXPLICIT paste entry may guess at a bare blob (share first — its codec is the
-        // stricter of the two, and a collab blob never satisfies it)
+        // stricter of the three, and a collaborator blob never satisfies it). The two collaborator codecs
+        // are mutually exclusive on `purpose`, so their order here is cosmetic rather than load-bearing.
         "" -> when {
             !allowBareBlob -> legacyPairUrl(t)
             else -> decodeShareInvite(t)?.let(IncomingLink::Share)
                 ?: decodeCollaboratorInvite(t)?.let(IncomingLink::Collab)
+                ?: decodeReviewContactInvite(t)?.let { IncomingLink.ReviewContact(it, t) }
                 ?: legacyPairUrl(t)
         }
         else -> IncomingLink.Unknown

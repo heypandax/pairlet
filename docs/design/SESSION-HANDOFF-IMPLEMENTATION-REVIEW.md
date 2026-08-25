@@ -1,9 +1,16 @@
 # Session Handoff 实现复审与修复清单
 
-> 日期：2026-08-02  
-> 状态：待实现；作为 `SESSION-HANDOFF.md` 的实现补充  
-> 面向：Claude Code / 后续 coding agent  
+> 日期：2026-08-02
+>
+> 状态：**现有能力的实现复审与维护记录**；已完成项保留，未完成缺陷按实际优先级处理
+>
+> 面向：Claude Code / 后续 coding agent
+>
 > 范围：当前工作区内 Claude 已实现的 Collaborator Link + Session Handoff 代码
+
+> Session Handoff 继续作为“运行时上下文交接”能力保留；[`REVIEW-REQUEST.md`](./REVIEW-REQUEST.md) 新增
+> “任务上下文交接”。联系人、E2E 投递、通知和历史可共享，但 Recipient 打开 Source Session、Controller
+> Lease、Recall 等仍是 Session Handoff 自身的维护范围，不进入 ReviewRequest。
 
 ## 1. 结论
 
@@ -301,4 +308,3 @@ java.util.ConcurrentModificationException
 - 强制重跑 handoff 测试无并发失败；
 - `bash scripts/check-all.sh` 全绿；
 - 不启动第二个 daemon；如需更新本机 daemon，遵守仓库 `AGENTS.md` 的 detached 规则。
-

@@ -44,11 +44,41 @@ enum class AgentKind {
     @SerialName("claude") CLAUDE,
     @SerialName("codex") CODEX,
     @SerialName("opencode") OPENCODE,
+    @SerialName("kimi") KIMI,
+    @SerialName("zcode") ZCODE,
+    @SerialName("dsh") DSH,
 }
 
 /** OPENCODE's wire name, shared by [ClientCaps.supportsAgents] declarations on both ends — the
  *  daemon must not emit this enum value to a peer that never declared it (see ClientCaps). */
 const val AGENT_WIRE_OPENCODE = "opencode"
+
+/** KIMI's wire name (issue #206), same contract as [AGENT_WIRE_OPENCODE]: KIMI was added AFTER the
+ *  baseline vocabulary, so the daemon must not emit `agent:"kimi"` to a peer whose [ClientCaps.supportsAgents]
+ *  never listed it (an already-shipped client hard-fails the whole Envelope on the unknown enum). */
+const val AGENT_WIRE_KIMI = "kimi"
+
+/** ZCode's wire name (issue #228). Like other post-baseline agents, this must be declared in
+ * [ClientCaps.supportsAgents] before the daemon can safely emit `agent:"zcode"` to an App. */
+const val AGENT_WIRE_ZCODE = "zcode"
+
+/** DeepSeek Harness's wire name (issue #255). Same post-baseline contract as the three above: an
+ * already-shipped App hard-fails the WHOLE Envelope on an unknown enum value, so the daemon may only
+ * emit `agent:"dsh"` to a peer whose [ClientCaps.supportsAgents] listed it. */
+const val AGENT_WIRE_DSH = "dsh"
+
+/** Agent backends this daemon build knows how to route. Unlike [ClientCaps] (app -> daemon), this
+ * list is advertised in [DaemonInfo] so a newer app never sends a post-baseline enum value to an
+ * older daemon that would coerce it to Claude. Keep the baseline names too: the field is an honest
+ * complete capability list even though current apps only need its ZCode bit for compatibility. */
+val DAEMON_SUPPORTED_AGENT_WIRES = listOf(
+    "claude",
+    "codex",
+    AGENT_WIRE_OPENCODE,
+    AGENT_WIRE_KIMI,
+    AGENT_WIRE_ZCODE,
+    AGENT_WIRE_DSH,
+)
 
 /** Last-resort Codex presets when the daemon cannot read Codex's own model cache. The normal picker is
  * populated dynamically; these current family ids only prevent an empty picker on a fresh/offline install. */
@@ -76,7 +106,7 @@ fun isOpenCodeModelId(model: String?): Boolean = model?.trim()?.let { '/' in it 
  * gateway "vendor/model" that no shape heuristic can place), and an over-eager guard here rejected
  * daemon-reported models and locked the picker. Only two facts are hard:
  *  - OpenCode hangs silently on anything that isn't provider/model;
- *  - Claude aliases (opus/sonnet/...) are meaningless to the other two backends.
+ *  - Claude aliases (opus/sonnet/...) are meaningless to the non-Claude backends.
  * Everything else passes — a genuinely wrong id fails loudly on the daemon side instead.
  */
 fun isModelCompatibleWithAgent(agent: AgentKind, model: String?): Boolean {
@@ -85,6 +115,17 @@ fun isModelCompatibleWithAgent(agent: AgentKind, model: String?): Boolean {
     return when (agent) {
         AgentKind.OPENCODE -> isOpenCodeModelId(m)
         AgentKind.CODEX -> m.lowercase() !in CLAUDE_MODEL_ALIAS_IDS
+        // KIMI (issue #206): pass any non-empty id but reject the Claude alias family — a stale persisted
+        // claude default (opus/sonnet/…) is meaningless to kimi and would launch it against a bad --model.
+        // V8 can tighten this once the real `kimi provider catalog list` id shape is known.
+        AgentKind.KIMI -> m.lowercase() !in CLAUDE_MODEL_ALIAS_IDS
+        // ZCode's app-server takes a strict {providerId, modelId} reference. The daemon exposes that
+        // as "provider/model", so a bare/stale id must fall back to ZCode's configured main model.
+        AgentKind.ZCODE -> m.indexOf('/').let { it > 0 && it < m.lastIndex }
+        // DSH (issue #255): model SWITCHING is out of scope for v1 — dsh picks its own model from the
+        // user's environment and the daemon never passes one. Keep the same minimal blocklist as KIMI so a
+        // stale persisted Claude alias can never leak into a dsh open if a later version does send --model.
+        AgentKind.DSH -> m.lowercase() !in CLAUDE_MODEL_ALIAS_IDS
         AgentKind.CLAUDE -> true // gateway users run arbitrary ids, slashed OpenRouter-style included
     }
 }
@@ -158,6 +199,21 @@ data class SessionSummary(
     // stamped by the daemon per row; a trailing optional — an old daemon omits it (every row reads ungrouped),
     // an old app ignores it (renders today's flat list).
     val group: String? = null,
+    // Lineage of a session this daemon branched on the user's explicit request (issue #282): the
+    // sessionId this one was FORKED from, i.e. the original is still a peer in the list and both are
+    // meant to be visible. The CLI writes NO blood line of its own into a forked transcript (probed on
+    // 2.1.228: the parent id appears nowhere in the copy), so this is the daemon's own journal talking
+    // — see the daemon's RewindLineage store. Exactly one of [forkedFrom]/[rewindOf] is ever set, and
+    // only on the CHILD row. Trailing optional both ways: an old daemon omits it (rows read as ordinary
+    // unrelated sessions), an old app ignores it and renders today's flat list.
+    val forkedFrom: String? = null,
+    // The other half of [forkedFrom]: the sessionId this one REWOUND — the original was replaced rather
+    // than branched from, so the list must not grow. Clients derive the fold from the list itself: an
+    // entry that some other entry names in its [rewindOf] is the superseded original and belongs in the
+    // collapsed "rewound" group, which keeps the visible count unchanged across a rewind. Deliberately
+    // NOT a "collapsed" flag on the original — a flag would need a second write to a row the daemon may
+    // not be scanning, while the child's own pointer is written once and reads the same to every client.
+    val rewindOf: String? = null,
 )
 
 /**
@@ -232,6 +288,13 @@ data class DirectoryEntry(
      *  daemon omits it and the new app treats empty as "unknown" (keeps the row); an old app ignores it.
      *  Live sessions remain separately authoritative in [activeSessions]. */
     val sessionAgents: List<AgentKind> = emptyList(),
+    /** issue #281: this directory is a LINKED git worktree, and this is the path of the repository's main
+     *  worktree it belongs to (null = an ordinary directory, or a main worktree itself). Purely a display
+     *  fact — the row gets a "⎇ part of <repo>" caption so nobody opens a linked checkout believing it is
+     *  a separate project. It changes NO grouping: different checkouts are different cwds and therefore
+     *  different `~/.claude/projects` directories, and TranscriptScanner's attribution stays untouched.
+     *  A trailing optional: an old daemon omits it (rows render exactly as before), an old app ignores it. */
+    val worktreeOf: String? = null,
 )
 
 /** One filesystem child under a session's cwd, for the composer's `@`-file completion ([PathEntries],
@@ -242,7 +305,7 @@ data class PathEntry(val name: String, val isDir: Boolean)
 
 /** One live session in a project dir — [DirectoryEntry.activeSessions]. The daemon knows its own
  *  conversations' turn state exactly; [executing] for a terminal-launched claude falls back to the
- *  wrote-recently heuristic. */
+ *  wrote-recently heuristic and therefore must not be used to infer a completion edge. */
 @Serializable
 data class ActiveSession(
     val sessionId: String,
@@ -257,6 +320,10 @@ data class ActiveSession(
     /** the external bridge credential that opened it (issue #91), e.g. "feishu-bot" — clients show
      *  "via feishu-bot" on the live row. Null = interactive/local session or an older daemon. */
     val origin: String? = null,
+    /** True only when [executing] came from a daemon-owned conversation's real turn lifecycle. False for
+     *  terminal transcript-mtime heuristics and old daemons; clients may under-report completions in that
+     *  case, but must never invent one when a recency window expires (#239). */
+    val executingAuthoritative: Boolean = false,
 )
 
 /**

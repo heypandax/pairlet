@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 构建 HarmonyOS 客户端 HAP（本机 DevEco Studio 工具链，macOS）。
 #
-# 用法：bash scripts/build-harmony.sh
+# 用法：bash scripts/build-harmony.sh [额外 hvigor 参数]
+# 示例：bash scripts/build-harmony.sh -p buildMode=release
 # 产物：harmony/entry/build/default/outputs/default/entry-default-unsigned.hap
 #
 # 说明：
@@ -12,25 +13,36 @@
 #   本脚本的核心价值是 ArkTS 编译回归门 + 发版时产出可归档的构建产物。
 set -euo pipefail
 
-DEVECO="/Applications/DevEco-Studio.app/Contents"
-[ -d "$DEVECO" ] || { echo "未找到 DevEco Studio（$DEVECO）"; exit 1; }
+DEVECO="${DEVECO_HOME:-/Applications/DevEco-Studio.app/Contents}"
+# Braces are mandatory before a full-width closing paren. Under a UTF-8 locale, bash 3.2 (macOS
+# /bin/bash) scans an unbraced variable reference that is immediately followed by a full-width paren
+# and swallows that paren's first byte into the variable name, so `set -u` aborts with
+# `DEVECO?: unbound variable` instead of printing the message below. Same rule for any 全角 punctuation.
+[ -d "$DEVECO" ] || { echo "未找到 DevEco Studio（${DEVECO}）"; exit 1; }
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HV="$ROOT/harmony/tools/hvigor"
 
 if [ ! -x "$HV/bin/hvigorw" ]; then
   echo "==> 拷贝 hvigor wrapper（首次/刷新）"
+  for component in bin hvigor hvigor-ohos-plugin; do
+    [ -d "$DEVECO/tools/hvigor/$component" ] || {
+      echo "DevEco Studio 缺少 hvigor 组件：$DEVECO/tools/hvigor/$component"
+      exit 1
+    }
+  done
   mkdir -p "$HV"
   cp -R "$DEVECO/tools/hvigor/bin" "$DEVECO/tools/hvigor/hvigor" "$DEVECO/tools/hvigor/hvigor-ohos-plugin" "$HV/"
   chmod +x "$HV/bin/hvigorw"
 fi
+[ -x "$HV/bin/hvigorw" ] || { echo "hvigor wrapper 准备失败：$HV/bin/hvigorw"; exit 1; }
 
 export DEVECO_SDK_HOME="$DEVECO/sdk"
 export JAVA_HOME="$DEVECO/jbr/Contents/Home"
 export PATH="$JAVA_HOME/bin:$DEVECO/tools/node/bin:$DEVECO/tools/ohpm/bin:$PATH"
 
 cd "$ROOT/harmony"
-./tools/hvigor/bin/hvigorw assembleHap --mode module -p product=default --no-daemon
+./tools/hvigor/bin/hvigorw assembleHap --mode module -p product=default --no-daemon "$@"
 
 HAP="$ROOT/harmony/entry/build/default/outputs/default/entry-default-unsigned.hap"
 [ -f "$HAP" ] || { echo "构建完成但未找到产物：$HAP"; exit 1; }

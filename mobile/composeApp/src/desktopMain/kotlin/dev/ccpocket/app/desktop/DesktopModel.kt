@@ -19,12 +19,23 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.ui.ComposerState
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
+
+/** Chat-stream alignment preference (issue #213, desktop-only). LEFT = the current document flow (every turn
+ *  left-aligned, unchanged — the default so existing users see no difference). BUBBLES = classic chat layout:
+ *  user turns hug the right in a bubble, assistant turns stay left. Only alignment/bubble presentation moves;
+ *  the row's information structure and components are untouched. Absent/garbage → LEFT. */
+enum class ChatStreamAlignment { LEFT, BUBBLES;
+    companion object {
+        fun from(name: String?): ChatStreamAlignment = entries.firstOrNull { it.name == name } ?: LEFT
+    }
+}
 
 // ── view types (carry the ids/paths the actions need) ───────────────────────────────────────────
 
@@ -44,6 +55,20 @@ sealed interface DkUpdateState {
     data class Available(val latest: String, val source: DkInstallSource) : DkUpdateState
     data class Downloading(val latest: String) : DkUpdateState // standalone self-update in progress
     data class Failed(val message: String) : DkUpdateState
+}
+
+/**
+ * Why a first prompt typed into the empty state (issue #256) never became a turn. Kept as a KIND rather than
+ * a ready-made message so the pane resolves it through the same string resources as everything else it says.
+ * Every value has the same contract: the user's text survives — see [DesktopModel.newSessionPrompt].
+ */
+enum class NewSessionPromptError {
+    /** The open request was refused before it reached the wire (unsupported agent, duplicate open). */
+    OPEN_REFUSED,
+    /** The session never went live inside the wait window. */
+    TIMEOUT,
+    /** The session opened but the send was gated (degraded session, uploads in flight). */
+    SEND_REFUSED,
 }
 
 data class DkComputer(
@@ -75,6 +100,12 @@ data class DkSession(
     // custom session-group id this row belongs to (issue #119), or null = ungrouped. Only meaningful for
     // the CURRENT project's live rows — the daemon lists groups only for the listed dir.
     val group: String? = null,
+    // rewind/fork lineage (issue #282), mirroring SessionSummary: [forkedFrom] keeps both sessions
+    // visible as peers, [rewindOf] folds the ORIGINAL — the one this row names — into the collapsed
+    // "rewound" bucket, which is what keeps a rewind from growing the list. Null on a synthesized row
+    // (a session not yet on disk has no ledger entry either).
+    val forkedFrom: String? = null,
+    val rewindOf: String? = null,
 )
 
 /** One custom session group inside a project (issue #119) — the view mirror of protocol's SessionGroup.
@@ -119,6 +150,12 @@ data class DkPin(
  * device stays pinned in both.
  */
 data class DkProjectPin(val path: String, val name: String)
+
+/**
+ * One-shot request to reveal a pinned project's session list in RECENT. [generation] makes opening the
+ * same pin again observable after the user folds that project a second time.
+ */
+data class DkProjectListReveal(val path: String, val generation: Long)
 
 // ── fleet ("Fleet Desktop" board): machine-grouped sidebar · cross-machine attention · watch pane ──
 
@@ -194,8 +231,13 @@ interface DesktopModel {
     var showQuickActions: Boolean // chat-header ⋯ popover: effort/mode + compact/clear (mirrors mobile's sheet)
     var showModelPopover: Boolean // the composer chip's anchored model popover (issue #157) — the ⋯ Model row shortcuts here too
     var showChanges: Boolean // the Changes two-pane diff browser (chat-header ± pill / palette verb)
+    var showGit: Boolean // the Git panel overlay (issue #280; chat-header branch pill)
+    var showWorktrees: Boolean // every checkout of the open repository (issue #281; raised from the Git overlay)
     var showSkills: Boolean // the installed skills/plugins browser (issue #132; sidebar row / palette verb)
     var showHandoff: Boolean // session-handoff draft modal (design session-handoff/ Frame 11)
+    var showReviewCenter: Boolean // the ReviewRequest centre (REVIEW-REQUEST.md §12; sidebar row / ⌘⇧R)
+    var showFolderPicker: Boolean // remote "Open Folder" browser (issues #218/#214): the daemon-machine dir picker
+    var showQuotaPopover: Boolean // the sidebar footer allowance strip's anchored detail popover
 
     // ── session handoff (SESSION-HANDOFF.md) — defaults are the "no handoff" seed/preview state ──
     val activeHandoff: dev.ccpocket.protocol.SessionHandoff? get() = null
@@ -220,16 +262,42 @@ interface DesktopModel {
     fun handoffReturn(verdict: String?) {}
     fun dismissHandoffInvite() {}
 
+    // ── ReviewRequest (REVIEW-REQUEST.md §12) ──
+    //
+    // The Review Center is the ONE surface that gets the live repository handed to it whole, rather than
+    // a per-field pass-through like everything above. Two reasons: its UI is shared verbatim with mobile
+    // (ui/review/ReviewCenterFlow), so re-projecting a dozen fields through this interface would be a
+    // second copy of the same binding; and a seed/preview model has nothing meaningful to fake here —
+    // an inert Center is the honest preview, which is exactly what a null gives.
+    val reviewRepo: dev.ccpocket.app.data.PocketRepository? get() = null
+
+    /** The SECOND surface whose UI is shared verbatim with mobile and therefore gets the live repository
+     *  handed over whole for the same two reasons as [reviewRepo]: the Token-usage dashboard
+     *  ([dev.ccpocket.app.ui.UsageScreen]). It aliases [reviewRepo] by default — there is only ever one
+     *  live repository — but keeps its own name so a preview model can inert one surface without the
+     *  other, and so a reader of the usage pane is not sent looking through review code. Null in
+     *  seed/preview models: the pane then shows its own "can't reach your computer" state, which is the
+     *  honest preview for a dashboard nobody's daemon is backing. */
+    val usageRepo: dev.ccpocket.app.data.PocketRepository? get() = reviewRepo
+
+    /** Received reviews still waiting on this machine — the sidebar count. 0 in seed/preview models. */
+    val reviewPending: Int get() = 0
+
+    /** Open the Center and re-pull, in the [openSkills] idiom: an overlay showing yesterday's ledger is
+     *  worse than one that is briefly loading. */
+    fun openReviewCenter() { showReviewCenter = true; refreshReviews() }
+    fun refreshReviews() {}
+
     /** Open the ⌘K palette scoped to projects — the sidebar's browse affordance for the full list. */
     fun browseProjects() { palette = PaletteScope.PROJECTS }
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showSkills || showHandoff || handoffInvite != null
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showGit || showWorktrees || showSkills || showHandoff || showReviewCenter || showFolderPicker || showQuotaPopover || handoffInvite != null
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showSkills = false; showHandoff = false; dismissHandoffInvite()
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showGit = false; showWorktrees = false; showSkills = false; showHandoff = false; showReviewCenter = false; showFolderPicker = false; showQuotaPopover = false; dismissHandoffInvite()
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts
@@ -254,6 +322,8 @@ interface DesktopModel {
     fun pinProject(path: String, name: String) {}
     fun unpinProject(path: String) {}
     fun isProjectPinned(path: String): Boolean = projectPins.any { it.path == path }
+    /** Latest pinned-project reveal request. Null means this model has not opened a project pin. */
+    val projectListReveal: DkProjectListReveal? get() = null
     /** Open a pinned project: its session LIST — the pinned entity is the project, not one session in it. */
     fun openProjectPin(p: DkProjectPin) { openProject(DkProject(p.path, p.name)) }
 
@@ -376,6 +446,28 @@ interface DesktopModel {
     /** Dismiss the inline rename refusal (the rename row's Esc). */
     fun dismissRenameError() {}
 
+    // ── session rewind / fork (issue #282) ────────────────────────────────────────────────────────
+    // Defaults leave Seed/preview models entirely inert: [canRewind] false means the chat's user turns
+    // grow no context menu at all, so a fake model never has to answer a frame it has no transport for.
+    /** May THIS user turn be rewound? False when the row carries no transcript coordinates (older
+     *  daemon / non-Claude backend), which is the capability probe — not a version check. */
+    fun canRewind(item: ChatItem.User): Boolean = false
+    /** True when the entry is shown but disabled, with the "stop the current turn first" reason. */
+    val rewindBlockedByTurn: Boolean get() = false
+    /** Open the confirmation and ask the daemon what the cut would cost. Never cuts anything. */
+    fun startRewind(item: ChatItem.User, mode: String) {}
+    /** The confirmation currently on screen (counts null while the dry run is out), or null. */
+    val rewindSheet: PocketRepository.RewindSheet? get() = null
+    fun confirmRewind() {}
+    fun cancelRewind() {}
+    /** The daemon's machine-readable refusal of the last attempt — a `RewindRefusal` value, mapped to
+     *  copy by the renderer (never shown raw: the vocabulary is a protocol, not user-facing text). */
+    val rewindError: String? get() = null
+    fun dismissRewindError() {}
+    /** Where the OPEN conversation was branched from, when this app is the one that branched it. Null
+     *  once the view moves on — the banner is scoped to the exact conversation the rewind produced. */
+    val sessionLineage: PocketRepository.SessionLineage? get() = null
+
     /** True while a session-list re-scan is in flight — the sidebar's refresh affordances spin on it. */
     val sessionsRefreshing: Boolean get() = false
 
@@ -401,6 +493,38 @@ interface DesktopModel {
     /** Start a session at [dir] (display form; "~" is expanded against the daemon host's home).
      *  [model] is the popover's per-creation pick (issue #199); null = the usual default ladder. */
     fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String? = null, model: String? = null)
+
+    // ── empty-state session starter (issue #256) ─────────────────────────────────────────────────
+    // The main pane's "no session open" state used to be a dead end: it named the situation and offered
+    // nothing to do about it. It is now the fastest way INTO a session — type the first prompt, hit ⏎, and
+    // the default agent/mode open a session in the current project with that prompt queued as turn one.
+    /**
+     * The empty state's input text. Owned by the MODEL, not by a `remember` inside the composable, for one
+     * reason: when the queued first prompt can't be delivered (open refused, never landed, send gated) the
+     * text has to come back to the user intact. A composable-local field would be gone by then — the pane
+     * recomposes through open/fail — and silently eating what someone typed is the one outcome this feature
+     * must never have. Defaults are inert so seed/preview models compile untouched.
+     */
+    var newSessionPrompt: String
+        get() = ""
+        set(_) {}
+
+    /** A first prompt is queued and the session it belongs to hasn't landed yet — the empty state locks its
+     *  field and says so, instead of looking idle while an open is in flight. */
+    val startingSession: Boolean get() = false
+
+    /** Why the last [startSessionWithPrompt] didn't deliver; null = nothing to report. The text is still in
+     *  [newSessionPrompt] (or, for [NewSessionPromptError.SEND_REFUSED], in the live composer). */
+    val newSessionPromptError: NewSessionPromptError? get() = null
+
+    /** Open a session at [dir] on [agent] and send [prompt] as its first turn once the session is live.
+     *  Blank prompts and re-entry while one is already queued are no-ops. [agent] became explicit with
+     *  issue #260 — the empty state now shows WHICH backend it is about to use and lets you change it, so
+     *  the pick has to reach the open. It defaults to [defaultAgent], the pre-#260 behavior. */
+    fun startSessionWithPrompt(dir: String, prompt: String, agent: AgentKind = defaultAgent) {}
+
+    /** Clear the inline failure line (the user edited the prompt / picked another project). */
+    fun dismissNewSessionPromptError() {}
     /**
      * True when the ACTIVE computer is the one this desktop app runs on (issue #163). Gates the native
      * directory chooser: a local Finder panel can only browse local disk, so a remote machine has to fall
@@ -415,12 +539,38 @@ interface DesktopModel {
      */
     fun openFolderPath(path: String) { openNewSession(path) }
 
+    // ── remote directory browser (issues #218/#214) ──────────────────────────────────────────────────
+    // When the ACTIVE daemon is another machine, a local native chooser browses the WRONG filesystem — so
+    // the folder picks (⌘O / the bridge project list) drive the daemon-side #152 browse wire instead: the
+    // same ListPathEntries frame the @-completer uses, anchored at "~" (the daemon home) or a reported fs
+    // root. These reuse the pure helpers in ui/DirectoryPicker.kt. Defaults are inert for seed/preview.
+    /** Latest anchored folder-browse reply (match its (workdir, subPath) before use). */
+    val browseListing: dev.ccpocket.protocol.PathEntries? get() = null
+    /** The daemon machine's filesystem roots, latched from the "~" reply (owner-only; empty on old daemon/guest). */
+    val browseRoots: List<String> get() = emptyList()
+    /** The daemon's known project directories — feeds recents/home inference + the "already a project" badge. */
+    val browseDirectories: List<dev.ccpocket.protocol.DirectoryEntry> get() = emptyList()
+    /** Request the children under ([anchor] + [subPath]); the reply lands in [browseListing]. Resets the
+     *  held listing to null first so a reopened picker can't flash the previous level's stale rows. */
+    fun requestBrowse(anchor: String, subPath: String) {}
+
     // main pane: the open chat
     val hasChat: Boolean
     /** True while an OpenSession is in flight — messages are already cleared and convoId nulled, but the
      *  daemon hasn't answered with SessionLive yet (issue #82). ChatPane shows a loading transition for the
      *  target session instead of the blank "No session open" empty state, which read as "didn't respond". */
     val opening: Boolean get() = false
+
+    /** True when the last open never landed — the daemon didn't answer inside the repo's 8s window (issue
+     *  #235). The phone shows this as a slim banner over its own screens; the desktop's main pane had no
+     *  consumer at all, so a timed-out open dropped straight back to the blank "No session open" state,
+     *  which reads as "your click never happened". Distinct from [opening] and from an ordinary empty pane. */
+    val openFailed: Boolean get() = false
+
+    /** Re-send the open that failed — the failure pane's retry. Replays the same request (same workdir,
+     *  session, agent/mode/model), so a retry can't land under different flags than the click that failed. */
+    fun retryOpen() {}
+
     val chatTitle: String
     val chatAgent: AgentKind
     val chatWorkdir: String
@@ -524,6 +674,40 @@ interface DesktopModel {
     fun selectChangedFile(path: String) {}
     /** Open the browser: flip the flag and refresh both the list and the remembered selection. */
     fun openChanges() { showChanges = true; fetchChangedFiles() }
+
+    // ── Git panel (issue #280) + worktrees (issue #281) ──────────────────────────────────────────
+    // Same shape as `changes` above: inert defaults so seed/preview models compile untouched, live
+    // values ride the repository. Every one of these is a NEW frame family, so a daemon that predates
+    // them simply never answers and the repo's deadline lands the overlay in its "update" state.
+    val gitStatus: dev.ccpocket.protocol.GitStatus? get() = null
+    val gitStatusLoading: Boolean get() = false
+    /** No reply — the daemon predates pocket/git.*; the overlay shows its "update the computer" state. */
+    val gitStatusStale: Boolean get() = false
+    val gitDiff: dev.ccpocket.protocol.GitDiff? get() = null
+    val gitDiffPath: String? get() = null
+    val gitDiffStaged: Boolean get() = false
+    /** The verb currently running — drives the spinner in the button that started it, nothing else. */
+    val gitBusyOp: String? get() = null
+    val gitError: dev.ccpocket.protocol.GitActionResult? get() = null
+    /** A two-step verb's preview: non-null raises the confirm dialog and nothing else. */
+    val gitPendingConfirm: dev.ccpocket.protocol.GitActionPreview? get() = null
+    fun fetchGitStatus(withBranches: Boolean = false) {}
+    fun openGitDiff(path: String, staged: Boolean) {}
+    fun gitAct(op: String, paths: List<String> = emptyList(), message: String? = null, branch: String? = null) {}
+    fun confirmPendingGit() {}
+    fun dismissGitConfirm() {}
+    fun dismissGitError() {}
+    /** Open the panel: flip the flag and re-read, in the [openChanges] idiom. Branches ride along so
+     *  the branch popover has its data before it is asked for. */
+    fun openGit() { showGit = true; fetchGitStatus(withBranches = true) }
+
+    val worktrees: dev.ccpocket.protocol.WorktreeList? get() = null
+    val worktreesLoading: Boolean get() = false
+    val worktreesStale: Boolean get() = false
+    fun fetchWorktrees() {}
+    fun addWorktree(branch: String, createBranch: Boolean) {}
+    fun removeWorktree(path: String) {}
+    fun openWorktrees() { showWorktrees = true; fetchWorktrees() }
 
     // installed skills/plugins browser (issue #132): the machine's ~/.claude catalog, plus the open
     // project's `.claude/skills` when a chat is live. Defaults keep seed/preview models inert.
@@ -639,6 +823,9 @@ interface DesktopModel {
     val updateCommand: String? get() = null
     /** Releases page for the "can't self-update from here" fallback (brew/scoop/unknown). */
     val updateReleasesUrl: String get() = DesktopUpdater.RELEASES_URL
+    /** Agent choices accepted by the active daemon. Seed/preview models emulate a current daemon, so they
+     *  offer the full enum — the live adapter narrows it through the same projection mobile uses. */
+    val availableAgents: List<AgentKind> get() = AgentKind.entries
     var defaultAgent: AgentKind
     var defaultMode: PermissionMode
     val defaultPermissionMode: String? get() = null
@@ -671,6 +858,12 @@ interface DesktopModel {
     // appearance (issue #63): force light/dark or follow the OS. The window root reads this into PocketTheme;
     // RepoDesktopModel persists it through the shared repo, seed/preview models just hold it in memory.
     var themeMode: ThemeMode
+    // global accent source (issue #204): POCKET terracotta or Codex teal. Same persistence path as themeMode;
+    // the window root passes it to PocketTheme(accent = …) so every Tok.accent slot follows.
+    var accentTheme: dev.ccpocket.app.theme.AccentTheme
+    // chat-stream alignment (issue #213, desktop-only): all-left document flow (default) or left/right bubbles.
+    // ChatPane reads this per message; persisted desktop-locally like terminalApp, seed models hold it in memory.
+    var chatAlignment: ChatStreamAlignment
 
     // phone-push switch (pocket/push.prefs.*): daemon truth; null = daemon predates it (toggle hidden)
     val phonePush: Boolean? get() = null
@@ -683,6 +876,11 @@ interface DesktopModel {
     fun setApprovalNoAutoDeny(enabled: Boolean) {}
     fun refreshApprovalPrefs() {}
 
+    // Full Control expiry (pocket/approval.prefs.*, issue #220): daemon truth, 0 = never expires (default).
+    // Rides the same capability gate as [approvalNoAutoDeny] — shown only once an ApprovalPrefs reply arrives.
+    val approvalFullControlExpiryMs: Long? get() = null
+    fun setFullControlExpiryMs(ms: Long) {}
+
     // read-only OBSERVE view (the session is owned by a terminal/VS Code on the computer): the composer
     // must yield — a prompt sent into an observe convo is silently unroutable on the daemon (issue #45 ②)
     val observing: Boolean get() = false
@@ -693,7 +891,8 @@ interface DesktopModel {
     // re-run a delivered-but-no-turn prompt (issue #104) under a fresh id; no-op unless turnStalled
     fun resendStalled() {}
     fun renameComputer(c: DkComputer, label: String?) // null clears back to the accountId fallback
-    fun revokeComputer(c: DkComputer)
+    /** Remove this daemon binding from the desktop's local credential list; the daemon itself is unchanged. */
+    fun removeComputer(c: DkComputer)
 
     // ── folder-share (issue #115): owner management + guest redeem. All default to inert so the
     //    seed/preview model needs no changes; the live [RepoDesktopModel] wires them to the repo. ──

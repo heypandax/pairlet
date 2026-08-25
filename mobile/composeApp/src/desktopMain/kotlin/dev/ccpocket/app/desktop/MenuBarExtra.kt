@@ -1,5 +1,8 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
@@ -11,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -61,6 +65,9 @@ internal fun MenuBarExtra(
     onActivateWindow: () -> Unit,
     onExitApplication: (() -> Unit)? = null,
     onAvailabilityChanged: (Boolean) -> Unit = {},
+    // issue #292: Windows 换 flyout 载体（角锚定 + [WinTrayFlyout]）。参数化而不是就地读 os.name，
+    // 是为了让宿主一眼看见分叉在哪；mac/Linux 路径一字未动。
+    isWindows: Boolean = hostIsWindows(),
 ) {
     val supported = remember {
         runCatching { !GraphicsEnvironment.isHeadless() && java.awt.SystemTray.isSupported() }.getOrDefault(false)
@@ -102,7 +109,8 @@ internal fun MenuBarExtra(
         if (anchor != null) {
             if (now - openedAt > 350) { anchor = null; closedAt = now }
         } else if (now - closedAt > 350) {
-            anchor = trayAnchor(x, y, screenConfigAt(x, y))
+            val gc = screenConfigAt(x, y)
+            anchor = if (isWindows) winFlyoutAnchor(gc) else trayAnchor(x, y, gc)
             openedAt = now
         }
     }
@@ -145,7 +153,11 @@ internal fun MenuBarExtra(
             onCloseRequest = { anchor = null },
             state = rememberWindowState(
                 // pre-pack guess; placePopover() corrects it the moment the window knows its real size
-                position = WindowPosition.Absolute((a.centerX - POPOVER_W / 2).dp, (if (a.fromTop) a.y else a.y - 480).dp),
+                position = if (a.corner) {
+                    WindowPosition.Absolute((a.workRight - WIN_FLYOUT_GAP - POPOVER_W).dp, (a.workBottom - WIN_FLYOUT_GAP - 480).dp)
+                } else {
+                    WindowPosition.Absolute((a.centerX - POPOVER_W / 2).dp, (if (a.fromTop) a.y else a.y - 480).dp)
+                },
                 size = DpSize.Unspecified, // pack to the popover's content
             ),
             undecorated = true,
@@ -198,15 +210,36 @@ internal fun MenuBarExtra(
                 // Opaque root so the borderless window's square corners blend into the card colour; the
                 // OS supplies the drop shadow an opaque window gets for free. flat (elevated=false) card,
                 // no transparent-gutter self-shadow, no pointer triangle (it needs transparency to read).
-                Box(Modifier.background(Tok.raised)) {
-                    TrayPopover(
-                        model,
-                        onOpenMain = { anchor = null; onActivateWindow() },
-                        onExitApp = onExitApplication?.let { exit -> { anchor = null; exit() } },
-                        showPointer = false,
-                        elevated = false,
-                        keyHint = true,
-                    )
+                if (a.corner) {
+                    // issue #292 — Windows flyout。入场按稿子上升 22dp + 淡入 250ms ease-out，但用
+                    // graphicsLayer 而不是 AnimatedVisibility：后者在动画期间内容不参与测量，窗口会先
+                    // pack 成 0 再长开，和贴角锚定打架。出场淡出**故意不做**——托盘窗口是即建即销毁的，
+                    // 关闭那一刻窗口已经没了，没有可以淡的东西。
+                    val intro = remember { Animatable(0f) }
+                    LaunchedEffect(Unit) { intro.animateTo(1f, tween(250, easing = LinearOutSlowInEasing)) }
+                    Box(Modifier.background(Tok.surface)) {
+                        WinTrayFlyout(
+                            model,
+                            onOpenMain = { anchor = null; onActivateWindow() },
+                            onExitApp = onExitApplication?.let { exit -> { anchor = null; exit() } },
+                            modifier = Modifier.graphicsLayer {
+                                alpha = intro.value
+                                translationY = (1f - intro.value) * 22.dp.toPx()
+                            },
+                            onRelayout = { window.pack() },
+                        )
+                    }
+                } else {
+                    Box(Modifier.background(Tok.raised)) {
+                        TrayPopover(
+                            model,
+                            onOpenMain = { anchor = null; onActivateWindow() },
+                            onExitApp = onExitApplication?.let { exit -> { anchor = null; exit() } },
+                            showPointer = false,
+                            elevated = false,
+                            keyHint = true,
+                        )
+                    }
                 }
             }
         }
@@ -217,8 +250,29 @@ internal fun MenuBarExtra(
 
 internal const val POPOVER_W = 360 // the opaque card's width (placePopover re-centers on the real packed size)
 
-/** Where the popover hangs: the glyph's screen X, the edge Y to grow from, and which way it grows. */
-internal data class TrayAnchor(val centerX: Int, val y: Int, val fromTop: Boolean, val screen: java.awt.Rectangle)
+/** Windows 浮层与工作区边缘的间距（issue #292 稿子：距右屏边 12px、任务栏上方 12px）。 */
+internal const val WIN_FLYOUT_GAP = 12
+
+/** 宿主是否 Windows —— [MenuBarExtra] 的载体分叉默认值（Main.kt 也各自算过一次，两处含义相同）。 */
+internal fun hostIsWindows(): Boolean =
+    System.getProperty("os.name").orEmpty().lowercase().contains("windows")
+
+/**
+ * Where the popover hangs: the glyph's screen X, the edge Y to grow from, and which way it grows.
+ *
+ * [corner] 是 Windows 的角锚定模式（issue #292）：忽略 [centerX]，改贴工作区右下角。工作区边界预先
+ * 折进 [workRight] / [workBottom]（= 屏幕边界减任务栏 inset），所以真正的落点计算
+ * （[winFlyoutOrigin]）是纯函数，无需显示器也能测——任务栏在上/左/右时 inset 同样成立。
+ */
+internal data class TrayAnchor(
+    val centerX: Int,
+    val y: Int,
+    val fromTop: Boolean,
+    val screen: java.awt.Rectangle,
+    val corner: Boolean = false,
+    val workRight: Int = screen.x + screen.width,
+    val workBottom: Int = screen.y + screen.height,
+)
 
 /** Anchor for a tray click at ([clickX], [clickY]): menu-bar trays drop the popover below the bar, bottom
  *  taskbars (Windows) grow it upward from above the bar. */
@@ -230,14 +284,39 @@ internal fun trayAnchor(clickX: Int, clickY: Int, gc: GraphicsConfiguration): Tr
     return TrayAnchor(clickX, y, fromTop, b)
 }
 
+/**
+ * Windows 角锚定（issue #292）：**不跟随托盘图标的 x**。Win11 的通知区浮层（网络/音量/电池）一律贴
+ * 工作区右下角，跟着图标横向游走的气泡在 Windows 上读起来就是一扇孤儿小窗。取点击所在屏的
+ * [GraphicsConfiguration]，用 [Toolkit.getScreenInsets] 拿任务栏 inset 换算出工作区。
+ */
+internal fun winFlyoutAnchor(gc: GraphicsConfiguration): TrayAnchor {
+    val b = gc.bounds
+    val ins = Toolkit.getDefaultToolkit().getScreenInsets(gc)
+    return TrayAnchor(
+        centerX = b.x + b.width, y = b.y + b.height - ins.bottom, fromTop = false, screen = b,
+        corner = true, workRight = b.x + b.width - ins.right, workBottom = b.y + b.height - ins.bottom,
+    )
+}
+
+/** 角锚定的窗口左上角：工作区右缘 −12 −宽、任务栏顶 −12 −高，并夹在屏幕内（超大浮层不会跑出屏外）。 */
+internal fun winFlyoutOrigin(a: TrayAnchor, w: Int, h: Int): Pair<Int, Int> =
+    (a.workRight - WIN_FLYOUT_GAP - w).coerceAtLeast(a.screen.x + WIN_FLYOUT_GAP) to
+        (a.workBottom - WIN_FLYOUT_GAP - h).coerceAtLeast(a.screen.y + WIN_FLYOUT_GAP)
+
 private fun screenConfigAt(x: Int, y: Int): GraphicsConfiguration {
     val ge = GraphicsEnvironment.getLocalGraphicsEnvironment()
     return ge.screenDevices.map { it.defaultConfiguration }.firstOrNull { it.bounds.contains(x, y) }
         ?: ge.defaultScreenDevice.defaultConfiguration
 }
 
-/** Center the (now measured) window on the glyph, clamped to the screen, growing down or up per anchor. */
+/** Center the (now measured) window on the glyph, clamped to the screen, growing down or up per anchor.
+ *  角锚定（Windows）走 [winFlyoutOrigin]，与点击点无关。 */
 internal fun placePopover(w: java.awt.Window, a: TrayAnchor) {
+    if (a.corner) {
+        val (cx, cy) = winFlyoutOrigin(a, w.width, w.height)
+        w.setLocation(cx, cy)
+        return
+    }
     val minX = a.screen.x + 8
     val x = (a.centerX - w.width / 2).coerceIn(minX, maxOf(minX, a.screen.x + a.screen.width - w.width - 8))
     val y = if (a.fromTop) a.y else a.y - w.height

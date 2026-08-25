@@ -23,14 +23,19 @@ actual class VoiceRecorder actual constructor() {
     private val _levels = MutableSharedFlow<Float>(extraBufferCapacity = 16)
     actual val levels: Flow<Float> = _levels
 
+    private val _interruptions = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    actual val interruptions: Flow<Unit> = _interruptions
+
     private val format = AudioFormat(VOICE_SAMPLE_RATE.toFloat(), 16, 1, true, false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var line: TargetDataLine? = null
     private var pumpJob: Job? = null
     private val pcm = ByteArrayOutputStream()
     private var startedMs = 0L
+    @Volatile private var stopping = false // tells the pump whether a dead line is ours or the OS's doing
 
     actual suspend fun start(): Unit = withContext(Dispatchers.IO) {
+        if (line != null) cancel() // re-entrant start: drop the live capture first, never orphan the line
         val l = try {
             AudioSystem.getTargetDataLine(format).apply { open(format); start() }
         } catch (t: Throwable) {
@@ -38,12 +43,16 @@ actual class VoiceRecorder actual constructor() {
         }
         line = l
         pcm.reset()
+        stopping = false
         startedMs = System.currentTimeMillis()
         pumpJob = scope.launch {
             val buf = ByteArray(VOICE_SAMPLE_RATE / 10 * 2) // 100 ms of 16-bit samples
             while (isActive) {
-                val n = l.read(buf, 0, buf.size) // returns 0/-1 once the line is stopped+closed
-                if (n <= 0) break
+                val n = runCatching { l.read(buf, 0, buf.size) }.getOrDefault(-1) // 0/-1 once stopped+closed
+                if (n <= 0) {
+                    if (!stopping) onInterrupted() // device unplugged / grabbed by another app
+                    break
+                }
                 pcm.write(buf, 0, n)
                 _levels.emit(rms16(buf, n))
             }
@@ -51,6 +60,7 @@ actual class VoiceRecorder actual constructor() {
     }
 
     actual suspend fun stop(): RecordedAudio = withContext(Dispatchers.IO) {
+        stopping = true
         line?.let { runCatching { it.stop(); it.close() } } // unblocks the pump's read
         pumpJob?.join()
         line = null
@@ -65,10 +75,18 @@ actual class VoiceRecorder actual constructor() {
     }
 
     actual fun cancel() {
+        stopping = true
         line?.let { runCatching { it.stop(); it.close() } }
         pumpJob?.cancel()
         line = null
         pcm.reset()
+    }
+
+    /** The line died without us asking — keep whatever PCM landed so far, but tell the composer. */
+    private fun onInterrupted() {
+        line?.let { runCatching { it.close() } }
+        line = null
+        _interruptions.tryEmit(Unit)
     }
 
     private fun rms16(buf: ByteArray, n: Int): Float {

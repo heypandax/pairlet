@@ -10,7 +10,8 @@ sealed interface VoiceState {
     /** S2 — waveform + timer; on iOS the live transcript streams alongside. */
     data class Recording(val elapsedMs: Long) : VoiceState
 
-    /** S3 — capture done, waiting for the transcript; on success it is SENT directly (no S4 review). */
+    /** S3 — capture done, waiting for the transcript; on success it is APPENDED to the composer for the
+     *  user to review/edit and send explicitly (issue #221 — no auto-send). */
     data object Transcribing : VoiceState
 
     /**

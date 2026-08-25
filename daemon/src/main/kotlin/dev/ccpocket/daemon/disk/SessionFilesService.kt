@@ -406,6 +406,12 @@ object SessionFilesService {
             AgentKind.CLAUDE -> claudeScan(file, ::touch, ::record)
             AgentKind.CODEX -> codexScan(file, ::touch, ::record)
             AgentKind.OPENCODE -> { /* OpenCode uses SQLite, not file scanning */ }
+            AgentKind.KIMI -> { /* KIMI Changes preview is P1 no-op (like OPENCODE); ACP transcript scan is P2 */ }
+            AgentKind.ZCODE -> { /* ZCode's session-store schema is not a stable public file contract */ }
+            // issue #255 v1 scope is discovery/replay/open/send only. dsh transcripts are multi-frame
+            // zstd, so a Changes preview would have to decode the whole file per scan — deferred with
+            // the rest of the non-core surface (approvals, usage, model switching).
+            AgentKind.DSH -> { /* DSH Changes preview is out of v1 scope (like OPENCODE/KIMI) */ }
         }
         return seen
     }
@@ -419,6 +425,12 @@ object SessionFilesService {
             AgentKind.CLAUDE -> ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl")
             AgentKind.CODEX -> CodexPaths.findSession(sessionId)
             AgentKind.OPENCODE -> null // OpenCode sessions are in SQLite, not individual files
+            AgentKind.KIMI -> null // KIMI file-preview is P1 no-op (transcript format unverified pre-auth)
+            AgentKind.ZCODE -> null // fail-safe: never guess a transcript path from an opaque session id
+            // dsh's transcript IS a single known file, but it is zstd-compressed — every caller here
+            // reads the path as plain JSONL, so handing it over would produce binary garbage. null until
+            // this service learns to go through DshTranscript.
+            AgentKind.DSH -> null
         }
         return file?.takeIf { it.exists() }
     }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -33,11 +35,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.dir_picker_choose_here
+import dev.ccpocket.app.resources.dir_picker_remote_title
 import dev.ccpocket.app.resources.show_sidebar
 import dev.ccpocket.app.resources.your_computer
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.handoff.canInitiateSessionHandoff
 import dev.ccpocket.protocol.isQuestion
 import org.jetbrains.compose.resources.stringResource
 
@@ -66,6 +71,11 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
     LaunchedEffect(Unit) {
         delay(STARTUP_UPDATE_CHECK_DELAY_MS)
         if (model.updateState is DkUpdateState.Idle) model.checkForUpdates()
+    }
+    // A session switch can change the backend while the draft modal is open. Clear the stale state as
+    // well as hiding the surface, otherwise anyOverlay would keep treating an invisible modal as active.
+    LaunchedEffect(model.chatAgent) {
+        if (!model.chatAgent.canInitiateSessionHandoff()) model.showHandoff = false
     }
     Box(Modifier.fillMaxSize().background(Tok.base)) {
         Row(Modifier.fillMaxSize()) {
@@ -109,6 +119,7 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 NewSessionPopover(
                     model.newSessionSeed ?: "~/",
                     model.defaultAgent,
+                    model.availableAgents,
                     model.defaultMode,
                     model.defaultPermissionMode,
                     model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
@@ -119,6 +130,19 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                     defaultModelFor = { a -> model.defaultModelFor(a) },
                     onAgentPicked = { a -> model.fetchModels(a) },
                 ) { dir, agent, mode, native, pickedModel -> model.newSession(dir, agent, mode, native, pickedModel) }
+            }
+        }
+        if (model.showFolderPicker) {
+            // remote "Open Folder" (issues #218/#214): the daemon-machine directory browser — centered scrim,
+            // same language as the other modals. Only reached when the active daemon is another machine.
+            Overlay(onDismiss = { model.showFolderPicker = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                RemoteDirPickerCard(
+                    model,
+                    title = stringResource(Res.string.dir_picker_remote_title),
+                    confirmLabel = stringResource(Res.string.dir_picker_choose_here),
+                    onDismiss = { model.showFolderPicker = false },
+                    onPick = { path -> model.showFolderPicker = false; model.openFolderPath(path) },
+                )
             }
         }
         if (model.showQuickActions) {
@@ -155,10 +179,28 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 ChangesOverlay(model) { model.showChanges = false }
             }
         }
+        if (model.showGit) {
+            // the Git panel (issue #280) — same centered-scrim language as Changes, which it sits beside
+            Overlay(onDismiss = { model.showGit = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                GitOverlay(model) { model.showGit = false }
+            }
+        }
+        if (model.showWorktrees) {
+            // raised FROM the Git panel (issue #281); closing it returns to the panel underneath
+            Overlay(onDismiss = { model.showWorktrees = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                WorktreesOverlay(model) { model.showWorktrees = false }
+            }
+        }
         if (model.showSkills) {
             // the installed skills/plugins browser (issue #132) — same centered-scrim language as Changes
             Overlay(onDismiss = { model.showSkills = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
                 SkillsOverlay(model) { model.showSkills = false }
+            }
+        }
+        if (model.showReviewCenter) {
+            // the ReviewRequest centre (REVIEW-REQUEST.md §12) — same centered-scrim language as Skills
+            Overlay(onDismiss = { model.showReviewCenter = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                ReviewCenterOverlay(model) { model.showReviewCenter = false }
             }
         }
         if (model.showSettings) {
@@ -166,7 +208,7 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 SettingsModal(model) { model.showSettings = false }
             }
         }
-        if (model.showHandoff && model.handoffInvite == null) {
+        if (model.showHandoff && model.handoffInvite == null && model.chatAgent.canInitiateSessionHandoff()) {
             // session-handoff draft dialog (design Frame 11) — centered scrim, two-column trust layout.
             // A fresh invite yields to the QR card below (the draft's job is done once the invite exists).
             Overlay(onDismiss = { model.showHandoff = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
@@ -233,7 +275,10 @@ private fun SidebarRevealStrip(onExpand: () -> Unit) {
     }
 }
 
-/** A dismiss-on-scrim overlay that anchors [content] at [alignment]; clicks on the content are swallowed. */
+/** A dismiss-on-scrim overlay that anchors [content] at [alignment]; clicks on the content are swallowed.
+ *  Content height is bounded to the window's visible area minus [padding] (issue #209): a modal/popover taller
+ *  than the window is clamped rather than spilling its bottom (the create button / About page) off-screen, so
+ *  its own inner scroll keeps that content reachable. A short/wrap-content overlay is unaffected. */
 @Composable
 private fun Overlay(
     onDismiss: () -> Unit,
@@ -244,7 +289,9 @@ private fun Overlay(
 ) {
     val base = Modifier.fillMaxSize()
     Box((if (scrim) base.background(Dk.backdrop.copy(alpha = 0.5f)) else base).noRippleClick(onDismiss)) {
-        Box(Modifier.align(alignment).padding(padding).noRippleClick {}) { content() }
+        BoxWithConstraints(Modifier.align(alignment).padding(padding)) {
+            Box(Modifier.heightIn(max = maxHeight).noRippleClick {}) { content() }
+        }
     }
 }
 

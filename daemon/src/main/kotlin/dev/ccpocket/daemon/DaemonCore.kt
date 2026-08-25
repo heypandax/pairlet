@@ -26,6 +26,7 @@ import dev.ccpocket.protocol.SendPrompt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** The transport-agnostic core: registry + services + router. Shared by the local server and the relay client.
@@ -43,12 +44,25 @@ class DaemonCore(
     presetStore: PresetStore = PresetStore.load(),
     scheduleStore: ScheduleStore = ScheduleStore.load(),
     openCodeModels: OpenCodeModelService = OpenCodeModelService(),
+    kimiModels: dev.ccpocket.daemon.kimi.KimiModelService = dev.ccpocket.daemon.kimi.KimiModelService(),
+    zcodeModels: dev.ccpocket.daemon.zcode.ZCodeModelService = dev.ccpocket.daemon.zcode.ZCodeModelService(),
     codexModels: CodexModelService = CodexModelService(),
     /** Session Handoff (SESSION-HANDOFF.md): registry + guard + fan-out, shared by both transports.
      *  Installed onto [SessionRegistry.handoffs] below so the router's drive gate, the §4.1 create
      *  checks, the graceful-recall turn control and the idle-reaper protection all read one truth.
      *  Injectable so a test can hand in a temp-store instance instead of the real ~/.cc-pocket one. */
     val handoffs: dev.ccpocket.daemon.handoff.HandoffService = dev.ccpocket.daemon.handoff.HandoffService(),
+    /** ReviewRequest (REVIEW-REQUEST.md) — the TASK-context sibling of [handoffs], deliberately BESIDE it
+     *  rather than inside it: it has its own store, its own state machine and its own capability set, and
+     *  Session Handoff's runtime semantics must not leak into it (§13.2). Sender-authoritative side.
+     *  Injectable so a test can hand in a temp-store instance instead of the real ~/.cc-pocket one. */
+    val reviews: dev.ccpocket.daemon.review.ReviewService = dev.ccpocket.daemon.review.ReviewService(
+        dev.ccpocket.daemon.review.ReviewRegistry(dev.ccpocket.daemon.review.ReviewStore.inMemory()),
+    ),
+    /** Production supplies the durable implementation explicitly in Main. The in-memory default keeps
+     * unit tests and embedded cores from reading ~/.cc-pocket or opening peer relay connections. */
+    peerInboxFactory: (CoroutineScope) -> dev.ccpocket.daemon.review.PeerInboxService =
+        dev.ccpocket.daemon.review.PeerInboxService::inMemory,
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -76,12 +90,38 @@ class DaemonCore(
         // here (not lazily in ApprovalTimeout) so the object never has to know about DaemonPrefs — the
         // router writes the same pair whenever a client flips it.
         dev.ccpocket.daemon.agent.ApprovalTimeout.noAutoDeny = prefs.askNoAutoDeny
+        // issue #220: same mirror for the persisted Full Control expiry duration (0 = never expires)
+        dev.ccpocket.daemon.agent.ApprovalTimeout.fullControlExpiryMs = prefs.fullControlExpiryMs
         // unhide transcripts a crashed previous instance stranded hidden (issue #70) — off the
-        // constructor path (file IO over up to 200 journal entries must not delay startup)
-        scope.launch(Dispatchers.IO) { runCatching { SpawnedSessions.sweepAtBoot() } }
+        // constructor path (file IO over up to 200 journal entries must not delay startup). Then keep
+        // sweeping periodically (issue #216 ②/④): an always-on daemon never reboots, so boot-only
+        // convergence left crash/orphan leftovers — and sibling spawners' drop-in journals — hidden
+        // for days. Live sessions are excluded per entry via the registry (their claudes hold the
+        // files), and the sweep's own mtime/process guards cover external writers.
+        scope.launch(Dispatchers.IO) {
+            while (true) {
+                runCatching { SpawnedSessions.sweep(held = registry::isLiveSession) }
+                delay(SPAWNED_SWEEP_PERIOD_MS)
+            }
+        }
         // periodic handoff expiry sweep + HandoffUpdated fan-out — on the core scope like the schedule
         // pump below, so BOTH transports (relay client + local server) get it for free
         scope.launch { handoffs.sweepLoop() }
+        // the ReviewRequest expiry sweep, on the same footing and for the same reason
+        scope.launch { reviews.sweepLoop() }
+    }
+
+    /**
+     * The RECIPIENT half of ReviewRequest (REVIEW-REQUEST.md §9): inbound peer links and their inbox
+     * connections. Lives here — not on the relay client — because it is not this account's relay leg at
+     * all: each link dials the PEER's relay with a credential minted in the PEER's account, so it works
+     * (and must keep retrying) whether or not this machine's own relay link is up.
+     */
+    val peerInbox = peerInboxFactory(scope)
+
+    init {
+        // one supervised inbox per stored link; a peer that is unreachable simply keeps backing off
+        runCatching { peerInbox.start() }
     }
 
     val dirs = DirectoryService()
@@ -89,6 +129,17 @@ class DaemonCore(
     val inbox = FileInboxService(registry::workdirOf)
     val shell = ShellService(scope, coordinator = approvals, grants = grants)
     val exports = FileExportService(scope, registry::workdirOf, coordinator = approvals)
+
+    /**
+     * The Git panel (#280) / worktree (#281) engine. Wired to the SAME two live-session truths the
+     * project list uses — the daemon's own conversations by cwd, and `claude` processes started in an
+     * outside terminal — because "a worktree with a running agent must not be removed" has to mean the
+     * same thing here as the running dot means there. No new liveness heuristic is invented.
+     */
+    val git = dev.ccpocket.daemon.git.GitService(
+        liveByCwd = { registry.liveByCwd() },
+        externalCwds = { dev.ccpocket.daemon.disk.LiveProcesses.claudeCwds() },
+    )
     val auth = AuthService(
         scope, registry::busyForAuth, registry::closeIdleForAuth, registry::closeBusyForAuth,
         claudeConfigDir = claudeConfigDir,
@@ -144,15 +195,30 @@ class DaemonCore(
         scope.launch { scheduler.runLoop() }
     }
 
+    /**
+     * The OWNER-LOCAL review plane (REVIEW-REQUEST.md §6 + §12). ONE instance for the whole daemon: the
+     * wire router (App/desktop Review Center) and the local control API (CLI/Skill) both drive it, which
+     * is what keeps "contacts, prepare and queued actions mean the same thing on every surface" true in
+     * code rather than in a comment. [collaboratorControl] is read lazily — it only exists once the relay
+     * link is up, and a review contact list must not capture the null it saw at construction.
+     */
+    val reviewOwner = dev.ccpocket.daemon.review.ReviewOwnerService({ collaboratorControl }, reviews, peerInbox)
+
     val router = RequestRouter(
         registry, dirs, transcribe, inbox, shell, exports, scope, auth, prefs, presets, scheduler,
         // presetEnv shares PresetStore with the DaemonInfo gateway pill (Main.kt): the host we ask for a
         // model list must be the host the client is showing, with that layer's own credential (#167 ②).
-        openCodeModels, codexModels,
-        ClaudeModelService(claudeConfigDir, presetEnv = { runCatching { presetStore.activeEnv() }.getOrNull() }),
+        openCodeModels = openCodeModels,
+        kimiModels = kimiModels,
+        zcodeModels = zcodeModels,
+        codexModels = codexModels,
+        claudeModels = ClaudeModelService(claudeConfigDir, presetEnv = { runCatching { presetStore.activeEnv() }.getOrNull() }),
         approvals = approvals,
         grants = grants,
         approvalHistory = approvalHistory,
+        reviews = reviews,
+        reviewOwner = reviewOwner,
+        git = git,
     )
 
     /**
@@ -175,4 +241,11 @@ class DaemonCore(
     var collaboratorControl: dev.ccpocket.daemon.handoff.CollaboratorControl? = null
 
     suspend fun shutdown() = registry.closeAll()
+
+    private companion object {
+        /** Cadence of the periodic spawned-session sweep (issue #216 ②). Convergence for crash/orphan
+         *  leftovers only — the common paths (process end, idle reap) unhide in real time, so this just
+         *  bounds how long a stranded transcript can stay hidden without a daemon restart. */
+        const val SPAWNED_SWEEP_PERIOD_MS = 5 * 60_000L
+    }
 }

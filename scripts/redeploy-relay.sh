@@ -25,14 +25,33 @@ DIST=relay/build/install/cc-pocket-relay
 # HK box runs SSH anti-bruteforce: an offered-then-rejected pubkey counts as a failed auth and,
 # after a couple in quick succession, locks out even the correct password for ~30s. Force
 # password-only auth so the multi-step deploy (ssh + scp × several) never trips it.
-SSH=(sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=accept-new "root@$RELAY_HOST")
+# RELAY_SSH_JUMP（可选，.env）：ProxyJump 跳板（如 ark-114）。本机 IP 被防暴破封禁时换源 IP 用。
+# Bash 3.2 treats expanding an empty array under `set -u` as an unset-variable error. Build the
+# command arrays incrementally so a missing optional jump host remains valid on the macOS shell.
+SSH=(sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=accept-new)
 SCP=(sshpass -e scp -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=accept-new)
+if [ -n "${RELAY_SSH_JUMP:-}" ]; then
+  SSH+=(-o "ProxyJump=$RELAY_SSH_JUMP")
+  SCP+=(-o "ProxyJump=$RELAY_SSH_JUMP")
+fi
+SSH+=("root@$RELAY_HOST")
 
-echo "── 1/5 stop relay + clear old dist ──"
-"${SSH[@]}" 'systemctl stop cc-pocket-relay && rm -rf /opt/cc-pocket-relay/bin /opt/cc-pocket-relay/lib'
+# 先传后切：dist 打成单个 tarball 上传（多文件 scp 的每个文件都是一次翻车机会，且该机防暴破
+# 会掐长会话），服务全程在线；最后一步才 stop→untar→start，停机窗口从「整个传输期」缩到秒级。
+# 08-04 实战教训：老流程先 stop 再多文件 scp，传输中途被防暴破掐断 = 线上直接停机。
+echo "── 1/5 ship relay dist (tarball, service stays up) ──"
+TARBALL=$(mktemp /tmp/relay-dist.XXXXXX.tgz)
+trap 'rm -f "$TARBALL"' EXIT
+tar czf "$TARBALL" -C "$DIST" bin lib
+"${SCP[@]}" "$TARBALL" "root@$RELAY_HOST:/tmp/relay-dist.tgz"
 
-echo "── 2/5 ship relay dist ──"
-"${SCP[@]}" -r "$DIST/bin" "$DIST/lib" "root@$RELAY_HOST:/opt/cc-pocket-relay/"
+echo "── 2/5 swap dist（4/5 重新拉起）──"
+"${SSH[@]}" '
+  systemctl stop cc-pocket-relay &&
+  rm -rf /opt/cc-pocket-relay/bin /opt/cc-pocket-relay/lib &&
+  tar xzf /tmp/relay-dist.tgz -C /opt/cc-pocket-relay/ 2>/dev/null &&
+  rm -f /tmp/relay-dist.tgz
+'
 
 echo "── 3/5 ship Caddyfile (back up current first) ──"
 "${SSH[@]}" 'cp -a /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.$(date +%s)"'

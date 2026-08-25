@@ -5,7 +5,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * WHO launches clean-room (no MCP, `--setting-sources ""`). The flag's CONTENT is pinned by
+ * WHO launches clean-room (no MCP, `--setting-sources=` i.e. none). The flag's CONTENT is pinned by
  * ClaudeLauncherCleanRoomTest; this pins the DERIVATION — the security-relevant half, because the
  * failure mode of getting it wrong is silent: the owner's personal permissions.allow rules (a bare
  * "Edit" was live on the machine this shipped from) auto-approve tools inside the CLI, no ask ever

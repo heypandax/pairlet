@@ -37,6 +37,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Check
@@ -75,12 +76,12 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
@@ -101,6 +102,8 @@ import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.awtTransferable
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.ui.chat.LineageBanner
+import dev.ccpocket.app.ui.chat.RewindErrorBar
 import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.ImgState
 import dev.ccpocket.app.data.PendingFile
@@ -121,10 +124,23 @@ import dev.ccpocket.app.resources.autorun_tighten
 import dev.ccpocket.app.resources.attach_menu
 import dev.ccpocket.app.resources.cancel
 import dev.ccpocket.app.resources.cancel_upload
+import dev.ccpocket.app.resources.action_retry
 import dev.ccpocket.app.resources.chat_no_session
 import dev.ccpocket.app.resources.chat_no_session_hint
+import dev.ccpocket.app.resources.chat_open_failed
+import dev.ccpocket.app.resources.chat_open_failed_hint
+import dev.ccpocket.app.resources.chat_open_failed_named
 import dev.ccpocket.app.resources.chat_opening
 import dev.ccpocket.app.resources.chat_opening_named
+import dev.ccpocket.app.resources.chat_start_choose
+import dev.ccpocket.app.resources.chat_start_defaults_note
+import dev.ccpocket.app.resources.chat_start_failed
+import dev.ccpocket.app.resources.chat_start_in
+import dev.ccpocket.app.resources.chat_start_opening
+import dev.ccpocket.app.resources.chat_start_pick_project
+import dev.ccpocket.app.resources.chat_start_placeholder
+import dev.ccpocket.app.resources.chat_start_send_failed
+import dev.ccpocket.app.resources.chat_start_timeout
 import dev.ccpocket.app.resources.chat_you
 import dev.ccpocket.app.resources.cmd_source_builtin
 import dev.ccpocket.app.resources.cmd_source_project
@@ -185,7 +201,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dev.ccpocket.app.ui.AgentBadge
 import dev.ccpocket.app.ui.AgentTag
+import dev.ccpocket.app.ui.agentColor
 import dev.ccpocket.app.ui.agentName
+import dev.ccpocket.app.ui.tilde
+import dev.ccpocket.app.resources.new_task_agent
+import dev.ccpocket.app.resources.new_task_browse_other
+import dev.ccpocket.app.resources.new_task_project
+import dev.ccpocket.app.resources.new_task_recent
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import dev.ccpocket.app.ui.AttachImageIcon
 import dev.ccpocket.app.ui.EarlierMessagesSeam
 import dev.ccpocket.app.ui.LoadEarlierRow
@@ -200,6 +224,7 @@ import dev.ccpocket.app.ui.renderClip
 import dev.ccpocket.app.ui.SentImages
 import dev.ccpocket.app.ui.SubagentCard
 import dev.ccpocket.app.ui.WorkflowCard
+import dev.ccpocket.app.ui.folderName
 import dev.ccpocket.app.ui.pathLinked
 import dev.ccpocket.app.ui.rememberBottomPinned
 import dev.ccpocket.app.ui.rememberCopied
@@ -236,9 +261,14 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         // transition for the TARGET session instead of the blank "No session open" state: that empty state
         // read as "the newly-opened session didn't respond" when ⌘K-switching (issue #82). `opening` clears
         // atomically with convoId on SessionLive, so this hands straight off to the live transcript — no
-        // EmptyChat flash in between.
+        // EmptyChat flash in between. And when the open never lands at all, say THAT (issue #235) instead
+        // of falling back to the same empty state a user who clicked nothing would see.
         Column(modifier.fillMaxSize().background(Tok.base)) {
-            if (model.opening) OpeningChat(model.chatTitle) else EmptyChat()
+            when {
+                model.opening -> OpeningChat(model.chatTitle)
+                model.openFailed -> FailedChat(model.chatTitle) { model.retryOpen() }
+                else -> EmptyChat(model)
+            }
         }
         return
     }
@@ -351,10 +381,16 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 if (i == historySeamAt) EarlierMessagesSeam(model.historyPrependGen, monoFamily = Dk.mono)
                                 MessageRow(
                                     m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered,
+                                    bubbles = model.chatAlignment == ChatStreamAlignment.BUBBLES,
                                     workflowRun = (m as? ChatItem.Tool)?.let(model::workflowRunFor),
                                     onOpenWorkflow = model::openWorkflowPanel,
                                     onOpenVideo = { model.openWorkspaceFile(it.path) },
                                     onTightenAutoRun = model::tightenAutoRun,
+                                    // rewind/fork (issue #282): built only for a user turn the daemon
+                                    // gave transcript coordinates to — see DesktopModel.canRewind
+                                    onRewind = (m as? ChatItem.User)?.takeIf(model::canRewind)?.let {
+                                        RewindEntries(!model.rewindBlockedByTurn) { turn, mode -> model.startRewind(turn, mode) }
+                                    },
                                 )
                             }
                         }
@@ -434,7 +470,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 // replace the blinking caret with a restrained, clickable resend cue.
                                 Text(
                                     stringResource(Res.string.msg_no_response_click), color = Tok.warn,
-                                    fontFamily = Dk.mono, fontSize = 11.sp,
+                                    fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp),
                                     modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { model.resendStalled() }
                                         .padding(vertical = 3.dp, horizontal = 6.dp),
                                 )
@@ -443,7 +479,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 // status only, no resend affordance (the queued original would double-run).
                                 Text(
                                     stringResource(Res.string.msg_queued), color = Tok.muted,
-                                    fontFamily = Dk.mono, fontSize = 11.sp,
+                                    fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp),
                                     modifier = Modifier.padding(vertical = 3.dp, horizontal = 6.dp),
                                 )
                             } else if (model.streaming) {
@@ -485,6 +521,9 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
     }
     }
     }
+    // rewind/fork confirmation (issue #282) — a popup over the whole pane, so the numbers land in the
+    // middle of the window rather than tucked beside the turn they refer to
+    RewindConfirmPopup(model)
 }
 
 /**
@@ -514,6 +553,7 @@ private fun HandoffPaneRibbon(model: DesktopModel, onFinishReturn: () -> Unit) {
         if (recipient) {
             Text(
                 stringResource(Res.string.ho_finish_return), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(12.sp),
                 modifier = Modifier.clip(RoundedCornerShape(9.dp)).background(Tok.accent.copy(alpha = 0.10f))
                     .border(1.dp, Tok.accent, RoundedCornerShape(9.dp))
                     .clickable(onClick = onFinishReturn).padding(horizontal = 11.dp, vertical = 6.dp),
@@ -586,7 +626,18 @@ private fun HandoffComposerZone(model: DesktopModel, questionOwnsInput: Boolean)
             HandoffWatchBar(onRecall = { model.handoffRecall() })
         }
         model.observing -> ObserveBar(model)
-        else -> Composer(model, suppressAutoFocus = questionOwnsInput)
+        else -> Column(Modifier.fillMaxWidth()) {
+            // A refused rewind (issue #282) docks above the composer, like every other transient chat
+            // notice, and self-dismisses — the commonest refusal is a stale anchor, which is information
+            // ("reload and point again"), not a decision to make.
+            model.rewindError?.let { reason ->
+                RewindErrorBar(
+                    reason, onDismiss = { model.dismissRewindError() },
+                    modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 8.dp),
+                )
+            }
+            Composer(model, suppressAutoFocus = questionOwnsInput)
+        }
     }
 }
 
@@ -619,12 +670,313 @@ private fun CenteredStreamRow(content: @Composable () -> Unit) {
     }
 }
 
+/**
+ * The empty pane (issue #256). It used to state a fact and offer nothing — "No session open" over a hint to
+ * go click something else — which made the largest surface in the window the one place you couldn't work.
+ * It is now the session starter: type the first prompt here and ⏎ opens a session in the current project
+ * (default agent + default mode, the same ladder ⌘N uses) with that prompt queued as turn one.
+ *
+ * Deliberately NOT a second composer: it writes to [DesktopModel.newSessionPrompt] — model-owned precisely so
+ * a queue that fails can hand the text back — and it has no attachments, no model chip and no slash/@ menus,
+ * none of which have a session to resolve against yet.
+ *
+ * With no project in context ([DesktopModel.newSessionDir] null — nothing opened yet on this machine) the
+ * field still takes text; submitting says so inline and the full popover is one click away. Refusing to
+ * accept keystrokes would be the dead end this replaces.
+ */
 @Composable
-private fun EmptyChat() {
+private fun EmptyChat(model: DesktopModel) {
+    // Issue #260: the two decisions creating a session actually makes — WHICH project, WHICH agent — are
+    // shown here as chips instead of being implied by "the current project, the default agent". They start
+    // at exactly those defaults, so the pre-#260 one-keystroke path is unchanged; they are just legible now,
+    // and changeable without leaving the pane. Mode and model deliberately stay implicit (the line beside
+    // the chips says so) — those belong to the full new-session popover.
+    var pickedDir by remember { mutableStateOf<String?>(null) }
+    var pickedAgent by remember { mutableStateOf<AgentKind?>(null) }
+    var projectPop by remember { mutableStateOf(false) }
+    var agentPop by remember { mutableStateOf(false) }
+    val dir = pickedDir ?: model.newSessionDir
+    val agent = pickedAgent ?: model.defaultAgent
+    val busy = model.startingSession
+    var pickHint by remember { mutableStateOf(false) } // "select a project first", shown only after a submit
+    val submit = {
+        val text = model.newSessionPrompt
+        if (text.isNotBlank() && !model.startingSession) {
+            if (dir == null) pickHint = true else { pickHint = false; model.startSessionWithPrompt(dir, text, agent) }
+        }
+    }
+    val fieldFocus = remember { FocusRequester() }
+    // Land ready-to-type. One best-effort attempt, not the composer's retry loop: nothing else claims the
+    // keyboard in an empty pane, and a delay-driven loop is exactly what stalls the UI test clock.
+    LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Text(stringResource(Res.string.chat_no_session), color = Tok.tx, fontFamily = Dk.ui, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text(stringResource(Res.string.chat_no_session_hint), color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, textAlign = TextAlign.Center)
+            Text(
+                if (dir != null) stringResource(Res.string.chat_start_in, folderName(dir)) else stringResource(Res.string.chat_no_session_hint),
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, textAlign = TextAlign.Center,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(6.dp))
+            // the Composer's own shape (surface + hairline + 12dp radius + 34dp send circle), so this reads
+            // as the same input the session will hand over to. The card is a COLUMN since #260: the field
+            // row on top, the attachment row (project · agent · defaults note) beneath it.
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(start = 12.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+            ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                Box(Modifier.weight(1f).padding(vertical = 6.dp)) {
+                    val fieldStyle = TextStyle(color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, lineHeight = 20.sp)
+                    if (model.newSessionPrompt.isEmpty()) {
+                        Text(stringResource(Res.string.chat_start_placeholder), style = fieldStyle.copy(color = Tok.muted))
+                    }
+                    BasicTextField(
+                        value = model.newSessionPrompt,
+                        onValueChange = {
+                            model.newSessionPrompt = it
+                            pickHint = false
+                            model.dismissNewSessionPromptError() // editing retracts the last failure line
+                        },
+                        enabled = !busy, // locked while the session it belongs to is opening
+                        textStyle = fieldStyle,
+                        cursorBrush = SolidColor(Tok.accent),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 132.dp).focusRequester(fieldFocus)
+                            .testTag("new-session-prompt")
+                            .onPreviewKeyEvent { e ->
+                                // ⏎ starts the session; ⇧⏎ falls through to the field's own newline
+                                val send = e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed
+                                if (send) submit()
+                                send
+                            },
+                    )
+                }
+                if (busy) {
+                    Box(
+                        Modifier.size(34.dp).clip(RoundedCornerShape(999.dp)).background(Tok.base)
+                            .border(1.dp, Tok.hair, RoundedCornerShape(999.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) { SpinnerRing(24.dp, 2.dp) }
+                } else {
+                    val armed = model.newSessionPrompt.isNotBlank()
+                    Box(
+                        Modifier.size(34.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent)
+                            .alpha(if (armed) 1f else 0.45f).testTag("new-session-send").clickable { submit() },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Rounded.ArrowUpward, null, tint = Tok.base, modifier = Modifier.size(16.dp)) }
+                }
+            }
+            // ── attachment row (issue #260): the two picks, then what stays implicit ──
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box {
+                    StarterChip(
+                        label = dir?.let { folderName(it) } ?: stringResource(Res.string.chat_start_pick_project),
+                        contentDescription = stringResource(Res.string.new_task_project),
+                        open = projectPop, mono = true,
+                        leading = { Icon(Icons.Outlined.Folder, null, tint = it, modifier = Modifier.size(13.dp)) },
+                    ) { projectPop = !projectPop }
+                    if (projectPop) {
+                        val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
+                        Popup(
+                            popupPositionProvider = remember(gap) { AboveAnchorEndPopupPositionProvider(gap) },
+                            onDismissRequest = { projectPop = false },
+                            properties = PopupProperties(focusable = true),
+                        ) {
+                            StarterProjectPopover(
+                                projects = model.projects,
+                                selected = dir,
+                                onPick = { pickedDir = it; projectPop = false },
+                                // the existing typed-path popover — one implementation of "some other folder"
+                                onBrowse = { projectPop = false; model.openNewSession("~/") },
+                            )
+                        }
+                    }
+                }
+                Box {
+                    StarterChip(
+                        label = agentName(agent),
+                        contentDescription = stringResource(Res.string.new_task_agent),
+                        open = agentPop, mono = false,
+                        leading = { Box(Modifier.size(9.dp).clip(RoundedCornerShape(999.dp)).background(agentColor(agent))) },
+                    ) { agentPop = !agentPop }
+                    if (agentPop) {
+                        val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
+                        Popup(
+                            popupPositionProvider = remember(gap) { AboveAnchorEndPopupPositionProvider(gap) },
+                            onDismissRequest = { agentPop = false },
+                            properties = PopupProperties(focusable = true),
+                        ) {
+                            StarterAgentPopover(model.availableAgents, agent) { pickedAgent = it; agentPop = false }
+                        }
+                    }
+                }
+                // says out loud what the quick path decides FOR you, so nothing here is a silent default
+                Text(
+                    stringResource(Res.string.chat_start_defaults_note),
+                    color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                )
+            }
+            }
+            Row(Modifier.fillMaxWidth().padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Key("⏎"); Text(stringResource(Res.string.key_send), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+                Key("⇧⏎"); Text(stringResource(Res.string.key_newline), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+            }
+            // ONE inline status line — never a dialog: whatever went wrong, the text is still in the field
+            // above it and the fix is to press ⏎ again.
+            val status: Pair<Color, String>? = when {
+                busy -> Tok.tx2 to stringResource(Res.string.chat_start_opening)
+                pickHint -> Tok.warn to stringResource(Res.string.chat_start_pick_project)
+                model.newSessionPromptError == NewSessionPromptError.TIMEOUT -> Tok.danger to stringResource(Res.string.chat_start_timeout)
+                model.newSessionPromptError == NewSessionPromptError.SEND_REFUSED -> Tok.danger to stringResource(Res.string.chat_start_send_failed)
+                model.newSessionPromptError != null -> Tok.danger to stringResource(Res.string.chat_start_failed)
+                else -> null
+            }
+            status?.let { (color, text) ->
+                Text(text, color = color, fontFamily = Dk.ui, fontSize = 12.sp, textAlign = TextAlign.Center)
+            }
+            // no project in context: the typed-path popover, the affordance that already exists
+            if (dir == null) {
+                Text(
+                    stringResource(Res.string.chat_start_choose),
+                    color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(7.dp))
+                        .hoverFill(RoundedCornerShape(7.dp))
+                        .clickable { model.openNewSession() }.padding(horizontal = 10.dp, vertical = 5.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The empty pane's project / agent chip (issue #260) — the #157 model-chip language with a leading mark.
+ *
+ * Same hairline pill that warms to accent while its popover is open, so the chips a user meets in the empty
+ * pane and in a live composer read as one control. Never accent-FILLED: send stays the loudest thing here.
+ */
+@Composable
+private fun StarterChip(
+    label: String,
+    contentDescription: String,
+    open: Boolean,
+    mono: Boolean,
+    leading: @Composable (Color) -> Unit,
+    onClick: () -> Unit,
+) {
+    val ink = if (open) Tok.accent else Tok.tx2
+    val cd = contentDescription
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        Modifier.height(30.dp).clip(shape).background(Tok.raised)
+            .border(1.dp, if (open) Tok.accent else Tok.hair, shape)
+            .clickable(onClick = onClick)
+            .semantics { this.contentDescription = cd }
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        leading(ink)
+        Text(
+            label, color = ink, fontFamily = if (mono) Dk.mono else Dk.ui, fontSize = 12.sp,
+            fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            style = tightCenter(12.sp), modifier = Modifier.widthIn(max = 132.dp),
+        )
+        Text(if (open) "▴" else "▾", color = ink, fontFamily = Dk.ui, fontSize = 10.sp, style = tightCenter(10.sp))
+    }
+}
+
+/** Recent projects, the current one ticked, over the existing typed-path popover for anything else. */
+@Composable
+private fun StarterProjectPopover(
+    projects: List<DkProject>,
+    selected: String?,
+    onPick: (String) -> Unit,
+    onBrowse: () -> Unit,
+) {
+    // "recent" on the desktop shell is the sidebar's own project order (running first) — the same list the
+    // user is looking at, capped so the popover stays a shortcut rather than a second project browser.
+    val rows = remember(projects) { projects.take(5) }
+    Column(
+        Modifier.width(328.dp).clip(RoundedCornerShape(12.dp)).background(Tok.raised)
+            .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)),
+    ) {
+        Text(
+            stringResource(Res.string.new_task_recent).uppercase(), color = Tok.muted, fontFamily = Dk.ui,
+            fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
+            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 11.dp, bottom = 9.dp),
+        )
+        rows.forEach { p ->
+            val checked = p.path == selected
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable { onPick(p.path) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        p.name, color = if (checked) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 14.5.sp,
+                        fontWeight = if (checked) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        tilde(p.path), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
+                if (checked) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 14.sp)
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).background(Tok.surface).clickable { onBrowse() }
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(Res.string.new_task_browse_other), color = Tok.tx, fontFamily = Dk.ui,
+                fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f),
+            )
+            Text("›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 17.sp)
+        }
+    }
+}
+
+/** The agents this daemon actually advertises — the desktop's picker has always been availability-filtered
+ *  (DesktopAgentChoicesTest pins that it reads the shared projection), so it stays a list of real choices. */
+@Composable
+private fun StarterAgentPopover(available: List<AgentKind>, selected: AgentKind, onPick: (AgentKind) -> Unit) {
+    Column(
+        Modifier.width(220.dp).clip(RoundedCornerShape(12.dp)).background(Tok.raised)
+            .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(vertical = 6.dp),
+    ) {
+        available.forEach { a ->
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable { onPick(a) }
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(Modifier.size(9.dp).clip(RoundedCornerShape(999.dp)).background(agentColor(a)))
+                Text(
+                    agentName(a), color = if (a == selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui,
+                    fontSize = 13.5.sp, fontWeight = if (a == selected) FontWeight.SemiBold else FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (a == selected) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp)
+            }
         }
     }
 }
@@ -641,6 +993,34 @@ private fun OpeningChat(title: String) {
                 if (title.isBlank()) stringResource(Res.string.chat_opening) else stringResource(Res.string.chat_opening_named, title),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
                 textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** The open that never landed (issue #235). Same two-line shape as [EmptyChat] — this replaces it, it does
+ *  not add a layer — but it names the session the user actually asked for and offers the one action that
+ *  can help. Sticky by design: the desktop has nowhere else to put this, so it stays until the user retries
+ *  or opens something else. */
+@Composable
+private fun FailedChat(title: String, onRetry: () -> Unit) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                if (title.isBlank()) stringResource(Res.string.chat_open_failed) else stringResource(Res.string.chat_open_failed_named, title),
+                color = Tok.tx, fontFamily = Dk.ui, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                stringResource(Res.string.chat_open_failed_hint),
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, textAlign = TextAlign.Center,
+            )
+            Text(
+                stringResource(Res.string.action_retry),
+                color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(7.dp))
+                    .hoverFill(RoundedCornerShape(7.dp))
+                    .clickable(onClick = onRetry).padding(horizontal = 10.dp, vertical = 5.dp),
             )
         }
     }
@@ -667,13 +1047,14 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
             val canOpenTerminal = remember(model.chatWorkdir) { TerminalLauncher.canOpen(model.chatWorkdir) }
             if (canOpenTerminal) {
                 Text(
-                    ">_", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
+                    ">_", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp),
                     modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
                         .clickable(onClick = onTerminalMenu)
                         .padding(horizontal = 9.dp, vertical = 3.dp),
                 )
             }
             ChangesPill(model) // "± N" — the session's changed files, opens the Changes browser
+            GitPill(model) // "⎇ branch ↑2" — the repository's state, opens the Git panel (issue #280)
             // the permission-mode switch lives in the ⋯ popover now, mirroring mobile's quick-actions
             // sheet (the old header pill was display-only and read as a broken control)
             Icon(
@@ -695,6 +1076,15 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
         // pathLinked left-clicks OPEN the workdir (when it's local); right-click adds "Copy path" so the
         // cwd is grabbable even on a remote session where it isn't a link at all. Copies the bare workdir,
         // not the whole machine·branch·model meta line.
+        // Branch lineage (issue #282, design frame C) TAKES THE PLACE of the context meta line while a
+        // rewound/forked conversation is on screen: right after a rewind, "which conversation is this"
+        // outranks machine·path·model, and stacking both would say two different things about identity.
+        val lineage = model.sessionLineage
+        if (lineage != null) {
+            LineageBanner(lineage.mode, lineage.fromTitle, Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+            return@Column
+        }
         val clipboard = LocalClipboardManager.current
         val copyPath = stringResource(Res.string.menu_copy_path)
         ContextMenuArea(items = {
@@ -711,20 +1101,49 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
     }
 }
 
+// chat-stream alignment (issue #213): in LEFT (default) this is a pass-through, so the user turn renders
+// exactly as before (byte-for-byte, no wrapper). In BUBBLES it hugs the content to the right inside a raised
+// bubble — only presentation moves; the inner Column (label, attachments, text, delivery state) is untouched.
+@Composable
+private fun UserTurn(bubbles: Boolean, content: @Composable () -> Unit) {
+    if (!bubbles) {
+        content()
+        return
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Box(
+            Modifier.widthIn(max = 520.dp).clip(RoundedCornerShape(14.dp))
+                .background(Tok.raised).padding(horizontal = 14.dp, vertical = 11.dp),
+        ) { content() }
+    }
+}
+
 @Composable
 private fun MessageRow(
     item: ChatItem,
     isLast: Boolean = false,
     undelivered: Boolean = false,
+    // chat-stream alignment (issue #213): true = user turns render as a right-hugging bubble; false (default)
+    // keeps the all-left document flow byte-for-byte
+    bubbles: Boolean = false,
     // Workflow run bound to a Workflow tool card (issue #106); clicking docks the right panel
     workflowRun: dev.ccpocket.protocol.WorkflowRun? = null,
     onOpenWorkflow: (String) -> Unit = {},
     onOpenVideo: (SentFile) -> Unit = {},
     onTightenAutoRun: (ChatItem.AutoRun) -> Unit = {},
+    // rewind/fork (issue #282): null = this row has no entries (no coordinates / not Claude). The
+    // Boolean is `enabled` — a disabled entry is still SHOWN, with the reason, because "not right now"
+    // and "this build can't" must not look the same.
+    onRewind: RewindEntries? = null,
 ) {
     when (item) {
-        is ChatItem.User -> CopyableBlock(item.text) {
-            Column {
+        // rewind/fork (issue #282): right-click is the desktop's long-press, matching the sidebar row's
+        // own ContextMenuArea. Entries appear ONLY when the row carries transcript coordinates — with a
+        // pre-#282 daemon or a non-Claude backend the menu isn't built at all, so the user turn keeps
+        // exactly its previous behaviour (no empty menu on right-click either).
+        is ChatItem.User -> RewindMenuArea(item, onRewind) { CopyableBlock(item.text) {
+            UserTurn(bubbles) {
+                Column {
                 Text(stringResource(Res.string.chat_you), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
                 Spacer(Modifier.height(7.dp))
                 // sent attachments (issue #85): the compressed JPEG bytes ride ChatItem.User.images from
@@ -733,9 +1152,11 @@ private fun MessageRow(
                 // on desktop). DisableSelection lets a click reach the tile through the stream-wide
                 // SelectionContainer — same carve-out as the QuestionCard fields (#76); previewFile drops
                 // the bytes to a temp file and opens the OS default viewer (the desktop preview gesture, #79).
-                if (item.images.isNotEmpty()) {
+                // …and since issue #254 they also ride a REPLAYED turn, so a prompt composed at another
+                // client (or in this computer's own terminal) shows its attachments here too.
+                if (item.images.isNotEmpty() || item.imagesTruncated) {
                     DisableSelection {
-                        SentImages(item.images) { i -> previewFile("image-${i + 1}.jpg", item.images[i], "image/jpeg") }
+                        SentImages(item.images, item.imagesTruncated) { i -> previewFile("image-${i + 1}.jpg", item.images[i], "image/jpeg") }
                     }
                     if (item.text.isNotBlank() || item.files.isNotEmpty()) Spacer(Modifier.height(8.dp))
                 }
@@ -773,8 +1194,9 @@ private fun MessageRow(
                 } else if (item.delivered && isLast) {
                     Text(stringResource(Res.string.msg_delivered_short), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp))
                 }
+                }
             }
-        }
+        } }
         is ChatItem.Assistant -> CopyableBlock(item.text) { MarkdownText(item.text, Tok.tx) }
         is ChatItem.Thinking -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Text("💭", fontSize = 12.sp)
@@ -799,6 +1221,7 @@ private fun MessageRow(
         )
         is ChatItem.RuleChip -> Text(
             stringResource(Res.string.allow_chip_prefix) + "  ${item.rule}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.sp,
+            style = tightCenter(11.sp),
             modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f)).padding(horizontal = 10.dp, vertical = 4.dp),
         )
         // approval design M2 §9.6 (design frame 3 `.achip`): grant-covered auto-run audit chip + 收紧 link
@@ -808,22 +1231,23 @@ private fun MessageRow(
                     .padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                Text("⚡ " + stringResource(Res.string.autorun_label), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp)
-                Text(item.summary, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("⚡ " + stringResource(Res.string.autorun_label), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp))
+                Text(item.summary, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     stringResource(if (item.basis == "task-grant") Res.string.autorun_basis_task else Res.string.autorun_basis_session),
-                    color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+                    color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(10.sp),
                     modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.12f)).padding(horizontal = 6.dp, vertical = 1.dp),
                 )
                 if (item.tightening) {
-                    Text("…", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                    Text("…", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
                 } else if (!item.tightened) {
                     Text(
                         stringResource(Res.string.autorun_tighten), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+                        style = tightCenter(10.5.sp),
                         modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onTightenAutoRun(item) }.padding(horizontal = 5.dp, vertical = 2.dp),
                     )
                 } else {
-                    Text("✓", color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                    Text("✓", color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
                 }
             }
         }
@@ -835,6 +1259,8 @@ private fun MessageRow(
         is ChatItem.QuestionsWithdrawn -> Text(
             stringResource(Res.string.questions_withdrawn), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
         )
+        // OpenCode asked a question — read-only card (no answer channel yet, issue #210)
+        is ChatItem.OpenCodeQuestion -> dev.ccpocket.app.ui.OpenCodeQuestionCard(item.questions)
         // a live turn's end: quiet ✓ divider so "finished" stays visible after the caret stops blinking
         is ChatItem.TurnEnded -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))
@@ -1225,11 +1651,10 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                             ) {
                                 if (diaBusy) SpinnerRing(11.dp, 1.5.dp)
                                 else Icon(Icons.Outlined.Language, null, tint = Tok.tx2, modifier = Modifier.size(12.dp))
-                                // trim=Both 去掉字体默认行距，让文字视觉中心与图标（12dp 对称盒）在 CenterVertically 下真正对齐
+                                // tightCenter 把行盒交给字号（#293），让文字视觉中心与图标（12dp 对称盒）在 CenterVertically 下真正对齐
                                 Text(
                                     if (diaBusy) stringResource(Res.string.dia_restarting) else stringResource(Res.string.dia_launch),
-                                    color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp,
-                                    style = TextStyle(lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both)),
+                                    color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp),
                                 )
                             }
                             if (diaConfirm) {

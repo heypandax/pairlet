@@ -51,6 +51,45 @@ class BridgeRequestApprovalGateTest {
     }
 
     @Test
+    fun over_limit_request_is_refused_without_ever_showing_a_card() = runBlocking {
+        // SECURITY regression guard: an approval grants full-turn authority to the WHOLE request, so a
+        // request that cannot be shown in full must be denied outright — never shown truncated and run
+        // whole. A malicious tail hidden past the preview cut inside a long quoted message must not run.
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val emitted = mutableListOf<Frame>()
+        val gate = BridgeRequestApprovalGate("c1", coord, scope, { emitted += it }, timeoutMs = 10_000)
+
+        val oversized = "x".repeat(BridgeRequestApprovalGate.MAX_PREVIEW_CHARS + 1)
+        val result = async { gate.awaitApproval(oversized) }
+        yield()
+
+        assertFalse(result.await(), "an un-showable request must be denied, not partially shown")
+        assertTrue(emitted.isEmpty(), "no approval card may reach the owner for a truncated request")
+        assertFalse(gate.hasPending())
+        scope.cancel()
+    }
+
+    @Test
+    fun at_limit_request_is_shown_in_full() = runBlocking {
+        // A legitimately vetted request (≤ BridgeGuard.MAX_PROMPT_CHARS + header) must never be refused
+        // by the fail-closed guard and must reach the owner un-truncated.
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val emitted = mutableListOf<Frame>()
+        val gate = BridgeRequestApprovalGate("c1", coord, scope, { emitted += it }, timeoutMs = 10_000)
+
+        val atLimit = "y".repeat(BridgeRequestApprovalGate.MAX_PREVIEW_CHARS)
+        val result = async { gate.awaitApproval(atLimit) }
+        yield()
+        val ask = assertIs<PermissionAsk>(emitted.single())
+        assertEquals(atLimit, ask.inputPreview, "the full request must be shown, not a truncated preview")
+        assertTrue(coord.onVerdict(PermissionVerdict("c1", ask.askId, Decision.ALLOW)))
+        assertTrue(result.await())
+        scope.cancel()
+    }
+
+    @Test
     fun pending_request_resurfaces_and_timeout_withdraws_it() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val coord = ApprovalCoordinator(scope)

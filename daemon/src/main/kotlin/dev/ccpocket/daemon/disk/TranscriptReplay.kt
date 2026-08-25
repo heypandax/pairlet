@@ -2,6 +2,7 @@ package dev.ccpocket.daemon.disk
 
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
+import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.QuestionAnswer
 import dev.ccpocket.protocol.isSubagentTool
 import dev.ccpocket.protocol.isWorkflowTool
@@ -23,6 +24,7 @@ object TranscriptReplay {
     // 2.1.206 via scripts/probe-claude-wire.py `ask`); one pair per question, comma-joined for multiSelect
     private val QA_PAIR = Regex("\"([^\"]+)\"=\"([^\"]*)\"")
     private const val MAX_TOOL_TEXT = 1000 // tool label / input preview cap (display-on-tap, not the reply body)
+    private val EMPTY_USER = UserContent("", emptyList())
 
     /** Count-capped, then byte-budgeted (issue #81) so one ConvoHistory frame stays under the relay's 4 MiB cap. */
     fun read(file: Path, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> =
@@ -51,16 +53,37 @@ object TranscriptReplay {
         return ReplaySlicer.page(rows, beforeSeq, limit, maxFrameTextBytes)
     }
 
+    /**
+     * One parsed row plus its transcript CHAIN identity (issue #282) — the rewind planner's view.
+     * [parentUuid] is the row's own `parentUuid` field, i.e. the chain entry immediately before it, which
+     * is precisely the CLI's `--resume-session-at` anchor for "drop this row and everything after it".
+     * Read off the record rather than inferred from the previous visible row, because the entry before a
+     * user prompt is often one the replay filters out (a tool_result record, a meta injection) and the CLI
+     * resolves the anchor against ITS parse, not ours.
+     */
+    data class ChainRow(val msg: HistoryMessage, val line: Long, val parentUuid: String?)
+
+    /** Every replayed row with its chain identity, in file order — the input to a rewind/fork anchor
+     *  translation and to the dry-run "what would this drop" count (issue #282). Deliberately the SAME
+     *  rows the phone was shown: the person points at a bubble they can see, and the preview counts what
+     *  they could scroll back and verify. */
+    fun chain(file: Path): List<ChainRow> =
+        parseRows(file).first.map { ChainRow(it.msg, it.line, it.parentUuid) }
+
     /** A parsed row still open to patching, finalized into [ReplaySlicer.Row] once the file is read. */
-    private class MutableRow(var msg: HistoryMessage, val line: Long) {
+    private class MutableRow(var msg: HistoryMessage, val line: Long, val parentUuid: String? = null) {
         var patchLine: Long = 0L
     }
 
     /** Parse the whole transcript into rows tagged with their source line (the #147 seq) + the total
      *  line count (the cursor). Every raw line — noise included — advances the cursor, so it equals
      *  the file's line count and stays stable under append-only growth. */
-    private fun parse(file: Path): Pair<List<ReplaySlicer.Row>, Long> {
-        if (!file.exists()) return emptyList<ReplaySlicer.Row>() to 0L
+    private fun parse(file: Path): Pair<List<ReplaySlicer.Row>, Long> =
+        parseRows(file).let { (rows, cursor) -> rows.map { ReplaySlicer.Row(it.msg, it.line, it.patchLine) } to cursor }
+
+    /** The shared pass behind [parse] and [chain] — the latter needs the chain identity the former drops. */
+    private fun parseRows(file: Path): Pair<List<MutableRow>, Long> {
+        if (!file.exists()) return emptyList<MutableRow>() to 0L
         val out = ArrayList<MutableRow>()
         val taskIdx = HashMap<String, Int>() // sub-agent tool_use id -> its card's index in `out` (issue #77)
         val questionIdx = HashMap<String, Int>() // AskUserQuestion tool_use id -> its row's index (issue #110)
@@ -81,21 +104,35 @@ object TranscriptReplay {
                         "user" -> {
                             attachSubagentResults(obj, out, taskIdx, lineNo)
                             attachQuestionAnswers(obj, out, questionIdx, lineNo)
-                            if (isRealUserTurn(obj)) userText(obj)
-                                .takeIf { it.isNotBlank() && !TranscriptNoise.isNoiseUserText(it) }
-                                ?.let { out += MutableRow(HistoryMessage(ChatRole.USER, it), lineNo) }
+                            if (isRealUserTurn(obj)) userContent(obj)
+                                // an IMAGE-ONLY prompt has no text at all (issue #254) — keeping the row
+                                // on its attachments is why this is no longer a bare isNotBlank() gate
+                                .takeIf { (it.text.isNotBlank() || it.images.isNotEmpty()) && !TranscriptNoise.isNoiseUserText(it.text) }
+                                // seq/uuid ride along on USER rows (issue #282) — the pair the phone hands
+                                // back to name a rewind anchor. uuid comes off the record, never invented.
+                                ?.let {
+                                    out += MutableRow(
+                                        HistoryMessage(
+                                            ChatRole.USER, it.text, images = it.images,
+                                            seq = lineNo, uuid = obj.str("uuid"),
+                                        ),
+                                        lineNo, obj.str("parentUuid"),
+                                    )
+                                }
                         }
                         // the id keys the AskUserQuestion row (issue #110) or the sub-agent card (issue #77);
                         // the tool name says which map so its later tool_result patches the right one
                         "assistant" -> assistantBlocks(obj).forEach { (msg, id) ->
                             id?.let { (if (msg.tool == ASK_TOOL) questionIdx else taskIdx)[it] = out.size }
-                            out += MutableRow(msg, lineNo)
+                            // seq only: a rewind anchor is always a user message, so a non-USER row's uuid
+                            // would be an attractive nuisance on the wire (issue #282)
+                            out += MutableRow(msg.copy(seq = lineNo), lineNo, obj.str("parentUuid"))
                         }
                     }
                 }
             }
         }
-        return out.map { ReplaySlicer.Row(it.msg, it.line, it.patchLine) } to lineNo
+        return out to lineNo
     }
 
     /** One history row + (for a sub-agent tool_use) its tool_use id, so the reader can key the card. */
@@ -234,15 +271,44 @@ object TranscriptReplay {
         return true
     }
 
-    private fun userText(obj: JsonObject): String {
-        val content = (obj["message"] as? JsonObject)?.get("content") ?: return ""
+    /** What a user turn carries: the bubble text plus any inline images (issue #254). */
+    private class UserContent(val text: String, val images: List<ImageData>)
+
+    /**
+     * A user record's content is either a bare string or a block array. [UserContent.text] keeps the
+     * long-standing "the FIRST text block" semantics deliberately — the phone's [TranscriptMerge]
+     * pairs a replayed user row against its live bubble by EXACT text equality, so concatenating
+     * blocks here would silently stop those rows matching and duplicate every prompt on reattach.
+     * Image blocks are collected in file order (the CLI writes them BEFORE the text block).
+     */
+    private fun userContent(obj: JsonObject): UserContent {
+        val content = (obj["message"] as? JsonObject)?.get("content") ?: return EMPTY_USER
         return when (content) {
-            is JsonPrimitive -> content.contentOrNull ?: ""
-            is JsonArray -> content.firstNotNullOfOrNull { el ->
-                (el as? JsonObject)?.takeIf { it.str("type") == "text" }?.str("text")
-            } ?: ""
-            else -> ""
+            is JsonPrimitive -> UserContent(content.contentOrNull ?: "", emptyList())
+            is JsonArray -> {
+                var text: String? = null
+                val images = ArrayList<ImageData>()
+                for (el in content) {
+                    val block = el as? JsonObject ?: continue
+                    when (block.str("type")) {
+                        "text" -> if (text == null) text = block.str("text")
+                        "image" -> imageBlock(block)?.let { images += it }
+                    }
+                }
+                UserContent(text ?: "", images)
+            }
+            else -> EMPTY_USER
         }
+    }
+
+    /** `{"type":"image","source":{"type":"base64","media_type":…,"data":…}}` — the one shape both the
+     *  CLI's own paste path and this daemon's uplink write (`ClaudeBackend.sendPrompt`). A `url` source
+     *  carries no bytes to replay, so it is skipped rather than sent as an un-renderable tile. */
+    private fun imageBlock(block: JsonObject): ImageData? {
+        val src = block["source"] as? JsonObject ?: return null
+        if (src.str("type") != "base64") return null
+        val data = src.str("data")?.takeIf { it.isNotBlank() } ?: return null
+        return ImageData(src.str("media_type")?.takeIf { it.isNotBlank() } ?: "image/jpeg", data)
     }
 
     private fun JsonObject?.str(key: String): String? = (this?.get(key) as? JsonPrimitive)?.contentOrNull

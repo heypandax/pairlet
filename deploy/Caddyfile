@@ -40,6 +40,15 @@ pocket.ark-nexus.cc {
 		root * /var/www/cc-pocket-site
 		file_server
 	}
+	# Release mirror for mainland-China installs/updates (GitHub's CDN crawls there). The tree is
+	# maintained by cc-pocket-mirror-sync.{service,timer} (deploy/mirror-sync.sh); clients try
+	# /dl/latest.json first and fall back to GitHub, so this path may lag but must never lie —
+	# latest.json is swapped in atomically only after assets verify against the release SHA256SUMS.
+	handle_path /dl/* {
+		root * /var/www/cc-pocket-dl
+		header /latest.json Cache-Control "no-cache"
+		file_server
+	}
 	handle /manual/* {
 		root * /var/www/cc-pocket-site
 		file_server
@@ -68,6 +77,14 @@ pocket.ark-nexus.cc {
 	# internet for the ACME challenge) and auto-handles the WebSocket upgrade,
 	# so the relay's /v1/daemon and /v1/device WS endpoints just work.
 	handle {
-		reverse_proxy 127.0.0.1:9000
+		reverse_proxy 127.0.0.1:9000 {
+			# Same rule as /support-api above: never forward a caller-supplied address. Caddy
+			# APPENDS to an existing X-Forwarded-For, so without this overwrite the relay's
+			# rate limiters key on a string the caller wrote — rotate it per request and the
+			# pair-code / redeem / auth / connect limits all stop counting. The relay also
+			# pins itself to the last hop (installRelayForwardedHeaders); both, deliberately.
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Real-IP {remote_host}
+		}
 	}
 }

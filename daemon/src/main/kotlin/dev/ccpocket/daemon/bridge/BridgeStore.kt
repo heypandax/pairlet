@@ -74,6 +74,15 @@ data class BridgeSpec(
      * extra auto-runs). Normalized (trimmed, blanks dropped, deduped, capped) by [clamped].
      */
     val allowedCommands: List<String> = emptyList(),
+    /**
+     * COLLABORATOR only (REVIEW-REQUEST.md §13.3): what the contact link this credential establishes is
+     * FOR. Chosen by the owner at mint time and read back by [dev.ccpocket.daemon.handoff.CollaboratorService.onRedeemed]
+     * when it writes the contact row, so the redeeming peer never gets to name its own scope.
+     *
+     * Trailing with the historical default: a `bridges.json` entry written before this field existed
+     * describes a Session Handoff contact, which is exactly what every pre-ReviewRequest link was.
+     */
+    val purpose: dev.ccpocket.protocol.CollaboratorPurpose = dev.ccpocket.protocol.CollaboratorPurpose.SESSION_HANDOFF,
 ) {
     val isGuest: Boolean get() = kind == CredentialKind.GUEST
 
@@ -136,7 +145,10 @@ data class BridgeSpec(
          * nothing here may widen; [tier] REVIEW is only the fallback ceiling for that grant's mode clamp.
          * No [expiresAt]: the LINK persists until severed (each redeem TICKET's TTL is the relay's).
          */
-        fun collaborator(label: String) = BridgeSpec(
+        fun collaborator(
+            label: String,
+            purpose: dev.ccpocket.protocol.CollaboratorPurpose = dev.ccpocket.protocol.CollaboratorPurpose.SESSION_HANDOFF,
+        ) = BridgeSpec(
             name = label,
             workdirs = emptyList(),
             maxSessions = 1, // at most the one handed-off Source Session
@@ -145,6 +157,7 @@ data class BridgeSpec(
             kind = CredentialKind.COLLABORATOR,
             expiresAt = null,
             tier = AccessTier.REVIEW,
+            purpose = purpose,
         )
 
         const val COLLAB_OPENS_PER_MIN = 6

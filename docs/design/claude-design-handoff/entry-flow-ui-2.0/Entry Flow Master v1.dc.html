@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+  a { color: #B4522F; text-decoration: none; }
+  a:hover { color: #8E3F23; }
+</style>
+</helmet>
+
+<div style="position:fixed;inset:0;z-index:-1;background:{{ boardBg }}"></div>
+
+<div style="width:1920px;margin:0 auto;padding:64px 72px 96px;font-family:'Public Sans',system-ui,sans-serif;color:#1B1A18">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:880px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · mobile ui 2.0 · entry flow · master</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">Entry Flow Master v1</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The approved direction, built. Every frame below is the same live component at 402 × 874 — tap through them. One state machine drives pairing, connection recovery, Projects, the directory picker and configuration, so what the frames show is what the flow actually does. Entry Flow Direction v1 remains the rationale; this file is the behaviour.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div>
+        <div style="color:#1B1A18">live prototype</div>
+        <div>402 × 874 · 1:1</div>
+      </div>
+      <div>
+        <div style="color:#1B1A18">9 screens</div>
+        <div>6 ConnPhase states</div>
+      </div>
+      <div>
+        <div style="color:#1B1A18">no new tokens</div>
+        <div>no protocol change</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ A · THE PROTOTYPE ═══════════ -->
+  <div style="padding-top:46px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">A</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Walk the flow</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Starts unpaired. The rail beside it is host chrome for review — it is not part of the product.</span>
+    </div>
+
+    <div style="display:flex;gap:52px;align-items:flex-start">
+      <dc-import name="EntryFlowDevice" screen="pair" controls="{{ true }}" hint-size="692px,874px"></dc-import>
+
+      <div style="flex:1;min-width:0;display:grid;grid-template-columns:repeat(2,1fr);gap:0 40px">
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Acceptance paths, wired</div>
+          <div style="border-top:1px solid #C9C5BD;font:400 13px/1.55 'Public Sans',sans-serif;color:#3A3730">
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">01</span><span style="text-wrap:pretty">Tap the code field six times, then <b style="font-weight:600">Pair computer</b> → Connecting → Projects. The camera is never touched.</span></div>
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">02</span><span style="text-wrap:pretty">Enter two digits, open <b style="font-weight:600">Scan QR code</b>, meet the unavailable camera, come back — the digits are still there and the screen says so.</span></div>
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">03</span><span style="text-wrap:pretty">From Projects, tap the machine row → Computers → tap another computer → the Projects-shaped skeleton → Projects, header geometry unmoved.</span></div>
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">04</span><span style="text-wrap:pretty">Simulate each failing phase: Relay unreachable and Computer offline offer Retry and Exit; Pairing invalid offers Pair again and Remove, and no Retry.</span></div>
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">05</span><span style="text-wrap:pretty">Type in the filter until nothing matches; the empty state offers Clear filter and the same single open-folder entry.</span></div>
+          </div>
+        </div>
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">&nbsp;</div>
+          <div style="border-top:1px solid #C9C5BD;font:400 13px/1.55 'Public Sans',sans-serif;color:#3A3730">
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">06</span><span style="text-wrap:pretty">Open the picker: use a recent, drill a child, switch root to <span style="font:400 12px/1 'JetBrains Mono',monospace">/</span>, open Library → Application Support for the unreadable state, and Downloads for the empty one.</span></div>
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">07</span><span style="text-wrap:pretty">Enter a path manually, then <b style="font-weight:600">Options</b>: configuration opens on that directory and nothing has started.</span></div>
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">08</span><span style="text-wrap:pretty">Switch agent and watch Model and Mode reset to that agent's own set; the Start caption reprints before it can be tapped.</span></div>
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">09</span><span style="text-wrap:pretty">Select Full access → Start opens the confirmation. Cancel returns with Full access still selected and nothing started.</span></div>
+            <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">10</span><span style="text-wrap:pretty">Any start leaves the configuration screen for a started state, so a second tap has nothing to start. The scrim, ✕ and Options never start anything.</span></div>
+          </div>
+          <div style="margin-top:18px;background:#E4E1DA;border-radius:11px;padding:14px 16px">
+            <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Prototype boundaries</div>
+            <p style="margin:9px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Chat, Review Center, Help, Settings and Demo open a stub that names the surface and stops. Copy actions report success without touching the clipboard. Everything else is the real flow.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ B · PRODUCTION SURFACES ═══════════ -->
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">B</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">The five surfaces</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Each frame is independently live — drive any of them without disturbing the others.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">01 · Pair a computer</div>
+        <dc-import name="EntryFlowDevice" screen="pair" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Code first, scan and paste as peers below the hairline, the daemon command as copyable help, demo last in secondary text. Pair stays inert until six digits exist.</div>
+        </sc-if>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">02 · Choose / recover a computer</div>
+        <dc-import name="EntryFlowDevice" screen="computers" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Rows carry the label → hostName → truncated accountId fallback, the account caption, the role, and which binding is active. Rename and remove sit under the row menu; nothing invents latency or last seen.</div>
+        </sc-if>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">03 · Projects · Ready</div>
+        <dc-import name="EntryFlowDevice" screen="projects" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Title → machine state → quiet utilities → filter → one Open any folder… row. The dock is New session plus a defaults chevron; the chevron opens configuration and starts nothing.</div>
+        </sc-if>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">04 · Directory picker</div>
+        <dc-import name="EntryFlowDevice" screen="picker" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Header names the remote computer. Recents pin at the home root and disappear on drill. Selected path stays visible and copyable; the decision region never scrolls away.</div>
+        </sc-if>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">05 · Configure session · Claude</div>
+        <dc-import name="EntryFlowDevice" screen="configure" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Workdir, Agent, Model, Mode, in that order. Mode rows read as selection — a check, no button ink. One filled Start, printing the exact combination it will run.</div>
+        </sc-if>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">06 · Configure · Codex · studio-mini</div>
+        <dc-import name="EntryFlowDevice" screen="configure" agent="Codex" computer="studio-mini.local" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">A computer that reports no Kimi support simply has no Kimi chip, and the omission is stated in words. Reported model ids fill the angle-bracket slots verbatim.</div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ C · STATE FRAMES ═══════════ -->
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">C</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">States that decide whether the flow survives</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Six ConnPhase values, an unusable camera, an automatic backend and one destination that has to be confirmed.</span>
+    </div>
+
+    <div style="display:flex;gap:48px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">07 · Scan · camera unavailable</div>
+        <dc-import name="EntryFlowDevice" screen="scan" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Entered on purpose, never on launch. Unavailable and denied share this layout; both routes back to code and paste are repeated here rather than linked away.</div>
+        </sc-if>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">08 · Connecting · Projects skeleton</div>
+        <dc-import name="EntryFlowDevice" screen="connecting" phase="Connecting" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Same header geometry and same dock as frame 03, so directories replace bars in place. Ready is never claimed before the list arrives.</div>
+        </sc-if>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">09 · Relay unreachable</div>
+        <dc-import name="EntryFlowDevice" screen="computers" phase="RelayUnreachable" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The relay was not reached, and the sentence blames neither the daemon nor the credential. Retry is canonical; Exit disconnects. The paired list stays flat underneath.</div>
+        </sc-if>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">10 · Computer offline</div>
+        <dc-import name="EntryFlowDevice" screen="computers" phase="ComputerOffline" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Relay reachable, daemon not running, existing hint kept. Retry and Exit outside Chat; inside Chat the history stays under a slim banner instead.</div>
+        </sc-if>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">11 · Pairing invalid</div>
+        <dc-import name="EntryFlowDevice" screen="computers" phase="PairingInvalid" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The credential was rejected, so Retry is not offered — it cannot help. Pair again returns to frame 01 with a real back path; Remove drops the dead binding.</div>
+        </sc-if>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">12 · Reconnecting · content preserved</div>
+        <dc-import name="EntryFlowDevice" screen="projects" phase="Reconnecting" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">A connection that was ready and dropped keeps its list. The banner is slim, sits under the header, and the machine row changes its mark and its word — never only its colour.</div>
+        </sc-if>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">13 · OpenCode · automatic</div>
+        <dc-import name="EntryFlowDevice" screen="configure" agent="OpenCode" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Mode is replaced by a statement, not filled with disabled rows. The mark is attention, not danger: this is honest backend behaviour, not a hazardous choice. Start prints automatic.</div>
+        </sc-if>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">14 · Full access confirmation</div>
+        <dc-import name="EntryFlowDevice" screen="confirm" mode="Full access" hint-size="402px,874px"></dc-import>
+        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:16px;border-top:1px solid #C9C5BD;padding-top:13px;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The existing safety step, restyled. It names the agent, the workdir and the computer. Cancel returns to configuration with the mode still selected and nothing started.</div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ D · LIGHT + 200% ═══════════ -->
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">D</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Light palette at 200% type</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">The hardest surface in the hardest condition: context pinned, body scrolling, Start still reachable.</span>
+    </div>
+
+    <div style="display:flex;gap:52px;align-items:flex-start">
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">15 · Configure · 200% · light</div>
+        <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#FCFBFA;color:#17161A;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.28)">
+          <div style="height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none;opacity:.4"><span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span><span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #17161A;border-radius:2px"></span><span style="width:22px;height:10px;border:1.3px solid #17161A;border-radius:3px"></span></span></div>
+
+          <div style="flex:1;min-height:0;display:flex;flex-direction:column;background:#F4F2EF;border-radius:22px 22px 0 0;border-top:1px solid rgba(20,18,16,.18)">
+            <div style="flex:none;padding:16px 20px 14px;border-bottom:1px solid rgba(20,18,16,.16)">
+              <div style="font:600 30px/1.2 system-ui,sans-serif;letter-spacing:-.015em">New session</div>
+              <div style="font:500 26px/1.25 system-ui,sans-serif;margin-top:10px;text-wrap:pretty">cc-pocket</div>
+              <div style="font:400 19px/1.4 'JetBrains Mono',monospace;color:#4B4A50;margin-top:6px;letter-spacing:-.01em;word-break:break-all">/Users/alex/code/cc-pocket</div>
+            </div>
+
+            <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px 0;position:relative">
+              <div style="font:500 17px/1.2 system-ui,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#6B6970">Agent</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
+                <span style="min-height:56px;padding:0 20px;border-radius:12px;background:rgba(169,72,42,.10);border:1px solid #A9482A;display:flex;align-items:center;font:600 23px/1.2 system-ui,sans-serif;color:#A9482A">Claude</span>
+                <span style="min-height:56px;padding:0 20px;border-radius:12px;border:1px solid rgba(20,18,16,.20);display:flex;align-items:center;font:500 23px/1.2 system-ui,sans-serif;color:#4B4A50">Codex</span>
+                <span style="min-height:56px;padding:0 20px;border-radius:12px;border:1px solid rgba(20,18,16,.20);display:flex;align-items:center;font:500 23px/1.2 system-ui,sans-serif;color:#4B4A50">OpenCode</span>
+                <span style="min-height:56px;padding:0 20px;border-radius:12px;border:1px solid rgba(20,18,16,.20);display:flex;align-items:center;font:500 23px/1.2 system-ui,sans-serif;color:#4B4A50">Kimi</span>
+              </div>
+
+              <div style="font:500 17px/1.2 system-ui,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#6B6970;margin-top:24px">Model</div>
+              <div style="border-top:1px solid rgba(20,18,16,.16);border-bottom:1px solid rgba(20,18,16,.16);margin-top:12px;padding:16px 0">
+                <div style="font:500 23px/1.3 system-ui,sans-serif;text-wrap:pretty">Follow the computer's default</div>
+                <div style="font:400 17px/1.4 'JetBrains Mono',monospace;color:#4B4A50;margin-top:7px;letter-spacing:-.01em;word-break:break-all">this computer reported no model list</div>
+              </div>
+
+              <div style="font:500 17px/1.2 system-ui,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#6B6970;margin-top:24px">Mode</div>
+              <div style="margin-top:12px;border-top:1px solid rgba(20,18,16,.16);padding:16px 0;display:flex;gap:12px">
+                <span style="width:24px;flex:none;font:500 23px/1.3 system-ui,sans-serif;color:#A9482A">✓</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font:600 25px/1.25 system-ui,sans-serif;text-wrap:pretty">Default</div>
+                  <div style="font:400 21px/1.45 system-ui,sans-serif;color:#4B4A50;margin-top:7px;text-wrap:pretty">Asks before anything that changes files or runs a command.</div>
+                </div>
+              </div>
+              <div style="border-top:1px solid rgba(20,18,16,.16);padding:16px 0 48px;display:flex;gap:12px">
+                <span style="width:24px;flex:none"></span>
+                <div style="flex:1;min-width:0">
+                  <div style="font:500 25px/1.25 system-ui,sans-serif;color:#17161A;text-wrap:pretty">Accept edits</div>
+                  <div style="font:400 21px/1.45 system-ui,sans-serif;color:#4B4A50;margin-top:7px;text-wrap:pretty">Edits files without asking. Still asks before running commands.</div>
+                </div>
+              </div>
+              <div style="position:absolute;left:0;right:0;bottom:0;height:28px;background:linear-gradient(to bottom,rgba(244,242,239,0),#F4F2EF)"></div>
+            </div>
+
+            <div style="flex:none;padding:14px 20px;border-top:1px solid rgba(20,18,16,.16);background:#FFFFFF">
+              <div style="min-height:72px;border-radius:14px;background:#A9482A;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 14px;font:600 25px/1.2 system-ui,sans-serif;color:#FFF4EF;text-align:center">Start session<span style="font:400 16px/1.35 'JetBrains Mono',monospace;margin-top:6px;letter-spacing:-.01em;word-break:break-all">cc-pocket · Claude · Default</span></div>
+            </div>
+          </div>
+          <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none;background:#FFFFFF"><span style="width:132px;height:5px;border-radius:3px;background:#17161A;opacity:.22"></span></div>
+        </div>
+      </div>
+
+      <div style="flex:1;min-width:0;display:grid;grid-template-columns:repeat(2,1fr);gap:0 40px">
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">What holds at 200%</div>
+          <div style="border-top:1px solid #C9C5BD">
+            <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+              <div style="font:600 13px/1.4 'Public Sans',sans-serif">Context and decision stay pinned</div>
+              <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Only the middle scrolls. The user can still read which directory they are in and still reach the control that starts it.</p>
+            </div>
+            <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+              <div style="font:600 13px/1.4 'Public Sans',sans-serif">Nothing shrinks to fit</div>
+              <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Agent chips wrap to a second line; the Start caption wraps on characters and the control grows. No label is truncated and no row has a fixed height.</p>
+            </div>
+            <div style="padding:12px 0;border-bottom:1px solid #C9C5BD">
+              <div style="font:600 13px/1.4 'Public Sans',sans-serif">Light keeps state priority</div>
+              <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Ring, diamond, square and filled dot carry state in both themes. Colour only confirms what the shape and the sentence already said.</p>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Still owned by code</div>
+          <div style="border-top:1px solid #C9C5BD">
+            <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+              <div style="font:600 13px/1.4 'Public Sans',sans-serif">Model ids</div>
+              <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Rendered as <span style="font:400 12px/1 'JetBrains Mono',monospace">⟨model id n⟩</span> slots. Real ids come from the daemon list verbatim; when there is no list the row reads as following the computer's default.</p>
+            </div>
+            <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+              <div style="font:600 13px/1.4 'Public Sans',sans-serif">CODEX_PRESETS axes</div>
+              <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">The four preset names are product truth; their approval and sandbox pairs are not written here. The rows explain behaviour in plain language only.</p>
+            </div>
+            <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+              <div style="font:600 13px/1.4 'Public Sans',sans-serif">Capability gating</div>
+              <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Which agents a computer reports, and whether Claude's native Auto exists, come from capability. The prototype models this per computer; the real flags live in the repository.</p>
+            </div>
+            <div style="padding:12px 0;border-bottom:1px solid #C9C5BD">
+              <div style="font:600 13px/1.4 'Public Sans',sans-serif">Localised strings</div>
+              <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Every label here is the product's English string. Translations come from product resources; rows already have no fixed heights, so longer strings grow rather than clip.</p>
+            </div>
+          </div>
+          <div style="margin-top:18px;background:#E4E1DA;border-radius:11px;padding:14px 16px">
+            <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Not claimed anywhere</div>
+            <div style="font:400 12.5px/1.85 'JetBrains Mono',monospace;color:#54504A;margin-top:9px">per-device latency · last seen · OS<br />repository health · test results<br />branch on inactive rows · file counts<br />online state inferred from a LAN url</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;boardBg&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#EDEBE6&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#EDEBE6&quot;,&quot;#E4E1DA&quot;,&quot;#F4F2EF&quot;,&quot;#D9D5CC&quot;]},&quot;showNotes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      boardBg: this.props.boardBg ?? '#EDEBE6',
+      showNotes: this.props.showNotes ?? true
+    };
+  }
+}
+</script>
+</body>
+</html>
+

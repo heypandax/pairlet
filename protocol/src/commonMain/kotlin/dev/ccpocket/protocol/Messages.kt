@@ -97,10 +97,18 @@ data object ListArchivedSessions : ToDaemon
 @SerialName("pocket/session.rename")
 data class RenameSession(val workdir: String, val sessionId: String, val title: String) : ToDaemon
 
-/** Fetch aggregated token usage over the last [days] local days (reads transcripts; no launch). Issue #26. */
+/**
+ * Fetch aggregated token usage over the last [days] local days (reads transcripts; no launch). Issue #26.
+ *
+ * [agent] narrows the whole aggregation to ONE backend (issue #258); null (the default) keeps the
+ * all-backends total, i.e. exactly the pre-#258 behavior. Trailing optional with a default, so an old App
+ * omits it and an old daemon drops the unknown key and answers with everything — the App's "All" chip.
+ * A daemon predating this field silently ignores a narrowed request; there is no reverse capability for
+ * it, so the App only offers the filter to a daemon new enough to advertise its agent vocabulary.
+ */
 @Serializable
 @SerialName("pocket/usage.fetch")
-data class FetchUsage(val days: Int = 7) : ToDaemon
+data class FetchUsage(val days: Int = 7, val agent: AgentKind? = null) : ToDaemon
 
 /** Open a session: resume (resumeId != null) or start new (resumeId == null). */
 @Serializable
@@ -449,14 +457,24 @@ data object AuthLogout : ToDaemon
 data class SetPushPrefs(val enabled: Boolean? = null) : ToDaemon
 
 /**
- * client -> daemon: set (or, with [noAutoDeny] null, just query) whether the owner's OWN approval asks
- * wait for a manual decision instead of auto-denying after the usual window (issue #201). Reply is one
- * [ApprovalPrefs]. A daemon that predates this drops the frame — no reply arrives and the client hides
+ * client -> daemon: set (or, with every field null, just query) the owner's approval preferences. Reply is
+ * one [ApprovalPrefs]. A daemon that predates this drops the frame — no reply arrives and the client hides
  * the setting, which is why the reply (not an optimistic local write) is the source of truth.
+ *
+ * [noAutoDeny] (issue #201): whether the owner's OWN approval asks wait for a manual decision instead of
+ *   auto-denying after the usual window.
+ * [fullControlExpiryMs] (issue #220): how long the owner's manually-entered Full Control lasts before it
+ *   auto-reverts to the default ask-driven mode. 0 = never expires (the new default — a manual Full Control
+ *   is a deliberate authorization, so it persists until the user leaves it or the session ends). A positive
+ *   value re-arms the old safety net at the chosen duration; the revert surfaces a visible in-session notice
+ *   (never a silent badge flip). Tail-appended and optional so a pre-#220 client simply never sets it.
  */
 @Serializable
 @SerialName("pocket/approval.prefs.set")
-data class SetApprovalPrefs(val noAutoDeny: Boolean? = null) : ToDaemon
+data class SetApprovalPrefs(
+    val noAutoDeny: Boolean? = null,
+    val fullControlExpiryMs: Long? = null,
+) : ToDaemon
 
 // ── API presets (issue #113): named env overrides for third-party API users ──
 // Every pocket/presets.* request is answered by one [PresetsState]. A daemon that predates these
@@ -665,12 +683,17 @@ const val RUNNER_RESTART = "restart"
 @SerialName("pocket/push.prefs")
 data class PushPrefs(val enabled: Boolean) : ToPhone
 
-/** daemon -> client: the current "wait for my decision" preference — the single reply to every
- *  [SetApprovalPrefs] (issue #201). Its ARRIVAL is the client's capability gate: a daemon that predates
- *  #201 never sends one, so the setting stays hidden rather than silently doing nothing. */
+/** daemon -> client: the current approval preferences — the single reply to every [SetApprovalPrefs]
+ *  (issue #201). Its ARRIVAL is the client's capability gate: a daemon that predates #201 never sends one,
+ *  so the setting stays hidden rather than silently doing nothing.
+ *  [fullControlExpiryMs] (issue #220): the owner's Full Control expiry duration in ms; 0 = never expires
+ *  (the default). Tail-appended with a 0 default so a pre-#220 client decodes the frame and just ignores it. */
 @Serializable
 @SerialName("pocket/approval.prefs")
-data class ApprovalPrefs(val noAutoDeny: Boolean) : ToPhone
+data class ApprovalPrefs(
+    val noAutoDeny: Boolean,
+    val fullControlExpiryMs: Long = 0L,
+) : ToPhone
 
 /**
  * daemon -> phone: the CLI's auth state — the single reply to every pocket/auth.* request and pushed
@@ -859,6 +882,13 @@ fun isSubagentTool(tool: String): Boolean = tool == "Task" || tool == "Agent"
  *  Shared daemon+clients so the card dispatch and the tracker can't drift. */
 fun isWorkflowTool(tool: String): Boolean = tool == "Workflow"
 
+/** OpenCode's `question` ask-the-user tool (mapped name is the capitalized raw name). OpenCode runs
+ *  fully automatic with no interaction protocol, so phase 1 (issue #210) surfaces it as a READ-ONLY
+ *  question card instead of a raw JSON tool row — the daemon sends the parsed questions untruncated in
+ *  the tool preview, the client renders the card. Shared so the daemon preview and the client card
+ *  key on the exact same tool name. */
+fun isOpenCodeQuestionTool(tool: String): Boolean = tool == "Question"
+
 /** A permission prompt the phone must resolve. askId == Anthropic request_id. */
 @Serializable
 @SerialName("pocket/ask")
@@ -893,9 +923,10 @@ data class PermissionAsk(
     val taskId: String? = null,
     // The grant scopes the daemon will honor for THIS ask, in recommendation order — tolerant wire strings
     // ("once" / "task" / "session"), NOT an enum, so a future scope degrades to ignored instead of a
-    // frame drop. Null/empty ⇒ pre-M2 daemon: the client renders the legacy buttons and rides `remember`.
-    // Non-null is ALSO the client's implicit capability gate for [ApprovalAttentionHeartbeat] — a daemon
-    // that offers scopes understands heartbeats; one that doesn't would answer "unsupported".
+    // frame drop. Null ⇒ pre-M2 daemon: the client renders the legacy buttons and rides `remember`.
+    // A non-null list, INCLUDING empty, is also the client's implicit capability gate for
+    // [ApprovalAttentionHeartbeat] — a daemon that sends this field understands heartbeats even when it
+    // offers no standing scope; one that omits it would answer "unsupported".
     val grantOptions: List<String>? = null,
     // This ask does NOT auto-deny (issue #201): instead of timing out, the daemon RENEWS its window —
     // a daily reminder, bounded by a 7-day hard floor — so someone away from the computer is never
@@ -1140,6 +1171,23 @@ data class LanHello(val deviceId: String) : ToDaemon
  * Releases ship in lockstep, so the app also compares [latestVersion] against ITS own version — that
  * is how a phone with no GitHub access of its own learns it is behind. All three are trailing optional:
  * an older daemon omits them (the app shows "unknown" and skips the nudge), an older app ignores them.
+ * [supportedAgents] is the reverse of [ClientCaps.supportsAgents]: a new daemon advertises the agent
+ * enum values it can accept, while an old daemon's missing field decodes to an empty list. Clients use
+ * that deny-by-omission default only for newly-added agents whose enum an older daemon could coerce;
+ * baseline agents retain their existing compatibility behavior. An old app ignores the added key.
+ *
+ * [supportsUsageAgentFilter] (issue #258) is its OWN flag rather than something inferred from
+ * [supportedAgents], because the two shipped in different releases: [supportedAgents] went out with
+ * v1.7.7, [FetchUsage.agent] came after it. A v1.7.7 daemon therefore advertises the full agent
+ * vocabulary AND silently drops the agent key — inferring the filter from a non-empty [supportedAgents]
+ * would show the App a Kimi chip that answers with every backend's tokens under a Kimi label. Same
+ * deny-by-omission contract as [bridgeControl]: absent → false → the App hides the filter entirely.
+ *
+ * [supportsPromptRecovery] means this daemon retains prompts after acknowledging the stdin write and
+ * re-delivers any prompt the agent never consumed. A client connected to such a daemon must not infer
+ * "swallowed" from a quiet first-token window and offer a blind resend: large contexts can legitimately
+ * stay silent, while a fresh-id resend can execute the same request twice. Absent/false preserves the
+ * legacy client's second-stage fallback for older daemons that do not own this recovery.
  */
 @Serializable
 @SerialName("pocket/daemon.info")
@@ -1154,6 +1202,9 @@ data class DaemonInfo(
     val daemonVersion: String? = null,
     val latestVersion: String? = null,
     val updateCommand: String? = null,
+    val supportedAgents: List<String> = emptyList(),
+    val supportsUsageAgentFilter: Boolean = false,
+    val supportsPromptRecovery: Boolean = false,
 ) : ToPhone
 
 @Serializable
@@ -1192,6 +1243,34 @@ data class HistoryMessage(
      *  [WorkflowRun] pushed separately via [WorkflowUpdate]. Trailing optional both ways:
      *  old daemons omit it (the card renders as a plain tool row), old clients ignore it. */
     val workflowRunId: String? = null,
+    /** Images the prompt carried, on a USER row only (issue #254). The transcript stores them inline as
+     *  base64 (`{"type":"image","source":{"type":"base64",…}}`) — whether they were pasted at the
+     *  computer or uplinked by this daemon — so the phone can render the same turn the computer sees
+     *  instead of a text-only (or entirely empty) bubble. Same [ImageData] shape the uplink
+     *  [SendPrompt] uses, so the client decodes it with the code it already has. Trailing optional both
+     *  ways: an old daemon omits the key (decodes to an empty list — today's text-only replay), an old
+     *  client ignores it. Byte-capped by the replay budget, NOT by the sender — see [imagesTruncated]. */
+    val images: List<ImageData> = emptyList(),
+    /** True when the replay budget dropped some (or all) of this row's images to keep the `ConvoHistory`
+     *  frame under the relay's 4 MiB cap — the client says so in place rather than silently showing
+     *  fewer tiles than the computer has. Trailing optional both ways: old daemons omit it (false = no
+     *  claim either way, which is what a daemon that never carried images means), old clients ignore it. */
+    val imagesTruncated: Boolean = false,
+    /** This row's transcript cursor — the source `.jsonl` line it was parsed from, the SAME numbering
+     *  as [ConvoHistory.firstSeq]/[ConvoHistory.lastSeq]. Carried per row (issue #282) so the client can
+     *  name a point in the history when it asks for a rewind/fork: [RewindSession.anchorSeq] is this
+     *  value, and the daemon re-derives the row from disk and refuses on a mismatch rather than cutting
+     *  at whatever now sits there. Trailing optional both ways: an old daemon omits it (the client sees
+     *  null and hides the rewind entry entirely — the capability probe is the field's own absence), an
+     *  old client ignores it. Null from any backend whose replay has no line-addressable transcript. */
+    val seq: Long? = null,
+    /** The transcript chain-entry uuid of this row — filled on USER rows only (issue #282), because a
+     *  rewind anchor is always "this message of mine and everything after it". The daemon translates it
+     *  into the CLI's `--resume-session-at` anchor (the row's own parentUuid) and never trusts the value
+     *  blind: [RewindSession] carries uuid AND [seq], and both must still agree with the file. Trailing
+     *  optional both ways: an old daemon omits it (no rewind entry, same probe as [seq]), an old client
+     *  ignores it. Null on ASSISTANT/TOOL rows and on backends other than Claude. */
+    val uuid: String? = null,
 )
 
 /**
@@ -1254,6 +1333,130 @@ data class ConvoHistoryPage(
     val firstSeq: Long? = null,
     val hasMore: Boolean = false,
 ) : ToPhone
+
+// ── session rewind / fork (issue #282, docs/design/REWIND-FORK.md) ─────────────────────────────
+
+/**
+ * phone -> daemon: rewind or fork [convoId]'s session at one of its own past user messages.
+ *
+ * [anchorUuid] is the [HistoryMessage.uuid] of the USER row the person long-pressed and [anchorSeq] its
+ * [HistoryMessage.seq]; together they mean "drop this message and everything after it". Both travel
+ * because either alone can be stale: a uuid that moved lines, or a line whose occupant changed, must
+ * fail loudly instead of cutting somewhere the user did not point at. The daemon re-reads the file,
+ * requires uuid AND seq to agree, and only then translates the pair into the CLI's chain anchor (the
+ * row's parentUuid — "keep up to my parent"). The client never sees or sends that translated anchor.
+ *
+ * [mode] is `"rewind"` or `"fork"` — the underlying launch is IDENTICAL (`--resume <sid>
+ * --resume-session-at <anchor> --fork-session`), and the two differ only in how the ORIGINAL session is
+ * then filed: a rewind's original folds away under [SessionSummary.rewindOf], a fork's stays in place
+ * under [SessionSummary.forkedFrom]. A plain String rather than an enum, per this protocol's tolerant
+ * wire-string convention: an unknown value from a newer client is refused with a reason instead of
+ * failing the whole frame's decode.
+ *
+ * [dryRun] = true asks ONLY for the [RewindPreview] count ("N turns, M tool calls will be dropped") and
+ * changes nothing; the confirmation sheet cannot be skipped, so the client always sends the dry run
+ * first and the real one only after the person taps through. A NEW message type, wire-safe both ways:
+ * an old daemon can't decode the unknown discriminator and silently DROPS the frame (its inbound
+ * decodes are runCatching-wrapped; no reply ever comes) — but a client only reaches this at all when
+ * the row carried [HistoryMessage.seq]/[HistoryMessage.uuid], which the same old daemon never sends.
+ * An old phone never sends it.
+ */
+@Serializable
+@SerialName("pocket/session.rewind")
+data class RewindSession(
+    val convoId: String,
+    val anchorSeq: Long,
+    val anchorUuid: String,
+    val mode: String,
+    val dryRun: Boolean = false,
+) : ToDaemon
+
+/**
+ * daemon -> phone: the dry-run answer to a [RewindSession] with `dryRun = true` — what the cut would
+ * cost, sent ONLY to the asking client.
+ *
+ * [dropTurns] counts the user turns that would leave the context (the anchor message included) and
+ * [dropToolCalls] the tool calls in them, both counted on the MAIN chain exactly as the transcript
+ * replay renders it — so the sheet's numbers match what the person can scroll back and see, rather
+ * than a sub-agent-inflated total they have no way to check.
+ *
+ * [ok] = false means the cut is refused and [reason] says why in machine-readable form (`not_idle`,
+ * `unsupported`, `stale`, `no_convo`, `first_message`, `bad_mode`); the counts are then meaningless and
+ * the client shows the reason instead of the sheet. [reason] is null when [ok] is true. An old phone
+ * drops the unknown frame harmlessly; an old daemon never sends it.
+ */
+@Serializable
+@SerialName("pocket/session.rewindPreview")
+data class RewindPreview(
+    val convoId: String,
+    val dropTurns: Int,
+    val dropToolCalls: Int,
+    val ok: Boolean,
+    val reason: String? = null,
+) : ToPhone
+
+/**
+ * daemon -> phone: the result of an executed [RewindSession] (`dryRun = false`), sent ONLY to the
+ * asking client. [convoId] is the ORIGINAL conversation the request named, so a client can match the
+ * answer even when the rewind failed and nothing new exists.
+ *
+ * On success [newConvoId] is the conversation the client should switch to. [newSessionId] is normally
+ * NULL and that is not a failure: the branch is opened lazily, exactly like any other open, so the CLI
+ * has not minted the forked session id yet — it arrives with the first turn's `SessionLive`, which is
+ * also when the daemon journals the lineage that later fills [SessionSummary.forkedFrom]/[rewindOf].
+ * Keeping it lazy is what makes "a fork is never implicit" true all the way down: back out without
+ * typing and no transcript, no session row and no ledger entry were ever created. A daemon that DOES
+ * know the id early (a future eager path) may fill it; clients must not require it.
+ *
+ * On failure [ok] = false with the same machine-readable [reason] vocabulary as [RewindPreview] plus
+ * `launch_failed`, and NOTHING has changed — the original conversation is still the live one and the
+ * client stays on it. Trailing optionals both ways; an old phone drops the unknown frame harmlessly.
+ */
+@Serializable
+@SerialName("pocket/session.rewindDone")
+data class RewindDone(
+    val convoId: String,
+    val ok: Boolean,
+    val newConvoId: String? = null,
+    val newSessionId: String? = null,
+    val reason: String? = null,
+) : ToPhone
+
+/** The two [RewindSession.mode] values this daemon understands. Kept as strings on the wire (see
+ *  [RewindSession.mode]); anything else is answered with [RewindRefusal.BAD_MODE]. */
+object RewindMode {
+    const val REWIND = "rewind"
+    const val FORK = "fork"
+}
+
+/**
+ * The `reason` vocabulary of [RewindPreview] / [RewindDone] — shared so the client branches on a value
+ * instead of matching prose, and so a LATER daemon can add a reason without an older client rendering
+ * it wrong: anything unrecognised must fall back to a generic "couldn't rewind" message.
+ */
+object RewindRefusal {
+    /** The named conversation is not live here (idle-reaped, or the daemon restarted). */
+    const val NO_CONVO = "no_convo"
+    /** Not a plain Claude owner conversation: another backend (no truncated-resume support exists), or
+     *  a bridge / guest / handoff-granted session, which must not branch someone else's work. */
+    const val UNSUPPORTED = "unsupported"
+    /** [RewindSession.mode] was neither [RewindMode.REWIND] nor [RewindMode.FORK]. */
+    const val BAD_MODE = "bad_mode"
+    /** A turn is executing, background work is running, an ask is unanswered, or a prompt is still
+     *  queued — the session has to be at a standstill before its history can be cut. */
+    const val NOT_IDLE = "not_idle"
+    /** Something outside this daemon is writing the transcript right now (a terminal `claude --resume`). */
+    const val EXTERNAL_WRITER = "external_writer"
+    /** No transcript on disk for this session yet — nothing to branch from. */
+    const val NO_TRANSCRIPT = "no_transcript"
+    /** The (uuid, seq) pair no longer names the same row: the client's replay is out of date and must be
+     *  reloaded before trying again. Never resolved to a nearby row — see [RewindSession]. */
+    const val STALE = "stale"
+    /** The anchor is the session's first message; cutting before it is a new session, not a rewind. */
+    const val FIRST_MESSAGE = "first_message"
+    /** The branch conversation could not be created. Nothing changed; the original is still live. */
+    const val LAUNCH_FAILED = "launch_failed"
+}
 
 /** One slash command the composer can offer. [name] has no leading "/". */
 @Serializable
@@ -1860,6 +2063,11 @@ const val PROTO_V_HEADLESS: Int = 2
  *  offer on its next connect/foreground pull. */
 const val PROTO_V_TARGETED_PUSH: Int = 3
 
+/** The [Attached.relayProtoV] from which a relay sends [DeviceReplayComplete] after the complete
+ * attach-time device snapshot. New daemons use this barrier instead of guessing that a replay has
+ * settled after a wall-clock delay. */
+const val PROTO_V_ATTACH_REPLAY_COMPLETE: Int = 4
+
 /** relay -> daemon: a single-use nonce to sign (bound to this socket, short TTL). */
 @Serializable
 @SerialName("pocket/challenge")
@@ -1929,6 +2137,13 @@ data class PairTicket(val ticket: String, val expiresInSec: Int, val code: Strin
 @Serializable
 @SerialName("pocket/device.paired")
 data class DevicePaired(val deviceId: String, val devicePubKey: String) : ToRelay
+
+/** relay -> daemon: the attach-time [DevicePaired] snapshot is complete. Reconciliation MUST happen
+ * only after this marker; a missing marker means the snapshot is incomplete and local devices must be
+ * retained. This is a control-plane barrier, not a device pairing event. */
+@Serializable
+@SerialName("pocket/device.replayComplete")
+data object DeviceReplayComplete : ToRelay
 
 /** daemon -> relay: revoke a device; the relay marks it revoked and force-closes its socket. */
 @Serializable

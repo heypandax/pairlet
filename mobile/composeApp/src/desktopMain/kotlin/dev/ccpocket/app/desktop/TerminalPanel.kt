@@ -424,8 +424,8 @@ private fun TermBranchChip(branch: String) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text("⑂", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
-        Text(branch, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1)
+        Text("⑂", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
+        Text(branch, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp), maxLines = 1)
     }
 }
 

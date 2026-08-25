@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -44,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.usage_agent_all
 import dev.ccpocket.app.resources.usage_by_model
 import dev.ccpocket.app.resources.usage_cache
 import dev.ccpocket.app.resources.usage_cost
@@ -88,16 +90,32 @@ private fun money(v: Double): String {
  * cost / cache hit) FOLLOW the same window (issue #174) — labeled "· 7d"/"· 30d" — falling back to the today
  * values under "· today" only for an old daemon; est. cost hides entirely when no cost is recorded.
  * All views branch on the reply's own shape (u.days.size), so a stale reply keeps rendering coherently while
- * the next fetch is in flight. Data is aggregated by the daemon from Claude/Codex transcripts.
+ * the next fetch is in flight. Data is aggregated by the daemon from EVERY backend's own records — Claude
+ * and Codex transcripts, the OpenCode and ZCode databases, and Kimi Code's wire logs (issue #258).
+ * A second header row filters that total to ONE agent; "All" (the default) is the unfiltered view.
+ *
+ * [embedded] drops the page's OWN back arrow + title (and its system-back interception) for a host that
+ * already provides them — the desktop settings modal, which frames it as one pane among ten. Everything
+ * else in the header stays: the range toggle and agent chips are controls, not chrome. Default false, so
+ * the phone's full-screen route is untouched.
  */
 @Composable
-fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
-    dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
+fun UsageScreen(repo: PocketRepository, onBack: () -> Unit, embedded: Boolean = false) {
+    // Never intercept system back when embedded: the host modal owns Esc/back, and a second handler would
+    // swallow the gesture that is supposed to close the whole modal.
+    if (!embedded) dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     var days by remember { mutableStateOf(1) } // default to "Today"
+    var agent by remember { mutableStateOf<AgentKind?>(null) } // null = All (issue #258)
     var timedOut by remember { mutableStateOf(false) }
-    LaunchedEffect(days) {
+    // A selection can outlive the capability: reconnecting to a daemon that ignores the filter (or losing
+    // the handshake) must fall back to the honest all-backends request, not keep asking for one agent and
+    // render the whole machine under its label. Keying the fetch on the EFFECTIVE agent re-fetches on that
+    // transition too, so the page can't sit on a mislabeled reply.
+    val filterable = repo.daemonUsageAgentFilter.value
+    val effectiveAgent = agent.takeIf { filterable }
+    LaunchedEffect(days, effectiveAgent) {
         timedOut = false
-        repo.fetchUsage(days)
+        repo.fetchUsage(days, effectiveAgent)
         kotlinx.coroutines.delay(10_000)
         // no reply after the deadline → most likely an older daemon that can't aggregate usage yet (or a huge scan)
         if (repo.usage.value == null) timedOut = true
@@ -109,9 +127,11 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         // header
         Column(Modifier.fillMaxWidth().background(Tok.base)) {
-            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton({ onBack() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
-                Text(stringResource(Res.string.usage_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth().padding(start = if (embedded) 16.dp else 4.dp, end = 12.dp, top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!embedded) {
+                    TextButton({ onBack() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
+                    Text(stringResource(Res.string.usage_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
                 Spacer(Modifier.weight(1f))
                 Row(Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(999.dp)).padding(2.dp)) {
                     for ((label, d) in listOf("Today" to 1, "7d" to 7, "30d" to 30)) {
@@ -123,9 +143,29 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
                     }
                 }
             }
+            // Per-agent filter (issue #258). Gated on the daemon's OWN filter capability, never on the
+            // agent-vocabulary advertisement: that one shipped a release earlier, so a v1.7.7 daemon would
+            // pass an `isNotEmpty` gate while silently ignoring FetchUsage.agent — and a filter that
+            // answers with the whole machine under one agent's label is worse than no filter. Chips follow
+            // the same availability projection as the session pickers, each in its own agent color.
+            val agents = repo.availableAgents
+            if (filterable && agents.size > 1) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    AgentChip(stringResource(Res.string.usage_agent_all), Tok.accent, agent == null) { agent = null }
+                    for (a in agents) AgentChip(agentName(a), agentColor(a), agent == a) { agent = a }
+                }
+            }
             Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         }
 
+        // NOTE: the subscription allowance (5h/7d) deliberately does NOT live here. It briefly did, and
+        // user testing said the same thing the design settled on: "how much have I got left" is a
+        // question you ask WHILE working, not one you navigate to a dashboard for. It is now a permanent
+        // strip in the desktop sidebar footer (desktop/QuotaBar.kt). This page stays what it always was:
+        // token accounting read out of local transcripts.
         when {
             u != null && (u.tokensToday > 0 || u.models.isNotEmpty() || u.days.any { it.tokens > 0 }) -> Populated(u)
             u != null -> Empty(u.days.size)
@@ -486,12 +526,38 @@ internal fun quartile(tokens: Long, max: Long): Int {
 /** The peak day's caption label: ISO [UsageDay.date] "2026-07-05" → "07-05"; falls back to the weekday [UsageDay.label]. */
 internal fun peakLabel(day: UsageDay): String = day.date?.substringAfter('-') ?: day.label
 
+/**
+ * One filter pill in the per-agent row (issue #258). Deliberately the SAME pill language as the page's
+ * Today/7d/30d segmented control — selected fills, unselected is a hairline outline — so the header reads
+ * as one control surface. The only addition is the agent's own [color], which ties a selected chip to the
+ * bar color its rows will wear below.
+ */
+@Composable
+private fun AgentChip(label: String, color: Color, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(999.dp))
+            .background(if (selected) color.agentTintFill() else Tok.surface)
+            .border(1.dp, if (selected) color.agentTintBorder() else Tok.hair, RoundedCornerShape(999.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Text(
+            label, color = if (selected) color else Tok.tx2,
+            fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+        )
+    }
+}
+
 @Composable
 private fun ModelRow(m: UsageModel, max: Long) {
     val color = when (m.agent) {
         AgentKind.CODEX -> Tok.codex
         AgentKind.OPENCODE -> Tok.opencode
-        else -> Tok.accent
+        AgentKind.ZCODE -> Tok.zcode
+        // DSH (issue #255) reports no usage in v1, so this arm is defensive: if a row ever does arrive it
+        // wears the agent's own hue rather than silently borrowing Claude's accent.
+        AgentKind.DSH -> Tok.dsh
+        AgentKind.CLAUDE, AgentKind.KIMI -> Tok.accent
     }
     Column(Modifier.padding(vertical = 9.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

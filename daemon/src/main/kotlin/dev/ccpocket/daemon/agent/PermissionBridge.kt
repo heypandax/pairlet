@@ -56,11 +56,11 @@ class PermissionBridge(
     //  2. structured file tools (Read/Write/Edit/Glob/Grep) confined to the bound [workdir] — a bridge has
     //     no pathScope, so without this a Read of ~/.ssh/id_rsa would exfiltrate it to the chat.
     private val bridgeSession: Boolean = false,
-    // issue #91 OWNER BYPASS: this whole conversation is the CONFIGURED OWNER's OWN dedicated session (only
-    // ever driven by the owner — the built-in engine routes non-owner messages to a SEPARATE session), so its
-    // execution asks auto-allow: the owner asked in the chat, that IS the approval, on their own machine. A
-    // PER-SESSION property (race-free — no attributing individual tool calls to a sender), set at OPEN by
-    // TRUSTED in-process code only, never the wire. Bridge-only. neverRemember gates still reach a human.
+    // issue #91 OWNER BYPASS: this is the CONFIGURED OWNER's OWN dedicated session (only ever driven by the
+    // owner — the built-in engine routes non-owner messages to a SEPARATE session). The standing flag only
+    // identifies who may MINT [BridgeGrant.OWNER_BYPASS]; the per-turn grant below is what actually allows
+    // tools, so cancel/revoke closes buffered post-cancel asks. Set at OPEN by trusted in-process code only,
+    // never the wire. Bridge-only. neverRemember gates still reach a human.
     private val ownerBypassSession: Boolean = false,
     // issue #190 / #198: the authority ONE externally submitted bridge request carries into its turn —
     // [BridgeGrant.OWNER_APPROVED] when the owner read and approved it, [BridgeGrant.AUTO_TRUSTED] when the
@@ -68,6 +68,11 @@ class PermissionBridge(
     // TurnResult/process end, so the next request starts locked. Supplied dynamically because the
     // PermissionBridge lives for the whole agent process while the grant is per-turn.
     private val bridgeGrant: () -> BridgeGrant = { BridgeGrant.NONE },
+    // Conversation overrides this with a synchronized decision so cancel/revoke cannot interleave between
+    // reading a grant and sending the allow response. Tests/standalone bridges keep an equivalent re-check.
+    private val useBridgeGrant: suspend (BridgeGrant, suspend () -> Unit) -> Boolean = { expected, allow ->
+        if (bridgeGrant() == expected) { allow(); true } else false
+    },
     // issue #91 "一次授权跑完全程": the owner-configured Bash allow-list for this bridge. A command that
     // matches (and is neither DANGEROUS nor carrying shell metacharacters) is auto-run with NO phone prompt,
     // so a whitelisted multi-step task isn't chopped up by per-command approvals in an async IM channel.
@@ -116,8 +121,9 @@ class PermissionBridge(
             respond(ev.requestId, false, false, ev.input, null, "denied — this handoff grant is review/read-only; write tools are disabled")
             return
         }
-        // ── HARD WALLS BEFORE EVERY GRANT (§18.1 P1-8 / design §6: no request approval, remembered rule,
-        // task grant or bypass mode may precede a hard policy — a DENY here is never recovered) ────────
+        // ── PRE-GRANT POLICY CHECKS (§18.1 P1-8 / design §6): no request approval, remembered rule,
+        // task grant or bypass mode may precede these checks. The structured-path wall is authoritative for
+        // tool schemas the daemon understands; the Bash deny screen is deliberately only defense-in-depth.
         // GUEST folder-share path guard (issue #115) + bridge workdir wall: a built-in file tool whose
         // target escapes the allowed roots is denied under EVERY mode and EVERY grant — including an
         // owner-approved bridge request (P1-8: request approval must not unlock path escapes).
@@ -125,10 +131,10 @@ class PermissionBridge(
             respond(ev.requestId, false, false, ev.input, null, "denied — $escaped is outside the allowed directory")
             return
         }
-        // BRIDGE destructive-command red line (issue #91): classified ONCE here; the DENY leg is a hard
-        // wall that precedes every grant branch (P1-8 — an owner-approved request must not unlock
-        // `rm -rf /`); the ALLOW (whitelist) leg is a convenience fast path applied AFTER the grant
-        // branches below; ASK falls through to the phone.
+        // BRIDGE destructive-command screen (issue #91): classified ONCE here. A literal DENY is refused
+        // before every grant branch, but the classifier is not a shell parser and must not be described as a
+        // sandbox: obfuscated/desugared equivalents can classify ASK. The ALLOW leg is a convenience fast
+        // path applied after explicit grants; an ungranted ASK falls through to the phone.
         val command = (ev.input?.get("command") as? JsonPrimitive)?.content
         val bridgeBash =
             if (bridgeSession && ev.toolName == "Bash") BridgeCommandPolicy.classify(command.orEmpty(), bridgeAllowedCommands)
@@ -137,21 +143,12 @@ class PermissionBridge(
             respond(ev.requestId, false, false, ev.input, null, "denied — this command is blocked for a bridge (destructive/high-risk)")
             return
         }
-        // ASK is the security backstop for Bash syntax the deterministic bridge classifier cannot prove
-        // safe. In particular, blacklist obfuscations such as `r\m` intentionally classify ASK rather
-        // than DENY; no broad bypass/request grant may turn that fallback into an allow. Only the explicit
-        // BridgeCommandPolicy.ALLOW branch below can skip the per-command phone gate for bridge Bash.
+        // ASK is the classifier's fallback verdict for Bash syntax it cannot prove safe. Under the owner's
+        // three-rule model (issue #233) it gates UNAUTHORIZED and Guardian-reviewed turns. A turn the owner
+        // confirmed — their own dedicated session, a request they read and approved, or a request from a
+        // chat/project they durably TRUSTED — runs its shell without a per-command card.
         val bridgeBashNeedsAsk = bridgeBash == BridgeCommandPolicy.Verdict.ASK
-        // OWNER BYPASS (issue #91): the configured owner's dedicated bridge session skips ordinary
-        // piecemeal asks, but it is still BELOW the non-overridable path and destructive-command walls.
-        // The sender being the owner is an authorization fact, not proof that an IM-origin prompt was
-        // free of injection; deterministic red lines apply to every source.
-        if (bridgeSession && ownerBypassSession && !meta.neverRemember && !bridgeBashNeedsAsk) {
-            coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "owner-bypass-session")
-            respond(ev.requestId, true, false, ev.input, null, null)
-            return
-        }
-        // M3: feed the sequence ledger on every ATTEMPT that got past the hard walls (intent matters
+        // M3: feed the sequence ledger on every ATTEMPT that got past the pre-grant checks (intent matters
         // for the radar) and keep the assessment for the ask below. Deterministic + advisory: no
         // outcome changes.
         val assessed = risk?.observe(
@@ -160,16 +157,39 @@ class PermissionBridge(
             targets = ToolMetadata.pathTargets(ev.toolName, ev.input),
         )
         val grant = if (bridgeSession) bridgeGrant() else BridgeGrant.NONE
-        // FULL REQUEST AUTHORIZATION (issue #190): the owner approved this exact externally submitted
-        // request before it reached the agent, so execution tools skip the PIECEMEAL approval layer.
-        // What it no longer skips (P1-8): the workdir wall and the destructive-Bash red line above —
-        // approving a natural-language prompt is not a licence for path escapes or `rm -rf /`.
-        // AskUserQuestion remains interactive because the answer, rather than permission, rides the
-        // verdict. The supplier is trusted in-process state, revoked when the turn ends.
-        if (grant == BridgeGrant.OWNER_APPROVED && ev.toolName != AskQuestions.TOOL && !bridgeBashNeedsAsk) {
-            coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "owner-approved-request")
-            respond(ev.requestId, true, false, ev.input, null, null)
-            return
+        // OWNER BYPASS (issue #91 / #233 rule ①): the configured owner's dedicated bridge session runs
+        // full — the owner asked in the chat, that IS the confirmation, on their own machine. Authority
+        // is nevertheless turn-scoped: cancel revokes OWNER_BYPASS under the same lock as this allow response,
+        // so a buffered classifier-ASK tool arriving afterwards falls back to the phone instead of executing.
+        if (
+            bridgeSession && ownerBypassSession && grant == BridgeGrant.OWNER_BYPASS &&
+            !meta.neverRemember && ToolMetadata.broadGrantEligible(ev.toolName)
+        ) {
+            if (useBridgeGrant(grant) {
+                    coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "owner-bypass-session")
+                    respond(ev.requestId, true, false, ev.input, null, null)
+                }) return
+        }
+        // FULL REQUEST AUTHORIZATION (issue #190 / #233 rules ②+③): either the owner read and approved this
+        // exact externally submitted request, or durably TRUSTED its exact chat/project. The turn runs full —
+        // including Bash the classifier could not prove safe: the machine owner's authorization IS the wall.
+        // What it does not skip (P1-8): the structured-file workdir check and any literal Bash DENY above.
+        // Human-decision tools remain interactive because their decision/answer rides the verdict. The
+        // supplier is trusted in-process state, revoked when the turn ends.
+        if (
+            (grant == BridgeGrant.OWNER_APPROVED || grant == BridgeGrant.AUTO_TRUSTED) &&
+            !meta.neverRemember && ToolMetadata.broadGrantEligible(ev.toolName)
+        ) {
+            if (useBridgeGrant(grant) {
+                    coordinator.recordAuto(
+                        ApprovalSource.AGENT,
+                        convoId,
+                        ev.toolName,
+                        meta.rule,
+                        if (grant == BridgeGrant.AUTO_TRUSTED) "trusted-chat-full-turn" else "owner-approved-request",
+                    )
+                    respond(ev.requestId, true, false, ev.input, null, null)
+                }) return
         }
         // BRIDGE whitelist fast path (issue #91 "一次授权跑完全程"): provably-safe / owner-whitelisted
         // commands run without pestering the owner — a convenience grant, so it sits BEHIND the walls.
@@ -178,23 +198,17 @@ class PermissionBridge(
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
-        // MACHINE-CONFINED GRANTS (issue #198 AUTO_TRUSTED + reviewed-trust REVIEWER_APPROVED): the owner
-        // pre-authorized this chat's requests to run without a per-request card — outright, or conditional on
-        // the Guardian's per-request pass. Placed HERE, below the workdir wall (:above) and BELOW the Bash
-        // gate, and gated on a CLOSED tool allow-list ([BridgeGrant.autoRunnable]) rather than "everything but
-        // AskUserQuestion": nobody (human) read this prompt, so only tools the daemon can confine on its own
-        // may skip the owner. Bash therefore keeps its normal verdict — its ambiguous middle falls past this
-        // branch to the ask below, which is the backstop that makes the DANGEROUS blacklist tolerable in the
-        // first place. Unknown tools (MCP, WebFetch, a renamed file tool) likewise ask, instead of passing the
-        // path wall vacuously. ONE shared judgement for both levels — a second copy of the ceiling would
-        // drift; the recorded source keeps the two distinguishable for audit.
-        if (grant.machineConfined && autoTrustedMayRun(ev.toolName, ev.input)) {
-            coordinator.recordAuto(
-                ApprovalSource.AGENT, convoId, ev.toolName, meta.rule,
-                if (grant == BridgeGrant.AUTO_TRUSTED) "auto-trusted-chat" else "reviewer-approved-request",
-            )
-            respond(ev.requestId, true, false, ev.input, null, null)
-            return
+        // GUARDIAN-REVIEWED GRANT: the Reviewer did not become the machine owner. Keep its closed allow-list;
+        // classifier-ASK Bash and unknown tools still reach the owner. The helper also requires a resolvable
+        // in-workdir target and holds writes that would persist into the owner's later execution.
+        if (grant.machineConfined && !meta.neverRemember && !bridgeBashNeedsAsk && machineConfinedMayRun(ev.toolName, ev.input)) {
+            if (useBridgeGrant(grant) {
+                    coordinator.recordAuto(
+                        ApprovalSource.AGENT, convoId, ev.toolName, meta.rule,
+                        "reviewer-approved-request",
+                    )
+                    respond(ev.requestId, true, false, ev.input, null, null)
+                }) return
         }
         // bypassPermissions auto-allows ordinary tools — but NOT the neverRemember class (issue #156): those
         // are human-decision gates that must survive every skip-the-ask path (the ToolMeta contract).
@@ -221,8 +235,8 @@ class PermissionBridge(
             return
         }
         // TASK grant (approval design M2): "允许本任务" issued earlier in this task covers the action —
-        // auto-run with an in-stream audit chip instead of a card. Every hard wall above already ran;
-        // a grant can only skip the ASK, never a wall, and it dies with the task/session/2h TTL.
+        // auto-run with an in-stream audit chip instead of a card. Every pre-grant check above already ran;
+        // a grant can only skip the ASK, never one of those checks, and it dies with the task/session/2h TTL.
         // §18.1 P1-1: the match is CONTEXT-BOUND — same canonical root, file targets provably inside it,
         // Bash bound to the exact approved command; anything unverifiable falls through to the ask.
         if (!neverRemember) {
@@ -377,8 +391,9 @@ class PermissionBridge(
     private fun outOfScopeTarget(tool: String, input: JsonObject?): String? {
         // GUEST: pathScope confines file tools to the shared roots. BRIDGE (issue #91): no pathScope, but a
         // structured file tool must still not escape the bound workdir — else a Read of ~/.ssh/id_rsa
-        // exfiltrates it to the chat. Bash isn't guarded here (targets not statically knowable); its
-        // content reads route to ASK via BridgeCommandPolicy instead.
+        // exfiltrates it to the chat. Bash isn't guarded here because its targets are not statically
+        // knowable. On an unauthorized turn its ASK verdict reaches the owner; on a #233-authorized turn
+        // that broader shell reach is part of the authority the owner explicitly accepted.
         // canonicalize the implicit bridge root: PathScope.contains assumes canonical roots, and a raw
         // workdir (trailing slash / symlinked prefix / ..) would otherwise mis-compare (review N7).
         val roots = pathScope ?: (workdir?.takeIf { bridgeSession }?.let { listOf(PathScope.canonical(it) ?: it) } ?: return null)
@@ -395,11 +410,11 @@ class PermissionBridge(
     }
 
     /**
-     * May a [BridgeGrant.AUTO_TRUSTED] request run [tool] with no owner card (issue #198)? On top of the closed
-     * tool allow-list, two target-shaped conditions the tool NAME cannot express:
+     * May a legacy machine-confined request run [tool] with no owner card? In addition to the CLOSED tool
+     * allow-list, two target-shaped conditions the tool name cannot express:
      *
      *  1. A specific-file tool must have at least one target the daemon actually RESOLVED. With no target the
-     *     workdir wall passes vacuously, so "confined by machinery" would be a claim about an unknown location —
+     *     workdir wall passes vacuously, so "in the project" would be a claim about an unknown location —
      *     e.g. a Codex fileChange whose path the daemon could not recover. Not applied to Glob/Grep, whose
      *     absent `path` legitimately means "the session cwd".
      *  2. No target may be a file that EXECUTES on the owner's next interaction. The wall bounds where bytes
@@ -409,11 +424,17 @@ class PermissionBridge(
      *     primitive. These fall through to the owner's card (one tap), NOT a hard deny: editing them is
      *     legitimate work, it just isn't something a group member should do while nobody is looking.
      */
-    private fun autoTrustedMayRun(tool: String, input: JsonObject?): Boolean {
+    private fun machineConfinedMayRun(tool: String, input: JsonObject?): Boolean {
         if (!BridgeGrant.autoRunnable(tool)) return false
         val targets = ToolMetadata.pathTargets(tool, input)
         if (tool in BridgeGrant.SPECIFIC_FILE_TOOLS && targets.isEmpty()) return false
-        return targets.none { BridgeGrant.executesForTheOwner(it) }
+        // Inspect the same canonical target used by containment, not the lexical alias. Otherwise
+        // `safe/hooks/pre-commit` with `safe -> .git` bypasses the persistence hold.
+        val canonicalTargets = targets.map { target ->
+            val absolute = if (File(target).isAbsolute || workdir == null) target else File(workdir, target).path
+            PathScope.canonical(absolute) ?: return false
+        }
+        return canonicalTargets.none { BridgeGrant.executesForTheOwner(it) }
     }
 
     /** Is [tool] a write tool this conversation's Handoff Grant refuses outright (§8.3)? Fail-closed

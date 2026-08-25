@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DataUsage
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Keyboard
@@ -58,11 +59,14 @@ import dev.ccpocket.app.ui.share.countdown
 import dev.ccpocket.app.ui.share.expiryOptionLabel
 import dev.ccpocket.app.ui.share.groupShares
 import dev.ccpocket.app.ui.share.shareStatus
+import dev.ccpocket.app.ui.share.tierHelp
 import dev.ccpocket.app.ui.share.tierLabel
 import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -79,6 +83,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -92,6 +97,7 @@ import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
+import dev.ccpocket.app.ui.UsageScreen
 import kotlinx.coroutines.delay
 import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.app.ui.agentColor
@@ -108,6 +114,9 @@ import dev.ccpocket.protocol.PresetsState
 private enum class SettingsTab(val label: StringResource, val icon: ImageVector) {
     GENERAL(Res.string.settings_tab_general, Icons.Outlined.Tune),
     ACCOUNT(Res.string.settings_tab_account, Icons.Rounded.Person),
+    // right after Account on purpose: both token spend and the subscription allowance are properties of
+    // the signed-in ACCOUNT, not of this machine
+    USAGE(Res.string.settings_usage, Icons.Rounded.DataUsage),
     COMPUTERS(Res.string.settings_tab_computers, Icons.Rounded.Devices),
     SCHEDULES(Res.string.settings_tab_schedules, Icons.Rounded.Schedule),
     SHARES(Res.string.settings_tab_shared, Icons.Rounded.Share),
@@ -135,14 +144,32 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Row(Modifier.fillMaxWidth().weight(1f)) {
-            Column(Modifier.width(176.dp).fillMaxHeight().padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            // The nav rail scrolls too (issue #209 re-report): the Overlay clamps the modal to the
+            // window's visible height, and on a short/high-DPI-scaled window the clamped rail used to
+            // crop its bottom items (About) with no way to reach them — only the CONTENT pane scrolled.
+            Column(
+                Modifier.width(176.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 SettingsTab.entries.forEach { t -> RailItem(t, selected = t == tab) { tab = t } }
             }
             Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
-            Box(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(24.dp)) {
+            // Every pane rides the shared content scroller EXCEPT Token usage. [UsageScreen] is a
+            // full-height page that scrolls itself (and sizes a trend chart against the viewport), and a
+            // scroller nested in a scroller is measured with INFINITE height — the classic "vertical
+            // viewport was given unbounded height" crash, not a cosmetic issue. It brings its own padding
+            // too, so the 24.dp inset goes with the scroll. The state is remembered unconditionally: a
+            // conditional remember would shift composition slots on every tab switch.
+            val contentScroll = rememberScrollState()
+            val paneScrollsItself = tab == SettingsTab.USAGE
+            Box(
+                Modifier.weight(1f).fillMaxHeight()
+                    .then(if (paneScrollsItself) Modifier else Modifier.verticalScroll(contentScroll).padding(24.dp)),
+            ) {
                 when (tab) {
                     SettingsTab.GENERAL -> GeneralPane(model)
                     SettingsTab.ACCOUNT -> AccountPane(model)
+                    SettingsTab.USAGE -> UsagePane(model)
                     SettingsTab.COMPUTERS -> ComputersPane(model)
                     SettingsTab.SCHEDULES -> SchedulesPane(model)
                     SettingsTab.SHARES -> SharesPane(model)
@@ -155,6 +182,29 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * Token usage + the Claude subscription allowance — the mobile [UsageScreen] rendered verbatim as a
+ * settings pane, in the [ReviewCenterOverlay] idiom (hand the live repository over whole rather than
+ * re-projecting a dozen fields through [DesktopModel]). Until now this page had NO desktop entry point at
+ * all: the desktop replaces mobile's Settings.kt with this modal, and the modal never mounted it.
+ *
+ * `embedded = true` drops the page's own back arrow and title, which the modal's header already provides;
+ * its range toggle and agent chips stay, being controls rather than chrome.
+ */
+@Composable
+private fun UsagePane(model: DesktopModel) {
+    val repo = model.usageRepo
+    if (repo == null) {
+        // a seed/preview model has no daemon behind it — and a usage dashboard is the last place to
+        // invent numbers for a screenshot
+        Box(Modifier.fillMaxWidth().fillMaxHeight(), contentAlignment = Alignment.Center) {
+            Text(stringResource(Res.string.usage_offline), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp)
+        }
+        return
+    }
+    UsageScreen(repo, onBack = {}, embedded = true)
 }
 
 @Composable
@@ -265,11 +315,20 @@ private fun GeneralPane(model: DesktopModel) {
         Group(stringResource(Res.string.settings_appearance), stringResource(Res.string.settings_appearance_sub)) {
             AppearanceRow(model)
         }
+        Group(stringResource(Res.string.settings_accent), stringResource(Res.string.settings_accent_sub)) {
+            AccentRow(model)
+        }
+        Group(stringResource(Res.string.settings_chat_align), stringResource(Res.string.settings_chat_align_sub)) {
+            ChatAlignRow(model)
+        }
         Group(stringResource(Res.string.settings_default_agent), stringResource(Res.string.settings_default_agent_sub)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                AgentCardRow(AgentKind.CLAUDE, model.defaultAgent == AgentKind.CLAUDE, Modifier.weight(1f)) { model.defaultAgent = AgentKind.CLAUDE }
-                AgentCardRow(AgentKind.CODEX, model.defaultAgent == AgentKind.CODEX, Modifier.weight(1f)) { model.defaultAgent = AgentKind.CODEX }
-                AgentCardRow(AgentKind.OPENCODE, model.defaultAgent == AgentKind.OPENCODE, Modifier.weight(1f)) { model.defaultAgent = AgentKind.OPENCODE }
+            model.availableAgents.chunked(3).forEach { rowAgents ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    rowAgents.forEach { agent ->
+                        AgentCardRow(agent, model.defaultAgent == agent, Modifier.weight(1f)) { model.defaultAgent = agent }
+                    }
+                    repeat(3 - rowAgents.size) { Spacer(Modifier.weight(1f)) }
+                }
             }
         }
         val defaultAgent = model.defaultAgent
@@ -292,6 +351,14 @@ private fun GeneralPane(model: DesktopModel) {
                 // OpenCode's provider/model catalog is installation-specific, so only daemon-reported ids
                 // are valid choices. The selected value leads in case a later catalog no longer lists it.
                 AgentKind.OPENCODE -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
+                // KIMI (issue #206): daemon-reported aliases (from `kimi provider list --json`)
+                AgentKind.KIMI -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
+                // ZCode (issue #228): daemon-reported ids only, the same contract as Kimi.
+                AgentKind.ZCODE -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
+                // DSH (issue #255): v1 has no model switching, so nothing is ever discovered here and only
+                // the "CLI default" row above remains. Kept on the shared shape so adding a catalog later
+                // is a daemon-side change, not a UI one.
+                AgentKind.DSH -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
             }
             options.forEach { (label, id) ->
                 PrefRow(label, id, selected = defaultModel == id) { model.setDefaultModelFor(defaultAgent, id) }
@@ -341,10 +408,11 @@ private fun GeneralPane(model: DesktopModel) {
             }
         }
         Group(stringResource(Res.string.settings_default_mode), stringResource(Res.string.settings_default_mode_sub)) {
-            val modes = CLAUDE_MODES + if (
+            val modes = desktopModeChoices(
+                defaultAgent,
                 defaultAgent == AgentKind.CLAUDE &&
-                model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO)
-            ) listOf(CLAUDE_AUTO_MODE) else emptyList()
+                    model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+            )
             modes.forEach { m ->
                 ModeRow(
                     m,
@@ -367,9 +435,19 @@ private fun GeneralPane(model: DesktopModel) {
                 TerminalRow(t, selected = t == model.terminalApp) { model.terminalApp = t }
             }
         }
-        // menu-bar presence (issue #151): the OS status glyph + anchored popover, on by default
-        Group(stringResource(Res.string.settings_menu_bar), stringResource(Res.string.settings_menu_bar_sub)) {
-            ToggleRow(stringResource(Res.string.settings_menu_bar_toggle), model.menuBarEnabled) { model.menuBarEnabled = !model.menuBarEnabled }
+        // menu-bar presence (issue #151): the OS status glyph + anchored popover, on by default.
+        // Windows gets its own wording (issue #292): "menu bar" is a mac term — the Windows user who
+        // wanted the floating panel gone never connected it to this switch, because there it lives in
+        // the notification area as a tray icon + popover.
+        val isWinDesktop = remember { System.getProperty("os.name").lowercase().contains("win") }
+        Group(
+            stringResource(if (isWinDesktop) Res.string.settings_menu_bar_win else Res.string.settings_menu_bar),
+            stringResource(if (isWinDesktop) Res.string.settings_menu_bar_sub_win else Res.string.settings_menu_bar_sub),
+        ) {
+            ToggleRow(
+                stringResource(if (isWinDesktop) Res.string.settings_menu_bar_toggle_win else Res.string.settings_menu_bar_toggle),
+                model.menuBarEnabled,
+            ) { model.menuBarEnabled = !model.menuBarEnabled }
         }
         // daemon-side switch: silence phone alerts while working at the computer. Null = old daemon.
         LaunchedEffect(Unit) { model.refreshPushPrefs() }
@@ -388,6 +466,19 @@ private fun GeneralPane(model: DesktopModel) {
         model.approvalNoAutoDeny?.let { on ->
             Group(stringResource(Res.string.approvals_section), stringResource(Res.string.approval_no_auto_deny_sub)) {
                 ToggleRow(stringResource(Res.string.approval_no_auto_deny), on) { model.setApprovalNoAutoDeny(!on) }
+            }
+            // #220: Full Control存续时长 — rides the same daemon-truth gate as the toggle above
+            val neverLabel = stringResource(Res.string.full_control_expiry_never)
+            val expiry = model.approvalFullControlExpiryMs ?: 0L
+            val selected = dev.ccpocket.app.ui.FULL_CONTROL_EXPIRY_OPTS.minByOrNull { kotlin.math.abs(it - expiry) } ?: 0L
+            Group(stringResource(Res.string.full_control_expiry), stringResource(Res.string.full_control_expiry_sub)) {
+                dev.ccpocket.app.ui.FULL_CONTROL_EXPIRY_OPTS.forEach { ms ->
+                    PrefRow(
+                        dev.ccpocket.app.ui.fullControlExpiryLabel(ms, neverLabel),
+                        if (ms <= 0L) "" else "--expiry",
+                        selected = ms == selected,
+                    ) { model.setFullControlExpiryMs(ms) }
+                }
             }
         }
     }
@@ -422,6 +513,67 @@ private fun AppearanceRow(model: DesktopModel) {
                 Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
                     .background(if (sel) Tok.accent else Color.Transparent)
                     .clickable { model.themeMode = mode }.padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label, color = if (sel) Tok.base else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+        }
+    }
+}
+
+// Global accent source (issue #204) — CC Pocket terracotta (default) vs Codex teal. Same segmented-control
+// shape as AppearanceRow, but each option's selected swatch previews its own hue so the pick is legible even
+// while the rest of the shell is still on the old accent.
+@Composable
+private fun AccentRow(model: DesktopModel) {
+    val options = listOf(
+        Triple(dev.ccpocket.app.theme.AccentTheme.POCKET, stringResource(Res.string.accent_pocket), Tok.current.accent),
+        Triple(dev.ccpocket.app.theme.AccentTheme.CODEX, stringResource(Res.string.accent_codex), Tok.codex),
+    )
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.base)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        options.forEach { (theme, label, swatch) ->
+            val sel = model.accentTheme == theme
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
+                    .background(if (sel) swatch else Color.Transparent)
+                    .clickable { model.accentTheme = theme }.padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label, color = if (sel) Tok.base else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+        }
+    }
+}
+
+// Chat-stream alignment (issue #213) — all-left document flow (default) vs left/right bubbles. Same segmented
+// control as AppearanceRow; only affects how the conversation renders, so it lives in the Appearance section.
+@Composable
+private fun ChatAlignRow(model: DesktopModel) {
+    val options = listOf(
+        ChatStreamAlignment.LEFT to stringResource(Res.string.chat_align_left),
+        ChatStreamAlignment.BUBBLES to stringResource(Res.string.chat_align_bubbles),
+    )
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.base)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        options.forEach { (align, label) ->
+            val sel = model.chatAlignment == align
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
+                    .background(if (sel) Tok.accent else Color.Transparent)
+                    .clickable { model.chatAlignment = align }.padding(vertical = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -477,7 +629,9 @@ private fun TerminalRow(t: TerminalApp, selected: Boolean, onClick: () -> Unit) 
 private fun AgentCardRow(agent: AgentKind, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val c = agentColor(agent)
     Row(
-        modifier.clip(RoundedCornerShape(11.dp))
+        // testTag (issue #204): the accent picker now also carries a "Codex" label, so tests target the
+        // agent card by tag instead of the newly-ambiguous "Codex" text
+        modifier.testTag("agent-card-${agent.name}").clip(RoundedCornerShape(11.dp))
             .background(if (selected) c.agentTintFill() else Tok.surface)
             .border(1.5.dp, if (selected) c else Tok.hair, RoundedCornerShape(11.dp))
             .clickable(onClick = onClick).padding(13.dp),
@@ -722,6 +876,7 @@ private fun AccountPane(model: DesktopModel) {
                         s.subscriptionType?.let { plan ->
                             Text(
                                 plan.uppercase(), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                                style = tightCenter(10.sp),
                                 modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(5.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
                             )
                         }
@@ -971,6 +1126,7 @@ private fun PresetRow(
             }
             active -> Text(
                 stringResource(Res.string.settings_preset_active), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.sp,
+                style = tightCenter(10.sp),
                 modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.accent.copy(alpha = 0.13f)).padding(horizontal = 7.dp, vertical = 2.dp),
             )
             hovered -> Row {
@@ -1234,7 +1390,7 @@ private fun HelperLine(mono: String, rest: String) {
 @Composable
 private fun SegChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Text(
-        label, color = if (selected) Tok.tx else Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp,
+        label, color = if (selected) Tok.tx else Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp),
         modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(if (selected) Tok.hair else Color.Transparent)
             .clickable(onClick = onClick).padding(horizontal = 7.dp, vertical = 2.5.dp),
     )
@@ -1253,7 +1409,7 @@ private fun FilledBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
 @Composable
 private fun MonoPill(label: String, accent: Boolean) {
     Text(
-        label, color = if (accent) Tok.accent else Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
+        label, color = if (accent) Tok.accent else Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp),
         modifier = Modifier.clip(RoundedCornerShape(20.dp))
             .background(if (accent) Tok.accent.copy(alpha = 0.13f) else Tok.base)
             .border(1.dp, if (accent) Tok.accent.copy(alpha = 0.3f) else Tok.hair, RoundedCornerShape(20.dp))
@@ -1311,6 +1467,7 @@ private fun isHttpUrl(s: String): Boolean = runCatching {
 private fun ComputersPane(model: DesktopModel) {
     var editingId by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
+    var removing by remember { mutableStateOf<DkComputer?>(null) }
     Column {
         Text(stringResource(Res.string.settings_paired_computers), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
         if (model.computers.isEmpty()) {
@@ -1341,7 +1498,7 @@ private fun ComputersPane(model: DesktopModel) {
                         PulseDot(Tok.ok, 6.dp); Text(stringResource(Res.string.presence_online), color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.sp)
                     } else Text(stringResource(Res.string.presence_offline), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
                     TextBtn(stringResource(Res.string.device_rename), Tok.tx2) { editingId = c.accountId; draft = "" }
-                    TextBtn(stringResource(Res.string.share_revoke), Tok.danger) { model.revokeComputer(c) }
+                    TextBtn(stringResource(Res.string.device_remove), Tok.danger) { removing = c }
                 }
             }
         }
@@ -1353,6 +1510,35 @@ private fun ComputersPane(model: DesktopModel) {
             Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(15.dp))
             Text(stringResource(Res.string.add_device), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         }
+    }
+    removing?.let { computer ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            containerColor = Tok.raised,
+            titleContentColor = Tok.tx,
+            textContentColor = Tok.tx2,
+            title = { Text(stringResource(Res.string.remove_device_title), fontFamily = Dk.ui) },
+            text = {
+                Column {
+                    Text(computer.name, color = Tok.tx, fontFamily = Dk.ui, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        stringResource(Res.string.remove_device_confirm),
+                        color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, lineHeight = 18.sp,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { model.removeComputer(computer); removing = null }) {
+                    Text(stringResource(Res.string.device_remove), color = Tok.danger, fontFamily = Dk.ui)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { removing = null }) {
+                    Text(stringResource(Res.string.cancel), color = Tok.muted, fontFamily = Dk.ui)
+                }
+            },
+        )
     }
 }
 
@@ -1479,15 +1665,28 @@ private fun ShareCreateForm(model: DesktopModel) {
             if (path.isEmpty()) Text("/Users/me/project", color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
             BasicTextField(path, { path = it }, singleLine = true, textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp), cursorBrush = SolidColor(Tok.accent), modifier = Modifier.fillMaxWidth())
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(14.dp))
+        ShareFormLabel(stringResource(Res.string.share_access_level))
+        Spacer(Modifier.height(7.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SHARE_TIERS.forEach { t -> SegPill(tierLabel(t), tier == t) { tier = t } }
         }
-        Spacer(Modifier.height(8.dp))
+        // #212: a one-line, mode-accurate explanation of the selected tier so a security choice isn't blind
+        Text(
+            tierHelp(tier), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, lineHeight = 16.sp,
+            modifier = Modifier.padding(top = 7.dp),
+        )
+        Spacer(Modifier.height(14.dp))
+        ShareFormLabel(stringResource(Res.string.share_expires_label))
+        Spacer(Modifier.height(7.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ShareExpiryOption.entries.forEach { o -> SegPill(expiryOptionLabel(o), expiry == o) { expiry = o } }
         }
-        Spacer(Modifier.height(12.dp))
+        Text(
+            stringResource(Res.string.share_expiry_help), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp,
+            modifier = Modifier.padding(top = 7.dp),
+        )
+        Spacer(Modifier.height(14.dp))
         Text(
             stringResource(Res.string.share_create), color = if (path.isBlank()) Tok.muted else Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(if (path.isBlank()) Tok.surface else Tok.accent)
@@ -1496,10 +1695,21 @@ private fun ShareCreateForm(model: DesktopModel) {
     }
 }
 
+/** The small caps section label inside the desktop share composer ("ACCESS LEVEL" / "EXPIRES") — matches
+ *  the muted, letter-spaced heading language used elsewhere in Settings (#212). */
+@Composable
+private fun ShareFormLabel(text: String) {
+    Text(
+        text.uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
+        fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
+    )
+}
+
 @Composable
 private fun SegPill(label: String, selected: Boolean, onClick: () -> Unit) {
     Text(
         label, color = if (selected) Tok.base else Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, fontWeight = FontWeight.Medium,
+        style = tightCenter(11.5.sp),
         modifier = Modifier.clip(RoundedCornerShape(7.dp)).then(if (selected) Modifier.background(Tok.accent) else Modifier.border(1.dp, Tok.hair, RoundedCornerShape(7.dp)))
             .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
     )

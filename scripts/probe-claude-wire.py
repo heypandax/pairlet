@@ -27,7 +27,12 @@ lock 为 07-10 增，workflow/fgtask/bgcontinue 为 07-11 增、在 2.1.206 上�
   skill  Skill 装载在 transcript 落两行 user 记录（issue #126）：tool_result "Launching skill: …"
          的 ack 行 + SKILL.md 注入行 —— 后者顶层带 isMeta:true 与 sourceToolUseID（指回 Skill
          tool_use），文本以 "Base directory for this skill:" 开头。TranscriptReplay/TranscriptPatcher
-         的过滤靠这个形状把 SKILL.md 全文挡在「用户气泡」外
+         的过滤靠这个形状把 SKILL.md 全文挡在「用户气泡」外。搭车验 <system-reminder> 的成对闭合
+         （issue #253）：TranscriptNoise 按「整条都是闭合块」判噪声，标签改名/不闭合＝注入重新
+         顶着「你」渲染（同一条 transcript 上顺带查，不额外起会话）
+  entrypoint  -p 会话 transcript 逐行打精确拼写的 "entrypoint":"sdk-cli" 标记，且 picker 隐藏
+         集合仍是 ["sdk-cli","sdk-ts","sdk-py"]（issue #216）——unhide 闭环（TranscriptPatcher/
+         SpawnedSessions/空闲 reaper）的逐字节替换全押在这两点上，漂移=手机端会话静默重新隐身
 
 任一条漂移都会让 App 静默变坏（排队消失 / 提问卡失灵 / Task 卡片永远转圈 / 占用会话裸报错 /
 任务面板幻影 job / 无人值守任务只做半截 / SKILL.md 全文渲染成用户输入）。
@@ -38,8 +43,28 @@ lock 为 07-10 增，workflow/fgtask/bgcontinue 为 07-11 增、在 2.1.206 上�
           deny。某 mode 下 CLI 越界自动放行（无 control_request 就吐内容/落盘）= #115「碰不到你其他文件夹」
           保证被绕过（settingsources 验 --setting-sources "" 挡住共享目录 settings.json 的 allow 自动放行）
 
+  cleanroom  clean-room 的「零 MCP server」：--strict-mcp-config 不带任何 --mcp-config 时，owner 的 user 级
+          server 和共享目录自己的 .mcp.json 都不得加载。原来靠内联的 `--mcp-config '{"mcpServers":{}}'` 显式
+          给空集合，但那行 JSON 的引号在 Windows 的 claude.cmd shim 上活不下来（cmd.exe 重解析吃掉引号 →
+          被当成路径 → 起不来），所以改成只给 strict。等价性一漂移＝guest/bridge 静默拿回 owner 已认证的
+          MCP 集成（#115 最大的洞），且不会有任何报错
+
+  rewind  会话回溯/分叉的 CLI 原生能力（issue #282 的技术路线基座）。三个 flag 承载它，且后两个
+          **被 .hideHelp() 藏起来、`claude --help` 里查不到**（2.1.228 在 bundle 里实证），所以只能靠
+          本探针盯着它们别消失：
+            --fork-session          resume 时铸新 session id，原 transcript 逐字节不动
+            --resume-session-at <chain uuid>   只加载到该链条目为止（CLI 内部 messages.slice(0, i+1)），
+                                    等价于 Agent SDK 的 resumeSessionAt —— 「任意点截断续聊」的原生实现
+            --resume-drops-turn <prompt uuid>  安全声明：被丢弃区间若混入未声明的东西就拒绝启动
+          两条反直觉事实决定 daemon 怎么用它：① **不带 --fork-session 时截断 resume 不重写文件，而是
+          往原 jsonl 追加一条新分支**（被丢弃的行全都留在盘上，锚点行出现多个子节点）—— 线性回放
+          transcript 会把两条分支都渲染出来，必须按 parentUuid 走链或认 last-prompt.leafUuid；
+          ② fork 出的 transcript **不带任何 lineage 字段**（不写 parentSessionId/forkedFrom，连原 sid
+          都不出现），血缘只能由 daemon 自己记账。任一 flag 消失 = #282 的回溯要退回「手工截断 jsonl
+          副本」的备选路线（已实证可行：CLI 按文件名认会话，行内 sessionId 改不改都接受）。
+
 用法：python3 scripts/probe-claude-wire.py [steer|queue|ask|ask_plan|task|workflow|lock|fgtask|bgcontinue|
-      skill|scope|scope_acceptedits|settingsources|all]（默认 all）
+      skill|scope|scope_acceptedits|settingsources|cleanroom|entrypoint|rewind|all]（默认 all）
       CLAUDE_BIN=/path/to/claude 可覆盖二进制。失败退出码非 0。
 探针在 /tmp/ccprobe 下起真实 claude 进程（bypassPermissions / default / acceptEdits），会消耗少量用量。
 """
@@ -416,6 +441,181 @@ def scenario_lock() -> bool:
             subprocess.run([CLAUDE, "stop", short_id], capture_output=True, text=True, env=env, timeout=30)
 
 
+def _project_dir(cwd: str) -> str:
+    """cwd 对应的 ~/.claude/projects/<dirKey> —— 与 daemon 的 dirKey 编码规则一致。"""
+    return os.path.expanduser("~/.claude/projects/" + re.sub(r"[^A-Za-z0-9-]", "-", os.path.realpath(cwd)))
+
+
+def _chain_rows(path: str):
+    """transcript 里的「链条目」（带 uuid 的行）—— --resume-session-at 的锚点只能是这些行之一。
+    queue-operation / last-prompt / mode 这类边车行没有 uuid，截断时不参与定位。"""
+    out = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if r.get("uuid"):
+                out.append(r)
+    return out
+
+
+def _is_prompt_row(r) -> bool:
+    """真正的用户提问行（排除 tool_result 回填出来的 user 行）。"""
+    if r.get("type") != "user" or r.get("toolUseResult") is not None:
+        return False
+    content = (r.get("message") or {}).get("content")
+    if isinstance(content, str):
+        return True
+    return isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == "text" for b in content)
+
+
+def _rw_run(cwd: str, extra, text: str = "Reply with exactly: ok"):
+    """跑一次 daemon 同款旗子的一次性 turn，返回 (CompletedProcess, init 里的 session_id, 解析出的帧)。"""
+    env = dict(os.environ)
+    env.pop("CLAUDECODE", None)
+    env.pop("CLAUDE_CODE_ENTRYPOINT", None)
+    r = subprocess.run(
+        [CLAUDE, *BASE_ARGS, "--permission-mode", "default", *extra],
+        input=user_frame(text) + "\n", capture_output=True, text=True,
+        cwd=cwd, env=env, timeout=240,
+    )
+    sid, frames = None, []
+    for line in r.stdout.splitlines():
+        try:
+            j = json.loads(line)
+        except ValueError:
+            continue
+        frames.append(j)
+        if j.get("type") == "system" and j.get("subtype") == "init":
+            sid = j.get("session_id")
+    return r, sid, frames
+
+
+def scenario_rewind() -> bool:
+    print("── rewind：--fork-session / --resume-session-at / --resume-drops-turn（issue #282 路线基座）──")
+    # #282 要的「回到某条消息重开」在 CLI 上是有原生实现的，但两个关键 flag 被 .hideHelp() 藏了，
+    # `claude --help` 查不到 —— 它们随时可能被静默摘掉，所以钉在这里。断言全部是结构性的
+    # （新旧 session id、原文件字节、fork transcript 里出现/不出现哪些 uuid、退出码与错误文案），
+    # 不赌模型答什么，避免推理波动导致假红。
+    # 子目录名刻意短且不含 '-'：dirKey 把 '/' 和 '-' 都编码成 '-'，"ccprobe/rewind" 会与外部的
+    # "ccprobe-rewind" 撞进同一个 ~/.claude/projects 目录（已知的 dirKey 有损编码坑）。
+    cwd = os.path.join(WORKDIR, "rw")
+    os.makedirs(cwd, exist_ok=True)
+    NOTOOL = " Do not use any tools. Do not save anything to memory."
+
+    # ① 静态：三个 flag 还在 bundle 里（hidden flag 的消失不会有任何报错，只能这样早发现）
+    data = open(os.path.realpath(CLAUDE), "rb").read()
+    missing = [t.decode() for t in (b"--fork-session", b"--resume-session-at", b"--resume-drops-turn")
+               if t not in data]
+    ok = check("三个 flag 仍在 CLI bundle 里（后两个 --help 查不到）", not missing,
+               "all present" if not missing else f"missing: {missing}")
+    if missing:
+        return False
+
+    # ② 造一个两轮会话：轮1 记数字、轮2 记颜色。截断点取轮1 末尾 —— 轮2 是「要被丢弃的那一轮」。
+    r1, sid, _ = _rw_run(cwd, [], "Remember the number 7." + NOTOOL + " Reply with exactly: ok")
+    ok &= check("seed turn 1", r1.returncode == 0 and bool(sid), f"exit={r1.returncode} sid={sid}")
+    if not sid:
+        return False
+    r2, _, _ = _rw_run(cwd, ["--resume", sid], "Remember the color blue." + NOTOOL + " Reply with exactly: ok")
+    ok &= check("seed turn 2 (same session id, no fork)", r2.returncode == 0, f"exit={r2.returncode}")
+
+    proj = _project_dir(cwd)
+    orig = os.path.join(proj, sid + ".jsonl")
+    if not check("seed transcript on disk", os.path.isfile(orig), orig):
+        return False
+    chain = _chain_rows(orig)
+    prompts = [i for i, r in enumerate(chain) if _is_prompt_row(r)]
+    if not check("seed has two user prompts (anchor computable)", len(prompts) >= 2,
+                 f"{len(prompts)} prompt row(s) in {len(chain)} chain entries"):
+        return False
+    t1_prompt = chain[prompts[0]]["uuid"]
+    t2_prompt = chain[prompts[1]]["uuid"]
+    t1_last = chain[prompts[1] - 1]["uuid"]  # 轮1 的最后一条链条目 = 截断锚点
+    pristine = open(orig, "rb").read()
+
+    def unchanged() -> bool:
+        return open(orig, "rb").read() == pristine
+
+    # ③ 纯 fork：铸新 id，原 transcript 逐字节不动
+    rf, fork_sid, _ = _rw_run(cwd, ["--resume", sid, "--fork-session"])
+    ok &= check("--fork-session 铸新 session id", rf.returncode == 0 and bool(fork_sid) and fork_sid != sid,
+                f"exit={rf.returncode} new={fork_sid}")
+    ok &= check("--fork-session 不动原 transcript（逐字节）", unchanged(), f"{len(pristine)} byte(s)")
+
+    # ④ 截断 fork：#282 的主路线 —— 只保留锚点及之前，轮2 必须从上下文里彻底消失
+    rt, trunc_sid, _ = _rw_run(cwd, ["--resume", sid, "--resume-session-at", t1_last, "--fork-session"])
+    ok &= check("--resume-session-at + --fork-session 启动成功并铸新 id",
+                rt.returncode == 0 and bool(trunc_sid) and trunc_sid not in (sid, fork_sid),
+                f"exit={rt.returncode} new={trunc_sid} stderr={rt.stderr.strip()[:80]!r}")
+    ok &= check("截断 fork 同样不动原 transcript", unchanged(), f"{len(pristine)} byte(s)")
+    if trunc_sid:
+        tpath = os.path.join(proj, trunc_sid + ".jsonl")
+        tuuids = [r.get("uuid") for r in _chain_rows(tpath)] if os.path.isfile(tpath) else []
+        ok &= check("截断副本保留了锚点及之前（轮1 在）", t1_last in tuuids,
+                    f"{len(tuuids)} chain entries, anchor present={t1_last in tuuids}")
+        ok &= check("截断副本丢掉了锚点之后（轮2 不在）", t2_prompt not in tuuids,
+                    f"dropped turn-2 prompt {t2_prompt[:8]}… present={t2_prompt in tuuids}")
+        ok &= check("截断副本在锚点后续写了新一轮（可继续对话）", len(tuuids) > tuuids.index(t1_last) + 1
+                    if t1_last in tuuids else False, f"{len(tuuids)} chain entries")
+        # blood line：fork 不写任何 lineage 字段（2.1.228 实证）。若将来 CLI 补上了，是良性漂移，
+        # 只留痕不判红 —— daemon 无论如何都得自己记账，多一个字段不会让既有逻辑变坏。
+        if os.path.isfile(tpath):
+            has_lineage = sid in open(tpath, encoding="utf-8").read()
+            print(f"     · fork lineage census: 原 sid 出现在 fork transcript 里 = {has_lineage}"
+                  f"（2.1.228 为 False —— 血缘只能 daemon 自己记）")
+
+    # ⑤ 锚点不存在时必须启动即拒（daemon 传了个陈旧 uuid 时要拿到明确失败，而不是静默全量重放）
+    rb, rb_sid, rb_frames = _rw_run(cwd, ["--resume", sid, "--resume-session-at",
+                                          "00000000-0000-4000-8000-000000000000", "--fork-session"])
+    # 拒绝形态：exit 1 + 一个 is_error 的 result 帧，且**没有 init 帧**（turn 根本没起来）。
+    # 不断言 stdout 为空 —— 用户自己的 SessionStart 钩子会在 stdout 上留 hook_started/hook_response 帧。
+    err_result = [j for j in rb_frames if j.get("type") == "result" and j.get("is_error")]
+    ok &= check("未知锚点 uuid → exit 1 且没有 init 帧（turn 未启动）",
+                rb.returncode == 1 and rb_sid is None,
+                f"exit={rb.returncode} init_sid={rb_sid}")
+    ok &= check("未知锚点在 stdout 上给出结构化 is_error result 帧",
+                bool(err_result) and err_result[0].get("subtype") == "error_during_execution",
+                f"{len(err_result)} error result(s), subtype="
+                f"{err_result[0].get('subtype') if err_result else 'none'}")
+    ok &= check("未知锚点的错误文案", "No message found with message.uuid of:" in rb.stderr,
+                repr(rb.stderr.strip())[:110])
+
+    # ⑥ --resume-drops-turn 护栏：声明「这次只丢弃哪一轮」，对不上就拒绝启动。
+    #    daemon 若要做「撤回上一轮」，这是防止连坐丢掉排队消息/后台通知的现成安全网。
+    rok, drop_sid, _ = _rw_run(cwd, ["--resume", sid, "--resume-session-at", t1_last,
+                                     "--resume-drops-turn", t2_prompt, "--fork-session"])
+    ok &= check("drops-turn 声明正确 → 放行", rok.returncode == 0 and bool(drop_sid),
+                f"exit={rok.returncode} stderr={rok.stderr.strip()[:80]!r}")
+    rno, _, _ = _rw_run(cwd, ["--resume", sid, "--resume-session-at", t1_last,
+                              "--resume-drops-turn", t1_prompt, "--fork-session"])
+    ok &= check("drops-turn 声明错误 → exit 1 拒绝启动", rno.returncode == 1,
+                f"exit={rno.returncode}")
+    ok &= check("drops-turn 拒绝文案", "Resume rejected by --resume-drops-turn" in rno.stderr,
+                repr(rno.stderr.strip())[:110])
+
+    # ⑦ 反直觉的那条：不带 --fork-session 的截断 resume **不重写文件，而是长出第二条分支**。
+    #    被丢弃的行还在盘上，锚点因此有了多个子节点 —— 线性回放 transcript 会同时渲染两条分支。
+    #    这条放最后跑，因为它是本场景里唯一会改动 seed 的操作。
+    rn, same_sid, _ = _rw_run(cwd, ["--resume", sid, "--resume-session-at", t1_last])
+    ok &= check("不带 fork 的截断 resume 沿用原 session id", rn.returncode == 0 and same_sid == sid,
+                f"exit={rn.returncode} sid={same_sid}")
+    after = _chain_rows(orig)
+    auuids = [r.get("uuid") for r in after]
+    kids = [r.get("uuid") for r in after if r.get("parentUuid") == t1_last]
+    ok &= check("原文件是追加而非重写（被丢弃的轮2 仍留在盘上）",
+                len(open(orig, "rb").read()) > len(pristine) and t2_prompt in auuids,
+                f"{len(pristine)} → {len(open(orig, 'rb').read())} byte(s), turn-2 retained={t2_prompt in auuids}")
+    ok &= check("锚点长出第二个子节点 = transcript 变成分支树（线性回放会重影）",
+                len(kids) >= 2, f"anchor has {len(kids)} child chain entries: {[k[:8] for k in kids]}")
+    return ok
+
+
 def scenario_skill() -> bool:
     print("── skill：Skill 装载的 transcript 注入行形状（issue #126 过滤前提）──")
     # daemon 的 TranscriptReplay/TranscriptPatcher 靠两点把 SKILL.md 全文挡在「用户气泡」外：
@@ -490,6 +690,29 @@ def scenario_skill() -> bool:
                             and c.get("tool_use_id") in use_ids for c in blocks(r))]
         ok &= check("launch ack is a tool_result row ('Launching skill: …')", bool(launches),
                     f"{len(launches)} row(s)")
+
+        # issue #253 搭车断言（不额外起会话）：TranscriptNoise 认的是成对的 <system-reminder> …
+        # </system-reminder>，且只在「整条都是块」时丢弃。标签改名 / 不闭合 = 判定静默失灵，注入
+        # 又会顶着「你」渲染。观察到 reminder 才断言，观察不到只报census（本轮 CLI 没注入而已）。
+        SR_OPEN, SR_CLOSE = "<system-reminder>", "</system-reminder>"
+        sr_rows = [r for r in rows if r.get("type") == "user" and SR_OPEN in json.dumps(r, ensure_ascii=False)]
+        pure = mixed = nested = 0
+        for r in sr_rows:
+            top = "\n".join(texts(r)).strip()
+            if SR_OPEN not in top:
+                nested += 1  # reminder 藏在 tool_result 里（isRealUserTurn 已挡）
+            elif top.startswith(SR_OPEN) and top.rsplit(SR_CLOSE, 1)[-1].strip() == "" and SR_CLOSE in top:
+                pure += 1    # 整条都是注入 —— TranscriptNoise.isPureSystemReminder 该丢弃的那类
+            else:
+                mixed += 1   # 注入 + 真实文本混排 —— 保守取向下整条保留
+        print(f"     · system-reminder census: {len(sr_rows)} user row(s) — "
+              f"pure={pure} mixed={mixed} inside-tool_result={nested}")
+        if sr_rows:
+            unclosed = [r for r in sr_rows
+                        if json.dumps(r, ensure_ascii=False).count(SR_OPEN)
+                        != json.dumps(r, ensure_ascii=False).count(SR_CLOSE)]
+            ok &= check("every <system-reminder> is closed (pure-block detection premise, #253)",
+                        not unclosed, f"{len(unclosed)} unbalanced row(s)")
         return ok
     finally:
         p.kill()
@@ -626,7 +849,7 @@ def scenario_scope(mode: str = "default") -> bool:
         pass
     # mirror the REAL guest launch (ClaudeLauncher clean-room) so tool availability matches production and
     # the owner's private settings/hooks don't color the result
-    clean = ["--setting-sources", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']
+    clean = ["--strict-mcp-config", "--setting-sources="]
     p = Probe(["--permission-mode", mode, *clean], cwd=shared)
     try:
         p.send(
@@ -749,6 +972,94 @@ def scenario_settingsources() -> bool:
     return ok
 
 
+def scenario_cleanroom() -> bool:
+    print("── cleanroom：--strict-mcp-config（不带 --mcp-config）必须让会话零 MCP server（#115 最大的洞）──")
+    # clean-room 原来用 `--mcp-config '{"mcpServers":{}}'` 显式给一个空集合。这行 JSON 在 Windows 上活不下来：
+    # npm 装的 claude.cmd 只能经 cmd.exe 起，命令行被重新解析、引号被吃掉，claude 收到 {mcpServers:{}}，
+    # 当成相对路径 → "MCP config file not found: D:\...\{mcpServers:{}}"，飞书群会话在 Windows 上根本起不来。
+    # 现在改成「只给 --strict-mcp-config、一个 config 都不给」——语义等价且全是无引号单 token。
+    # 但这条等价是 CLI 行为，不是我们能在单测里证的：一旦漂移（strict 不再意味着空集合），guest / bridge
+    # 会话就会静默拿回 owner 已认证的 MCP 集成 —— #115 里最大的那个洞，且没有任何报错。所以钉在这里。
+    base = os.path.join(WORKDIR, "cleanroom")
+    shutil.rmtree(base, ignore_errors=True)
+    os.makedirs(os.path.join(base, ".claude"))
+    # 植入一个「共享目录自己的」.mcp.json —— guest 可写、常被提交进仓库，正是要挡的那类
+    with open(os.path.join(base, ".mcp.json"), "w") as fh:
+        json.dump({"mcpServers": {"probe-planted": {"command": "cat", "args": []}}}, fh)
+    with open(os.path.join(base, ".claude", "settings.json"), "w") as fh:
+        json.dump({"enableAllProjectMcpServers": True, "enabledMcpjsonServers": ["probe-planted"]}, fh)
+
+    def servers(extra):
+        """会话 init 行报告的 mcp_servers 名单（None = 没等到 init）。"""
+        p = Probe([*extra, "--permission-mode", "default"], cwd=base)
+        try:
+            p.send("Reply with exactly CR_DONE.")  # init 只在开始处理第一轮时才吐
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                init = [j for j in p.raw if j.get("type") == "system" and j.get("subtype") == "init"]
+                if init:
+                    return [m.get("name") for m in init[0].get("mcp_servers", [])]
+                time.sleep(0.3)
+            return None
+        finally:
+            p.kill()
+
+    loaded = servers([])  # 对照组：不加 flag 时植入的 server 确实会被加载（否则本场景什么也没证）
+    # Isolate the contract under test: settings sources remain enabled here, so a zero-server result must
+    # come from --strict-mcp-config itself rather than from suppressing the project setting that enables it.
+    clean = servers(["--strict-mcp-config"])
+
+    ok = True
+    ok &= check("对照：不加 flag 时共享目录的 .mcp.json server 会加载（信号有效）",
+                bool(loaded) and "probe-planted" in loaded, str(loaded))
+    ok &= check("--strict-mcp-config（无 --mcp-config）→ 会话零 MCP server",
+                clean == [], f"mcp_servers={clean}（要求 []）")
+    return ok
+
+
+def scenario_entrypoint() -> bool:
+    print("── entrypoint：-p transcript 落盘打 sdk-cli 标记、picker 隐藏集合未漂移（issue #216 unhide 前提）──")
+    # daemon 的 unhide 闭环（TranscriptPatcher / SpawnedSessions / 空闲 reaper）做的是逐字节替换：
+    #   "entrypoint":"sdk-cli"  →  "entrypoint":"cli"
+    # 它 load-bearing 的两个上游事实：
+    #   ① CLI（≥2.1.90）给 -p 会话在 jsonl 记录上打上面这个精确拼写的标记（无空格、双引号）；
+    #   ② resume picker 的隐藏集合仍是 ["sdk-cli","sdk-ts","sdk-py"]（2.1.218 在 bundle 里实证），
+    #      且 "cli" 不在集合内 —— 替换后会话才真的现身。
+    # 任一漂移（标记改拼写/换字段/换值，或隐藏集合改名），unhide 就静默失效：手机端发起的会话
+    # 重新在桌面 `claude --resume` picker 里消失，daemon 侧不会有任何报错。
+    p = Probe(["--permission-mode", "bypassPermissions"])
+    sid = None
+    try:
+        p.send("Do not use any tools. Reply with exactly: ok")
+        ok = check("turn completed", p.wait_for("result"), "result arrived")
+        for j in p.raw:
+            if j.get("type") == "system" and j.get("subtype") == "init":
+                sid = j.get("session_id")
+        ok &= check("init carries session_id", bool(sid), f"{sid}")
+        try:
+            p.proc.stdin.close()  # EOF → 进程正常退出，把 transcript 刷盘
+            p.proc.wait(timeout=15)
+        except Exception:
+            pass
+    finally:
+        p.kill()
+    time.sleep(0.5)
+    import glob
+    matches = glob.glob(os.path.expanduser(f"~/.claude/projects/*/{sid}.jsonl")) if sid else []
+    ok &= check("transcript on disk", bool(matches), matches[0] if matches else "no ~/.claude/projects/*/<sid>.jsonl")
+    if matches:
+        text = open(matches[0], encoding="utf-8").read()
+        tag = '"entrypoint":"sdk-cli"'  # 与 TranscriptPatcher.SDK_TAG 逐字节一致
+        ok &= check("rows carry the exact sdk-cli tag (TranscriptPatcher 的替换目标)",
+                    tag in text, f"{text.count(tag)} row(s) tagged")
+    # picker 隐藏集合：三个 token 仍应出现在 CLI bundle 里（集合改名/移除 = 隐藏语义漂移，须重估闭环）
+    data = open(os.path.realpath(CLAUDE), "rb").read()
+    missing = [t.decode() for t in (b"sdk-cli", b"sdk-ts", b"sdk-py") if t not in data]
+    ok &= check("picker hidden-set tokens still in the CLI bundle", not missing,
+                "sdk-cli / sdk-ts / sdk-py all present" if not missing else f"missing: {missing}")
+    return ok
+
+
 def main():
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
     version = subprocess.run([CLAUDE, "--version"], capture_output=True, text=True).stdout.strip()
@@ -758,7 +1069,8 @@ def main():
         "task": scenario_task, "workflow": scenario_workflow, "lock": scenario_lock,
         "fgtask": scenario_fgtask, "bgcontinue": scenario_bgcontinue, "skill": scenario_skill,
         "scope": scenario_scope, "scope_acceptedits": scenario_scope_acceptedits,
-        "settingsources": scenario_settingsources,
+        "settingsources": scenario_settingsources, "cleanroom": scenario_cleanroom,
+        "entrypoint": scenario_entrypoint, "rewind": scenario_rewind,
     }
     run = scenarios.values() if which == "all" else [scenarios[which]]
     results = [fn() for fn in run]

@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.SystemBackHandler
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
@@ -67,13 +68,20 @@ fun CollaboratorPickerPage(
     onBack: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    // LIFO: the host sheet (PocketSheet) already registered a back handler that dismisses the WHOLE
+    // sheet. This page is the sheet's second page, so it registers later and wins — back pops to the
+    // draft instead of throwing the half-filled draft away.
+    SystemBackHandler(enabled = true) { onBack() }
     Column(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("‹ ", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(onClick = onBack).padding(end = 4.dp))
             Text(stringResource(Res.string.co_picker_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         }
-        val live = filterCollaborators(contacts, query)
-        if (contacts.none { !it.removed }) {
+        // eligibility, not merely "still connected": a REVIEW contact is a colleague's daemon and
+        // binding a handoff to it is refused by the daemon (§13.3) — never offer it as a recipient
+        val recipients = handoffRecipients(contacts)
+        val live = filterCollaborators(recipients, query)
+        if (recipients.isEmpty()) {
             // first-run empty: the whole mental model in one sentence, then a single primary
             Column(Modifier.padding(top = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 CollaboratorGroupBox {
@@ -100,7 +108,7 @@ fun CollaboratorPickerPage(
         }
         Column(Modifier.padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             CollaboratorSearchField(query) { query = it }
-            val recent = if (query.isBlank()) recentCollaborators(contacts) else emptyList()
+            val recent = if (query.isBlank()) recentHandoffRecipients(contacts) else emptyList()
             if (recent.isNotEmpty()) {
                 Column {
                     CollaboratorGroupLabel(stringResource(Res.string.co_recent))
@@ -141,6 +149,10 @@ fun ConnectColleagueScreen(
     onBackToHandoff: () -> Unit,
     onClose: () -> Unit,
 ) {
+    // full-screen route with no handler of its own = Android back leaves the APP. Registered here in the
+    // component (not at a mount point) so both hosts — Settings and the chat's draft detour — are covered,
+    // and it does exactly what the ‹ does.
+    SystemBackHandler(enabled = true) { onClose() }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
@@ -342,6 +354,11 @@ fun CollaboratorsScreen(
     onBack: () -> Unit,
 ) {
     var detail by remember { mutableStateOf<Collaborator?>(null) }
+    // #257: this is a full-screen route off Settings, and the root handler is disabled at that depth —
+    // without this, the Android edge gesture left the app. Registered BEFORE the detail early-return so
+    // the detail screen's own handler (registered later, hence LIFO-first) pops to the list, and only the
+    // second back reaches here and returns to Settings.
+    SystemBackHandler(enabled = true) { onBack() }
     // keep the detail view pinned to the live list (a remove flips the row to its terminal state)
     val liveDetail = detail?.let { d -> contacts.firstOrNull { it.deviceId == d.deviceId } ?: d }
     if (liveDetail != null) {
@@ -418,6 +435,9 @@ fun CollaboratorDetailScreen(
     onRemove: () -> Unit,
     onBack: () -> Unit,
 ) {
+    // the contact detail is inner state of [CollaboratorsScreen], so back must pop it to the list first;
+    // this handler is registered after that screen's, so LIFO gives it the first refusal.
+    SystemBackHandler(enabled = true) { onBack() }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clickable(onClick = onBack), contentAlignment = Alignment.Center) { Text("‹", color = Tok.tx2, fontSize = 20.sp) }

@@ -3,6 +3,7 @@ package dev.ccpocket.protocol
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AgentModelCompatibilityTest {
@@ -35,6 +36,17 @@ class AgentModelCompatibilityTest {
         assertTrue(isModelCompatibleWithAgent(AgentKind.CLAUDE, "deepseek-chat"))
         assertTrue(isModelCompatibleWithAgent(AgentKind.CLAUDE, "gpt-5.5")) // LiteLLM-fronted ids are legitimate
         assertTrue(isModelCompatibleWithAgent(AgentKind.CLAUDE, "openrouter/anthropic/claude-4.5")) // slashed gateway ids too
+    }
+
+    @Test
+    fun zcode_accepts_provider_model_refs_only() {
+        assertFalse(isModelCompatibleWithAgent(AgentKind.ZCODE, "glm-5"))
+        assertTrue(isModelCompatibleWithAgent(AgentKind.ZCODE, "zai/glm-5"))
+        assertFalse(isModelCompatibleWithAgent(AgentKind.ZCODE, "sonnet"))
+        assertFalse(isModelCompatibleWithAgent(AgentKind.ZCODE, " OPUS "))
+        assertFalse(isModelCompatibleWithAgent(AgentKind.ZCODE, "  "))
+        assertEquals("zai/glm-5", compatibleModelForAgent(AgentKind.ZCODE, " zai/glm-5 "))
+        assertNull(compatibleModelForAgent(AgentKind.ZCODE, " glm-5 "))
     }
 
     @Test

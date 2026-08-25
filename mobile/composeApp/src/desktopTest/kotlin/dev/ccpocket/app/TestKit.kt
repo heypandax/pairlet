@@ -22,3 +22,15 @@ internal fun ComposeUiTest.assertPresent(text: String, substring: Boolean = fals
  *  resource the UI renders, so tests stay green in any JVM locale instead of pinning English literals. */
 internal fun str(res: StringResource, vararg args: Any): String =
     runBlocking { if (args.isEmpty()) getString(res) else getString(res, *args) }
+
+/**
+ * A REAL daemon identity key for invite fixtures, base64url.
+ *
+ * Generated rather than written by hand because the collaborator-invite decoder now validates what it is
+ * given as an actual P-256 public key: the fingerprint it shows is an identity a human is asked to trust,
+ * and a placeholder would be fingerprinted into equally convincing words for a key no handshake could
+ * ever complete. Generated once per JVM, so the cost is a single keygen per test run.
+ */
+internal val TEST_DAEMON_PUB: String by lazy {
+    dev.ccpocket.app.util.B64Url.encode(dev.ccpocket.protocol.e2e.E2ECrypto.generateKeyPair().publicRaw)
+}

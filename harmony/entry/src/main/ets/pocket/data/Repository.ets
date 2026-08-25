@@ -7,6 +7,7 @@ import { RelayConnection } from '../net/RelayConnection';
 import { Push } from '../net/Push';
 import { DEFAULT_RELAY, Pairing } from '../net/Pairing';
 import { PairedDaemon, Store } from '../store/Store';
+import { DEMO_PLAIN_CHUNKS, DEMO_REPLY_CHUNKS, demoAsk, demoDirs, demoHistory, demoSessions } from './DemoData';
 import { mergeHistory } from './TranscriptMerge';
 import { ThemeMode, Tok, fmtSize } from '../ui/Theme';
 import { b64Encode, b64Len } from '../util/B64';
@@ -125,6 +126,7 @@ export class Repository {
   activity: string = ''; // 回合内当前活动（思考中 / 工具名 / 回复中），空 = 静默
   currentAsk: PermissionAsk | null = null;
   selfTestLine: string = ''; // 开发期自检结果（配对页展示）
+  demo: boolean = false;     // 免配对演示模式（应用商店审核 + 首次体验预览）
 
   // ── 设置 ──
   themeMode: ThemeMode = 'dark';
@@ -313,6 +315,40 @@ export class Repository {
     this.screen = 'pairing';
   }
 
+  // ═══ 演示模式（免配对；对齐 mobile 端 Demo 模式立意） ═══
+
+  /** 进入演示：示例数据直接喂状态机，全程无 relay / daemon 连接（conn 保持 null）。 */
+  enterDemo(): void {
+    this.demo = true;
+    this.demoTurn = 0;
+    this.connState = 'online';
+    this.peerOnline = true;
+    this.statusLine = '';
+    this.directories = demoDirs();
+    this.screen = 'projects';
+  }
+
+  /** 退出演示：清空演示态，回配对页（或已有绑定时回项目页）。 */
+  exitDemo(): void {
+    if (!this.demo) return;
+    this.demo = false;
+    this.directories = [];
+    this.sessions = [];
+    this.messages = [];
+    this.convoId = null;
+    this.currentSessionId = null;
+    this.currentAsk = null;
+    this.executing = false;
+    this.activity = '';
+    if (this.paired === null) {
+      this.screen = 'pairing';
+      this.connState = 'offline';
+      this.peerOnline = false;
+    } else {
+      this.screen = 'projects';
+    }
+  }
+
   /** 系统返回键：应用内导航优先（chat→sessions→projects），项目页/首配页才放行退出。 */
   handleBack(): boolean {
     if (this.screen === 'chat') {
@@ -332,6 +368,10 @@ export class Repository {
 
   /** 解配当前电脑：还有别的绑定就切过去，没有才回配对页。 */
   unpair(): void {
+    if (this.demo) {
+      this.exitDemo();
+      return;
+    }
     this.intentionalDown = true;
     this.conn?.disconnect();
     this.conn = null;
@@ -442,6 +482,10 @@ export class Repository {
     this.currentWorkdir = dir.path;
     this.sessions = [];
     this.screen = 'sessions';
+    if (this.demo) {
+      this.sessions = demoSessions(dir.path);
+      return;
+    }
     this.conn?.send(frameListSessions(dir.path));
   }
 
@@ -470,6 +514,15 @@ export class Repository {
     this.mode = sessionId === null ? (this.defaultMode === 'auto' ? 'default' : this.defaultMode) : 'default';
     this.permissionMode = sessionId === null && this.defaultMode === 'auto' ? 'auto' : '';
     this.screen = 'chat';
+    if (this.demo) {
+      this.convoId = 'demo-convo';
+      this.currentSessionId = sessionId ?? 'demo-live-0001';
+      this.messages = demoHistory();
+      this.model = 'sonnet';
+      this.contextWindow = 200000;
+      this.contextUsed = 62000;
+      return;
+    }
     this.conn?.send(frameOpenSession(this.currentWorkdir, sessionId, null, this.mode));
   }
 
@@ -537,7 +590,55 @@ export class Repository {
     pending.promptId = promptId;
     this.pendingPrompt = pending;
     this.promptResendArmed = false;
+    if (this.demo) {
+      m.delivered = true;
+      this.pendingPrompt = null;
+      this.demoRespond();
+      return;
+    }
     this.conn?.send(frameSendPrompt(convoId, outText, promptId, images));
+  }
+
+  // ── 演示回合（假流式：thinking → 授权卡（首回合）→ 分片回复） ──
+
+  private demoTurn = 0;
+
+  private demoRespond(): void {
+    this.activity = '思考中…';
+    const first = this.demoTurn === 0;
+    this.demoTurn = this.demoTurn + 1;
+    setTimeout(() => {
+      if (!this.demo) return;
+      if (first) {
+        this.currentAsk = demoAsk();
+        this.activity = '等待授权';
+      } else {
+        this.demoStream(DEMO_PLAIN_CHUNKS);
+      }
+    }, 700);
+  }
+
+  private demoStream(chunks: string[]): void {
+    const m = new ChatMessage();
+    m.id = `demo-r${this.pendingIdSeq++}`;
+    m.role = 'assistant';
+    m.streaming = true;
+    this.activity = '回复中…';
+    this.messages = [...this.messages, m];
+    let i = 0;
+    const step = (): void => {
+      if (!this.demo) return;
+      if (i < chunks.length) {
+        m.text = m.text + chunks[i];
+        i = i + 1;
+        setTimeout(step, 350);
+      } else {
+        m.streaming = false;
+        this.executing = false;
+        this.activity = '';
+      }
+    };
+    setTimeout(step, 300);
   }
 
   // ═══ 会话指令（/model /effort /compact /simplify /clear——daemon 拦截或透传给 agent） ═══
@@ -875,8 +976,22 @@ export class Repository {
     if (decision === 'allow' && remember && ask.rule !== null && !this.allowRules.includes(ask.rule)) {
       this.allowRules = [...this.allowRules, ask.rule];
     }
-    this.conn?.send(framePermissionVerdict(convoId, ask.askId, decision, remember, answers));
     this.currentAsk = null;
+    if (this.demo) {
+      if (decision === 'allow') {
+        const t = new ChatMessage();
+        t.id = `demo-t${this.pendingIdSeq++}`;
+        t.role = 'tool';
+        t.tool = ask.tool;
+        t.text = ask.inputPreview;
+        this.messages = [...this.messages, t];
+        this.demoStream(DEMO_REPLY_CHUNKS);
+      } else {
+        this.demoStream(['好的，先跳过这一步；需要时再告诉我。']);
+      }
+      return;
+    }
+    this.conn?.send(framePermissionVerdict(convoId, ask.askId, decision, remember, answers));
   }
 
   /** 删除一条"始终允许"规则（设置页）；daemon 侧同步遗忘，下次同类操作重新询问。 */

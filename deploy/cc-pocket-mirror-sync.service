@@ -1,0 +1,15 @@
+[Unit]
+Description=cc-pocket release mirror sync (GitHub -> /var/www/cc-pocket-dl)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/cc-pocket-mirror/mirror-sync.sh
+# a cold sync moves ~400MB from GitHub; give it room but never let a wedged download run forever
+TimeoutStartSec=30min
+# background hygiene: the relay's data plane on this box always wins over a mirror refresh
+Nice=10
+IOSchedulingClass=idle
+PrivateTmp=yes
+ProtectHome=yes

@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.update
 
+import dev.ccpocket.daemon.DEFAULT_RELAY
+import dev.ccpocket.daemon.SingleInstance
 import dev.ccpocket.daemon.service.ServiceInstaller
 import dev.ccpocket.daemon.util.DaemonVersion
 import dev.ccpocket.daemon.util.logger
@@ -199,21 +201,68 @@ object UpdateService {
 
     /** Restart the background service so the new binary takes over (CLI path; the in-daemon auto path
      *  just exits and lets KeepAlive/Restart=always relaunch through the flipped symlink). */
-    fun restartService(newLauncher: Path) {
+    fun restartService(newLauncher: Path, pairPort: Int = 8799) {
         val os = System.getProperty("os.name").lowercase()
         when {
             os.contains("mac") -> {
                 val uid = ProcessBuilder("id", "-u").start().inputStream.bufferedReader().readText().trim()
                 ProcessBuilder("launchctl", "kickstart", "-k", "gui/$uid/dev.ccpocket.daemon").inheritIO().start().waitFor()
             }
-            os.contains("win") -> {
-                // point the logon task at the new exe (default args — custom --claude-bin users re-run
-                // service-install themselves), then bounce it
-                ServiceInstaller.install(newLauncher.toString(), listOf("run", "--relay", dev.ccpocket.daemon.DEFAULT_RELAY), apply = true)
-                runCatching { ProcessBuilder("schtasks", "/End", "/TN", ServiceInstaller.WINDOWS_TASK).start().waitFor() }
-                ProcessBuilder("powershell.exe", "-NoProfile", "-Command", "Start-ScheduledTask -TaskName '${ServiceInstaller.WINDOWS_TASK}'").start().waitFor()
-            }
+            os.contains("win") -> restartWindowsService(newLauncher, pairPort)
             else -> ProcessBuilder("systemctl", "--user", "restart", "cc-pocket-daemon").inheritIO().start().waitFor()
+        }
+    }
+
+    /**
+     * Windows' Scheduled Task runs a WScript which intentionally detaches the daemon to avoid a console
+     * window. Consequently `schtasks /End` only ends an already-finished wrapper and cannot stop the old
+     * daemon. The handoff has to be ordered explicitly:
+     *
+     *  1. register the task on the new executable WITHOUT starting it;
+     *  2. stop the process that owns the daemon's singleton pair port;
+     *  3. start the newly registered task exactly once and verify that it claims the port.
+     *
+     * The effect lambdas make this ordering regression-testable on non-Windows CI.
+     */
+    internal fun restartWindowsService(
+        newLauncher: Path,
+        pairPort: Int,
+        register: (Path, Int) -> Unit = { launcher, port ->
+            val result = ServiceInstaller.windows(
+                launcher.toString(),
+                listOf("run", "--relay", DEFAULT_RELAY, "--pair-port", port.toString()),
+                apply = true,
+                startNow = false,
+            )
+            check(!result.startsWith("could not register")) { result }
+        },
+        stopOld: (Int) -> Boolean = SingleInstance::stopRunning,
+        startNew: () -> Unit = ::startWindowsTask,
+        awaitNew: (Int) -> Boolean = SingleInstance::waitUntilRunning,
+    ) {
+        register(newLauncher, pairPort)
+        check(stopOld(pairPort)) {
+            "could not stop the old daemon on 127.0.0.1:$pairPort — the new task is registered; " +
+                "close the old daemon and run: schtasks /Run /TN ${ServiceInstaller.WINDOWS_TASK}"
+        }
+        startNew()
+        check(awaitNew(pairPort)) {
+            "the updated daemon did not start on 127.0.0.1:$pairPort — inspect " +
+                "%USERPROFILE%\\.cc-pocket\\logs\\daemon.log, then run: " +
+                "schtasks /Run /TN ${ServiceInstaller.WINDOWS_TASK}"
+        }
+    }
+
+    private fun startWindowsTask() {
+        val proc = ProcessBuilder(
+            "powershell.exe", "-NoProfile", "-Command",
+            "Start-ScheduledTask -TaskName '${ServiceInstaller.WINDOWS_TASK}'",
+        ).redirectErrorStream(true).start()
+        val out = proc.inputStream.bufferedReader().readText().trim()
+        val code = proc.waitFor()
+        check(code == 0) {
+            "could not start Scheduled Task '${ServiceInstaller.WINDOWS_TASK}' (exit $code)" +
+                out.takeIf { it.isNotEmpty() }?.let { ":\n$it" }.orEmpty()
         }
     }
 

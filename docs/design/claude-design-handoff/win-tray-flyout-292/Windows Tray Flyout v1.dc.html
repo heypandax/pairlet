@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+  a { color: #B4522F; text-decoration: none; }
+  a:hover { color: #8E3F23; }
+</style>
+</helmet>
+
+<div style="position:fixed;inset:0;z-index:-1;background:#EDEBE6"></div>
+
+<div style="width:1920px;margin:0 auto;padding:64px 72px 96px;font-family:'Public Sans','Noto Sans SC',system-ui,sans-serif;color:#1B1A18">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:940px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · desktop 2.0 · windows notification-area flyout · v1</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">Windows 托盘浮层 · Tray Flyout</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans','Noto Sans SC',sans-serif;color:#54504A;text-wrap:pretty">The mac menu-bar popover ported verbatim to Windows reads as an orphan windowlet floating near the tray — Windows has no menu-bar metaphor to hang it on. Same content model, new carrier: a notification-area flyout in the Windows 11 idiom, anchored to our tray icon, flush with the taskbar corner. No pointer arrow, 8px window radius, 4px control radius, 12px screen margins, acrylic approximated with layered fills rather than real Mica.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div>
+        <div style="color:#1B1A18">flyout</div>
+        <div>360 × adaptive</div>
+      </div>
+      <div>
+        <div style="color:#1B1A18">windows only</div>
+        <div>macos unchanged</div>
+      </div>
+      <div>
+        <div style="color:#1B1A18">rows 44 / 48</div>
+        <div>no scroll · no blur</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ A · FOUR STATES IN CONTEXT ═══════════ -->
+  <div style="padding-top:46px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">A</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Four states, anchored</h2>
+      <span style="font:400 13.5px/1 'Public Sans','Noto Sans SC',sans-serif;color:#7C776F">Each frame is a 1120 × 660 crop of the bottom-right of a 1920 × 1080 display at 1:1. The desktop fill is a placeholder for a real wallpaper.</span>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:56px">
+
+      <div id="1a" style="display:flex;gap:44px;align-items:flex-start">
+        <div style="flex:none;width:1120px">
+        <div style="display:flex;align-items:baseline;gap:10px;padding-bottom:12px">
+          <span style="font:600 11px/1 'JetBrains Mono',monospace;color:#fff;background:#B4522F;padding:5px 7px;border-radius:4px">1a</span>
+          <div style="font:600 16px/1.2 'Public Sans',sans-serif">Default · 2 needs you, 4 running</div>
+          <span style="font:400 12.5px/1.3 'Public Sans','Noto Sans SC',sans-serif;color:#7C776F">flyout height 432</span>
+        </div>
+        <dc-import name="WinTrayFlyoutDevice" state="default" hint-size="1120px,660px"></dc-import>
+        </div>
+        <p style="flex:1;min-width:0;margin:44px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">Urgency owns the top of the surface: terracotta section label, count pill, and the only filled buttons on screen. Running rows below carry no button at all, so the eye lands on the two decisions first. The tray icon holds a matching badge, which is what makes the flyout feel attached to it rather than merely near it.</p>
+      </div>
+
+      <div id="1b" style="display:flex;gap:44px;align-items:flex-start">
+        <div style="flex:none;width:1120px">
+        <div style="display:flex;align-items:baseline;gap:10px;padding-bottom:12px">
+          <span style="font:600 11px/1 'JetBrains Mono',monospace;color:#fff;background:#B4522F;padding:5px 7px;border-radius:4px">1b</span>
+          <div style="font:600 16px/1.2 'Public Sans',sans-serif">Calm · nothing needs you</div>
+          <span style="font:400 12.5px/1.3 'Public Sans','Noto Sans SC',sans-serif;color:#7C776F">flyout height 213</span>
+        </div>
+        <dc-import name="WinTrayFlyoutDevice" state="calm" hint-size="1120px,660px"></dc-import>
+        </div>
+        <p style="flex:1;min-width:0;margin:44px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">The NEEDS YOU section is absent, not emptied — no zero pill, no "nothing to approve" shell. The flyout shrinks to its content and stays bottom-anchored, so the distance from the taskbar never changes. Terracotta disappears from the surface entirely; calm should look calm.</p>
+      </div>
+
+      <div id="1c" style="display:flex;gap:44px;align-items:flex-start">
+        <div style="flex:none;width:1120px">
+        <div style="display:flex;align-items:baseline;gap:10px;padding-bottom:12px">
+          <span style="font:600 11px/1 'JetBrains Mono',monospace;color:#fff;background:#B4522F;padding:5px 7px;border-radius:4px">1c</span>
+          <div style="font:600 16px/1.2 'Public Sans',sans-serif">Idle · no sessions at all</div>
+          <span style="font:400 12.5px/1.3 'Public Sans','Noto Sans SC',sans-serif;color:#7C776F">flyout height 149</span>
+        </div>
+        <dc-import name="WinTrayFlyoutDevice" state="idle" hint-size="1120px,660px"></dc-import>
+        </div>
+        <p style="flex:1;min-width:0;margin:44px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">One quiet line, one dim dot, and the footer. No illustration, no call to action, no "start a session" button — the flyout is a status glance, and the place to start work is the app the footer opens. Fleet summary switches to 无会话 so the header still answers the question the user opened it with.</p>
+      </div>
+
+      <div id="1d" style="display:flex;gap:44px;align-items:flex-start">
+        <div style="flex:none;width:1120px">
+        <div style="display:flex;align-items:baseline;gap:10px;padding-bottom:12px">
+          <span style="font:600 11px/1 'JetBrains Mono',monospace;color:#fff;background:#B4522F;padding:5px 7px;border-radius:4px">1d</span>
+          <div style="font:600 16px/1.2 'Public Sans',sans-serif">Attention-heavy · 3 shown, 2 waiting</div>
+          <span style="font:400 12.5px/1.3 'Public Sans','Noto Sans SC',sans-serif;color:#7C776F">flyout height 472 · ceiling</span>
+        </div>
+        <dc-import name="WinTrayFlyoutDevice" state="attention" hint-size="1120px,660px"></dc-import>
+        </div>
+        <p style="flex:1;min-width:0;margin:44px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">Three approvals is the cap; the fourth and fifth become a single accent row that hands off to the approval centre instead of growing the flyout into a scroller. This is the tallest the surface is allowed to get — 3 needs-you plus 6 running rows still clears the taskbar with room to spare.</p>
+      </div>
+
+      </div>
+  </div>
+
+  <!-- ═══════════ B · ROW DETAIL ═══════════ -->
+  <div style="padding-top:64px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">B</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Row detail &amp; closability</h2>
+      <span style="font:400 13.5px/1 'Public Sans','Noto Sans SC',sans-serif;color:#7C776F">Shown at 1.5× for legibility. Real size is the 360 px flyout above.</span>
+    </div>
+
+    <div style="display:flex;gap:64px;align-items:flex-start">
+
+      <div id="1e" style="flex:none">
+        <div style="display:flex;align-items:baseline;gap:10px;padding-bottom:14px">
+          <span style="font:600 11px/1 'JetBrains Mono',monospace;color:#fff;background:#B4522F;padding:5px 7px;border-radius:4px">1e</span>
+          <div style="font:600 16px/1.2 'Public Sans',sans-serif">NEEDS-YOU row · rest / hover / focus</div>
+        </div>
+        <div style="width:540px;height:330px;overflow:hidden">
+          <div style="transform:scale(1.5);transform-origin:top left;width:360px">
+            <dc-import name="WinTrayFlyoutDevice" piece="rows" hint-size="360px,180px"></dc-import>
+          </div>
+        </div>
+        <p style="margin:16px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;max-width:520px;text-wrap:pretty">Hover raises the row fill to 5.5% white and adds a 2 px terracotta edge on the left — the row, not the button, is what lights up, so pointer position is never ambiguous when two approvals sit adjacent. Allow warms one step and gains a soft accent halo; Deny gains border weight only, keeping the destructive action reachable but never the brightest thing in the row. Keyboard focus uses a light outline on the default action instead of the row fill, so tabbing reads differently from pointing.</p>
+      </div>
+
+      <div id="1f" style="flex:none">
+        <div style="display:flex;align-items:baseline;gap:10px;padding-bottom:14px">
+          <span style="font:600 11px/1 'JetBrains Mono',monospace;color:#fff;background:#B4522F;padding:5px 7px;border-radius:4px">1f</span>
+          <div style="font:600 16px/1.2 'Public Sans',sans-serif">Overflow · 隐藏此浮层</div>
+        </div>
+        <div style="width:540px;height:330px;overflow:hidden">
+          <div style="transform:scale(1.5);transform-origin:top left;width:360px">
+            <dc-import name="WinTrayFlyoutDevice" piece="menu" hint-size="360px,180px"></dc-import>
+          </div>
+        </div>
+        <p style="margin:16px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;max-width:520px;text-wrap:pretty">The exit is in the header, one click deep, and it is the first item — nobody should have to hunt for the way to make this surface stop appearing. 隐藏此浮层 writes the existing settings toggle; 通知设置… opens that pane in the app. The caption states what survives the hiding, because a badge on the tray icon is the difference between hidden and uninstalled.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════ C · SPEC ═══════════ -->
+  <div style="padding-top:64px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">C</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Build notes</h2>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 44px">
+
+      <div>
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Why not the mac popover</div>
+        <div style="border-top:1px solid #C9C5BD">
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans','Noto Sans SC',sans-serif">The pointer arrow is gone</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">A beak points at a menu-bar item. Windows system flyouts do not have one; they sit in the corner and are understood by position. Keeping it was the single loudest tell that the window was ported.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans','Noto Sans SC',sans-serif">Corner-anchored, not icon-centred</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">12 px from the right screen edge and 12 px above the taskbar, matching clock and volume. It does not track the tray icon's x-position, which is what made the ported version drift into open space.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #C9C5BD">
+            <div style="font:600 13px/1.4 'Public Sans','Noto Sans SC',sans-serif">Squarer controls</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">8 px on the window, 4 px on buttons and chips. Our mac build uses softer radii throughout; on Windows the tighter control radius is what makes the buttons read as native.</p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Faking acrylic</div>
+        <div style="border-top:1px solid #C9C5BD">
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans','Noto Sans SC',sans-serif">Three layers, no blur</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">Base fill <span style="font:400 12px/1 'JetBrains Mono',monospace">#16171B</span>, a 96 px top-down white wash at 3.5%, and a 1 px highlight line across the very top edge. Border is white at 8.5%. Nothing depends on what is behind the window, so Compose renders it identically with or without composition effects.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans','Noto Sans SC',sans-serif">Shadow carries the lift</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">A wide soft drop plus a tight contact shadow. Since the surface cannot blur the wallpaper, separation has to come from the shadow — it is heavier than the mac popover's on purpose.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #C9C5BD">
+            <div style="font:600 13px/1.4 'Public Sans','Noto Sans SC',sans-serif">Motion</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">In: 250 ms, 22 px rise plus fade, ease-out. Out: 150 ms fade, no travel. Same curve family as the system flyouts; dismiss on click-outside, Esc, and tray-icon re-click.</p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Density &amp; tokens</div>
+        <div style="border-top:1px solid #C9C5BD">
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans','Noto Sans SC',sans-serif">48 / 44</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">Needs-you rows are 48 px (two lines: title + the tool being requested); running rows are 44 px (one line). Every text run truncates at one line — the flyout never wraps and never scrolls in the happy path.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+            <div style="font:600 13px/1.4 'Public Sans','Noto Sans SC',sans-serif">Caps: 3 and 6</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">Three approvals, six running sessions, then the counts move into the overflow row and the footer. Content model is unchanged from mac — only the carrier and the paddings are Windows-specific.</p>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid #C9C5BD">
+            <div style="font:600 13px/1.4 'Public Sans','Noto Sans SC',sans-serif">No new tokens</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#6E695F;text-wrap:pretty">Terracotta <span style="font:400 12px/1 'JetBrains Mono',monospace">#E2795A</span> for urgency only, green <span style="font:400 12px/1 'JetBrains Mono',monospace">#7ECBA0</span> for running, Inter for UI, JetBrains Mono for machine names and elapsed. The <span style="font:400 12px/1 'JetBrains Mono',monospace">#16171B</span> flyout fill is one step up from the app's <span style="font:400 12px/1 'JetBrains Mono',monospace">#141417</span> surface — same family, reads as floating.</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="margin-top:34px;padding:16px 18px;border:1px solid #C9C5BD;border-left:3px solid #B4522F;background:#E5E2DB">
+      <div style="font:600 12.5px/1.4 'Public Sans','Noto Sans SC',sans-serif">Open questions</div>
+      <p style="margin:7px 0 0;font:400 12.5px/1.6 'Public Sans','Noto Sans SC',sans-serif;color:#54504A;max-width:1100px;text-wrap:pretty">Session titles, machine names and elapsed values are fixtures. Wallpaper is a placeholder fill — I can't generate imagery, so a real screenshot should be dropped in before this goes to review. Taskbar glyphs are stand-ins for real Windows iconography. macOS keeps its pointer-arrow dropdown unchanged; nothing here touches it.</p>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

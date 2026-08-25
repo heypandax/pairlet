@@ -134,6 +134,23 @@ class RepoDesktopModelRecentTest {
         }
     }
 
+    @Test
+    fun openingTheSameProjectPinPublishesAFreshListRevealEachTime() {
+        val (repo, m) = demoModel()
+        val dir = DemoData.dirs()[1]
+        val pin = DkProjectPin(dir.path, dir.name)
+
+        m.openProjectPin(pin)
+        val first = requireNotNull(m.projectListReveal)
+        assertEquals(dir.path, first.path)
+        assertEquals(dir.path, repo.sessionsDir.value)
+
+        m.openProjectPin(pin)
+        val second = requireNotNull(m.projectListReveal)
+        assertEquals(dir.path, second.path)
+        assertTrue(second.generation > first.generation, "reopening the same pin must remain observable")
+    }
+
     // issue #115: a guest's shared folder — the daemon stamps sharedBy/shareExpiresAt on its
     // DirectoryEntry — must keep that provenance on its RECENT group (visits carry only account+path,
     // so the group re-derives it from the directory list). Ordinary local dirs stay unstamped.

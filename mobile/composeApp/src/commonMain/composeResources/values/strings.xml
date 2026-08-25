@@ -3,21 +3,14 @@
     <!-- ── connect / pairing ─────────────────────────────────────── -->
     <string name="connect">Connect</string>
     <string name="paste_pair_link">paste ccpocket://pair link</string>
-    <string name="hide_advanced">Hide advanced</string>
-    <string name="advanced_direct_lan">Advanced · direct LAN</string>
     <string name="daemon_ws_url">daemon ws url</string>
     <string name="connect_direct">Connect direct</string>
     <string name="pairing_title">Connect your computer</string>
     <string name="pairing_subtitle">Pair this phone with the cc-pocket daemon on your computer.</string>
     <string name="scanning">scanning…</string>
-    <string name="tap_to_scan">tap to scan the QR</string>
-    <string name="or_enter_code">or enter the pairing code</string>
     <string name="run_code_prefix">Run</string>
     <string name="run_code_suffix">to get a code.</string>
-    <string name="hide">hide</string>
-    <string name="cant_scan_paste_link">can't scan? paste link</string>
     <string name="pair_from_link">Pair from link</string>
-    <string name="demo_cta">Try Demo · no computer needed</string>
     <string name="demo_banner">Demo mode · sample data</string>
     <!-- preview/recording mode (marketing/preview) -->
     <string name="preview_connecting">Connecting to your Mac…</string>
@@ -29,6 +22,7 @@
     <string name="reconnect_banner">Connection lost — reconnecting…</string>
     <string name="status_disconnected">disconnected</string>
     <string name="status_invalid_link">invalid pairing link</string>
+    <string name="status_review_invite_wrong_door">That\'s a review invite — add it under Review · Contacts, on the computer that should receive the reviews.</string>
     <string name="status_pairing">pairing…</string>
     <string name="status_pair_failed">pairing failed: %1$s</string>
     <string name="status_checking_network">checking network access…</string>
@@ -42,14 +36,12 @@
     <!-- ── connection-state UX (full-screen states + empty) ──────── -->
     <string name="conn_retry">Try again</string>
     <string name="conn_repair">Pair again</string>
-    <string name="conn_relay_unreachable_title">Can\'t reach the server</string>
-    <string name="conn_relay_unreachable_body">We can\'t reach CC Pocket\'s relay right now. Check your phone\'s internet and try again.</string>
     <string name="conn_computer_offline_title">Your computer is offline</string>
     <string name="conn_computer_offline_body">CC Pocket can\'t see your computer. Make sure it\'s awake and the cc-pocket app is running.</string>
     <string name="conn_computer_offline_hint">We\'ll reconnect automatically as soon as it\'s back.</string>
     <string name="conn_computer_offline_banner">Computer offline — waiting for it to come back…</string>
     <string name="conn_connecting_banner">Connecting to your computer…</string>
-    <string name="msg_pending_undelivered">Not delivered yet — will send once connected</string>
+    <string name="msg_pending_undelivered">Delivery not confirmed — will retry once connected</string>
     <string name="history_loading_earlier">Loading earlier messages…</string>
     <string name="history_earlier_seam">· earlier messages ·</string>
     <string name="msg_sending">Sending…</string>
@@ -60,16 +52,14 @@
     <string name="context_critical_caption">Context full — oldest turns will start dropping</string>
     <string name="open_session_timeout">Couldn\'t open the session — the computer didn\'t respond</string>
     <string name="turn_done_marker">done</string>
-    <string name="conn_pairing_invalid_title">Pairing expired</string>
-    <string name="conn_pairing_invalid_body">This phone is no longer paired with your computer. Pair again to reconnect.</string>
     <string name="dir_empty_title">No projects yet</string>
-    <string name="dir_empty_body">Open a folder with the cc-pocket CLI on your computer, then pull to refresh.</string>
+    <string name="dir_empty_body">This computer has no projects to open yet. Pick a folder to start your first session here.</string>
     <string name="dir_refresh">Refresh</string>
     <string name="dir_no_matches">No matches</string>
 
     <!-- ── directory browser ─────────────────────────────────────── -->
     <string name="exit">Exit</string>
-    <string name="filter_hint">filter…</string>
+    <string name="filter_hint">Filter projects</string>
     <string name="history_badge">history</string>
     <string name="dir_open_sessions">Open Sessions</string>
     <string name="dir_projects">Projects</string>
@@ -92,7 +82,41 @@
     <string name="switcher_all_projects">All projects</string>
     <string name="switcher_empty">No other sessions yet</string>
     <string name="switcher_open">Switch session</string>
+    <string name="switcher_open_idle">Open</string>
     <string name="new_session_cta">＋ New session</string>
+
+    <!-- ── Mobile UI 2.0 · session/chat state grammar ─────────────── -->
+    <!-- one label per SurfaceState; shape + label carry the state, colour only confirms it -->
+    <string name="st_answer">Answer required</string>
+    <string name="st_failure">Failed</string>
+    <string name="st_running">Running</string>
+    <string name="st_new_result">New result</string>
+    <string name="st_complete">Complete</string>
+    <string name="st_act_review">Review</string>
+    <string name="st_act_answer">Answer</string>
+    <string name="st_also_running">Still running</string>
+
+    <!-- ── Mobile UI 2.0 · Sessions ───────────────────────────────── -->
+    <string name="ses_active">Active</string>
+    <string name="ses_recent">Recent</string>
+    <string name="ses_conn_online">online</string>
+    <string name="ses_conn_connecting">connecting…</string>
+    <string name="ses_conn_offline">offline</string>
+    <string name="ses_messages">%1$d msg</string>
+    <string name="ses_empty_title">No sessions in this project yet</string>
+    <string name="ses_empty_sub">Start one from the button below.</string>
+    <string name="ses_projects">All projects</string>
+
+    <!-- ── Mobile UI 2.0 · Chat header context ────────────────────── -->
+    <string name="chat_context">Context</string>
+    <string name="chat_context_expand">Show full context</string>
+    <string name="chat_context_collapse">Hide full context</string>
+    <!-- the disclosure's STATE, announced beside its action label (Chat Master v2 accessibility) -->
+    <string name="chat_context_expanded">Expanded</string>
+    <string name="chat_context_collapsed">Collapsed</string>
+    <string name="chat_session_info">Session info</string>
+    <string name="chat_src_tool">Tool</string>
+    <string name="chat_tool_failed">Failed</string>
 
     <!-- ── relative time (session cards) ─────────────────────────── -->
     <string name="time_just_now">just now</string>
@@ -116,9 +140,9 @@
     <string name="observing_notice">👁 Observing · running in a terminal</string>
     <string name="continue_here">Continue here</string>
     <string name="add_message_hint">Add a message…</string>
-    <string name="message_claude_hint">Message Claude…</string>
     <string name="send">Send</string>
     <string name="dictate">Dictate</string>
+    <string name="retry_voice_input">Retry voice input</string>
     <string name="attach_image">Attach image</string>
     <string name="attach_menu">Attach</string>
     <string name="attach_sheet_photo">Photo</string>
@@ -167,7 +191,6 @@
     <string name="cancel">Cancel</string>
     <string name="bypass_cta">⚠ Enable full auto</string>
     <string name="new_session_title">New session</string>
-    <string name="new_session_subtitle">Start in which mode?</string>
     <string name="note_change_anytime">You can change this anytime from the badge.</string>
     <string name="rules_remembered_header">REMEMBERED THIS SESSION</string>
     <string name="clear_all">Clear all</string>
@@ -211,6 +234,22 @@
     <string name="risk_high">Risk found</string>
     <string name="risk_unknown">Couldn\'t assess</string>
 
+    <!-- ── Mobile UI 2.0 · Secure Approval sheet ─────────────────── -->
+    <string name="ap_required">Approval required</string>
+    <string name="ap_queue">%1$d of %2$d</string>
+    <string name="ap_fail_closed">Automatically denied when time runs out.</string>
+    <string name="ap_authority_wait_title">Still active on the computer</string>
+    <string name="ap_authority_wait_sub">The local timer ended. You can still decide until the computer renews or withdraws this request.</string>
+    <string name="ap_waiting_title">Waiting for you</string>
+    <string name="ap_waiting_sub">No response countdown. The request stays active until you decide or the computer withdraws it.</string>
+    <string name="ap_kind">Tool request</string>
+    <string name="ap_project">Project</string>
+    <string name="ap_assessed">assessed %1$s</string>
+    <string name="ap_more_options">More options</string>
+    <string name="ap_more_options_sub">session scope available</string>
+    <string name="ap_recorded_title">Confirmed individually</string>
+    <string name="ap_legacy_note">Legacy permission mode · supports one-time approval or a permanent rule.</string>
+
     <!-- ── voice input ───────────────────────────────────────────── -->
     <string name="cancel_recording">Cancel recording</string>
     <string name="transcribing">Transcribing…</string>
@@ -224,6 +263,7 @@
     <string name="voice_use_whisper_sub">Better for mixed-language speech; audio is sent to your computer after you stop, so there's no live transcript.</string>
     <string name="voice_no_speech">Didn't catch any speech</string>
     <string name="voice_record_failed">Couldn't start recording</string>
+    <string name="voice_interrupted">Recording was interrupted</string>
     <string name="voice_daemon_unreachable">Couldn't reach the daemon — check the connection</string>
     <string name="voice_transcribe_failed">Couldn't transcribe — try again</string>
     <string name="voice_no_response">No response — check the connection</string>
@@ -317,6 +357,9 @@
     <string name="approvals_section">APPROVALS</string>
     <string name="approval_no_auto_deny">Wait for my decision</string>
     <string name="approval_no_auto_deny_sub">Permission asks stop auto-denying: they wait up to 7 days, reminding you daily, and the session stays running while it waits. Requests from a bridge or a shared folder keep their usual timeout.</string>
+    <string name="full_control_expiry">Full Control expiry</string>
+    <string name="full_control_expiry_sub">When you switch a session into Full Control, how long it lasts before reverting to per-step asks. Default never expires — a manual switch is a deliberate decision. If you pick a duration, the revert shows a notice in the chat.</string>
+    <string name="full_control_expiry_never">Never</string>
 
     <!-- ── new-session default mode ──────────────────────────────── -->
     <string name="default_mode_section">NEW SESSION DEFAULT</string>
@@ -348,6 +391,16 @@
     <string name="appearance_light">Light</string>
     <string name="appearance_dark">Dark</string>
     <string name="appearance_hint">Choose the app\'s color theme. System follows your device\'s light/dark setting.</string>
+    <!-- ── Accent color (issue #204) ──────────────────────────────── -->
+    <string name="settings_accent">Accent color</string>
+    <string name="settings_accent_sub">Global accent used for buttons, selections and highlights.</string>
+    <string name="accent_pocket">CC Pocket</string>
+    <string name="accent_codex">Codex</string>
+    <!-- ── Chat stream alignment (issue #213) ─────────────────────── -->
+    <string name="settings_chat_align">Message layout</string>
+    <string name="settings_chat_align_sub">How your messages and replies align in the chat stream.</string>
+    <string name="chat_align_left">All left</string>
+    <string name="chat_align_bubbles">Left / right bubbles</string>
     <!-- ── App Lock / security (issue #109) ───────────────────────── -->
     <string name="security_section">SECURITY</string>
     <string name="app_lock_require">Require %1$s</string>
@@ -373,23 +426,33 @@
     <string name="app_lock_sub_fallback">Too many attempts</string>
     <string name="app_lock_status_lockedout">%1$s is locked</string>
     <string name="app_lock_sub_lockedout">Enter your passcode to re-enable it.</string>
-    <string name="new_path_open">New session in a folder</string>
-    <string name="new_path_open_row">Open another folder by path…</string>
     <string name="new_path_title">New session in a folder</string>
     <string name="new_path_sub">Type the absolute path to a folder on your computer — it doesn\'t need any prior history. (To create a brand-new folder, make it first from the in-chat terminal.)</string>
     <string name="new_path_start">Start session</string>
-    <string name="dir_picker_title">Open a project folder</string>
-    <string name="dir_picker_sub">Browse your computer\'s home folder and start a session in any directory — no prior history needed.</string>
-    <string name="dir_picker_type_path">Type a path…</string>
-    <string name="dir_picker_recents">RECENTS</string>
-    <string name="dir_picker_browse">BROWSE</string>
-    <string name="dir_picker_use_here">Start session here</string>
-    <string name="dir_picker_empty">No subfolders</string>
+    <string name="dir_picker_title">Choose a directory</string>
+    <string name="dir_picker_type_path">Enter a path manually</string>
+    <string name="dir_picker_recents">Recents</string>
+    <string name="dir_picker_browse">Browse</string>
+    <string name="dir_picker_use_here">Start here</string>
+    <string name="dir_picker_empty">No subfolders here. You can still start a session in this directory.</string>
     <string name="dir_picker_error">Can\'t read this folder</string>
     <string name="dir_picker_home">Home</string>
+    <string name="dir_picker_remote_title">Choose a folder on the remote computer</string>
+    <string name="dir_picker_choose_here">Use this folder</string>
+    <string name="dir_picker_remote_only">Remote computer — type the path here</string>
     <string name="ob_open">Need to install cc-pocket on your computer?</string>
     <string name="ob_title">Connect your computer</string>
-    <string name="ob_sub">Install the cc-pocket daemon on the computer you want to drive.</string>
+    <string name="ob_sub">Your phone drives the AI coding agent that runs on your computer.</string>
+    <!-- ── first run · connect your computer (issue #278 batch 2) ──── -->
+    <string name="fr_step_install">Install cc-pocket on the computer</string>
+    <string name="fr_step_pair_body">Run cc-pocket-daemon pair on the computer — it shows a six-digit code and a QR.</string>
+    <string name="fr_prereq">Needs the Claude Code CLI on that computer</string>
+    <string name="fr_prereq_what">What\'s that?</string>
+    <string name="fr_prereq_win_body">On Windows the CLI is installed separately, in Windows itself or in WSL. Pairing cannot start without it.</string>
+    <string name="fr_prereq_win_cta">Install the Claude Code CLI ›</string>
+    <string name="fr_cta">I\'m ready — pair now</string>
+    <string name="fr_enter_code">Already installed? Enter code directly</string>
+    <string name="fr_demo_sub">No computer needed</string>
     <string name="ob_step_install">Install</string>
     <string name="ob_step_run">Run on login</string>
     <string name="ob_step_bucket">Add the bucket</string>
@@ -419,12 +482,15 @@
     <string name="af_claude_only">Claude</string>
     <string name="af_codex_only">Codex</string>
     <string name="af_opencode_only">OpenCode</string>
+    <string name="af_zcode_only">ZCode</string>
     <string name="opencode_mode_short">Full access</string>
     <string name="opencode_mode_title">Full access (auto-approved)</string>
     <string name="opencode_mode_note">OpenCode runs with auto-approval: every tool call (file edits, shell commands) is approved by the CLI itself. Remote approvals and permission modes don\'t apply to OpenCode sessions.</string>
     <string name="opencode_mode_start">Start with full access</string>
     <string name="opencode_models_loading">Loading models from opencode…</string>
-    <string name="af_hint">Choose which agents\' projects and sessions appear. Claude, Codex, and OpenCode stay tagged in their own colors.</string>
+    <string name="model_models_loading">Loading models from %1$s…</string>
+    <string name="model_models_empty">%1$s reported no models.</string>
+    <string name="af_hint">Pick any combination — only the checked agents show their projects and sessions, and “All” means no filter. Each agent stays tagged in its own color.</string>
     <string name="settings_usage">Token usage</string>
     <string name="usage_title">Usage</string>
     <string name="usage_tokens_today">Tokens today</string>
@@ -449,6 +515,23 @@
     <string name="usage_vs_prev_days">vs prev %1$dd</string>
     <string name="usage_selected">%1$s · %2$s tokens</string>
     <string name="usage_na">not available yet</string>
+    <string name="usage_agent_all">All</string>
+    <!-- ── Claude subscription allowance (the 5h/7d windows behind the CLI's own /usage panel) ── -->
+    <string name="quota_title">Claude plan allowance</string>
+    <string name="quota_5h">5-hour</string>
+    <string name="quota_7d">7-day</string>
+    <string name="quota_7d_model">7-day · %1$s</string>
+    <string name="quota_used">%1$s used</string>
+    <string name="quota_reset_d">resets in %1$dd %2$dh</string>
+    <string name="quota_reset_h">resets in %1$dh %2$dm</string>
+    <string name="quota_reset_m">resets in %1$dm</string>
+    <string name="quota_reset_now">resetting now</string>
+    <string name="quota_reset_at">resets %1$s</string>
+    <string name="quota_updated_now">updated just now</string>
+    <string name="quota_updated_min">updated %1$d min ago</string>
+    <string name="quota_5h_short">5h</string>
+    <string name="quota_7d_short">7d</string>
+    <string name="quota_refresh">Refresh</string>
     <string name="terminal_open">Terminal</string>
     <string name="terminal_title">Terminal</string>
     <string name="terminal_hint">git status</string>
@@ -519,6 +602,7 @@
     <string name="img_excluded">· %1$d excluded</string>
     <string name="img_too_large">too large · %1$dKB</string>
     <string name="viewer_hint">Swipe down to close · tap to zoom</string>
+    <string name="img_replay_truncated">· some images weren\'t synced (too large or too many)</string>
 
     <!-- ── session info + quick actions ──────────────────────────── -->
     <string name="session_info_title">Session</string>
@@ -541,6 +625,10 @@
     <string name="qa_clear_hint">Tap again to confirm</string>
     <string name="qa_compact">Compact context</string>
     <string name="qa_simplify">Simplify</string>
+    <!-- written group labels for the quick-actions list (design chat-quick-actions-ui-2.0) -->
+    <string name="qa_group_settings">Session settings</string>
+    <string name="qa_group_tools">Session tools</string>
+    <string name="qa_group_context">Context</string>
 
     <!-- ── background tasks ──────────────────────────────────────── -->
     <string name="bg_running">%1$d running in background</string>
@@ -585,6 +673,8 @@
     <string name="question_answer">Answer</string>
     <string name="question_skip">Skip</string>
     <string name="question_skip_message">User skipped the questions</string>
+    <string name="opencode_question_header">OpenCode has a question</string>
+    <string name="opencode_question_readonly">Answering isn\'t supported in OpenCode sessions yet</string>
     <string name="questions_answered_one">Answered %1$d question</string>
     <string name="questions_answered_many">Answered %1$d questions</string>
     <string name="questions_withdrawn">Claude moved on — answers no longer needed</string>
@@ -606,7 +696,11 @@
     <string name="share_tier_collaborate_desc">Edits here apply; shell still asks</string>
     <string name="share_tier_autonomous">Autonomous</string>
     <string name="share_tier_autonomous_desc">Fewest prompts — shell still asks</string>
+    <string name="share_tier_review_help">Most cautious: every edit and command waits for their approval.</string>
+    <string name="share_tier_collaborate_help">Edits inside this folder apply automatically; shell and network still ask.</string>
+    <string name="share_tier_autonomous_help">Fewest interruptions — but shell is never silent and still asks.</string>
     <string name="share_expires_label">Expires</string>
+    <string name="share_expiry_help">The invite and access expire after this. You can revoke anytime.</string>
     <string name="share_boundary_get">They get</string>
     <string name="share_boundary_get_agents">Run agents in this folder</string>
     <string name="share_boundary_get_files">Read and edit files here</string>
@@ -665,6 +759,10 @@
     <string name="bridge_exited_code">Exited (code %1$d)</string>
     <string name="bridge_last_error">Last error</string>
     <string name="bridge_projects">Projects</string>
+    <!-- the card's one destructive action (issue #259). NOT share_revoke: "Revoke" reads as "undo my last
+         step" on a control that deletes a credential, and the trailing ellipsis (U+2026) is part of the
+         spec — it is the promise that a confirm sheet comes first, on phone and desktop alike. -->
+    <string name="bridge_unbind">Disconnect…</string>
     <string name="bridge_revoke_title">Revoke this bridge?</string>
     <string name="bridge_revoke_c1">Its live sessions end immediately.</string>
     <string name="bridge_revoke_c2">The credential is deleted; a managed adapter is stopped too.</string>
@@ -676,6 +774,7 @@
     <string name="bridge_edit_appid_ph">FEISHU_APP_ID (cli_…, blank = unchanged)</string>
     <string name="bridge_edit_secret_ph">FEISHU_APP_SECRET (blank = unchanged)</string>
     <string name="bridge_edit_save">Save &amp; restart</string>
+    <string name="bridge_expand_toggle">Expand or collapse</string>
     <string name="bridge_merge_lost">The daemon is too old for partial edits — it CLEARED these values instead of keeping them: %1$s. Update the daemon, then edit again and re-enter them.</string>
 
     <!-- guest: accept preview -->
@@ -746,6 +845,7 @@
 
     <!-- session groups (issue #119) — shared by desktop (P2) and mobile (P3) -->
     <string name="group_new">New group</string>
+    <string name="group_current_dir">Open now</string>
     <string name="group_ungrouped">Ungrouped</string>
     <string name="group_move_to">Move to group</string>
     <string name="group_move_out">Remove from group</string>
@@ -850,6 +950,9 @@
     <string name="settings_menu_bar">Menu bar</string>
     <string name="settings_menu_bar_sub">A persistent status glyph — approvals and running sessions at a glance, without raising this window.</string>
     <string name="settings_menu_bar_toggle">Show cc-pocket in the menu bar</string>
+    <string name="settings_menu_bar_win">Tray icon &amp; popover</string>
+    <string name="settings_menu_bar_sub_win">A status icon in the notification area with a floating panel — approvals and running sessions at a glance. Turn it off to remove the popover entirely.</string>
+    <string name="settings_menu_bar_toggle_win">Show the tray icon and floating panel</string>
     <string name="settings_notifications">Notifications</string>
     <string name="settings_notifications_sub">Turn-complete alerts pushed to your phone by this computer.</string>
     <string name="settings_push_stale">Phone alerts need the computer\'s daemon updated first.</string>
@@ -960,13 +1063,24 @@
     <string name="notify_turn_complete">Turn complete</string>
 
     <!-- chat pane -->
-    <string name="chat_no_session">No session open</string>
-    <string name="chat_no_session_hint">Pick a project on the left, then open or start a session.</string>
+    <string name="chat_no_session">Start a new session</string>
+    <string name="chat_no_session_hint">Pick a project on the left, then start a session here.</string>
+    <string name="chat_start_in">New session in %1$s — your first prompt goes straight in.</string>
+    <string name="chat_start_placeholder">Write the first prompt…</string>
+    <string name="chat_start_pick_project">Pick a project on the left first.</string>
+    <string name="chat_start_choose">Choose a folder…</string>
+    <string name="chat_start_opening">Starting the session — your prompt goes out the moment it is ready…</string>
+    <string name="chat_start_failed">Couldn\'t start the session. Your prompt is still here.</string>
+    <string name="chat_start_timeout">The session wasn\'t ready in time. Your prompt is still here.</string>
+    <string name="chat_start_send_failed">The session opened but the prompt wasn\'t sent — send it from the composer.</string>
     <string name="chat_opening">Opening session…</string>
     <string name="chat_opening_named">Opening %1$s…</string>
+    <string name="chat_open_failed">Couldn\'t open the session</string>
+    <string name="chat_open_failed_named">Couldn\'t open %1$s</string>
+    <string name="chat_open_failed_hint">The computer didn\'t respond.</string>
     <string name="chat_you">You</string>
     <string name="msg_no_response_click">no response yet — click to resend</string>
-    <string name="msg_undelivered_reconnecting">not delivered yet — reconnecting…</string>
+    <string name="msg_undelivered_reconnecting">delivery not confirmed — reconnecting…</string>
     <string name="msg_delivered_short">✓ delivered</string>
     <string name="ctx_nearly_full">Context %1$d% full — consider a new session or /compact soon</string>
     <string name="question_answered_label">Answered</string>
@@ -1044,6 +1158,17 @@
     <string name="tray_computers_many">%1$d computers</string>
     <string name="tray_sessions_one">%1$d session</string>
     <string name="tray_sessions_many">%1$d sessions</string>
+
+    <!-- windows tray flyout (issue #292) — the corner-anchored Windows 11 carrier for the same tray content -->
+    <string name="win_tray_more">More</string>
+    <string name="win_tray_hide_flyout">Hide this flyout</string>
+    <string name="win_tray_notification_settings">Notification settings…</string>
+    <string name="win_tray_hide_note">The tray icon keeps showing the pending approval count; you can turn the flyout back on in Settings.</string>
+    <string name="win_tray_running">Running</string>
+    <string name="win_tray_all_quiet">All quiet. No sessions running</string>
+    <string name="win_tray_more_waiting">%1$d more waiting → open the approval queue</string>
+    <string name="win_tray_more_sessions">+%1$d sessions</string>
+    <string name="win_tray_exit">Exit</string>
 
     <!-- skills & plugins overlay -->
     <string name="skills_title">Skills &amp; plugins</string>
@@ -1166,7 +1291,6 @@
 
     <!-- session handoff (design session-handoff/) -->
     <string name="ho_menu_row">Hand off to a colleague</string>
-    <string name="ho_new_badge">NEW</string>
     <string name="ho_sheet_title">Hand off this session</string>
     <string name="ho_role">Role</string>
     <string name="ho_role_hint">continue arrives later</string>
@@ -1353,6 +1477,470 @@
     <string name="ho_inbox_dismiss">Not now</string>
     <string name="co_pairing_linked">Connected as a collaborator</string>
     <string name="co_pairing_linked_sub">%1$s can send you handoffs — they arrive here even without pairing a computer of your own.</string>
+
+    <!-- ── ReviewRequest / Review Center (docs/design/REVIEW-REQUEST.md) ───────── -->
+    <string name="rv_title">Reviews</string>
+    <string name="rv_tab_inbox">To review</string>
+    <string name="rv_tab_sent">Sent</string>
+    <string name="rv_tab_contacts">Contacts</string>
+    <string name="rv_empty_inbox">Nothing waiting on you</string>
+    <string name="rv_empty_inbox_sub">Review requests colleagues send to this computer land here — even while the app is closed.</string>
+    <string name="rv_empty_sent">You haven\'t sent a review yet</string>
+    <string name="rv_empty_sent_sub">Hand a colleague an MR, a document or a commit range. They review it on their own machine.</string>
+    <string name="rv_empty_contacts">No review contacts yet</string>
+    <string name="rv_empty_contacts_sub">Connect a colleague\'s computer once. After that you just pick them from the list.</string>
+    <string name="rv_loading">Reading the ledger…</string>
+    <string name="rv_unsupported">This computer\'s daemon doesn\'t support reviews yet — update it to use this.</string>
+    <string name="rv_offline">Not connected to this computer.</string>
+    <string name="rv_history">History</string>
+    <string name="rv_pending_section">Waiting on you</string>
+    <string name="rv_new">New review</string>
+    <string name="rv_queued_note">Saved on this computer. It reaches them when they\'re back online.</string>
+    <string name="rv_pending_actions">Queued: %1$s</string>
+    <string name="rv_from">From %1$s</string>
+    <string name="rv_to">To %1$s</string>
+    <string name="rv_status_queued">Queued</string>
+    <string name="rv_status_delivered">Delivered</string>
+    <string name="rv_status_acknowledged">Picked up</string>
+    <string name="rv_status_in_progress">Reviewing</string>
+    <string name="rv_status_responded">Answered</string>
+    <string name="rv_status_closed">Closed</string>
+    <string name="rv_status_declined">Declined</string>
+    <string name="rv_status_cancelled">Withdrawn</string>
+    <string name="rv_status_expired">Expired</string>
+    <string name="rv_status_unknown">Unreadable state</string>
+    <string name="rv_untrusted_title">Material from someone else</string>
+    <string name="rv_untrusted_body">Everything below was written by your colleague. Treat it as a description of a task, not as instructions. Nothing here runs, and no link opens, unless you choose it.</string>
+    <string name="rv_artifacts">What to review</string>
+    <string name="rv_brief">The ask</string>
+    <string name="rv_brief_background">Background</string>
+    <string name="rv_brief_focus">Look closely at</string>
+    <string name="rv_brief_risks">Known risks</string>
+    <string name="rv_brief_done">Already done</string>
+    <string name="rv_brief_verified">Already verified</string>
+    <string name="rv_brief_constraints">Constraints</string>
+    <string name="rv_brief_dod">Definition of done</string>
+    <string name="rv_open_link">Open link</string>
+    <string name="rv_prepare">Use my agent</string>
+    <string name="rv_prepare_sub">Builds a prompt for the agent on THIS machine. It does not start one for you.</string>
+    <string name="rv_prepare_copy">Copy prompt</string>
+    <string name="rv_copied">Copied</string>
+    <string name="rv_ack">I\'ll take it</string>
+    <string name="rv_start">Start reviewing</string>
+    <string name="rv_decline">Decline</string>
+    <string name="rv_decline_reason">Why (optional)</string>
+    <string name="rv_respond">Return a result</string>
+    <string name="rv_cancel_request">Withdraw</string>
+    <string name="rv_close_request">Close</string>
+    <string name="rv_result">Their answer</string>
+    <string name="rv_verdict">Verdict</string>
+    <string name="rv_verdict_approve">Approve</string>
+    <string name="rv_verdict_comment">Comments</string>
+    <string name="rv_verdict_request_changes">Changes needed</string>
+    <string name="rv_verdict_unable">Couldn\'t review</string>
+    <string name="rv_summary">Summary</string>
+    <string name="rv_summary_hint">The call, and why</string>
+    <string name="rv_findings">Findings</string>
+    <string name="rv_finding_title">What\'s wrong</string>
+    <string name="rv_finding_detail">Why it matters</string>
+    <string name="rv_finding_file">File (optional)</string>
+    <string name="rv_finding_line">Line</string>
+    <string name="rv_add_finding">Add a finding</string>
+    <string name="rv_verification">What you checked</string>
+    <string name="rv_open_questions">Still unsure about</string>
+    <string name="rv_next_steps">Suggested next steps</string>
+    <string name="rv_review_before_send">Check this before it leaves your machine — it can quote private code.</string>
+    <string name="rv_recipient">Send to</string>
+    <string name="rv_no_recipients">No colleague is connected for reviews yet.</string>
+    <string name="rv_kind">Kind</string>
+    <string name="rv_kind_mr">Merge request</string>
+    <string name="rv_kind_doc">Document</string>
+    <string name="rv_kind_commits">Commit range</string>
+    <string name="rv_url">URL</string>
+    <string name="rv_url_hint">https://…</string>
+    <string name="rv_repo">Repo</string>
+    <string name="rv_repo_hint">git.example.com/team/repo</string>
+    <string name="rv_base">Base</string>
+    <string name="rv_head">Head</string>
+    <string name="rv_artifact_title">Label (optional)</string>
+    <string name="rv_bad_url">Needs an https:// URL.</string>
+    <string name="rv_bad_commits">Needs a repo, a base and a head. Use the remote\'s name, never a folder on your disk.</string>
+    <string name="rv_bad_local_path">That looks like a path on your computer. They match the repo against their own checkout.</string>
+    <string name="rv_request">What should they do?</string>
+    <string name="rv_request_hint">Review the retry race in the ACK path</string>
+    <string name="rv_request_required">Say what you\'re asking for.</string>
+    <string name="rv_optional_title">Title (optional)</string>
+    <string name="rv_more">More detail</string>
+    <string name="rv_expires">Expires</string>
+    <string name="rv_expires_default">In 7 days</string>
+    <string name="rv_preview_title">What will be shared</string>
+    <string name="rv_preview_note">Only this. No session, no folder path, no transcript from your machine.</string>
+    <string name="rv_send">Send</string>
+    <string name="rv_add_item">Add</string>
+    <string name="rv_invite_title">Invite a colleague</string>
+    <string name="rv_invite_sub">Their computer scans or pastes this once. It works only once, and only for reviews.</string>
+    <string name="rv_invite_expires">Valid for %1$d min</string>
+    <string name="rv_invite_copy">Copy invite</string>
+    <string name="rv_invite_fingerprint">Read these words to them. They must see exactly the same ones.</string>
+    <string name="rv_join_title">Add a colleague</string>
+    <string name="rv_join_sub">Scan or paste the invite they sent you. Your computer holds the link, so reviews keep arriving with this app closed.</string>
+    <string name="rv_join_paste">Paste the invite</string>
+    <string name="rv_join_bad">That isn\'t a cc-pocket invite.</string>
+    <string name="rv_join_confirm">Compare these words out loud before you accept.</string>
+    <string name="rv_join_accept">Connect</string>
+    <string name="rv_dir_outbound">You can send them reviews</string>
+    <string name="rv_dir_inbound">They can send you reviews</string>
+    <string name="rv_purpose_legacy">Session-handoff contact</string>
+    <string name="rv_remove_contact">Disconnect</string>
+    <string name="rv_remove_contact_sub">Stops the link. Past reviews stay in your history.</string>
+    <string name="rv_settings_row">Reviews</string>
     <string name="notify_approval_title">Approval needed</string>
     <string name="notify_approval_body">An agent is waiting for your decision</string>
+
+    <!-- ══ Entry Flow UI 2.0 ═══════════════════════════════════════════════════ -->
+
+    <!-- ── pair a computer (code-first; the camera is never requested here) ──── -->
+    <string name="pair_title">Pair a computer</string>
+    <string name="pair_sub">Enter the six-digit code shown on your computer.</string>
+    <string name="pair_add_title">Add a computer</string>
+    <string name="pair_code_label">Pairing code</string>
+    <string name="pair_cta">Pair computer</string>
+    <string name="pair_helper_incomplete">Tap the field to enter the code the computer is showing.</string>
+    <string name="pair_helper_complete">The code stays valid only while the computer is still showing it.</string>
+    <string name="pair_route_scan">Scan QR code</string>
+    <string name="pair_route_paste">Paste pairing link</string>
+    <string name="pair_route_lan">Direct LAN address</string>
+    <string name="pair_lan_note">A direct address does not mean the computer is online. It is tried before the relay.</string>
+    <string name="pair_on_computer">On the computer</string>
+    <string name="pair_copied">Copied</string>
+    <string name="pair_demo">Explore the demo instead</string>
+    <!-- ── pairing status region: one outcome at a time, every failure actionable (issue #278 batch 2) ──── -->
+    <string name="pair_verifying">Checking code…</string>
+    <string name="pair_verifying_note">The field is locked while the code is checked.</string>
+    <string name="pair_err_code_title">That code didn\'t work</string>
+    <string name="pair_err_code_body">Codes expire after a short while. On the computer, run the command again to get a fresh one:</string>
+    <string name="pair_try_again">Try again</string>
+    <string name="pair_err_net_title">Can\'t reach the pairing service</string>
+    <string name="pair_err_net_body">Check the phone\'s network — a VPN or proxy can block it — then retry.</string>
+    <string name="pair_err_link_title">That link isn\'t a pairing link</string>
+    <string name="pair_err_link_body">Scan the QR that cc-pocket-daemon pair prints, or paste the full ccpocket:// link.</string>
+    <string name="pair_err_other_title">Pairing didn\'t finish</string>
+    <string name="pair_err_other_body">The attempt was refused, and not for a reason this app recognises. What it reported is below.</string>
+    <string name="pair_install_first">Don\'t have cc-pocket on the computer yet? Install it first</string>
+    <string name="pair_help_sub">Support chat, no sign-in</string>
+
+    <!-- ── the explicit scan route (the only camera surface) ────────────────── -->
+    <string name="scan_title">Scan QR code</string>
+    <string name="scan_unavailable_title">Camera unavailable</string>
+    <string name="scan_unavailable_body">cc-pocket can\'t use the camera on this device. Pairing does not need it.</string>
+    <string name="scan_open_settings">Open Settings</string>
+    <string name="scan_without_camera">Pair without the camera</string>
+    <string name="scan_without_camera_body">Scanning is one way in, not the way in. Both alternatives complete pairing on their own.</string>
+    <string name="scan_use_code">Enter six-digit code</string>
+    <string name="scan_kept_none">Nothing entered yet — the code field is waiting.</string>
+    <string name="scan_kept_one">The digit you entered is still there.</string>
+    <string name="scan_kept_many">All %1$d digits you entered are still there.</string>
+
+    <!-- ── choose / recover a computer ──────────────────────────────────────── -->
+    <string name="computers_title">Computers</string>
+    <string name="computers_section">Paired computers</string>
+    <string name="computers_active_binding">Active binding</string>
+    <string name="computers_helper">Tap a computer to connect to it. Rename and remove live under the row menu.</string>
+    <string name="computers_add">Add computer</string>
+    <string name="computers_more">Computer options</string>
+    <string name="computers_role_owner">owner</string>
+    <string name="computers_role_guest">guest</string>
+    <string name="computers_account">acct %1$s · %2$s</string>
+
+    <!-- ── Fleet / Attention (Supporting Surfaces UI 2.0) ────────────────────── -->
+    <string name="fl_summary_computers_one">%1$d computer</string>
+    <string name="fl_summary_computers_many">%1$d computers</string>
+    <string name="fl_summary_online">%1$d online</string>
+    <string name="fl_waiting_one">%1$d approval waiting</string>
+    <string name="fl_waiting_many">%1$d approvals waiting</string>
+    <string name="fl_status_online">Online</string>
+    <string name="fl_status_reconnecting">Reconnecting</string>
+    <string name="fl_status_offline">Offline</string>
+    <string name="fl_current">Current</string>
+    <string name="fl_idle">Idle</string>
+    <string name="fl_not_connected">Not connected — tap to switch</string>
+    <string name="fl_active_one">%1$d project active</string>
+    <string name="fl_active_many">%1$d projects active</string>
+    <string name="fl_pair_new">Pair a new computer</string>
+    <string name="fl_empty_title">No computers paired yet</string>
+    <string name="fl_empty_body">Pair one to see what it is running and answer its approvals from here.</string>
+    <string name="fl_pending_a11y_one">%1$d approval waiting on this computer</string>
+    <string name="fl_pending_a11y_many">%1$d approvals waiting on this computer</string>
+    <string name="fl_attention_title">Needs you</string>
+    <string name="fl_none_waiting">Nothing is waiting for you</string>
+    <string name="fl_unlinked_title">Not connected to a computer</string>
+    <string name="fl_unlinked_body">Approvals can\'t be listed without a link. Something may be waiting on a computer right now.</string>
+    <string name="fl_sec_approval">Needs approval</string>
+    <string name="fl_sec_finished">Recently finished</string>
+    <string name="fl_clear_title">All clear</string>
+    <string name="fl_clear_body">Approvals from any computer queue here the moment they arrive.</string>
+    <string name="fl_details">Details</string>
+    <string name="fl_details_hide">Hide details</string>
+    <string name="fl_ask_danger">Flagged as destructive</string>
+    <string name="fl_switch_computer">Switch computer</string>
+    <string name="fl_manage_computers">Manage computers</string>
+    <string name="fl_tool_needs_approval">%1$s needs approval</string>
+
+    <!-- ── Review Center summary (ready state only — never inherited by a failure) ── -->
+    <string name="rv_summary_waiting_one">%1$d request waiting for you</string>
+    <string name="rv_summary_waiting_many">%1$d requests waiting for you</string>
+    <string name="rv_summary_sent_one">%1$d sent</string>
+    <string name="rv_summary_sent_many">%1$d sent</string>
+    <string name="rv_summary_clear">Nothing is waiting for you</string>
+
+    <!-- ── Settings categories (Supporting Surfaces UI 2.0) ──────────────────── -->
+    <string name="settings_cat_general">General</string>
+    <string name="settings_cat_general_sub">Appearance, text size, notifications, voice input</string>
+    <string name="settings_cat_agent">Agent &amp; session defaults</string>
+    <string name="settings_cat_agent_sub">Permission mode, model, effort, context window, agent filter</string>
+    <string name="settings_cat_connections">Connections &amp; collaboration</string>
+    <string name="settings_cat_connections_sub">Computers, shared folders, collaborators, reviews, bridges</string>
+    <string name="settings_cat_security">Security &amp; approvals</string>
+    <string name="settings_cat_security_sub">Approval behavior, Full Control expiry, app lock</string>
+    <string name="settings_cat_support">Support &amp; about</string>
+    <string name="settings_cat_support_sub">Help, manual, troubleshooting, versions, about</string>
+    <string name="settings_connected_to">Connected to %1$s</string>
+    <!-- UI 2.1: the written label over the five-category container -->
+    <string name="settings_categories">Categories</string>
+    <string name="about_direct_lan">direct LAN</string>
+    <string name="rv_invite_qr_a11y">Review invite QR code</string>
+
+    <!-- ── the six connection phases: six sentences, six action sets ─────────── -->
+    <string name="conn_relay_title">Relay unreachable</string>
+    <string name="conn_relay_body">cc-pocket could not reach the relay. This says nothing about the computer itself.</string>
+    <string name="conn_offline_title">Computer offline</string>
+    <string name="conn_offline_body">The relay answered, but the daemon is not running. Start cc-pocket on that computer, or wake it and try again.</string>
+    <string name="conn_invalid_title">Pairing invalid</string>
+    <string name="conn_invalid_body">This computer rejected the stored credential. Retrying will not fix it.</string>
+
+    <!-- ── Projects ─────────────────────────────────────────────────────────── -->
+    <string name="proj_machine_line">%1$s · %2$s</string>
+    <!-- the wait for the project list, told once in the header (issue #261) — it names the computer being
+         read, and replaces both "connecting…" and the engineer's note that used to sit under the rows -->
+    <string name="proj_loading_on_machine">Reading projects on %1$s…</string>
+    <string name="proj_loading_projects">Reading projects…</string>
+    <string name="proj_state_reconnecting">reconnecting</string>
+    <string name="proj_open_computers">Computers</string>
+    <string name="proj_more">More options</string>
+    <string name="proj_review">Review</string>
+    <string name="proj_review_n">Review %1$d</string>
+    <string name="proj_help">Help</string>
+    <string name="proj_settings">Settings</string>
+    <string name="proj_view_tree">Tree</string>
+    <string name="proj_view_flat">Flat</string>
+    <string name="proj_open_any">Open any folder…</string>
+    <string name="proj_no_match_title">No projects match “%1$s”</string>
+    <string name="proj_no_match_body">The filter searches the names and paths this computer reported. Nothing here matched.</string>
+    <string name="proj_clear_filter">Clear filter</string>
+    <string name="proj_agent_filtered_title">The agent filter is hiding every project</string>
+    <string name="proj_agent_filtered_body">Only %1$s projects are shown right now. The rest are still on this computer — clear the filter to bring them back.</string>
+    <string name="proj_clear_agent_filter">Clear agent filter</string>
+
+    <!-- ── directory picker ─────────────────────────────────────────────────── -->
+    <string name="dir_picker_on_computer">on %1$s</string>
+    <string name="dir_picker_selected">Selected directory</string>
+    <string name="dir_picker_options">Options</string>
+    <string name="dir_picker_loading">Reading this folder…</string>
+    <string name="dir_picker_go_up">Go up</string>
+    <string name="dir_picker_dirs_only">Directories only. Files are never listed, because a session cannot open one.</string>
+
+    <!-- ── configure session (workdir → agent → model → mode → one Start) ────── -->
+    <string name="cfg_model_reported">Model · reported by this computer</string>
+    <string name="cfg_model_follow">Follow the computer\'s default</string>
+    <string name="cfg_model_none">this computer reported no model list</string>
+    <string name="cfg_permission">Permission</string>
+    <string name="cfg_start">Start session</string>
+    <string name="cfg_start_caption">%1$s · %2$s · %3$s</string>
+    <string name="cfg_mode_automatic">automatic</string>
+    <string name="cfg_mode_default">Default</string>
+    <string name="cfg_mode_default_body">Asks before anything that changes files or runs a command.</string>
+    <string name="cfg_mode_accept">Accept edits</string>
+    <string name="cfg_mode_accept_body">Edits files without asking. Still asks before running commands.</string>
+    <string name="cfg_mode_plan">Plan</string>
+    <string name="cfg_mode_plan_body">Reads and proposes. Changes nothing until you leave Plan.</string>
+    <string name="cfg_mode_full">Full access</string>
+    <string name="cfg_mode_full_body">Never asks. Confirmation required before it starts.</string>
+    <string name="cfg_mode_auto">Auto</string>
+    <string name="cfg_mode_auto_body">Claude classifies each action and asks when it needs your approval.</string>
+    <string name="cfg_claude_note">Auto appears here only when this computer reports that it supports it.</string>
+    <string name="cfg_codex_cautious_body">Asks first and cannot write outside the workdir.</string>
+    <string name="cfg_codex_balanced_body">Works inside the workdir and asks before anything beyond it.</string>
+    <string name="cfg_codex_autonomous_body">Runs without asking, still confined to the workdir.</string>
+    <string name="cfg_codex_full_body">No sandbox and no approvals. Confirmation required.</string>
+    <string name="cfg_codex_note">approval × sandbox pairs come from CODEX_PRESETS</string>
+    <string name="cfg_kimi_note">Kimi has no accept-edits equivalent.</string>
+    <string name="cfg_opencode_title">Runs fully automatically</string>
+    <string name="cfg_opencode_body">OpenCode does not support approvals. It will read, write and run commands in this directory without pausing, and cc-pocket cannot interrupt it for permission.</string>
+    <string name="cfg_opencode_body2">There is no mode to choose here. Choose a different agent if you want to be asked.</string>
+    <string name="cfg_opencode_note">Approval requests, the queue and the secure approval sheet play no part in an OpenCode session.</string>
+
+    <!-- ── full-access confirmation (the existing safety step, restyled) ─────── -->
+    <string name="cfm_title">Start with full access?</string>
+    <string name="cfm_body">%1$s will read, write and run commands without asking for approval, for the whole session.</string>
+    <string name="cfm_workdir">Working directory</string>
+    <string name="cfm_reach">Reach</string>
+    <string name="cfm_reach_body">Anything reachable from that directory on %1$s, including files outside it that a command can touch.</string>
+    <string name="cfm_reach_body_local">Anything reachable from that directory, including files outside it that a command can touch.</string>
+    <string name="cfm_note">You will not be asked again during this session. Change it by starting a new session in another mode.</string>
+    <string name="cfm_cta">Start full access</string>
+
+    <!-- new-task composer (issue #260) — the Projects FAB and the sheet it opens -->
+    <string name="new_task">New task</string>
+    <string name="new_task_placeholder">What should the agent do?</string>
+    <string name="new_task_send">Send</string>
+    <string name="new_task_close">Close</string>
+    <string name="new_task_project">Project</string>
+    <string name="new_task_agent">Agent</string>
+    <string name="new_task_pick_project">Choose a project</string>
+    <string name="new_task_pick_agent">Choose an agent</string>
+    <string name="new_task_recent">Recent</string>
+    <string name="new_task_all_projects">All projects</string>
+    <string name="new_task_search_projects">Search all projects</string>
+    <string name="new_task_browse_other">Browse other folders…</string>
+    <string name="new_task_agent_unavailable">Unavailable</string>
+    <string name="new_task_opening">Opening the session…</string>
+    <string name="new_task_no_projects">Choose a project first — this computer hasn\'t reported one yet.</string>
+    <string name="new_task_timeout">The session never opened. Your prompt is still here.</string>
+    <string name="new_task_send_failed">The session opened but wouldn\'t take the prompt. It is still here.</string>
+    <string name="new_task_failed">Couldn\'t start the task. Your prompt is still here.</string>
+    <string name="chat_start_defaults_note">Mode and model follow your defaults</string>
+    <string name="proj_search">Search projects</string>
+    <string name="proj_search_cancel">Cancel</string>
+    <string name="proj_view_mode">List style</string>
+    <!-- session rewind / fork (issue #282) -->
+    <string name="rewind_menu_rewind">Rewind from here</string>
+    <string name="rewind_menu_rewind_sub">Retry this message with a different wording</string>
+    <string name="rewind_menu_fork">Fork from here</string>
+    <string name="rewind_menu_fork_sub">Branch a parallel session from this point</string>
+    <string name="rewind_menu_blocked">Stop the current turn first</string>
+    <string name="rewind_confirm_rewind_title">Rewind from this message?</string>
+    <string name="rewind_confirm_fork_title">Fork from this message?</string>
+    <string name="rewind_will_drop">Will drop</string>
+    <string name="rewind_turns">turns</string>
+    <string name="rewind_tool_calls">tool calls</string>
+    <string name="rewind_counting">Counting…</string>
+    <string name="rewind_files_warning_lead">Files are NOT rolled back</string>
+    <string name="rewind_files_warning_rest">— only the conversation rewinds.</string>
+    <string name="rewind_mode_note_rewind">The current session will be tucked away (recoverable)</string>
+    <string name="rewind_mode_note_fork">The current session stays untouched</string>
+    <string name="rewind_action_rewind">Rewind</string>
+    <string name="rewind_action_fork">Create fork</string>
+    <string name="rewind_lineage_rewound">Rewound from</string>
+    <string name="rewind_lineage_fork">Fork of</string>
+    <string name="rewind_group_rewound">Rewound sessions (%1$d)</string>
+    <string name="rewind_caption_fork">fork of %1$s</string>
+    <string name="rewind_caption_rewound">rewound → %1$s</string>
+    <string name="rewind_err_stale">The transcript changed — reload and try again.</string>
+    <string name="rewind_err_not_idle">The session is still working — stop the current turn first.</string>
+    <string name="rewind_err_unsupported">This session\'s agent can\'t rewind.</string>
+    <string name="rewind_err_external">Someone else is writing this session right now.</string>
+    <string name="rewind_err_first">That\'s the first message — start a new session instead.</string>
+    <string name="rewind_err_generic">Couldn\'t rewind this session.</string>
+
+    <!-- Git panel (issue #280) — the third tab beside Files and Diff -->
+    <string name="git_tab">Git</string>
+    <string name="git_files_tab">Files</string>
+    <string name="git_refresh">Refresh status</string>
+    <string name="git_switch_branch">Switch branch</string>
+    <string name="git_in_sync">in sync</string>
+    <string name="git_sec_conflicts">Conflicts</string>
+    <string name="git_sec_staged">Staged</string>
+    <string name="git_sec_changes">Changes</string>
+    <string name="git_sec_untracked">Untracked</string>
+    <string name="git_stage">Stage</string>
+    <string name="git_unstage">Unstage</string>
+    <string name="git_commit">Commit</string>
+    <string name="git_commit_hint">Commit message…</string>
+    <string name="git_commit_blocked_conflicts">Resolve the %1$d conflicts before committing.</string>
+    <string name="git_commit_blocked_detached">HEAD is detached — check out a branch before committing.</string>
+    <string name="git_fetch">Fetch</string>
+    <string name="git_fetching">Fetching</string>
+    <string name="git_pull">Pull</string>
+    <string name="git_pulling">Pulling</string>
+    <string name="git_pull_tail">--ff-only</string>
+    <string name="git_push">Push</string>
+    <string name="git_pushing">Pushing</string>
+    <string name="git_fetch_note_up_to_date">Fetched — already up to date</string>
+    <string name="git_fetch_note_behind">Fetched — remote is %1$d ahead, ready to merge</string>
+    <string name="git_fetch_note_diverged">Fetched — diverged: %1$d in, %2$d out. Merge on the computer</string>
+    <string name="git_fetch_note_done">Fetched from the remote</string>
+    <string name="git_push_rejected_hint">The remote has new commits — fetch and merge first, or finish this on the computer.</string>
+    <string name="git_clean_title">Nothing to commit — working tree clean</string>
+    <string name="git_clean_caption">In sync with %1$s.</string>
+    <string name="git_clean_caption_plain">Nothing staged, nothing changed.</string>
+    <string name="git_truncated">Long list — some paths were left out.</string>
+    <string name="git_not_a_repo">This folder isn\'t a git repository.</string>
+    <string name="git_unavailable">This computer can\'t answer Git yet — update the desktop app.</string>
+    <string name="git_push_rejected">Push rejected</string>
+    <string name="git_pull_refused">Needs a merge — finish this on the computer</string>
+    <string name="git_action_failed">That didn\'t go through</string>
+    <string name="git_dismiss">Dismiss</string>
+    <string name="git_conflict_both_modified">Both modified</string>
+    <string name="git_conflict_both_added">Both added</string>
+    <string name="git_conflict_both_deleted">Both deleted</string>
+    <string name="git_conflict_added_by_us">Added by us</string>
+    <string name="git_conflict_added_by_them">Added by them</string>
+    <string name="git_conflict_deleted_by_us">Deleted by us</string>
+    <string name="git_conflict_deleted_by_them">Deleted by them</string>
+    <string name="git_conflict_resolve_hint">resolve on the computer</string>
+    <string name="git_branch_title">Branch</string>
+    <string name="git_branch_count">%1$d local</string>
+    <string name="git_new_branch">New branch…</string>
+    <string name="git_new_branch_from">New branch from %1$s</string>
+    <string name="git_new_branch_hint">branch name</string>
+    <string name="git_create">Create</string>
+    <string name="git_branch_current">current</string>
+    <string name="git_working">Working</string>
+    <string name="git_staged">Staged</string>
+    <string name="git_hunks">%1$d hunks</string>
+    <string name="git_hunk_one">1 hunk</string>
+    <string name="git_open_terminal">Open in terminal</string>
+    <string name="git_revert_file">Revert file…</string>
+    <string name="git_discard_title">Discard changes to %1$d files?</string>
+    <string name="git_discard_body">Working-tree changes will be permanently discarded. Staged content is kept.</string>
+    <string name="git_discard_confirm">Discard changes</string>
+    <string name="git_checkout_title">Check out %1$s over your changes?</string>
+    <string name="git_new_file">new</string>
+
+    <!-- Worktree management (issue #281) — every checkout of one repository -->
+    <string name="wt_title">Worktrees</string>
+    <string name="wt_rescan">Rescan</string>
+    <string name="wt_count">%1$d worktrees</string>
+    <string name="wt_count_one">1 worktree</string>
+    <string name="wt_new">New worktree</string>
+    <string name="wt_hint_single">A worktree is a second checkout of this repository. Add one to let an agent work on another branch without disturbing this one.</string>
+    <string name="wt_chip_clean">clean</string>
+    <string name="wt_chip_dirty">dirty · %1$d</string>
+    <string name="wt_chip_unknown">status unknown</string>
+    <string name="wt_chip_session">session active</string>
+    <string name="wt_foot_unknown">Status is read when a worktree is opened. Grey means we have not looked yet — everything here still works.</string>
+    <string name="wt_main_badge">main</string>
+    <string name="wt_menu_open">Open session here</string>
+    <string name="wt_menu_remove">Remove…</string>
+    <string name="wt_new_title">New worktree</string>
+    <string name="wt_seg_existing">Existing branch</string>
+    <string name="wt_seg_new">New branch</string>
+    <string name="wt_search_branches">Search branches</string>
+    <string name="wt_branch_name">Branch name</string>
+    <string name="wt_branched_from">Branched from %1$s · does not exist yet</string>
+    <string name="wt_in_use">in use · %1$s</string>
+    <string name="wt_location">Location</string>
+    <string name="wt_location_note">Created next to the repository</string>
+    <string name="wt_create">Create worktree</string>
+    <string name="wt_remove_title">Remove worktree %1$s?</string>
+    <string name="wt_remove_lost">%1$d uncommitted changes will be lost</string>
+    <string name="wt_remove_blocked">A session is running here. Stop it first.</string>
+    <string name="wt_remove_note_dirty">The directory is deleted and the uncommitted work in it goes with it. The branch itself is kept.</string>
+    <string name="wt_remove_note_clean">Only this checkout directory is deleted. The branch and its commits are never touched.</string>
+    <string name="wt_remove">Remove</string>
+    <string name="wt_part_of">part of %1$s</string>
+    <string name="wt_unavailable">This computer can\'t answer worktrees yet — update the desktop app.</string>
+    <string name="wt_creating">Creating worktree…</string>
+    <string name="wt_removing">Removing worktree…</string>
+    <string name="wt_search">Search worktrees</string>
 </resources>

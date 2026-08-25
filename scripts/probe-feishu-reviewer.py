@@ -69,9 +69,10 @@ def main() -> int:
         "--json-schema", SCHEMA,
         "--model", "sonnet",
         "--effort", "low",
-        "--tools", "",
+        # 与 ClaudeFeishuPromptReviewer.buildArgv 保持一字不差：空 tool 集合与空 MCP 集合都写成单 token
+        # （`--tools=` / 只给 --strict-mcp-config），不依赖独立的空参数或字面引号活过 argv 传递
+        "--tools=",
         "--strict-mcp-config",
-        "--mcp-config", '{"mcpServers":{}}',
         "--safe-mode",
         "--disable-slash-commands",
         "--no-session-persistence",

@@ -8,8 +8,23 @@
 #  - DerivedData 可能残留旧产物造成"装了但没更新"的假成功 → 装前校验二进制 5 分钟内新鲜。
 #
 # 用法：bash scripts/install-pandaa.sh [CoreDevice-UUID]（缺省读 .env 的 IOS_DEVICE_UUID）
+#
+# 设备连不上/装不上时自动转投 F2.im（fir.im）OTA：走 scripts/ios-fir.sh development 出签名 IPA 并
+# 发布，手机上开 fir 短链自装。构建失败不转投（那是代码问题不是设备问题）。PANDAA_NO_FIR=1 关闭。
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# USB/Wi-Fi 装不进去时的 OTA 兜底。成功后以 0 退出——「用户能装到手机」这个目标已达成，只是换了条路。
+publish_fir() {
+  echo "── 设备不可达/安装失败 → 转投 F2.im OTA（scripts/ios-fir.sh development）──"
+  if [[ "${PANDAA_NO_FIR:-}" == "1" ]]; then
+    echo "❌ PANDAA_NO_FIR=1：不转投，按失败退出"
+    exit 1
+  fi
+  bash scripts/ios-fir.sh development
+  echo "✅ 已发布 F2.im：在手机浏览器打开上方 fir 输出的短链安装（Debug 直装恢复后重跑本脚本即可）"
+  exit 0
+}
 
 # 设备 UUID 是个人环境值，不进仓库：从 $1 或 .env 的 IOS_DEVICE_UUID 取
 [[ -f .env ]] && source .env
@@ -24,9 +39,9 @@ LOG=/tmp/ios-device-build.log
 
 echo "── 0/4 设备在线检查 ──"
 if ! xcrun devicectl list devices | grep "$DEVICE" | grep -Eq '(^|[[:space:]])(available|connected)([[:space:]]|$)'; then
-  echo "❌ 设备不在线：$DEVICE"
+  echo "⚠️ 设备不在线：$DEVICE"
   xcrun devicectl list devices
-  exit 1
+  publish_fir
 fi
 
 echo "── 1/4 构建（generic/platform=iOS，日志 ${LOG}）──"
@@ -45,9 +60,10 @@ if ! find "$APP/cc-pocket" -mmin -5 | grep -q .; then
 fi
 
 echo "── 2/4 安装 → $DEVICE ──"
-xcrun devicectl device install app --device "$DEVICE" "$APP"
+xcrun devicectl device install app --device "$DEVICE" "$APP" || publish_fir
 
 echo "── 3/4 拉起 $BUNDLE_ID ──"
-xcrun devicectl device process launch --device "$DEVICE" "$BUNDLE_ID"
+# 装上了只是拉起失败（比如手机中途锁屏）不值得转 OTA——手点图标就行
+xcrun devicectl device process launch --device "$DEVICE" "$BUNDLE_ID" || echo "⚠️ 拉起失败（已安装，手动打开即可）"
 
 echo "✅ 4/4 完成：$APP"

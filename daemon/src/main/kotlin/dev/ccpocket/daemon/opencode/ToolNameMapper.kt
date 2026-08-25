@@ -8,13 +8,15 @@ package dev.ccpocket.daemon.opencode
  */
 object ToolNameMapper {
     fun map(tool: String): String = when (val name = tool.lowercase()) {
-        "bash" -> "Bash"
+        // kimi ACP (issue #206) passes a tool `kind` ∈ execute/read/edit/delete/move/search/fetch/…;
+        // `execute` and legacy `shell` are the command tool → Claude's Bash danger regex.
+        "bash", "shell", "execute" -> "Bash"
         "read" -> "Read"
         "write" -> "Write"
-        "edit" -> "Edit"
+        "edit", "delete", "move" -> "Edit"
         "glob" -> "Glob"
-        "grep" -> "Grep"
-        "webfetch" -> "WebFetch"
+        "grep", "search" -> "Grep"
+        "webfetch", "fetch" -> "WebFetch"
         "websearch" -> "WebSearch"
         "task" -> "Task"
         else -> name.replaceFirstChar { it.uppercase() }

@@ -36,4 +36,29 @@ class ServiceInstallerTest {
         assertTrue(ServiceInstaller.removeSiblingAgents(canonical).isEmpty())
         assertTrue(canonical.exists())
     }
+
+    @Test
+    fun windowsTaskCanBeRegisteredWithoutStartingDuringUpdateHandoff() {
+        val rendered = ServiceInstaller.windows(
+            exec = "C:\\Program Files\\cc-pocket\\cc-pocket-daemon.exe",
+            args = listOf("run", "--pair-port", "8799"),
+            apply = false,
+            startNow = false,
+        )
+
+        assertTrue("Register-ScheduledTask" in rendered)
+        assertFalse("Start-ScheduledTask" in rendered)
+    }
+
+    @Test
+    fun normalWindowsServiceInstallStillStartsImmediately() {
+        val rendered = ServiceInstaller.windows(
+            exec = "C:\\Program Files\\cc-pocket\\cc-pocket-daemon.exe",
+            args = listOf("run"),
+            apply = false,
+            startNow = true,
+        )
+
+        assertTrue("Start-ScheduledTask" in rendered)
+    }
 }

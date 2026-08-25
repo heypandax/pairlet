@@ -3,9 +3,11 @@ package dev.ccpocket.daemon.session
 import dev.ccpocket.daemon.agent.AgentBackendFactory
 import dev.ccpocket.daemon.conversation.AskPushHook
 import dev.ccpocket.daemon.conversation.Conversation
+import dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX
 import dev.ccpocket.daemon.conversation.KeyedSink
 import dev.ccpocket.daemon.conversation.ObserveSession
 import dev.ccpocket.daemon.conversation.OutboundSink
+import dev.ccpocket.daemon.conversation.PromptFate
 import dev.ccpocket.daemon.conversation.PushHook
 import dev.ccpocket.daemon.conversation.sinkKey
 import dev.ccpocket.daemon.codex.CodexPaths
@@ -31,11 +33,13 @@ import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.SwitchServiceTier
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -87,7 +91,25 @@ class SessionRegistry(
     private val log = dev.ccpocket.daemon.util.logger("SessionRegistry")
     private val convos = mutableMapOf<String, Conversation>()
     private val observes = mutableMapOf<String, ObserveSession>()
-    private val pendingClose = mutableMapOf<String, Job>() // convoId -> delayed-close job during a LAN disconnect grace
+    /** A shared conversation can have several LAN viewers disconnect inside the same grace window. Each
+     *  dead connection owns an independent cleanup; keying only by convoId made the newest disconnect
+     *  cancel the older one's cleanup and leave its sink attached forever. */
+    private data class PendingCloseKey(val convoId: String, val ownerKey: Any)
+    private val pendingClose = mutableMapOf<PendingCloseKey, Job>()
+    private data class LiveReattachClaim(val staleClose: Job?)
+
+    /** Conversations with a rewind PAST its point of no return (issue #282), guarded by [mutex]. The
+     *  frame arrives on the router's scope, so two copies of one request — a duplicate tap, a resend
+     *  after a flaky link — can both clear the admission gate before either has closed anything, and
+     *  would then branch the same session twice. The claim is what makes the swap happen at most once. */
+    private val rewinding = mutableSetOf<String>()
+
+    /** Test-only race seam: invoked after a grace delay but before that timer claims the mutex. A
+     *  replacement can supersede the awakened timer here, pinning the cancellation boundary. */
+    internal var beforePendingCloseClaim: (suspend () -> Unit)? = null
+
+    /** Test-only race seam between the optimistic live lookup and its authoritative atomic claim. */
+    internal var beforeLiveReattachClaim: (suspend () -> Unit)? = null
 
     // live LAN sockets — the reaper must treat "a phone is attached over LAN" like relay peerOnline,
     // else a LAN session idle past the reap window is killed under the user's thumbs
@@ -260,7 +282,7 @@ class SessionRegistry(
         if (convoIds.isEmpty()) return 0
         // a stub carrying ONLY the identity: every attach/detach path matches on sinkKey, never on the
         // lambda instance, so this removes the device's real sink without needing a handle to it
-        val probe = KeyedSink("dev:$deviceId", OutboundSink { })
+        val probe = KeyedSink("$DEVICE_SINK_KEY_PREFIX$deviceId", OutboundSink { })
         val orphaned = mutableListOf<ObserveSession>()
         var cut = 0
         mutex.withLock {
@@ -286,9 +308,16 @@ class SessionRegistry(
         origin: String? = null,
         pathScope: List<String>? = null,
         peerSupportsOpencode: Boolean = true,
+        peerSupportsKimi: Boolean = true,
+        peerSupportsZcode: Boolean = true,
+        peerSupportsDsh: Boolean = true,
         bridgeAllowedCommands: List<String> = emptyList(),
-        // issue #91 OWNER BYPASS: this session is the bridge owner's OWN dedicated session → its whole
-        // PermissionBridge auto-allows. Passed ONLY by trusted in-process code (the built-in engine).
+        // issue #242: a BRIDGE's session-stable context preamble (chat/project/capability boundary), appended
+        // to the agent's system prompt on every launch of this conversation. Null for owner/guest opens.
+        bridgeContextPreamble: String? = null,
+        // issue #91 OWNER BYPASS: this is the bridge owner's OWN dedicated session. It may mint one-turn
+        // OWNER_BYPASS grants through the in-process entry point; the flag alone does not auto-allow tools.
+        // Passed ONLY by trusted in-process code (the built-in engine).
         ownerBypass: Boolean = false,
         // SESSION-HANDOFF §8.3: non-null exactly for a COLLABORATOR's vetted open — the Handoff Grant's
         // operation ceiling. It rides into the Conversation's PermissionBridge (REVIEW hard-refuses
@@ -297,6 +326,9 @@ class SessionRegistry(
         // issue #201: a HEADLESS fire (the scheduler) has no client attached, so its asks must keep the
         // bounded window even when the owner turned on "wait for my decision" — see Conversation's noAutoDeny.
         headless: Boolean = false,
+        // issue #219: the workdir the phone OPENED with (raw "~"-relative allowed) — announced verbatim in
+        // SessionLive so the phone's identity guard matches it; null → the daemon's canonical workdir.
+        announcedWorkdir: String? = null,
     ): String {
         val resume = open.resumeId
         // A resume id is the durable backend identity. Older Apps did not send `agent`, and a newer App
@@ -342,7 +374,7 @@ class SessionRegistry(
                 // sink is excluded: it is the new conversation's initialSink already.
                 spectators = hot.attachedSinks().filterNot { sinkKey(it) == sinkKey(sink) }
                 mutex.withLock { convos.remove(hot.convoId) }
-                cancelPendingClose(hot.convoId)
+                cancelPendingCloses(hot.convoId)
                 runCatching { hot.close() }
                 noteSelfClosed(hot)
                 live = null
@@ -356,13 +388,67 @@ class SessionRegistry(
                 // that reports itself open while every push vanishes. Refuse with something readable
                 // instead — and refuse HERE, so any future path that hands such a client an opencode
                 // session id is covered too.
-                if (attach.kind == AgentKind.OPENCODE && !peerSupportsOpencode) {
-                    log.info("open ${resume.take(8)}… → refused: opencode session, peer never declared support")
-                    sink.emit(PocketError("agent_unavailable", "update the app to open OpenCode sessions"))
+                if ((attach.kind == AgentKind.OPENCODE && !peerSupportsOpencode) ||
+                    (attach.kind == AgentKind.KIMI && !peerSupportsKimi) ||
+                    (attach.kind == AgentKind.ZCODE && !peerSupportsZcode) ||
+                    (attach.kind == AgentKind.DSH && !peerSupportsDsh)
+                ) {
+                    log.info("open ${resume.take(8)}… → refused: ${attach.kind} session, peer never declared support")
+                    sink.emit(PocketError("agent_unavailable", "update the app to open ${attach.kind} sessions"))
                     return ""
                 }
                 log.info("open ${resume.take(8)}… → reattach ${attach.convoId.take(8)}…")
-                cancelPendingClose(attach.convoId); attach.reattach(sink, open.lastEventSeq); return attach.convoId
+                // Issue #50 on the HOT path — parity with the cold resume below, which builds the
+                // Conversation from open.mode: re-opening a still-live conversation applies the caller's
+                // mode instead of silently reviving whatever the convo drifted to. Since M5 (Full Control
+                // auto-expiry) the drift is real: a convo alive past the TTL has fallen back to DEFAULT,
+                // and without this every re-open kept that fallback — reading as "Settings' default mode
+                // is ignored", which is exactly what #50 reported.
+                //
+                // GATED on the reattacher carrying the SAME authority the conversation's walls were built
+                // for. The tempting argument — "every restricted ingress already clamps open.mode to its
+                // tier ceiling before it gets here" — only covers opens BY a restricted credential. An
+                // OWNER open lands here too (see the spectator note above) carrying the owner's own
+                // Settings default, which nobody clamped; and a COLLABORATOR conversation has origin ==
+                // null, so switchMode's M5 source ceiling (`origin != null && BYPASS`) does not backstop
+                // it either. Ungated, an owner peeking at a session they handed out under
+                // REVIEW_READ_ONLY would hand it Full Control — unattended write + shell for the
+                // colleague. Matching grant shape AND origin keeps #50's actual case (owner re-opening
+                // their own session) working, while a grant-bearing conversation keeps the mode its own
+                // grant clamped.
+                //
+                // Same-mode re-opens no-op inside switchMode (grants and the M5 expiry clock are
+                // untouched — merely re-entering never renews Full Control). A BUSY conversation is left
+                // alone: peeking at a running task must not yank its grants/autonomy mid-flight (the
+                // idle-only spirit of the reaper and the client's close-on-switch).
+                beforeLiveReattachClaim?.invoke()
+                // The first lookup above is optimistic: an awakened grace timer may remove and close that
+                // Conversation while switchMode/replay suspends. Claim it again under the SAME mutex the
+                // timer uses for cleanup. Presence recheck + same-key timer removal + replacement-sink
+                // registration are indivisible, so either reattach wins and expiry becomes stale, or expiry
+                // wins and this open falls through to a fresh cold resume instead of returning a dead id.
+                val claim = mutex.withLock {
+                    if (convos[attach.convoId] !== attach) return@withLock null
+                    val staleClose = pendingClose.remove(PendingCloseKey(attach.convoId, sinkKey(sink)))
+                    attach.registerReattach(sink)
+                    LiveReattachClaim(staleClose)
+                }
+                if (claim != null) {
+                    claim.staleClose?.cancel()
+                    val sameAuthority = attach.matchesGrant(pathScope, handoffAccess) && attach.origin == origin
+                    if (!attach.isBusy() && sameAuthority) {
+                        if (attach.currentMode() != open.mode) {
+                            log.info("open ${resume.take(8)}… → reattach applies caller mode ${open.mode} (was ${attach.currentMode()})")
+                        }
+                        attach.switchMode(open.mode, open.permissionMode)
+                    } else if (!attach.isBusy() && !sameAuthority && attach.currentMode() != open.mode) {
+                        log.info("open ${resume.take(8)}… → reattach keeps convo mode ${attach.currentMode()}: caller's grant shape differs (mode ${open.mode} not applied)")
+                    }
+                    attach.replayReattach(sink, open.lastEventSeq)
+                    return attach.convoId
+                }
+                log.info("open ${resume.take(8)}… → live candidate ${attach.convoId.take(8)}… expired before reattach claim; resuming cold")
+                live = null
             }
             // Observe a Claude/Codex session running OUTSIDE the daemon (e.g. a terminal) — read-only,
             // no second writer. Each backend supplies its own transcript resolver/replay and process probe.
@@ -416,8 +502,10 @@ class SessionRegistry(
         val c = Conversation(
             convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(),
             pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
-            pathScope = pathScope, bridgeAllowedCommands = bridgeAllowedCommands, ownerBypass = ownerBypass,
+            pathScope = pathScope, bridgeAllowedCommands = bridgeAllowedCommands,
+            bridgeContextPreamble = bridgeContextPreamble, ownerBypass = ownerBypass,
             handoffAccess = handoffAccess, headless = headless,
+            announcedWorkdir = announcedWorkdir,
             approvals = approvals, grants = grants, riskEngine = riskEngine,
         )
         mutex.withLock { convos[convoId] = c }
@@ -482,6 +570,147 @@ class SessionRegistry(
             ?: requested
     }
 
+    // ── rewind / fork (issue #282, docs/design/REWIND-FORK.md §6) ──────────────────────────────────
+
+    /**
+     * Answer one [RewindSession]: preview the cut, or make it.
+     *
+     * The whole operation is "close one conversation, open a branch of it", and the ONE invariant is
+     * that it either happens completely or leaves nothing behind. So every refusable condition is
+     * checked BEFORE anything is closed — the admission gate, then the anchor translated against the
+     * file on disk — and the only step after the point of no return is creating the replacement, whose
+     * failure path restores nothing because nothing on disk was touched: `--fork-session` writes a new
+     * transcript and leaves the original byte-for-byte (probed on 2.1.228), and the branch's own file
+     * does not exist until its first turn.
+     *
+     * Both modes launch identically (`--resume <sid> --resume-session-at <anchor> --fork-session`); the
+     * mode only decides how the ORIGINAL is later filed, which is the lineage ledger's business, not
+     * this function's. The "truncate WITHOUT forking" shape is never emitted anywhere: it keeps the
+     * original id and appends the branch to the same file, turning the transcript into a tree that
+     * linear replay renders twice.
+     *
+     * Answers the REQUESTING sink only — another attached client did not ask and must not be told its
+     * session is being cut by a frame it has no context for; it finds out the ordinary way, by being
+     * migrated onto the branch below.
+     */
+    suspend fun rewind(req: dev.ccpocket.protocol.RewindSession, sink: OutboundSink) {
+        val refuse: suspend (String) -> Unit = { reason ->
+            log.info("rewind ${req.convoId.take(8)}… refused: $reason")
+            sink.emit(
+                if (req.dryRun) dev.ccpocket.protocol.RewindPreview(req.convoId, 0, 0, ok = false, reason = reason)
+                else dev.ccpocket.protocol.RewindDone(req.convoId, ok = false, reason = reason),
+            )
+        }
+        val R = dev.ccpocket.protocol.RewindRefusal
+        if (req.mode != dev.ccpocket.protocol.RewindMode.REWIND && req.mode != dev.ccpocket.protocol.RewindMode.FORK) {
+            return refuse(R.BAD_MODE)
+        }
+        val convo = get(req.convoId) ?: return refuse(R.NO_CONVO)
+        // Claude only: no other backend has a truncated-resume primitive, and silently doing something
+        // ELSE (a plain resume, a fresh session) would be worse than refusing. Restricted conversations
+        // are out too — a bridge / guest / handoff-granted session branching the owner's history is an
+        // authority question this feature has not answered, so the answer is no.
+        if (convo.kind != AgentKind.CLAUDE) return refuse(R.UNSUPPORTED)
+        if (convo.origin != null || !convo.matchesGrant(null, null)) return refuse(R.UNSUPPORTED)
+        // idle in BOTH senses: nothing running or unanswered (isBusy), and nothing queued toward the
+        // agent that a cut would strand (the #122 ledger). Keeps this orthogonal to the #285 attribution
+        // gate — a rewind can only start from a standstill, where no prompt has a fate to decide.
+        if (convo.isBusy() || convo.hasQueuedPrompts()) return refuse(R.NOT_IDLE)
+        val sid = convo.sessionId ?: convo.resumeAnchor ?: return refuse(R.NO_TRANSCRIPT)
+        val workdir = convo.workdir.toString()
+        val file = ProjectPaths.dirForUnder(projectsRoot, workdir).resolve("$sid.jsonl")
+        if (!file.exists()) return refuse(R.NO_TRANSCRIPT)
+        // a terminal `claude --resume` on this transcript is a second writer; our own live process is
+        // fine (we are about to stop it) and externallyActive already excludes it
+        if (externallyActive(sid, workdir, file)) return refuse(R.EXTERNAL_WRITER)
+
+        val plan = when (val p = withContext(Dispatchers.IO) { dev.ccpocket.daemon.disk.RewindPlanner.plan(file, req.anchorUuid, req.anchorSeq) }) {
+            is dev.ccpocket.daemon.disk.RewindPlanner.Result.Refused -> return refuse(p.reason)
+            is dev.ccpocket.daemon.disk.RewindPlanner.Result.Ok -> p.plan
+        }
+        if (req.dryRun) {
+            log.info("rewind ${req.convoId.take(8)}… preview: ${plan.dropTurns} turn(s), ${plan.dropToolCalls} tool call(s)")
+            return sink.emit(dev.ccpocket.protocol.RewindPreview(req.convoId, plan.dropTurns, plan.dropToolCalls, ok = true))
+        }
+
+        val factory = backends[AgentKind.CLAUDE] ?: return refuse(R.UNSUPPORTED)
+        // Claim the conversation before touching anything. A loser here gets NO_CONVO, which is what its
+        // request has effectively become: the conversation it named is on its way out.
+        if (!mutex.withLock { rewinding.add(convo.convoId) }) return refuse(R.NO_CONVO)
+        try {
+            rewindLocked(req, sink, convo, sid, plan, factory, refuse)
+        } finally {
+            mutex.withLock { rewinding.remove(convo.convoId) }
+        }
+    }
+
+    /** The execute half of [rewind], past the point of no return and holding the [rewinding] claim. */
+    private suspend fun rewindLocked(
+        req: dev.ccpocket.protocol.RewindSession,
+        sink: OutboundSink,
+        convo: Conversation,
+        sid: String,
+        plan: dev.ccpocket.daemon.disk.RewindPlanner.Plan,
+        factory: AgentBackendFactory,
+        refuse: suspend (String) -> Unit,
+    ) {
+        val R = dev.ccpocket.protocol.RewindRefusal
+        val knobs = convo.launchKnobs()
+        // Everyone else watching this conversation moves onto the branch (the §3.3 auto-spectate shape):
+        // the alternative is leaving them attached to a conversation that is about to stop existing.
+        val spectators = convo.attachedSinks().filterNot { sinkKey(it) == sinkKey(sink) }
+        // POINT OF NO RETURN. Stop the old conversation first and let its process flush: the branch is
+        // launched with --fork-session so two writers could not actually collide, but the daemon's own
+        // "one writer per session" discipline does not get relaxed just because the CLI would survive it.
+        mutex.withLock { convos.remove(convo.convoId) }
+        cancelPendingCloses(convo.convoId)
+        approvals.withdrawAllForConvo(convo.convoId)
+        runCatching { convo.close() }
+        noteSelfClosed(convo)
+
+        val newConvoId = UUID.randomUUID().toString()
+        val branch = Conversation(
+            newConvoId, convo.workdir, knobs.mode, sink, scope, factory.create(),
+            pushHookProvider = { pushHook }, askPushHookProvider = { askPushHook },
+            approvals = approvals, grants = grants, riskEngine = riskEngine,
+        )
+        mutex.withLock { convos[newConvoId] = branch }
+        val started = runCatching {
+            branch.open(
+                sid, knobs.model, knobs.effort,
+                permissionMode = knobs.permissionMode,
+                serviceTier = knobs.serviceTier,
+                // LAZY, like every plain open. Nothing is forked until the person actually sends the
+                // first turn — back out here and no transcript, no session row and no ledger entry were
+                // created, which is the strongest possible reading of "a fork is never implicit". It is
+                // also why RewindDone carries no newSessionId: the CLI has not minted one yet.
+                rewind = Conversation.RewindLaunch(
+                    parentSid = sid,
+                    anchorUuid = plan.anchorUuid,
+                    dropsTurnUuid = plan.dropsTurnUuid,
+                    cutSeq = req.anchorSeq,
+                    mode = req.mode,
+                ),
+            )
+        }
+        if (started.isFailure) {
+            mutex.withLock { convos.remove(newConvoId) }
+            runCatching { branch.close() }
+            log.warn("rewind ${req.convoId.take(8)}… branch failed to open: ${started.exceptionOrNull()?.message}")
+            return refuse(R.LAUNCH_FAILED)
+        }
+        for (s in spectators) {
+            runCatching { branch.reattach(s) }
+                .onFailure { log.warn("rewind: could not migrate a spectator onto ${newConvoId.take(8)}…: ${it.message}") }
+        }
+        log.info(
+            "rewind ${req.convoId.take(8)}… → ${req.mode} branch ${newConvoId.take(8)}… of ${sid.take(8)}… " +
+                "at seq ${req.anchorSeq} (dropping ${plan.dropTurns} turn(s), ${plan.dropToolCalls} tool call(s)" +
+                "${if (plan.dropsTurnUuid != null) ", guarded" else ""})",
+        )
+        sink.emit(dev.ccpocket.protocol.RewindDone(req.convoId, ok = true, newConvoId = newConvoId))
+    }
+
     /** Test hook: is [convoId] still a live observe view? (the issue-107 stale-observer reap) */
     internal suspend fun observing(convoId: String): Boolean = mutex.withLock { observes.containsKey(convoId) }
 
@@ -514,8 +743,17 @@ class SessionRegistry(
      *  - an unanswered permission ask / question (issue #55): blocked on the user, not idle — reaping would
      *    silently discard a card the phone is expected to answer (plan mode surfaces the question long after
      *    a premature `result`, past this idle window, while the phone is backgrounded).
+     *
+     * Occupancy is judged PER SESSION, not by global presence (issue #216). The caller used to gate this
+     * on "no phone connected at all", which never fired while a desktop App or phone held its permanent
+     * connection — a session the user had already tapped away from stayed warm (and hidden from the
+     * desktop `--resume` picker) indefinitely. Now a conversation is spared only while a REACHABLE client
+     * view is attached ([clientOccupied]): a `dev:` relay view counts while the relay peer is online
+     * ([relayPeerOnline]), a plain LAN view while any LAN socket lives, and a headless sink (scheduler
+     * fire) never counts. An idle session nobody is looking at is released — and unhidden — promptly,
+     * App online or not.
      */
-    suspend fun reapIdle(idleMs: Long): Int {
+    suspend fun reapIdle(idleMs: Long, relayPeerOnline: Boolean = false): Int {
         // first settle background jobs whose completion event never arrived — otherwise their forever-RUNNING
         // status keeps hasBackgroundWork() true and the session can never be reaped (and the phone's "N running"
         // count never clears). Snapshot outside the lock so the per-conversation emit doesn't hold the mutex.
@@ -527,10 +765,12 @@ class SessionRegistry(
         // detach a dead client's view, and a handoff session resumes from disk like any cold session.)
         val handoffProtected = handoffs?.activeSessionIds().orEmpty()
         val now = System.currentTimeMillis()
+        val lanClientPresent = lanConnected()
         val stale = mutex.withLock {
             val s = convos.filterValues {
                 val sid = it.sessionId ?: it.resumeAnchor
-                now - it.lastActivityMs > idleMs && !it.isBusy() && (sid == null || sid !in handoffProtected)
+                now - it.lastActivityMs > idleMs && !it.isBusy() && (sid == null || sid !in handoffProtected) &&
+                    !clientOccupied(it, relayPeerOnline, lanClientPresent)
             }
             convos.keys.removeAll(s.keys)
             s.values.toList()
@@ -543,6 +783,36 @@ class SessionRegistry(
             it.close(); noteSelfClosed(it)
         }
         return stale.size
+    }
+
+    /** Does a REACHABLE client view hold this conversation open? (the reaper's per-session occupancy
+     *  check, issue #216). Reachability is judged per sink, not per daemon:
+     *   - a `dev:` keyed sink is a relay device view — relay sinks are never detached when the peer
+     *     drops (the relay link just goes quiet), so a stale one must not pin the session forever;
+     *     it counts only while the relay peer is online.
+     *   - a plain (unkeyed) sink is a LAN socket view — LAN disconnects detach it via the
+     *     [scheduleClose] grace, so its mere presence implies a live client; gated on any LAN socket
+     *     being open at all, which also keeps offline-era unit fixtures (attached collector lambdas,
+     *     no real socket) reapable exactly like the pre-#216 offline reaper.
+     *   - a non-watching sink (the scheduler's headless fire) is a black hole, never an occupant —
+     *     a scheduled run that settled should surface in the desktop picker like any other leftover. */
+    private fun clientOccupied(c: Conversation, relayPeerOnline: Boolean, lanClientPresent: Boolean): Boolean =
+        c.attachedSinks().any { sink ->
+            val keyed = sink as? KeyedSink ?: return@any lanClientPresent
+            when {
+                !keyed.watching -> false
+                (keyed.key as? String)?.startsWith(DEVICE_SINK_KEY_PREFIX) == true -> relayPeerOnline
+                else -> lanClientPresent
+            }
+        }
+
+    /** Is [sessionId] one of THIS daemon's live conversations (by settled id or resume anchor)?
+     *  The periodic spawned-session sweep asks this before touching a journaled transcript: a live
+     *  conversation's claude may hold the file, and rewriting under it drops concurrent appends
+     *  (the d8fa0da class of regression). Queried per entry, not snapshotted — an open racing the
+     *  sweep must be seen. */
+    suspend fun isLiveSession(sessionId: String): Boolean = mutex.withLock {
+        convos.values.any { it.sessionId == sessionId || it.resumeAnchor == sessionId }
     }
 
     /** Conversations mid-work (turn in flight or background jobs) — these BLOCK an account switch:
@@ -628,8 +898,15 @@ class SessionRegistry(
         mutex.withLock {
             convos.values.mapNotNull { c ->
                 val sid = c.sessionId ?: return@mapNotNull null
+                // PUBLISHED work state, not the reaper's. A plan-mode result and a completed background
+                // task both arm a 5-minute continuation grace so the reaper can't reclaim a conversation
+                // whose unprompted follow-up turn is still coming — but that shield is not evidence the
+                // agent is running, and publishing it kept settled rows lit as Active for five minutes
+                // (issue #269). The continuation re-arms `executing` from its own init when it starts.
+                val executing = c.hasVisibleTurnWork()
                 c.workdir.toString() to dev.ccpocket.protocol.ActiveSession(
-                    sid, executing = c.isExecuting(), busy = c.hasBackgroundWork(), agent = c.kind, origin = c.origin,
+                    sid, executing = executing, busy = c.hasBackgroundWork(), agent = c.kind,
+                    origin = c.origin, executingAuthoritative = true,
                 )
             }
         }.groupBy({ it.first }, { it.second })
@@ -669,9 +946,9 @@ class SessionRegistry(
         val removed = mutex.withLock {
             val convo = convos[convoId] ?: return@withLock null
             if (convo.isBusy()) return@withLock null
-            pendingClose.remove(convoId) to (convos.remove(convoId) ?: return@withLock null)
+            removePendingCloseJobsLocked(convoId) to (convos.remove(convoId) ?: return@withLock null)
         } ?: return false
-        removed.first?.cancel()
+        removed.first.forEach { it.cancel() }
         removed.second.close()
         noteSelfClosed(removed.second)
         log.info("closeIfIdle: released ${convoId.take(8)}… (sid=${removed.second.sessionId?.take(8) ?: "-"})")
@@ -691,6 +968,11 @@ class SessionRegistry(
     suspend fun approveBridgeRequest(convoId: String, preview: String): Boolean =
         get(convoId)?.awaitBridgeRequestApproval(preview) ?: false
 
+    /** issue #285 归属门：桥接用它判定一个 TurnDone 是否属于自己发出的那条请求（凭证=消费账本）。
+     *  会话已不在册时回 UNKNOWN——此时也不会再有它的帧了，答案只影响日志措辞。 */
+    suspend fun promptFate(convoId: String, promptId: String): PromptFate =
+        get(convoId)?.promptFate(promptId) ?: PromptFate.UNKNOWN
+
     /** Execute the one request that just passed [approveBridgeRequest] under its ephemeral full grant. */
     suspend fun sendApprovedBridgePrompt(p: SendPrompt): Boolean {
         val convo = get(p.convoId) ?: return false
@@ -698,8 +980,8 @@ class SessionRegistry(
     }
 
     /**
-     * Execute one request from a chat the owner PRE-TRUSTED (issue #198) — no approval card was shown, so the
-     * turn runs under the narrower AUTO_TRUSTED grant (danger/workdir walls still enforced).
+     * Execute one request from a chat/project the owner PRE-TRUSTED (issues #198/#233). No approval card is
+     * shown; a broad AUTO_TRUSTED grant is armed only for this prompt and revoked at turn end.
      *
      * In-process callers only, exactly like [approveBridgeRequest]: the trust decision is keyed on the
      * attested chat id, which only the built-in engine sees. No frame reaches this — the router has no branch
@@ -712,7 +994,7 @@ class SessionRegistry(
 
     /**
      * Execute one Guardian-passed request from a REVIEWED chat (reviewed-trust design) under the one-turn
-     * REVIEWER_APPROVED grant — same closed ceiling as trusted, distinct for audit.
+     * REVIEWER_APPROVED grant — the Guardian path's closed ceiling, distinct from trusted full authority.
      *
      * In-process callers only, exactly like [sendTrustedBridgePrompt]: the review decision is made and
      * re-validated inside the built-in engine, and no router branch calls this — a bridge cannot claim its
@@ -721,6 +1003,13 @@ class SessionRegistry(
     suspend fun sendReviewedBridgePrompt(p: SendPrompt, reviewId: String): Boolean {
         val convo = get(p.convoId) ?: return false
         return convo.sendReviewedBridgePrompt(p.text, p.promptId, reviewId = reviewId)
+    }
+
+    /** Execute one request in the configured owner's dedicated in-process bridge session. No wire route
+     *  calls this; the Feishu engine exchanges its attested owner identity for a one-turn OWNER_BYPASS grant. */
+    suspend fun sendOwnerBypassBridgePrompt(p: SendPrompt): Boolean {
+        val convo = get(p.convoId) ?: return false
+        return convo.sendOwnerBypassBridgePrompt(p.text, p.promptId)
     }
 
     suspend fun switchDir(s: SwitchDirectory) = get(s.convoId)?.switchDirectory(Path.of(s.workdir)) ?: Unit
@@ -798,7 +1087,7 @@ class SessionRegistry(
      *  mode's premature `result` clears that flag long before the turn truly ends (issue #55): a "done"-looking
      *  session the user taps away from is often still researching and about to ask a question. Killing it here
      *  would abort the turn and drop the question; instead it survives (the idle reaper reclaims it once it
-     *  really goes idle and the phone stays away — the same spare set as reapIdle/scheduleClose). Returns true
+     *  really goes idle with no client view attached — the same spare set as reapIdle/scheduleClose). Returns true
      *  when the conversation was actually closed.
      *
      *  [force] = the user explicitly asked to STOP the session (an account-switch blocker row), not to
@@ -815,15 +1104,15 @@ class SessionRegistry(
                 return false
             }
         }
-        val (job, convo, obs) = mutex.withLock {
-            Triple(pendingClose.remove(convoId), convos.remove(convoId), observes.remove(convoId))
+        val (jobs, convo, obs) = mutex.withLock {
+            Triple(removePendingCloseJobsLocked(convoId), convos.remove(convoId), observes.remove(convoId))
         }
         // §18.1 P1-5: a REAL close sweeps every pending approval of this conversation across ALL sources
         // (agent asks die with the conversation anyway; shell/export pending live in daemon-global
         // services and would otherwise stay approvable from the account inbox after the session is gone).
         // BEFORE convo.close() so the withdraw frames still ride the fan-out sinks.
         if (convo != null || obs != null) approvals.withdrawAllForConvo(convoId)
-        job?.cancel(); convo?.close(); obs?.close()
+        jobs.forEach { it.cancel() }; convo?.close(); obs?.close()
         if (convo != null || obs != null) log.info("close ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
         convo?.let { noteSelfClosed(it) }
         return convo != null || obs != null
@@ -837,60 +1126,100 @@ class SessionRegistry(
     }
 
     /**
-     * Close [convoId] after [graceMs] UNLESS a reconnect reattaches first (which calls [cancelPendingClose]).
+     * Detach [owner]'s view of [convoId] after [graceMs]. A reconnect under the SAME keyed sink identity
+     * cancels this cleanup; a LAN reconnect uses a fresh plain sink and deliberately leaves the old
+     * connection's cleanup armed, so only the zombie view is removed after the grace.
      * The LAN server uses this on socket drop instead of closing immediately: a flaky link / backgrounded phone
      * would otherwise instantly kill the claude process and rewrite the transcript, forcing the reconnect into a
      * cold `--resume` (issue #24's amplifier) and losing warm session state. Relay drops have their own grace
      * (reaperLoop's 90s idle window); this is the LAN equivalent. A second schedule replaces the first.
      *
      * [owner] is the scheduling connection's sink: at expiry the close only fires if the conversation is STILL
-     * attached to it. A zombie socket's late `finally` (TCP can take minutes to give up) must not kill a
-     * conversation a newer connection has since reattached — and the same check closes the reattach-vs-expiry
-     * race (a reattach re-points the sink before cancelPendingClose lands).
+     * attached to that identity. A zombie socket's late `finally` (TCP can take minutes to give up) must not kill
+     * a conversation whose keyed sink a newer connection replaced — the matching-key reconnect cancels this
+     * timer before replacing the delegate. Plain LAN sinks have per-connection identity, so their old cleanup
+     * remains armed and cannot detach the replacement.
      */
     suspend fun scheduleClose(convoId: String, owner: OutboundSink, graceMs: Long = LAN_DISCONNECT_GRACE_MS) {
-        val job = scope.launch {
-            delay(graceMs)
-            // deregister BEFORE closing: otherwise close() below would cancel this very job mid-flight
-            mutex.withLock { pendingClose.remove(convoId) }
-            // A conversation still WORKING (streaming turn / running background jobs) survives its owner's
-            // disconnect: re-arm and check again next window, close only once truly idle. Killing in-flight
-            // work because the app quit (update/relaunch/crash) is exactly what the task-complete push
-            // promises never happens — the relay path's idle reaper already spares busy convos this way.
-            val busy = mutex.withLock {
-                convos[convoId]?.takeIf { it.isAttachedTo(owner) }?.isBusy() == true
-            }
-            if (busy) {
-                log.info("grace expiry ${convoId.take(8)}… still working → re-armed ${graceMs}ms")
-                scheduleClose(convoId, owner, graceMs); return@launch
-            }
-            val (convo, obs) = mutex.withLock {
-                val c = convos[convoId]
-                val o = observes[convoId]
-                when {
-                    // fan-out: the dead socket only takes ITS view with it — close only if it was the last
-                    c != null && c.isAttachedTo(owner) ->
-                        if (c.detach(owner)) { convos.remove(convoId); c to null } else null to null
-                    o != null && o.isAttachedTo(owner) -> { observes.remove(convoId); null to o }
-                    else -> null to null // reattached elsewhere (or already gone) — not ours to kill
+        val key = PendingCloseKey(convoId, sinkKey(owner))
+        // Register before the timer can execute. In particular delay(0) does not suspend, so a normally
+        // started child on an immediate/concurrent dispatcher could otherwise inspect an empty map, return,
+        // and then be installed as an already-completed job: the sink would never be detached and the stale
+        // map entry would live until a later real close/shutdown.
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            val me = currentCoroutineContext()[Job]
+            while (true) {
+                delay(graceMs)
+                beforePendingCloseClaim?.invoke()
+                var retry = false
+                var convo: Conversation? = null
+                var obs: ObserveSession? = null
+                val ownsCurrentTimer = mutex.withLock {
+                    // Ownership check and detach/removal share one critical section with open()'s claim.
+                    // Never expose a window where this job has dropped its map identity but can still
+                    // remove the replacement sink installed by a same-key reconnect.
+                    if (pendingClose[key] !== me) return@withLock false
+                    val currentConvo = convos[convoId]
+                    val currentObs = observes[convoId]
+                    when {
+                        currentConvo != null && currentConvo.isAttachedTo(owner) && currentConvo.isBusy() -> {
+                            // Keep this same job registered/cancellable across the next grace window.
+                            retry = true
+                        }
+                        currentConvo != null && currentConvo.isAttachedTo(owner) -> {
+                            pendingClose.remove(key)
+                            if (currentConvo.detach(owner)) {
+                                convos.remove(convoId)
+                                convo = currentConvo
+                            }
+                        }
+                        currentObs != null && currentObs.isAttachedTo(owner) -> {
+                            pendingClose.remove(key)
+                            observes.remove(convoId)
+                            obs = currentObs
+                        }
+                        else -> pendingClose.remove(key) // already detached/gone — retire this timer
+                    }
+                    true
                 }
+                if (!ownsCurrentTimer) return@launch
+                if (retry) {
+                    log.info("grace expiry ${convoId.take(8)}… still working → re-armed ${graceMs}ms")
+                    continue
+                }
+                if (convo != null || obs != null) {
+                    log.info("grace expiry closed ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
+                }
+                convo?.close(); obs?.close()
+                convo?.let { noteSelfClosed(it) }
+                return@launch
             }
-            if (convo != null || obs != null) {
-                log.info("grace expiry closed ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
-            }
-            convo?.close(); obs?.close()
-            convo?.let { noteSelfClosed(it) }
         }
-        mutex.withLock { pendingClose.put(convoId, job) }?.cancel()
+        mutex.withLock { pendingClose.put(key, job) }?.cancel()
+        job.start()
     }
 
-    private suspend fun cancelPendingClose(convoId: String) {
-        mutex.withLock { pendingClose.remove(convoId) }?.cancel()
+    /** Real conversation removal invalidates every connection-specific grace timer. */
+    private suspend fun cancelPendingCloses(convoId: String) {
+        mutex.withLock { removePendingCloseJobsLocked(convoId) }.forEach { it.cancel() }
+    }
+
+    /** Caller holds [mutex]. */
+    private fun removePendingCloseJobsLocked(convoId: String): List<Job> {
+        val hits = pendingClose.filterKeys { it.convoId == convoId }.values.toList()
+        pendingClose.keys.removeAll { it.convoId == convoId }
+        return hits
     }
 
     suspend fun closeAll() {
-        val all = mutex.withLock { convos.values.toList().also { convos.clear() } }
-        val obs = mutex.withLock { observes.values.toList().also { observes.clear() } }
+        val (all, obs, jobs) = mutex.withLock {
+            Triple(
+                convos.values.toList().also { convos.clear() },
+                observes.values.toList().also { observes.clear() },
+                pendingClose.values.toList().also { pendingClose.clear() },
+            )
+        }
+        jobs.forEach { it.cancel() }
         // Close in parallel. The daemon-shutdown hook (Main.kt / DaemonServer.kt) runs this, and each
         // Conversation.close can spend AgentProcess's bounded EOF->SIGTERM->SIGKILL grace on a wedged
         // child (issue #101). Serialised, N wedged sessions would sum past launchd/systemd's stop

@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -43,7 +44,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.ImgState
@@ -121,9 +124,29 @@ private fun TrayThumb(img: PendingImage, onRemove: () -> Unit) {
     }
 }
 
-/** Image group inside a sent user turn: 1 natural-aspect tile, or a 2-up / 2×2 grid. Tapping opens the viewer. */
+/**
+ * Image group inside a sent user turn: 1 natural-aspect tile, or a 2-up / 2×2 grid. Tapping opens the viewer.
+ *
+ * [truncated] = the daemon's replay budget shed some of the turn's attachments (issue #254). It is
+ * rendered even with an EMPTY [images] — a turn whose only image was too big must still say so rather
+ * than silently look like a plain text (or blank) prompt.
+ */
 @Composable
-fun SentImages(images: List<ByteArray>, onOpen: (Int) -> Unit) {
+fun SentImages(images: List<ByteArray>, truncated: Boolean = false, onOpen: (Int) -> Unit) {
+    if (images.isEmpty() && !truncated) return
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SentImageTiles(images, onOpen)
+        if (truncated) {
+            Text(
+                stringResource(Res.string.img_replay_truncated),
+                color = Tok.muted, fontSize = 10.5.sp, fontFamily = FontFamily.Monospace,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SentImageTiles(images: List<ByteArray>, onOpen: (Int) -> Unit) {
     val n = images.size
     if (n == 0) return
     if (n == 1) {
@@ -133,7 +156,10 @@ fun SentImages(images: List<ByteArray>, onOpen: (Int) -> Unit) {
         Box(
             Modifier.fillMaxWidth(0.62f).widthIn(max = 240.dp).aspectRatio(ar).clip(shape)
                 .background(Tok.raised).border(1.dp, Tok.hair, shape).clickable { onOpen(0) },
-        ) { if (bmp != null) Image(bmp, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop) }
+        ) {
+            if (bmp != null) Image(bmp, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+            else UndecodableFill(12.sp)
+        }
         return
     }
     val frac = if (n == 2) 0.78f else 0.70f
@@ -148,12 +174,28 @@ fun SentImages(images: List<ByteArray>, onOpen: (Int) -> Unit) {
                     Box(
                         Modifier.weight(1f).aspectRatio(1f).clip(shape).background(Tok.raised)
                             .border(1.dp, Tok.hair, shape).clickable { onOpen(idx) },
-                    ) { if (bmp != null) Image(bmp, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop) }
+                    ) {
+                        if (bmp != null) Image(bmp, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+                        else UndecodableFill(10.sp)
+                    }
                 }
                 if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
+}
+
+/** Stand-in for bytes the platform decoder refused (issue #254). Before this, a null bitmap drew
+ *  NOTHING — the tile was an empty rounded rectangle and the full-screen viewer opened pure black,
+ *  which is exactly what "tap it and it's blank" looked like. Same wording as the file preview's
+ *  undecodable state, so the two read as one behavior. */
+@Composable
+private fun BoxScope.UndecodableFill(fontSize: TextUnit) {
+    Text(
+        stringResource(Res.string.file_undecodable),
+        color = Tok.muted, fontSize = fontSize, textAlign = TextAlign.Center,
+        modifier = Modifier.align(Alignment.Center).padding(horizontal = 8.dp),
+    )
 }
 
 /** Full-screen image viewer: swipe between, swipe down to dismiss, tap to zoom. */
@@ -187,6 +229,21 @@ fun ImageViewer(images: List<ByteArray>, startIndex: Int, onClose: () -> Unit) {
                             .clip(shape).border(1.dp, Tok.hair, shape).clickable { zoom = !zoom },
                         contentScale = ContentScale.Fit,
                     )
+                } else {
+                    // undecodable bytes used to render as an all-black screen with no explanation
+                    // (issue #254) — the reported "tap it and it's blank"
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            Modifier.size(34.dp).clip(CircleShape).background(Tok.raised)
+                                .border(1.dp, Tok.hair, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) { BangGlyph(Tok.muted, 16.dp) }
+                        Text(
+                            stringResource(Res.string.file_undecodable),
+                            color = Tok.muted, fontSize = 13.sp, textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
                 }
             }
         }

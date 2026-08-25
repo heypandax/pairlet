@@ -1,5 +1,9 @@
 package dev.ccpocket.daemon.feishu
 
+import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import java.io.File
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -8,6 +12,13 @@ import kotlin.test.assertTrue
 
 /** The daemon's own judgement layer over reviewer signals: the pass bar and the output-shape validation. */
 class FeishuPromptReviewerTest {
+
+    private val tmp: File = Files.createTempDirectory("ccp-reviewer").toFile()
+
+    /** A schema-valid ALLOW_GUARDED envelope on one line — a fake CLI can echo it verbatim. */
+    private val compactValid =
+        """{"decision":"ALLOW_GUARDED","risk":"LOW","matchesContract":true,"confidence":0.95,""" +
+            """"intent":"summarize the readme","reasonCodes":[],"explanation":"routine read"}"""
 
     private fun result(
         decision: PromptReviewDecision = PromptReviewDecision.ALLOW_GUARDED,
@@ -150,13 +161,65 @@ class FeishuPromptReviewerTest {
         assertTrue(""""allowed_commands":[]""" in empty, empty)
     }
 
+    // ── argv transport (Windows post-mortem): the isolation flags must be single, quote-free tokens ──
+
     @Test
-    fun capability_ceiling_admits_the_allowlist_instead_of_claiming_absolute_no_network() {
-        val c = PromptReviewInput.CAPABILITY_CEILING
-        assertTrue("allowed_commands" in c, "ceiling must point at the real allowlist field")
-        // the old wording promised "no network access" flatly — a whitelisted command can reach the
-        // network, and a reviewer judging against the fiction would under-price that risk
-        assertFalse("no network access" in c, c)
-        assertFalse("no shell beyond" in c.lowercase(), c)
+    fun the_reviewer_argv_isolates_without_relying_on_quotes_or_an_empty_argument() {
+        val argv = ClaudeFeishuPromptReviewer.buildArgv("/usr/local/bin/claude")
+        // still tool-less, MCP-less, settings-less, non-persistent — the whole point of the one-shot
+        assertTrue("--tools=" in argv, argv.toString())
+        assertTrue("--strict-mcp-config" in argv, argv.toString())
+        assertTrue("--safe-mode" in argv, argv.toString())
+        assertTrue("--no-session-persistence" in argv, argv.toString())
+        // and the fail-closed contract is untouched: the schema still rides along
+        assertTrue("--json-schema" in argv, argv.toString())
+        assertEquals(ClaudeFeishuPromptReviewer.SCHEMA, argv[argv.indexOf("--json-schema") + 1])
+        // …but the empty MCP set is no longer an inline JSON literal, and the empty tool set no longer a
+        // standalone "": both shapes are eaten when a command line is re-parsed (see ClaudeLauncher)
+        assertFalse("--mcp-config" in argv, argv.toString())
+        assertFalse(argv.any { it.contains("mcpServers") }, argv.toString())
+        assertFalse(argv.any { it.isEmpty() }, argv.toString())
     }
+
+    @Test
+    fun a_batch_shim_cli_disables_the_reviewer_instead_of_running_it_mangled() = runBlocking {
+        // A `.cmd` can only start through cmd.exe, which re-parses the line — and this argv carries the
+        // multi-line, quote-bearing --system-prompt. Running it mangled is WORSE than not running: the
+        // --json-schema contract survives (it comes earlier), so a classifier that lost its "untrusted
+        // data" defense would still emit schema-valid output that the daemon honours. So: refuse.
+        // The fixture is a REAL runnable script that answers ALLOW_GUARDED — the only thing standing
+        // between it and an auto-run is the extension, which is exactly what this pins.
+        val body = "#!/bin/sh\necho '{\"version\":\"t\",\"structured_output\":$compactValid}'\n"
+        val shim = File(tmp, "fake-claude.cmd").apply { writeText(body); setExecutable(true) }
+        val r = ClaudeFeishuPromptReviewer(cwd = File(tmp, "state"), resolveBin = { shim.toPath() })
+            .review(PromptReviewInput("r1", "alpha", "review only", "summarize the readme"))
+        assertEquals(PromptReviewDecision.ASK_OWNER, r.decision)
+        assertFalse(PromptReviewPolicy.mayAutoRun(r))
+        assertTrue(PromptReviewPolicy.REVIEWER_UNAVAILABLE in r.reasonCodes, r.reasonCodes.toString())
+    }
+
+    @Test
+    fun the_same_fixture_without_the_shim_extension_does_reach_the_pass_bar() {
+        // control for the test above — proves the refusal comes from the extension, not from a broken
+        // fixture that would have failed anyway. (Needs a POSIX shell; the daemon suite runs on Linux/macOS.)
+        assumeTrue(!System.getProperty("os.name").lowercase().contains("win"))
+        val body = "#!/bin/sh\necho '{\"version\":\"t\",\"structured_output\":$compactValid}'\n"
+        val native = File(tmp, "fake-claude").apply { writeText(body); setExecutable(true) }
+        val r = runBlocking {
+            ClaudeFeishuPromptReviewer(cwd = File(tmp, "state"), resolveBin = { native.toPath() })
+                .review(PromptReviewInput("r2", "alpha", "review only", "summarize the readme"))
+        }
+        assertEquals(PromptReviewDecision.ALLOW_GUARDED, r.decision)
+        assertTrue(PromptReviewPolicy.mayAutoRun(r))
+    }
+
+    @Test
+    fun reviewed_capability_ceiling_remains_the_legacy_restricted_authority() {
+        val c = PromptReviewInput.CAPABILITY_CEILING
+        assertTrue("INSIDE the bound project" in c, c)
+        assertTrue("allowed_commands" in c, c)
+        assertTrue("Everything else" in c && "requires the machine owner's approval" in c, c)
+        assertFalse("full-auto" in c, "a legacy REVIEWED record must not silently acquire #233 authority: $c")
+    }
+
 }

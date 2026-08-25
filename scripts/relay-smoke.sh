@@ -21,7 +21,16 @@ WORK=$(mktemp -d)
 ID_FILE="$WORK/identity.json"   # isolated identity so the test never touches ~/.cc-pocket
 PORT=9099
 PAIRPORT=8899
-cleanup() { kill "${RELAY_PID:-}" "${DAEMON_PID:-}" 2>/dev/null || true; rm -rf "$WORK"; }
+cleanup() {
+  [ -z "${CLIENT_PID:-}" ] || kill "$CLIENT_PID" 2>/dev/null || true
+  [ -z "${RELAY_PID:-}" ] || kill "$RELAY_PID" 2>/dev/null || true
+  [ -z "${DAEMON_PID:-}" ] || kill "$DAEMON_PID" 2>/dev/null || true
+  [ -z "${CLIENT_PID:-}" ] || wait "$CLIENT_PID" 2>/dev/null || true
+  [ -z "${RELAY_PID:-}" ] || wait "$RELAY_PID" 2>/dev/null || true
+  [ -z "${DAEMON_PID:-}" ] || wait "$DAEMON_PID" 2>/dev/null || true
+  exec 3>&- 2>/dev/null || true
+  rm -rf "$WORK"
+}
 trap cleanup EXIT
 
 echo "── relay (in-memory, :$PORT) ──"
@@ -47,10 +56,33 @@ DPUB=$(echo "$PAIR" | sed -E 's/.*"daemonPub":"([^"]+)".*/\1/')
 echo "  ticket minted ✓ (daemon E2E pub ${#DPUB} chars)"
 
 echo "── device: redeem + E2E handshake + 'dirs' over the relay ──"
-# the test-client generates its key, redeems, runs the Noise handshake, then talks encrypted
-( printf 'dirs\n'; sleep 5; printf 'quit\n' ) \
-  | "$D" test-client --relay "ws://127.0.0.1:$PORT" --daemon-pub "$DPUB" --ticket "$TICKET" >"$WORK/tc.log" 2>&1 || true
+# The test-client generates its key, redeems, runs the Noise handshake, then talks encrypted.
+# Keep its stdin open through a FIFO, observe the required proofs, and own termination explicitly;
+# waiting for its WebSocket close handshake after `quit` can otherwise hang this smoke indefinitely.
+mkfifo "$WORK/tc.in"
+exec 3<>"$WORK/tc.in"
+"$D" test-client --relay "ws://127.0.0.1:$PORT" --daemon-pub "$DPUB" --ticket "$TICKET" \
+  <"$WORK/tc.in" >"$WORK/tc.log" 2>&1 &
+CLIENT_PID=$!
+printf 'dirs\n' >&3
 
+PROVED=0
+for _ in $(seq 1 60); do
+  if grep -q "\[relay\] attached" "$WORK/tc.log" 2>/dev/null &&
+     grep -q "E2E channel up" "$WORK/tc.log" 2>/dev/null &&
+     grep -q "\[dirs\]" "$WORK/tc.log" 2>/dev/null; then
+    PROVED=1
+    break
+  fi
+  kill -0 "$CLIENT_PID" 2>/dev/null || break
+  sleep 0.5
+done
+kill "$CLIENT_PID" 2>/dev/null || true
+wait "$CLIENT_PID" 2>/dev/null || true
+CLIENT_PID=
+exec 3>&-
+
+[ "$PROVED" = 1 ] || { echo "FAIL: timed out waiting for encrypted round trip"; cat "$WORK/tc.log"; exit 1; }
 grep -q "\[relay\] attached" "$WORK/tc.log" || { echo "FAIL: device auth"; cat "$WORK/tc.log"; exit 1; }
 grep -q "E2E channel up"     "$WORK/tc.log" || { echo "FAIL: E2E handshake"; cat "$WORK/tc.log"; exit 1; }
 grep -q "\[dirs\]"          "$WORK/tc.log" || { echo "FAIL: no encrypted round trip"; cat "$WORK/tc.log"; exit 1; }

@@ -21,8 +21,10 @@ class FeishuReviewedFlowTest {
 
     private class FakeReviewer(val answer: () -> PromptReviewResult) : FeishuPromptReviewer {
         var calls = 0
+        var lastInput: PromptReviewInput? = null
         override suspend fun review(input: PromptReviewInput): PromptReviewResult {
             calls++
+            lastInput = input
             return answer()
         }
     }
@@ -38,7 +40,7 @@ class FeishuReviewedFlowTest {
         revalidate: () -> Boolean = { true },
     ) = runBlocking {
         ReviewedPreflight(reviewer, audit, shadowOnly = shadow)
-            .evaluate(snapshot, prompt, "alpha", "ou_member", "om_msg1", revalidate)
+            .evaluate(snapshot, prompt, "alpha", "ou_member", "om_msg1", revalidate = revalidate)
     }
 
     @Test
@@ -132,6 +134,17 @@ class FeishuReviewedFlowTest {
                 .evaluate(snapshot, "帮我跑测试", "alpha", "ou_member", "om_msg1") { true }
         }
         assertEquals(listOf("npm test", "./gradlew build"), seen?.allowedCommands)
+    }
+
+    @Test
+    fun preflight_always_uses_the_restricted_reviewed_ceiling() {
+        val restricted = FakeReviewer { allow() }
+        runBlocking {
+            ReviewedPreflight(restricted, audit)
+                .evaluate(snapshot, "帮我跑测试", "alpha", "ou_member", "om_restricted") { true }
+        }
+        assertEquals(PromptReviewInput.CAPABILITY_CEILING, restricted.lastInput?.capabilityCeiling)
+
     }
 
     @Test

@@ -57,6 +57,13 @@ tail -f ~/Library/Logs/cc-pocket/daemon.err.log
 - 坑：relay 的 `MAX_FRAME` 曾是 256KB，大会话历史帧（>256KB）会被 `FrameTooBigException` 踢断连接；源码已改 4MB，**改完记得重新部署**，否则线上仍是旧值。
 - 只读排查：`sshpass -e ssh -o PubkeyAuthentication=no root@$RELAY_HOST 'journalctl -u cc-pocket-relay -n 50'`（`RELAY_HOST` 读 `.env`）。
 
+## Compose UI 铁律：文本垂直对齐必须 tightCenter
+
+任何 `Text` 与非文本元素**同排几何居中**（进度条、徽章、图标、胶囊/背景盒）或与**不同字号的 Text 同排**时，必须设 `style = tightCenter(fontSize)`（commonMain `theme/TightText.kt`；`desktop` 包内有同名直通）。
+
+- **Why**：裸 `fontSize` 的行盒高度由字体自带 ascent/descent 决定，各平台实体字体（Roboto Mono / SF Mono / skiko fallback）度量不同——`Alignment.CenterVertically` 居中的是行盒，字形在行盒内偏上/偏下，肉眼可见「没对齐」。已反复踩坑：#293 桌面、手机 QuotaPill 胶囊、侧栏「正在打开」徽章、额度条文字。
+- **How**：新写带背景/描边的小字文本、或文本旁挂几何元素时，一律 `tightCenter`；同排多个 Text 要**全部**加（只加一个照样错位）。`trim` 必须保持 `Trim.None`（详见 `TightText.kt` KDoc 与 `TightCenterTest`）。
+
 ## 构建速记
 
 - 本机需 `JAVA_HOME=/opt/homebrew/opt/openjdk@17`（keg-only，不在 PATH）。

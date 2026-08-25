@@ -24,11 +24,11 @@ HIRA    = "/System/Library/Fonts/Hiragino Sans GB.ttc"   # iOS-style Chinese san
 TEXT = {
     "en": {
         "captions": [
-            "Your AI coding agent,\nnow in your pocket.",
-            "See what's running\non your computer.",
-            "Stream progress\nin real time.",
+            "Six AI coding agents,\nnow in your pocket.",
+            "Every session,\nin one place.",
+            "See work unfold\nin real time.",
             "Approve sensitive actions\nfrom anywhere.",
-            "Send prompts, screenshots,\nand voice.",
+            "Review what\nactually changed.",
             "Your computer keeps working.\nYou stay in control.",
         ],
         "tagline": "Your AI coding agent, in your pocket.",
@@ -37,11 +37,11 @@ TEXT = {
     },
     "zh": {
         "captions": [
-            "你的 AI 编程助手\n现在就在口袋里",
-            "电脑上正在运行什么\n随时一手掌握",
-            "每一步进展\n实时尽收眼底",
-            "敏感操作\n随时随地一键审批",
-            "文字 · 截图 · 语音\n想怎么发就怎么发",
+            "六个 AI 编程 Agent\n现在就在口袋里",
+            "所有会话\n一处掌握",
+            "实时看它思考\n调用工具和执行",
+            "敏感操作\n随时随地处理审批",
+            "改了什么\n验完再相信",
             "电脑持续工作\n掌控始终在你手中",
         ],
         "tagline": "你的 AI 编程助手，就在口袋里",

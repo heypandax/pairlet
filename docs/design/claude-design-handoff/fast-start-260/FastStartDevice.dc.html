@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  @keyframes fspulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+  @keyframes fsbreathe { 0% { opacity: .34 } 50% { opacity: .72 } 100% { opacity: .34 } }
+  @keyframes fsland { 0% { opacity: 0; transform: translateY(3px) } 100% { opacity: 1; transform: none } }
+</style>
+</helmet>
+
+<div style="font-family:'Public Sans',system-ui,sans-serif">
+
+<!-- ══════════════ MOBILE ══════════════ -->
+<sc-if value="{{ isMobile }}" hint-placeholder-val="{{ true }}">
+<div data-screen-label="{{ label }}" style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+
+  <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none">
+    <span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span>
+    <span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #F3F3F4;border-radius:2px;opacity:.7"></span><span style="width:22px;height:10px;border:1.3px solid #F3F3F4;border-radius:3px;opacity:.7"></span></span>
+  </div>
+
+  <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+
+   <div style="flex:1;min-height:0;position:relative;display:flex;flex-direction:column">
+
+    <!-- ── nav ── -->
+    <div style="flex:none;padding:6px 20px 0">
+      <sc-if value="{{ searchClosed }}" hint-placeholder-val="{{ true }}">
+      <div style="min-height:56px;display:flex;align-items:center;gap:2px">
+        <h1 style="margin:0;flex:1;min-width:0;font:600 33px/1.1 system-ui,sans-serif;letter-spacing:-.025em;white-space:nowrap">项目</h1>
+        <span role="button" tabIndex="0" aria-label="搜索项目" onClick="{{ openSearch }}" style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+          <span aria-hidden="true" style="width:17px;height:17px;border:1.6px solid #B4B5BC;border-radius:50%;position:relative;display:block"><span style="position:absolute;right:-6px;bottom:-4px;width:8px;height:1.8px;background:#B4B5BC;border-radius:1px;transform:rotate(45deg)"></span></span>
+        </span>
+        <span role="button" tabIndex="0" aria-label="电脑" style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+          <span aria-hidden="true" style="width:25px;height:18px;border:1.4px solid #B4B5BC;border-radius:3px;position:relative;display:block"><span style="position:absolute;left:50%;bottom:-7px;margin-left:-6px;width:12px;height:2px;background:#B4B5BC;border-radius:1px"></span></span>
+        </span>
+        <span role="button" tabIndex="0" aria-label="更多" style="width:48px;height:48px;margin-right:-12px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+          <span aria-hidden="true" style="font:500 21px/1 system-ui,sans-serif;color:#B4B5BC;margin-top:-7px">⋯</span>
+        </span>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ searchOpen }}" hint-placeholder-val="{{ false }}">
+      <div style="min-height:56px;display:flex;align-items:center;gap:8px">
+        <span style="flex:1;min-width:0;height:44px;border-radius:11px;background:#141417;border:1px solid #E2795A;display:flex;align-items:center;gap:9px;padding:0 12px">
+          <span aria-hidden="true" style="width:15px;height:15px;border:1.5px solid #8C8D95;border-radius:50%;position:relative;flex:none"><span style="position:absolute;right:-5px;bottom:-3px;width:7px;height:1.6px;background:#8C8D95;border-radius:1px;transform:rotate(45deg)"></span></span>
+          <span style="flex:1;min-width:0;font:400 16px/1 system-ui,sans-serif;color:#F3F3F4">{{ query }}</span>
+          <span aria-hidden="true" style="width:1.5px;height:19px;background:#E2795A;flex:none;animation:fspulse 1.1s steps(1) infinite"></span>
+        </span>
+        <span role="button" tabIndex="0" onClick="{{ closeSearch }}" style="min-height:44px;padding:0 4px;display:flex;align-items:center;font:500 15.5px/1 system-ui,sans-serif;color:#E2795A;flex:none;cursor:pointer;white-space:nowrap">取消</span>
+      </div>
+      </sc-if>
+
+      <div style="min-height:48px;display:flex;align-items:center;gap:8px">
+        <sc-if value="{{ ready }}" hint-placeholder-val="{{ true }}">
+        <div style="flex:1;min-width:0;display:flex;align-items:center;gap:9px">
+          <span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:#5CB582;flex:none"></span>
+          <span style="flex:1;min-width:0;font:400 14px/1.35 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">Panda · MacBook Pro · 在线</span>
+        </div>
+        <span role="button" tabIndex="0" aria-label="审阅中心，2 项待处理" style="min-height:48px;min-width:48px;padding:0 10px;margin-right:-10px;display:flex;align-items:center;justify-content:flex-end;gap:7px;flex:none;cursor:pointer">
+          <span aria-hidden="true" style="width:8px;height:8px;background:#E9B45C;transform:rotate(45deg);flex:none"></span>
+          <span style="font:500 14px/1.2 system-ui,sans-serif;color:#B4B5BC;white-space:nowrap">审阅 2</span>
+        </span>
+        </sc-if>
+        <sc-if value="{{ waiting }}" hint-placeholder-val="{{ false }}">
+        <div role="status" aria-live="polite" style="flex:1;min-width:0;display:flex;align-items:center;gap:9px">
+          <span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:#8C8D95;flex:none;animation:fsbreathe 1.4s ease-in-out infinite"></span>
+          <span style="flex:1;min-width:0;font:400 14px/1.35 system-ui,sans-serif;color:#8C8D95;text-wrap:pretty">正在读取 Panda 上的项目…</span>
+        </div>
+        </sc-if>
+      </div>
+    </div>
+
+    <!-- ── loading ── -->
+    <sc-if value="{{ waiting }}" hint-placeholder-val="{{ false }}">
+    <div aria-hidden="true" style="flex:1;min-height:0;overflow:hidden;padding:14px 20px 0">
+      <div style="height:9px;width:62px;border-radius:3px;background:#3A3A42;animation:fsbreathe 1.4s ease-in-out infinite"></div>
+      <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.14)">
+        <sc-for list="{{ loadRows }}" as="r" hint-placeholder-count="5">
+          <sc-if value="{{ r.isSkel }}" hint-placeholder-val="{{ true }}">
+          <div style="{{ r.skelStyle }}">
+            <span style="width:9px;height:9px;border-radius:50%;background:#3A3A42;flex:none;margin-top:6px"></span>
+            <div style="flex:1;min-width:0">
+              <div style="height:15px;width:{{ r.titleW }};border-radius:4px;background:#3A3A42"></div>
+              <div style="height:11px;width:{{ r.pathW }};border-radius:3px;background:#2A2A30;margin-top:8px"></div>
+            </div>
+            <span style="width:6px;height:11px;border-radius:2px;background:#2A2A30;flex:none;margin-top:8px"></span>
+          </div>
+          </sc-if>
+          <sc-if value="{{ r.isReal }}" hint-placeholder-val="{{ false }}">
+          <div style="{{ r.realStyle }}">
+            <span style="width:9px;height:9px;border-radius:50%;border:1.5px solid #6E6E76;flex:none;margin-top:6px"></span>
+            <div style="flex:1;min-width:0">
+              <div style="font:500 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em;color:#E6E6E9;text-wrap:pretty">{{ r.name }}</div>
+              <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px;letter-spacing:-.01em;word-break:break-all">{{ r.path }}</div>
+            </div>
+          </div>
+          </sc-if>
+        </sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ── list ── -->
+    <sc-if value="{{ ready }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1;min-height:0;overflow:auto;padding:14px 20px 0">
+      <sc-for list="{{ sections }}" as="s" hint-placeholder-count="3">
+        <div style="padding-top:{{ s.gap }}">
+          <div style="display:flex;align-items:center;gap:10px;min-height:22px">
+            <span style="flex:1;min-width:0;font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;white-space:nowrap">{{ s.label }}</span>
+            <sc-if value="{{ s.hasToggle }}" hint-placeholder-val="{{ true }}">
+              <span role="button" tabIndex="0" aria-label="列表形态" onClick="{{ toggleTree }}" style="min-height:44px;margin:-11px -6px -11px 0;padding:0 6px;display:flex;align-items:center;gap:7px;flex:none;cursor:pointer">
+                <span style="font:500 12.5px/1 system-ui,sans-serif;color:{{ treeInk }};white-space:nowrap">树形</span>
+                <span aria-hidden="true" style="width:1px;height:11px;background:rgba(255,255,255,.2)"></span>
+                <span style="font:500 12.5px/1 system-ui,sans-serif;color:{{ flatInk }};white-space:nowrap">平铺</span>
+              </span>
+            </sc-if>
+          </div>
+          <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.14)">
+            <sc-for list="{{ s.rows }}" as="p" hint-placeholder-count="2">
+              <sc-if value="{{ p.active }}" hint-placeholder-val="{{ false }}">
+              <div role="button" tabIndex="0" style="padding:14px 0 16px;border-bottom:1px solid rgba(255,255,255,.14);display:flex;gap:11px;cursor:pointer">
+                <span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:#5CB582;flex:none;margin-top:7px"></span>
+                <div style="flex:1;min-width:0">
+                  <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font:600 18px/1.3 system-ui,sans-serif;letter-spacing:-.015em">{{ p.name }}</span><span style="font:500 13px/1.3 system-ui,sans-serif;color:#7ECBA0;white-space:nowrap">运行中</span></div>
+                  <div style="font:400 15px/1.45 system-ui,sans-serif;color:#E6E6E9;margin-top:6px;text-wrap:pretty">{{ p.liveTitle }}</div>
+                  <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#B4B5BC;margin-top:8px;letter-spacing:-.01em">{{ p.meta }}</div>
+                  <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:4px;letter-spacing:-.01em;word-break:break-all">{{ p.path }}</div>
+                </div>
+              </div>
+              </sc-if>
+              <sc-if value="{{ p.plain }}" hint-placeholder-val="{{ true }}">
+              <div role="button" tabIndex="0" style="padding:13px 0;border-bottom:1px solid rgba(255,255,255,.14);display:flex;gap:11px;cursor:pointer">
+                <span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;border:1.5px solid #6E6E76;flex:none;margin-top:6px"></span>
+                <div style="flex:1;min-width:0">
+                  <div style="font:500 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em;color:#E6E6E9;text-wrap:pretty">{{ p.name }}</div>
+                  <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px;letter-spacing:-.01em;word-break:break-all">{{ p.path }}</div>
+                </div>
+              </div>
+              </sc-if>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+      <div style="height:{{ listTail }}"></div>
+    </div>
+    </sc-if>
+
+    <!-- ── FAB ── -->
+    <sc-if value="{{ showFab }}" hint-placeholder-val="{{ true }}">
+    <div aria-hidden="true" style="position:absolute;left:0;right:0;bottom:0;height:96px;background:linear-gradient(to bottom,rgba(11,11,12,0),rgba(11,11,12,.92) 62%);pointer-events:none"></div>
+    <span role="button" tabIndex="0" aria-label="新建任务" onClick="{{ openSheet }}" style="position:absolute;right:20px;bottom:20px;width:56px;height:56px;border-radius:28px;background:#E2795A;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 12px 26px -8px rgba(226,121,90,.55),0 5px 12px -3px rgba(0,0,0,.65)">
+      <span aria-hidden="true" style="width:22px;height:22px;position:relative;display:block">
+        <span style="position:absolute;left:0;top:10px;width:22px;height:2.4px;border-radius:2px;background:#160C07"></span>
+        <span style="position:absolute;top:0;left:10px;height:22px;width:2.4px;border-radius:2px;background:#160C07"></span>
+      </span>
+    </span>
+    </sc-if>
+
+    <!-- ── SHEET ── -->
+    <sc-if value="{{ sheetOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ dismissSheet }}" aria-hidden="true" style="position:absolute;inset:0;background:rgba(5,5,6,.72);cursor:pointer"></div>
+    <div role="dialog" aria-modal="true" aria-label="新建任务" style="position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;background:#141417;border-top:1px solid rgba(255,255,255,.16);border-radius:22px 22px 0 0;padding:0 20px 12px;box-shadow:0 -18px 44px -20px rgba(0,0,0,.8)">
+
+      <div role="button" tabIndex="0" aria-label="下滑关闭" onClick="{{ dismissSheet }}" style="flex:none;height:34px;display:flex;align-items:center;justify-content:center;cursor:grab">
+        <span aria-hidden="true" style="width:38px;height:4px;border-radius:2px;background:#4A4A52"></span>
+      </div>
+
+      <!-- picker / agent panel -->
+      <sc-if value="{{ panelOpen }}" hint-placeholder-val="{{ false }}">
+      <div role="dialog" aria-label="{{ panelTitle }}" style="flex:none;height:{{ panelH }};margin-bottom:12px;display:flex;flex-direction:column;background:#17171B;border:1px solid rgba(255,255,255,.18);border-radius:14px;overflow:hidden">
+        <div style="flex:none;display:flex;align-items:center;gap:10px;padding:12px 14px 10px;border-bottom:1px solid rgba(255,255,255,.14)">
+          <span style="flex:1;min-width:0;font:600 15.5px/1.3 system-ui,sans-serif;color:#F3F3F4;white-space:nowrap">{{ panelTitle }}</span>
+          <span role="button" tabIndex="0" aria-label="关闭" onClick="{{ closePanel }}" style="width:44px;height:44px;margin:-8px -10px -8px 0;display:flex;align-items:center;justify-content:center;flex:none;font:400 16px/1 system-ui,sans-serif;color:#8C8D95;cursor:pointer">✕</span>
+        </div>
+
+        <div style="flex:1;min-height:0;overflow:auto;padding:0 14px">
+          <sc-for list="{{ panelGroups }}" as="g" hint-placeholder-count="2">
+            <div style="padding-top:{{ g.gap }}">
+              <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;white-space:nowrap">{{ g.label }}</div>
+              <sc-if value="{{ g.hasSearch }}" hint-placeholder-val="{{ false }}">
+              <div style="height:44px;margin-top:10px;border-radius:10px;background:#0B0B0C;border:1px solid rgba(255,255,255,.16);display:flex;align-items:center;gap:8px;padding:0 11px">
+                <span aria-hidden="true" style="width:13px;height:13px;border:1.5px solid #6E6E76;border-radius:50%;position:relative;flex:none"><span style="position:absolute;right:-5px;bottom:-3px;width:6px;height:1.5px;background:#6E6E76;border-radius:1px;transform:rotate(45deg)"></span></span>
+                <span style="flex:1;font:400 14.5px/1 system-ui,sans-serif;color:#6E6E76">搜索全部项目</span>
+              </div>
+              </sc-if>
+              <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.14)">
+                <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="3">
+                  <div role="{{ r.role }}" tabIndex="0" aria-checked="{{ r.aria }}" onClick="{{ r.pick }}" style="{{ r.rowStyle }}">
+                    <sc-if value="{{ r.hasDot }}" hint-placeholder-val="{{ false }}">
+                      <span aria-hidden="true" style="width:10px;height:10px;border-radius:50%;background:{{ r.dot }};flex:none;opacity:{{ r.dotOpacity }}"></span>
+                    </sc-if>
+                    <sc-if value="{{ r.hasFolder }}" hint-placeholder-val="{{ true }}">
+                      <span aria-hidden="true" style="width:19px;height:14px;border:1.3px solid #8C8D95;border-radius:2.5px;flex:none;position:relative"><span style="position:absolute;top:-4px;left:0;width:8px;height:4px;background:#17171B;border-top:1.3px solid #8C8D95;border-left:1.3px solid #8C8D95;border-right:1.3px solid #8C8D95;border-radius:2px 2px 0 0"></span></span>
+                    </sc-if>
+                    <div style="flex:1;min-width:0">
+                      <div style="font:{{ r.nameFont }};color:{{ r.nameInk }};letter-spacing:-.01em;word-break:break-all">{{ r.name }}</div>
+                      <sc-if value="{{ r.hasPath }}" hint-placeholder-val="{{ true }}">
+                        <div style="font:400 12px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:4px;letter-spacing:-.01em;word-break:break-all">{{ r.path }}</div>
+                      </sc-if>
+                    </div>
+                    <sc-if value="{{ r.unavailable }}" hint-placeholder-val="{{ false }}">
+                      <span style="font:400 12px/1.2 system-ui,sans-serif;color:#6E6E76;flex:none;white-space:nowrap">不可用</span>
+                    </sc-if>
+                    <sc-if value="{{ r.checked }}" hint-placeholder-val="{{ false }}">
+                      <span aria-hidden="true" style="font:500 15px/1 system-ui,sans-serif;color:#E2795A;flex:none">✓</span>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+          <div style="height:10px"></div>
+        </div>
+
+        <sc-if value="{{ panelPinned }}" hint-placeholder-val="{{ false }}">
+        <div role="button" tabIndex="0" onClick="{{ closePanel }}" style="flex:none;min-height:56px;display:flex;align-items:center;gap:12px;padding:0 14px;border-top:1px solid rgba(255,255,255,.16);background:#1B1B1F;cursor:pointer">
+          <span aria-hidden="true" style="width:21px;height:16px;border:1.3px solid #B4B5BC;border-radius:3px;flex:none;position:relative"><span style="position:absolute;top:-4px;left:0;width:9px;height:4px;background:#1B1B1F;border-top:1.3px solid #B4B5BC;border-left:1.3px solid #B4B5BC;border-right:1.3px solid #B4B5BC;border-radius:2px 2px 0 0"></span></span>
+          <span style="flex:1;font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">浏览其他文件夹…</span>
+          <span aria-hidden="true" style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <!-- composer -->
+      <div role="textbox" tabIndex="0" aria-label="新建任务" onClick="{{ focusComposer }}" style="flex:none;min-height:82px;border-radius:12px;background:#0B0B0C;border:1px solid rgba(255,255,255,.24);padding:14px;display:flex;align-items:flex-start;cursor:text">
+        <sc-if value="{{ hasDraft }}" hint-placeholder-val="{{ false }}">
+          <span style="font:400 16px/1.5 system-ui,sans-serif;color:#F3F3F4;text-wrap:pretty">{{ draft }}<span aria-hidden="true" style="display:inline-block;width:1.5px;height:18px;background:#E2795A;margin-left:2px;vertical-align:-3px;animation:fspulse 1.1s steps(1) infinite"></span></span>
+        </sc-if>
+        <sc-if value="{{ noDraft }}" hint-placeholder-val="{{ true }}">
+          <span style="font:400 16px/1.5 system-ui,sans-serif;color:#6E6E76">让智能体做什么？</span>
+        </sc-if>
+      </div>
+
+      <div style="flex:none;display:flex;align-items:center;gap:8px;margin-top:10px">
+        <span role="button" tabIndex="0" aria-label="项目，{{ project }}" aria-expanded="{{ projectExpanded }}" onClick="{{ openProject }}" style="{{ projectChipStyle }}">
+          <span aria-hidden="true" style="width:17px;height:13px;border:1.3px solid {{ projectChipInk }};border-radius:2.5px;flex:none;position:relative"><span style="position:absolute;top:-4px;left:0;width:7px;height:4px;background:#141417;border-top:1.3px solid {{ projectChipInk }};border-left:1.3px solid {{ projectChipInk }};border-right:1.3px solid {{ projectChipInk }};border-radius:2px 2px 0 0"></span></span>
+          <span style="font:500 14px/1.2 'JetBrains Mono',monospace;color:{{ projectChipInk }};letter-spacing:-.01em;white-space:nowrap">{{ projectShort }}</span>
+          <span aria-hidden="true" style="font:400 11px/1 system-ui,sans-serif;color:{{ projectChipInk }};flex:none">{{ projectChevron }}</span>
+        </span>
+
+        <span role="button" tabIndex="0" aria-label="智能体，{{ agent }}" aria-expanded="{{ agentExpanded }}" onClick="{{ openAgent }}" style="{{ agentChipStyle }}">
+          <span aria-hidden="true" style="width:10px;height:10px;border-radius:50%;background:{{ agentDot }};flex:none"></span>
+          <span style="font:500 14px/1.2 system-ui,sans-serif;color:{{ agentChipInk }};white-space:nowrap">{{ agent }}</span>
+          <span aria-hidden="true" style="font:400 11px/1 system-ui,sans-serif;color:{{ agentChipInk }};flex:none">{{ agentChevron }}</span>
+        </span>
+
+        <span style="flex:1;min-width:0"></span>
+
+        <sc-if value="{{ canSend }}" hint-placeholder-val="{{ false }}">
+          <span role="button" tabIndex="0" aria-label="发送" onClick="{{ send }}" style="min-width:64px;height:44px;padding:0 16px;border-radius:11px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:600 15px/1 system-ui,sans-serif;color:#160C07;flex:none;cursor:pointer;white-space:nowrap">发送</span>
+        </sc-if>
+        <sc-if value="{{ cantSend }}" hint-placeholder-val="{{ true }}">
+          <span aria-disabled="true" style="min-width:64px;height:44px;padding:0 16px;border-radius:11px;border:1px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;font:600 15px/1 system-ui,sans-serif;color:#6E6E76;flex:none;white-space:nowrap">发送</span>
+        </sc-if>
+      </div>
+    </div>
+    </sc-if>
+
+   </div>
+
+    <!-- ── keyboard ── -->
+    <sc-if value="{{ kb }}" hint-placeholder-val="{{ false }}">
+    <div aria-hidden="true" style="flex:none;background:#17171B;border-top:1px solid rgba(255,255,255,.10);padding:0 4px 4px">
+      <div style="height:42px;display:flex;align-items:center;gap:16px;padding:0 12px;border-bottom:1px solid rgba(255,255,255,.10)">
+        <sc-for list="{{ candidates }}" as="c" hint-placeholder-count="3">
+          <span style="font:400 15px/1 system-ui,sans-serif;color:#B4B5BC;white-space:nowrap">{{ c.t }}</span>
+        </sc-for>
+      </div>
+      <sc-for list="{{ kbRows }}" as="row" hint-placeholder-count="4">
+        <div style="display:flex;gap:6px;padding:6px 3px 0">
+          <sc-for list="{{ row.keys }}" as="k" hint-placeholder-count="10">
+            <span style="{{ k.style }}">{{ k.t }}</span>
+          </sc-for>
+        </div>
+      </sc-for>
+      <div style="height:26px;display:flex;justify-content:center;align-items:flex-end;padding-bottom:4px"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ noKb }}" hint-placeholder-val="{{ true }}">
+    <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+    </sc-if>
+
+  </div>
+</div>
+</sc-if>
+
+<!-- ══════════════ DESKTOP ══════════════ -->
+<sc-if value="{{ isDesktop }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="Desktop empty state" style="width:600px;height:412px;border-radius:14px;overflow:hidden;position:relative;background:#0B0B0C;color:#F3F3F4;border:1px solid rgba(255,255,255,.14);font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+  <div style="height:44px;display:flex;align-items:center;gap:10px;padding:0 18px;border-bottom:1px solid rgba(255,255,255,.10)">
+    <span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:#5CB582;flex:none"></span>
+    <span style="flex:1;min-width:0;font:400 13px/1.3 system-ui,sans-serif;color:#B4B5BC;white-space:nowrap">Panda · MacBook Pro · 在线</span>
+    <span style="font:400 12.5px/1.3 'JetBrains Mono',monospace;color:#6E6E76;letter-spacing:-.01em">cc-pocket</span>
+  </div>
+
+  <div style="position:absolute;left:0;right:0;top:44px;bottom:0;display:flex;flex-direction:column;justify-content:center;padding:0 56px">
+    <h2 style="margin:0;font:600 24px/1.2 system-ui,sans-serif;letter-spacing:-.02em">开始一个任务</h2>
+    <p style="margin:9px 0 0;font:400 14.5px/1.5 system-ui,sans-serif;color:#B4B5BC;text-wrap:pretty">项目与智能体是这里的两个选择，写在下面这行里，随时可改。</p>
+
+    <div style="margin-top:20px;border-radius:13px;border:1px solid rgba(255,255,255,.18);background:#141417;padding:14px 14px 12px">
+      <div style="min-height:52px;font:400 15.5px/1.5 system-ui,sans-serif;color:#6E6E76">让智能体做什么？</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+        <span role="button" tabIndex="0" aria-label="项目，{{ project }}" aria-expanded="{{ popExpanded }}" onClick="{{ togglePop }}" style="{{ deskProjectChipStyle }}">
+          <span aria-hidden="true" style="width:17px;height:13px;border:1.3px solid {{ deskProjectInk }};border-radius:2.5px;flex:none;position:relative"><span style="position:absolute;top:-4px;left:0;width:7px;height:4px;background:#141417;border-top:1.3px solid {{ deskProjectInk }};border-left:1.3px solid {{ deskProjectInk }};border-right:1.3px solid {{ deskProjectInk }};border-radius:2px 2px 0 0"></span></span>
+          <span style="font:500 13.5px/1.2 'JetBrains Mono',monospace;color:{{ deskProjectInk }};letter-spacing:-.01em;white-space:nowrap">{{ projectShort }}</span>
+          <span aria-hidden="true" style="font:400 10.5px/1 system-ui,sans-serif;color:{{ deskProjectInk }};flex:none">{{ popChevron }}</span>
+        </span>
+        <span role="button" tabIndex="0" aria-label="智能体，{{ agent }}" style="min-height:44px;padding:0 12px;border-radius:10px;border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;gap:8px;flex:none;cursor:pointer">
+          <span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:{{ agentDot }};flex:none"></span>
+          <span style="font:500 13.5px/1.2 system-ui,sans-serif;color:#E6E6E9;white-space:nowrap">{{ agent }}</span>
+          <span aria-hidden="true" style="font:400 10.5px/1 system-ui,sans-serif;color:#8C8D95;flex:none">▾</span>
+        </span>
+        <span style="flex:1;min-width:0;font:400 12.5px/1.4 system-ui,sans-serif;color:#8C8D95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">模式与模型沿用默认</span>
+        <span aria-disabled="true" style="min-width:72px;height:44px;padding:0 16px;border-radius:10px;border:1px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;font:600 14.5px/1 system-ui,sans-serif;color:#6E6E76;flex:none;white-space:nowrap">发送</span>
+      </div>
+    </div>
+
+    <sc-if value="{{ popOpen }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-label="选择项目" style="position:absolute;left:56px;bottom:118px;width:328px;background:#17171B;border:1px solid rgba(255,255,255,.20);border-radius:12px;overflow:hidden;box-shadow:0 22px 44px -18px rgba(0,0,0,.78)">
+      <div style="padding:11px 14px 9px;border-bottom:1px solid rgba(255,255,255,.14);font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">最近使用</div>
+      <sc-for list="{{ popRows }}" as="r" hint-placeholder-count="3">
+        <div role="menuitemradio" tabIndex="0" aria-checked="{{ r.aria }}" onClick="{{ r.pick }}" style="min-height:52px;display:flex;align-items:center;gap:11px;padding:8px 14px;border-bottom:1px solid rgba(255,255,255,.12);cursor:pointer">
+          <div style="flex:1;min-width:0">
+            <div style="font:{{ r.nameFont }};color:{{ r.nameInk }};letter-spacing:-.01em;word-break:break-all">{{ r.name }}</div>
+            <div style="font:400 11.5px/1.4 'JetBrains Mono',monospace;color:#8C8D95;margin-top:3px;letter-spacing:-.01em;word-break:break-all">{{ r.path }}</div>
+          </div>
+          <sc-if value="{{ r.checked }}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="font:500 14px/1 system-ui,sans-serif;color:#E2795A;flex:none">✓</span></sc-if>
+        </div>
+      </sc-for>
+      <div role="button" tabIndex="0" onClick="{{ togglePop }}" style="min-height:48px;display:flex;align-items:center;gap:10px;padding:0 14px;background:#1B1B1F;cursor:pointer">
+        <span style="flex:1;font:500 14px/1.3 system-ui,sans-serif;color:#E6E6E9">浏览其他文件夹…</span>
+        <span aria-hidden="true" style="font:300 17px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+      </div>
+    </div>
+    </sc-if>
+  </div>
+</div>
+</sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:402,&quot;height&quot;:874},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;projects&quot;,&quot;options&quot;:[&quot;projects&quot;,&quot;loading&quot;,&quot;search&quot;,&quot;composer&quot;,&quot;picker&quot;,&quot;agents&quot;,&quot;desktop&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;landed&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:0,&quot;min&quot;:0,&quot;max&quot;:5,&quot;tsType&quot;:&quot;number&quot;},&quot;project&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;cc-pocket&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;agent&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;Claude&quot;,&quot;options&quot;:[&quot;Claude&quot;,&quot;Codex&quot;,&quot;OpenCode&quot;,&quot;Kimi&quot;,&quot;ZCode&quot;,&quot;DeepSeek&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;pop&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  AGENTS = [
+    { name: 'Claude', dot: '#E2795A', ok: true },
+    { name: 'Codex', dot: '#8FA9C8', ok: true },
+    { name: 'OpenCode', dot: '#5CB582', ok: true },
+    { name: 'Kimi', dot: '#B58CD6', ok: true },
+    { name: 'ZCode', dot: '#E9B45C', ok: true },
+    { name: 'DeepSeek', dot: '#6FBDBD', ok: false }
+  ];
+  RECENT = [
+    { name: 'cc-pocket', path: '/Users/alex/code/cc-pocket' },
+    { name: 'cc-pocket-site', path: '/Users/alex/code/cc-pocket-site' },
+    { name: 'relay-server', path: '/Users/alex/code/relay-server' },
+    { name: 'notes-cli', path: '~/Library/Mobile Documents/…/notes-cli' }
+  ];
+  ALL = [
+    { name: 'dotfiles', path: '/Users/alex/dotfiles' },
+    { name: 'scratch-and-archive-2024', path: '/Users/alex/code/scratch-and-archive-2024' }
+  ];
+  PROJECTS = [
+    { name: 'cc-pocket', path: '/Users/alex/code/cc-pocket', section: '进行中', active: true, liveTitle: '为 App Review 添加演示模式', meta: 'main · 1 个会话' },
+    { name: 'cc-pocket-site', path: '/Users/alex/code/cc-pocket-site · 2 小时前', section: '已固定' },
+    { name: 'relay-server', path: '/Users/alex/code/relay-server · 昨天', section: '全部项目' },
+    { name: 'notes-cli', path: '/Users/alex/Library/Mobile Documents/com~apple~CloudDocs/notes-cli · 3 月 4 日', section: '全部项目' },
+    { name: 'dotfiles', path: '/Users/alex/dotfiles · 2 月 19 日', section: '全部项目' }
+  ];
+  DRAFT = '把发布脚本改成先跑测试，再打标签，然后把变更日志发到频道里';
+
+  constructor(props) {
+    super(props);
+    const sc = props.screen || 'projects';
+    const sheet = sc === 'composer' || sc === 'picker' || sc === 'agents';
+    const base = { desktop: 'desktop', search: 'search', loading: 'loading' };
+    this.state = {
+      screen: base[sc] || 'projects',
+      sheet: sheet,
+      panel: sc === 'picker' ? 'project' : (sc === 'agents' ? 'agent' : null),
+      draft: sheet ? this.DRAFT : '',
+      project: props.project || 'cc-pocket',
+      agent: props.agent || 'Claude',
+      query: sc === 'search' ? 'rel' : '',
+      tree: true,
+      pop: !!props.pop
+    };
+  }
+
+  mid(n) {
+    if (n.length <= 15) return n;
+    return n.slice(0, 8) + '…' + n.slice(-5);
+  }
+
+  keyRow(chars, h) {
+    const base = 'height:' + h + 'px;border-radius:5px;background:#2A2A30;display:flex;align-items:center;justify-content:center;font:400 17px/1 system-ui,sans-serif;color:#F3F3F4;';
+    return chars.map(c => {
+      if (typeof c === 'string') return { t: c, style: base + 'flex:1;min-width:0' };
+      return { t: c[0], style: base.replace('#2A2A30', c[2] || '#1F1F25').replace('17px', c[3] || '13px') + 'flex:' + c[1] + ';min-width:0' };
+    });
+  }
+
+  renderVals() {
+    const s = this.state;
+    const desktop = s.screen === 'desktop';
+    const searchOpen = s.screen === 'search';
+    const waiting = s.screen === 'loading';
+    const landed = Math.max(0, Math.min(5, this.props.landed || 0));
+    const SKEL = [{ t: '54%', p: '76%' }, { t: '43%', p: '64%' }, { t: '61%', p: '82%' }, { t: '38%', p: '58%' }, { t: '50%', p: '71%' }];
+    const REAL = [
+      { name: 'cc-pocket', path: '/Users/alex/code/cc-pocket' },
+      { name: 'cc-pocket-site', path: '/Users/alex/code/cc-pocket-site · 2 小时前' },
+      { name: 'relay-server', path: '/Users/alex/code/relay-server · 昨天' },
+      { name: 'notes-cli', path: '/Users/alex/Library/Mobile Documents/com~apple~CloudDocs/notes-cli · 3 月 4 日' },
+      { name: 'dotfiles', path: '/Users/alex/dotfiles · 2 月 19 日' }
+    ];
+    const rowBase = 'padding:13px 0;border-bottom:1px solid rgba(255,255,255,.14);display:flex;gap:11px;align-items:flex-start;';
+    const loadRows = SKEL.map((k, i) => ({
+      isSkel: i >= landed, isReal: i < landed,
+      titleW: k.t, pathW: k.p, name: REAL[i].name, path: REAL[i].path,
+      skelStyle: rowBase + 'min-height:64px;animation:fsbreathe 1.4s ease-in-out ' + (i * 90) + 'ms infinite',
+      realStyle: rowBase + 'animation:fsland 220ms cubic-bezier(.2,0,0,1) ' + (i * 90) + 'ms both'
+    }));
+    const panel = s.panel;
+    const kb = searchOpen || (s.sheet && !panel);
+    const agentRec = this.AGENTS.filter(a => a.name === s.agent)[0] || this.AGENTS[0];
+
+    const q = s.query.trim().toLowerCase();
+    const matched = this.PROJECTS.filter(p => !q || p.name.toLowerCase().indexOf(q) >= 0 || p.path.toLowerCase().indexOf(q) >= 0);
+    const order = q ? ['搜索结果'] : ['进行中', '已固定', '全部项目'];
+    const sections = order.map((label, i) => ({
+      label: label, gap: i === 0 ? '0px' : '20px', hasToggle: i === 0,
+      rows: matched.filter(p => q || p.section === label).map(p => ({
+        name: p.name, path: p.path, liveTitle: p.liveTitle, meta: p.meta,
+        active: !!p.active && !q, plain: !(!!p.active && !q)
+      }))
+    })).filter(sec => sec.rows.length);
+
+    const chip = open => 'min-height:44px;padding:0 11px;border-radius:10px;display:flex;align-items:center;gap:8px;flex:none;cursor:pointer;background:'
+      + (open ? 'rgba(226,121,90,.12)' : 'transparent') + ';border:1px solid ' + (open ? '#E2795A' : 'rgba(255,255,255,.18)');
+
+    const pickRow = (r, checked) => ({
+      role: 'menuitemradio', aria: checked ? 'true' : 'false', hasDot: false, hasFolder: true, hasPath: true,
+      dot: '#8C8D95', dotOpacity: '1', unavailable: false, checked: checked,
+      name: r.name, path: r.path,
+      nameFont: (checked ? '600' : '500') + ' 15.5px/1.3 system-ui,sans-serif', nameInk: checked ? '#F3F3F4' : '#E6E6E9',
+      rowStyle: 'min-height:56px;display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:pointer',
+      pick: () => this.setState({ project: r.name, panel: null })
+    });
+
+    const agentRow = a => {
+      const checked = a.name === s.agent;
+      return {
+        role: 'menuitemradio', aria: checked ? 'true' : 'false', hasDot: true, hasFolder: false, hasPath: false,
+        dot: a.dot, dotOpacity: a.ok ? '1' : '.4', unavailable: !a.ok, checked: checked && a.ok,
+        name: a.name, path: '',
+        nameFont: (checked ? '600' : '500') + ' 16px/1.3 system-ui,sans-serif',
+        nameInk: !a.ok ? '#6E6E76' : (checked ? '#F3F3F4' : '#E6E6E9'),
+        rowStyle: 'min-height:56px;display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.14);cursor:' + (a.ok ? 'pointer' : 'default'),
+        pick: a.ok ? () => this.setState({ agent: a.name, panel: null }) : () => {}
+      };
+    };
+
+    const panelGroups = panel === 'project'
+      ? [{ label: '最近使用', gap: '12px', hasSearch: false, rows: this.RECENT.map(r => pickRow(r, r.name === s.project)) },
+         { label: '全部项目', gap: '20px', hasSearch: true, rows: this.ALL.map(r => pickRow(r, r.name === s.project)) }]
+      : [{ label: '可用的智能体', gap: '12px', hasSearch: false, rows: this.AGENTS.map(agentRow) }];
+
+    return {
+      isMobile: !desktop, isDesktop: desktop,
+      waiting: waiting, ready: !waiting, loadRows: loadRows,
+      label: panel === 'project' ? 'Project picker' : (panel === 'agent' ? 'Agent picker' : (searchOpen ? 'Search expanded' : (s.sheet ? 'Composer sheet' : (waiting ? 'Projects loading' : 'Projects idle')))),
+
+      searchOpen: searchOpen, searchClosed: !searchOpen, query: s.query,
+      openSearch: () => this.setState({ screen: 'search', sheet: false, panel: null }),
+      closeSearch: () => this.setState({ screen: 'projects', query: '' }),
+
+      sections: sections,
+      listTail: s.sheet ? '18px' : '92px',
+      toggleTree: () => this.setState({ tree: !s.tree }),
+      treeInk: s.tree ? '#F3F3F4' : '#6E6E76', flatInk: s.tree ? '#6E6E76' : '#F3F3F4',
+
+      showFab: !searchOpen && !s.sheet,
+      openSheet: () => this.setState({ sheet: true, panel: null }),
+      sheetOpen: s.sheet,
+      dismissSheet: () => this.setState({ sheet: false, panel: null }),
+
+      hasDraft: !!s.draft, noDraft: !s.draft, draft: s.draft,
+      focusComposer: () => this.setState({ draft: s.draft || this.DRAFT, panel: null }),
+      send: () => this.setState({ sheet: false, draft: '', panel: null }),
+      canSend: !!s.draft, cantSend: !s.draft,
+
+      project: s.project, projectShort: this.mid(s.project),
+      agent: s.agent, agentDot: agentRec.dot,
+      projectChipStyle: chip(panel === 'project'), agentChipStyle: chip(panel === 'agent'),
+      projectChipInk: panel === 'project' ? '#F0A184' : '#E6E6E9',
+      agentChipInk: panel === 'agent' ? '#F0A184' : '#E6E6E9',
+      projectChevron: panel === 'project' ? '▴' : '▾', agentChevron: panel === 'agent' ? '▴' : '▾',
+      projectExpanded: panel === 'project' ? 'true' : 'false', agentExpanded: panel === 'agent' ? 'true' : 'false',
+      openProject: () => this.setState({ panel: panel === 'project' ? null : 'project' }),
+      openAgent: () => this.setState({ panel: panel === 'agent' ? null : 'agent' }),
+      closePanel: () => this.setState({ panel: null }),
+
+      panelOpen: !!panel, panelTitle: panel === 'agent' ? '选择智能体' : '选择项目',
+      panelH: (panel === 'project' ? 372 : 424) + 'px',
+      panelGroups: panelGroups, panelPinned: panel === 'project',
+
+      kb: kb, noKb: !kb,
+      candidates: [{ t: '发布' }, { t: '发布脚本' }, { t: '发送' }],
+      kbRows: [
+        { keys: this.keyRow(['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'], 40) },
+        { keys: this.keyRow([['', 0.5], 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ['', 0.5]], 40) },
+        { keys: this.keyRow([['⇧', 1.4, '#1F1F25', '15px'], 'Z', 'X', 'C', 'V', 'B', 'N', 'M', ['⌫', 1.4, '#1F1F25', '15px']], 40) },
+        { keys: this.keyRow([['123', 1.3, '#1F1F25'], ['中', 1.3, '#1F1F25', '15px'], ['空格', 4.4, '#2A2A30', '14px'], ['换行', 2, '#1F1F25', '14px']], 40) }
+      ],
+
+      popOpen: s.pop, popExpanded: s.pop ? 'true' : 'false', popChevron: s.pop ? '▴' : '▾',
+      togglePop: () => this.setState({ pop: !s.pop }),
+      deskProjectChipStyle: 'min-height:44px;padding:0 12px;border-radius:10px;display:flex;align-items:center;gap:8px;flex:none;cursor:pointer;background:'
+        + (s.pop ? 'rgba(226,121,90,.12)' : 'transparent') + ';border:1px solid ' + (s.pop ? '#E2795A' : 'rgba(255,255,255,.18)'),
+      deskProjectInk: s.pop ? '#F0A184' : '#E6E6E9',
+      popRows: this.RECENT.slice(0, 3).map(r => ({
+        name: r.name, path: r.path, checked: r.name === s.project, aria: r.name === s.project ? 'true' : 'false',
+        nameFont: (r.name === s.project ? '600' : '500') + ' 14.5px/1.3 system-ui,sans-serif',
+        nameInk: r.name === s.project ? '#F3F3F4' : '#E6E6E9',
+        pick: () => this.setState({ project: r.name, pop: false })
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

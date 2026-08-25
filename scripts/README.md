@@ -13,6 +13,7 @@ jpackage 不能跨平台编译，所以每个平台的产物都在对应 OS 上�
 | `release-macos.sh` | daemon `cc-pocket-daemon-<ver>-macos-<arch>.tar.gz`（签名+公证） | macOS |
 | `release-linux.sh` | daemon Linux tarball | Linux |
 | `release-windows.ps1` | daemon Windows zip | Windows |
+| `release-harmony.sh` | HarmonyOS 签名 HAP + AGC `.app`（CI 路径需 self-hosted DevEco runner） | macOS + DevEco Studio |
 | `ios-fir.sh` | **iOS IPA** 签名并发布到 fir.im 做真机测试分发（`development` 开发版 / `release-testing` ad-hoc）。token 放 `scripts/.fir-token`（已 gitignore）；设备需先登记 UDID。详见脚本头注释 | macOS |
 
 > 桌面 App 的 Windows MSI / 便携 zip 目前只走 CI（`build-windows.yml` 的 `windows-app` job + `release.yml` 的 `windows-desktop` job）；Linux 桌面包（.deb/AppImage）尚未配置（`build.gradle` targetFormats 只有 Dmg、Msi）。
@@ -20,6 +21,9 @@ jpackage 不能跨平台编译，所以每个平台的产物都在对应 OS 上�
 ## 常用命令
 
 ```bash
+# 发布前：校验 daemon / Android / iOS / 桌面 / Homebrew 模板版本锁步
+bash scripts/check-release-version.sh <ver>
+
 # 只构建桌面端（mac，签名+公证；要 .env 里的 DEVELOPER_ID + APPLE_* 凭证）
 scripts/release-desktop-macos.sh
 
@@ -35,9 +39,18 @@ scripts/release-all.sh --desktop-only
 # 传产物到 GitHub release（release 须先存在）
 gh release upload v<ver> cc-pocket-desktop-<ver>-macos-arm64.dmg --clobber
 
-# 全平台发版（CI，需 release 先建好）
-gh workflow run release.yml -f version=<ver>
+# 全平台发版（CI，需同名 tag + release 先建好；必须从 tag 构建）
+gh workflow run release.yml --ref v<ver> -f version=<ver>
+
+# 全平台 + HarmonyOS（必须从同名 tag 触发；需 harmony-release environment + ephemeral/JIT runner）
+gh workflow run release.yml --ref v<ver> -f version=<ver> -f include_harmony=true
+
+# Harmony 发版契约静态检查（无需 DevEco / 签名材料）
+bash scripts/check-harmony-release.sh
 ```
+
+Harmony environment 审批、ephemeral/JIT runner、标签、DevEco 路径和 secrets 清单见
+[`harmony/README.md`](../harmony/README.md#正式-github-release显式启用)。
 
 ## 凭证
 

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.Snapshot
@@ -17,6 +18,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.ChatItem
@@ -25,14 +27,22 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.ChatScreen
+import dev.ccpocket.app.ui.DirectoryPickerSheet
+import dev.ccpocket.app.ui.DirectoryScreen
+import dev.ccpocket.app.ui.PairingScreen
+import dev.ccpocket.app.ui.entry.ComputersSurface
+import dev.ccpocket.app.ui.entry.ConfigureSessionSheet
+import dev.ccpocket.app.ui.entry.connRecovery
 import dev.ccpocket.app.ui.FileViewerScreen
 import dev.ccpocket.app.ui.ModelPicker
-import dev.ccpocket.app.ui.PermissionSheet
 import dev.ccpocket.app.ui.QuestionCard
 import dev.ccpocket.app.ui.SessionsScreen
 import dev.ccpocket.app.ui.StartSessionModeSheet
 import dev.ccpocket.app.ui.SubagentCard
 import dev.ccpocket.app.ui.UsageScreen
+import dev.ccpocket.app.ui.approval.ApprovalUi
+import dev.ccpocket.app.ui.approval.SecureApprovalSheet
+import dev.ccpocket.app.ui.approval.approvalUi
 import dev.ccpocket.app.ui.fleet.FleetHomeScreen
 import dev.ccpocket.app.ui.share.ShareFolderScreen
 import dev.ccpocket.protocol.AccessTier
@@ -44,12 +54,18 @@ import dev.ccpocket.protocol.AskQuestion
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.ChatRole
+import dev.ccpocket.app.data.ConnPhase
+import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.FileDiff
 import dev.ccpocket.protocol.HistoryMessage
+import dev.ccpocket.protocol.PendingApproval
+import dev.ccpocket.protocol.PendingApprovals
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
+import dev.ccpocket.protocol.PermissionRiskUpdated
 import dev.ccpocket.protocol.SessionLive
+import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.TokenUsage
@@ -267,9 +283,11 @@ class ShowcaseRender {
             Beat(3800) { permTimedOut.value = true },
         )) { _ ->
             Box(Modifier.fillMaxSize().background(Tok.base)) {
-                PermissionSheet(
-                    ask = permAsk.value, workdir = DemoData.LIVE_DIR, timedOutSignal = permTimedOut.value,
-                    onDeny = {}, onOnce = {}, onAlways = {}, onDismiss = {},
+                SecureApprovalSheet(
+                    approvalUi(
+                        permAsk.value, workdir = DemoData.LIVE_DIR, timedOutSignal = permTimedOut.value,
+                    ),
+                    onDeny = {}, onAllowOnce = {},
                 )
             }
         },
@@ -409,6 +427,555 @@ class ShowcaseRender {
             } finally {
                 scene.close()
                 scope.cancel()
+            }
+        }
+    }
+
+    // ── Mobile UI 2.0 · Secure Approval acceptance frames ────────────────────────────────────────
+
+    /** One still of [SecureApprovalSheet] at the release baseline. [dark] follows the handoff's own frames. */
+    private class ApprovalFrame(val id: String, val dark: Boolean, val ui: ApprovalUi)
+
+    private fun approvalFrames(): List<ApprovalFrame> {
+        val dir = DemoData.LIVE_DIR
+        fun ask(
+            id: String, tool: String, title: String, preview: String,
+            rule: String? = null, grants: List<String>? = null, danger: Boolean = false,
+            dangerNote: String? = null, neverRemember: Boolean = false, noAutoDeny: Boolean = false,
+            diff: String? = null, timeoutSec: Int? = null,
+        ) = PermissionAsk(
+            convoId = convo, askId = id, tool = tool, title = title, inputPreview = preview, rule = rule,
+            grantOptions = grants, danger = danger, dangerNote = dangerNote, neverRemember = neverRemember,
+            noAutoDeny = noAutoDeny, diff = diff, timeoutSec = timeoutSec,
+        )
+        // assessedAt is deliberately left null: it renders as a RELATIVE time, which would make the frames
+        // drift with wall-clock. The reason-code half of the same line still proves the layout.
+        fun risk(askId: String, level: String, reason: String, vararg codes: String) =
+            PermissionRiskUpdated(convo, askId, level, reason = reason, reasonCodes = codes.toList())
+
+        return listOf(
+            // 01 · ordinary V2: task + session offered, every tile NEUTRAL (capability ≠ recommendation)
+            ApprovalFrame(
+                "ordinary", dark = true,
+                approvalUi(
+                    ask(
+                        "ap-1", "Bash", "Run command", "./gradlew :protocol:allTests --rerun-tasks",
+                        rule = "Bash(./gradlew test:*)", grants = listOf("once", "task", "session"), timeoutSec = 18,
+                    ),
+                    workdir = dir, risk = risk("ap-1", "medium", "modifies release tooling", "repo.tooling.write"),
+                    queueProgress = 1 to 3,
+                ),
+            ),
+            // 02 · danger: same action SET, emphasis moves to least privilege; dangerNote is bounded
+            ApprovalFrame(
+                "danger", dark = true,
+                approvalUi(
+                    ask(
+                        "ap-2", "Bash", "Reset the working tree", "git clean -fdx && git reset --hard origin/main",
+                        rule = "Bash(git clean:*)", grants = listOf("once", "task"), danger = true, timeoutSec = 24,
+                        dangerNote = "Removes the build directory and every untracked file in the working tree, " +
+                            "including anything not yet committed.",
+                    ),
+                    workdir = dir, risk = risk("ap-2", "high", "deletes files", "fs.delete.recursive"), queueProgress = 2 to 3,
+                ),
+            ),
+            // 03 · legacy pre-M2 peer, light theme: no grants, no risk, no queue, 30s fallback
+            ApprovalFrame(
+                "legacy", dark = false,
+                approvalUi(
+                    ask("ap-3", "Bash", "Run command", "npm run build", rule = "Bash(npm run build:*)"),
+                    workdir = dir,
+                ),
+            ),
+            // 04 · one-off / review shell: Deny + Allow once only, and the record band explains why
+            ApprovalFrame(
+                "oneoff", dark = true,
+                approvalUi(
+                    ask(
+                        "ap-4", "Bash", "Run command",
+                        "ssh deploy@build-01.internal 'sudo systemctl restart ccpocket-relay'",
+                        rule = "Bash(ssh:*)", grants = listOf("once", "task", "session"), timeoutSec = 45,
+                    ),
+                    workdir = dir, risk = risk("ap-4", "medium", "remote host"), handoffReview = true,
+                ),
+            ),
+            // 05 · noAutoDeny: no ring, no number, no ∞ — a truthful waiting state; V2 with only `once`
+            ApprovalFrame(
+                "noautodeny", dark = true,
+                approvalUi(
+                    ask(
+                        "ap-5", "Edit", "Edit file", "scripts/release.sh", rule = "Edit(scripts/release.sh)",
+                        grants = listOf("once"), noAutoDeny = true, timeoutSec = 86_400,
+                        diff = """
+                            @@ -18,7 +18,9 @@
+                             set -euo pipefail
+                            -VERSION="${'$'}1"
+                            +VERSION="${'$'}{1:?usage: release.sh <version>}"
+                            +test -n "${'$'}{GITHUB_TOKEN:-}" || { echo "GITHUB_TOKEN unset" >&2; exit 1; }
+                             gh release create "v${'$'}VERSION" --generate-notes
+                        """.trimIndent(),
+                    ),
+                    workdir = dir,
+                ),
+            ),
+            // 06 · grant-aware local display floor: no false 0s/auto-deny claim while the daemon remains authoritative
+            ApprovalFrame(
+                "authoritywait", dark = true,
+                approvalUi(
+                    ask(
+                        "ap-6", "Bash", "Run command", "./scripts/deploy-preview.sh",
+                        grants = listOf("once", "task"), timeoutSec = 0,
+                    ),
+                    workdir = dir,
+                ),
+            ),
+        )
+    }
+
+    // ── Mobile UI 2.0 · Sessions + Chat acceptance frames ───────────────────────────────────────
+
+    /** One Sessions/Chat still at the release baseline. [scale] doubles as the Dynamic Type proof. */
+    private class CoreFrame(
+        val id: String,
+        val dark: Boolean = true,
+        val fontScale: Float = 1f,
+        val seed: PocketRepository.() -> Unit,
+        val content: @Composable (PocketRepository) -> Unit,
+    )
+
+    private fun coreFrames(): List<CoreFrame> {
+        val dir = DemoData.LIVE_DIR
+        val convoId = "core"
+        fun live(executing: Boolean) = SessionLive(
+            convoId = convoId, workdir = dir, sessionId = "core-s1", mode = PermissionMode.DEFAULT,
+            executing = executing, model = "claude-sonnet-4-5", agent = AgentKind.CLAUDE,
+        )
+        // one transcript for every Chat frame: a user turn, an agent turn and a real tool result
+        val transcript = ConvoHistory(
+            convoId,
+            listOf(
+                HistoryMessage(ChatRole.USER, "add a unit test for the stream parser"),
+                HistoryMessage(ChatRole.ASSISTANT, "The parser now emits exactly one event when a frame is split across chunks."),
+                HistoryMessage(ChatRole.TOOL, "./gradlew :protocol:test", tool = "Bash", ok = true),
+                HistoryMessage(ChatRole.ASSISTANT, "I'm checking the remaining call sites that read `TokenStore`."),
+            ),
+        )
+        // the blocking ask: pinned as Approval required in Chat, and as the loudest row in Sessions
+        val ask = PermissionAsk(
+            convoId = convoId, askId = "core-ap", tool = "Bash", title = "Upload coverage to Codecov",
+            inputPreview = "./gradlew test && bash scripts/upload-coverage.sh",
+            grantOptions = listOf("once", "task"), timeoutSec = 600,
+        )
+        val minute = 60_000L
+        fun ago(ms: Long) = dev.ccpocket.app.epochMillis() - ms
+        val sessions = Sessions(
+            dir,
+            listOf(
+                SessionSummary(
+                    sessionId = "core-s1", title = "Refactor auth module",
+                    firstPrompt = "Review the concurrency around the refresh mutex before I open the PR.",
+                    messageCount = 24, cwd = dir, lastModified = ago(3 * minute),
+                    gitBranch = "feat/auth-refactor", live = true,
+                ),
+                SessionSummary(
+                    sessionId = "core-s2", title = "Fix flaky socket test",
+                    firstPrompt = "The reconnect test still fails intermittently on CI.",
+                    messageCount = 9, cwd = dir, lastModified = ago(120 * minute),
+                    gitBranch = "fix/socket-test", agent = AgentKind.CODEX,
+                ),
+                SessionSummary(
+                    sessionId = "core-s3", title = "Release notes 1.6",
+                    firstPrompt = "Summarize the user-visible changes from the last 12 commits.",
+                    messageCount = 15, cwd = dir, lastModified = ago(1680 * minute),
+                    gitBranch = "main",
+                ),
+            ),
+        )
+        val blocked = PendingApprovals(listOf(PendingApproval(ask, workdir = dir, sessionId = "core-s1")))
+        return listOf(
+            // 01/02 · Sessions in both palettes: context hierarchy, Active/Recent, one pinned dock, and an
+            // attention row that is the only filled control on the screen
+            CoreFrame("sessions-dark", seed = { receiveForTest(sessions); receiveForTest(blocked) }) { SessionsScreen(it) },
+            CoreFrame("sessions-light", dark = false, seed = { receiveForTest(sessions); receiveForTest(blocked) }) { SessionsScreen(it) },
+            // 03 · Chat mid-turn: Running is the pinned state because nothing outranks it
+            CoreFrame("chat-streaming", seed = { receiveForTest(live(true)); receiveForTest(transcript) }) { ChatScreen(it) },
+            // 04 · Chat under a real open approval. The Secure Approval sheet is a ROOT overlay and is
+            // deliberately not composed here: this frame proves the block beneath it states the same state
+            // in the same grammar without becoming a second decision path.
+            CoreFrame(
+                "chat-approval",
+                seed = { receiveForTest(live(true)); receiveForTest(transcript); receiveForTest(ask) },
+            ) { ChatScreen(it) },
+            // 05 · Dynamic Type: header, pinned state and composer all still reachable at 200%
+            CoreFrame(
+                "chat-type200", fontScale = 2f,
+                seed = { receiveForTest(live(true)); receiveForTest(transcript) },
+            ) { ChatScreen(it) },
+        )
+    }
+
+    /**
+     * NOT a test — the Sessions/Chat acceptance stills at the Mobile UI 2.0 release baseline (402 × 874 pt,
+     * iPhone 17), rendered from real protocol frames.
+     *
+     *   CORE_UI_OUT=/abs/dir ./gradlew :mobile:composeApp:desktopTest \
+     *     --tests dev.ccpocket.app.showcase.ShowcaseRender
+     */
+    @Test
+    fun renderCoreFrames() {
+        val outRoot = System.getenv("CORE_UI_OUT") ?: return   // opt-in only
+        val scale = 2f
+        val w = 402; val h = 874
+        val dir = File(outRoot).apply { mkdirs() }
+        for (frame in coreFrames()) {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            val repo = PocketRepository(scope, coreAccount).apply(frame.seed)
+            val scene = ImageComposeScene((w * scale).toInt(), (h * scale).toInt(), Density(scale)) {
+                CompositionLocalProvider(LocalDensity provides Density(scale, frame.fontScale)) {
+                    PocketTheme(dark = frame.dark) {
+                        Box(Modifier.fillMaxSize().background(Tok.base)) { frame.content(repo) }
+                    }
+                }
+            }
+            try {
+                Snapshot.sendApplyNotifications()
+                // one beat past the 180ms landing grace, so the transcript is revealed rather than faded out
+                scene.render(0L)
+                Snapshot.sendApplyNotifications()
+                val png = scene.render(400L * 1_000_000L).encodeToData(EncodedImageFormat.PNG)
+                    ?: error("encode ${frame.id}")
+                File(dir, "core-${frame.id}.png").writeBytes(png.bytes)
+                println("core frame: ${frame.id} → ${w}x$h @${frame.fontScale}x type")
+            } finally {
+                scene.close()
+                scope.cancel()
+            }
+        }
+    }
+
+    // ── Entry Flow UI 2.0 · acceptance frames ────────────────────────────────────────────────────
+
+    /** One entry-flow still at the release baseline. Same shape as [CoreFrame], different surfaces. */
+    private class EntryFrame(
+        val id: String,
+        val dark: Boolean = true,
+        val fontScale: Float = 1f,
+        val seed: PocketRepository.() -> Unit = {},
+        val content: @Composable (PocketRepository) -> Unit,
+    )
+
+    private fun entryFrames(): List<EntryFrame> {
+        val dir = DemoData.LIVE_DIR
+        val minute = 60_000L
+        fun ago(ms: Long) = dev.ccpocket.app.epochMillis() - ms
+        // real DirectoryEntry shapes only: one live project with a branch and a live title, then plain rows
+        // that claim nothing beyond a name, a path and the daemon's own mtime
+        val directories = Directories(
+            listOf(
+                DirectoryEntry(
+                    path = dir, name = "cc-pocket", isDir = true, hasSessions = true, recent = true,
+                    lastModified = ago(3 * minute), open = true, executing = true,
+                    activeSessionId = "entry-s1", activeSessionTitle = "Add demo mode for App Review",
+                    gitBranch = "main",
+                ),
+                DirectoryEntry(
+                    path = "/Users/alex/code/cc-pocket-site", name = "cc-pocket-site", isDir = true,
+                    hasSessions = true, lastModified = ago(90 * minute),
+                ),
+                DirectoryEntry(
+                    path = "/Users/alex/code/relay-server", name = "relay-server", isDir = true,
+                    hasSessions = true, lastModified = ago(600 * minute),
+                ),
+                DirectoryEntry(
+                    path = "/Users/alex/Library/Mobile Documents/com~apple~CloudDocs/notes-cli",
+                    name = "notes-cli", isDir = true, hasSessions = true, lastModified = ago(2400 * minute),
+                ),
+            ),
+        )
+        return listOf(
+            // 01 · Pairing: code-first, camera-free. The scanner is a route below the hairline, never the page.
+            EntryFrame("pair") { PairingScreen(it) },
+            // 02 · Computers under a real failure: one recovery region, the paired list flat underneath
+            EntryFrame("offline", seed = { pairedList.clear(); pairedList.add(coreAccount) }) {
+                ComputersSurface(
+                    it, recovery = connRecovery(ConnPhase.ComputerOffline), onSwitch = {}, onAdd = {},
+                )
+            },
+            // 03/04 · Projects in both palettes (header v2 + #260): title + Search/Computers/overflow, then
+            // the machine state + Review, then the work full-height — and the new-task FAB over its scrim
+            EntryFrame("projects-dark", seed = { receiveForTest(directories) }) { DirectoryScreen(it) },
+            EntryFrame("projects-light", dark = false, seed = { receiveForTest(directories) }) { DirectoryScreen(it) },
+            // 04b · the header at 200% type: row 2 reflows (Review drops under the state sentence) rather
+            // than crushing either side, and the FAB is still reachable without scrolling
+            EntryFrame("projects-type200", fontScale = 2f, seed = { receiveForTest(directories) }) { DirectoryScreen(it) },
+            // 05 · Directory picker: header and decision region pinned, only the middle list scrolls
+            EntryFrame("picker", seed = { enterDemo() }) {
+                DirectoryPickerSheet(it, onDismiss = {}, onTypePath = {}, onOptions = {}, onStart = {})
+            },
+            // 06 · Configure · Claude: workdir → Agent → Model → Mode → one Start printing the combination
+            EntryFrame("configure-claude") {
+                ConfigureSessionSheet(
+                    workdir = dir, agent = AgentKind.CLAUDE, computer = "alex-macbook",
+                    onPick = { _, _, _, _ -> }, onDismiss = {},
+                )
+            },
+            // 07 · Configure · OpenCode: a statement where a ladder would be, not a disabled one
+            EntryFrame("configure-opencode") {
+                ConfigureSessionSheet(
+                    workdir = dir, agent = AgentKind.OPENCODE, computer = "alex-macbook",
+                    onPick = { _, _, _, _ -> }, onDismiss = {},
+                )
+            },
+            // 08 · Dynamic Type: context pinned, body scrolling, the final decision still reachable
+            EntryFrame("configure-type200", fontScale = 2f) {
+                ConfigureSessionSheet(
+                    workdir = dir, agent = AgentKind.CLAUDE, computer = "alex-macbook",
+                    onPick = { _, _, _, _ -> }, onDismiss = {},
+                )
+            },
+        )
+    }
+
+    /**
+     * NOT a test — the Entry Flow acceptance stills at the release baseline (402 × 874 pt, iPhone 17).
+     *
+     *   ENTRY_UI_OUT=/abs/dir ./gradlew :mobile:composeApp:desktopTest \
+     *     --tests dev.ccpocket.app.showcase.ShowcaseRender
+     */
+    @Test
+    fun renderEntryFrames() {
+        val outRoot = System.getenv("ENTRY_UI_OUT") ?: return   // opt-in only
+        val scale = 2f
+        val w = 402; val h = 874
+        val dir = File(outRoot).apply { mkdirs() }
+        for (frame in entryFrames()) {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            val repo = PocketRepository(scope, coreAccount).apply(frame.seed)
+            val scene = ImageComposeScene((w * scale).toInt(), (h * scale).toInt(), Density(scale)) {
+                CompositionLocalProvider(LocalDensity provides Density(scale, frame.fontScale)) {
+                    PocketTheme(dark = frame.dark) {
+                        Box(Modifier.fillMaxSize().background(Tok.base)) { frame.content(repo) }
+                    }
+                }
+            }
+            try {
+                Snapshot.sendApplyNotifications()
+                scene.render(0L)
+                Snapshot.sendApplyNotifications()
+                val png = scene.render(400L * 1_000_000L).encodeToData(EncodedImageFormat.PNG)
+                    ?: error("encode ${frame.id}")
+                File(dir, "entry-${frame.id}.png").writeBytes(png.bytes)
+                println("entry frame: ${frame.id} → ${w}x$h @${frame.fontScale}x type")
+            } finally {
+                scene.close()
+                scope.cancel()
+            }
+        }
+    }
+
+    // ── Website / README · the public control loop (Watch → Approve → Continue → Inspect) ────────
+
+    /**
+     * The reel's shots. The four PUBLIC steps are Watch → Approve → Continue → Inspect; Watch gets two
+     * shots (the machine's session list, then the stream itself) because that is what watching is.
+     */
+    private enum class Shot { SESSIONS, STREAM, APPROVE, CONTINUE, INSPECT }
+
+    /** One localized reel script. Every string here is invented demo copy — never a real transcript. */
+    private class LoopScript(
+        val prompt: String,
+        val thinking: String,
+        val say1: String,
+        val say2: String,
+        val done1: String,
+        val done2: String,
+    )
+
+    private fun loopScript(lang: String): LoopScript = if (lang == "zh") LoopScript(
+        prompt = "relay 的重连回路补稳一下，改完跑一遍协议测试。",
+        thinking = "先看重连的计时器挂在哪个 scope 上——socket 一关它大概就跟着没了。",
+        say1 = "重试的计时器和 socket 同一个 scope，socket 一关就被取消。我把它挪到独立 scope，",
+        say2 = "退避重连再加一道守卫，关闭的 socket 杀不掉它。",
+        done1 = "守卫加好了：socket 关闭不再连坐取消重连。",
+        done2 = "协议测试全过。改动在 relay/src/net/WsClient.kt。",
+    ) else LoopScript(
+        prompt = "Harden the relay reconnect loop, then run the protocol tests.",
+        thinking = "Reading the reconnect path first — the retry timer looks like it dies with the socket.",
+        say1 = "The retry timer shares the socket's scope, so closing the socket cancels it. I'll move it out,",
+        say2 = " then guard the backoff so a closed socket can't take it down.",
+        done1 = "Guard added — a closed socket no longer cancels the reconnect.",
+        done2 = "Protocol tests are green. The change is in relay/src/net/WsClient.kt.",
+    )
+
+    /**
+     * NOT a test — the website / README control-loop reel (see `marketing/site/README.md`).
+     *
+     * One continuous 10.5s scene through the four PUBLIC jobs, rendered from the real production
+     * composables (`SessionsScreen` → `ChatScreen` → `SecureApprovalSheet` → `FileViewerScreen`) so the
+     * marketing media can never drift from the shipped UI. Every frame stays a pure function of t: beats
+     * mutate repository state at fixed offsets and the approval countdown is stepped by re-keying
+     * `timeoutSec` (its own `delay`-driven ticker is not deterministic offscreen — same trick as
+     * `permtimeout`).
+     *
+     * `SHOWCASE_LANG=zh` switches BOTH the app's own resource locale and this scripted copy, so a frame
+     * is never half-translated.
+     *
+     *   SITE_LOOP_OUT=/abs/dir [SHOWCASE_LANG=en|zh] [SHOWCASE_FPS=30] \
+     *     ./gradlew :mobile:composeApp:desktopTest --tests dev.ccpocket.app.showcase.ShowcaseRender
+     */
+    @Test
+    fun renderSiteLoop() {
+        val outRoot = System.getenv("SITE_LOOP_OUT") ?: return   // opt-in only
+        val lang = (System.getenv("SHOWCASE_LANG") ?: "en").lowercase()
+        val fps = (System.getenv("SHOWCASE_FPS") ?: "30").toInt()
+        val durationMs = 10_500L
+        val scale = 2f
+        val w = 390; val h = 844
+        val s = loopScript(lang)
+
+        val previousLocale = java.util.Locale.getDefault()
+        java.util.Locale.setDefault(if (lang == "zh") java.util.Locale.SIMPLIFIED_CHINESE else java.util.Locale.US)
+
+        val shot = mutableStateOf(Shot.SESSIONS)
+        val askSec = mutableStateOf(18)
+        fun ask(sec: Int) = PermissionAsk(
+            convoId = convo, askId = "loop-ap", tool = "Bash", title = "Run command",
+            inputPreview = "./gradlew :protocol:allTests --rerun-tasks",
+            rule = "Bash(./gradlew test:*)", grantOptions = listOf("once", "task", "session"),
+            timeoutSec = sec,
+        )
+
+        val beats = listOf(
+            // WATCH · the machine's running work, then the stream itself
+            Beat(0) {
+                phase.value = ConnPhase.Ready       // a paired, attached machine — not a connecting spinner
+                connected.value = true
+                receiveForTest(Sessions(DemoData.LIVE_DIR, DemoData.sessions(DemoData.LIVE_DIR)))
+                receiveForTest(live(executing = true))
+                receiveForTest(ConvoHistory(convo, listOf(HistoryMessage(ChatRole.USER, s.prompt))))
+            },
+            Beat(1600) { shot.value = Shot.STREAM },
+            Beat(1900) { receiveForTest(think(s.thinking)) },
+            Beat(2500) { receiveForTest(text(s.say1)) },
+            Beat(3000) { receiveForTest(text(s.say2)) },
+            Beat(3400) { receiveForTest(tool("Read", "relay/src/net/WsClient.kt")) },
+            // APPROVE · the agent stops at a sensitive action and the decision is made from here
+            Beat(3900) { shot.value = Shot.APPROVE },
+            Beat(4600) { askSec.value = 15 },
+            Beat(5300) { askSec.value = 12 },
+            // CONTINUE · the same session picks up where it stopped and finishes the turn
+            Beat(6000) {
+                shot.value = Shot.CONTINUE
+                receiveForTest(tool("Bash", "./gradlew :protocol:allTests --rerun-tasks"))
+            },
+            Beat(6600) { receiveForTest(tool("Edit", "relay/src/net/WsClient.kt  +24 −6")) },
+            Beat(7100) { receiveForTest(text(s.done1)) },
+            Beat(7600) { receiveForTest(text(s.done2)) },
+            Beat(8000) { receiveForTest(TurnDone(convo, usage = TokenUsage(inputTokens = 42_180, outputTokens = 5_360))) },
+            // INSPECT · what actually changed, line by line
+            Beat(8300) {
+                changedFiles.add(ChangedFile("relay/src/net/WsClient.kt", op = "edit", adds = 24, dels = 6))
+                viewedFilePath.value = "relay/src/net/WsClient.kt"
+                viewedFileDiff.value = FileDiff(
+                    workdir = DemoData.LIVE_DIR, sessionId = DemoData.LIVE_SESSION_ID,
+                    path = "relay/src/net/WsClient.kt", adds = 24, dels = 6,
+                    diff = """
+                        @@ -41,9 +41,14 @@
+                         private fun scheduleReconnect(n: Int) {
+                        -    socketScope.launch {
+                        -        delay(backoff(n))
+                        -        connect()
+                        -    }
+                        +    // the socket scope dies with it
+                        +    retryScope.launch {
+                        +        delay(backoff(n))
+                        +        if (!closedByUser) connect()
+                        +    }
+                         }
+                        +
+                        +private fun backoff(n: Int) =
+                        +    minOf(30_000L, 250L shl n)
+                    """.trimIndent(),
+                )
+                shot.value = Shot.INSPECT
+            },
+        )
+
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val repo = PocketRepository(scope, coreAccount)
+        val dir = File(outRoot).apply { mkdirs() }
+        seq = 0
+        val scene = ImageComposeScene((w * scale).toInt(), (h * scale).toInt(), Density(scale)) {
+            PocketTheme(dark = true) {
+                Box(Modifier.fillMaxSize().background(Tok.base)) {
+                    when (shot.value) {
+                        Shot.SESSIONS -> SessionsScreen(repo)
+                        Shot.STREAM, Shot.CONTINUE -> ChatScreen(repo)
+                        Shot.APPROVE -> {
+                            ChatScreen(repo)
+                            SecureApprovalSheet(
+                                approvalUi(ask(askSec.value), workdir = DemoData.LIVE_DIR),
+                                onDeny = {}, onAllowOnce = {},
+                            )
+                        }
+                        Shot.INSPECT -> FileViewerScreen(repo, onBack = {})
+                    }
+                }
+            }
+        }
+        try {
+            val frames = ceil(durationMs / 1000.0 * fps).toInt()
+            var next = 0
+            for (i in 0 until frames) {
+                val t = i * 1000L / fps
+                while (next < beats.size && beats[next].at <= t) { beats[next].action(repo); next++ }
+                Snapshot.sendApplyNotifications()
+                val png = scene.render(t * 1_000_000L).encodeToData(EncodedImageFormat.PNG) ?: error("encode $i")
+                File(dir, "f%05d.png".format(i)).writeBytes(png.bytes)
+            }
+            println("site-loop[$lang]: $frames frames @ ${fps}fps → ${(w * scale).toInt()}x${(h * scale).toInt()}")
+        } finally {
+            scene.close()
+            scope.cancel()
+            java.util.Locale.setDefault(previousLocale)
+        }
+    }
+
+    /** A real paired binding, so the machine name in the Sessions header is a rendered fact, not a blank. */
+    private val coreAccount = dev.ccpocket.app.pairing.PairedDaemon(
+        relay = "wss://showcase.invalid", accountId = "showcase", daemonPub = "pub",
+        deviceId = "dev", credential = "cred", hostName = "alex-macbook",
+    )
+
+    /**
+     * NOT a test — the Secure Approval acceptance stills at the Mobile UI 2.0 release baseline (402 × 874 pt,
+     * iPhone 17). Separate from [render] on purpose: the marketing reel keeps its own scenes, size and
+     * cadence, and a bare `desktopTest` run still renders nothing.
+     *
+     *   APPROVAL_OUT=/abs/dir ./gradlew :mobile:composeApp:desktopTest \
+     *     --tests dev.ccpocket.app.showcase.ShowcaseRender
+     */
+    @Test
+    fun renderApprovalFrames() {
+        val outRoot = System.getenv("APPROVAL_OUT") ?: return   // opt-in only
+        val scale = 2f
+        val w = 402; val h = 874
+        val dir = File(outRoot).apply { mkdirs() }
+        for (frame in approvalFrames()) {
+            val scene = ImageComposeScene((w * scale).toInt(), (h * scale).toInt(), Density(scale)) {
+                PocketTheme(dark = frame.dark) {
+                    Box(Modifier.fillMaxSize().background(Tok.base)) {
+                        SecureApprovalSheet(frame.ui, onDeny = {}, onAllowOnce = {})
+                    }
+                }
+            }
+            try {
+                Snapshot.sendApplyNotifications()
+                val png = scene.render(0L).encodeToData(EncodedImageFormat.PNG) ?: error("encode ${frame.id}")
+                File(dir, "approval-${frame.id}.png").writeBytes(png.bytes)
+                println("approval frame: ${frame.id} → ${w}x$h")
+            } finally {
+                scene.close()
             }
         }
     }

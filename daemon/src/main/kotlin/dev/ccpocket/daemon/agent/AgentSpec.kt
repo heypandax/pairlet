@@ -23,16 +23,35 @@ data class AgentSpec(
     // the phone takes over a session another writer may hold: Claude maps this to --fork-session; Codex
     // maps it to the app-server's native thread/fork request.
     val forkSession: Boolean = false,
+    // Claude only, issue #282 (docs/design/REWIND-FORK.md): truncate the resumed context at a chain entry
+    // (`--resume-session-at <uuid>`) — the CLI keeps everything up to and including that entry and drops the
+    // rest. ALWAYS set together with [forkSession]: without a fork the CLI keeps the original id and APPENDS
+    // the branch to the same transcript, turning it into a tree that linear replay renders twice (probed);
+    // with one, the original file is untouched byte-for-byte and the truncated context lands in a fresh copy.
+    // Both flags are `.hideHelp()`-hidden on the CLI but are the same knobs the Agent SDK's resumeSessionAt
+    // compiles to; scripts/probe-claude-wire.py `scenario_rewind` asserts they still exist on every upgrade.
+    val resumeSessionAt: String? = null,
+    // Claude only, issue #282: the guard rail for the above (`--resume-drops-turn <uuid>`) — declares WHICH
+    // user turn this truncation means to discard. The CLI refuses to start if the cut would also take
+    // anything outside that turn (an absorbed queued message, a task notification), which is exactly the
+    // #122 queued-injection hazard. Only meaningful when the cut drops EXACTLY one turn: declaring a single
+    // turn while dropping several is always rejected, so the daemon leaves it null there and relies on the
+    // dry-run preview + explicit confirmation instead. Ignored unless [resumeSessionAt] is also set.
+    val resumeDropsTurn: String? = null,
     // GUEST folder-share clean-room (issue #115): launch the agent WITHOUT the owner's private, machine-wide
     // context, so a scoped collaborator can't siphon it through the agent (the issue's "context & capability
     // overflow" threat). Claude honours it (Codex ignores it; v1 guests are Claude-only in practice) via:
-    //   • --strict-mcp-config + empty --mcp-config  → NO MCP servers (the "biggest hole": no acting through
-    //     the owner's already-authenticated Feishu / email / calendar / internal integrations),
-    //   • --setting-sources project,local            → drop the `user` source (~/.claude global CLAUDE.md,
-    //     user skills / commands / settings) — only the shared folder's own project config loads,
+    //   • --strict-mcp-config with NO --mcp-config   → NO MCP servers (the "biggest hole": no acting through
+    //     the owner's already-authenticated Feishu / email / calendar / internal integrations), neither the
+    //     owner's user-scope servers nor the shared root's own guest-writable .mcp.json,
+    //   • --setting-sources= (empty)                 → drop EVERY settings source: the `user` one (~/.claude
+    //     global CLAUDE.md, user skills / commands / settings) and the shared folder's own project/local
+    //     .claude/settings.json, whose allow-rules would auto-approve tools past the daemon (review H2),
     //   • --exclude-dynamic-system-prompt-sections   → drop auto-memory paths, env info, git status from the
     //     system prompt (vectors #2/#5 — the owner's private memory + shell env don't bleed into replies).
-    // Credentials/auth are NOT a setting source, so the guest still bills the owner's account (billing intact).
+    // The CLI's separate login store remains available. On a GATEWAY machine, however, the route/token often
+    // live in the user settings' `env` and go down with the settings sources; `CleanRoomEnv` re-imports that
+    // allow-listed transport slice at launch and blocks it from reaching Bash/hooks/MCP subprocesses.
     val cleanRoom: Boolean = false,
     // OpenCode only: the initial prompt text, passed as a CLI positional arg to `opencode run`.
     // KNOWN LIMITATION (review P1, issue #164): argv is readable in the local process table (`ps`)

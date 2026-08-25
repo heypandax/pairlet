@@ -77,6 +77,11 @@ fun initDesktopTelemetry() {
     }
 }
 
+/** Test-only observation seam (desktop compilation only): `internal`, null in production, and read BEFORE the
+ *  opt-out/credential gates so desktopTest can pin WHICH enum event a repo path fires without a GA4 config.
+ *  It never sees more than [Telemetry.track]'s own arguments — enum event + enum-keyed params. */
+internal var telemetryTap: ((TelEvent, Map<TelKey, Any>) -> Unit)? = null
+
 actual object Telemetry {
     actual fun setEnabled(enabled: Boolean) {
         collectionEnabled = enabled
@@ -85,14 +90,17 @@ actual object Telemetry {
 
     actual fun isEnabled(): Boolean = collectionEnabled
 
-    actual fun track(event: TelEvent, params: Map<TelKey, Any>) = send(event.id) {
-        params.forEach { (k, v) ->
-            when (v) {
-                is Int -> put(k.id, v)
-                is Long -> put(k.id, v)
-                is Double -> put(k.id, v)
-                is Boolean -> put(k.id, if (v) 1 else 0)
-                else -> put(k.id, v.toString())
+    actual fun track(event: TelEvent, params: Map<TelKey, Any>) {
+        telemetryTap?.invoke(event, params)
+        send(event.id) {
+            params.forEach { (k, v) ->
+                when (v) {
+                    is Int -> put(k.id, v)
+                    is Long -> put(k.id, v)
+                    is Double -> put(k.id, v)
+                    is Boolean -> put(k.id, if (v) 1 else 0)
+                    else -> put(k.id, v.toString())
+                }
             }
         }
     }

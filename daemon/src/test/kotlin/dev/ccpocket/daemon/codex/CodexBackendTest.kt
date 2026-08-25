@@ -3,8 +3,14 @@ package dev.ccpocket.daemon.codex
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentSpec
+import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.PermissionMode
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
@@ -24,6 +30,14 @@ class CodexBackendTest {
 
     private fun threadStartResponse(id: Int, threadId: String) =
         """{"id":$id,"result":{"thread":{"id":"$threadId","sessionId":"sess-1"},"model":"gpt-5.1-codex"}}"""
+
+    /** The `input` array of the last turn/start line the backend wrote. */
+    private fun turnInput(w: List<String>): JsonArray =
+        Json.parseToJsonElement(w.last { "turn/start" in it })
+            .jsonObject["params"]!!.jsonObject["input"]!!.jsonArray
+
+    private fun JsonArray.field(index: Int, key: String): String? =
+        this[index].jsonObject[key]?.jsonPrimitive?.content
 
     /** attach + handshake to a live thread "thr-1". Leaves `w` holding every line the backend wrote. */
     private suspend fun ready(w: MutableList<String>, mode: PermissionMode = PermissionMode.DEFAULT): CodexBackend {
@@ -96,6 +110,43 @@ class CodexBackendTest {
         assertTrue("\"threadId\":\"thr-1\"" in request, request)
         assertTrue("\"expectedTurnId\":\"turn-live\"" in request, request)
         assertTrue("continue with the next batch" in request, request)
+    }
+
+    @Test
+    fun images_are_forwarded_to_codex_as_data_urls() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.sendPrompt(
+            "compare these",
+            listOf(
+                ImageData("image/jpeg", "/9j/AA=="),
+                ImageData("image/png", "iVBORw=="),
+            ),
+        )
+
+        val input = turnInput(w)
+        assertEquals(3, input.size)
+        assertEquals("text", input.field(0, "type"))
+        assertEquals("compare these", input.field(0, "text"))
+        assertEquals("image", input.field(1, "type"))
+        assertEquals("data:image/jpeg;base64,/9j/AA==", input.field(1, "url"))
+        assertEquals("image", input.field(2, "type"))
+        assertEquals("data:image/png;base64,iVBORw==", input.field(2, "url"))
+    }
+
+    @Test
+    fun buffered_first_prompt_keeps_its_image_until_thread_ready() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = CodexBackend(null)
+        b.attach(AgentIo({ w += it }, {}), AgentSpec(Path.of("/repo")))
+        b.sendPrompt("", listOf(ImageData("image/webp", "UklGRg==")))
+
+        b.parse(initResponse(1))
+        b.parse(threadStartResponse(2, "thr-1"))
+
+        val input = turnInput(w)
+        assertEquals("", input.field(0, "text"))
+        assertEquals("data:image/webp;base64,UklGRg==", input.field(1, "url"))
     }
 
     @Test

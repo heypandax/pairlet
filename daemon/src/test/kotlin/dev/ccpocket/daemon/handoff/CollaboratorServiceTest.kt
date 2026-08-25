@@ -6,6 +6,7 @@ import dev.ccpocket.daemon.bridge.CredentialKind
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.Collaborator
 import dev.ccpocket.protocol.CollaboratorConnected
+import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.CollaboratorUpdated
 import dev.ccpocket.protocol.CreateCollaboratorTicket
 import dev.ccpocket.protocol.HandoffAccess
@@ -15,6 +16,8 @@ import dev.ccpocket.protocol.HandoffStatus
 import dev.ccpocket.protocol.PairTicket
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.ToPhone
+import dev.ccpocket.protocol.acceptsReviewRequest
+import dev.ccpocket.protocol.acceptsSessionHandoff
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import kotlin.test.Test
@@ -74,7 +77,7 @@ class CollaboratorServiceTest {
     @Test
     fun mint_and_redeem_establishes_a_contact_with_fingerprint() = runBlocking {
         val fx = Fixture()
-        val created = fx.service.createTicket(CreateCollaboratorTicket(label = "Frank"))
+        val created = fx.service.createTicket("Frank")
         assertTrue(created.ok, created.error)
         val invite = assertNotNull(created.invite)
         assertEquals("wss://relay.example", invite.relay)
@@ -100,8 +103,8 @@ class CollaboratorServiceTest {
     @Test
     fun a_second_mint_while_an_intent_is_pending_is_refused() = runBlocking {
         val fx = Fixture()
-        assertTrue(fx.service.createTicket(CreateCollaboratorTicket("Frank")).ok)
-        val second = fx.service.createTicket(CreateCollaboratorTicket("Alex"))
+        assertTrue(fx.service.createTicket("Frank").ok)
+        val second = fx.service.createTicket("Alex")
         assertFalse(second.ok, "the one-pending-intent serialization rule covers collaborator mints too")
         assertNull(second.invite)
     }
@@ -109,7 +112,7 @@ class CollaboratorServiceTest {
     @Test
     fun remove_kills_credential_and_grants_but_keeps_the_row() = runBlocking {
         val fx = Fixture()
-        val invite = assertNotNull(fx.service.createTicket(CreateCollaboratorTicket("Frank")).invite)
+        val invite = assertNotNull(fx.service.createTicket("Frank").invite)
         fx.redeem("dev-frank", invite.ticket)
 
         // a WAITING handoff bound to the contact + an IN_PROGRESS one on another session
@@ -148,7 +151,7 @@ class CollaboratorServiceTest {
     @Test
     fun directory_view_validates_bindings_and_bumps_stats() = runBlocking {
         val fx = Fixture()
-        val invite = assertNotNull(fx.service.createTicket(CreateCollaboratorTicket("Frank")).invite)
+        val invite = assertNotNull(fx.service.createTicket("Frank").invite)
         fx.redeem("dev-frank", invite.ticket)
 
         assertTrue(fx.service.isActive("dev-frank"))
@@ -168,7 +171,7 @@ class CollaboratorServiceTest {
     @Test
     fun contact_rows_survive_a_reload_and_reconcile_against_the_key_truth() = runBlocking {
         val fx = Fixture()
-        val invite = assertNotNull(fx.service.createTicket(CreateCollaboratorTicket("Frank")).invite)
+        val invite = assertNotNull(fx.service.createTicket("Frank").invite)
         fx.redeem("dev-frank", invite.ticket)
 
         // the key dies elsewhere (revoked from another device / pruned by the relay attach replay)...
@@ -185,7 +188,7 @@ class CollaboratorServiceTest {
     @Test
     fun the_credential_key_lives_in_its_own_file_not_devices_or_guests() = runBlocking {
         val fx = Fixture()
-        val invite = assertNotNull(fx.service.createTicket(CreateCollaboratorTicket("Frank")).invite)
+        val invite = assertNotNull(fx.service.createTicket("Frank").invite)
         fx.redeem("dev-frank", invite.ticket)
 
         assertTrue(fx.tmp.resolve("collaborator-keys.json").readText().contains("dev-frank"))
@@ -197,6 +200,112 @@ class CollaboratorServiceTest {
         val reloaded = BridgeRegistry(store = fx.tmp.resolve("bridges.json"))
         assertTrue(reloaded.isCollaborator("dev-frank"))
         assertEquals(CredentialKind.COLLABORATOR, reloaded.kindOf("dev-frank"))
+    }
+
+    // ---- purpose separation, against the REAL service (REVIEW-REQUEST.md §13.3) ----
+
+    /**
+     * The legacy `pocket/collaborator.*` family is the SESSION HANDOFF view and nothing else.
+     *
+     * This matters most for an OLD App, which cannot read [Collaborator.purpose] at all: it renders
+     * whatever these frames carry straight into its contact page and its handoff recipient picker. A
+     * Review peer appearing there is a daemon-purpose link offered for a runtime lease.
+     */
+    @Test
+    fun the_legacy_listing_and_pushes_carry_session_handoff_rows_only() = runBlocking {
+        val fx = Fixture()
+        val handoff = assertNotNull(fx.service.createTicket("Frank").invite)
+        fx.redeem("dev-frank", handoff.ticket)
+
+        fx.mintedTicket = "ticket-2"
+        val review = assertNotNull(fx.service.createTicket("Frank's daemon", CollaboratorPurpose.REVIEW).invite)
+        assertEquals(CollaboratorPurpose.REVIEW, review.purpose, "the invite says what it establishes")
+        fx.ownerFrames.clear()
+        fx.redeem("dev-frank-daemon", review.ticket)
+
+        // the row exists and is scoped to its own ledger…
+        assertEquals(listOf("dev-frank-daemon"), fx.service.contacts(CollaboratorPurpose.REVIEW).map { it.deviceId })
+        // …but the legacy listing does not show it
+        assertEquals(listOf("dev-frank"), fx.service.list().items.map { it.deviceId })
+        // …and neither does the legacy push: establishing a review link is silent on this family
+        assertTrue(
+            fx.ownerFrames.none { it is CollaboratorConnected || it is CollaboratorUpdated },
+            "a review link must not be announced through the handoff frames: ${fx.ownerFrames}",
+        )
+    }
+
+    /** An old App cannot see a Review row, so any id it sends that resolves to one is stale or guessed.
+     *  Honouring it would revoke a credential its user never knew existed. */
+    @Test
+    fun the_legacy_remove_refuses_a_review_row_without_touching_it() = runBlocking {
+        val fx = Fixture()
+        val review = assertNotNull(fx.service.createTicket("Frank's daemon", CollaboratorPurpose.REVIEW).invite)
+        fx.redeem("dev-frank-daemon", review.ticket)
+        fx.ownerFrames.clear()
+
+        val refused = fx.service.remove("dev-frank-daemon") // the legacy RemoveCollaborator path
+        assertTrue(refused is PocketError, "got $refused")
+        assertEquals("collaborator_not_found", (refused as PocketError).code)
+        // NOTHING was mutated: the credential lives, the row is untouched, no push went out
+        assertTrue(fx.revokedCredentials.isEmpty(), "a refusal must not revoke: ${fx.revokedCredentials}")
+        assertTrue(fx.bridges.isCollaborator("dev-frank-daemon"))
+        assertFalse(fx.service.contacts(CollaboratorPurpose.REVIEW).single().removed)
+        assertTrue(fx.ownerFrames.isEmpty())
+
+        // the purpose-scoped path DOES remove it, and that is the only way to
+        val ok = fx.service.remove("dev-frank-daemon", CollaboratorPurpose.REVIEW)
+        assertTrue(ok is CollaboratorUpdated && ok.collaborator.removed, "got $ok")
+        assertEquals(listOf("dev-frank-daemon"), fx.revokedCredentials)
+    }
+
+    /** …and the mirror image: a handoff row is not removable through the review-scoped path. */
+    @Test
+    fun a_purpose_scoped_remove_refuses_the_other_features_row() = runBlocking {
+        val fx = Fixture()
+        val handoff = assertNotNull(fx.service.createTicket("Frank").invite)
+        assertEquals(CollaboratorPurpose.SESSION_HANDOFF, handoff.purpose, "the historical default")
+        fx.redeem("dev-frank", handoff.ticket)
+
+        val refused = fx.service.remove("dev-frank", CollaboratorPurpose.REVIEW)
+        assertTrue(refused is PocketError, "got $refused")
+        assertTrue(fx.revokedCredentials.isEmpty())
+        assertFalse(fx.service.list().items.single().removed)
+    }
+
+    /** The two directory predicates the router and the send path read — from the real ledger. */
+    @Test
+    fun each_purpose_is_eligible_for_exactly_one_feature() = runBlocking {
+        val fx = Fixture()
+        fx.redeem("dev-frank", assertNotNull(fx.service.createTicket("Frank").invite).ticket)
+        fx.mintedTicket = "ticket-2"
+        fx.redeem("dev-daemon", assertNotNull(fx.service.createTicket("D", CollaboratorPurpose.REVIEW).invite).ticket)
+
+        assertTrue(fx.service.acceptsHandoff("dev-frank"))
+        assertFalse(fx.service.acceptsReview("dev-frank"), "a handoff contact is never widened into a review peer")
+        assertTrue(fx.service.acceptsReview("dev-daemon"))
+        assertFalse(fx.service.acceptsHandoff("dev-daemon"), "a review peer is never a runtime recipient")
+    }
+
+    /** A mint whose spec is gone by redeem time has nothing saying what the link is for. Guessing the
+     *  historical default would turn a lost REVIEW mint into a handoff-bindable contact. */
+    @Test
+    fun a_redeem_with_no_surviving_spec_is_eligible_for_neither_feature() = runBlocking {
+        val fx = Fixture()
+        fx.service.onRedeemed("dev-orphan", "peer-pub-b64") // no intent, no spec — the fail-closed path
+        val row = fx.service.contacts(CollaboratorPurpose.UNKNOWN).single()
+        assertEquals("dev-orphan", row.deviceId)
+        assertFalse(row.acceptsSessionHandoff)
+        assertFalse(row.acceptsReviewRequest)
+        assertTrue(fx.service.list().items.isEmpty(), "and it is in neither ledger")
+    }
+
+    /** An unreadable purpose can only come from a newer peer's value: refuse the mint outright. */
+    @Test
+    fun an_unreadable_purpose_cannot_be_minted() = runBlocking {
+        val fx = Fixture()
+        val refused = fx.service.createTicket("Frank", CollaboratorPurpose.UNKNOWN)
+        assertFalse(refused.ok)
+        assertNull(refused.invite, "a refused mint must not carry establishment material")
     }
 
     /** The wire type reused as row shape must round-trip removed contacts (history semantics). */

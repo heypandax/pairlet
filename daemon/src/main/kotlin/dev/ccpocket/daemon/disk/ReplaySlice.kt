@@ -50,7 +50,13 @@ object ReplaySlicer {
      *  - a patch line > [sinceSeq] mutated a row at line <= [sinceSeq] (already on the client);
      *  - the delta itself would need count/byte trimming (a huge away-window — full replaces wholesale).
      * The delta path still runs [ReplayBudget.fit] so an oversized continuation can never ride through
-     * un-guarded — a trimmed fit simply demotes to the full window.
+     * un-guarded — a fit that DROPS rows simply demotes to the full window.
+     *
+     * "Trimming" here means losing rows. A delta's rows may still be lightened in place: since issue
+     * #254 [ReplayBudget.fit] can shed a row's images (and its sub-agent report / answers) while
+     * keeping the row itself, which leaves the count intact and so stays a clean delta. That is
+     * deliberate — the shed is not silent, it rides out as `HistoryMessage.imagesTruncated` and the
+     * client renders the notice on that turn.
      */
     fun slice(
         rows: List<Row>,

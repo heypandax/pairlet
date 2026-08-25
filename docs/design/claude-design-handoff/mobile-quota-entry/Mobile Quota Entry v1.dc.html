@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  body { margin: 0; background: #EDEBE6; -webkit-font-smoothing: antialiased; }
+  a { color: #A9482A; text-decoration: none; }
+  a:hover { color: #8C3A20; text-decoration: underline; }
+</style>
+</helmet>
+
+<div style="background:#EDEBE6;color:#1B1A18;width:1800px;padding:52px 52px 90px;font-family:'Public Sans',system-ui,sans-serif">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:1000px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · mobile 2.0 · subscription quota entry point · v1</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">Where quota lives on mobile</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Quota is account-level ambient status, like battery — not a feature anyone opens. Desktop solved it with a footer status strip in the sidebar chrome. Mobile has no persistent chrome, so each direction below borrows the weight of something already ambient on Home: the machine-status line, the bottom edge of the window, or the machine block itself. The rejected toolbar pill is not repeated — nothing here sits among icon buttons.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div><div style="color:#1B1A18">402 × 874</div><div>dark only</div></div>
+      <div><div style="color:#1B1A18">3 directions</div><div>normal · warning · absent</div></div>
+      <div><div style="color:#1B1A18">recommended</div><div>B · docked strip</div></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0 40px;border-bottom:1px solid #C9C5BD;padding:18px 0 20px">
+    <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">Ambient means borrowed weight.</span> No card, no fill, no radius, no icon. Every direction is mono numbers and a 2pt bar attached to a hairline that already exists in the layout.</p>
+    <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">Remaining, not consumed.</span> The bar depletes left-to-right and the number reads <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">58% left</span>. A battery empties; so does this. The detail sheet keeps the same direction.</p>
+    <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">Escalation is ink only.</span> At ≥80% used the tightest window turns amber <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">#E0A93B</span>. Same geometry, same position, no pulse, no banner, no reflow.</p>
+    <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">Absence is first-class.</span> API-key accounts and pre-snapshot states drop the element entirely. Each no-data frame below is the untouched Home layout — no hole, no placeholder.</p>
+  </div>
+
+  <div id="A" style="padding-top:44px">
+    <div style="display:flex;align-items:baseline;gap:12px;padding-bottom:8px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">A</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Machine-status line · trailing segment</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Tightest window only, on the line that already reports state you don't operate.</span>
+    </div>
+    <p style="margin:0 0 22px;font:400 13px/1.6 'Public Sans',sans-serif;color:#54504A;max-width:1180px;text-wrap:pretty"><span style="font-weight:600;color:#1B1A18">Why it reads as chrome:</span> it joins a sentence the user already skims past — <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">Mac Studio · online · 1 session</span> — at the same 12.5–14px secondary weight, so it is one more fact about the connection rather than a control placed near one. Lightest footprint of the three, and the only one that costs zero vertical space.</p>
+    <div style="display:flex;gap:26px;align-items:flex-start">
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">a1 · home · normal</div>
+        <dc-import name="QuotaEntryDevice" variant="a" state="normal" label="A1 Home normal" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Grey bar, grey percent, no separator of its own. At arm's length it is texture on the status line; read deliberately it says 7d is the tighter window.</p>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">a2 · home · warning · 7d 12% left</div>
+        <dc-import name="QuotaEntryDevice" variant="a" state="warn" label="A2 Home warning" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Bar and number go amber; the label and the word <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">left</span> stay grey so the colour marks the value, not the whole row. Nothing moves.</p>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">a3 · home · no data</div>
+        <dc-import name="QuotaEntryDevice" variant="a" state="absent" label="A3 Home no data" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Segment gone, machine line unchanged, ellipsis truncation still available to a long machine name. This is the current Home exactly.</p>
+      </div>
+      <div style="flex:1;min-width:0;padding-top:26px;display:flex;flex-direction:column;gap:14px">
+        <div style="border-top:1px solid #C9C5BD;padding-top:12px">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Cost</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">One window only. The 5h window — the one that actually interrupts a working session — is invisible until it becomes the tightest. Also competes for line width with the review affordance that already lives at the right end of this row.</p>
+        </div>
+        <div style="border-top:1px solid #DAD6CE;padding-top:12px">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Reach</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Home only. Sessions and Chat have no machine line, so quota disappears one screen in — acceptable if Home is the hub, weak if people live in Chat.</p>
+        </div>
+        <div style="border-top:1px solid #DAD6CE;padding-top:12px">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Target</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">44pt tap target via negative margin; the visible element stays 26pt tall.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="B" style="padding-top:60px">
+    <div style="display:flex;align-items:baseline;gap:12px;padding-bottom:8px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">B</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Docked strip at the window's bottom edge</h2>
+      <span style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#fff;background:#B4522F;padding:6px 8px;border-radius:5px">recommended</span>
+    </div>
+    <p style="margin:0 0 22px;font:400 13px/1.6 'Public Sans',sans-serif;color:#54504A;max-width:1180px;text-wrap:pretty"><span style="font-weight:600;color:#1B1A18">Why it reads as chrome:</span> it is outside the scroll container. The project list runs under a hairline and stops; the strip does not move, does not scroll, and belongs to no section — the same argument that made it work in the desktop sidebar footer, and the same position the phone already uses for system furniture. Both windows fit, with the tightest reset time trailing.</p>
+    <div style="display:flex;gap:26px;align-items:flex-start">
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">b1 · home · normal</div>
+        <dc-import name="QuotaEntryDevice" variant="b" state="normal" label="B1 Home normal" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">48pt strip, hairline top, page background — no fill, so it reads as an edge rather than a bar. <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">5h</span> and <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">7d</span> in one glance.</p>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">b2 · home · warning</div>
+        <dc-import name="QuotaEntryDevice" variant="b" state="warn" label="B2 Home warning" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Only the breaching window changes ink. 5h stays grey at 44% left, so the comparison between the two windows survives the alarm.</p>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">b3 · home · no data</div>
+        <dc-import name="QuotaEntryDevice" variant="b" state="absent" label="B3 Home no data" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Strip and its hairline both go; the list simply runs to the bottom edge. The list is the only thing that gains height, so nothing else reflows.</p>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">b4 · sessions · extends unchanged</div>
+        <dc-import name="QuotaEntryDevice" variant="b" state="normal" screen="sessions" label="B4 Sessions normal" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The only direction that travels. Identical strip on the session list, well away from the archive/help/settings row at the top — quota never joins the icon cluster that was rejected before.</p>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 40px;margin-top:20px;border-top:1px solid #C9C5BD;padding-top:14px;max-width:1290px">
+      <p style="margin:0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="font-weight:600;color:#1B1A18">Cost.</span> 48pt of permanent height on two screens, and it must yield to anything that docks later (a composer, a tab bar). If a bottom bar ever ships, the strip merges into its top hairline rather than stacking.</p>
+      <p style="margin:0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="font-weight:600;color:#1B1A18">Reach.</span> Home and Sessions. Chat keeps CtxPill in the connection bar and does not take the strip — two persistent meters on one screen would compete.</p>
+      <p style="margin:0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="font-weight:600;color:#1B1A18">Why recommended.</span> Closest structural match to the desktop footer, carries both windows without abbreviating, and is the only option whose meaning does not depend on a neighbouring sentence.</p>
+    </div>
+  </div>
+
+  <div id="C" style="padding-top:60px">
+    <div style="display:flex;align-items:baseline;gap:12px;padding-bottom:8px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">C</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Machine band · account row underneath</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Machine on top, the account it is signed into below, quota as that account's attribute.</span>
+    </div>
+    <p style="margin:0 0 22px;font:400 13px/1.6 'Public Sans',sans-serif;color:#54504A;max-width:1180px;text-wrap:pretty"><span style="font-weight:600;color:#1B1A18">Why it reads as chrome:</span> the machine line grows into a full-bleed band bounded by hairlines top and bottom, matching the <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">Open any folder…</span> band directly below it. Bands in this layout are standing facts about the connection; list rows are things you tap to go somewhere. Quota lands in the first grammar, indented under the machine dot so it is visibly subordinate to identity rather than a peer of the projects.</p>
+    <div style="display:flex;gap:26px;align-items:flex-start">
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">c1 · home · normal</div>
+        <dc-import name="QuotaEntryDevice" variant="c" state="normal" label="C1 Home normal" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Both windows, plus the account they belong to — the only direction that answers "whose quota?" without opening the sheet.</p>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">c2 · home · warning</div>
+        <dc-import name="QuotaEntryDevice" variant="c" state="warn" label="C2 Home warning" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Amber sits beside a green machine dot without contradiction: the machine is fine, the account is not. The band does not change height or gain a border.</p>
+      </div>
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">c3 · home · no data</div>
+        <dc-import name="QuotaEntryDevice" variant="c" state="absent" label="C3 Home no data" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Band collapses back to the plain status line rather than standing empty — identical to <a href="#A">A</a>'s and <a href="#B">B</a>'s no-data frame, which is the proof that all three degrade to today's Home.</p>
+      </div>
+      <div style="flex:1;min-width:0;padding-top:26px;display:flex;flex-direction:column;gap:14px">
+        <div style="border-top:1px solid #C9C5BD;padding-top:12px">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Cost</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Adds ~34pt above the fold and puts two hairline bands back to back near the top of Home, which is the heaviest header this screen has carried. Watch it against the reconnecting/offline banner, which lands in the same zone.</p>
+        </div>
+        <div style="border-top:1px solid #DAD6CE;padding-top:12px">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Reach</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Home only, same as <a href="#A">A</a>. The band cannot follow into Sessions without inventing a machine header there.</p>
+        </div>
+        <div style="border-top:1px solid #DAD6CE;padding-top:12px">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Scope caveat</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Quota is per account, not per machine. Grouping it under the machine reads correctly with one computer and misleads with several — the account line is doing real work here.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="sheet" style="padding-top:60px">
+    <div style="display:flex;align-items:baseline;gap:12px;padding-bottom:8px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">S</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Continuity · the existing detail sheet</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Not redesigned. Shown to confirm the entry point's vocabulary survives the tap.</span>
+    </div>
+    <div style="display:flex;gap:26px;align-items:flex-start">
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">s1 · sheet over home · direction b</div>
+        <dc-import name="QuotaEntryDevice" variant="b" state="normal" sheet="{{ true }}" label="S1 Detail sheet" hint-size="402px,874px"></dc-import>
+      </div>
+      <div style="flex:1;min-width:0;max-width:820px;padding-top:26px;display:flex;flex-direction:column;gap:16px">
+        <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Same three parts in the same order as the entry point — label, 2pt bar, mono remainder — with the reset countdown added and the per-model window that the strip cannot show. The tap is an expansion, not a navigation: the user recognises the row they touched at the top of the sheet.</p>
+        <div style="border-top:1px solid #C9C5BD;padding-top:14px;display:grid;grid-template-columns:repeat(2,1fr);gap:0 40px">
+          <p style="margin:0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="font-weight:600;color:#1B1A18">Shared tokens.</span> Track <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">rgba(255,255,255,.14)</span> at 2pt; normal fill <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">#8C8D95</span>; warning <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">#E0A93B</span>; numbers JetBrains Mono 12.5px in the chrome, 13.5px in the sheet; labels always <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">5h</span> / <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">7d</span>.</p>
+          <p style="margin:0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="font-weight:600;color:#1B1A18">Footer unchanged.</span> <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">updated 2 min ago</span> plus manual Refresh in terracotta. The entry point never shows staleness — if the snapshot is old, the strip holds its last value and the sheet explains.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:52px;border-top:1px solid #C9C5BD;padding-top:16px;font:400 12.5px/1.7 'Public Sans',sans-serif;color:#6E695F;max-width:1290px;text-wrap:pretty">
+    <span style="font-weight:600;color:#1B1A18">Open calls.</span> One: whether Home shows both windows or only the tightest — <a href="#B">B</a> and <a href="#C">C</a> assume both, <a href="#A">A</a> assumes one. Two: whether the strip in <a href="#B">B</a> follows into Sessions permanently or only while a session is running. Three: what the amber threshold does when 5h and 7d breach together — current rule is both go amber, no aggregation.
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

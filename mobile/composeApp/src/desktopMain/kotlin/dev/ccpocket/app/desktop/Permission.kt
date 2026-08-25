@@ -125,8 +125,8 @@ private fun RememberCheck(label: String, checked: Boolean, onToggle: () -> Unit)
                 .background(if (checked) Tok.accent else Color.Transparent)
                 .border(1.5.dp, if (checked) Tok.accent else Tok.muted, RoundedCornerShape(4.dp)),
             contentAlignment = Alignment.Center,
-        ) { if (checked) Text("✓", color = Tok.base, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-        Text(label, color = if (checked) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp)
+        ) { if (checked) Text("✓", color = Tok.base, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.Bold, style = tightCenter(11.sp)) }
+        Text(label, color = if (checked) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp))
     }
 }
 
@@ -235,6 +235,7 @@ private fun DesktopSaferPanel(onBack: () -> Unit, onSend: (List<String>) -> Unit
 private fun SaferChip(label: String, on: Boolean, onToggle: () -> Unit) {
     Text(
         label, color = if (on) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, maxLines = 1,
+        style = tightCenter(11.5.sp),
         modifier = Modifier.clip(RoundedCornerShape(999.dp))
             .background(if (on) Tok.accent.copy(alpha = 0.16f) else Tok.surface)
             .border(1.dp, if (on) Tok.accent else Tok.hair, RoundedCornerShape(999.dp))
@@ -362,6 +363,7 @@ fun InlinePermCard(
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text(
                                     stringResource(Res.string.retry_safer), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                    style = tightCenter(12.sp),
                                     modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { safer = true }.padding(horizontal = 7.dp, vertical = 4.dp),
                                 )
                                 if (canRemember(ask) && ask.grantOptions?.contains("session") == true) {
@@ -383,6 +385,7 @@ fun InlinePermCard(
                                     if (rememberRule) {
                                         Text(
                                             stringResource(Res.string.allow_session_option), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                            style = tightCenter(12.sp),
                                             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onAllow(true) }.padding(horizontal = 8.dp, vertical = 4.dp),
                                         )
                                     }

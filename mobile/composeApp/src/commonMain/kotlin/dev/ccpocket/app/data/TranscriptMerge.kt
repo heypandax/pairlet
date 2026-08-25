@@ -17,7 +17,8 @@ package dev.ccpocket.app.data
  * Rules (chronological order is always preserved):
  *  - an empty replay still clears — that is the daemon's explicit /clear wipe;
  *  - the replay is anchored inside the local list; local rows OLDER than the anchor survive;
- *  - matched rows are enriched, never duplicated: User keeps promptId/delivered/images, Tool keeps
+ *  - matched rows are enriched, never duplicated: User keeps promptId/delivered and its own images
+ *    (adopting the replay's only when it has none — issue #254), Tool keeps
  *    taskId/childCount/lastChild and gains ok/output, Assistant keeps the longer of the two texts;
  *  - transcript-invisible local rows inside the overlap are carried through in place;
  *  - a live bubble glued across a dropped-chunk gap is replaced by the replay's full run (the disk
@@ -32,7 +33,7 @@ object TranscriptMerge {
         if (replay.isEmpty()) return emptyList() // the daemon's /clear wipe must still clear
         if (local.isEmpty()) return replay
         val anchor = findAnchor(local, replay)
-            ?: return replay + rescuePending(local, replay) // nothing lines up — replay wholesale
+            ?: return replayResolvingPending(local, replay) // nothing lines up — replay wholesale
         val out = ArrayList<ChatItem>(local.size + replay.size)
         out.addAll(local.subList(0, anchor)) // scrollback older than the replay window survives
         var li = anchor
@@ -42,8 +43,8 @@ object TranscriptMerge {
             val r = replay[ri]
             // a pending bubble whose text the replay now carries WAS delivered (the ack got lost):
             // resolve it in place — checked before the pass-through so it can't duplicate below
-            if (l is ChatItem.User && l.pending && r is ChatItem.User && l.text == r.text) {
-                out.add(l.copy(pending = false)); li++; ri++
+            if (l is ChatItem.User && l.pending && r is ChatItem.User && samePendingPrompt(l, r)) {
+                out.add(resolveUser(l, r)); li++; ri++
                 continue
             }
             if (isLocalOnly(l)) { // transcript-invisible row: carry it through in place
@@ -53,8 +54,7 @@ object TranscriptMerge {
             if (!couldPair(l, r)) {
                 // hard divergence: the on-disk replay wins from here — but typed-and-undelivered
                 // bubbles in the dropped region are rescued (input must never vanish)
-                out.addAll(replay.subList(ri, replay.size))
-                out.addAll(rescuePending(local.subList(li, local.size), replay))
+                out.addAll(replayResolvingPending(local.subList(li, local.size), replay.subList(ri, replay.size)))
                 return out
             }
             when (l) {
@@ -81,11 +81,7 @@ object TranscriptMerge {
                     out.add(ChatItem.Assistant(text))
                     li++; ri++
                 }
-                is ChatItem.User -> {
-                    // same prompt row: keep the receipt fields (promptId/delivered/images) the
-                    // transcript never carries — a late PromptAck still finds its bubble
-                    out.add(l.copy(pending = false)); li++; ri++
-                }
+                is ChatItem.User -> { out.add(resolveUser(l, r as ChatItem.User)); li++; ri++ }
                 is ChatItem.Tool -> {
                     val rt = r as ChatItem.Tool
                     out.add(
@@ -123,8 +119,13 @@ object TranscriptMerge {
         if (delta.isEmpty()) return local
         if (local.isEmpty()) return delta
         if (findAnchor(local, delta) != null) return merge(local, delta)
-        val delivered = delta.filterIsInstance<ChatItem.User>().mapTo(HashSet()) { it.text }
-        return local.filterNot { it is ChatItem.User && it.pending && it.text in delivered } + delta
+        val remaining = local.toMutableList()
+        val resolvedDelta = delta.map { row ->
+            if (row !is ChatItem.User) return@map row
+            val i = remaining.indexOfFirst { it is ChatItem.User && it.pending && samePendingPrompt(it, row) }
+            if (i < 0) row else resolveUser(remaining.removeAt(i) as ChatItem.User, row)
+        }
+        return remaining + resolvedDelta
     }
 
     /**
@@ -155,6 +156,33 @@ object TranscriptMerge {
 
     // ---- internals ----
 
+    /**
+     * The local prompt bubble [l], resolved against the replay row [r] that proves it landed: the
+     * receipt fields (promptId/delivered) the transcript never carries always stay local.
+     *
+     * Images (issue #254) are a one-way fill: a bubble that already holds its own attachment bytes
+     * keeps them (same picture, no decode round-trip), and only a bubble with NONE — a turn composed
+     * at the computer, or one this device sent before the transcript learned to carry them — adopts
+     * the replay's. The "some images were too large" notice travels with whichever set is shown, so a
+     * bubble holding its full local attachments never inherits a truncation that didn't happen to it.
+     */
+    private fun resolveUser(l: ChatItem.User, r: ChatItem.User): ChatItem.User =
+        (
+            if (l.images.isEmpty()) l.copy(pending = false, images = r.images, imagesTruncated = r.imagesTruncated)
+            else l.copy(pending = false)
+            )
+            // The LOCAL bubble wins everywhere else, but it can never have transcript coordinates of its
+            // own — it was composed here, and only the daemon's replay knows which line the turn landed
+            // on (issue #282). Without adopting them, the turns most likely to be rewound (the ones you
+            // just typed) would be the only ones with no rewind entry.
+            //
+            // The replay is authoritative INCLUDING when it carries none, which is why this is a plain
+            // take and not `r.seq ?: l.seq`. Absence of coordinates is the feature's capability probe, so
+            // a row re-merged from a daemon that cannot rewind has to LOSE them: keeping stale ones alive
+            // across a reconnect to an older build (a rollback, or the two-daemons-on-one-machine case)
+            // would leave the entry showing and send an anchor that daemon silently drops.
+            .copy(seq = r.seq, uuid = r.uuid)
+
     /** Rows the transcript never contains — carried through a merge, invisible to pairing. */
     private fun isLocalOnly(item: ChatItem): Boolean = when (item) {
         is ChatItem.Thinking, is ChatItem.Sys, is ChatItem.RuleChip,
@@ -166,7 +194,9 @@ object TranscriptMerge {
 
     private fun couldPair(l: ChatItem, r: ChatItem): Boolean = when {
         l is ChatItem.Assistant && r is ChatItem.Assistant -> extendsEither(l.text, r.text)
-        l is ChatItem.User && r is ChatItem.User -> l.text == r.text
+        // Within an already-anchored pairwise run, position disambiguates blank image-only rows. Receipt
+        // recovery below has no such anchor and therefore applies the stricter image check.
+        l is ChatItem.User && r is ChatItem.User -> userTextsMatch(l, r)
         l is ChatItem.Tool && r is ChatItem.Tool -> l.tool == r.tool
         else -> false
     }
@@ -202,12 +232,38 @@ object TranscriptMerge {
         return n
     }
 
-    /** Undelivered prompt bubbles from a dropped region — re-appended so typed input never vanishes.
-     *  A bubble whose text already appears among the replay's trailing user rows WAS delivered (only
-     *  its ack was lost) — the replayed row covers it, so it is not duplicated. */
-    private fun rescuePending(dropped: List<ChatItem>, replay: List<ChatItem>): List<ChatItem> {
-        val delivered = replay.takeLast(RESCUE_WINDOW).filterIsInstance<ChatItem.User>().mapTo(HashSet()) { it.text }
-        return dropped.filter { it is ChatItem.User && it.pending && it.text !in delivered }
+    /** Enrich matching replay USER rows with their local receipt identity/attachments, then append only
+     *  genuinely unmatched pending bubbles. A sent file prompt is deliberately matched by its wire text:
+     *  the local bubble hides generated `@path` references while the transcript stores them verbatim. */
+    private fun replayResolvingPending(dropped: List<ChatItem>, replay: List<ChatItem>): List<ChatItem> {
+        val pending = dropped.filterIsInstance<ChatItem.User>().filter { it.pending }.toMutableList()
+        val eligibleFrom = (replay.size - RESCUE_WINDOW).coerceAtLeast(0)
+        val resolved = replay.mapIndexed { index, row ->
+            if (index < eligibleFrom || row !is ChatItem.User) return@mapIndexed row
+            val i = pending.indexOfFirst { samePendingPrompt(it, row) }
+            if (i < 0) row else resolveUser(pending.removeAt(i), row)
+        }
+        return resolved + pending
+    }
+
+    /** The transcript stores the actual SendPrompt text, while a local file bubble intentionally shows only
+     *  the text the user typed. Image-only prompts require byte-for-byte evidence: blank text by itself is
+     *  not enough to collapse two different photos (and an old daemon that omitted replay images cannot
+     *  prove which blank prompt it saw). */
+    private fun samePendingPrompt(local: ChatItem.User, replay: ChatItem.User): Boolean {
+        if (!userTextsMatch(local, replay)) return false
+        if (local.text.isNotBlank() || local.files.isNotEmpty()) return true
+        if (local.images.isEmpty() || replay.images.size != local.images.size) return false
+        return local.images.indices.all { local.images[it].contentEquals(replay.images[it]) }
+    }
+
+    private fun userTextsMatch(local: ChatItem.User, replay: ChatItem.User): Boolean =
+        local.text == replay.text || localWireText(local) == replay.text
+
+    private fun localWireText(user: ChatItem.User): String {
+        if (user.files.isEmpty()) return user.text
+        val refs = user.files.joinToString("\n") { "@${it.path}" }
+        return if (user.text.isBlank()) refs else user.text + "\n\n" + refs
     }
 
     private fun lastContentIndex(messages: List<ChatItem>): Int {

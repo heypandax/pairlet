@@ -194,7 +194,12 @@ object ServiceInstaller {
     // directly would flash a console window every login — instead we point the task at a tiny VBScript
     // that launches the daemon with window style 0 (hidden) and returns immediately. Registered via
     // PowerShell cmdlets (Execute/Argument passed separately → avoids schtasks /tr quote hell).
-    private fun windows(exec: String, args: List<String>, apply: Boolean, startNow: Boolean = true): String {
+    /**
+     * Kept internal so the Windows updater can replace the task definition without starting it yet.
+     * The updater must first stop the detached daemon that owns the pair port; starting here would make
+     * the new binary observe the old singleton, exit cleanly, and leave the old version serving forever.
+     */
+    internal fun windows(exec: String, args: List<String>, apply: Boolean, startNow: Boolean = true): String {
         val home = System.getProperty("user.home")
         val taskName = WINDOWS_TASK
         val ccDir = Path.of(home, ".cc-pocket")
@@ -238,6 +243,7 @@ object ServiceInstaller {
             return "could not register the Scheduled Task (exit $code):\n$out\n" +
                 "the daemon still runs by hand: \"$exec\" run"
         }
-        return "installed + started logon Scheduled Task '$taskName'\n  hidden launcher: $vbs\n  logs: $logFile"
+        val action = if (startNow) "installed + started" else "installed"
+        return "$action logon Scheduled Task '$taskName'\n  hidden launcher: $vbs\n  logs: $logFile"
     }
 }

@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  @keyframes ccflyup { 0% { opacity: 0; transform: translateY(22px) } 100% { opacity: 1; transform: translateY(0) } }
+</style>
+</helmet>
+
+<div style="font-family:'Inter','Noto Sans SC','Segoe UI Variable Text','Segoe UI',system-ui,sans-serif">
+
+  <!-- ══════════════ DESKTOP CONTEXT FRAME ══════════════ -->
+  <sc-if value="{{ isFrame }}" hint-placeholder-val="{{ true }}">
+  <div data-screen-label="{{ frameLabel }}" style="width:1120px;height:660px;position:relative;overflow:hidden;border-radius:6px;background:radial-gradient(115% 95% at 18% 6%, #262A31 0%, #15181C 55%, #0D0F12 100%);box-shadow:0 24px 60px -30px rgba(20,18,16,.55)">
+
+    <div style="position:absolute;inset:0;background:linear-gradient(160deg, rgba(226,121,90,.055) 0%, rgba(0,0,0,0) 42%)"></div>
+    <div style="position:absolute;left:18px;top:14px;font:400 10px/1.5 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.16)">wallpaper placeholder</div>
+
+    <!-- flyout, anchored 12px from right edge / 12px above taskbar -->
+    <div style="position:absolute;right:12px;bottom:60px;width:360px">
+      <div style="border-radius:8px;overflow:hidden;background:#16171B;border:1px solid rgba(255,255,255,.085);box-shadow:0 28px 56px -18px rgba(0,0,0,.72), 0 4px 14px -4px rgba(0,0,0,.5);color:#F3F3F4">
+        <div style="height:1px;background:linear-gradient(90deg, rgba(255,255,255,.02), rgba(255,255,255,.14), rgba(255,255,255,.02))"></div>
+        <div style="background:linear-gradient(180deg, rgba(255,255,255,.035) 0%, rgba(255,255,255,0) 96px)">
+
+          <!-- header -->
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 8px 10px 12px">
+            <span style="width:22px;height:22px;border-radius:5px;background:#E2795A;display:flex;align-items:center;justify-content:center;flex:none;font:700 11px/1 'JetBrains Mono',monospace;color:#16100E">cc</span>
+            <span style="flex:1;min-width:0">
+              <span style="display:block;font:600 13px/1.25 'Inter','Noto Sans SC',sans-serif;letter-spacing:-.006em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">CC Pocket</span>
+              <span style="display:block;font:400 11.5px/1.35 'Inter','Noto Sans SC',sans-serif;color:#8C8D95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ fleet }}</span>
+            </span>
+            <button type="button" aria-label="更多" aria-haspopup="menu" style="appearance:none;flex:none;width:32px;height:32px;border-radius:4px;border:0;background:none;color:#8C8D95;display:flex;align-items:center;justify-content:center;gap:2.5px;cursor:pointer" style-hover="background:rgba(255,255,255,.07);color:#F3F3F4">
+              <span style="width:3px;height:3px;border-radius:50%;background:currentColor"></span>
+              <span style="width:3px;height:3px;border-radius:50%;background:currentColor"></span>
+              <span style="width:3px;height:3px;border-radius:50%;background:currentColor"></span>
+            </button>
+          </div>
+
+          <!-- NEEDS YOU -->
+          <sc-if value="{{ hasNeeds }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <div style="height:1px;background:rgba(255,255,255,.075)"></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:11px 12px 6px">
+              <span style="font:600 11px/1 'Inter','Noto Sans SC',sans-serif;letter-spacing:.09em;color:#F0A184">需要你</span>
+              <span style="min-width:17px;height:17px;padding:0 5px;border-radius:9px;background:rgba(226,121,90,.16);border:1px solid rgba(226,121,90,.45);display:flex;align-items:center;justify-content:center;font:600 10.5px/1 'JetBrains Mono',monospace;color:#F0A184">{{ needsCount }}</span>
+            </div>
+            <sc-for list="{{ needs }}" as="r" hint-placeholder-count="2">
+              <sc-if value="{{ r.rest }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px">
+                <span style="flex:1;min-width:0">
+                  <span style="display:flex;align-items:center;gap:6px">
+                    <span style="min-width:0;font:500 13px/1.3 'Inter','Noto Sans SC',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</span>
+                    <span style="flex:none;padding:1.5px 5px;border-radius:4px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09);font:400 10px/1.3 'JetBrains Mono',monospace;color:#B4B5BC">{{ r.machine }}</span>
+                  </span>
+                  <span style="display:block;margin-top:2px;font:400 11.5px/1.3 'Inter','Noto Sans SC',sans-serif;color:#8C8D95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.ask }}</span>
+                </span>
+                <span style="flex:none;display:flex;gap:6px">
+                  <button type="button" style="appearance:none;height:30px;padding:0 11px;border-radius:4px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.11);font:500 12px/1 'Inter','Noto Sans SC',sans-serif;color:#E6E6E9;cursor:pointer" style-hover="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2)">拒绝</button>
+                  <button type="button" style="appearance:none;height:30px;padding:0 13px;border-radius:4px;background:#E2795A;border:0;font:600 12px/1 'Inter','Noto Sans SC',sans-serif;color:#16100E;cursor:pointer" style-hover="background:#EA8869">允许</button>
+                </span>
+              </div>
+              </sc-if>
+              <sc-if value="{{ r.hovered }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px;background:rgba(255,255,255,.055);box-shadow:inset 2px 0 0 #E2795A">
+                <span style="flex:1;min-width:0">
+                  <span style="display:flex;align-items:center;gap:6px">
+                    <span style="min-width:0;font:500 13px/1.3 'Inter','Noto Sans SC',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</span>
+                    <span style="flex:none;padding:1.5px 5px;border-radius:4px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);font:400 10px/1.3 'JetBrains Mono',monospace;color:#C8C9CF">{{ r.machine }}</span>
+                  </span>
+                  <span style="display:block;margin-top:2px;font:400 11.5px/1.3 'Inter','Noto Sans SC',sans-serif;color:#A9AAB2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.ask }}</span>
+                </span>
+                <span style="flex:none;display:flex;gap:6px">
+                  <button type="button" style="appearance:none;height:30px;padding:0 11px;border-radius:4px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);font:500 12px/1 'Inter','Noto Sans SC',sans-serif;color:#F3F3F4;cursor:pointer">拒绝</button>
+                  <button type="button" style="appearance:none;height:30px;padding:0 13px;border-radius:4px;background:#EA8869;border:0;font:600 12px/1 'Inter','Noto Sans SC',sans-serif;color:#16100E;cursor:pointer;box-shadow:0 0 0 3px rgba(226,121,90,.18)">允许</button>
+                </span>
+              </div>
+              </sc-if>
+            </sc-for>
+            <sc-if value="{{ hasWaiting }}" hint-placeholder-val="{{ false }}">
+            <button type="button" style="appearance:none;width:100%;display:flex;align-items:center;gap:6px;height:36px;padding:0 12px;background:none;border:0;border-top:1px solid rgba(255,255,255,.05);font:500 11.5px/1 'Inter','Noto Sans SC',sans-serif;color:#F0A184;text-align:left;cursor:pointer" style-hover="background:rgba(226,121,90,.07)">
+              <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ waitingText }}</span>
+              <span style="flex:none;width:5px;height:5px;border-top:1.4px solid currentColor;border-right:1.4px solid currentColor;transform:rotate(45deg)"></span>
+            </button>
+            </sc-if>
+          </div>
+          </sc-if>
+
+          <!-- RUNNING -->
+          <sc-if value="{{ hasRunning }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <div style="height:1px;background:rgba(255,255,255,.075)"></div>
+            <div style="padding:11px 12px 5px;font:600 11px/1 'Inter','Noto Sans SC',sans-serif;letter-spacing:.09em;color:#8C8D95">正在运行</div>
+            <sc-for list="{{ running }}" as="s" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:9px;height:44px;padding:0 12px" style-hover="background:rgba(255,255,255,.04)">
+                <span style="flex:none;width:6px;height:6px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 3px rgba(126,203,160,.14)"></span>
+                <span style="min-width:0;font:400 13px/1.3 'Inter','Noto Sans SC',sans-serif;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.title }}</span>
+                <span style="flex:none;padding:1.5px 5px;border-radius:4px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09);font:400 10px/1.3 'JetBrains Mono',monospace;color:#8C8D95">{{ s.machine }}</span>
+                <span style="flex:1"></span>
+                <span style="flex:none;font:400 11.5px/1 'JetBrains Mono',monospace;color:#8C8D95;letter-spacing:-.01em">{{ s.elapsed }}</span>
+              </div>
+            </sc-for>
+          </div>
+          </sc-if>
+
+          <!-- IDLE -->
+          <sc-if value="{{ isIdle }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="height:1px;background:rgba(255,255,255,.075)"></div>
+            <div style="display:flex;align-items:center;gap:9px;padding:16px 12px 17px">
+              <span style="flex:none;width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.22)"></span>
+              <span style="font:400 12.5px/1.4 'Inter','Noto Sans SC',sans-serif;color:#8C8D95">一切安静。没有正在运行的会话</span>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- footer -->
+          <div style="display:flex;align-items:center;gap:10px;height:42px;padding:0 12px;border-top:1px solid rgba(255,255,255,.075);background:rgba(255,255,255,.018)">
+            <button type="button" style="appearance:none;background:none;border:0;padding:0;font:600 12.5px/1 'Inter','Noto Sans SC',sans-serif;color:#F3F3F4;cursor:pointer" style-hover="color:#fff;text-decoration:underline">打开 CC Pocket</button>
+            <span style="flex:1;min-width:0;text-align:center;font:400 11.5px/1 'Inter','Noto Sans SC',sans-serif;color:#8C8D95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ moreText }}</span>
+            <button type="button" style="appearance:none;background:none;border:0;padding:0;font:400 11.5px/1 'Inter','Noto Sans SC',sans-serif;color:#8C8D95;cursor:pointer" style-hover="color:#E6E6E9">退出</button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- taskbar -->
+    <div style="position:absolute;left:0;right:0;bottom:0;height:48px;background:rgba(24,25,28,.96);border-top:1px solid rgba(255,255,255,.055);display:flex;align-items:center;padding:0 10px">
+      <div style="flex:1;display:flex;justify-content:center;gap:6px">
+        <sc-for list="{{ taskbarApps }}" as="a" hint-placeholder-count="5">
+          <span style="width:30px;height:30px;border-radius:5px;background:rgba(255,255,255,.06);display:flex;align-items:center;justify-content:center;font:600 9.5px/1 'JetBrains Mono',monospace;color:#9EA0A8">{{ a.mark }}</span>
+        </sc-for>
+      </div>
+      <div style="flex:none;display:flex;align-items:center;gap:6px">
+        <span style="width:26px;height:26px;border-radius:4px;display:flex;align-items:center;justify-content:center"><span style="width:5px;height:5px;border-top:1.3px solid #9EA0A8;border-right:1.3px solid #9EA0A8;transform:rotate(-45deg);margin-top:2px"></span></span>
+        <span style="display:flex;align-items:center;gap:7px;padding:0 7px;height:30px;border-radius:4px;background:rgba(226,121,90,.13);border:1px solid rgba(226,121,90,.34)">
+          <span style="width:15px;height:15px;border-radius:3.5px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:700 8px/1 'JetBrains Mono',monospace;color:#16100E">cc</span>
+          <sc-if value="{{ trayBadge }}" hint-placeholder-val="{{ true }}">
+          <span style="min-width:14px;height:14px;padding:0 4px;border-radius:7px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:700 9px/1 'JetBrains Mono',monospace;color:#16100E">{{ needsCount }}</span>
+          </sc-if>
+        </span>
+        <span style="display:flex;align-items:center;gap:8px;padding:0 6px">
+          <span style="width:13px;height:9px;border:1.2px solid #9EA0A8;border-radius:2px;opacity:.85"></span>
+          <span style="width:11px;height:11px;border:1.2px solid #9EA0A8;border-radius:50%;opacity:.85"></span>
+        </span>
+        <span style="text-align:right;font:400 11px/1.35 'Inter',sans-serif;color:#C8C9CF;padding-right:4px">
+          <span style="display:block">14:32</span>
+          <span style="display:block">2026/08/21</span>
+        </span>
+      </div>
+    </div>
+
+  </div>
+  </sc-if>
+
+  <!-- ══════════════ DETAIL · NEEDS-YOU ROW STATES ══════════════ -->
+  <sc-if value="{{ isRows }}" hint-placeholder-val="{{ false }}">
+  <div style="width:360px;border-radius:8px;overflow:hidden;background:#16171B;border:1px solid rgba(255,255,255,.085);box-shadow:0 18px 40px -20px rgba(0,0,0,.6);color:#F3F3F4">
+    <sc-for list="{{ detailRows }}" as="r" hint-placeholder-count="2">
+      <div>
+        <div style="display:flex;align-items:center;gap:7px;padding:9px 12px 3px">
+          <span style="font:500 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#6E6F77">{{ r.stateLabel }}</span>
+          <span style="flex:1;height:1px;background:rgba(255,255,255,.06)"></span>
+        </div>
+        <sc-if value="{{ r.rest }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px">
+          <span style="flex:1;min-width:0">
+            <span style="display:flex;align-items:center;gap:6px">
+              <span style="min-width:0;font:500 13px/1.3 'Inter','Noto Sans SC',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</span>
+              <span style="flex:none;padding:1.5px 5px;border-radius:4px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09);font:400 10px/1.3 'JetBrains Mono',monospace;color:#B4B5BC">{{ r.machine }}</span>
+            </span>
+            <span style="display:block;margin-top:2px;font:400 11.5px/1.3 'Inter','Noto Sans SC',sans-serif;color:#8C8D95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.ask }}</span>
+          </span>
+          <span style="flex:none;display:flex;gap:6px">
+            <button type="button" style="appearance:none;height:30px;padding:0 11px;border-radius:4px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.11);font:500 12px/1 'Inter','Noto Sans SC',sans-serif;color:#E6E6E9;cursor:pointer">拒绝</button>
+            <button type="button" style="appearance:none;height:30px;padding:0 13px;border-radius:4px;background:#E2795A;border:0;font:600 12px/1 'Inter','Noto Sans SC',sans-serif;color:#16100E;cursor:pointer">允许</button>
+          </span>
+        </div>
+        </sc-if>
+        <sc-if value="{{ r.hovered }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px;background:rgba(255,255,255,.055);box-shadow:inset 2px 0 0 #E2795A">
+          <span style="flex:1;min-width:0">
+            <span style="display:flex;align-items:center;gap:6px">
+              <span style="min-width:0;font:500 13px/1.3 'Inter','Noto Sans SC',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</span>
+              <span style="flex:none;padding:1.5px 5px;border-radius:4px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);font:400 10px/1.3 'JetBrains Mono',monospace;color:#C8C9CF">{{ r.machine }}</span>
+            </span>
+            <span style="display:block;margin-top:2px;font:400 11.5px/1.3 'Inter','Noto Sans SC',sans-serif;color:#A9AAB2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.ask }}</span>
+          </span>
+          <span style="flex:none;display:flex;gap:6px">
+            <button type="button" style="appearance:none;height:30px;padding:0 11px;border-radius:4px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);font:500 12px/1 'Inter','Noto Sans SC',sans-serif;color:#F3F3F4;cursor:pointer">拒绝</button>
+            <button type="button" style="appearance:none;height:30px;padding:0 13px;border-radius:4px;background:#EA8869;border:0;font:600 12px/1 'Inter','Noto Sans SC',sans-serif;color:#16100E;cursor:pointer;box-shadow:0 0 0 3px rgba(226,121,90,.18)">允许</button>
+          </span>
+        </div>
+        </sc-if>
+        <sc-if value="{{ r.focused }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px;background:rgba(255,255,255,.03)">
+          <span style="flex:1;min-width:0">
+            <span style="display:flex;align-items:center;gap:6px">
+              <span style="min-width:0;font:500 13px/1.3 'Inter','Noto Sans SC',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</span>
+              <span style="flex:none;padding:1.5px 5px;border-radius:4px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09);font:400 10px/1.3 'JetBrains Mono',monospace;color:#B4B5BC">{{ r.machine }}</span>
+            </span>
+            <span style="display:block;margin-top:2px;font:400 11.5px/1.3 'Inter','Noto Sans SC',sans-serif;color:#8C8D95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.ask }}</span>
+          </span>
+          <span style="flex:none;display:flex;gap:6px">
+            <button type="button" style="appearance:none;height:30px;padding:0 11px;border-radius:4px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.11);font:500 12px/1 'Inter','Noto Sans SC',sans-serif;color:#E6E6E9;cursor:pointer">拒绝</button>
+            <button type="button" style="appearance:none;height:30px;padding:0 13px;border-radius:4px;background:#E2795A;border:0;font:600 12px/1 'Inter','Noto Sans SC',sans-serif;color:#16100E;cursor:pointer;outline:2px solid #F3F3F4;outline-offset:2px">允许</button>
+          </span>
+        </div>
+        </sc-if>
+      </div>
+    </sc-for>
+  </div>
+  </sc-if>
+
+  <!-- ══════════════ DETAIL · OVERFLOW MENU ══════════════ -->
+  <sc-if value="{{ isMenu }}" hint-placeholder-val="{{ false }}">
+  <div style="width:360px;position:relative;padding-bottom:120px">
+    <div style="border-radius:8px;overflow:hidden;background:#16171B;border:1px solid rgba(255,255,255,.085);box-shadow:0 18px 40px -20px rgba(0,0,0,.6);color:#F3F3F4">
+      <div style="height:1px;background:linear-gradient(90deg, rgba(255,255,255,.02), rgba(255,255,255,.14), rgba(255,255,255,.02))"></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 8px 10px 12px;background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0))">
+        <span style="width:22px;height:22px;border-radius:5px;background:#E2795A;display:flex;align-items:center;justify-content:center;flex:none;font:700 11px/1 'JetBrains Mono',monospace;color:#16100E">cc</span>
+        <span style="flex:1;min-width:0">
+          <span style="display:block;font:600 13px/1.25 'Inter','Noto Sans SC',sans-serif;letter-spacing:-.006em">CC Pocket</span>
+          <span style="display:block;font:400 11.5px/1.35 'Inter','Noto Sans SC',sans-serif;color:#8C8D95">2 台电脑 · 8 个会话</span>
+        </span>
+        <span style="flex:none;width:32px;height:32px;border-radius:4px;background:rgba(255,255,255,.09);display:flex;align-items:center;justify-content:center;gap:2.5px">
+          <span style="width:3px;height:3px;border-radius:50%;background:#F3F3F4"></span>
+          <span style="width:3px;height:3px;border-radius:50%;background:#F3F3F4"></span>
+          <span style="width:3px;height:3px;border-radius:50%;background:#F3F3F4"></span>
+        </span>
+      </div>
+      <div style="height:1px;background:rgba(255,255,255,.075)"></div>
+      <div style="padding:11px 12px 12px;font:600 11px/1 'Inter','Noto Sans SC',sans-serif;letter-spacing:.09em;color:#F0A184">需要你</div>
+    </div>
+    <div role="menu" style="position:absolute;right:6px;top:52px;width:214px;border-radius:8px;overflow:hidden;background:#1D1E23;border:1px solid rgba(255,255,255,.1);box-shadow:0 22px 44px -14px rgba(0,0,0,.7);padding:4px">
+      <button type="button" role="menuitem" style="appearance:none;width:100%;display:flex;align-items:center;gap:9px;height:34px;padding:0 9px;border:0;border-radius:5px;background:rgba(255,255,255,.06);font:400 12.5px/1 'Inter','Noto Sans SC',sans-serif;color:#F3F3F4;text-align:left;cursor:pointer">
+        <span style="flex:none;width:13px;height:13px;border:1.3px solid #B4B5BC;border-radius:3px;position:relative"><span style="position:absolute;left:1.5px;right:1.5px;top:5px;height:1.3px;background:#B4B5BC"></span></span>
+        <span style="flex:1;min-width:0">隐藏此浮层</span>
+      </button>
+      <button type="button" role="menuitem" style="appearance:none;width:100%;display:flex;align-items:center;gap:9px;height:34px;padding:0 9px;border:0;border-radius:5px;background:none;font:400 12.5px/1 'Inter','Noto Sans SC',sans-serif;color:#E6E6E9;text-align:left;cursor:pointer" style-hover="background:rgba(255,255,255,.06)">
+        <span style="flex:none;width:13px;height:13px;border:1.3px solid #8C8D95;border-radius:50%"></span>
+        <span style="flex:1;min-width:0">通知设置…</span>
+      </button>
+      <div style="height:1px;background:rgba(255,255,255,.08);margin:4px 5px"></div>
+      <div style="padding:6px 9px 7px;font:400 11px/1.5 'Inter','Noto Sans SC',sans-serif;color:#7A7B83;text-wrap:pretty">关闭后托盘图标仍会显示待审批数量，可在设置中重新开启。</div>
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1120,&quot;height&quot;:660},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;default&quot;,&quot;calm&quot;,&quot;idle&quot;,&quot;attention&quot;],&quot;default&quot;:&quot;default&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;piece&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;frame&quot;,&quot;rows&quot;,&quot;menu&quot;],&quot;default&quot;:&quot;frame&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hoverIndex&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:-1,&quot;min&quot;:-1,&quot;max&quot;:2,&quot;tsType&quot;:&quot;number&quot;}}">
+const NEEDS = {
+  default: [
+    { title: '修复 auth 回调重定向', machine: 'MBP-16', ask: '写入 src/auth/callback.ts' },
+    { title: '迁移 pg schema', machine: 'DESKTOP-7QK', ask: '运行 npx prisma migrate' }
+  ],
+  attention: [
+    { title: '删除旧迁移文件', machine: 'DESKTOP-7QK', ask: '删除 migrations/2024_*' },
+    { title: '推送到 origin/main', machine: 'MBP-16', ask: '运行 git push --force-with-lease' },
+    { title: '写入生产环境变量', machine: 'win-dev', ask: '写入 .env.production' }
+  ],
+  calm: [], idle: []
+};
+
+const RUNNING = {
+  default: [
+    { title: '重构 chat 组件树', machine: 'MBP-16', elapsed: '12m' },
+    { title: '补 e2e 测试', machine: 'DESKTOP-7QK', elapsed: '4m' },
+    { title: '升级 tauri 到 2.1', machine: 'win-dev', elapsed: '41m' },
+    { title: '清理 lint 警告', machine: 'MBP-16', elapsed: '1h 06m' }
+  ],
+  calm: [
+    { title: '生成 API 文档', machine: 'MBP-16', elapsed: '8m' },
+    { title: '跑基准测试', machine: 'DESKTOP-7QK', elapsed: '23m' }
+  ],
+  attention: [
+    { title: '构建 windows 安装包', machine: 'win-dev', elapsed: '3m' },
+    { title: '同步依赖锁文件', machine: 'MBP-16', elapsed: '17m' },
+    { title: '重跑失败的 CI', machine: 'DESKTOP-7QK', elapsed: '52m' }
+  ],
+  idle: []
+};
+
+const META = {
+  default:   { fleet: '2 台电脑 · 8 个会话', more: '+2 个会话', waiting: 0, label: 'Windows · default' },
+  calm:      { fleet: '2 台电脑 · 2 个会话', more: '', waiting: 0, label: 'Windows · calm' },
+  idle:      { fleet: '2 台电脑 · 无会话',   more: '', waiting: 0, label: 'Windows · idle' },
+  attention: { fleet: '3 台电脑 · 9 个会话', more: '+1 个会话', waiting: 2, label: 'Windows · attention-heavy' }
+};
+
+class Component extends DCLogic {
+  renderVals() {
+    const state = this.props.state ?? 'default';
+    const piece = this.props.piece ?? 'frame';
+    const hoverIndex = this.props.hoverIndex ?? -1;
+    const meta = META[state] ?? META.default;
+    const needs = (NEEDS[state] ?? []).map((r, i) => ({
+      ...r, rest: i !== hoverIndex, hovered: i === hoverIndex
+    }));
+    const running = RUNNING[state] ?? [];
+    return {
+      isFrame: piece === 'frame',
+      isRows: piece === 'rows',
+      isMenu: piece === 'menu',
+      frameLabel: meta.label,
+      fleet: meta.fleet,
+      moreText: meta.more,
+      needs,
+      needsCount: needs.length,
+      hasNeeds: needs.length > 0,
+      hasRunning: running.length > 0,
+      running,
+      isIdle: state === 'idle',
+      hasWaiting: meta.waiting > 0,
+      waitingText: '还有 ' + meta.waiting + ' 条在等 → 打开审批中心',
+      trayBadge: needs.length > 0,
+      taskbarApps: [{ mark: '⊞' }, { mark: 'Q' }, { mark: '▤' }, { mark: '>_' }, { mark: '◍' }],
+      detailRows: [
+        { ...NEEDS.default[0], stateLabel: 'rest', rest: true, hovered: false, focused: false },
+        { ...NEEDS.default[0], stateLabel: 'hover / 指针悬停', rest: false, hovered: true, focused: false },
+        { ...NEEDS.default[0], stateLabel: 'keyboard focus', rest: false, hovered: false, focused: true }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

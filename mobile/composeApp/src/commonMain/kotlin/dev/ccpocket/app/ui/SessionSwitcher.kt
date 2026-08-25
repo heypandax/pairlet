@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -46,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.SessionSwitcherItem
 import dev.ccpocket.app.data.SessionWorkingSet
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import org.jetbrains.compose.resources.stringResource
 
@@ -77,31 +79,39 @@ import org.jetbrains.compose.resources.stringResource
 fun SessionStackChip(count: Int, attention: Boolean, onClick: () -> Unit) {
     if (count <= 0) return
     val cd = stringResource(Res.string.switcher_open)
-    Box {
-        Row(
-            Modifier.height(30.dp).clip(RoundedCornerShape(999.dp)).background(Tok.raised)
-                .border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
-                .clickable { onClick() }
-                .padding(start = 9.dp, end = 10.dp)
-                .semantics { contentDescription = cd },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SessionStackGlyph(Tok.tx2, Modifier.size(13.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(
-                // TightCenter for the same reason the model chip needs it: mono ascent/descent are
-                // asymmetric, so a raw Text rides high inside the pill even under CenterVertically
-                if (count > 9) "9+" else count.toString(),
-                color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = TightCenter,
-                maxLines = 1,
+    // the pill stays 30dp; the TARGET is the [Metric.touch] minimum (Chat Master v2), transparent around
+    // it. Deliberately unclipped: the attention dot overhangs the pill's corner, and a stadium clip on the
+    // slot would shave it. sizeIn, so a host that pins this chip's box measures exactly as before.
+    Box(
+        Modifier.sizeIn(minWidth = Metric.touch, minHeight = Metric.touch)
+            .clickable { onClick() }
+            .semantics { contentDescription = cd },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box {
+            Row(
+                Modifier.height(30.dp).clip(RoundedCornerShape(999.dp)).background(Tok.raised)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
+                    .padding(start = 9.dp, end = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SessionStackGlyph(Tok.tx2, Modifier.size(13.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    // TightCenter for the same reason the model chip needs it: mono ascent/descent are
+                    // asymmetric, so a raw Text rides high inside the pill even under CenterVertically
+                    if (count > 9) "9+" else count.toString(),
+                    color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = TightCenter,
+                    maxLines = 1,
+                )
+            }
+            // attention rides the corner rather than recoloring the pill: the count stays readable, and the
+            // composer keeps exactly one accent-colored thing at a time (Send)
+            if (attention) Box(
+                Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp)
+                    .size(7.dp).clip(CircleShape).background(Tok.accent),
             )
         }
-        // attention rides the corner rather than recoloring the pill: the count stays readable, and the
-        // composer keeps exactly one accent-colored thing at a time (Send)
-        if (attention) Box(
-            Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp)
-                .size(7.dp).clip(CircleShape).background(Tok.accent),
-        )
     }
 }
 
@@ -238,9 +248,20 @@ private fun SwitcherRow(s: SessionSwitcherItem, onClick: (() -> Unit)?) {
                 Text(stringResource(Res.string.switcher_current), color = Tok.muted, fontSize = 12.sp)
                 Icon(Icons.Rounded.Check, null, tint = Tok.accent, modifier = Modifier.size(17.dp))
             }
-            // accent while mid-turn, calm green when merely alive — the same two-tone rule the chat header's
-            // connection dot follows, so "working" reads the same everywhere
-            s.running -> PulseDot(if (s.executing) Tok.accent else Tok.ok, size = 7.dp)
+            // #229: color alone was too easy to miss (and inaccessible), so name the exact distinction the
+            // daemon reports. Accent + “Running” means a real turn/background job; calm green + “Open” means
+            // the process is alive but idle. Unknown/external sessions render neither — never guess.
+            s.running -> Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PulseDot(if (s.executing) Tok.accent else Tok.ok, size = 7.dp)
+                Text(
+                    stringResource(if (s.executing) Res.string.st_running else Res.string.switcher_open_idle),
+                    color = if (s.executing) Tok.accent else Tok.muted,
+                    fontSize = 12.sp,
+                )
+            }
         }
     }
 }

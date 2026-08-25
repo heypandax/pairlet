@@ -7,6 +7,7 @@ import dev.ccpocket.daemon.identity.PairedDevices
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.DaemonInfo
+import dev.ccpocket.protocol.DAEMON_SUPPORTED_AGENT_WIRES
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.LanHello
 import dev.ccpocket.protocol.PocketError
@@ -42,6 +43,10 @@ class LanE2E(
     val hostname: () -> String? = { null }, // OS computer name advertised in DaemonInfo (client's default binding name — #62)
     val gatewayBaseUrl: () -> String? = { null }, // third-party ANTHROPIC_BASE_URL in DaemonInfo (issue #139; null = official endpoint)
     val firstContactPending: suspend (String) -> Boolean = { false },
+    /** The allow-list lookup the gate consults, re-read PER handshake (see [PairedDevices]) so a device
+     *  paired over the relay a moment ago is accepted here without a restart. A parameter only so tests
+     *  can supply a fixture instead of the real ~/.cc-pocket/devices.json. */
+    val pairedDevices: () -> Map<String, ByteArray> = { PairedDevices.load() },
 ) {
     val gateSlots = kotlinx.coroutines.sync.Semaphore(MAX_PENDING_HANDSHAKES)
 
@@ -72,6 +77,18 @@ class WsConnection(
      *  pass the LAN gate). Null while the relay link is still coming up, or forever on a LAN-only `serve`
      *  (minting needs the relay). */
     private val ownerControls: (() -> Triple<dev.ccpocket.daemon.relay.ShareControl?, dev.ccpocket.daemon.relay.BridgeControl?, dev.ccpocket.daemon.handoff.CollaboratorControl?>)? = null,
+    /** ReviewRequest fan-out (REVIEW-REQUEST.md §5.1), for the SAME reason [ownerControls] is served here:
+     *  the desktop app on the daemon's own machine — and any phone on the LAN — arrives on this transport,
+     *  not over the relay. Without it those clients answer commands but never see a live `ReviewUpdated`,
+     *  so a colleague's response only appears on a manual re-list.
+     *
+     *  [dev.ccpocket.daemon.server.DaemonServer] passes it on BOTH flavours, including the plaintext
+     *  `--local` one, and that is not an oversight: a `--local` socket already routes to the router as a
+     *  full-power owner (no origin, no guest/collab scope), so it can enumerate every row with
+     *  `ListReviewRequests` whether or not it is attached here. Push adds no authority it lacks — the
+     *  loopback-only default is what bounds that socket, not this parameter. Null only for a caller that
+     *  hasn't got the service (tests). */
+    private val reviews: dev.ccpocket.daemon.review.ReviewService? = null,
 ) {
     private val outbox = Channel<Envelope>(Channel.BUFFERED)
     private val nextId = AtomicLong(0)
@@ -126,23 +143,43 @@ class WsConnection(
                 }
                 is WsFrame.Binary -> {
                     val id = deviceId ?: return null // handshake before hello — protocol violation
+                    // an empty BINARY frame has no type byte to read (DeviceSessions.onFrame guards the
+                    // relay path the same way); indexing it would throw out of the whole connection
+                    if (frame.data.isEmpty()) return null
                     if (Wire.payloadType(frame.data) != Wire.HANDSHAKE) return null
                     // re-read per handshake: a device paired over the relay minutes ago must work here now
-                    val devicePub = PairedDevices.load()[id]
+                    val devicePub = gate.pairedDevices()[id]
                     if (devicePub == null) { log.warn("direct connect from unpaired device ${id.take(8)}…"); return null }
                     // a freshly paired device must prove ticket knowledge over the relay FIRST — the LAN
                     // handshake deliberately runs PSK-less and can't provide that pairing-ceremony binding
                     if (gate.firstContactPending(id)) { log.warn("direct connect from ${id.take(8)}… before its first relay handshake — refused"); return null }
-                    val (crypto, responderEph) = E2ESession.responder(
-                        gate.identity.e2ePrivRaw, gate.identity.e2ePubRaw, devicePub, ByteArray(0), Wire.payloadBody(frame.data),
-                    )
+                    // The allow-list authenticates the device's STATIC key, but the ephemeral bytes in
+                    // this frame are still whatever the socket sent. A short, wrong-format, or off-curve
+                    // P-256 point makes the crypto provider throw — mirror of the relay path's fix
+                    // (DeviceSessions.handshake): reject this connection rather than let untrusted input
+                    // escape as an exception. Cancellation is not a crypto failure and must propagate.
+                    val (crypto, responderEph) = try {
+                        E2ESession.responder(
+                            gate.identity.e2ePrivRaw, gate.identity.e2ePubRaw, devicePub, ByteArray(0), Wire.payloadBody(frame.data),
+                        )
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        log.warn("malformed direct handshake from ${id.take(8)}… (${e::class.simpleName}) — refused")
+                        return null
+                    }
                     session.outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.HANDSHAKE, responderEph)))
                     gatedDeviceId = id
                     // freshly gated: hand the device our current direct address (IP may have changed since it
                     // stored it). outbox is buffered, so this queues until pump()'s writer starts draining.
                     sink.emit(
                         dev.ccpocket.daemon.update.UpdateState.stamp( // version visibility (issue #200)
-                            DaemonInfo(gate.lanUrl(), gate.hostname(), gate.gatewayBaseUrl(), bridgeControl = true),
+                            DaemonInfo(
+                                gate.lanUrl(), gate.hostname(), gate.gatewayBaseUrl(), bridgeControl = true,
+                                supportedAgents = DAEMON_SUPPORTED_AGENT_WIRES,
+                                supportsUsageAgentFilter = true, // issue #258: this build honors FetchUsage.agent
+                                supportsPromptRecovery = true, // #122: acked prompts stay ledgered until agent consumption
+                            ),
                         ),
                     )
                     log.info("direct E2E session established with ${id.take(8)}…")
@@ -159,6 +196,11 @@ class WsConnection(
         // construction (the gate refuses restricted credentials), so it may see HandoffUpdated pushes.
         // Instance-keyed (one sink per connection) — MUST detach on disconnect, see the finally below.
         registry.handoffs?.attach(sink)
+        // …and the review fan-out on the same footing, with NO recipient filter — exactly the owner
+        // attach the relay branch does (DeviceSessions: `core.reviews.attach(sink)`). The two transports
+        // must agree about what an owner sees, or "did my colleague answer yet" depends on which one the
+        // desktop app happened to connect over.
+        reviews?.attach(sink)
         val writer = launch {
             for (env in outbox) {
                 val text = PocketJson.encodeToString(env)
@@ -183,7 +225,10 @@ class WsConnection(
                     if (gated !in PairedDevices.load()) error("device revoked — closing live direct link")
                 }
                 val text = when {
-                    crypto != null && frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT ->
+                    // isNotEmpty() before payloadType() for the same reason as in the gate above: a zero-byte
+                    // BINARY frame has no type byte, and this loop is the whole connection
+                    crypto != null && frame is WsFrame.Binary && frame.data.isNotEmpty() &&
+                        Wire.payloadType(frame.data) == Wire.TRANSPORT ->
                         crypto.open(Wire.payloadBody(frame.data))?.decodeToString()
                             ?: run { log.warn("decrypt failed on direct link"); null }
                     crypto == null && frame is WsFrame.Text -> frame.readText()
@@ -222,6 +267,7 @@ class WsConnection(
             }
         } finally {
             registry.handoffs?.detach(sink) // this connection's fan-out slot dies with the socket
+            reviews?.detach(sink)           // …keyed by THIS sink, so a sibling connection is untouched
             outbox.close()
             writer.cancel()
             withContext(NonCancellable) {

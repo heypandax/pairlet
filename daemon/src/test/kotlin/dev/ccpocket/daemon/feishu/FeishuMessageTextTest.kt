@@ -51,6 +51,24 @@ class FeishuMessageTextTest {
         assertTrue(out != null && "我已经" in out && "取消排队的旧 job" in out, "got: $out")
     }
 
+    @Test
+    fun mention_placeholders_are_token_boundaries_not_confirmation_token_splices() {
+        assertEquals(
+            "/full-auto con firm",
+            FeishuMessageText.withoutMentionPlaceholders(
+                "@_bot /full-auto con@_alicefirm",
+                listOf("@_bot", "@_alice"),
+            ),
+        )
+    }
+
+    @Test
+    fun rich_post_mentions_cannot_splice_a_full_auto_confirmation_token() {
+        val post =
+            """{"content":[[{"tag":"text","text":"/full-auto con"},{"tag":"at","user_id":"ou_alice"},{"tag":"text","text":"firm"}]]}"""
+        assertEquals("/full-auto con  firm", FeishuMessageText.inboundText("post", post))
+    }
+
     /** …and unlike plainText it must NOT invent a placeholder: a turn driven by the literal "[图片]" is
      *  worse than no turn, so a kind with no instruction in it reads as null and the message is ignored. */
     @Test

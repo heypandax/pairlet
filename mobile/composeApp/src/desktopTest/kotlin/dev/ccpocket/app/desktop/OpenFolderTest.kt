@@ -73,4 +73,18 @@ class OpenFolderTest {
         val (_, m) = model(emptyList())
         assertTrue(!m.activeIsThisMachine, "unknown host must fall back to typing a path, which always works")
     }
+
+    /**
+     * Issues #214/#218: a remote daemon no longer degrades "Open Folder" to a bare new-session popover
+     * (the "two entries, one effect" the user reported). It opens the daemon-side folder browser instead,
+     * so the folders offered are on the machine the session will actually run on.
+     */
+    @Test
+    fun openFolderActionOnARemoteDaemonOpensTheRemoteBrowser() {
+        val (_, m) = model(emptyList())
+        assertTrue(!m.activeIsThisMachine, "unknown host is treated as remote")
+        openFolderAction(CoroutineScope(Dispatchers.Unconfined), m)
+        assertTrue(m.showFolderPicker, "remote Open Folder must open the daemon-side directory browser")
+        assertTrue(!m.showNewSession, "it must NOT collapse into the plain new-session popover (#214 duplication)")
+    }
 }

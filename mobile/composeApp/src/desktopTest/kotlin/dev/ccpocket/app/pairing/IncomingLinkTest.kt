@@ -1,10 +1,13 @@
 package dev.ccpocket.app.pairing
 
 import dev.ccpocket.protocol.CollaboratorInvite
+import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.ShareInvite
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -22,8 +25,11 @@ import kotlin.test.assertTrue
 class IncomingLinkTest {
 
     private val collab = CollaboratorInvite(
-        relay = "wss://relay.test", accountId = "acct-a", daemonPub = "PUBKEY", ticket = "tkt-1", ownerLabel = "Panda",
+        relay = "wss://relay.test", accountId = "acct-a", daemonPub = dev.ccpocket.app.TEST_DAEMON_PUB,
+        ticket = "tkt-1", ownerLabel = "Panda",
     )
+    /** The same establishment material, minted for the OTHER feature (REVIEW-REQUEST.md §13.3). */
+    private val reviewContact = collab.copy(ticket = "tkt-3", purpose = CollaboratorPurpose.REVIEW)
     private val share = ShareInvite(
         relay = "wss://relay.test", accountId = "acct-a", daemonPub = "PUBKEY", ticket = "tkt-2", folderName = "cc-pocket",
         tier = dev.ccpocket.protocol.AccessTier.REVIEW, expiresAt = 1_800_000_000_000, ttlSec = 600,
@@ -111,5 +117,140 @@ class IncomingLinkTest {
         // both are base64url JSON — the paste path tries share first, so this guards the ordering
         assertTrue(decodeShareInvite(collab.encode()) == null)
         assertTrue(decodeCollaboratorInvite(share.encode()) == null)
+    }
+
+    // ── the two collaborator DOORS (REVIEW-REQUEST.md §13.3) ──────────────────────────────────────
+    //
+    // A Session Handoff invite and a Review contact invite are the same bytes but for one trailing
+    // field, and the ticket inside either is SINGLE USE. So crossing the doors is not a routing bug —
+    // it burns the ticket the other side is still waiting for, and leaves both people re-scanning.
+    //
+    // Two gates, because they stop different peers: the URI host is the only one an ALREADY-RELEASED
+    // app can act on (it does not read the trailing `purpose` at all), and the embedded purpose is the
+    // only one left when a human strips the prefix and pastes the bare blob.
+
+    /**
+     * A v1.6.0-MINTED invite — the exact bytes in the field today: no `purpose` key, no `ttlSec`.
+     *
+     * Hand-written rather than produced by [encode], because that is the whole point: `encode` now emits
+     * `"purpose":"session_handoff"`, so a fixture built through it would prove the two codecs agree with
+     * THEMSELVES and nothing about the artifact a shipped app already put on someone's screen. Both new
+     * gates ride on this path — the `purpose == want` match (satisfied by the ABSENT-key default) and
+     * `validDaemonPub` (which is strictly tighter than the shipped `isNotBlank`).
+     */
+    private fun legacyCollabBlob(): String = dev.ccpocket.app.util.B64Url.encode(
+        ("""{"relay":"wss://relay.test","accountId":"acct-a",""" +
+            """"daemonPub":"${dev.ccpocket.app.TEST_DAEMON_PUB}","ticket":"tkt-1","ownerLabel":"Panda"}""")
+            .encodeToByteArray(),
+    )
+
+    @Test
+    fun aPreReleaseCollabInviteStillDecodesAtItsOwnDoor() {
+        val blob = legacyCollabBlob()
+
+        val decoded = decodeCollaboratorInvite(COLLAB_URI_PREFIX + blob)
+        assertNotNull(decoded, "a v1.6.0 invite must keep working — it is printed and pasted in the field")
+        assertEquals(CollaboratorPurpose.SESSION_HANDOFF, decoded.purpose, "an ABSENT purpose keeps its historical meaning")
+        assertEquals(600, decoded.ttlSec, "…and the pre-existing ttl default is untouched")
+
+        assertIs<IncomingLink.Collab>(parseIncomingLink(COLLAB_URI_PREFIX + blob))
+        assertIs<IncomingLink.Collab>(parseIncomingLink("ccpocket://collab#$blob"))
+        assertNotNull(decodeCollaboratorInvite(blob), "a bare pre-purpose blob still pastes")
+        assertIs<IncomingLink.Collab>(parseIncomingLink(blob, allowBareBlob = true))
+
+        // …and it is still not a review peer, at either form of that door
+        assertNull(decodeReviewContactInvite(REVIEW_CONTACT_URI_PREFIX + blob))
+        assertNull(decodeReviewContactInvite(blob))
+    }
+
+    @Test
+    fun theLegacyCollabHostIsUnchangedAndTheReviewHostIsItsOwn() {
+        assertTrue(collab.encode().startsWith(COLLAB_URI_PREFIX), collab.encode())
+        assertTrue(reviewContact.encode().startsWith(REVIEW_CONTACT_URI_PREFIX), reviewContact.encode())
+
+        // an old collab link keeps routing exactly where it always did
+        assertIs<IncomingLink.Collab>(parseIncomingLink(collab.encode()))
+
+        // …and a review link gets its own lane, carrying the RAW uri (the daemon redeems it, not us)
+        val link = parseIncomingLink(reviewContact.encode())
+        assertIs<IncomingLink.ReviewContact>(link)
+        assertEquals("tkt-3", link.invite.ticket)
+        assertEquals(CollaboratorPurpose.REVIEW, link.invite.purpose)
+        assertEquals(reviewContact.encode(), link.uri, "the join flow needs the line verbatim")
+    }
+
+    @Test
+    fun neitherDoorAcceptsTheOthersTicket() {
+        // a review blob dressed up under the collab host — the shape a mis-built producer would emit
+        val reviewBlobUnderCollabHost = COLLAB_URI_PREFIX + reviewContact.encode().removePrefix(REVIEW_CONTACT_URI_PREFIX)
+        assertEquals(IncomingLink.Unknown, parseIncomingLink(reviewBlobUnderCollabHost))
+        assertNull(decodeCollaboratorInvite(reviewBlobUnderCollabHost))
+
+        // …and the reverse
+        val handoffBlobUnderReviewHost = REVIEW_CONTACT_URI_PREFIX + collab.encode().removePrefix(COLLAB_URI_PREFIX)
+        assertEquals(IncomingLink.Unknown, parseIncomingLink(handoffBlobUnderReviewHost))
+        assertNull(decodeReviewContactInvite(handoffBlobUnderReviewHost))
+
+        // a full URI is never re-probed at the other codec's door either
+        assertNull(decodeReviewContactInvite(collab.encode()))
+        assertNull(decodeCollaboratorInvite(reviewContact.encode()))
+    }
+
+    @Test
+    fun aBareReviewBlobStaysAReviewTicketAtThePasteEntry() {
+        val bare = reviewContact.encode().removePrefix(REVIEW_CONTACT_URI_PREFIX)
+        // the prefix is gone, so only the embedded purpose is left — and it still decides
+        assertIs<IncomingLink.ReviewContact>(parseIncomingLink(bare, allowBareBlob = true))
+        assertNull(decodeCollaboratorInvite(bare), "a bare review blob must never redeem as a phone contact")
+        // and, like every bare blob, it is not guessed at from a generic deep link
+        assertEquals(IncomingLink.Unknown, parseIncomingLink(bare, allowBareBlob = false))
+    }
+
+    /** A purpose only a NEWER build knows fails closed at both doors rather than defaulting into one. */
+    @Test
+    fun anUnreadablePurposeIsAcceptedByNeitherDoor() {
+        val json = """{"relay":"wss://relay.test","accountId":"acct-a",""" +
+            """"daemonPub":"${dev.ccpocket.app.TEST_DAEMON_PUB}","ticket":"tkt-9","purpose":"pair_programming"}"""
+        val blob = dev.ccpocket.app.util.B64Url.encode(json.encodeToByteArray())
+        assertEquals(IncomingLink.Unknown, parseIncomingLink(COLLAB_URI_PREFIX + blob))
+        assertEquals(IncomingLink.Unknown, parseIncomingLink(REVIEW_CONTACT_URI_PREFIX + blob))
+        assertEquals(IncomingLink.Unknown, parseIncomingLink(blob, allowBareBlob = true))
+    }
+
+    @Test
+    fun aReviewLinkWithNoFragmentIsInvalidRatherThanMisrouted() {
+        assertEquals(IncomingLink.Unknown, parseIncomingLink("ccpocket://review-contact"))
+        assertEquals(IncomingLink.Unknown, parseIncomingLink("ccpocket://review-contact#!!!not-base64!!!"))
+    }
+
+    /**
+     * `parseIncomingLink` routes on a case-INSENSITIVE scheme and a lowercased host, but the codecs match
+     * their accept prefixes literally — so a case-variant URI reaches a door whose prefix check misses.
+     *
+     * That split is only safe in one direction and it must be the fail-closed one: an odd-cased link
+     * reads as invalid (the user re-copies it), never as "close enough, redeem it". The accept branches
+     * deliberately stay case-sensitive — `ccpocket://collab#` is frozen, so neither port may start
+     * accepting spellings the released build rejects — while the "some other host" REFUSAL is
+     * case-insensitive, so the guard covers every string that can actually reach the door instead of
+     * letting an odd-cased one fall through to the bare-blob branch and lean only on `purpose`.
+     *
+     * The cases below cover both halves: an odd-cased HOST (scheme still lowercase, so the refusal
+     * branch fires) and an odd-cased SCHEME (which only the ignoreCase refusal catches).
+     */
+    @Test
+    fun caseVariantHostsFailClosedAtBothDoors() {
+        listOf(
+            "ccpocket://Review-Contact#" to reviewContact,
+            "ccpocket://REVIEW-CONTACT#" to reviewContact,
+            "ccpocket://Collab#" to collab,
+            "ccpocket://COLLAB#" to collab,
+            "CCPOCKET://collab#" to collab,
+            "CCPocket://review-contact#" to reviewContact,
+        ).forEach { (host, invite) ->
+            val blob = invite.encode().substringAfter('#')
+            assertEquals(IncomingLink.Unknown, parseIncomingLink(host + blob), host)
+            assertNull(decodeCollaboratorInvite(host + blob), host)
+            assertNull(decodeReviewContactInvite(host + blob), host)
+        }
     }
 }

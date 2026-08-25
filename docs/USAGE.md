@@ -88,7 +88,24 @@ Claude 要执行敏感操作（跑命令、改文件等）时，手机会弹出�
 
 ### 图片附件
 
-点 ＋ 选图，最多 **4 张**随一条消息发出——发报错截图、设计稿给 Claude 看都很顺手。
+点 ＋ 选图，最多 **4 张**随一条消息发出——发报错截图、设计稿给 Claude 或 Codex 看都很顺手。
+
+### 运行时上下文协作接力
+
+需要同事使用你电脑上的原始 Session、代码和运行状态时，可以把当前 Session 临时交给已连接的同事：首次扫码建立协作联系人，后续直接选人；对方接受后在同一个 Session 中接续，完成后归还。当前只支持文件只读、shell 命令逐次确认的 Review 模式。完整流程、安全边界与故障排查见 [`COLLABORATION-HANDOFF.md`](COLLABORATION-HANDOFF.md)。任务上下文评审由独立的 ReviewRequest 承载（见下一节），不替换本能力。
+
+### 任务上下文评审（ReviewRequest，预览）
+
+把一个**任务**交给同事，而不是把电脑交给他：对方用自己的仓库、Agent、账号和审批策略完成评审，再回一份结构化结果；不转移会话控制权，也不让对方进入你的电脑。双方的 App 与桌面端全部关闭时，投递、重试、去重和历史仍由 daemon 承担。
+
+手机与桌面的「评审中心」是控制面，命令行入口是 `cc-pocket-daemon review`（连的是已在跑的 daemon，不会另起进程）。想让 Claude Code 直接驱动它，把随仓库分发的 Skill 拷到自己的 skills 目录：
+
+```bash
+mkdir -p ~/.claude/skills/review-request
+cp packaging/skills/review-request/SKILL.md ~/.claude/skills/review-request/
+```
+
+设计、状态机与安全边界见 [`design/REVIEW-REQUEST.md`](design/REVIEW-REQUEST.md)。**当前为预览能力**：双机实网验收尚未完成，请先在可控范围内试用。
 
 ### 桌面接力
 

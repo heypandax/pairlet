@@ -28,6 +28,7 @@ class PageParser(HTMLParser):
         self.h1_parts: list[str] = []
         self.h1_count = 0
         self.description = ""
+        self.noindex = False
         self.canonicals: list[str] = []
         self.alternates: dict[str, str] = {}
         self.jsonld_parts: list[str] = []
@@ -44,6 +45,8 @@ class PageParser(HTMLParser):
             self.h1_count += 1
         elif tag == "meta" and values.get("name", "").lower() == "description":
             self.description = values.get("content", "").strip()
+        elif tag == "meta" and values.get("name", "").lower() == "robots":
+            self.noindex = "noindex" in values.get("content", "").lower()
         elif tag == "link":
             rels = set(values.get("rel", "").lower().split())
             href = values.get("href", "")
@@ -169,10 +172,15 @@ def main() -> int:
     sitemap = ET.parse(SITE / "sitemap.xml").getroot()
     ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
     sitemap_urls = {node.text.strip() for node in sitemap.findall("s:url/s:loc", ns) if node.text}
-    canonical_urls = set(canonical_to_page)
+    # A `noindex` page is deliberately delisted: it stays reachable by URL for the users who already
+    # have it, but it must NOT be advertised in the sitemap. It is an error either way round.
+    canonical_urls = {url for url, page in canonical_to_page.items() if not pages[page].noindex}
+    for url, page in canonical_to_page.items():
+        if pages[page].noindex and url in sitemap_urls:
+            errors.append(f"sitemap.xml: noindex page must not be listed {url}")
     for missing in sorted(canonical_urls - sitemap_urls):
         errors.append(f"sitemap.xml: missing canonical {missing}")
-    for extra in sorted(sitemap_urls - canonical_urls):
+    for extra in sorted(sitemap_urls - set(canonical_to_page)):
         errors.append(f"sitemap.xml: URL has no local canonical page {extra}")
 
     for page, parser in pages.items():

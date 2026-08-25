@@ -81,6 +81,9 @@ import dev.ccpocket.app.resources.bridge_tier_edit_title
 import dev.ccpocket.app.resources.cancel
 import dev.ccpocket.app.resources.cmd_source_builtin
 import dev.ccpocket.app.resources.device_remove
+import dev.ccpocket.app.resources.dir_picker_choose_here
+import dev.ccpocket.app.resources.dir_picker_remote_only
+import dev.ccpocket.app.resources.dir_picker_remote_title
 import dev.ccpocket.app.resources.done
 import dev.ccpocket.app.resources.form_name
 import dev.ccpocket.app.theme.Tok
@@ -168,6 +171,7 @@ internal fun OneShotCredentialCard(name: String, ttlSec: Int, json: String, onDo
  */
 @Composable
 internal fun NewBridgeForm(
+    model: DesktopModel,
     onCancel: () -> Unit,
     onCreate: (name: String, workdirs: List<String>, tier: AccessTier, allowedCommands: List<String>, runner: BridgeRunnerSpec?) -> Unit,
 ) {
@@ -182,6 +186,9 @@ internal fun NewBridgeForm(
     var adminId by remember { mutableStateOf("") }
     var ownerBypass by remember { mutableStateOf(false) }
     var noApproval by remember { mutableStateOf(false) }
+    // #218: on a remote daemon the local FileDialog browses the WRONG machine — swap in the daemon-side
+    // folder browser (RemoteDirPickerPopup, rendered at the tail of this form).
+    var remotePick by remember { mutableStateOf(false) }
     val requestScopedApproval = manage && scriptPath.isBlank()
 
     // scriptPath is NOT required: blank = the built-in Feishu adapter (the normal case)
@@ -196,7 +203,14 @@ internal fun NewBridgeForm(
 
         Spacer(Modifier.height(14.dp))
         FieldLabel(stringResource(Res.string.bridge_projects).uppercase(), stringResource(Res.string.bridge_projects_hint))
-        PickedDirs(picked, onAdd = { pickProjectDir()?.let { if (it !in picked) picked.add(it) } }, onRemove = { picked.remove(it) })
+        PickedDirs(
+            picked,
+            onAdd = {
+                if (model.activeIsThisMachine) pickProjectDir()?.let { if (it !in picked) picked.add(it) }
+                else remotePick = true
+            },
+            onRemove = { picked.remove(it) },
+        )
 
         Spacer(Modifier.height(14.dp))
         if (requestScopedApproval) {
@@ -273,10 +287,18 @@ internal fun NewBridgeForm(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { TextInput(scriptPath, { scriptPath = it }, stringResource(Res.string.cmd_source_builtin)) }
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    stringResource(Res.string.action_browse), color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp,
-                    modifier = Modifier.clickable { pickAdapterScript()?.let { scriptPath = it } },
-                )
+                // #218: the adapter-script FILE chooser is local-only. On a remote daemon it would point at
+                // the wrong filesystem, so drop the browse affordance and tell the owner to type the path.
+                if (model.activeIsThisMachine) {
+                    Text(
+                        stringResource(Res.string.action_browse), color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp,
+                        modifier = Modifier.clickable { pickAdapterScript()?.let { scriptPath = it } },
+                    )
+                } else {
+                    Text(
+                        stringResource(Res.string.dir_picker_remote_only), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
+                    )
+                }
             }
         }
 
@@ -284,7 +306,7 @@ internal fun NewBridgeForm(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 stringResource(Res.string.action_create), color = if (canCreate) Tok.accent else Tok.muted.copy(alpha = 0.5f),
-                fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(12.sp),
                 modifier = Modifier.clip(RoundedCornerShape(6.dp))
                     .background((if (canCreate) Tok.accent else Tok.muted).copy(alpha = 0.12f))
                     .clickable(enabled = canCreate) {
@@ -313,6 +335,15 @@ internal fun NewBridgeForm(
             color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
         )
     }
+    if (remotePick) {
+        RemoteDirPickerPopup(
+            model,
+            title = stringResource(Res.string.dir_picker_remote_title),
+            confirmLabel = stringResource(Res.string.dir_picker_choose_here),
+            onDismiss = { remotePick = false },
+            onPick = { p -> if (p !in picked) picked.add(p); remotePick = false },
+        )
+    }
 }
 
 /**
@@ -324,6 +355,7 @@ internal fun NewBridgeForm(
  */
 @Composable
 internal fun EditRunnerForm(
+    model: DesktopModel,
     envKeys: List<String>,
     workdirs: List<String>,
     allowedCommands: List<String>,
@@ -338,6 +370,7 @@ internal fun EditRunnerForm(
     var adminId by remember { mutableStateOf("") }
     var ownerBypassOn by remember { mutableStateOf(ownerBypass) }
     var noApprovalOn by remember { mutableStateOf(noApproval) }
+    var remotePick by remember { mutableStateOf(false) } // #218: remote-daemon folder browser (see NewBridgeForm)
     val picked = remember { mutableStateListOf<String>().apply { addAll(workdirs) } }
     val projectsChanged = picked.toList() != workdirs
     var allowCmds by remember { mutableStateOf(allowedCommands.joinToString("\n")) }
@@ -354,7 +387,14 @@ internal fun EditRunnerForm(
             .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(12.dp),
     ) {
         FieldLabel(stringResource(Res.string.bridge_projects).uppercase(), stringResource(Res.string.bridge_edit_projects_hint))
-        PickedDirs(picked, onAdd = { pickProjectDir()?.let { if (it !in picked) picked.add(it) } }, onRemove = { picked.remove(it) })
+        PickedDirs(
+            picked,
+            onAdd = {
+                if (model.activeIsThisMachine) pickProjectDir()?.let { if (it !in picked) picked.add(it) }
+                else remotePick = true
+            },
+            onRemove = { picked.remove(it) },
+        )
         Spacer(Modifier.height(14.dp))
         if (requestScopedApproval) {
             FieldLabel(
@@ -403,7 +443,7 @@ internal fun EditRunnerForm(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 stringResource(Res.string.bridge_edit_save), color = if (dirty) Tok.accent else Tok.muted.copy(alpha = 0.5f),
-                fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(11.sp),
                 modifier = Modifier.clip(RoundedCornerShape(6.dp))
                     .background((if (dirty) Tok.accent else Tok.muted).copy(alpha = 0.12f))
                     .clickable(enabled = dirty) {
@@ -416,6 +456,15 @@ internal fun EditRunnerForm(
                 modifier = Modifier.clickable(onClick = onCancel).padding(horizontal = 6.dp, vertical = 6.dp),
             )
         }
+    }
+    if (remotePick) {
+        RemoteDirPickerPopup(
+            model,
+            title = stringResource(Res.string.dir_picker_remote_title),
+            confirmLabel = stringResource(Res.string.dir_picker_choose_here),
+            onDismiss = { remotePick = false },
+            onPick = { p -> if (p !in picked) picked.add(p); remotePick = false },
+        )
     }
 }
 
@@ -475,17 +524,18 @@ private fun PickedDirs(picked: List<String>, onAdd: () -> Unit, onRemove: (Strin
                 Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    p.substringAfterLast('/'), color = Tok.tx, fontFamily = Dk.ui, fontSize = 11.sp,
+                    p.substringAfterLast('/'), color = Tok.tx, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp),
                 )
                 Spacer(Modifier.width(8.dp))
-                Text(p, color = Tok.muted.copy(alpha = 0.7f), fontFamily = Dk.mono, fontSize = 9.sp)
+                Text(p, color = Tok.muted.copy(alpha = 0.7f), fontFamily = Dk.mono, fontSize = 9.sp, style = tightCenter(9.sp))
                 Spacer(Modifier.weight(1f))
-                Text(stringResource(Res.string.device_remove), color = Tok.muted, fontFamily = Dk.ui, fontSize = 9.sp, modifier = Modifier.clickable { onRemove(p) })
+                Text(stringResource(Res.string.device_remove), color = Tok.muted, fontFamily = Dk.ui, fontSize = 9.sp, style = tightCenter(9.sp), modifier = Modifier.clickable { onRemove(p) })
             }
         }
         Spacer(Modifier.height(4.dp))
         Text(
             stringResource(Res.string.bridge_add_project), color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp,
+            style = tightCenter(10.sp),
             modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.accent.copy(alpha = 0.12f))
                 .clickable(onClick = onAdd).padding(horizontal = 9.dp, vertical = 5.dp),
         )

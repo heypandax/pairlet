@@ -4,6 +4,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.ensureLocalNetworkAccess
 import dev.ccpocket.app.epochMillis
@@ -14,16 +15,23 @@ import dev.ccpocket.app.net.RelayAuthException
 import dev.ccpocket.app.net.RelayConnection
 import dev.ccpocket.app.net.RelayControlDial
 import dev.ccpocket.app.net.RelayE2EConnection
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.merge
 import dev.ccpocket.app.pairing.BindingRole
 import dev.ccpocket.app.pairing.IncomingLink
+import dev.ccpocket.app.pairing.PairFailure
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.Pairing
+import dev.ccpocket.app.pairing.classifyPairFailure
 import dev.ccpocket.app.pairing.parseIncomingLink
+import dev.ccpocket.app.pairing.wireReason
 import dev.ccpocket.app.push.PushTokens
 import dev.ccpocket.app.lock.AppLockController
 import dev.ccpocket.app.lock.createBiometrics
+import dev.ccpocket.app.theme.AccentTheme
 import dev.ccpocket.app.theme.ThemeMode
+import dev.ccpocket.app.ui.sameDirPath
 import dev.ccpocket.app.push.PushToken
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.telemetry.TelEvent
@@ -38,7 +46,28 @@ import dev.ccpocket.protocol.BackgroundJob
 import dev.ccpocket.protocol.GetWorkflowAgentDetail
 import dev.ccpocket.protocol.BackgroundJobs
 import dev.ccpocket.protocol.ChangedFile
+import dev.ccpocket.protocol.AddWorktree
+import dev.ccpocket.protocol.FetchGitStatus
+import dev.ccpocket.protocol.GIT_OPS
+import dev.ccpocket.protocol.GIT_OP_FETCH
+import dev.ccpocket.protocol.GIT_OP_REVERT
+import dev.ccpocket.protocol.GIT_OP_WORKTREE_ADD
+import dev.ccpocket.protocol.GIT_OP_WORKTREE_REMOVE
+import dev.ccpocket.protocol.GIT_TWO_STEP_OPS
+import dev.ccpocket.protocol.GitAction
+import dev.ccpocket.protocol.GitActionPreview
+import dev.ccpocket.protocol.GitActionResult
+import dev.ccpocket.protocol.GitDiff
+import dev.ccpocket.protocol.GitStatus
+import dev.ccpocket.protocol.ListWorktrees
+import dev.ccpocket.protocol.ReadGitDiff
+import dev.ccpocket.protocol.RemoveWorktree
+import dev.ccpocket.protocol.WorktreeList
+import dev.ccpocket.protocol.CLAUDE_QUOTA_NO_TOKEN
+import dev.ccpocket.protocol.CLAUDE_QUOTA_OK
 import dev.ccpocket.protocol.ChatRole
+import dev.ccpocket.protocol.ClaudeQuota
+import dev.ccpocket.protocol.ClaudeQuotaGet
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.AccessTier
@@ -74,6 +103,37 @@ import dev.ccpocket.protocol.CollaboratorUpdated
 import dev.ccpocket.protocol.CreateCollaboratorTicket
 import dev.ccpocket.protocol.ListCollaborators
 import dev.ccpocket.protocol.RemoveCollaborator
+import dev.ccpocket.protocol.ActOnReviewInbox
+import dev.ccpocket.protocol.ArtifactRef
+import dev.ccpocket.protocol.CancelReviewRequest
+import dev.ccpocket.protocol.CloseReviewRequest
+import dev.ccpocket.protocol.CollaboratorDirection
+import dev.ccpocket.protocol.CollaboratorPurpose
+import dev.ccpocket.protocol.CreateReviewInvite
+import dev.ccpocket.protocol.CreateReviewRequest
+import dev.ccpocket.protocol.JoinReviewContact
+import dev.ccpocket.protocol.ListReviewContacts
+import dev.ccpocket.protocol.ListReviewInbox
+import dev.ccpocket.protocol.ListReviewRequests
+import dev.ccpocket.protocol.PrepareReviewRequest
+import dev.ccpocket.protocol.RemoveReviewContact
+import dev.ccpocket.protocol.ReviewBrief
+import dev.ccpocket.protocol.ReviewContact
+import dev.ccpocket.protocol.ReviewContactUpdated
+import dev.ccpocket.protocol.ReviewContactsListing
+import dev.ccpocket.protocol.ReviewExecutionBundle
+import dev.ccpocket.protocol.ReviewInboxActed
+import dev.ccpocket.protocol.ReviewInboxAction
+import dev.ccpocket.protocol.ReviewInboxItem
+import dev.ccpocket.protocol.ReviewInboxListing
+import dev.ccpocket.protocol.ReviewInviteCreated
+import dev.ccpocket.protocol.ReviewListing
+import dev.ccpocket.protocol.ReviewPrepared
+import dev.ccpocket.protocol.ReviewRequest
+import dev.ccpocket.protocol.ReviewRequestCreated
+import dev.ccpocket.protocol.ReviewResult
+import dev.ccpocket.protocol.ReviewStatus
+import dev.ccpocket.protocol.ReviewUpdated
 import dev.ccpocket.protocol.CompleteHandoff
 import dev.ccpocket.protocol.CreateHandoff
 import dev.ccpocket.protocol.DeclineHandoff
@@ -170,7 +230,11 @@ import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.DeletePreset
 import dev.ccpocket.protocol.FetchAuthStatus
 import dev.ccpocket.protocol.FetchModels
+import dev.ccpocket.protocol.AGENT_WIRE_DSH
+import dev.ccpocket.protocol.AGENT_WIRE_KIMI
 import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
+import dev.ccpocket.protocol.AGENT_WIRE_ZCODE
+import dev.ccpocket.protocol.DAEMON_SUPPORTED_AGENT_WIRES
 import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.FetchPresets
 import dev.ccpocket.protocol.ModelsList
@@ -184,6 +248,7 @@ import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.Usage
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.StopBackgroundJob
+import dev.ccpocket.protocol.JobStatus
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.SwitchServiceTier
@@ -205,6 +270,11 @@ import dev.ccpocket.protocol.SessionGroup
 import dev.ccpocket.protocol.GroupCreate
 import dev.ccpocket.protocol.GroupRename
 import dev.ccpocket.protocol.RenameSession
+import dev.ccpocket.protocol.RewindDone
+import dev.ccpocket.protocol.RewindMode
+import dev.ccpocket.protocol.RewindPreview
+import dev.ccpocket.protocol.RewindRefusal
+import dev.ccpocket.protocol.RewindSession
 import dev.ccpocket.protocol.GroupDelete
 import dev.ccpocket.protocol.GroupAssign
 import dev.ccpocket.app.isPreviewMode
@@ -223,6 +293,7 @@ import dev.ccpocket.app.resources.status_connecting
 import dev.ccpocket.app.resources.status_disconnected
 import dev.ccpocket.app.resources.status_failed
 import dev.ccpocket.app.resources.status_invalid_link
+import dev.ccpocket.app.resources.status_review_invite_wrong_door
 import dev.ccpocket.app.resources.status_local_denied
 import dev.ccpocket.app.resources.status_pair_failed
 import dev.ccpocket.app.resources.status_pairing
@@ -230,6 +301,7 @@ import dev.ccpocket.app.resources.status_reconnecting
 import dev.ccpocket.app.resources.voice_audio_engine
 import dev.ccpocket.app.resources.voice_daemon_unreachable
 import dev.ccpocket.app.resources.voice_dictation_failed
+import dev.ccpocket.app.resources.voice_interrupted
 import dev.ccpocket.app.resources.voice_no_response
 import dev.ccpocket.app.resources.voice_no_speech
 import dev.ccpocket.app.resources.voice_record_failed
@@ -250,6 +322,7 @@ import dev.ccpocket.app.media.PickedFile
 import dev.ccpocket.app.media.compressImage
 import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -279,13 +352,29 @@ sealed interface ChatItem {
      *  when that ack lands — the explicit "the computer has it" marker (issue #66). */
     data class User(
         val text: String,
+        /** Decoded attachment bytes. Filled on send from this device, and — since issue #254 — also
+         *  from a replayed transcript, so a prompt typed AT THE COMPUTER shows its images here too
+         *  (before, every replayed user row was text-only and an image-only prompt read as blank). */
         val images: List<ByteArray> = emptyList(),
         val pending: Boolean = false,
         val promptId: String? = null,
         val delivered: Boolean = false,
         /** Files uploaded to the session's workspace inbox and referenced by this turn (issue #90) —
-         *  rendered as file chips with their `@` landing path. Client-side only, like [images]. */
+         *  rendered as file chips with their `@` landing path. Client-side only (unlike [images],
+         *  the transcript has no record of them). */
         val files: List<SentFile> = emptyList(),
+        /** The replay budget shed some of this turn's images to keep the history frame under the relay
+         *  cap (issue #254) — the renderers say so in place instead of showing fewer tiles silently. */
+        val imagesTruncated: Boolean = false,
+        /** This turn's transcript coordinates, replayed straight off [HistoryMessage] (issue #282).
+         *  Present TOGETHER or not at all, and only on rows a new daemon replayed from a Claude
+         *  transcript — a locally-composed bubble has none until the history comes back. Both being
+         *  non-null IS the rewind capability probe: no coordinates, no rewind/fork entry, which is what
+         *  keeps the affordance off older daemons and off every non-Claude backend without a version
+         *  check. Never invented client-side: a guessed anchor would cut somewhere the daemon can't
+         *  verify. */
+        val seq: Long? = null,
+        val uuid: String? = null,
     ) : ChatItem
     data class Assistant(val text: String) : ChatItem
 
@@ -330,6 +419,12 @@ sealed interface ChatItem {
 
     /** Claude withdrew its questions (control_cancel) — muted one-liner where the card used to be. */
     data object QuestionsWithdrawn : ChatItem
+
+    /** OpenCode's `question` tool surfaced as a READ-ONLY question card (issue #210, phase 1): the
+     *  parsed questions + options, rendered like the AskUserQuestion card but non-interactive with a
+     *  "作答暂不支持" note. OpenCode runs fully automatic — there is no answer channel yet, so this
+     *  replaces the raw JSON tool row without pretending it can be answered. */
+    data class OpenCodeQuestion(val questions: List<dev.ccpocket.protocol.AskQuestion>) : ChatItem
 
     /** A live turn finished here — muted "✓ done · 42s" divider so turn boundaries stay visible after
      *  the streaming caret stops. Appended on TurnDone only, never present in replayed history. */
@@ -504,9 +599,45 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.getString(K_DEFAULT_PERMISSION_MODE)?.takeIf { it == CLAUDE_PERMISSION_MODE_AUTO },
     )
 
-    /** Persisted default reasoning effort for NEW sessions (null = the model's own default). Resumed sessions
-     *  keep their own. Stored as "" for the null/default choice (SecureStore can't hold null). */
+    /** Persisted default reasoning effort for NEW Claude sessions (null = the model's own default). Resumed
+     *  sessions keep their own. Before per-agent defaults this key was shared by every backend; construction
+     *  migrates that historical value to each new scoped key, then this original key remains Claude's source
+     *  of truth. Stored as "" for the null/default choice (SecureStore can't hold null). */
     val defaultEffort = mutableStateOf(SecureStore.getString(K_DEFAULT_EFFORT)?.takeIf { it.isNotEmpty() })
+    /** Every non-Claude backend owns a separate effort value, just like its model. Kept private so old call
+     *  sites that bind [defaultEffort] continue to mean Claude until they explicitly become agent-aware. */
+    private val defaultCodexEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_CODEX_EFFORT))
+    private val defaultOpenCodeEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_OPENCODE_EFFORT))
+    private val defaultKimiEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_KIMI_EFFORT))
+    private val defaultZCodeEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_ZCODE_EFFORT))
+    private val defaultDshEffort = mutableStateOf(loadScopedDefaultEffort(K_DEFAULT_DSH_EFFORT))
+
+    /**
+     * One-time compatibility migration from the build where every backend read the same effort preference.
+     * Each absent scoped key copies that value regardless of which agent happened to be selected at upgrade:
+     * changing the selected agent did not change the old preference's scope. Absence and an explicit empty
+     * value remain intentionally different: only an ABSENT scoped key may copy the legacy value; `""` means
+     * the user explicitly chose the CLI default and must never be repopulated. The legacy key remains untouched
+     * because it becomes Claude's source of truth after the split.
+     */
+    private fun loadScopedDefaultEffort(key: String): String? {
+        SecureStore.getString(key)?.let { return it.takeIf(String::isNotEmpty) }
+        // Key absence is the one-shot migration gate. Close it during THIS construction even when there is
+        // nothing to copy: otherwise a user who starts this build on Claude, later switches to Codex, and
+        // relaunches would make the then-current Claude value look like pre-split Codex history.
+        val migrated = SecureStore.getString(K_DEFAULT_EFFORT)
+        SecureStore.putString(key, migrated ?: "")
+        return migrated?.takeIf(String::isNotEmpty)
+    }
+
+    fun defaultEffortFor(agent: AgentKind): String? = when (agent) {
+        AgentKind.CLAUDE -> defaultEffort.value
+        AgentKind.CODEX -> defaultCodexEffort.value
+        AgentKind.OPENCODE -> defaultOpenCodeEffort.value
+        AgentKind.KIMI -> defaultKimiEffort.value
+        AgentKind.ZCODE -> defaultZCodeEffort.value
+        AgentKind.DSH -> defaultDshEffort.value
+    }
     /** Default Codex service tier for new sessions (`priority` = Fast); null follows the account default. */
     val defaultServiceTier = mutableStateOf(SecureStore.getString(K_DEFAULT_SERVICE_TIER)?.takeIf { it.isNotEmpty() })
 
@@ -518,6 +649,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  agent in Settings must not erase the choice the user made for another backend. */
     private val defaultCodexModel = mutableStateOf(SecureStore.getString(K_DEFAULT_CODEX_MODEL)?.takeIf { it.isNotEmpty() })
     private val defaultOpenCodeModel = mutableStateOf(SecureStore.getString(K_DEFAULT_OPENCODE_MODEL)?.takeIf { it.isNotEmpty() })
+    private val defaultKimiModel = mutableStateOf(SecureStore.getString(K_DEFAULT_KIMI_MODEL)?.takeIf { it.isNotEmpty() })
+    private val defaultZCodeModel = mutableStateOf(SecureStore.getString(K_DEFAULT_ZCODE_MODEL)?.takeIf { it.isNotEmpty() })
+    /** DSH (issue #255) has no model switching in v1, so this stays null in practice. It exists anyway so the
+     *  scoped-storage invariant holds structurally: nothing can fall through to another backend's key. */
+    private val defaultDshModel = mutableStateOf(SecureStore.getString(K_DEFAULT_DSH_MODEL)?.takeIf { it.isNotEmpty() })
 
     fun defaultModelFor(agent: AgentKind): String? = when (agent) {
         // legacy persisted bare "opus" follows the Opus row to Opus 5. Official endpoint only: on a
@@ -525,6 +661,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         AgentKind.CLAUDE -> defaultModel.value.let { if (gatewayBaseUrl.value == null) migrateLegacyClaudeModel(it) else it }
         AgentKind.CODEX -> defaultCodexModel.value
         AgentKind.OPENCODE -> defaultOpenCodeModel.value
+        AgentKind.KIMI -> defaultKimiModel.value
+        AgentKind.ZCODE -> defaultZCodeModel.value
+        AgentKind.DSH -> defaultDshModel.value
     }
 
     /** Persisted context-window override (tokens) used as the usage statusline's denominator, or null to follow
@@ -580,9 +719,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.getString(K_DEFAULT_AGENT)?.let { s -> AgentKind.entries.firstOrNull { it.name == s } } ?: AgentKind.CLAUDE,
     )
 
-    /** Project + session agent filter: "both" | "claude" | "codex" | "opencode" (persisted). Session rows
-     *  were covered by #31; project rows consume DirectoryEntry.sessionAgents as of issue #188. */
-    val agentFilter = mutableStateOf(SecureStore.getString(K_AGENT_FILTER)?.takeIf { it.isNotEmpty() } ?: "both")
+    /** Project + session agent filter: the SET of backends whose rows are shown; the full set = no filter
+     *  (persisted, migrating the pre-#248 single value — see [parseAgentFilter]). Session rows were covered
+     *  by #31; project rows consume DirectoryEntry.sessionAgents as of issue #188. */
+    val agentFilter = mutableStateOf(parseAgentFilter(SecureStore.getString(K_AGENT_FILTER)))
 
     /** Projects screen: tree (drill-down) vs flat. Persisted (default tree). */
     val treeView = mutableStateOf(SecureStore.getString(K_VIEW_MODE) != "flat")
@@ -600,6 +740,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (mode == themeMode.value) return
         themeMode.value = mode
         SecureStore.putString(K_THEME_MODE, mode.name)
+    }
+
+    /** Global accent source (issue #204): POCKET terracotta (default) or Codex teal. Persisted; passed to
+     *  PocketTheme(accent = …) at the app root, which points Tok.accent at the chosen hue. */
+    val accentTheme = mutableStateOf(AccentTheme.from(SecureStore.getString(K_ACCENT_THEME)))
+    fun setAccentTheme(theme: AccentTheme) {
+        if (theme == accentTheme.value) return
+        accentTheme.value = theme
+        SecureStore.putString(K_ACCENT_THEME, theme.name)
     }
 
     // Voice engine choice: route captures to the computer's whisper instead of on-device dictation —
@@ -652,12 +801,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         workingSetKey(accountId)?.let { decodeWorkingSet(SecureStore.getString(it)) } ?: emptyList(),
     )
 
-    /** Sessions that finished while the user was looking at something ELSE — the switcher's attention
-     *  dot. Cleared per-session on open; per-machine (a disconnect/switch drops them, see [disconnect]). */
+    /** Sessions whose real work (`executing || busy`) settled while the user was looking at something
+     *  ELSE. Cleared per-session only after an authoritative open; per-machine and in-memory by design. */
     val unseenSessions = mutableStateOf<Set<String>>(emptySet())
 
-    /** Session ids the LAST project list reported as working — the busy→idle edge detector's other half. */
+    /** Session ids the LAST project list reported as actually working — the work→idle edge detector. */
     private var lastWorkingSessions: Set<String> = emptySet()
+    /** Directory for each prior working id, retained across the edge so the visible project can re-list. */
+    private var lastWorkingDirectories: Map<String, String> = emptyMap()
 
     /** The session identity the chat is actually showing, or null when no chat is open. [sessionKey] alone
      *  can't say this: it deliberately survives [backToBrowse] as the draft key, and a switcher opened from
@@ -681,13 +832,27 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // fleetAttention). The seam is here for when asks go account-wide — no other change needed.
     )
 
+    /** Current work for display from the latest directory snapshot. This intentionally includes the
+     * terminal-Claude mtime heuristic so its existing Running affordance remains visible; only
+     * [noteWorkingSessions] uses the stricter authoritative subset to infer completion edges. */
+    fun currentlyWorkingSessionIds(): Set<String> =
+        runningSessions(directories.toList()).filterTo(mutableListOf()) { it.executing }
+            .mapTo(mutableSetOf()) { it.sessionId }
+
     /**
      * Record an open at the head of the MRU and clear that session's unseen mark. Called from the daemon's
      * [SessionLive] announce (authoritative identity), from the first prompt of a brand-new session (which
      * is when its title finally exists), and optimistically by [switchToSession] so the sheet re-orders on
-     * the tap rather than a round-trip later. Idempotent — a re-touch just refreshes labels.
+     * the tap rather than a round-trip later. The optimistic touch passes [markSeen]=false: a failed open
+     * must not erase a result the user never saw. Idempotent — a re-touch just refreshes labels.
      */
-    internal fun rememberOpenedSession(dirKey: String?, sessionId: String?, title: String?, agent: AgentKind?) {
+    internal fun rememberOpenedSession(
+        dirKey: String?,
+        sessionId: String?,
+        title: String?,
+        agent: AgentKind?,
+        markSeen: Boolean = true,
+    ) {
         if (dirKey.isNullOrBlank() || sessionId.isNullOrBlank()) return
         val known = workingSetMru.firstOrNull { it.sessionId == sessionId }
         val project = directories.firstOrNull { it.path == dirKey }?.name?.takeIf { it.isNotBlank() }
@@ -699,18 +864,40 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // the demo walks fake projects — it may drive the switcher, but it must never write them into
         // the real store (same rule the rest of demo mode follows: no persistence, no network)
         if (!demoMode.value) workingSetKey()?.let { SecureStore.putString(it, encodeWorkingSet(workingSetMru.toList())) }
-        if (sessionId in unseenSessions.value) unseenSessions.value = unseenSessions.value - sessionId
+        if (markSeen && sessionId in unseenSessions.value) unseenSessions.value = unseenSessions.value - sessionId
     }
 
-    /** Fold a fresh project list into the finished-while-away marks. Marks are pruned to sessions the
-     *  switcher can actually SHOW (running or remembered) — a badge with no row behind it is a lie. */
+    /** Fold a fresh project list into the finished-while-away marks. Only daemon-reported work
+     *  (`executing || busy`) participates; a merely live/idle process is not a running task. Marks are
+     *  retained even for sessions never opened on this client so a later Sessions list can surface them.
+     *  The set is process-local and reset on disconnect, so this does not create a durable notification log. */
     private fun noteWorkingSessions() {
-        val now = runningSessions(directories.toList()).map { it.sessionId }.toSet()
-        val marked = markFinishedAway(lastWorkingSessions, now, openSessionId(), unseenSessions.value)
-        val visible = now + workingSetMru.map { it.sessionId }
-        val pruned = marked.filterTo(mutableSetOf()) { it in visible }
-        if (pruned != unseenSessions.value) unseenSessions.value = pruned
+        val observedRows = runningSessions(directories.toList())
+        val nowRows = observedRows.filter { it.executing && it.workStateAuthoritative }
+        val now = nowRows.map { it.sessionId }.toSet()
+        val settled = observedRows.filterTo(mutableListOf()) { !it.executing && it.workStateAuthoritative }
+            .mapTo(mutableSetOf()) { it.sessionId }
+        val before = unseenSessions.value
+        val marked = markFinishedAway(lastWorkingSessions, settled, openSessionId(), unseenSessions.value)
+        if (marked != before) unseenSessions.value = marked
+        val newlyFinished = marked - before
+        val listedDir = sessionsDir.value
+        if (listedDir != null && newlyFinished.any { sameDirPath(lastWorkingDirectories[it], listedDir) }) {
+            // A session started on another client may not exist in our stale Sessions snapshot yet.
+            // Refresh exactly on a completion edge so its NEW_RESULT row becomes renderable immediately.
+            scope.launch { runCatching { send(ListSessions(listedDir)) } }
+        }
         lastWorkingSessions = now
+        lastWorkingDirectories = nowRows.associate { it.sessionId to it.dirKey }
+    }
+
+    /** The current surface has already shown this session settling, so a delayed directory snapshot must
+     * not relabel it as unseen after a quick Back. If background work is still live, its next snapshot
+     * re-enters the baseline and a later away-from-screen completion remains discoverable. */
+    private fun noteCurrentSettledSeen(sessionId: String?) {
+        sessionId ?: return
+        lastWorkingSessions = lastWorkingSessions - sessionId
+        lastWorkingDirectories = lastWorkingDirectories - sessionId
     }
 
     /** Composer draft persisted per conversation. Keyed most-durable-first: the real sessionId (stable across
@@ -785,6 +972,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val addingDevice = mutableStateOf(false)
     /** No-pairing demo: when true, all I/O is short-circuited to local sample data (see [enterDemo]). */
     val demoMode = mutableStateOf(false)
+
+    /** `demo=1` for the funnel events the demo also fires. [enterDemo] deliberately reuses the REAL state
+     *  machine, so connected/session_opened/prompt_sent land whether or not a computer was ever paired —
+     *  untagged, demo browsing read as activation (issue #278). Tag, don't suppress: demo usage is a metric
+     *  of its own, and reports split on the parameter. */
+    private fun demoTag(): Map<TelKey, Any> = if (demoMode.value) mapOf(TelKey.Demo to 1) else emptyMap()
     /** PREVIEW: brief connecting → end-to-end-encrypted opener shown before the demo project list. */
     val demoConnecting = mutableStateOf(false)
     val directories = mutableStateListOf<DirectoryEntry>()
@@ -854,6 +1047,44 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  error line. Cleared by the next attempt / [dismissRenameError]. */
     val renameError = mutableStateOf<RenameRefusal?>(null)
     private var renameTarget: String? = null // the sessionId the in-flight RenameSession asked about
+
+    // ── session rewind / fork (issue #282, docs/design/REWIND-FORK.md) ──────────────────────────────
+
+    /** The message a rewind/fork was asked about, held while the dry run is out and the confirmation
+     *  sheet is up. [text] is the anchor's own wording — the composer is prefilled with it after a
+     *  rewind, which is the whole point of the gesture ("say that again, differently"). */
+    data class RewindTarget(val convoId: String, val seq: Long, val uuid: String, val text: String, val mode: String)
+
+    /** What the confirmation sheet is showing. `null` = no sheet. [counts] is null while the dry run is
+     *  in flight — the sheet opens immediately in a loading state rather than after a round trip, so the
+     *  gesture feels answered even on a slow link. */
+    data class RewindSheet(val target: RewindTarget, val counts: RewindCounts? = null, val submitting: Boolean = false)
+    data class RewindCounts(val turns: Int, val toolCalls: Int)
+
+    val rewindSheet = mutableStateOf<RewindSheet?>(null)
+
+    /** The daemon's machine-readable refusal of the last rewind attempt (a [dev.ccpocket.protocol.RewindRefusal]
+     *  value), surfaced as a transient bar. Never rendered raw — the UI maps known values to copy and
+     *  falls back to a generic line for anything a newer daemon invents. */
+    val rewindError = mutableStateOf<String?>(null)
+
+    fun dismissRewindError() { rewindError.value = null }
+
+    /** Where the OPEN conversation came from, when this app is the one that branched it (issue #282).
+     *  Deliberately local and short-lived rather than read back off the session list: the branch has no
+     *  transcript — and therefore no list row and no lineage ledger entry — until its first turn, so for
+     *  the whole "rewound, now retype it" window the client's own memory is the only source there is.
+     *  [convoId] scopes it: the banner shows only while that exact conversation is on screen. */
+    data class SessionLineage(val convoId: String, val mode: String, val fromSessionId: String?, val fromTitle: String)
+
+    val sessionLineage = mutableStateOf<SessionLineage?>(null)
+
+    /** The cut that has been SENT and is waiting for its [dev.ccpocket.protocol.RewindDone].
+     *  Deliberately outlives [rewindSheet]: the daemon opens the branch and announces it BEFORE it answers
+     *  the request, so by the time the answer lands `convoId` may already be the branch's — matching the
+     *  answer against the live conversation would drop it exactly when it succeeded. Cleared by the answer
+     *  (or by a conversation switch, which orphans it). */
+    private var rewindAwaiting: RewindTarget? = null
     val messages = mutableStateListOf<ChatItem>()
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
     val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
@@ -876,8 +1107,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      * the daemon deadline. */
     val askRisk = mutableStateMapOf<ApprovalKey, PermissionRiskUpdated>()
 
-    /** The current card's advisory risk, if any (M3). */
-    fun riskFor(ask: PermissionAsk): String? = askRisk[ApprovalKey(ask.convoId, ask.askId)]?.risk
+    /** The current card's advisory risk LEVEL, if any (M3) — the desktop card's badge input. */
+    fun riskFor(ask: PermissionAsk): String? = riskDetailFor(ask)?.risk
+
+    /** The current card's FULL risk event (M3): level plus reason, reason codes and assessed time. The
+     *  Secure Approval sheet renders the evidence, not just the badge — a level with no reason is a verdict
+     *  the user can't check. */
+    fun riskDetailFor(ask: PermissionAsk): PermissionRiskUpdated? = askRisk[ApprovalKey(ask.convoId, ask.askId)]
 
     /** issue #100: is THIS exact ask the one the daemon reported TIMED_OUT? Composite-matched (P1-3). */
     fun askTimedOut(ask: PermissionAsk): Boolean = timedOutAskId.value == ApprovalKey(ask.convoId, ask.askId)
@@ -903,6 +1139,29 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val viewedFileProgress = mutableStateOf<Pair<Long, Long>?>(null) // received/total bytes of an in-flight chunked read (#134 · 0714 A1 determinate bar)
     val viewedFileDiff = mutableStateOf<FileDiff?>(null)      // the loaded line-level diff; ok=false = none/too-old daemon
     val exportWaiting = mutableStateOf(false)                 // an ExportFile awaits the owner's approval/reply (issue #67 v2)
+
+    // ── Git panel (issue #280) + worktrees (issue #281): owner-only, per-session surfaces ────────
+    // Every request below is a NEW frame family, so an old daemon drops it silently — each one arms
+    // an 8s deadline that lands in the honest "update the computer" state rather than spinning.
+    val gitStatus = mutableStateOf<GitStatus?>(null)          // the repository's whole state (Screen A)
+    val gitStatusLoading = mutableStateOf(false)
+    val gitStatusUnavailable = mutableStateOf(false)          // no reply — the daemon predates pocket/git.*
+    val gitDiff = mutableStateOf<GitDiff?>(null)              // the open file diff (Screen B); ok=false = none/too-old
+    val gitDiffPath = mutableStateOf<String?>(null)           // non-null = the git diff screen is open
+    val gitDiffStaged = mutableStateOf(false)                 // which side the Working|Staged control shows
+    val gitBusyOp = mutableStateOf<String?>(null)             // the verb whose button spins; nothing ELSE locks (A4)
+    val gitError = mutableStateOf<GitActionResult?>(null)     // the last failed action — drives the A5/A6 strip
+    // A fetch changes nothing local, so without this the panel answers a successful fetch with silence
+    // (issue #280 真机反馈 1). Cleared the moment the next verb starts — it is a receipt, not a state.
+    val gitFetchNote = mutableStateOf<GitFetchReport?>(null)
+    val gitPendingConfirm = mutableStateOf<GitActionPreview?>(null) // a two-step verb's preview → Screen D / C1-C2
+    val worktrees = mutableStateOf<WorktreeList?>(null)       // every checkout of this repository (#281 Screen A)
+    // the post-create receipt (#281 功能范围「在新建 worktree 中启动会话」, restored by #294 真机反馈):
+    // a successful worktree.add answers with the created path, and the sheet it drives offers to open a
+    // session there. A receipt, not a state — dismissed by hand or replaced by the next add.
+    val worktreeCreated = mutableStateOf<WorktreeCreated?>(null)
+    val worktreesLoading = mutableStateOf(false)
+    val worktreesUnavailable = mutableStateOf(false)          // no reply — the daemon predates pocket/worktree.*
     val pathListing = mutableStateOf<PathEntries?>(null)     // latest @-file completion listing (issue #75); match its subPath before use
     val browseListing = mutableStateOf<PathEntries?>(null)   // latest anchored folder-browse listing (issue #152); match its (workdir, subPath) before use
     val browseRoots = mutableStateOf<List<String>>(emptyList()) // #176: fs roots latched from the "~" home-anchor reply (owner-only; empty on old daemon / guest → root switcher hidden)
@@ -987,6 +1246,49 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val switchingSession = mutableStateOf(false)
     val openTimedOut = mutableStateOf(false)                 // the daemon never answered an OpenSession within 8s — slim banner, auto-dismissed (issue #41)
     private var openGen = 0                                  // generation counter matching each openSession call to its own safety-net timer
+    private var openDispatchedGen = 0                        // current generation has reached its OpenSession send (#235 identity handoff)
+    private var openJob: Job? = null                         // owns both the state-switch worker and its 8s deadline
+    /**
+     * Explicit navigation fence (issue #226). [sessionKey] intentionally survives [backToBrowse] so a
+     * draft keeps its durable key, but it therefore cannot also prove that the user still wants a chat
+     * route. Once the user backs out, late SessionLive re-announces from that same session are background
+     * state and must not bind [convoId] again. A later explicit [openSession] lowers the fence.
+     *
+     * Default false preserves the cold/test bootstrap seam where a first SessionLive establishes an
+     * otherwise-unbound view; every real browse action raises it before any late frame can arrive.
+     */
+    private var sessionNavigationFenced = false
+    /** The workdir of an in-flight BRAND-NEW OpenSession (resumeId == null), armed by [openSession] and
+     *  disarmed when its SessionLive answer lands (or the open fails / times out). A brand-new session has
+     *  no sessionId to recognize its announce by, so the #219 identity guard in the SessionLive handler
+     *  matches the answer on this workdir instead. Resume opens never need it — their announce carries the
+     *  resumed sessionId, which [sessionKey] already pins. */
+    private var pendingNewOpenWd: String? = null
+
+    /** One open request's full identity: everything [openSession] needs to REPLAY it (the desktop's retry)
+     *  and enough to tell two requests apart (the no-op guard). Issue #235. */
+    private data class OpenAttempt(
+        val wd: String,
+        val resumeId: String?,
+        val startMode: PermissionMode,
+        val title: String?,
+        val agent: AgentKind?,
+        val startPermissionMode: String?,
+        val startModel: String?,
+    )
+
+    /** The open currently in flight, claimed SYNCHRONOUSLY by [openSession] before it launches (issue #235).
+     *  [opening] alone could not gate a double-click: it was raised inside the coroutine, so two clicks in
+     *  the same frame both got past it and the second one's CloseSession+OpenSession tore down the session
+     *  the first had just landed. Released on every terminal path — the SessionLive answer, a PocketError,
+     *  the 8s net, disconnect/demote — exactly where [pendingNewOpenWd] is, so a claim can never outlive
+     *  the request that made it. (The wire carries no request id; releasing on any of those is the
+     *  provably safe direction — an early release only re-enables a retry, it never opens anything.) */
+    private var openInFlight: OpenAttempt? = null
+
+    /** The last open asked for, kept PAST its terminal path so [retryOpen] can replay the same request —
+     *  the desktop's open-failed pane offers a retry and must not silently re-open under other flags. */
+    private var lastOpenAttempt: OpenAttempt? = null
     val autoFocusComposer = mutableStateOf(false)            // brand-new session: ChatScreen raises the keyboard once on landing (consumed there)
     val streaming = mutableStateOf(false)
     val observing = mutableStateOf(false) // viewing a session running outside the daemon (read-only tail)
@@ -1063,6 +1365,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var promptRetry: PromptRetry? = null
     private var promptResendArmed = false // set by SessionGone: the next matching SessionLive resends promptRetry
     private var promptPending = false // a User bubble is marked pending until the daemon shows signs of life
+    /** The newest prompt whose receipt/start state may still change the global watchdogs. PromptAck can race
+     *  behind the first AssistantChunk (the daemon's stdout pump is concurrent with the stdin write), and old
+     *  receipts can arrive after a newer send. Only an exact id match may advance this state machine. */
+    private var activePromptId: String? = null
 
     /** The in-flight prompt got neither a [dev.ccpocket.protocol.PromptAck] nor any stream evidence within
      *  [promptReceiptTimeoutMs] (issue #78). The link can CLAIM healthy while nothing comes back — outboxes
@@ -1074,7 +1380,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var promptWatchdog: Job? = null
     internal var promptReceiptTimeoutMs = 10_000L // > relay RTT + a lazy agent spawn; a test seam shrinks it
 
-    /** Second-stage deadline (issue #104): a [dev.ccpocket.protocol.PromptAck] only means the daemon WROTE
+    /** Legacy-daemon second-stage deadline (issue #104): a [dev.ccpocket.protocol.PromptAck] only means the daemon WROTE
      *  the prompt to the agent's stdin — not that a turn started. A wedged or mid-relaunch agent can swallow
      *  that write and emit nothing, leaving [streaming] stuck true and the UI silently "thinking" forever
      *  (issue #78's receipt watchdog is already cancelled by the ack, so nothing catches this). Once delivered
@@ -1084,10 +1390,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  SessionGone same-id resend safe would here turn a same-id resend into a bare re-ack — no turn), and a
      *  fresh-id auto-resend would double-run a turn that was merely slow to start. The recovery is user-driven
      *  ([resendStalledPrompt], fresh id). [turnStalled] retracts on the first real turn frame or a session change.
-     *  Only for prompts sent into an IDLE session — a mid-turn send is the queued case, [turnQueued]. */
+     *  Only for prompts sent into an IDLE session — a mid-turn send is the queued case, [turnQueued]. Daemons
+     *  advertising [dev.ccpocket.protocol.DaemonInfo.supportsPromptRecovery] own this recovery with their
+     *  unconsumed ledger, so the silence-only resend timer is disabled for them. */
     val turnStalled = mutableStateOf(false)
 
-    /** Queued flavor of the same deadline: the prompt was sent INTO an already-running turn (the composer's
+    /** Legacy queued flavor of the same deadline: the prompt was sent INTO an already-running turn (the composer's
      *  "sending will queue" state), so the CLI parks it until the next tool boundary / turn end — silence past
      *  the deadline is expected there, not a swallow. The watchdog can only be pending while the prompt is
      *  provably still queued (consuming it takes a tool boundary or turn end, and either frame feeds
@@ -1126,18 +1434,38 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Real turn evidence (chunk / tool / turn-end / error) or a terminal frame (process exit, session gone):
      *  the agent is actually producing — or the whole turn is being torn down. Cancels BOTH the delivery
      *  receipt watchdog (issue #78) and the turn-start watchdog (issue #104), clears both stall cues, drops
-     *  the retry copy, and flips the pending User bubble to delivered (issue #41). */
-    private fun promptEvidence() {
+     *  the retry copy, and flips the matching pending User bubble out of its local-only state (issue #41).
+     *
+     *  A frame from a turn that was ALREADY running when this prompt was sent is not receipt evidence for
+     *  the queued prompt: the old turn can keep streaming before this SendPrompt even reaches the daemon.
+     *  [exactPrompt] is reserved for evidence that names/resolves this prompt itself (currently a matching
+     *  ConvoHistory USER row) and for terminal teardown where no delivery claim remains on screen. */
+    private fun promptEvidence(exactPrompt: Boolean = false) {
+        clearTurnWatchdogState() // any real frame retires a silence-only turn inference
+        if (promptPending && promptQueued && !exactPrompt) return
+
+        val promptId = activePromptId
         promptRetry = null
+        activePromptId = null
         promptWatchdog?.cancel(); promptWatchdog = null // the daemon is talking — the receipt deadline is moot
-        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false // …and a real turn frame moots the turn deadline
         sendStalled.value = false
-        turnStalled.value = false
-        turnQueued.value = false
         if (!promptPending) return
         promptPending = false
-        val i = messages.indexOfLast { it is ChatItem.User }
+        val i = messages.indexOfLast {
+            it is ChatItem.User && it.pending && (promptId == null || it.promptId == promptId)
+        }
         (messages.getOrNull(i) as? ChatItem.User)?.takeIf { it.pending }?.let { messages[i] = it.copy(pending = false) }
+    }
+
+    /** TranscriptMerge may resolve (or replace) the active local pending bubble when a reconnect replay
+     *  contains the matching USER row. That is stronger evidence than link liveness: retire the receipt
+     *  deadline and retry state too, otherwise the invisible old [sendStalled] leaks into the next send. */
+    private fun reconcilePromptReceiptFromHistory(before: List<ChatItem>, after: List<ChatItem>) {
+        if (!promptPending) return
+        val promptId = activePromptId ?: return
+        val wasPending = before.any { it is ChatItem.User && it.promptId == promptId && it.pending }
+        val remainsPending = after.any { it is ChatItem.User && it.promptId == promptId && it.pending }
+        if (wasPending && !remainsPending) promptEvidence(exactPrompt = true)
     }
 
     /** Delivery receipt ONLY (PromptAck, issue #104): the daemon wrote the prompt to the agent's stdin, but an
@@ -1145,11 +1473,52 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  is still expected, hand off to the turn-start watchdog. Deliberately keeps [promptRetry] — the resend cue
      *  (and a late SessionGone in this window) still needs the text/images. The PromptAck handler flips the
      *  specific bubble to delivered right after this; here we only clear the delivery FLAG. */
-    private fun promptDelivered() {
+    private fun promptDelivered(promptId: String) {
+        // The pump may emit real output before sendPrompt() returns and the daemon emits PromptAck. In that
+        // ordering promptEvidence() already retired activePromptId; re-arming here creates the exact false
+        // "no response — resend" cue on top of a live/completed answer. A receipt for an older queued send is
+        // equally forbidden from controlling the newest prompt's watchdog.
+        if (activePromptId != promptId || !promptPending) return
         promptWatchdog?.cancel(); promptWatchdog = null // receipt arrived — the delivery deadline is moot
         sendStalled.value = false
         promptPending = false
-        if (streaming.value) { awaitingTurn = true; armTurnWatchdog(queued = promptQueued) } // a TurnDone/error already in wouldn't re-arm
+        // #122-capable daemons keep the prompt in an unconsumed ledger and re-deliver it after process
+        // replacement. A quiet first-token window is therefore not a failure signal (large-context Codex and
+        // Claude turns routinely exceed 45s); blind fresh-id resend can double-execute the request.
+        if (promptQueued && streaming.value) {
+            // Queue status is informational and non-actionable, so it remains useful with a ledger-capable
+            // daemon; only the unsafe "swallowed → resend" inference is retired.
+            awaitingTurn = true
+            armTurnWatchdog(queued = true, promptId = promptId)
+        } else if (daemonOwnsPromptRecovery) {
+            clearTurnWatchdogState()
+        } else if (streaming.value) {
+            awaitingTurn = true
+            armTurnWatchdog(queued = false, promptId = promptId)
+        } // a TurnDone/error already in wouldn't re-arm
+    }
+
+    /** Retire only the ack→turn fallback. The prompt retry/receipt state is separate: a SessionLive reattach
+     *  proves the conversation lifecycle again, but it does not by itself prove that this exact prompt was
+     *  consumed. */
+    private fun clearTurnWatchdogState() {
+        turnWatchdog?.cancel(); turnWatchdog = null
+        awaitingTurn = false
+        turnStalled.value = false
+        turnQueued.value = false
+    }
+
+    /** A prompt's retry/receipt/turn cues belong to one visible conversation. Every explicit conversation
+     *  boundary calls this alongside clearing [messages], so an invisible timer cannot resurrect underneath
+     *  a later session or its first fresh send. Transport reconnect is intentionally NOT such a boundary. */
+    private fun clearPromptLifecycleState() {
+        promptWatchdog?.cancel(); promptWatchdog = null
+        promptRetry = null
+        promptResendArmed = false
+        promptPending = false
+        activePromptId = null
+        sendStalled.value = false
+        clearTurnWatchdogState()
     }
 
     // mode/model/effort are claude launch flags, NOT stored in the transcript jsonl. Leaving an idle
@@ -1202,42 +1571,118 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val livePartial = mutableStateOf("")                     // native dictation: volatile tail (muted)
     val micPermissionSheet = mutableStateOf(false)           // S6
     val voiceNotice = mutableStateOf<StringResource?>(null)  // transient "didn't catch any speech"
+    // A finished transcript waiting for the composer to pick up (issue #221): recognition can be wrong, so
+    // the result lands in the input box for the user to review/edit and send EXPLICITLY — it never auto-sends.
+    // The UI (App.kt) appends it after the current draft, drops the caret at the end and takes focus, then
+    // clears this back to null.
+    val pendingVoiceText = mutableStateOf<String?>(null)
     private val recorder by lazy { VoiceRecorder() }
     private var usingNative = false
     private var preferRemote = false                         // sticky after a native-engine failure
     private var keptAudio: RecordedAudio? = null             // retained for S5 retry (re-send, not re-record)
-    private var captureId: String? = null
+    internal var captureId: String? = null // internal: tests drive onTranscript's capture-match gate
     private var voiceTicker: Job? = null
     private var voiceTimeout: Job? = null
     private var levelsJob: Job? = null
     private var dictationJob: Job? = null
     private var noticeJob: Job? = null
+    private var voiceStartJob: Job? = null                    // the async recorder.start() window (issue #266)
+    private var interruptJob: Job? = null                     // system interruption (call / route steal) collector
 
-    /** Pair from a scanned/pasted `ccpocket://pair?...` link, then connect end-to-end. */
-    fun pair(link: String) {
+    /** Pair from a scanned/pasted `ccpocket://pair?...` link, then connect end-to-end.
+     *  [fromScan] only flavors telemetry (source=qr-link vs link) — see [handleIncomingLink]. */
+    fun pair(link: String, fromScan: Boolean = false) {
         val info = Pairing.parse(link.trim())
-        if (info == null) { status.value = StatusMsg(Res.string.status_invalid_link); return }
+        if (info == null) {
+            status.value = StatusMsg(Res.string.status_invalid_link)
+            // a reject BEFORE any network is still a pairing failure — untracked, it looked like "never tried"
+            setPairFailure(PairFailure.PARSE)
+            Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to PairFailure.PARSE.wireReason(null)))
+            return
+        }
+        setPairFailure(null)
+        pairVerifying.value = true
         status.value = StatusMsg(Res.string.status_pairing)
-        scope.launch { doPair("link") { info } }
+        scope.launch { doPair(if (fromScan) "qr-link" else "link") { info } }
     }
 
     /** A scanned/opened `ccpocket://…` URL. Kept as the historical name for the pairing call sites, but it
      *  is now just [handleIncomingLink]: the scanner that used to see only pair links routes collaborator
      *  and share invites to their trust screens instead of rejecting them (§7). */
-    fun handlePairUrl(url: String) { handleIncomingLink(url) }
+    fun handlePairUrl(url: String, fromScan: Boolean = false) { handleIncomingLink(url, fromScan = fromScan) }
 
-    /** Pair from the 6-digit code shown by `cc-pocket pair` on the computer. */
-    fun pairWithCode(code: String) {
+    /** Pair from the 6-digit code shown by `cc-pocket pair` on the computer.
+     *  [fromScan] only flavors telemetry: a scanned QR carries the same `code=` payload, so without it every
+     *  camera pairing reported source=code and the scanner's share of activations was invisible. */
+    fun pairWithCode(code: String, fromScan: Boolean = false) {
         status.value = StatusMsg(Res.string.status_pairing)
-        scope.launch { doPair("code") { Pairing.resolveCode(code.trim(), it) } }
+        // cleared HERE as well as in doPair: the launch is one dispatch away, and a card from the previous
+        // attempt surviving into the new one's first frames reads as "that failed again, instantly"
+        setPairFailure(null)
+        pairVerifying.value = true
+        scope.launch { doPair(if (fromScan) "qr" else "code") { Pairing.resolveCode(code.trim(), it) } }
+    }
+
+    /**
+     * pair_failed cause as a CLASS, never the exception text: a redeem failure's message carries the relay's
+     * raw response body, which has no business leaving the device. Same shape as onTransportDown's conn_failed.
+     *
+     * Both halves now come from ONE place — [classifyPairFailure] decides the class, [wireReason] names it —
+     * so the screen's actionable card and the funnel's category can never describe the same failure
+     * differently. The strings are unchanged by construction; `PairFailureTest` pins that.
+     */
+    private fun pairFailReason(t: Throwable): String = classifyPairFailure(t).wireReason(t)
+
+    /**
+     * Why the last pairing attempt failed, as the class the SCREEN can act on (issue #278 batch 2).
+     *
+     * [status] alone could not carry this: one sentence cannot both name a stale code and offer the command
+     * that mints a new one. Written at every point that reports `pair_failed` from THIS screen's routes, and
+     * cleared the moment a new attempt starts — a card that outlives its attempt is a lie about the present.
+     */
+    val pairFailure = mutableStateOf<PairFailure?>(null)
+
+    /**
+     * Bumped on every write to [pairFailure], so a pairing surface can tell news from history.
+     *
+     * The state is repository-scoped but the card is screen-scoped: an unroutable `ccpocket://` link tapped
+     * while the user was happily connected sets PARSE from the ROOT deep-link handler, and without this a
+     * pairing screen opened days later would greet them with it. A surface records the value it entered on
+     * and shows only failures recorded after that.
+     */
+    val pairFailureSeq = mutableStateOf(0)
+
+    /** True while a pairing attempt is in flight, so the code field can lock and say why it is locked.
+     *  Distinct from [status], which is a sentence and cannot gate an input. */
+    val pairVerifying = mutableStateOf(false)
+
+    /** Drop the failure card — the user is starting over (the "Try again" / "Retry" actions). */
+    fun clearPairFailure() { setPairFailure(null) }
+
+    /** Which attempt currently OWNS the screen state. The alternate routes (scan, paste, LAN) stay live
+     *  while an attempt is in flight, so a slow attempt can still be running when a later one succeeds —
+     *  and a loser that reports its timeout afterwards would arm a failure card over a completed pairing. */
+    private var pairAttempt = 0
+
+    private fun setPairFailure(kind: PairFailure?) {
+        pairFailure.value = kind
+        pairFailureSeq.value++
     }
 
     private suspend fun doPair(source: String, getInfo: suspend (HttpClient) -> dev.ccpocket.app.pairing.PairingInfo) {
-        val client = HttpClient()
+        // before any network: this is the "the user actually tried" mark the funnel was missing (issue #278)
+        Telemetry.track(TelEvent.PairStarted, mapOf(TelKey.Source to source))
+        val attempt = ++pairAttempt
+        setPairFailure(null)          // this attempt's outcome is not known yet; the last one's card must go
+        pairVerifying.value = true
+        // constructed INSIDE the try: an engine that fails to initialise would otherwise skip the finally
+        // and strand the screen on a locked field with a spinner and no recovery
+        var client: HttpClient? = null
         try {
+            client = HttpClient()
             val info = getInfo(client)
             val keys = Pairing.deviceKeys()
-            paired.value = Pairing.redeem(info, keys, client) // upserts the list + pins this as the active account
+            paired.value = Pairing.redeem(info, keys, client!!) // upserts the list + pins this as the active account
             // a FRESH pairing (e.g. a guest redeeming a new invite for the same daemon/accountId) supersedes
             // any recorded "share ended" terminal state — else the new binding would open on the dead card
             paired.value?.let { SecureStore.remove(K_SHARE_ENDED_PREFIX + it.accountId) }
@@ -1249,10 +1694,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             startRelay()
         } catch (t: Throwable) {
             status.value = StatusMsg(Res.string.status_pair_failed, t.message ?: t::class.simpleName ?: "error")
-            Telemetry.track(TelEvent.PairFailed)
+            // …but only the NEWEST attempt owns the SCREEN state. Telemetry below is deliberately left
+            // unconditional: a superseded attempt really did fail, and suppressing it here would change what
+            // the funnel counts (a pre-existing race, out of this change's scope).
+            if (attempt == pairAttempt) setPairFailure(classifyPairFailure(t))
+            Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t)))
             Telemetry.recordError(t.message ?: "pair failed", "pairing")
         } finally {
-            client.close()
+            if (attempt == pairAttempt) pairVerifying.value = false
+            client?.close()
         }
     }
 
@@ -1507,12 +1957,32 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.putString(K_VIEW_MODE, if (on) "tree" else "flat")
     }
 
-    /** Settings: persist the default reasoning effort for new sessions (null = model default). */
+    /** Legacy Claude entry point retained for source/storage compatibility. */
     fun setDefaultEffort(level: String?) {
         val v = level?.takeIf { it.isNotEmpty() }
         if (v == defaultEffort.value) return
         defaultEffort.value = v
         SecureStore.putString(K_DEFAULT_EFFORT, v ?: "")
+    }
+
+    /** Settings: persist an agent-scoped default effort. No backend may overwrite another one's choice. */
+    fun setDefaultEffortFor(agent: AgentKind, level: String?) {
+        if (agent == AgentKind.CLAUDE) {
+            setDefaultEffort(level)
+            return
+        }
+        val v = level?.takeIf { it.isNotEmpty() }
+        val (state, key) = when (agent) {
+            AgentKind.CLAUDE -> error("handled above")
+            AgentKind.CODEX -> defaultCodexEffort to K_DEFAULT_CODEX_EFFORT
+            AgentKind.OPENCODE -> defaultOpenCodeEffort to K_DEFAULT_OPENCODE_EFFORT
+            AgentKind.KIMI -> defaultKimiEffort to K_DEFAULT_KIMI_EFFORT
+            AgentKind.ZCODE -> defaultZCodeEffort to K_DEFAULT_ZCODE_EFFORT
+            AgentKind.DSH -> defaultDshEffort to K_DEFAULT_DSH_EFFORT
+        }
+        if (v == state.value) return
+        state.value = v
+        SecureStore.putString(key, v ?: "")
     }
 
     fun setDefaultServiceTier(tier: String?) {
@@ -1535,24 +2005,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             AgentKind.CLAUDE -> defaultModel
             AgentKind.CODEX -> defaultCodexModel
             AgentKind.OPENCODE -> defaultOpenCodeModel
+            AgentKind.KIMI -> defaultKimiModel
+            AgentKind.ZCODE -> defaultZCodeModel
+            AgentKind.DSH -> defaultDshModel
         }
         if (v == state.value) return
         state.value = v
-        if (agent == AgentKind.CODEX) {
-            modelCapabilities(agent, v)?.let { caps ->
-                if (defaultEffort.value != null && defaultEffort.value !in caps.reasoningEfforts) {
-                    setDefaultEffort(null)
-                }
-                if (defaultServiceTier.value != null && caps.serviceTiers.none { it.id == defaultServiceTier.value }) {
-                    setDefaultServiceTier(null)
-                }
-            }
-        }
+        reconcileDefaultCapabilities(agent)
         SecureStore.putString(
             when (agent) {
                 AgentKind.CLAUDE -> K_DEFAULT_MODEL
                 AgentKind.CODEX -> K_DEFAULT_CODEX_MODEL
                 AgentKind.OPENCODE -> K_DEFAULT_OPENCODE_MODEL
+                AgentKind.KIMI -> K_DEFAULT_KIMI_MODEL
+                AgentKind.ZCODE -> K_DEFAULT_ZCODE_MODEL
+                AgentKind.DSH -> K_DEFAULT_DSH_MODEL
             },
             v ?: "",
         )
@@ -1593,12 +2060,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.putString(K_DEFAULT_AGENT, a.name)
     }
 
-    /** Settings: persist the project/session agent filter ("both" | "claude" | "codex" | "opencode"). */
-    fun setAgentFilter(v: String) {
+    /** Settings: persist the project/session agent filter (the set of backends to show; #248). */
+    fun setAgentFilter(selected: Set<AgentKind>) {
+        val v = if (selected.isEmpty()) ALL_AGENTS else selected.toSet() // empty would hide everything with no way back
         if (v == agentFilter.value) return
         agentFilter.value = v
-        SecureStore.putString(K_AGENT_FILTER, v)
+        SecureStore.putString(K_AGENT_FILTER, encodeAgentFilter(v))
     }
+
+    /** Back to "show every agent" — the one call the removable chip and the Projects empty state share. */
+    fun clearAgentFilter() = setAgentFilter(ALL_AGENTS)
 
     /** Settings: persist the chat text scale (clamped to the slider range). Applies live to every message. */
     fun setFontScale(scale: Float) {
@@ -1754,7 +2225,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // offers addressed to THIS device. Sending the ordinary volley here would be three refusals.
                 send(ListHandoffs())
             } else {
-                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE), supportsApprovalV2 = true))
+                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true))
                 send(ListDirectories())
                 send(ListPendingApprovals)
             }
@@ -1889,10 +2360,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Drop the live connection and return to the Connect screen (pairing is kept). */
     fun disconnect() {
         sessionActive.value = false
+        // An OpenSession worker belongs to the link/computer that accepted the click. It may still be
+        // queued (or suspended on a full reconnect outbox), so invalidating only the claim is insufficient:
+        // the worker could wake after drainPending() and enqueue the old machine's open into the next link.
+        openGen++
+        openJob?.cancel(); openJob = null
         retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); deafJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel(); linkStableJob?.cancel(); presenceProbeJob?.cancel()
         retryJob = null; connectJob = null; inboundJob = null; controlJob = null; deafJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null; linkStableJob = null; presenceProbeJob = null
-        promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // pending bubbles leave with messages below
-        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false; turnQueued.value = false // (issue #104) drop the ack→turn deadline too
+        clearPromptLifecycleState() // pending bubbles and every related deadline leave with messages below
         // frames queued for the binding we're leaving must not leak into the next link (both transports
         // are reused across machine switches, and their outboxes deliberately buffer across reconnects)
         directAttemptInFlight = false
@@ -1900,9 +2375,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         connected.value = false
         phase.value = ConnPhase.Connecting
         pendingOpen = null // a queued push-tap target is moot once the user drops the connection
+        // #235: so is the open claim — carrying it across a reconnect would make the same row's next click
+        // a permanent no-op, and its retry target names a machine we may never come back to
+        openInFlight = null; lastOpenAttempt = null; pendingNewOpenWd = null
+        opening.value = false; switchingSession.value = false; openTimedOut.value = false
+        sessionNavigationFenced = true
         attachedThisSession = false; daemonOffline = false; pairingInvalid = false
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
         handoffsLoaded.value = false // inbox mode's readiness proof dies with the link, same as the list
+        clearReviewState() // a review ledger belongs to one machine — never show the last daemon's inbox
         pushDialJob?.cancel(); pushDialJob = null // an in-flight LAN-side token dial dies with the link
         // the shared-token observer dies with the link too (an inbox link that was removed must not be kept
         // alive by a collector); pushStarted re-arms it on the next Attached. PushTokens.ensureStarted() is
@@ -1915,8 +2396,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // store it". authState clears for the same reason — the next daemon's account is a fresh fetch.
         authState.value = null
         presetsState.value = null; presetsStateRev.value = 0
+        agentModels.clear() // model/effort capabilities belong to the daemon we just left; UNKNOWN on the next one until it replies
         gatewayBaseUrl.value = null // per-daemon truth (issue #139): the next machine re-announces via DaemonInfo
         bridgeControl.value = null  // per-daemon truth too — the next daemon re-advertises via DaemonInfo (issue #91)
+        daemonSupportedAgents.value = emptySet() // reverse agent capability: no stale ZCode across machines
+        daemonAgentsKnown = false // #276: back to "not told yet" — the guard must not deny during reconnect
+        daemonUsageAgentFilter.value = false // ditto (issue #258): the next machine re-advertises its own
+        // per-daemon truth: the allowance belongs to the ACCOUNT on the machine we just left. Showing it
+        // under the next machine's name would be a straight lie about a billing number.
+        claudeQuotaDeadline?.cancel(); claudeQuota.value = null; claudeQuotaLoading.value = false; claudeQuotaStatus.value = null
+        daemonOwnsPromptRecovery = false // ditto: an older next daemon still needs the legacy fallback
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
@@ -1926,9 +2415,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
         clearAskQueue()
         pendingApprovals.clear()
-        // #165: the busy→idle detector is per-MACHINE state. Carrying this machine's working ids into the
+        // #165/#239: the work→idle detector is per-MACHINE state. Carrying this machine's ids into the
         // next one's first project list would mark every one of them "finished while you were away".
-        lastWorkingSessions = emptySet(); unseenSessions.value = emptySet()
+        lastWorkingSessions = emptySet(); lastWorkingDirectories = emptyMap(); unseenSessions.value = emptySet()
         directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear(); clearFileUploads(); clearBackgroundJobs()
         resetHistoryPaging() // #147: the transcript left with messages — so must its cursor
         demoMode.value = false // leaving the demo returns to real pairing
@@ -1941,10 +2430,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // ── multi-device: bind several computers, talk to one at a time ─────────────────────────────────
 
     /** Pair another computer without dropping the existing ones: tear down the live link, show PairingScreen. */
-    fun beginAddDevice() { disconnect(); addingDevice.value = true }
+    fun beginAddDevice() { disconnect(); clearPairFailure(); addingDevice.value = true }
 
     /** Back out of "add a computer" — returns to the device picker (bindings are untouched). */
-    fun cancelAddDevice() { addingDevice.value = false }
+    fun cancelAddDevice() { clearPairFailure(); addingDevice.value = false }
 
     /**
      * Desktop "add a computer" while a session is live: pair the new binding and add it to the list, but
@@ -1966,7 +2455,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 onDone(true)
             } catch (t: Throwable) {
                 status.value = StatusMsg(Res.string.status_pair_failed, t.message ?: t::class.simpleName ?: "error")
-                Telemetry.track(TelEvent.PairFailed)
+                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t)))
                 onDone(false)
             } finally {
                 client.close()
@@ -2009,10 +2498,22 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         defaultMode.value = from.defaultMode.value
         defaultPermissionMode.value = from.defaultPermissionMode.value
         defaultEffort.value = from.defaultEffort.value
+        defaultCodexEffort.value = from.defaultCodexEffort.value
+        defaultOpenCodeEffort.value = from.defaultOpenCodeEffort.value
+        defaultKimiEffort.value = from.defaultKimiEffort.value
+        defaultZCodeEffort.value = from.defaultZCodeEffort.value
+        defaultDshEffort.value = from.defaultDshEffort.value
         defaultServiceTier.value = from.defaultServiceTier.value
         defaultModel.value = from.defaultModel.value
         defaultCodexModel.value = from.defaultCodexModel.value
         defaultOpenCodeModel.value = from.defaultOpenCodeModel.value
+        defaultKimiModel.value = from.defaultKimiModel.value
+        defaultZCodeModel.value = from.defaultZCodeModel.value
+        defaultDshModel.value = from.defaultDshModel.value
+        // This repository keeps the promoted MACHINE's capability catalog. Reconcile the shell defaults
+        // copied from the outgoing machine against that truth now, so Settings and the next OpenSession
+        // cannot disagree until another ModelsList happens to arrive.
+        AgentKind.entries.forEach(::reconcileDefaultCapabilities)
         contextWindowOverride.value = from.contextWindowOverride.value
         contextWindowOverrides.clear(); contextWindowOverrides.putAll(from.contextWindowOverrides) // #169: per-model table travels with the rest of Settings
         defaultAgent.value = from.defaultAgent.value
@@ -2020,6 +2521,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         treeView.value = from.treeView.value
         fontScale.value = from.fontScale.value
         themeMode.value = from.themeMode.value
+        accentTheme.value = from.accentTheme.value
         voiceWhisper.value = from.voiceWhisper.value
         replace(pinnedPaths, from.pinnedPaths.toList())
         // #165: NOT copied from the outgoing primary — the working set is per-computer, and this promote is
@@ -2043,15 +2545,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      * link would open a ghost session nobody is watching.
      */
     internal fun demoteToSatellite() {
+        // The UI open worker is not a transport job and therefore survives the fleet swap unless it is
+        // explicitly retired. A headless satellite must never execute a click queued by the old primary.
+        openGen++
+        openJob?.cancel(); openJob = null
+        pendingNewOpenWd = null
+        sessionNavigationFenced = true
         convoId.value?.let { c -> if (observing.value || !streaming.value) scope.launch { send(CloseSession(c)) } }
         pendingOpen = null
-        promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false
-        promptRetry = null; promptPending = false; promptResendArmed = false
+        clearPromptLifecycleState()
         convoId.value = null; currentSessionId = null; sessionKey.value = null
         workdir.value = null // same reason as disconnect(): a stale path must not leak into a later ⌘N (issue #56)
         sessionsDir.value = null; sessions.clear()
         chatTitle.value = null; observing.value = false; streaming.value = false
         opening.value = false; openTimedOut.value = false; switching.value = false; switchingSession.value = false
+        openInFlight = null; lastOpenAttempt = null // #235: the claim + its retry target belong to the machine we're leaving
         autoFocusComposer.value = false
         clearAskQueue()
         messages.clear(); pendingImages.clear()
@@ -2059,6 +2567,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         terminalEntries.clear(); terminalBusy.value = false
         changedFiles.clear(); changedFilesLoading.value = false; changedFilesUnavailable.value = false
         closeFileViewer()
+        clearGitState() // the Git panel is per-session too (#280/#281)
         pathListing.value = null
         allowRules.clear()
         slashCommands.clear()
@@ -2105,8 +2614,31 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     internal var onSendForTest: ((Frame) -> Unit)? = null // test seam: observe outbound frames (issue #104 resend)
 
+    /** The backend an outbound frame targets, for the reverse capability guard in [send]; null = not agent-scoped. */
+    private fun agentCarried(frame: Frame): AgentKind? = when (frame) {
+        is OpenSession -> frame.agent
+        is ScheduleCreate -> frame.agent
+        is FetchModels -> frame.agent
+        is ListSessionFiles -> frame.agent
+        is ReadFile -> frame.agent
+        is ExportFile -> frame.agent
+        is ReadFileDiff -> frame.agent
+        is CreateHandoff -> frame.agent
+        is FetchUsage -> frame.agent
+        else -> null
+    }
+
     /** All outbound frames funnel here; a throw means the link is dead — trigger the reconnect path. */
     private suspend fun send(frame: Frame) {
+        // Reverse capability guard (#275/#276): an old daemon coerces the unknown `zcode` enum to the Claude
+        // default, so never fire an agent-carrying frame at a daemon that lacks
+        // that backend — but ONLY once the daemon has actually told us, THIS connection, what it supports.
+        // Pre-DaemonInfo the set is empty for the ordinary reason "not told yet", not "unsupported"; dropping
+        // then silently killed ZCode reattach on every reconnect (no SessionLive, no retry). In that window
+        // let it through — a genuinely absent backend is refused by the daemon with agent_unavailable, the
+        // proper channel. The new-session picker is already gated upstream in openSession(), so this seam
+        // backstops every lower-level session, schedule, model, file, handoff, and usage path.
+        agentCarried(frame)?.let { if (daemonAgentsKnown && !supportsAgent(it)) return }
         onSendForTest?.invoke(frame)
         if (demoMode.value) { demoRespond(frame); return } // no network: synthesize the daemon's reply locally
         try {
@@ -2138,6 +2670,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Enter the demo: seed the project list + slash commands, then render like a connected session. */
     fun enterDemo() {
         demoMode.value = true
+        // Demo has no handshake, so explicitly emulate a current daemon rather than inheriting the
+        // disconnected socket's deny-by-default capability state.
+        daemonSupportedAgents.value = DAEMON_SUPPORTED_AGENT_WIRES.toSet()
+        daemonAgentsKnown = true // #276: demo asserts a current daemon's caps — the guard may act on them
+        daemonUsageAgentFilter.value = true // a current daemon honors the usage filter (issue #258)
+        daemonOwnsPromptRecovery = true // demo emulates the current daemon's prompt-lifecycle contract
         demoAsked = false
         sessionActive.value = true
         replace(slashCommands, DemoData.commands())
@@ -2251,8 +2789,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             val preview = isPreviewMode()
             val cmd = if (preview) DemoData.PREVIEW_ASK_PREVIEW else DemoData.ASK_PREVIEW
             val rule = if (preview) DemoData.PREVIEW_ASK_RULE else DemoData.ASK_RULE
-            val title = if (preview) getString(Res.string.preview_cmd_title) else DemoData.ASK_TITLE
-            val note = if (preview) getString(Res.string.preview_cmd_note) else null
+            // #251: same containment as daemonTooOldText() — a demo/App-Review script must never be
+            // the thing that kills the process it is demonstrating.
+            val title = if (preview) safeString("Run command") { getString(Res.string.preview_cmd_title) } else DemoData.ASK_TITLE
+            val note = if (preview) safeString("delete files") { getString(Res.string.preview_cmd_note) } else null
             delay(500)
             handle(AssistantChunk(convoId, demoSeq++, StreamPiece.Thinking(DemoData.THINKING)))
             delay(700)
@@ -2279,6 +2819,52 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // delivery→turn watchdog handoff (PromptAck vs. a following turn frame) without a live daemon.
     internal fun receiveForTest(f: Frame) = handle(f)
 
+    // Test the single outbound capability boundary with arbitrary protocol frames. Keeping this beside
+    // receiveForTest makes additions to agentCarried() independently pin-able without UI setup.
+    internal suspend fun sendForTest(f: Frame) = send(f)
+
+    /**
+     * Session-identity check for an incoming [SessionLive] (issue #219). The daemon deliberately keeps
+     * this device attached to every conversation it left running in the background (that fan-out is what
+     * feeds the machine-wide approval inbox), so announces from conversations OTHER than the open view
+     * arrive here routinely — a background turn starting, a relaunch, a Full-Control expiry. Those must
+     * never rebind the single active view. Accepted shapes:
+     *  - the open conversation's own re-announce (mode/model/effort switch, relaunch, init backfill);
+     *  - the SAME session coming back under a fresh convoId — a reconnect re-open, a SessionGone
+     *    recovery, a handoff spectator migration (§3.3), a registry hot→cold rebuild — recognized by
+     *    [sessionKey], which every open path pins to the target session before the daemon answers;
+     *  - the answer to an in-flight brand-new open (no sessionId exists yet), matched on the workdir
+     *    the open targeted ([pendingNewOpenWd]);
+     *  - a fully unbound client (no view, no open in flight): nothing to protect, keep today's behavior
+     *    (cold-start seams and a background announce while browsing both land here harmlessly).
+     */
+    private fun acceptsSessionLive(f: SessionLive): Boolean {
+        // #226: BACK is an authoritative navigation decision. The daemon may already have queued a
+        // SessionLive for the chat we just left (turn-state reannounce, close race, reconnect replay).
+        // sessionKey still names that chat for draft durability, so reject before consulting identity.
+        // An explicit open owns openInFlight and is allowed through; openSession also lowers the fence.
+        if (sessionNavigationFenced && openInFlight == null) return false
+        // #235: openSession claims this target synchronously, while sessionKey/pendingNewOpenWd are still
+        // assigned by the launched worker. During that narrow gap the previous chat can re-announce; the
+        // old guard would accept it by convoId, clear the new claim/opening state, and leave the worker's
+        // eventual open waiting behind an EmptyChat pane. No SessionLive can answer until THIS generation
+        // has actually sent OpenSession; after that, only its target may answer. Resume opens keep #219's
+        // session-id authority (the daemon may canonicalize the cwd beyond what the client can prove),
+        // while new sessions retain the existing workdir match (demo mode assigns their id immediately).
+        openInFlight?.let { target ->
+            if (openDispatchedGen != openGen) return false
+            return if (target.resumeId != null) {
+                f.sessionId == target.resumeId
+            } else {
+                sameDirPath(f.workdir, target.wd)
+            }
+        }
+        return f.convoId == convoId.value ||
+            (f.sessionId != null && f.sessionId == sessionKey.value) ||
+            (pendingNewOpenWd != null && f.workdir == pendingNewOpenWd) ||
+            (!opening.value && convoId.value == null && sessionKey.value == null)
+    }
+
     // control-plane counterpart: Attached/PeerPresence/AuthError flow through handleControl, not handle.
     // Lets a test drive a (re)attach edge without a live transport — e.g. that Attached bumps connGen so
     // the Account pane's fetch re-keys on reconnect.
@@ -2289,6 +2875,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     internal fun receiveDeafForTest() = onDeafLink()
 
     private fun handle(f: Frame) {
+        // A completed turn is the moment the subscription allowance actually moves, so it is one of the
+        // quota refresh triggers. Counted HERE rather than inside the `is TurnDone` branch below, because
+        // that branch is filtered to the currently-open conversation (chat-state bookkeeping) and would
+        // miss a turn finishing in another session/window on the same machine.
+        if (f is TurnDone) turnCompletions.value++
         when (f) {
             is Directories -> {
                 replace(directories, f.entries); refreshing.value = false
@@ -2304,12 +2895,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 if (!useRelay && linkStableJob?.isActive != true) armLinkStableReset()
                 if (!hadReadyThisSession) {
                     hadReadyThisSession = true
-                    Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()))
+                    Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()) + demoTag())
                 }
                 recomputePhase()
             }
             is Sessions -> {
-                sessionsDir.value = f.workdir; replace(sessions, f.items)
+                // distinctBy: one row per session id NO MATTER what the daemon sent. A codex resume-rollout
+                // (two files, one id) once reached the phone's LazyColumn as two rows with one key — that is
+                // an instant native crash, not a cosmetic glitch. The daemon dedupes too; this edge survives
+                // an older daemon. First occurrence wins = newest (the list arrives sorted by recency).
+                sessionsDir.value = f.workdir; replace(sessions, f.items.distinctBy { it.sessionId })
                 replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
                 groupsSupported.value = f.groups != null // groups=[] (owner, none yet) still enables management
                 renameSupported.value = f.renameSupported // #158: false from an older daemon / a guest
@@ -2321,6 +2916,22 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 archivedRefreshing.value = false
             }
             is Usage -> { usage.value = f; usageLoading.value = false }
+            // The Claude subscription allowance behind the CLI's `/usage` panel. Two different kinds of
+            // non-OK reply, deliberately handled differently:
+            //  · NO_TOKEN is AUTHORITATIVE — the machine signed out, or authenticates with an API key.
+            //    There is no allowance any more, so the old snapshot must go; keeping it would leave a
+            //    stale bar promising headroom on an account that is no longer in play.
+            //  · NETWORK / HTTP are TRANSIENT — we simply failed to ask. Keep the last good snapshot and
+            //    its original fetchedAt (which is what ages the "updated N min ago" line honestly) and
+            //    wait for the next trigger. Blanking the bar every time a laptop's wifi blips would make
+            //    a persistent indicator useless.
+            is ClaudeQuota -> {
+                claudeQuotaDeadline?.cancel()
+                claudeQuotaStatus.value = f.status
+                if (f.status == CLAUDE_QUOTA_OK || f.status == CLAUDE_QUOTA_NO_TOKEN) claudeQuota.value = f
+                claudeQuotaLoading.value = false
+                onClaudeQuotaReply?.invoke()
+            }
             is SkillCatalog -> {
                 skillCatalogDeadline?.cancel()
                 skillCatalog.value = f; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
@@ -2390,17 +3001,56 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                         )
                     } else merged
                 agentModels[f.agent] = accepted
-                if (f.agent == AgentKind.CODEX) {
-                    modelCapabilities(AgentKind.CODEX, defaultModelFor(AgentKind.CODEX))?.let { caps ->
-                        if (defaultEffort.value != null && defaultEffort.value !in caps.reasoningEfforts) setDefaultEffort(null)
-                        if (defaultServiceTier.value != null && caps.serviceTiers.none { it.id == defaultServiceTier.value }) {
-                            setDefaultServiceTier(null)
-                        }
+                reconcileDefaultCapabilities(f.agent)
+            }
+            // rewind/fork dry run (issue #282): fills the open sheet's numbers, or replaces the sheet
+            // with the refusal. Convo-scoped like every other per-conversation frame — a preview for a
+            // conversation we have since left must not repaint a sheet the user opened somewhere else.
+            is RewindPreview -> if (f.convoId == rewindSheet.value?.target?.convoId) {
+                if (!f.ok) {
+                    rewindSheet.value = null
+                    rewindError.value = f.reason ?: RewindRefusal.LAUNCH_FAILED
+                } else {
+                    rewindSheet.value = rewindSheet.value?.copy(counts = RewindCounts(f.dropTurns, f.dropToolCalls))
+                }
+            }
+            // rewind/fork executed. On success the daemon has ALREADY opened the branch and announced it
+            // (SessionLive with the new convoId, which the #219 identity guard accepts because the branch
+            // still resumes this session's id) — so there is nothing to open here, only the two things
+            // only this side knows: where the branch came from, and what the person was trying to say.
+            // Matched against the conversation the REQUEST named, never against the live one: the daemon
+            // opens the branch and announces it (SessionLive, new convoId) before answering, so `convoId`
+            // has often already moved on by now — and a success is precisely when it has.
+            is RewindDone -> if (f.convoId == rewindAwaiting?.convoId) {
+                val target = rewindAwaiting
+                rewindAwaiting = null
+                rewindSheet.value = null
+                val branch = f.newConvoId
+                if (!f.ok || branch == null) {
+                    rewindError.value = f.reason ?: RewindRefusal.LAUNCH_FAILED
+                } else {
+                    sessionLineage.value = SessionLineage(
+                        convoId = branch,
+                        mode = target?.mode ?: RewindMode.REWIND,
+                        fromSessionId = sessionKey.value,
+                        fromTitle = chatTitle.value.orEmpty(),
+                    )
+                    // Prefill the anchor's own words for a REWIND ("say it differently"); a FORK explores
+                    // from that point instead and starts empty. Routed through the draft + epoch bump
+                    // rather than poked into a ComposerState: that is the one write both the mobile and
+                    // the desktop composer re-read, and it survives the re-key the branch's first turn
+                    // will do (#93/#108 — never touch a live IME field from underneath).
+                    if (target != null && target.mode == RewindMode.REWIND) {
+                        saveDraft(composerKey(), target.text)
+                        composerEpoch.value++
                     }
                 }
             }
             is PushPrefs -> pushPrefs.value = f.enabled
-            is ApprovalPrefs -> approvalPrefs.value = f.noAutoDeny
+            is ApprovalPrefs -> {
+                approvalPrefs.value = f.noAutoDeny
+                approvalFullControlExpiryMs.value = f.fullControlExpiryMs // #220 (0 = never expires)
+            }
             // the daemon told us where it lives on the LAN — persist per binding; the next connect (this
             // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
             // address that already answered with the WRONG daemon key stays blacklisted — the daemon
@@ -2418,6 +3068,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // endpoint (or an old daemon omitting the field) must clear a previous gateway's value
                 gatewayBaseUrl.value = f.gatewayBaseUrl
                 bridgeControl.value = f.bridgeControl // capability advertisement (issue #91): false = daemon too old
+                daemonSupportedAgents.value = f.supportedAgents.toSet()
+                daemonAgentsKnown = true // #276: the daemon has now told us — the guard may deny an unsupported agent
+                daemonUsageAgentFilter.value = f.supportsUsageAgentFilter // issue #258: false = daemon ignores the filter
+                daemonOwnsPromptRecovery = f.supportsPromptRecovery
+                if (daemonOwnsPromptRecovery) clearTurnWatchdogState()
                 // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
                 // the fields — "unknown" must not be shown as the previous machine's numbers
                 versionStatus.value = VersionStatus(
@@ -2427,7 +3082,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     updateCommand = f.updateCommand,
                 )
             }
-            is SessionLive -> {
+            // #219 identity guard: a SessionLive that fails [acceptsSessionLive] is a BACKGROUND
+            // conversation's announce (turn start / relaunch / mode expiry, fanned out because this
+            // device stays attached to conversations it left running). Letting it through re-pointed
+            // `convoId.value` — the very baseline every stream guard below compares against — so that
+            // conversation's AssistantChunk/ToolEvent frames then passed the guards and spliced another
+            // session's live turn into the open transcript. Not our view's session → no state touched.
+            is SessionLive -> if (acceptsSessionLive(f)) {
+                // Reattach is an authoritative lifecycle snapshot. A local 45s deadline may have fired while
+                // the phone was suspended and missed both output + TurnDone; never carry that stale inference
+                // over the daemon's fresh executing/idle truth (the screenshot bug).
+                if (f.executing != null) clearTurnWatchdogState()
+                openJob?.cancel(); openJob = null // the answer owns the view; retire its dormant 8s deadline
+                pendingNewOpenWd = null // the in-flight open (if any) is answered by this announce
+                openInFlight = null // …and so is its #235 claim — the next click on this row is a real request again
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
                 f.sessionId?.let { sessionKey.value = it }
@@ -2493,6 +3161,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 val retry = promptRetry
                 if (promptResendArmed && retry != null && !f.observing && f.workdir == retry.workdir) {
                     promptRetry = null; promptResendArmed = false
+                    activePromptId = retry.promptId
+                    promptPending = true
                     promptQueued = false // fresh process, no running turn to queue behind — its ack arms the strict deadline
                     streaming.value = true
                     // same promptId as the original: if the first send actually landed, the daemon
@@ -2504,7 +3174,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // delivery receipt (issue #66): the daemon handed the turn to the agent — flip the bubble's
             // marker. Also first evidence: the retry copy is obsolete (the prompt cannot be lost anymore).
             is PromptAck -> if (f.convoId == convoId.value) {
-                promptDelivered() // delivered ≠ turn started (issue #104): hand off to the turn-start watchdog
+                promptDelivered(f.promptId) // delivered ≠ turn started; only the matching active prompt may move the watchdog
                 val i = messages.indexOfLast { it is ChatItem.User && it.promptId == f.promptId }
                 (messages.getOrNull(i) as? ChatItem.User)?.let { messages[i] = it.copy(pending = false, delivered = true) }
             }
@@ -2606,7 +3276,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 }
             }
             is TurnDone -> if (f.convoId == convoId.value) {
+                val queuedReceiptStillPending = promptPending && promptQueued
                 promptEvidence()
+                // This boundary closes the turn that existed before the queued prompt was sent. If its Ack
+                // was lost, keep the bubble pending, but the NEXT stream frame can now safely prove that
+                // prompt started; it can no longer be mistaken for output from the preceding turn.
+                if (queuedReceiptStillPending) promptQueued = false
                 replayEcho = false // turn boundary — the next block belongs to a new turn, never a replay echo
                 val turnWasLive = streaming.value // gate the marker/notify on a turn we actually watched run
                 finishThinking(); streaming.value = false
@@ -2634,6 +3309,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // the listed snapshot said `live` at listing time — correct it locally so sidebar/list
                 // dots stop pulsing the moment the turn ends instead of waiting for a manual re-list
                 sessionKey.value?.let { sid ->
+                    // #239: this TurnDone was delivered while the session was on screen, so it is already
+                    // seen. If the user backs out before the next directory poll, do not reinterpret the
+                    // delayed executing→idle snapshot as a result completed while away. Real background
+                    // work will re-enter the baseline on that poll and can still finish unseen later.
+                    if (backgroundJobs.none { it.status == JobStatus.RUNNING }) noteCurrentSettledSeen(sid)
                     val i = sessions.indexOfFirst { it.sessionId == sid }
                     if (i >= 0 && sessions[i].live) sessions[i] = sessions[i].copy(live = false)
                 }
@@ -2644,7 +3324,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 f.usage?.takeIf { it.contextTokens > 0 }?.let { contextUsed.value = it.contextTokens }
                 upgradeWindowIfProven()
             }
-            is BackgroundJobs -> if (f.convoId == convoId.value) replace(backgroundJobs, f.jobs)
+            is BackgroundJobs -> if (f.convoId == convoId.value) {
+                replace(backgroundJobs, f.jobs)
+                if (!streaming.value && f.jobs.none { it.status == JobStatus.RUNNING }) {
+                    noteCurrentSettledSeen(sessionKey.value ?: currentSessionId)
+                }
+            }
             // Workflow orchestration (issue #106): whole-run snapshots keyed by runId; a re-push of the
             // same run reconciles in place. finalResult arrives only on the explicit terminal patch —
             // never let a later plain snapshot blank an already-received final return.
@@ -2670,14 +3355,23 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // asked) — the common case (renaming a terminal-held session) has no chat open, and an
                 // open chat is an UNRELATED session whose transcript must not absorb the error line.
                 renameError.value = renameTarget?.let { RenameRefusal(it, f.message) }
+            } else if (f.convoId != null && (openInFlight != null || f.convoId != convoId.value)) {
+                // Conversation-scoped errors fan out from background sessions just like SessionLive and
+                // stream frames. They must not splice a system row into this transcript or terminate a
+                // different in-flight open. OpenSession failures have no conversation yet and therefore
+                // arrive with convoId == null; the current view's own errors still pass below.
             } else {
                 // …and a failed switch must release the router, or the chat would hold an empty screen
+                openJob?.cancel(); openJob = null
                 opening.value = false; switchingSession.value = false // a failed open re-enables the one-tap entries right away
+                pendingNewOpenWd = null // #219: the failed open's marker must not admit a later background announce
+                openInFlight = null // #235: release the claim on the same edge — a refused open must stay retryable
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
                 // a dead claude process never sends TurnDone — clear the streaming state here
                 if (f.code == "process_exited" && (f.convoId == null || f.convoId == convoId.value)) {
-                    promptEvidence()
+                    promptEvidence(exactPrompt = true)
                     finishThinking(); streaming.value = false
+                    noteCurrentSettledSeen(sessionKey.value ?: currentSessionId)
                 }
             }
             // The daemon no longer holds this conversation (idle-reaped during a link drop / daemon restart).
@@ -2687,7 +3381,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 if (observing.value) {
                     // an observe view can't run turns — a stray send must not leave the caret spinning
                     // forever (the old blanket ignore did exactly that, issue #45 ②)
-                    promptEvidence(); finishThinking(); streaming.value = false
+                    promptEvidence(exactPrompt = true); finishThinking(); streaming.value = false
                 } else {
                     val sid = sessionKey.value ?: currentSessionId
                     val wd = workdir.value
@@ -2696,7 +3390,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                         // lastEventSeq (issue #147): the transcript is still on screen — delta reattach
                         scope.launch { send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE, lastEventSeq = lastEventSeqFor(sid))) }
                     } else {
-                        promptEvidence(); promptResendArmed = false
+                        promptEvidence(exactPrompt = true); promptResendArmed = false
                         finishThinking(); streaming.value = false
                         messages.add(ChatItem.Sys("session expired on the computer — send again to restart it"))
                     }
@@ -2716,6 +3410,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                         val localRows = messages.toList()
                         val merged = TranscriptMerge.mergeDelta(localRows, f.messages.map(::historyItem))
                         if (merged != localRows) replace(messages, merged)
+                        reconcilePromptReceiptFromHistory(localRows, merged)
                         replayEcho = true // same replay/stream race as the full path
                     }
                     f.lastSeq?.let { historySeq = it; historySeqSession = currentSessionId }
@@ -2730,6 +3425,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     val localRows = messages.toList()
                     val merged = TranscriptMerge.merge(localRows, f.messages.map(::historyItem))
                     if (merged != localRows) replace(messages, merged)
+                    reconcilePromptReceiptFromHistory(localRows, merged)
                     replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race
                     // reattach cursor + paging anchors (issue #147); null fields = a pre-#147 daemon
                     historySeq = f.lastSeq
@@ -2799,6 +3495,61 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is FileDiff -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
                 viewedFileDiff.value = f
             }
+            // ── Git panel (#280) / worktrees (#281): identity-matched on (convoId, workdir) before any
+            // state moves — a reply for a conversation or repository we've left is dropped, never merged.
+            is GitStatus -> if (f.convoId == convoId.value && f.workdir == workdir.value) {
+                gitStatusDeadline?.cancel()
+                gitStatusLoading.value = false; gitStatusUnavailable.value = false
+                gitStatus.value = f
+            }
+            // [staged] is part of the identity: a late reply for the OTHER side of the Working|Staged
+            // control must not overwrite the side currently on screen.
+            is GitDiff -> if (f.convoId == convoId.value && f.workdir == workdir.value &&
+                f.path == gitDiffPath.value && f.staged == gitDiffStaged.value
+            ) {
+                gitDiffDeadline?.cancel()
+                gitDiff.value = f
+            }
+            // workdir is a TRAILING optional: an older daemon omits it and we fall back to the convoId
+            // match, but when it is present it must agree — a session can switch directory while a
+            // preview is in flight, and a stale one would offer to discard files from the old tree.
+            is GitActionPreview -> if (f.convoId == convoId.value && (f.workdir == null || f.workdir == workdir.value)) {
+                gitActionDeadline?.cancel()
+                gitBusyOp.value = null
+                gitPendingConfirm.value = f
+            }
+            is GitActionResult -> if (f.convoId == convoId.value && (f.workdir == null || f.workdir == workdir.value)) {
+                gitActionDeadline?.cancel()
+                if (gitBusyOp.value == f.op) gitBusyOp.value = null
+                gitPendingAction = null; gitPendingRemove = null
+                gitError.value = if (f.ok) null else f
+                // the receipt a fetch otherwise has no way to give: read off the snapshot it came with,
+                // so "远端领先 1，可合并" is the SAME number the header is about to show (真机反馈 1)
+                if (f.op == GIT_OP_FETCH) {
+                    gitFetchNote.value = if (f.ok) gitFetchReport(f.statusAfter ?: gitStatus.value) else null
+                }
+                // the daemon hands back a fresh snapshot with a successful mutation — refresh IN PLACE
+                // rather than asking again (no second round trip, and no polling anywhere in this surface)
+                f.statusAfter?.takeIf { it.workdir == workdir.value }?.let {
+                    gitStatus.value = it
+                    gitStatusLoading.value = false; gitStatusUnavailable.value = false
+                }
+                // the worktree verbs change a list the status snapshot doesn't carry
+                if (f.ok && (f.op == GIT_OP_WORKTREE_ADD || f.op == GIT_OP_WORKTREE_REMOVE)) fetchWorktrees()
+                // the post-create receipt: the daemon names the checkout it just made (an older daemon
+                // omits path — the sheet then shows the fact without the open-here verb)
+                if (f.op == GIT_OP_WORKTREE_ADD) {
+                    if (f.ok) worktreeCreated.value = WorktreeCreated(path = f.path, branch = pendingWorktreeAddBranch)
+                    pendingWorktreeAddBranch = null
+                }
+                // reverting the file on screen makes the open diff a lie — re-read the side we're showing
+                if (f.ok && f.op == GIT_OP_REVERT) gitDiffPath.value?.let { openGitDiff(it, gitDiffStaged.value) }
+            }
+            is WorktreeList -> if (f.convoId == convoId.value && f.workdir == workdir.value) {
+                worktreesDeadline?.cancel()
+                worktreesLoading.value = false; worktreesUnavailable.value = false
+                worktrees.value = f
+            }
             // @-file completion (issue #75): keyed on workdir, not a session id — it browses the cwd, not a
             // session's changed set. A reply for a workdir we've since left is dropped (the completer keys
             // the visible listing on its own requested subPath anyway).
@@ -2851,7 +3602,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     connected.value = true; relayDeadlinePassed = false
                     if (!hadReadyThisSession) {
                         hadReadyThisSession = true
-                        Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()))
+                        Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()) + demoTag())
                     }
                     recomputePhase()
                 }
@@ -2871,6 +3622,64 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is CollaboratorConnected -> {
                 upsertCollaborator(f.collaborator)
                 lastCollaboratorConnected.value = f.collaborator // flips "waiting for scan…" → Connected
+            }
+            // ── ReviewRequest (REVIEW-REQUEST.md §12): daemon snapshots replace, pushes upsert ──
+            // Any reply at all clears [reviewUnsupported]: it only ever meant "nothing came back".
+            is ReviewListing -> {
+                // ONLY an owner connection's listing is this machine's sent ledger. A collaborator-inbox
+                // link is somebody else's account, and its rows are requests addressed TO this device —
+                // filing those under "I sent these" would be a straightforward lie about who asked whom.
+                if (!isCollaboratorInbox) {
+                    replace(reviewsSent, f.items.sortedByDescending { it.createdAt })
+                    reviewsSentLoaded.value = true
+                }
+                reviewUnsupported.value = false
+            }
+            is ReviewInboxListing -> {
+                replace(reviewsReceived, f.items)
+                reviewInboxLoaded.value = true; reviewUnsupported.value = false
+            }
+            is ReviewContactsListing -> {
+                replace(reviewContacts, f.items)
+                reviewContactsLoaded.value = true; reviewUnsupported.value = false
+            }
+            // same reason as the listing above: on a collaborator-inbox link this push is a request
+            // addressed to us, not one we sent
+            is ReviewUpdated -> if (!isCollaboratorInbox) upsertReview(f.request)
+            is ReviewRequestCreated -> {
+                reviewSending.value = false; reviewUnsupported.value = false
+                val r = f.request
+                if (f.ok && r != null) { reviewError.value = null; reviewLastCreated.value = r; upsertReview(r) }
+                else reviewError.value = f.error
+            }
+            is ReviewInviteCreated -> {
+                reviewInviteCreating.value = false; reviewUnsupported.value = false
+                if (f.ok && f.invite != null) {
+                    reviewInvite.value = f.invite; reviewInviteTtlSec.value = f.ttlSec; reviewError.value = null
+                } else reviewError.value = f.error
+            }
+            is ReviewContactUpdated -> {
+                reviewJoining.value = false; reviewUnsupported.value = false
+                if (f.ok) {
+                    reviewError.value = null
+                    // re-list rather than patch: a join starts an inbox connection and a remove settles
+                    // an outbox, so the daemon's next snapshot says more than the single row does
+                    refreshReviewContacts()
+                } else reviewError.value = f.error
+            }
+            is ReviewPrepared -> {
+                reviewPreparing.value = null; reviewUnsupported.value = false
+                if (f.ok && f.bundle != null) { reviewBundle.value = f.bundle; reviewError.value = null }
+                else reviewError.value = f.error
+            }
+            is ReviewInboxActed -> {
+                reviewActing.value = null; reviewUnsupported.value = false
+                reviewLastActed.value = f
+                if (f.ok) {
+                    reviewError.value = null
+                    // the daemon owns `pending`; re-read it instead of guessing what the queue now holds
+                    refreshReviewInbox()
+                } else reviewError.value = f.error
             }
             else -> {}
         }
@@ -2913,18 +3722,45 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     messages[i] = card.copy(childCount = card.childCount + 1, lastChild = f.tool)
                 } else messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: ""))
             }
-            else -> messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "", taskId = f.toolUseId))
+            // OpenCode's question tool renders as a read-only question card, not a raw JSON row (issue
+            // #210); a parse miss (old truncated preview / malformed) falls back to the plain tool card.
+            else -> OpenCodeQuestionParse.parse(f.tool, f.inputPreview)
+                ?.let { messages.add(ChatItem.OpenCodeQuestion(it)) }
+                ?: messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "", taskId = f.toolUseId))
         }
     }
 
+    @OptIn(ExperimentalEncodingApi::class)
     private fun historyItem(h: HistoryMessage): ChatItem = when (h.role) {
-        ChatRole.USER -> ChatItem.User(h.text)
-        // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65)
-        ChatRole.ASSISTANT -> if (h.error) ChatItem.Sys("API request failed — placeholder reply: ${h.text}") else ChatItem.Assistant(h.text)
+        // images the prompt carried replay as real tiles (issue #254) — a turn composed at the computer
+        // is no longer text-only here, and an image-ONLY turn is no longer a blank bubble. A base64 blob
+        // the platform can't decode is dropped rather than rendered as a broken tile; the renderer's own
+        // decode-failure card covers bytes that only fail later (on the image decoder).
+        ChatRole.USER -> ChatItem.User(
+            h.text,
+            images = h.images.mapNotNull { runCatching { Base64.Default.decode(it.base64) }.getOrNull() },
+            imagesTruncated = h.imagesTruncated,
+            // rewind/fork anchor coordinates (issue #282) — carried verbatim, including their absence
+            seq = h.seq,
+            uuid = h.uuid,
+        )
+        // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65).
+        // Attribution follows the placeholder text so the replay reads the same as the daemon live prompt:
+        // an upstream gateway/5xx signal stops blaming context (issue #208).
+        ChatRole.ASSISTANT -> if (h.error) {
+            ChatItem.Sys(
+                "API request failed — the agent wrote a placeholder, not a real reply. " +
+                    dev.ccpocket.protocol.SyntheticAttribution.attribution(h.text) +
+                    "\n\nplaceholder reply: ${h.text}",
+            )
+        } else {
+            ChatItem.Assistant(h.text)
+        }
         // an answered AskUserQuestion replays as the same compact answered row the live path leaves, not a
         // raw-JSON tool card (issue #110); ok/output keep a sub-agent card's outcome + report (issue #77);
         // workflowRunId binds a Workflow card to its separately-pushed run (issue #106)
         ChatRole.TOOL -> h.answers?.let { a -> ChatItem.QuestionsAnswered(a.map { it.question to it.answer }) }
+            ?: OpenCodeQuestionParse.parse(h.tool ?: "", h.text)?.let { ChatItem.OpenCodeQuestion(it) }
             ?: ChatItem.Tool(h.tool ?: "tool", h.text, ok = h.ok, output = h.output, workflowRunId = h.workflowRunId)
     }
 
@@ -3016,9 +3852,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  a switch that would silently do nothing. */
     val approvalPrefs = mutableStateOf<Boolean?>(null)
 
+    /** Issue #220: the owner's Full Control expiry duration in ms; 0 = never expires (the default). Daemon
+     *  truth via [ApprovalPrefs] — null until first fetched, and PERMANENTLY null against a pre-#220 daemon
+     *  (which decodes the frame but the field simply defaults 0 there); the UI reads [approvalPrefs] for its
+     *  capability gate, so this rides alongside it. */
+    val approvalFullControlExpiryMs = mutableStateOf<Long?>(null)
+
     fun fetchApprovalPrefs() = scope.launch { runCatching { send(SetApprovalPrefs()) } }
 
-    fun setAskNoAutoDeny(enabled: Boolean) = scope.launch { runCatching { send(SetApprovalPrefs(enabled)) } }
+    fun setAskNoAutoDeny(enabled: Boolean) = scope.launch { runCatching { send(SetApprovalPrefs(noAutoDeny = enabled)) } }
+
+    /** Issue #220: set how long a manually-entered Full Control lasts (ms; 0 = never expires). */
+    fun setFullControlExpiryMs(ms: Long) = scope.launch { runCatching { send(SetApprovalPrefs(fullControlExpiryMs = ms.coerceAtLeast(0L))) } }
 
     /** Switch account: the daemon logs the CLI out (when needed) and starts `claude auth login` —
      *  the browser opens on the daemon host; [authState] turns loginPending with the OAuth URL.
@@ -3061,6 +3906,133 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  shows "update the daemon" up front on false, instead of waiting for a bridge fetch to time out. */
     val bridgeControl = mutableStateOf<Boolean?>(null)
 
+    /** Agent wire names accepted by the connected daemon, learned from [DaemonInfo]. Empty is both the
+     * safe pre-handshake state and the decoded value from an older daemon. Only post-advertisement agents
+     * use it as a hard gate; see [agentAvailableFromDaemon]. */
+    val daemonSupportedAgents = mutableStateOf<Set<String>>(emptySet())
+
+    /** #276: has THIS connection's DaemonInfo (or the demo/current-daemon assertion) actually landed yet?
+     *  [daemonSupportedAgents] being empty conflates "not told yet" (reconnect window) with "told, lacks the
+     *  backend" (old daemon). The egress guard must only deny on the latter, or it drops legitimate reattach
+     *  frames during every reconnect. False until a handshake sets the capability set. */
+    private var daemonAgentsKnown = false
+
+    /** Whether the connected daemon honors [FetchUsage.agent] (issue #258). Deliberately NOT inferred from
+     * [daemonSupportedAgents]: that advertisement shipped a release EARLIER, so a v1.7.7 daemon advertises
+     * every agent while silently ignoring the filter — the usage page would then label a full-machine total
+     * as one agent's. False (the pre-handshake and old-daemon value) hides the filter row entirely. */
+    val daemonUsageAgentFilter = mutableStateOf(false)
+
+    /** DaemonInfo capability: this daemon keeps every acked prompt in its unconsumed ledger and owns
+     * redelivery after process replacement (#122). Silence is not a safe client-side resend signal then.
+     * Plain Boolean because it only selects repository mechanics; no UI observes it directly. */
+    private var daemonOwnsPromptRecovery = false
+
+    fun supportsAgent(agent: AgentKind): Boolean = agentAvailableFromDaemon(agent, daemonSupportedAgents.value)
+
+    /** Persisted ZCode remains the user's preference across machine switches, but an older daemon gets a
+     * temporary Claude fallback so its UI never displays or launches an agent it did not advertise. */
+    val sessionDefaultAgent: AgentKind
+        get() = defaultAgent.value.takeIf(::supportsAgent) ?: AgentKind.CLAUDE
+
+    val availableAgents: List<AgentKind>
+        get() = availableAgentsFromDaemon(daemonSupportedAgents.value)
+
+    // ── "open a session carrying a first prompt" (issues #256 / #260) ────────────────────────────────
+    // There is no protocol frame for it and this deliberately doesn't invent one: the queue is a wait for
+    // the SAME convoId the chat surfaces wait for, followed by the ordinary [sendPrompt] path — so the
+    // prompt passes every gate a typed prompt passes and a daemon of any vintage works unchanged.
+    //
+    // The WAIT lives here, in commonMain, because both shells need exactly it: the desktop empty pane
+    // (#256) and the phone's new-task sheet (#260). Only the wait is shared — each shell keeps its own
+    // orchestration, because "where does the text go when it fails" is a different answer per surface
+    // (the desktop pane re-renders with it; the phone re-opens its sheet with it).
+
+    /** How long a queued first prompt waits for its session to go live. Generous on purpose — a cold agent
+     *  start on a big repo is seconds, and the alternative to waiting is throwing the prompt back at a user
+     *  whose session is about to open anyway. Tests shrink it. */
+    internal var firstPromptTimeoutMs: Long = 30_000L
+
+    /**
+     * Suspend until the session opened after [previousConvo] is live enough to take a prompt.
+     *
+     * @return true = a NEW convoId landed (SessionLive), false = the repo's own open watchdog gave up,
+     *   null = [timeoutMs] elapsed with neither. Callers must treat all three as distinct: only `true`
+     *   may send, and the two failures owe the user their text back.
+     *
+     * [previousConvo] must be captured BEFORE the open: [openSession] nulls convoId from a coroutine that
+     * can suspend on the outgoing CloseSession first, so "convoId is non-null" alone could still be the
+     * PREVIOUS session — and would send this prompt into it.
+     */
+    internal suspend fun awaitOpenedConvo(previousConvo: String?, timeoutMs: Long = firstPromptTimeoutMs): Boolean? =
+        withTimeoutOrNull(timeoutMs) {
+            snapshotFlow {
+                val id = convoId.value
+                when {
+                    id != null && id != previousConvo -> true
+                    openTimedOut.value -> false
+                    else -> null
+                }
+            }.filterNotNull().first()
+        }
+
+    /** Why a queued first prompt didn't become a turn; the text is always still held by the caller. */
+    enum class NewTaskError { OPEN_REFUSED, TIMEOUT, SEND_REFUSED }
+
+    // The phone's new-task sheet state (#260). REPOSITORY-owned, not `remember`ed in the sheet, for two
+    // reasons: a dismissed-and-reopened sheet must show the same draft and the same two chips, and a queue
+    // that fails has to hand the text back to a sheet that no longer exists at the moment it fails. (This
+    // deliberately stays OUT of the composer draft collector — see the #256 note on startSessionWithPrompt:
+    // a queued prompt landing in a live composer races the target session's own draft restore.)
+    val newTaskDraft = mutableStateOf("")
+    /** Chip pick: the project to start in. Null = "not chosen yet", so the sheet prefills from recents. */
+    val newTaskDir = mutableStateOf<String?>(null)
+    /** Chip pick: the backend. Null = "not chosen yet", so the sheet prefills from [sessionDefaultAgent]. */
+    val newTaskAgent = mutableStateOf<AgentKind?>(null)
+    val newTaskError = mutableStateOf<NewTaskError?>(null)
+    /** A first prompt is queued and its session hasn't landed — the sheet is closed and the list waits. */
+    val newTaskStarting = mutableStateOf(false)
+
+    /**
+     * Open a session at [wd] on [agent] and send [prompt] as its first turn (issue #260).
+     *
+     * [onDelivered] runs only when the prompt actually became a turn — that is the phone's cue to route
+     * into the chat. Every failure path instead leaves [newTaskDraft] / the two chip picks exactly as the
+     * user left them and sets [newTaskError], so re-opening the sheet shows the draft and one inline line.
+     *
+     * @return false when nothing was started at all (blank prompt, or one already queued).
+     */
+    fun startTaskWithPrompt(wd: String, prompt: String, agent: AgentKind, onDelivered: () -> Unit = {}): Boolean {
+        if (prompt.isBlank() || newTaskStarting.value) return false
+        newTaskError.value = null
+        newTaskDraft.value = prompt // held until a send actually succeeds; only then is it cleared
+        val previousConvo = convoId.value
+        // A backend this daemon never advertised must be refused BEFORE the sheet closes — openSession
+        // would return false anyway, but saying so while the picks are still on screen is the honest order.
+        if (!supportsAgent(agent) || !openSession(wd, agent = agent)) {
+            newTaskError.value = NewTaskError.OPEN_REFUSED
+            return false
+        }
+        newTaskStarting.value = true
+        scope.launch {
+            val live = awaitOpenedConvo(previousConvo)
+            when {
+                live == null -> newTaskError.value = NewTaskError.TIMEOUT
+                !live -> newTaskError.value = NewTaskError.OPEN_REFUSED
+                sendPrompt(prompt) -> { newTaskDraft.value = ""; newTaskError.value = null; onDelivered() }
+                // gated (degraded session / uploads in flight): the session IS open, but the text is still
+                // held here rather than silently dropped into a turn that never happened
+                else -> newTaskError.value = NewTaskError.SEND_REFUSED
+            }
+            // Published LAST: "starting is over" is the signal observers key on, so the outcome above must
+            // already be readable when it flips — clearing it first opened a window where the sheet (and the
+            // test) saw "finished, no error" for a queued prompt that actually failed (same lesson as #245:
+            // the transient flag must not be the last word).
+            newTaskStarting.value = false
+        }
+        return true
+    }
+
     /** App / daemon / newest-release versions (issue #200), refreshed from every [DaemonInfo]. Starts as
      *  "only our own version known"; a daemon too old to report leaves the other fields null, which reads
      *  as "unknown" everywhere rather than as "up to date". */
@@ -3074,9 +4046,41 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     fun modelCapabilities(agent: AgentKind, modelId: String? = model.value): dev.ccpocket.protocol.ModelCapabilities? {
         val listed = agentModels[agent] ?: return null
-        val id = modelId ?: listed.models.firstOrNull()
-        return id?.let { wanted ->
-            listed.modelCapabilities.firstOrNull { it.model.equals(wanted, ignoreCase = true) }
+        // null is the CLI's real "Default" selection, not an alias for the first advertised model. The
+        // daemon cannot know which concrete model that default will resolve to for this account/session, so
+        // its capabilities are UNKNOWN and persisted launch options must pass through unchanged.
+        val id = modelId ?: return null
+        return listed.modelCapabilities.firstOrNull { it.model.equals(id, ignoreCase = true) }
+    }
+
+    /** The authoritative reasoning levels for one launch, when the daemon knows them. A matching
+     * per-model row wins even when its list is empty; otherwise a non-empty backend-wide advertisement
+     * (Claude CLI) applies. Null means an old daemon or an unknown/custom model, so callers preserve the
+     * legacy pass-through behaviour instead of guessing that a persisted value is invalid. */
+    private fun supportedReasoningEfforts(agent: AgentKind, modelId: String?): List<String>? {
+        val listed = agentModels[agent] ?: return null
+        modelCapabilities(agent, modelId)?.let { return it.reasoningEfforts }
+        return listed.supportedEfforts.takeIf { it.isNotEmpty() }
+    }
+
+    /** Reconcile Codex's persisted service tier against a fresh daemon catalog / model change.
+     *
+     * #274: the effort preference is deliberately NOT reconciled here. SecureStore is global, not
+     * per-machine, so clearing it whenever THIS machine's CLI advertises a leaner set permanently erased a
+     * preference other machines still support — and switching back never restored it. openSession AND
+     * takeOver already clamp the effort to the machine's supported set at launch (knownEfforts /
+     * supportedEfforts), so an unsupported preference is simply not sent where it doesn't fit and honoured
+     * where it does — non-destructively, restored on return. (The Codex service-tier reconcile below stays:
+     * its launch-time clamp isn't yet uniform across takeOver, so removing it could leak an unsupported
+     * tier — tracked with #274 as the same class, to be lifted once that clamp is uniform.) */
+    private fun reconcileDefaultCapabilities(agent: AgentKind) {
+        val modelId = defaultModelFor(agent)
+        modelCapabilities(agent, modelId)?.let { caps ->
+            if (agent == AgentKind.CODEX &&
+                defaultServiceTier.value != null && caps.serviceTiers.none { it.id == defaultServiceTier.value }
+            ) {
+                setDefaultServiceTier(null)
+            }
         }
     }
 
@@ -3084,9 +4088,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  advertises a backend-wide set. A present per-model row is authoritative even when empty. If both
      *  capability fields are absent, the daemon predates #183, so retain the picker it already supported. */
     fun effortOptions(agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE, modelId: String? = model.value): List<String> {
-        val listed = agentModels[agent] ?: return emptyList()
-        modelCapabilities(agent, modelId)?.let { return it.reasoningEfforts }
-        return listed.supportedEfforts.ifEmpty { LEGACY_EFFORT_OPTIONS }
+        if (agentModels[agent] == null) return emptyList()
+        return supportedReasoningEfforts(agent, modelId) ?: LEGACY_EFFORT_OPTIONS
     }
 
     fun serviceTierOptions(
@@ -3144,10 +4147,46 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val usage = mutableStateOf<Usage?>(null)
     val usageLoading = mutableStateOf(false)
 
-    /** Ask the daemon to aggregate usage over the last [days] local days; the reply lands in [usage]. */
-    fun fetchUsage(days: Int = 7) {
+    /** Ask the daemon to aggregate usage over the last [days] local days; the reply lands in [usage].
+     *  [agent] non-null narrows it to one backend (issue #258); null is the all-backends total. */
+    fun fetchUsage(days: Int = 7, agent: AgentKind? = null) {
         usageLoading.value = true
-        scope.launch { send(FetchUsage(days)) }
+        scope.launch { send(FetchUsage(days, agent)) }
+    }
+
+    /** Monotonic count of turns that FINISHED on this machine, in any conversation (see [handle]). A
+     *  change is the "some agent just spent tokens" edge the quota refresh policy debounces on; the
+     *  absolute value is meaningless and it is never persisted. */
+    val turnCompletions = mutableStateOf(0L)
+
+    // ── Claude subscription allowance (the 5h/7d windows behind the CLI's own `/usage` panel) ──
+    /** The daemon's latest [ClaudeQuota]. Null = we have not been told: either the fetch is still in
+     *  flight, or this daemon predates the frame and silently dropped the request — indistinguishable on
+     *  the wire, which is why the page hides the block in BOTH cases rather than showing an error. */
+    val claudeQuota = mutableStateOf<ClaudeQuota?>(null)
+    val claudeQuotaLoading = mutableStateOf(false)
+
+    /** The status of the LAST reply, including the transient failures [claudeQuota] deliberately does not
+     *  absorb. Null = never answered. Diagnostics only — no UI should turn a blip into an alarm. */
+    val claudeQuotaStatus = mutableStateOf<String?>(null)
+
+    /** Fired whenever a [ClaudeQuota] lands, success or failure. The refresh policy clears its in-flight
+     *  latch here; a callback rather than a state read so a dropped reply cannot look like a fresh one. */
+    internal var onClaudeQuotaReply: (() -> Unit)? = null
+
+    private var claudeQuotaDeadline: Job? = null
+
+    /** Ask the daemon for the subscription allowance; the reply lands in [claudeQuota]. The daemon caches
+     *  briefly on its side, so re-entering the usage page is cheap and [forceRefresh] is the manual
+     *  override. A deadline clears the in-flight flag so an old daemon's silence does not spin forever. */
+    fun fetchClaudeQuota(forceRefresh: Boolean = false) {
+        claudeQuotaLoading.value = true
+        claudeQuotaDeadline?.cancel()
+        scope.launch { send(ClaudeQuotaGet(forceRefresh)) }
+        claudeQuotaDeadline = scope.launch {
+            delay(12_000)
+            claudeQuotaLoading.value = false
+        }
     }
 
     // ── installed skills/plugins catalog (issue #132): the desktop browse page ──
@@ -3536,6 +4575,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         else -> Res.string.ho_accept_taken
     }
 
+    /**
+     * The "update the daemon" copy every handoff / collaborator / review timeout below reaches for.
+     *
+     * Issue #251: these all run inside a detached `scope.launch { delay(8000); … }`, where a throwing
+     * resource lookup has no handler and takes the desktop window down with an unnamed native error
+     * box. Losing a translation on an error path is a cosmetic regression; losing the app is not — so
+     * the lookup is contained and falls back to the English literal, tagged with a reportable code.
+     * Keep the literal in sync with `ho_daemon_too_old` in strings.xml.
+     */
+    private suspend fun daemonTooOldText(): String =
+        safeString(DAEMON_TOO_OLD_FALLBACK) { getString(Res.string.ho_daemon_too_old) }
+
     /** Owner: create a Handoff on the open session (v1: REVIEW read-only). [recipientDeviceId] non-null
      *  binds the Grant to that collaborator's device — only it may accept, and the daemon delivers the
      *  offer over the existing link (no invite artefact). The daemon replies with [HandoffCreated]; an
@@ -3562,7 +4613,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(8000)
             if (handoffCreating.value) {
                 handoffCreating.value = false
-                handoffError.value = getString(Res.string.ho_daemon_too_old)
+                handoffError.value = daemonTooOldText()
             }
         }
     }
@@ -3591,7 +4642,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             runCatching { send(ListCollaborators) }
             delay(8000)
             if (!collaboratorsLoaded.value && collaboratorError.value == null) {
-                collaboratorError.value = getString(Res.string.ho_daemon_too_old)
+                collaboratorError.value = daemonTooOldText()
             }
         }
     }
@@ -3604,7 +4655,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(8000)
             if (collaboratorTicketCreating.value) {
                 collaboratorTicketCreating.value = false
-                collaboratorError.value = getString(Res.string.ho_daemon_too_old)
+                collaboratorError.value = daemonTooOldText()
             }
         }
     }
@@ -3650,6 +4701,227 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun declineHandoff(id: String, reason: String? = null) = scope.launch { runCatching { send(DeclineHandoff(id, reason)) } }
     fun returnHandoff(id: String, result: HandoffResult?) = scope.launch { runCatching { send(ReturnHandoff(id, result)) } }
 
+    // ── ReviewRequest (REVIEW-REQUEST.md §12): the Review Center's daemon-backed state ──
+    //
+    // Every list here is a MIRROR of a daemon snapshot, never a second source of truth. The daemon owns
+    // the state machine, the retry, the dedupe and the history; closing this UI for a week changes
+    // nothing about any of them (§3.3). So the rules are narrow on purpose:
+    //  - a listing REPLACES its list wholesale (that is how a reconnect heals);
+    //  - a single-row push UPSERTS, and only when its revision is not older than what we hold;
+    //  - nothing here invents a transition, and "queued" is rendered as queued, never as delivered.
+
+    /** Requests THIS machine sent. The sender's row is authoritative, so this is real state. */
+    val reviewsSent = mutableStateListOf<ReviewRequest>()
+
+    /** Requests THIS machine received — the daemon's local mirror of each peer's authoritative row,
+     *  plus the peer label and the actions still queued toward them. */
+    val reviewsReceived = mutableStateListOf<ReviewInboxItem>()
+
+    /** Review contacts, both directions, removed ones included (terminal group like collaborators). */
+    val reviewContacts = mutableStateListOf<ReviewContact>()
+
+    /** Set once each listing lands — what distinguishes "you have none" from "the daemon never answered".
+     *  Without them an empty Review Center and a broken one look identical. */
+    val reviewsSentLoaded = mutableStateOf(false)
+    val reviewInboxLoaded = mutableStateOf(false)
+    val reviewContactsLoaded = mutableStateOf(false)
+
+    /** The bounded wait elapsed with no reply: an older daemon silently drops an unknown frame, so the UI
+     *  must say "update the computer's daemon" instead of spinning forever (§10). */
+    val reviewUnsupported = mutableStateOf(false)
+
+    /** The daemon's own words for the last refusal. Cleared by the next successful operation. */
+    val reviewError = mutableStateOf<String?>(null)
+
+    val reviewSending = mutableStateOf(false)
+    /** The created row, as proof of a send — the id the user can quote back. */
+    val reviewLastCreated = mutableStateOf<ReviewRequest?>(null)
+
+    /** requestId of the action/prepare in flight, so a row spinner is per-row rather than global. */
+    val reviewActing = mutableStateOf<String?>(null)
+    val reviewPreparing = mutableStateOf<String?>(null)
+
+    /** The last prepare bundle. Held so the detail screen can show and copy the daemon's recommended
+     *  prompt; the App neither launches an agent nor opens anything from it. */
+    val reviewBundle = mutableStateOf<ReviewExecutionBundle?>(null)
+
+    /** The honest answer to the last queued action — `queued=false` means it was already in that state. */
+    val reviewLastActed = mutableStateOf<ReviewInboxActed?>(null)
+
+    val reviewInvite = mutableStateOf<String?>(null)
+    val reviewInviteTtlSec = mutableStateOf(0)
+    val reviewInviteCreating = mutableStateOf(false)
+    val reviewJoining = mutableStateOf(false)
+
+    /**
+     * A scanned/opened `ccpocket://review-contact#…` waiting for the Review Center's join confirmation
+     * (REVIEW-REQUEST.md §13.3) — the Review twin of [pendingCollabInvite], and held as the RAW line
+     * because this App never redeems it: the daemon does, which is what keeps reviews arriving with the
+     * app closed. Cleared when the join page is left or the join is submitted; a deep link therefore
+     * never burns a ticket on sight.
+     */
+    val pendingReviewInvite = mutableStateOf<String?>(null)
+
+    /** Received requests still waiting on this machine — the badge count. Terminal and already-responded
+     *  rows are history, not work. */
+    val reviewPendingCount: Int
+        get() = reviewsReceived.count { !it.request.status.isTerminal && it.request.status != ReviewStatus.RESPONDED }
+
+    /** Contacts a NEW request may be addressed to. `canSend` is the DAEMON's answer (purpose, direction
+     *  and liveness all folded in), so the picker cannot drift from what the send path will accept. */
+    fun reviewRecipients(): List<ReviewContact> = reviewContacts.filter { it.canSend }
+
+    /** Replace by id, but never regress: a late replay of an older revision must not undo a newer state. */
+    private fun upsertReview(r: ReviewRequest) {
+        val i = reviewsSent.indexOfFirst { it.id == r.id }
+        if (i >= 0) { if (r.revision >= reviewsSent[i].revision) reviewsSent[i] = r } else reviewsSent.add(0, r)
+        // the same row may also be one we RECEIVED (an App attached as a collaborator of the sender):
+        // keep that mirror in step under the same revision rule rather than letting the two disagree
+        val j = reviewsReceived.indexOfFirst { it.request.id == r.id }
+        if (j >= 0 && r.revision >= reviewsReceived[j].request.revision) {
+            reviewsReceived[j] = reviewsReceived[j].copy(request = r)
+        }
+    }
+
+    /**
+     * Pull the whole Review Center from the active daemon. Three bounded snapshots rather than a cursor:
+     * per-request revisions are not a global sequence (§10), so a complete listing is what a reconnect
+     * heals from. Safe to call on open, on ⌘R and after a daemon switch.
+     */
+    fun refreshReviews() {
+        reviewError.value = null
+        scope.launch {
+            runCatching { send(ListReviewRequests()) }
+            runCatching { send(ListReviewInbox()) }
+            runCatching { send(ListReviewContacts) }
+            delay(REVIEW_REPLY_TIMEOUT_MS)
+            // an old daemon drops all three silently; one arriving is enough to prove it understands us
+            if (!reviewsSentLoaded.value && !reviewInboxLoaded.value && !reviewContactsLoaded.value) {
+                reviewUnsupported.value = true
+            }
+        }
+    }
+
+    /** Just the inbox — what an action's aftermath re-reads, so `pending` comes from the daemon and is
+     *  never guessed locally. */
+    fun refreshReviewInbox() = scope.launch { runCatching { send(ListReviewInbox()) } }
+
+    fun refreshReviewContacts() = scope.launch { runCatching { send(ListReviewContacts) } }
+
+    /** Mint a one-time REVIEW-peer invite. The URI is establishment material: shown once, never logged. */
+    fun createReviewInvite(label: String? = null) {
+        reviewInvite.value = null; reviewInviteCreating.value = true; reviewError.value = null
+        scope.launch {
+            runCatching { send(CreateReviewInvite(label)) }
+            delay(REVIEW_REPLY_TIMEOUT_MS)
+            if (reviewInviteCreating.value) {
+                reviewInviteCreating.value = false
+                reviewError.value = daemonTooOldText()
+            }
+        }
+    }
+
+    /**
+     * Hand a scanned/pasted invite to the ACTIVE DAEMON to redeem. Deliberately not [redeemCollaboratorInvite]:
+     * that one stores a restricted binding on THIS PHONE for Session Handoff. A review peer link has to
+     * live on the always-on daemon, or delivery and retry would stop the moment the app is closed.
+     */
+    fun joinReviewContact(invite: String, label: String? = null) {
+        reviewJoining.value = true; reviewError.value = null
+        scope.launch {
+            runCatching { send(JoinReviewContact(invite, label)) }
+            delay(REVIEW_REPLY_TIMEOUT_MS)
+            if (reviewJoining.value) {
+                reviewJoining.value = false
+                reviewError.value = daemonTooOldText()
+            }
+        }
+    }
+
+    fun removeReviewContact(id: String, direction: CollaboratorDirection) {
+        reviewError.value = null
+        scope.launch { runCatching { send(RemoveReviewContact(id, direction)) } }
+    }
+
+    /** Send a review. The daemon validates and is authoritative; the form's own checks are only for
+     *  fast feedback. Success proof is the returned row's id/status, not the absence of an error. */
+    fun sendReview(
+        recipientDeviceId: String,
+        title: String,
+        brief: ReviewBrief,
+        artifacts: List<ArtifactRef>,
+        dueAt: Long? = null,
+        expiresAt: Long? = null,
+    ) {
+        reviewSending.value = true; reviewError.value = null; reviewLastCreated.value = null
+        scope.launch {
+            runCatching { send(CreateReviewRequest(recipientDeviceId, title, brief, artifacts, dueAt, expiresAt)) }
+            delay(REVIEW_REPLY_TIMEOUT_MS)
+            if (reviewSending.value) {
+                reviewSending.value = false
+                reviewError.value = daemonTooOldText()
+            }
+        }
+    }
+
+    /** Ask the daemon to build the safe execution bundle. It opens nothing and runs nothing — the
+     *  recommended prompt is for the user's OWN agent, on their own machine, under their own policy. */
+    fun prepareReview(requestId: String) {
+        reviewPreparing.value = requestId; reviewBundle.value = null; reviewError.value = null
+        scope.launch {
+            runCatching { send(PrepareReviewRequest(requestId)) }
+            delay(REVIEW_REPLY_TIMEOUT_MS)
+            if (reviewPreparing.value == requestId) {
+                reviewPreparing.value = null
+                reviewError.value = daemonTooOldText()
+            }
+        }
+    }
+
+    fun clearReviewBundle() { reviewBundle.value = null }
+
+    /** Queue a recipient-side action on the active daemon. The reply says whether it was RECORDED. */
+    fun actOnReview(
+        requestId: String,
+        action: ReviewInboxAction,
+        reason: String? = null,
+        result: ReviewResult? = null,
+    ) {
+        if (reviewActing.value == requestId) return // a double-tap is not a second action
+        reviewActing.value = requestId; reviewError.value = null; reviewLastActed.value = null
+        scope.launch {
+            runCatching { send(ActOnReviewInbox(requestId, action, reason, result)) }
+            delay(REVIEW_REPLY_TIMEOUT_MS)
+            if (reviewActing.value == requestId) {
+                reviewActing.value = null
+                reviewError.value = daemonTooOldText()
+            }
+        }
+    }
+
+    fun cancelReview(id: String) {
+        reviewError.value = null
+        scope.launch { runCatching { send(CancelReviewRequest(id)) } }
+    }
+
+    fun closeReview(id: String) {
+        reviewError.value = null
+        scope.launch { runCatching { send(CloseReviewRequest(id)) } }
+    }
+
+    /** Drop every review mirror. Called from [disconnect] — a review ledger belongs to ONE machine, and
+     *  showing the previous daemon's inbox after a fleet switch would be a lie about whose work it is. */
+    private fun clearReviewState() {
+        reviewsSent.clear(); reviewsReceived.clear(); reviewContacts.clear()
+        reviewsSentLoaded.value = false; reviewInboxLoaded.value = false; reviewContactsLoaded.value = false
+        reviewUnsupported.value = false; reviewError.value = null
+        reviewSending.value = false; reviewLastCreated.value = null
+        reviewActing.value = null; reviewPreparing.value = null
+        reviewBundle.value = null; reviewLastActed.value = null
+        reviewInvite.value = null; reviewInviteTtlSec.value = 0
+        reviewInviteCreating.value = false; reviewJoining.value = false
+    }
+
     /** Guest: redeem a scanned/pasted folder-share invite — the same relay redeem as pairing a computer,
      *  but the daemon scopes this binding to the one shared folder (issue #115). */
     fun redeemShareInvite(invite: ShareInvite) {
@@ -3683,7 +4955,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 onCollaboratorLinkAdded?.invoke(link, invite.ticket)
             } catch (t: Throwable) {
                 collabRedeemError.value = t.message ?: t::class.simpleName ?: "error"
-                Telemetry.track(TelEvent.PairFailed)
+                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t)))
                 Telemetry.recordError(t.message ?: "collaborator redeem failed", "pairing")
             } finally {
                 collabRedeeming.value = false
@@ -3729,18 +5001,42 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *
      * [allowBareBlob] is the explicit-paste opt-in: a naked base64 string is only treated as an invite when
      * a human deliberately pasted it into a field that asks for one.
+     *
+     * [fromScan] is telemetry-only origin: the camera and a tapped deep link hand over the SAME payload, so
+     * only the entry point can tell them apart (issue #278). It changes no routing and no behaviour.
      */
-    fun handleIncomingLink(raw: String, allowBareBlob: Boolean = false): IncomingLink {
+    fun handleIncomingLink(raw: String, allowBareBlob: Boolean = false, fromScan: Boolean = false): IncomingLink {
         val link = parseIncomingLink(raw, allowBareBlob)
         when (link) {
-            is IncomingLink.Code -> pairWithCode(link.code)
-            is IncomingLink.Pair -> pair(link.url)
-            // both invite kinds park in a trust screen; neither redeems here
-            is IncomingLink.Collab -> pendingCollabInvite.value = link.invite
+            is IncomingLink.Code -> pairWithCode(link.code, fromScan = fromScan)
+            is IncomingLink.Pair -> pair(link.url, fromScan = fromScan)
+            // every invite kind parks in a trust screen; none of them redeems here
+            is IncomingLink.Collab ->
+                // A REVIEW invite does not belong to THIS door at all (REVIEW-REQUEST.md §13.3): it is
+                // addressed to a colleague's DAEMON, and its ticket is single use, so redeeming it here
+                // would burn it into a phone binding that can never answer a review. The parser already
+                // refuses a review ticket at the collab door — this is the SECOND gate, kept because the
+                // one that matters is the one standing right before the redeem.
+                if (link.invite.purpose == CollaboratorPurpose.REVIEW) {
+                    status.value = StatusMsg(Res.string.status_review_invite_wrong_door)
+                } else {
+                    pendingCollabInvite.value = link.invite
+                }
+            // …and its own door routes into the Review Center's join confirmation, where the human
+            // compares fingerprints before the DAEMON (not this app) redeems anything.
+            is IncomingLink.ReviewContact -> pendingReviewInvite.value = link.uri
             is IncomingLink.Share -> pendingShareInvite.value = link.invite
             is IncomingLink.Session -> requestOpenSession(link.workdir, link.sessionId)
             is IncomingLink.Handoff -> pendingOfferId.value = link.handoffId
-            IncomingLink.Unknown -> status.value = StatusMsg(Res.string.status_invalid_link)
+            // an unroutable payload is the other silent pairing dead end (issue #278): the user scanned or
+            // opened SOMETHING and got a red line, which the funnel used to see as no attempt at all.
+            // (The review-invite wrong-door branch above is deliberately NOT this: it is a routing correction
+            //  on a perfectly valid invite, not a failed pairing.)
+            IncomingLink.Unknown -> {
+                status.value = StatusMsg(Res.string.status_invalid_link)
+                setPairFailure(PairFailure.PARSE)
+                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to PairFailure.PARSE.wireReason(null)))
+            }
         }
         return link
     }
@@ -3818,8 +5114,65 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Dismiss the inline rename-refusal feedback (Esc on the sidebar's rename row). */
     fun dismissRenameError() { renameError.value = null }
+
+    // ── session rewind / fork actions (issue #282) ─────────────────────────────────────────────────
+
+    /** May [item] offer the rewind/fork entry at all? Three conditions, none of them a version number:
+     *  the row carries transcript coordinates (only a #282-aware daemon replaying a Claude transcript
+     *  sends those), the session is Claude, and nothing is in flight — cutting history under a running
+     *  turn is exactly what the daemon refuses, so the entry is shown disabled rather than firing a
+     *  frame that can only come back as `not_idle`. */
+    fun canRewind(item: ChatItem.User): Boolean =
+        item.seq != null && item.uuid != null && !item.pending &&
+            (sessionAgent.value ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
+
+    /** True when the entry must be shown but greyed out, with the "stop the current turn first" note. */
+    fun rewindBlockedByTurn(): Boolean = streaming.value
+
+    /** Step 1 of the gesture: open the confirmation sheet and ask the daemon what the cut would cost.
+     *  Never cuts anything — [confirmRewind] is the only path that does. */
+    fun startRewind(item: ChatItem.User, mode: String) {
+        val seq = item.seq ?: return
+        val uuid = item.uuid ?: return
+        val convo = convoId.value ?: return
+        rewindError.value = null
+        rewindSheet.value = RewindSheet(RewindTarget(convo, seq, uuid, item.text, mode))
+        scope.launch { send(RewindSession(convo, seq, uuid, mode, dryRun = true)) }
+    }
+
+    /** Step 2: the person read the numbers and tapped through. */
+    fun confirmRewind() {
+        val sheet = rewindSheet.value ?: return
+        if (sheet.submitting) return // a double tap must not send two cuts
+        val convo = convoId.value ?: return
+        rewindSheet.value = sheet.copy(submitting = true)
+        val t = sheet.target
+        rewindAwaiting = t
+        scope.launch { send(RewindSession(convo, t.seq, t.uuid, t.mode, dryRun = false)) }
+    }
+
+    /** Dismiss the sheet. A cut already on the wire is NOT cancelled — nothing can recall it — so the
+     *  pending answer is left armed and still lands its lineage + prefill. */
+    fun cancelRewind() { rewindSheet.value = null }
+    /** Whether ([wd], [resumeId]) names the conversation the chat is ALREADY showing (issue #235). Demands a
+     *  materialized identity on both sides: a brand-new open (resumeId == null) has none, so it must never
+     *  fold into "already open" just because the workdir agrees — that would make ⌘N in the current project
+     *  a permanent no-op. [convoId] (not [sessionKey] alone) is what proves a chat is open: sessionKey
+     *  deliberately survives [backToBrowse] as the draft key. Workdir compared under the shared [sameDirPath]
+     *  identity, so the daemon's absolute cwd and a raw `~/…` request (or a trailing separator) still name
+     *  the same directory. */
+    private fun alreadyOpen(wd: String, resumeId: String?): Boolean =
+        resumeId != null && convoId.value != null && sessionKey.value == resumeId && sameDirPath(workdir.value, wd)
+
+    /** Whether an open for the SAME target is already on the wire (issue #235). Keyed on the target's
+     *  identity only — not the whole [OpenAttempt] — because a second click is a duplicate however the row
+     *  spells the workdir or whatever title/flags the list happens to carry by then. */
+    private fun openInFlightFor(wd: String, resumeId: String?): Boolean =
+        openInFlight?.let { it.resumeId == resumeId && sameDirPath(it.wd, wd) } == true
+
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
     // the list applies it too — not just the new-session picker.
+    /** @return whether this request was actually sent — false means it was refused as a duplicate (#235). */
     fun openSession(
         wd: String,
         resumeId: String? = null,
@@ -3830,29 +5183,72 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         agent: AgentKind? = null,
         startPermissionMode: String? = defaultPermissionMode.value,
         // issue #199: a model picked in the new-session step, for THIS session only. Null = the usual
-        // ladder (the session's remembered model, else the per-agent Settings default). Deliberately not
-        // persisted anywhere: the pick is part of creating one session, not a new default.
+        // ladder (an existing session's remembered nullable value; a NEW session's per-agent Settings
+        // default). Deliberately not persisted anywhere: the pick is part of creating one session, not a
+        // new default.
         startModel: String? = null,
-    ) = scope.launch {
+    ): Boolean {
+        // Gate the EFFECTIVE agent (the same ladder openAgent resolves below: explicit row value, then the
+        // remembered backend, then the default) rather than only the caller's seed. This is synchronous like
+        // the idempotence refusals below: unsupported ZCode never clears the current chat, flips opening
+        // state or reaches the wire.
+        val targetAgent = agent ?: resumeId?.let { sessionParams[it]?.agent } ?: defaultAgent.value
+        if (!supportsAgent(targetAgent)) return false
+        val attempt = OpenAttempt(wd, resumeId, startMode, title, agent, startPermissionMode, startModel)
+        // #235: the two refusals, both decided SYNCHRONOUSLY — the defect they fix is two clicks landing in
+        // the same frame, so any check that only ran inside the coroutine below was already too late.
+        //  (a) the same target is in flight: a second OpenSession restarts the very session the first is
+        //      about to land (observed: a resume re-Closed+re-Opened ~600ms after it landed, new convo).
+        //  (b) it IS the open conversation: the CloseSession+OpenSession pair below would tear down and
+        //      rebuild a session the user is looking at, blanking the transcript and the composer.
+        // A DIFFERENT target still goes through — latest-wins switching is unchanged (#165), and the losing
+        // open's late SessionLive is still refused by the #219 identity guard.
+        if (openInFlightFor(wd, resumeId) || alreadyOpen(wd, resumeId)) return false
+        sessionNavigationFenced = false // an explicit tap/push is the only way out of #226's browse fence
+        openInFlight = attempt
+        lastOpenAttempt = attempt
         opening.value = true // held until the daemon answers (SessionLive/PocketError) — 8s net below
         openTimedOut.value = false
-        promptPending = false // the pending marker belongs to the previous conversation's transcript
-        promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // and so does its receipt deadline
-        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false; turnQueued.value = false // (issue #104) new session clears any ack→turn stall
-        sessionDegraded.value = false; degradedSendArmed = false // per-session — SessionLive re-announces the truth
         val gen = ++openGen // ties the 8s safety net below to THIS open — a quick second open isn't cleared by the first one's timer
+        openJob?.cancel() // a different target supersedes even a worker suspended before dispatch
+        val job = scope.launch(start = CoroutineStart.LAZY) { runOpen(attempt, gen) }
+        openJob = job
+        job.start()
+        return true
+    }
+
+    /** Re-send the open that just failed (issue #235) — the desktop's open-failed pane's retry. Replays the
+     *  SAME request, so a retry can never land under different flags than the click that failed. */
+    fun retryOpen(): Boolean {
+        val a = lastOpenAttempt ?: return false
+        return openSession(a.wd, a.resumeId, a.startMode, a.title, a.agent, a.startPermissionMode, a.startModel)
+    }
+
+    /** The state switch + send of one accepted [openSession]. Split out only so the claim above stays
+     *  synchronous; everything here runs on [scope] exactly as it always did. */
+    private suspend fun runOpen(attempt: OpenAttempt, gen: Int) {
+        if (gen != openGen) return // disconnect/demote/back may win before this queued worker gets CPU
+        val (wd, resumeId, startMode, title, agent, startPermissionMode, startModel) = attempt
+        clearPromptLifecycleState() // every prompt marker/deadline belongs to the previous conversation
+        sessionDegraded.value = false; degradedSendArmed = false // per-session — SessionLive re-announces the truth
+        abandonVoice() // #266: a capture in flight belongs to the session we're leaving — never carry it into the next
         // Reclaim the current session ONLY if it's idle (or a read-only observe): a RUNNING turn stays
         // alive in the background — same rule as backToBrowse. Desktop switches sessions directly
         // (sidebar click → here, no backToBrowse in between), so an unconditional close was killing
         // the previous session's in-flight work on every switch. Switching back later resumes by
         // sessionId and reattaches the still-live conversation (registry live-match), no fork.
         convoId.value?.let { if (observing.value || !streaming.value) send(CloseSession(it)) }
+        if (gen != openGen) return // the close send can suspend while a newer navigation decision wins
         messages.clear(); convoId.value = null; replayEcho = false
         resetHistoryPaging() // #147: a fresh open replays in full — a stale cursor must not ask for a delta
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
+        // #219: a brand-new session's SessionLive has no sessionId to recognize it by — arm the workdir
+        // match instead. A resume open disarms any stale marker: its answer is pinned by sessionKey above.
+        pendingNewOpenWd = if (resumeId == null) wd else null
         composerEpoch.value++ // a REAL context switch — composers re-init from the target's draft (#29/#88); identity flips don't
         terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
         changedFiles.clear(); changedFilesLoading.value = false; closeFileViewer() // changed-files view is per-session too
+        clearGitState() // …and so is the Git panel (#280/#281)
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
         turnStartMark = null // …nor stamp its send time onto this session's TurnEnded duration / stop-refill window
         clearAskQueue()
@@ -3881,10 +5277,25 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // the session's remembered model and the Settings default. Same compatibility guard as the rest.
         val openModel = compatibleModelForAgent(openAgent, startModel)
             ?: compatibleModelForAgent(openAgent, savedModel)
-            ?: compatibleModelForAgent(openAgent, defaultModelFor(openAgent))
+            // #237 adds Codex defaults for NEW sessions only. Every other backend keeps the pre-#237
+            // resume behavior: a missing/null local row falls through to its Settings default. In
+            // particular, changing that fallback for Claude would be an unrelated behavioral regression.
+            ?: if (resumeId == null || openAgent != AgentKind.CODEX) {
+                compatibleModelForAgent(openAgent, defaultModelFor(openAgent))
+            } else {
+                null
+        }
         val knownCapabilities = modelCapabilities(openAgent, openModel)
-        val openEffort = (saved?.effort ?: defaultEffort.value).takeIf { candidate ->
-            candidate == null || knownCapabilities == null || candidate in knownCapabilities.reasoningEfforts
+        val knownEfforts = supportedReasoningEfforts(openAgent, openModel)
+        // Same boundary for effort. A Codex resume never inherits a newly-selected default, while Claude
+        // and the other existing backends retain their historical null/missing-row fallback.
+        val requestedEffort = saved?.effort ?: if (resumeId == null || openAgent != AgentKind.CODEX) {
+            defaultEffortFor(openAgent)
+        } else {
+            null
+        }
+        val openEffort = requestedEffort.takeIf { candidate ->
+            candidate == null || knownEfforts == null || candidate in knownEfforts
         }
         val openServiceTier = (saved?.serviceTier ?: defaultServiceTier.value).takeIf { candidate ->
             openAgent == AgentKind.CODEX &&
@@ -3897,9 +5308,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // rather than only fetching on picker-open (SessionSheets.kt ModelPicker LaunchedEffect).
         fetchModels(openAgent)
         clearBackgroundJobs()
-        Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
+        Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0) + demoTag())
         // lastEventSeq = 0 (never null, via lastEventSeqFor after the reset above): full replay, but it
         // declares this client delta-capable so an observe view tails with deltas (issue #147)
+        if (gen != openGen) return
+        openDispatchedGen = gen // the matching SessionLive may own the view from here
         send(
             OpenSession(
                 wd,
@@ -3915,11 +5328,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         )
         delay(8000) // safety: clear if the daemon never answers (matches `switching`)
         if (gen == openGen && opening.value) {
+            openJob = null
             opening.value = false
             // …and release the router too (issue #165): a switch that never landed must fall back to the
             // session list rather than strand the user on a chat that will never fill
             switchingSession.value = false
             openTimedOut.value = true // surfaced as a slim banner instead of the old silent spinner reset (issue #41)
+            pendingNewOpenWd = null // #219: the open is dead — a later background announce must not claim it
+            openInFlight = null // #235: …and the claim dies with it, so the same row can be clicked again
         }
     }
 
@@ -4135,8 +5551,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
         val sentFiles = landed.map { SentFile(it.landedName ?: it.name, it.size, it.path!!, mediaType = it.mediaType, localUri = it.localUri) }
         val promptId = newPromptId()
+        // Every send starts a new status epoch. A receipt/turn deadline from the previous prompt may have
+        // fired while the app was suspended; carrying those booleans forward makes the fresh bubble say
+        // "not delivered", "queued", or "no response" before its own deadline has even started.
+        sendStalled.value = false
+        clearTurnWatchdogState()
         messages.add(ChatItem.User(text, ready, pending = true, promptId = promptId, files = sentFiles))
         promptPending = true
+        activePromptId = promptId
         turnStartMark = kotlin.time.TimeSource.Monotonic.markNow()
         if (chatTitle.value == null && text.isNotBlank()) {
             chatTitle.value = text.take(48) // new session: first prompt becomes the header title
@@ -4149,8 +5571,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         promptQueued = streaming.value // a send into a running turn gets QUEUED by the CLI — flavors the ack→turn watchdog
         streaming.value = true
         limitOffer.value = null; limitConfirmed.value = null // a manual send supersedes the auto-continue offer (#137)
-        workdir.value?.let { promptRetry = PromptRetry(outText, images, it, promptId); promptResendArmed = false }
-        Telemetry.track(TelEvent.PromptSent)
+        promptRetry = workdir.value?.let { PromptRetry(outText, images, it, promptId) }
+        promptResendArmed = false
+        Telemetry.track(TelEvent.PromptSent, demoTag())
         scope.launch { send(SendPrompt(c, outText, images, promptId = promptId)) }
         armPromptWatchdog()
         return true
@@ -4164,29 +5587,30 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  recovery is running — force one re-handshake. The queued frames re-flush on the fresh session, and
      *  the daemon dedupes the promptId if the original actually landed, so this can't double-run the turn. */
     private fun armPromptWatchdog() {
+        val promptId = activePromptId
         promptWatchdog?.cancel()
         promptWatchdog = scope.launch {
             delay(promptReceiptTimeoutMs)
-            if (!promptPending) return@launch
+            if (!promptPending || activePromptId != promptId) return@launch
             sendStalled.value = true
             // non-Ready phases already have the retry/backoff machinery (and the UI banner) on the case
             if (!demoMode.value && sessionActive.value && phase.value == ConnPhase.Ready) launchTransport(reconnect = true)
         }
     }
 
-    /** Second-stage watchdog (issue #104): a delivered prompt that produces no turn frame within the deadline
+    /** Legacy second-stage watchdog (issue #104): a delivered prompt that produces no turn frame within the deadline
      *  was swallowed by a wedged / mid-relaunch agent. Surface an inline resend cue instead of spinning forever.
      *  Self-guarded at fire time — a turn frame ([awaitingTurn] cleared), a session change ([convoId] moved off
      *  the one captured here), or a turn that already ended ([streaming] false) all no-op it, so it never fires
      *  into a stale conversation and no teardown path has to reach in and cancel it.
      *  [queued] flips the fired state: a prompt sent mid-turn waits in the CLI's queue, where the same silence
      *  is expected — it gets the calm [turnQueued] status, never the resend cue (see [turnQueued] for why). */
-    private fun armTurnWatchdog(queued: Boolean) {
+    private fun armTurnWatchdog(queued: Boolean, promptId: String) {
         val c = convoId.value
         turnWatchdog?.cancel()
         turnWatchdog = scope.launch {
             delay(promptTurnTimeoutMs)
-            if (!awaitingTurn || convoId.value != c || !streaming.value) return@launch
+            if (!awaitingTurn || activePromptId != promptId || convoId.value != c || !streaming.value) return@launch
             if (queued) {
                 turnQueued.value = true
                 Telemetry.track(TelEvent.PromptTurnQueued, mapOf(TelKey.Phase to phase.value.name))
@@ -4208,10 +5632,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (!turnStalled.value) return
         val c = convoId.value ?: run { turnStalled.value = false; return }
         val retry = promptRetry ?: run { turnStalled.value = false; return }
+        if (activePromptId != retry.promptId) { clearTurnWatchdogState(); return }
         turnStalled.value = false
-        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false
+        clearTurnWatchdogState()
         val freshId = newPromptId()
         promptRetry = PromptRetry(retry.text, retry.images, retry.workdir, freshId)
+        activePromptId = freshId
         promptResendArmed = false
         promptPending = true // pending until the re-driven turn shows life
         promptQueued = false // the stalled turn never started — the re-driven copy expects the strict deadline
@@ -4235,7 +5661,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (cmd.isEmpty() || terminalBusy.value) return
         terminalEntries.add(TerminalEntry(cmd))
         terminalBusy.value = true
-        Telemetry.track(TelEvent.PromptSent)
+        Telemetry.track(TelEvent.PromptSent, demoTag())
         scope.launch { send(RunShellCommand(c, cmd, wd)) }
     }
 
@@ -4314,6 +5740,183 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
+    // ── Git panel (#280) / worktrees (#281) ─────────────────────────────────────────────────────
+    // Same shape as the changed-files pair above: a NEW frame family an old daemon drops, so every
+    // request arms a reply deadline and settles into the "update the computer" state instead of a
+    // spinner that never ends. The two-step verbs keep their ORIGINAL request around rather than
+    // rebuilding one from the preview — the confirm must execute exactly what was previewed.
+    private var gitStatusDeadline: Job? = null
+    private var gitDiffDeadline: Job? = null
+    private var gitActionDeadline: Job? = null
+    private var worktreesDeadline: Job? = null
+    private var gitPendingAction: GitAction? = null
+    private var gitPendingRemove: RemoveWorktree? = null
+    private var pendingWorktreeAddBranch: String? = null      // names the branch on the post-create receipt
+
+    /** Read the whole repository state for the Git tab. [withBranches] rides along when the branch
+     *  sheet is about to open, so it costs one round trip instead of two. */
+    fun fetchGitStatus(withBranches: Boolean = false) {
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        gitStatusLoading.value = true
+        gitStatusUnavailable.value = false
+        gitStatusDeadline?.cancel()
+        gitStatusDeadline = scope.launch {
+            delay(GIT_REPLY_DEADLINE_MS)
+            if (gitStatusLoading.value) { gitStatusLoading.value = false; gitStatusUnavailable.value = true }
+        }
+        scope.launch { send(FetchGitStatus(c, wd, withBranches)) }
+    }
+
+    /** Open ONE path's diff on one side (Screen B). Flipping the Working|Staged control re-asks: the
+     *  two sides are two different truths and the daemon owns both. */
+    fun openGitDiff(path: String, staged: Boolean = false) {
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        gitDiffPath.value = path
+        gitDiffStaged.value = staged
+        gitDiff.value = null
+        gitDiffDeadline?.cancel()
+        gitDiffDeadline = scope.launch {
+            delay(GIT_REPLY_DEADLINE_MS)
+            if (gitDiffPath.value == path && gitDiff.value == null) {
+                gitDiff.value = GitDiff(c, wd, path, staged, ok = false, error = DIFF_ERROR_STALE_DAEMON)
+            }
+        }
+        scope.launch { send(ReadGitDiff(c, wd, path, staged)) }
+    }
+
+    fun closeGitDiff() {
+        gitDiffDeadline?.cancel()
+        gitDiffPath.value = null; gitDiff.value = null; gitDiffStaged.value = false
+    }
+
+    /**
+     * Run one verb from the closed allow-list. A [GIT_TWO_STEP_OPS] verb sent WITHOUT a token comes
+     * back as a [GitActionPreview] (→ [gitPendingConfirm], the confirm sheet); [confirmPendingGit]
+     * re-sends this exact frame with the token. An op outside [GIT_OPS] never leaves the app — the
+     * daemon rejects it by name too, this is only so a typo can't reach the wire.
+     */
+    fun gitAct(
+        op: String,
+        paths: List<String> = emptyList(),
+        message: String? = null,
+        branch: String? = null,
+        confirmToken: String? = null,
+    ) {
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        if (op !in GIT_OPS) return
+        val frame = GitAction(c, wd, op, paths, message, branch, confirmToken)
+        if (confirmToken == null && op in GIT_TWO_STEP_OPS) gitPendingAction = frame
+        armGitAction(op)
+        scope.launch { send(frame) }
+    }
+
+    /** List every checkout of the repository the open session sits in (#281 Screen A). */
+    fun fetchWorktrees(withStatus: Boolean = true) {
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        worktreesLoading.value = true
+        worktreesUnavailable.value = false
+        worktreesDeadline?.cancel()
+        worktreesDeadline = scope.launch {
+            delay(GIT_REPLY_DEADLINE_MS)
+            if (worktreesLoading.value) { worktreesLoading.value = false; worktreesUnavailable.value = true }
+        }
+        scope.launch { send(ListWorktrees(c, wd, withStatus)) }
+    }
+
+    /** `git worktree add` — L1, one tap: it writes a new directory and touches no existing data. The
+     *  destination is the daemon's own `<repoRoot>-worktrees/<slug>` policy, so no path crosses here. */
+    fun addWorktree(branch: String, createBranch: Boolean) {
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        val name = branch.trim()
+        if (name.isEmpty()) return
+        pendingWorktreeAddBranch = name
+        armGitAction(GIT_OP_WORKTREE_ADD)
+        scope.launch { send(AddWorktree(c, wd, name, createBranch)) }
+    }
+
+    /** `git worktree remove` — two-step on the SAME token machinery as revert/dirty-checkout. */
+    fun removeWorktree(path: String, confirmToken: String? = null) {
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        val frame = RemoveWorktree(c, wd, path, confirmToken)
+        if (confirmToken == null) gitPendingRemove = frame
+        armGitAction(GIT_OP_WORKTREE_REMOVE)
+        scope.launch { send(frame) }
+    }
+
+    /** Redeem the preview's token by re-sending the request it previewed, verbatim plus the token. A
+     *  [GitActionPreview.blocked] preview is never redeemable (a live session in the worktree) — the
+     *  sheet renders an inert button, and this refuses too so a stray call can't route around it. */
+    fun confirmPendingGit() {
+        val preview = gitPendingConfirm.value ?: return
+        gitPendingConfirm.value = null
+        if (preview.blocked) return
+        when (preview.op) {
+            GIT_OP_WORKTREE_REMOVE -> {
+                val req = gitPendingRemove ?: return
+                gitPendingRemove = null
+                removeWorktree(req.path, preview.confirmToken)
+            }
+            else -> {
+                val req = gitPendingAction ?: return
+                gitPendingAction = null
+                gitAct(req.op, req.paths, req.message, req.branch, preview.confirmToken)
+            }
+        }
+    }
+
+    /** Cancel a confirm sheet — the token simply expires unredeemed on the daemon. */
+    fun dismissGitConfirm() {
+        gitPendingConfirm.value = null
+        gitPendingAction = null; gitPendingRemove = null
+        gitBusyOp.value = null
+    }
+
+    /** Close the A5/A6 error strip (× ). Purely local: nothing about the repository changed. */
+    fun dismissGitError() { gitError.value = null }
+
+    /** Close the post-create receipt. Nothing is undone — the worktree stays. */
+    fun dismissWorktreeCreated() { worktreeCreated.value = null }
+
+    /** Close the fetch receipt (×). Same nothing-changed promise as [dismissGitError]. */
+    fun dismissGitFetchNote() { gitFetchNote.value = null }
+
+    /** One in-flight verb drives the spinner in the button that started it; the deadline turns a
+     *  dropped frame into the same "update the computer" sentence the reads use, in the strip. */
+    private fun armGitAction(op: String) {
+        gitBusyOp.value = op
+        gitError.value = null
+        gitFetchNote.value = null // a receipt for the PREVIOUS verb must not survive into this one
+        gitActionDeadline?.cancel()
+        gitActionDeadline = scope.launch {
+            delay(GIT_REPLY_DEADLINE_MS)
+            if (gitBusyOp.value == op) {
+                gitBusyOp.value = null
+                gitPendingAction = null; gitPendingRemove = null
+                gitError.value = GitActionResult(convoId.value ?: "", op, ok = false, error = GIT_ERROR_STALE_DAEMON)
+                gitStatusUnavailable.value = gitStatus.value == null
+            }
+        }
+    }
+
+    /** Per-session, exactly like the changed-files view: leaving a chat must not carry another
+     *  repository's status, diff or half-finished confirmation into the next one. */
+    private fun clearGitState() {
+        gitStatusDeadline?.cancel(); gitDiffDeadline?.cancel()
+        gitActionDeadline?.cancel(); worktreesDeadline?.cancel()
+        gitStatus.value = null; gitStatusLoading.value = false; gitStatusUnavailable.value = false
+        gitBusyOp.value = null; gitError.value = null; gitFetchNote.value = null
+        gitPendingConfirm.value = null; gitPendingAction = null; gitPendingRemove = null
+        worktrees.value = null; worktreesLoading.value = false; worktreesUnavailable.value = false
+        worktreeCreated.value = null; pendingWorktreeAddBranch = null
+        closeGitDiff()
+    }
+
     fun closeFileViewer() {
         viewedFileDeadline?.cancel()
         exportDeadline?.cancel(); exportWaiting.value = false
@@ -4390,13 +5993,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             startVoiceTimeout(NATIVE_FINAL_TIMEOUT_MS)
         } else {
             scope.launch {
-                val audio = runCatching { recorder.stop() }.getOrNull()
-                if (audio == null || audio.bytes.isEmpty()) {
-                    showNotice(Res.string.voice_no_speech)
-                    clearVoice()
-                } else {
-                    keptAudio = audio
-                    uploadCapture(audio)
+                // #266: a thrown stop() (mic stolen, route change, engine error) is a real FAILURE and must
+                // be retryable — collapsing it into "no speech" told the user they stayed silent. Only an
+                // empty successful capture is genuine silence.
+                val result = runCatching { recorder.stop() }
+                val audio = result.getOrNull()
+                when {
+                    result.isFailure -> voice.value = VoiceState.Failed(Res.string.voice_record_failed)
+                    audio == null || audio.bytes.isEmpty() -> {
+                        showNotice(Res.string.voice_no_speech)
+                        clearVoice()
+                    }
+                    else -> {
+                        keptAudio = audio
+                        uploadCapture(audio)
+                    }
                 }
             }
         }
@@ -4408,6 +6019,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Tear down capture jobs + engine and reset to Idle; [notifyDaemon] also aborts an in-flight remote transcription. */
     private fun stopCapture(notifyDaemon: Boolean) {
         voiceTicker?.cancel(); levelsJob?.cancel(); voiceTimeout?.cancel(); dictationJob?.cancel()
+        voiceStartJob?.cancel(); interruptJob?.cancel() // #266: cancel a start still in its async window, and the interruption watch
         when (voice.value) {
             is VoiceState.Recording -> if (usingNative) NativeDictation.cancel() else recorder.cancel()
             is VoiceState.Transcribing -> {
@@ -4437,15 +6049,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     fun dismissMicSheet() { micPermissionSheet.value = false }
 
-    /** ✓ = confirm AND send (user decision): the transcript goes straight out as the prompt. */
+    /** ✓ = capture confirmed: the transcript LANDS IN THE COMPOSER for the user to review/edit before
+     *  sending (issue #221). Recognition results can be wrong, and auto-sending them wasted a model turn
+     *  and could fire a bad instruction at the agent — so the result no longer sends itself; the user
+     *  sends explicitly. Blank = "no speech". Any staged images stay staged and ride the eventual send. */
     private fun deliverTranscript(text: String) {
-        if (text.isBlank()) {
+        val t = text.trim()
+        if (t.isBlank()) {
             showNotice(Res.string.voice_no_speech)
             clearVoice()
             return
         }
         clearVoice()
-        sendPrompt(text.trim()) // picks up any staged images too
+        pendingVoiceText.value = t // App.kt appends it to the composer and takes focus; the user sends
     }
 
     private fun startNativeVoice() {
@@ -4476,10 +6092,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     private fun startRemoteVoice() {
         usingNative = false
-        scope.launch {
+        // Claim Recording synchronously (issue #266): recorder.start() suspends across the permission
+        // dialog + prepare(), and until it returns voice.value would otherwise stay Idle — a window in
+        // which a second Mic tap passes startVoice()'s guard (double-recording) and an abandonVoice() is a
+        // silent no-op (the recorder then starts AFTER the user left and runs to the cap). Both are closed
+        // by owning the state now and tracking the start job so teardown can cancel mid-start.
+        voice.value = VoiceState.Recording(0)
+        voiceStartJob = scope.launch {
             try {
                 recorder.start()
+            } catch (c: CancellationException) {
+                runCatching { recorder.cancel() } // abandoned during the start window — tear the recorder down
+                throw c
             } catch (_: VoicePermissionDenied) {
+                voice.value = VoiceState.Idle
                 micPermissionSheet.value = true
                 return@launch
             } catch (t: Throwable) {
@@ -4488,6 +6114,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             }
             beginTicker()
             levelsJob = scope.launch { recorder.levels.collect { pushLevel(it) } }
+            // A system interruption (incoming call, another app steals the mic) tears the recorder down
+            // natively; without this the ticker keeps counting over audio that is no longer being captured
+            // and ✓ later reports "no speech". Surface it as an explicit, retryable failure instead.
+            interruptJob = scope.launch {
+                recorder.interruptions.collect {
+                    if (voice.value is VoiceState.Recording) {
+                        voiceTicker?.cancel(); levelsJob?.cancel()
+                        voice.value = VoiceState.Failed(Res.string.voice_interrupted)
+                    }
+                }
+            }
         }
     }
 
@@ -4546,7 +6183,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     private fun onTranscript(f: Transcript) {
-        if (f.captureId != captureId) return // a superseded/cancelled capture
+        // #266: bind to the conversation too, not just captureId. A capture dictated in session A whose
+        // transcript arrives after the user jumped to session B must never land in B's composer — captureId
+        // alone let it through because it isn't reset on session switch.
+        if (f.captureId != captureId || f.convoId != convoId.value) return // a superseded/cancelled/foreign capture
         voiceTimeout?.cancel()
         if (voice.value !is VoiceState.Transcribing) return
         if (f.ok) {
@@ -4581,6 +6221,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Reset all composer voice state (keeps [preferRemote] — it describes the device, not the session). */
     private fun clearVoice() {
+        voiceStartJob?.cancel(); interruptJob?.cancel() // #266: no reset path may leave the start/interruption watchers live
         voice.value = VoiceState.Idle
         liveDictation.value = false
         liveFinal.value = ""
@@ -4773,9 +6414,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         switchViaCommand("/model $target")
         // Reasoning and Fast are model capabilities, not global Codex switches. Clear a choice the
         // target model explicitly does not advertise before the next real turn can be rejected.
-        val caps = modelCapabilities(sessionAgent.value ?: AgentKind.CLAUDE, target)
+        val activeAgent = sessionAgent.value ?: AgentKind.CLAUDE
+        val caps = modelCapabilities(activeAgent, target)
+        val supportedEfforts = supportedReasoningEfforts(activeAgent, target)
+        if (supportedEfforts != null && effort.value != null && effort.value !in supportedEfforts) switchEffort(null)
         if (caps != null) {
-            if (effort.value != null && effort.value !in caps.reasoningEfforts) switchEffort(null)
             if (serviceTier.value != null && caps.serviceTiers.none { it.id == serviceTier.value }) switchServiceTier(null)
         }
     }
@@ -4814,6 +6457,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Clear the conversation — the daemon starts a fresh session (keeps model/effort/mode) and wipes history. */
     fun clearConversation() {
         val c = convoId.value ?: return
+        clearPromptLifecycleState()
         messages.clear(); chatTitle.value = null; contextUsed.value = null
         resetHistoryPaging() // #147: the wiped transcript's cursor dies with it
         clearBackgroundJobs()
@@ -4858,15 +6502,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     fun backToBrowse() {
+        fenceSessionNavigation()
         val c = convoId.value
         val dir = sessionsDir.value // non-null = we land on the session list: re-pull it so the rows reflect this session's run
         // observing or idle -> reclaim; still executing -> leave it running in the background.
         // One coroutine for both sends: the re-list must see the close, not race it.
-        val close = c != null && (observing.value || !streaming.value)
+        val closeConvo = c?.takeIf { observing.value || !streaming.value }
         scope.launch {
-            if (close && c != null) send(CloseSession(c))
+            closeConvo?.let { send(CloseSession(it)) }
             dir?.let { send(ListSessions(it)) }
         }
+        clearPromptLifecycleState()
         convoId.value = null
         chatTitle.value = null
         messages.clear()
@@ -4892,13 +6538,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (item.current) return // the row is on screen already; a tap that reopens it would just flash
         // hold the chat on screen across the round trip — see [switchingSession]. Only when we're actually
         // IN a chat: switching from the project list should keep showing the list, as it always has.
-        switchingSession.value = convoId.value != null
+        // Preserve an existing hold on a duplicate tap: after the first open worker runs, convoId is null,
+        // but the original in-flight transition still owns the chat route until it lands/fails/times out.
+        switchingSession.value = switchingSession.value || convoId.value != null
         sessionsDir.value = item.dirKey
         listSessions(item.dirKey) // freshen that project's list so the back trip doesn't show the old one's
         // Optimistic touch so the sheet re-orders under the tap. The daemon's SessionLive re-touches with
         // the authoritative id right after (a fork or lock-heal can hand back a different one), so a
         // wrong guess self-corrects instead of sticking in the MRU.
-        rememberOpenedSession(item.dirKey, item.sessionId, item.title, item.agent)
+        rememberOpenedSession(item.dirKey, item.sessionId, item.title, item.agent, markSeen = false)
         openSession(item.dirKey, item.sessionId, title = item.title, agent = item.agent)
     }
 
@@ -4916,6 +6564,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val wd = workdir.value ?: return
         scope.launch {
             obs?.let { send(CloseSession(it)) }
+            clearPromptLifecycleState()
             messages.clear(); convoId.value = null; observing.value = false
             resetHistoryPaging() // #147: the take-over open replays in full
             // "Continue here" resumes under the Settings default mode — omitting it fell back to the
@@ -4923,6 +6572,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // still restore per-session, same as openSession.
             val saved = sessionParams[sid]
             val agent = saved?.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
+            // A session saved under an older build may carry bare "opus" — resume it through the same legacy
+            // migration openSession applies (Opus 5 on the official endpoint), or "Continue here" relaunches
+            // on Opus 4.8. Migrate BEFORE the compatibility guard, exactly as openSession does.
+            val savedModel = saved?.model?.let {
+                if (agent == AgentKind.CLAUDE && gatewayBaseUrl.value == null) migrateLegacyClaudeModel(it) else it
+            }
+            val takeoverModel = compatibleModelForAgent(agent, savedModel)
+            val requestedEffort = saved?.effort ?: if (agent == AgentKind.CODEX) null else defaultEffortFor(agent)
+            val supportedEfforts = supportedReasoningEfforts(agent, takeoverModel)
+            val takeoverEffort = requestedEffort.takeIf { candidate ->
+                candidate == null || supportedEfforts == null || candidate in supportedEfforts
+            }
             mode.value = defaultMode.value
             permissionMode.value = defaultPermissionMode.value.takeIf { agent == AgentKind.CLAUDE }
             serviceTier.value = (saved?.serviceTier ?: defaultServiceTier.value).takeIf { agent == AgentKind.CODEX }
@@ -4930,9 +6591,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 OpenSession(
                     wd,
                     sid,
-                    model = compatibleModelForAgent(agent, saved?.model),
+                    model = takeoverModel,
                     mode = defaultMode.value,
-                    effort = saved?.effort ?: defaultEffort.value,
+                    // A Codex takeover is an existing session and must not inherit #237's new-session
+                    // default. Other backends keep their established fallback to the Settings effort.
+                    effort = takeoverEffort,
                     takeOver = true,
                     agent = agent,
                     lastEventSeq = lastEventSeqFor(sid),
@@ -4945,8 +6608,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Explicitly end the session now (force-reclaim the claude process), even if it is still running. */
     fun stopSession() {
+        fenceSessionNavigation()
         convoId.value?.let { c -> scope.launch { send(CloseSession(c)) } }
         streaming.value = false
+        clearPromptLifecycleState()
         convoId.value = null
         chatTitle.value = null
         messages.clear()
@@ -4958,8 +6623,30 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     fun backToDirectories() {
+        // "All projects" is reachable from inside a live chat (the switcher sheet, App.kt onAllProjects).
+        // Leaving a chat here must tear it down exactly like BACK does — and, load-bearing, null convoId:
+        // the #226 fence this raises makes acceptsSessionLive reject every reattach/reemit while fenced, so
+        // a chat left bound (convoId != null) freezes its live state and dies on the next reconnect until
+        // the user backs all the way out and reopens. Delegate the chat teardown, then drop to directories.
+        if (convoId.value != null) backToBrowse()
+        fenceSessionNavigation()
         sessionsDir.value = null
         sessions.clear()
+    }
+
+    /** Raise the #226 browse fence and abandon an open transition the user explicitly backed out of. */
+    private fun fenceSessionNavigation() {
+        sessionNavigationFenced = true
+        if (openInFlight != null || opening.value || switchingSession.value) {
+            openGen++ // invalidates the abandoned request's 8s safety-net coroutine
+            openJob?.cancel(); openJob = null
+            openInFlight = null
+            lastOpenAttempt = null
+            pendingNewOpenWd = null
+            opening.value = false
+            switchingSession.value = false
+            openTimedOut.value = false
+        }
     }
 
     internal companion object {
@@ -4984,6 +6671,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         /** §3.2.7: the Accept button waits this long for daemon truth before it says so — an old daemon
          *  DROPS the unknown accept frame entirely, and a permanent spinner would read as success. */
         const val ACCEPT_TIMEOUT_MS = 12_000L
+
+        /** How long a Review Center call waits for daemon truth before it says "update the daemon"
+         *  (REVIEW-REQUEST.md §10). Every pocket/review.* frame is a NEW discriminator an older daemon
+         *  silently drops, so the alternative to a bounded wait is an infinite spinner. Longer than the
+         *  accept window because a mint or a join round-trips the relay, not just the local process. */
+        const val REVIEW_REPLY_TIMEOUT_MS = 15_000L
         const val SOCKET_RETIRE_TIMEOUT_MS = 3_000L // #142: bounded wait for the old socket to really close before dialing anew
         const val TRANSPORT_COALESCE_MS = 3_000L    // #143: reconnect triggers within this of an in-flight attempt merge into it
         const val STABLE_LINK_RESET_MS = 60_000L    // #144: the retry ladder resets only after the link stays up this long
@@ -5030,15 +6723,23 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
         const val K_DEFAULT_PERMISSION_MODE = "default_session_permission_mode" // backend-native mode (`auto`), "" = legacy mode
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
+        const val K_DEFAULT_CODEX_EFFORT = "default_session_effort_codex" // SecureStore: Codex-only effort; never overwrites Claude
+        const val K_DEFAULT_OPENCODE_EFFORT = "default_session_effort_opencode" // SecureStore: OpenCode-only effort
+        const val K_DEFAULT_KIMI_EFFORT = "default_session_effort_kimi" // SecureStore: Kimi-only effort
+        const val K_DEFAULT_ZCODE_EFFORT = "default_session_effort_zcode" // SecureStore: ZCode-only thought level
+        const val K_DEFAULT_DSH_EFFORT = "default_session_effort_dsh" // SecureStore: DSH-only effort (issue #255)
         const val K_DEFAULT_SERVICE_TIER = "default_session_service_tier" // Codex `priority` = Fast; "" = account default
         const val K_DEFAULT_MODEL = "default_session_model"   // SecureStore: Claude model id for new sessions ("" = CLI default)
         const val K_DEFAULT_CODEX_MODEL = "default_session_model_codex" // SecureStore: Codex model id for new sessions
         const val K_DEFAULT_OPENCODE_MODEL = "default_session_model_opencode" // SecureStore: OpenCode provider/model id for new sessions
+        const val K_DEFAULT_KIMI_MODEL = "default_session_model_kimi" // SecureStore: Kimi model alias for new sessions (issue #206)
+        const val K_DEFAULT_ZCODE_MODEL = "default_session_model_zcode" // SecureStore: ZCode model id for new sessions (issue #228)
+        const val K_DEFAULT_DSH_MODEL = "default_session_model_dsh" // SecureStore: DSH model id — reserved; v1 has no model switching (issue #255)
         private val LEGACY_EFFORT_OPTIONS = listOf("low", "medium", "high", "xhigh", "max")
         const val K_CONTEXT_WINDOW_OVERRIDE = "context_window_override" // SecureStore: LEGACY global statusline denominator in tokens ("" = follow derived window); now the fallback tier under K_CONTEXT_WINDOW_OVERRIDES
         const val K_CONTEXT_WINDOW_OVERRIDES = "context_window_overrides" // SecureStore: TSV modelId\ttokens per line — per-model denominators (issue #169)
         const val K_DEFAULT_AGENT = "default_session_agent"   // SecureStore: AgentKind.name new sessions start under (default CLAUDE)
-        const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | "claude" | "codex" | "opencode" — project/session filter (#31/#188)
+        const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | one agent key | comma-joined keys — project/session filter (#31/#188/#248, see AgentFilter.kt)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
         const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
         const val K_WORKING_SET_PREFIX = "working_set_mru:"    // SecureStore: "working_set_mru:<accountId>" → TSV dirKey\tsessionId\ttitle\tproject\tat\tagent — that computer's switcher MRU (issue #165)
@@ -5046,6 +6747,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_SESSION_PARAMS = "session_params"          // SecureStore: TSV sid\tmode\tmodel\teffort\tagent per line (last 100 sessions)
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
         const val K_THEME_MODE = "appearance_theme_mode"      // SecureStore: ThemeMode name (SYSTEM/LIGHT/DARK; issue #63)
+        const val K_ACCENT_THEME = "appearance_accent_theme"  // SecureStore: AccentTheme name (POCKET/CODEX; issue #204)
         const val K_VOICE_ENGINE = "voice_engine"             // SecureStore: "whisper" = transcribe on the computer; "" = native dictation when available
         const val K_SHARE_ENDED_PREFIX = "share_ended:"        // SecureStore: "share_ended:<accountId>" → "reason\townerLabel" — the guest's ShareEnded notice (#115 follow-up)
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)
@@ -5057,6 +6759,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 }
 
 private const val REFRESH_SPINNER_SAFETY_MS = 4_000L // spinner never outlives a lost reply by more than this
+
+/** Degraded-mode copy for [PocketRepository.daemonTooOldText] (#251). Mirrors `ho_daemon_too_old`. */
+private const val DAEMON_TOO_OLD_FALLBACK =
+    "This computer's daemon doesn't support handoff yet — update it to use this."
 
 /** #142: cancel the previous connection's job and WAIT (bounded) until it has actually finished — its
  *  socket closed and its writers off the shared outboxes — before the next connection dials. cancel()

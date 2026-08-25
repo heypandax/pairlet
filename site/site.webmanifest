@@ -1,7 +1,7 @@
 {
   "name": "CC Pocket",
   "short_name": "CC Pocket",
-  "description": "Drive Claude Code or OpenAI Codex from your phone — resume sessions, stream output, approve tool permissions remotely. End-to-end encrypted, open source.",
+  "description": "Your coding agents stay on your computer; you stay in control from anywhere. Watch, approve, continue and inspect six agent backends from a phone, tablet or another computer. End-to-end encrypted, open source, no account.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

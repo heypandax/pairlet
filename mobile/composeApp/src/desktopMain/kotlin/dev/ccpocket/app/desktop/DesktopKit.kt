@@ -27,13 +27,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.platform.Font
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.theme.Tok
+import kotlin.math.roundToInt
 
 /**
  * Desktop design kit — the atoms shared by the two-pane shell, ported from `desktop-core.jsx`.
@@ -60,6 +64,34 @@ object Dk {
     val maxStreamWidth = 760.dp           // chat message column cap for readability
 }
 
+/**
+ * 紧凑文本（chip / badge / 状态标签 / 计数气泡）的「垂直居中稳定」文本样式（#293）。
+ *
+ * 这类小组件全靠 1–4dp 的纵向 padding 撑高，文字在盒子里的落点因此完全由字体自带的
+ * ascent/descent/leading 决定。[Dk.ui] / [Dk.mono] 随包的 Inter / JetBrains Mono 只有 latin
+ * 子集，中文取不到字形就走系统 fallback——mac 落到苹方/SF，Windows 落到微软雅黑/Segoe UI，
+ * 两边度量差一大截。于是在 mac 上调准的 padding 搬到 Windows 就整体偏上或偏下（真实用户反馈：
+ * 目录选择器的「正在打开」chip 等多处不居中）。
+ *
+ * 修法是把行盒的高度从「字体说了算」改成「字号说了算」：显式 [TextStyle.lineHeight]（字号的
+ * 1.15 倍取整）定死行盒，[LineHeightStyle.Alignment.Center] 把字形摆到行盒正中。同一字号在两个
+ * 平台拿到同一个行盒，chip 的视觉重心就对齐了。**不要逐处加 offset/padding 补偿**——那是修表象。
+ *
+ * `trim` 必须是 [LineHeightStyle.Trim.None]，这点反直觉：Trim.Both 正是 Compose 的默认值
+ * （`LineHeightStyle.Default`），它会把单行的行盒重新收回到字体自身的 ascent+descent，
+ * 等于把上面设的 lineHeight 作废。实测（`TightCenterTest`，desktop/skiko、density 2）11sp：
+ * 拉丁文行盒 27px、中文（fallback 到苹方）31px——Trim.Both 下两者原样不变，Trim.None 下同为 26px。
+ * 也就是说带 Trim.Both 的写法在桌面端是个空操作，修不了 #293。
+ *
+ * 只设行高相关字段、不设 fontSize，所以调用方照旧写 `fontSize = 11.sp` 参数，两者不打架
+ * （Text 的显式参数覆盖 style 同名字段）。
+ *
+ * 实现已上提到 commonMain（`theme/TightText.kt`）——手机端的额度胶囊踩了同一个坑，而这条规则
+ * 与平台无关。这里保留桌面端的名字做一层直通，纯粹为了不动二十来处既有调用点；
+ * `TightCenterTest` 照旧钉在这个入口上。
+ */
+fun tightCenter(fontSize: TextUnit): TextStyle = dev.ccpocket.app.theme.tightCenter(fontSize)
+
 /** A small keycap chip — a mono pill with a hairline border, e.g. ⌘K / ⏎ / ⌘⏎. */
 @Composable
 fun Key(text: String) {
@@ -68,6 +100,7 @@ fun Key(text: String) {
         color = Tok.muted,
         fontFamily = Dk.mono,
         fontSize = 11.sp,
+        style = tightCenter(11.sp),
         modifier = Modifier
             .clip(RoundedCornerShape(5.dp))
             .background(Tok.base)
@@ -146,6 +179,7 @@ fun OutlinePill(text: String, color: Color, modifier: Modifier = Modifier) {
         color = color,
         fontFamily = Dk.mono,
         fontSize = 9.5.sp,
+        style = tightCenter(9.5.sp),
         modifier = modifier
             .clip(RoundedCornerShape(999.dp))
             .border(1.dp, color.copy(alpha = 0.33f), RoundedCornerShape(999.dp))

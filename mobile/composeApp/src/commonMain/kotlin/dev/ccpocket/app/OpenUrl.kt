@@ -15,6 +15,15 @@ const val SUPPORT_URL = "https://pocket.ark-nexus.cc/support/"
 // static-site request, proxy logs, or Referer headers.
 const val SUPPORT_CHAT_URL = "${SUPPORT_URL}?mode=chat&source=app"
 
+// The Claude Code CLI is cc-pocket's PREREQUISITE, not its dependency: the daemon drives an agent CLI that
+// the user installs and authenticates themselves. The first-run guide states that in one line and links here
+// rather than paraphrasing an install procedure that Anthropic owns and revises (issue #278 batch 2).
+const val CLAUDE_CLI_SETUP_URL = "https://code.claude.com/docs/en/setup"
+
+// The long-form setup guide the first-run screen links out to — the marketing/docs site the onboarding
+// screen has always pointed at, named here instead of inlined at the call site.
+const val SETUP_GUIDE_URL = "https://heypandax.github.io/cc-pocket/"
+
 // Where a phone goes for a newer app build (issue #200). Both are the EXISTING distribution surfaces —
 // the release page that already carries the APK, and the store listing — so the nudge never becomes a
 // second update channel of its own.

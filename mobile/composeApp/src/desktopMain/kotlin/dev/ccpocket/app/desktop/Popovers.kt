@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.Icons
@@ -58,7 +60,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.ho_menu_row
-import dev.ccpocket.app.resources.ho_new_badge
 import dev.ccpocket.app.resources.label_agent
 import dev.ccpocket.app.resources.label_effort
 import dev.ccpocket.app.resources.label_mode
@@ -112,6 +113,7 @@ import dev.ccpocket.app.ui.agentColor
 import dev.ccpocket.app.ui.agentName
 import dev.ccpocket.app.ui.agentTintBorder
 import dev.ccpocket.app.ui.agentTintFill
+import dev.ccpocket.app.ui.handoff.canInitiateSessionHandoff
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.PermissionMode
@@ -134,6 +136,21 @@ internal val CLAUDE_MODES = listOf(
 internal val CLAUDE_AUTO_MODE =
     DkMode(Res.string.mode_auto_short, CLAUDE_PERMISSION_MODE_AUTO, PermissionMode.DEFAULT, Tok.accent, nativeMode = CLAUDE_PERMISSION_MODE_AUTO)
 
+/** Desktop's rendering model for the shared permission contract. */
+internal fun desktopModeChoices(agent: AgentKind, autoAvailable: Boolean = false): List<DkMode> = when (agent) {
+    AgentKind.CLAUDE -> CLAUDE_MODES + if (autoAvailable) listOf(CLAUDE_AUTO_MODE) else emptyList()
+    AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH -> CLAUDE_MODES
+}
+
+internal fun desktopDefaultModeIndex(
+    agent: AgentKind,
+    defaultMode: PermissionMode,
+    defaultPermissionMode: String?,
+    autoAvailable: Boolean = false,
+): Int = desktopModeChoices(agent, autoAvailable)
+    .indexOfFirst { it.mode == defaultMode && it.nativeMode == defaultPermissionMode }
+    .coerceAtLeast(0)
+
 /**
  * Agent + model + mode picker with an EDITABLE path field seeded by whoever opened it (the current project
  * from ⌘N / the Sessions-pane row, "~/" from the Projects-group row, a RECENT header's ＋). A path whose
@@ -148,6 +165,9 @@ internal val CLAUDE_AUTO_MODE =
 fun NewSessionPopover(
     initialPath: String,
     defaultAgent: AgentKind = AgentKind.CLAUDE,
+    // Same default as mobile's ConfigureSessionSheet: the full enum, narrowed by the host to what the
+    // connected daemon accepts (issue #252 — a desktop-only whitelist here silently dropped Kimi).
+    availableAgents: List<AgentKind> = AgentKind.entries,
     defaultMode: PermissionMode = PermissionMode.DEFAULT,
     defaultPermissionMode: String? = null,
     autoAvailable: Boolean = false,
@@ -156,12 +176,11 @@ fun NewSessionPopover(
     onAgentPicked: (AgentKind) -> Unit = {},
     onStart: (String, AgentKind, PermissionMode, String?, String?) -> Unit,
 ) {
-    var agent by remember { mutableStateOf(defaultAgent) }
-    val availableModes = CLAUDE_MODES + if (agent == AgentKind.CLAUDE && autoAvailable) listOf(CLAUDE_AUTO_MODE) else emptyList()
+    val selectableAgents = availableAgents.ifEmpty { listOf(AgentKind.CLAUDE) }
+    var agent by remember { mutableStateOf(defaultAgent.takeIf { it in selectableAgents } ?: selectableAgents.first()) }
+    val availableModes = desktopModeChoices(agent, autoAvailable)
     var modeIdx by remember {
-        mutableStateOf(
-            availableModes.indexOfFirst { it.mode == defaultMode && it.nativeMode == defaultPermissionMode }.coerceAtLeast(0),
-        )
+        mutableStateOf(desktopDefaultModeIndex(agent, defaultMode, defaultPermissionMode, autoAvailable))
     }
     // null = follow the per-agent default. Reset per agent: a Claude alias isn't a model Codex can run.
     var chosenModel by remember(agent) { mutableStateOf<String?>(null) }
@@ -174,6 +193,9 @@ fun NewSessionPopover(
     LaunchedEffect(Unit) { pathFocus.requestFocus() }
     Column(
         Modifier.width(300.dp).clip(RoundedCornerShape(14.dp)).background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(14.dp))
+            // issue #209: the Overlay bounds this popover to the window height; scroll so the Start button
+            // at the bottom stays reachable on a short window / high display scale instead of being clipped
+            .verticalScroll(rememberScrollState())
             // Enter anywhere in the popover = the Start button (the path field holds focus)
             .onPreviewKeyEvent { e ->
                 if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter) && looksAbsolute) {
@@ -206,10 +228,15 @@ fun NewSessionPopover(
                 )
             }
             PopoverLabel(stringResource(Res.string.label_agent))
-            Row(Modifier.fillMaxWidth().padding(bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                AgentCard(AgentKind.CLAUDE, agent == AgentKind.CLAUDE, Modifier.weight(1f)) { agent = AgentKind.CLAUDE }
-                AgentCard(AgentKind.CODEX, agent == AgentKind.CODEX, Modifier.weight(1f)) { agent = AgentKind.CODEX }
-                AgentCard(AgentKind.OPENCODE, agent == AgentKind.OPENCODE, Modifier.weight(1f)) { agent = AgentKind.OPENCODE }
+            Column(Modifier.fillMaxWidth().padding(bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                selectableAgents.chunked(3).forEach { rowAgents ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        rowAgents.forEach { candidate ->
+                            AgentCard(candidate, agent == candidate, Modifier.weight(1f)) { agent = candidate }
+                        }
+                        repeat(3 - rowAgents.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
             }
             NewSessionModelRow(modelsFor(agent), chosenModel, defaultModelFor(agent)) { chosenModel = it }
             PopoverLabel(stringResource(Res.string.label_mode))
@@ -337,10 +364,10 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                         onDismiss()
                     }
                 }
-                val modeChoices = CLAUDE_MODES + if (
-                    model.chatAgent == AgentKind.CLAUDE &&
-                    model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO)
-                ) listOf(CLAUDE_AUTO_MODE) else emptyList()
+                val modeChoices = desktopModeChoices(
+                    model.chatAgent,
+                    model.chatAgent == AgentKind.CLAUDE && model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO),
+                )
                 val activeMode = modeChoices.firstOrNull {
                     it.mode == model.chatMode && it.nativeMode == model.chatPermissionMode
                 } ?: modeChoices.first()
@@ -352,10 +379,11 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 if (canOpenTerminal) {
                     QaRow(stringResource(Res.string.qa_terminal)) { model.openTerminalPreferred(); onDismiss() }
                 }
-                // "Hand off to a colleague" (design Frame 1): only while the session is handoff-free —
+                // "Hand off to a colleague": an ordinary peer row (no NEW badge — available is not
+                // recommended, design chat-quick-actions-ui-2.0), only while the session is handoff-free —
                 // one non-terminal handoff per session, and the daemon refuses a second anyway
-                if (!model.observing && model.activeHandoff == null) {
-                    QaRow(stringResource(Res.string.ho_menu_row), value = stringResource(Res.string.ho_new_badge)) { onDismiss(); model.showHandoff = true }
+                if (!model.observing && model.activeHandoff == null && model.chatAgent.canInitiateSessionHandoff()) {
+                    QaRow(stringResource(Res.string.ho_menu_row)) { onDismiss(); model.showHandoff = true }
                 }
                 QaRow(stringResource(Res.string.qa_compact)) { model.compactConversation(); onDismiss() }
                 QaRow(
@@ -372,10 +400,10 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
             }
             QaPage.MODE -> {
                 QaBack(stringResource(Res.string.label_mode)) { page = QaPage.MAIN }
-                val choices = CLAUDE_MODES + if (
-                    model.chatAgent == AgentKind.CLAUDE &&
-                    model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO)
-                ) listOf(CLAUDE_AUTO_MODE) else emptyList()
+                val choices = desktopModeChoices(
+                    model.chatAgent,
+                    model.chatAgent == AgentKind.CLAUDE && model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO),
+                )
                 choices.forEach { m ->
                     QaOption(
                         stringResource(m.label),
@@ -416,6 +444,13 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
             // daemon truth or nothing — no static catalog (see SessionSheets' OPTIONS note); the
             // empty state renders below and the custom field still takes a provider/model id
             AgentKind.OPENCODE -> model.modelsForAgent(AgentKind.OPENCODE).map { it to it }
+            // KIMI (issue #206): daemon-reported aliases only (from `kimi provider list --json`)
+            AgentKind.KIMI -> model.modelsForAgent(AgentKind.KIMI).map { it to it }
+            // ZCode (issue #228): daemon-reported ids only, the same contract as Kimi.
+            AgentKind.ZCODE -> model.modelsForAgent(AgentKind.ZCODE).map { it to it }
+            // DSH (issue #255): no model switching in v1 — dsh picks its own model and the daemon has no
+            // switch path, so an empty picker is the truth rather than rows that would never take effect.
+            AgentKind.DSH -> emptyList()
             // Claude keeps its static alias rows (labels + the 1M/200K semantics live in the shared
             // table) — the daemon's list for Claude is config-default + the same aliases anyway.
             // claudeRowPick: on a gateway the Opus row degrades to the bare alias (#167/#168).
@@ -511,6 +546,18 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
 internal class AboveAnchorEndPopupPositionProvider(private val gapPx: Int) : PopupPositionProvider {
     override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
         val x = (anchorBounds.right - popupContentSize.width).coerceIn(0, maxOf(0, windowSize.width - popupContentSize.width))
+        val y = (anchorBounds.top - gapPx - popupContentSize.height).coerceAtLeast(0)
+        return IntOffset(x, y)
+    }
+}
+
+/** The left-edge mirror of [AboveAnchorEndPopupPositionProvider], for anchors on the LEFT side of the
+ *  window — the sidebar footer's allowance strip. Right-aligning there would push a popover wider than
+ *  the sidebar off its anchor entirely (clamped to x=0), which reads as a floating panel rather than
+ *  something growing out of the strip. */
+internal class AboveAnchorStartPopupPositionProvider(private val gapPx: Int) : PopupPositionProvider {
+    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
+        val x = anchorBounds.left.coerceIn(0, maxOf(0, windowSize.width - popupContentSize.width))
         val y = (anchorBounds.top - gapPx - popupContentSize.height).coerceAtLeast(0)
         return IntOffset(x, y)
     }
@@ -621,7 +668,7 @@ fun CollapsedSidebar(modifier: Modifier = Modifier) {
         Box(Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(Tok.raised), contentAlignment = Alignment.Center) {
             AgentGlyph(AgentKind.CLAUDE, size = 17)
             Box(Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp).size(15.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent), contentAlignment = Alignment.Center) {
-                Text("1", color = Tok.base, fontFamily = Dk.mono, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text("1", color = Tok.base, fontFamily = Dk.mono, fontSize = 9.sp, fontWeight = FontWeight.Bold, style = tightCenter(9.sp))
             }
         }
         Spacer(Modifier.weight(1f))

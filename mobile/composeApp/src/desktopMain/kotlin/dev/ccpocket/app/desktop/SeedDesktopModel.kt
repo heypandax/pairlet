@@ -127,6 +127,13 @@ open class SeedDesktopModel : DesktopModel {
     override fun isProjectPinned(path: String) = projectPinList.any { it.path == path }
     override fun pinProject(path: String, name: String) { if (!isProjectPinned(path)) projectPinList += DkProjectPin(path, name) }
     override fun unpinProject(path: String) { projectPinList.removeAll { it.path == path } }
+    private var projectRevealGeneration = 0L
+    private var projectListRevealState by mutableStateOf<DkProjectListReveal?>(null)
+    override val projectListReveal: DkProjectListReveal? get() = projectListRevealState
+    override fun openProjectPin(p: DkProjectPin) {
+        projectListRevealState = DkProjectListReveal(p.path, ++projectRevealGeneration)
+        openProject(DkProject(p.path, p.name))
+    }
 
     // the fleet boards' other machines — the design's four-machine command-center scenario
     private val resolvedAttention = mutableStateListOf<String>()
@@ -189,14 +196,62 @@ open class SeedDesktopModel : DesktopModel {
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
     override var showHandoff by mutableStateOf(false)
+    override var showFolderPicker by mutableStateOf(false)
     override var showModelPopover by mutableStateOf(false)
+    override var showQuotaPopover by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
+    override var showGit by mutableStateOf(false)
+    override var showWorktrees by mutableStateOf(false)
     override var showSkills by mutableStateOf(false)
 
-    override val appVersion = "1.6.0"
+    // ── Git panel (#280) / worktrees (#281): canned but STRUCTURALLY complete — one staged file, one
+    // working change, one untracked path and two checkouts, so the overlay's grouping, chips and the
+    // worktree card all render in a screenshot without a daemon. Mutations are inert by design: the
+    // seed model fakes state, never verbs.
+    override val gitStatus = dev.ccpocket.protocol.GitStatus(
+        convoId = "seed", workdir = "~/code/cc-pocket",
+        branch = "feat/auth-refactor", upstream = "origin/feat/auth-refactor", ahead = 2, behind = 1,
+        staged = listOf(dev.ccpocket.protocol.GitFileEntry("src/relay/FrameParser.kt", "M", 12, 3)),
+        unstaged = listOf(
+            dev.ccpocket.protocol.GitFileEntry("src/relay/RelaySession.kt", "M", 6, 2),
+            dev.ccpocket.protocol.GitFileEntry("src/relay/LegacyChunker.kt", "D", 0, 87),
+        ),
+        untracked = listOf(dev.ccpocket.protocol.GitFileEntry("docs/relay/frame-splitting.md", "?")),
+        branches = listOf(
+            dev.ccpocket.protocol.GitBranchInfo("feat/auth-refactor", current = true, lastCommitAt = 1_755_000_000),
+            dev.ccpocket.protocol.GitBranchInfo("main", lastCommitAt = 1_754_800_000),
+            dev.ccpocket.protocol.GitBranchInfo("fix/pair-timeout", lastCommitAt = 1_754_600_000, checkedOutAt = "~/code/cc-pocket-worktrees/pair-timeout"),
+        ),
+        worktreeCount = 2,
+    )
+    override val worktrees = dev.ccpocket.protocol.WorktreeList(
+        convoId = "seed", workdir = "~/code/cc-pocket", repoRoot = "~/code/cc-pocket",
+        worktrees = listOf(
+            dev.ccpocket.protocol.WorktreeEntry("~/code/cc-pocket", branch = "feat/auth-refactor", isMain = true, dirty = true, dirtyCount = 3),
+            dev.ccpocket.protocol.WorktreeEntry(
+                "~/code/cc-pocket-worktrees/pair-timeout", branch = "fix/pair-timeout",
+                dirty = false, activeSessionId = "s2", activeSessionTitle = "Fix stream parser test",
+            ),
+        ),
+    )
+    // the flag is real so a UI test can open the Center; [reviewRepo] stays null, so it renders its
+    // honest inert state rather than faked ledger data
+    override var showReviewCenter by mutableStateOf(false)
+
+    override val appVersion = "1.9.1"
     override val relayUrl = "wss://pocket.ark-nexus.cc"
     override var defaultAgent by mutableStateOf(AgentKind.CLAUDE)
     override var defaultMode by mutableStateOf(PermissionMode.DEFAULT)
+    private val defaultEfforts = mutableStateMapOf<AgentKind, String>()
+    override var defaultEffort: String?
+        get() = defaultEfforts[defaultAgent]
+        set(value) {
+            if (value == null) defaultEfforts.remove(defaultAgent) else defaultEfforts[defaultAgent] = value
+        }
+    /** Empty by default so existing seed screenshots do not gain a capability the scene did not declare.
+     *  Desktop Settings tests opt in when exercising the effort picker. */
+    var settingsEffortOptions: List<String> by mutableStateOf(emptyList())
+    override fun effortOptionsFor(agent: AgentKind, model: String?): List<String> = settingsEffortOptions
     private val defaultModels = mutableStateMapOf<AgentKind, String>()
     override fun defaultModelFor(agent: AgentKind): String? = defaultModels[agent]
     override fun setDefaultModelFor(agent: AgentKind, model: String?) {
@@ -208,11 +263,13 @@ open class SeedDesktopModel : DesktopModel {
     override val terminalPanel = TerminalPanelController()
     override var menuBarEnabled by mutableStateOf(true)
     override var themeMode by mutableStateOf(ThemeMode.DARK)
+    override var accentTheme by mutableStateOf(dev.ccpocket.app.theme.AccentTheme.POCKET)
+    override var chatAlignment by mutableStateOf(ChatStreamAlignment.LEFT)
     private var phonePushState by mutableStateOf(true)
     override val phonePush: Boolean? get() = phonePushState
     override fun setPhonePush(enabled: Boolean) { phonePushState = enabled }
     override fun renameComputer(c: DkComputer, label: String?) {}
-    override fun revokeComputer(c: DkComputer) {}
+    override fun removeComputer(c: DkComputer) {}
     override val composerState = ComposerState()
 
     // account + API presets (issue #113): canned masked state, exactly the shape a daemon replies with —
@@ -286,7 +343,9 @@ open class SeedDesktopModel : DesktopModel {
     override val chatModel: String get() = when (selected.agent) {
         AgentKind.CODEX -> "gpt-5.1-codex"
         AgentKind.OPENCODE -> "auto"
-        else -> "sonnet"
+        AgentKind.ZCODE -> "zai/glm-5"
+        AgentKind.DSH -> "" // issue #255: no model switching, so the seed shows no model chip for dsh
+        AgentKind.CLAUDE, AgentKind.KIMI -> "sonnet"
     }
     override val chatMode = PermissionMode.DEFAULT
     override val streaming = true
@@ -320,9 +379,17 @@ open class SeedDesktopModel : DesktopModel {
     override fun addComputer() {}
     override fun openProject(p: DkProject) {}
     override fun selectSession(s: DkSession) { sessions.indexOfFirst { it.sessionId == s.sessionId }.takeIf { it >= 0 }?.let { selectedIndex = it; askResolved = false } }
-    override val newSessionDir = "~/code/cc-pocket"
+    // nullable like the interface (not narrowed to String): "no project in context" is a state the empty-state
+    // starter (#256) has to be able to preview and test, and a narrowed override can't express it
+    override val newSessionDir: String? = "~/code/cc-pocket"
     override var newSessionSeed: String? by mutableStateOf(null)
     override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?, model: String?) { showNewSession = false }
+    // issue #256: the empty state's field is real here (it is a text field the previewer/screenshots and UI
+    // tests type into); the START is inert — a seed model has no session to open.
+    override var newSessionPrompt: String by mutableStateOf("")
+    override var startingSession: Boolean by mutableStateOf(false)
+    override var newSessionPromptError: NewSessionPromptError? by mutableStateOf(null)
+    override fun dismissNewSessionPromptError() { newSessionPromptError = null }
     override fun send(text: String) { composer = "" }
 
     override val pendingImages: List<dev.ccpocket.app.data.PendingImage> = emptyList()

@@ -43,6 +43,9 @@ actual class VoiceRecorder actual constructor() {
     private val _levels = MutableSharedFlow<Float>(extraBufferCapacity = 16)
     actual val levels: Flow<Float> = _levels
 
+    private val _interruptions = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    actual val interruptions: Flow<Unit> = _interruptions
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var recorder: MediaRecorder? = null
     private var file: File? = null
@@ -50,6 +53,7 @@ actual class VoiceRecorder actual constructor() {
     private var startedMs = 0L
 
     actual suspend fun start() {
+        if (recorder != null) cancel() // re-entrant start: drop the live capture first, never orphan it on the mic
         ensureMicPermission()
         val ctx = VoiceHost.appContext
         val f = File(ctx.cacheDir, "voice-${System.currentTimeMillis()}.m4a")
@@ -62,6 +66,7 @@ actual class VoiceRecorder actual constructor() {
         r.setAudioChannels(1)
         r.setAudioEncodingBitRate(VOICE_BIT_RATE)
         r.setOutputFile(f.path)
+        r.setOnErrorListener { _, _, _ -> onInterrupted() } // server death / mic stolen mid-capture
         r.prepare()
         r.start()
         recorder = r
@@ -99,6 +104,14 @@ actual class VoiceRecorder actual constructor() {
         recorder = null
         file?.delete()
         file = null
+    }
+
+    /** MediaRecorder error callback (any thread): the file is unusable past this point, so tear the
+     *  capture down and let the composer leave S2 instead of ticking against dead audio. */
+    private fun onInterrupted() {
+        if (recorder == null) return // late callback after a normal stop()/cancel()
+        cancel()
+        _interruptions.tryEmit(Unit)
     }
 }
 

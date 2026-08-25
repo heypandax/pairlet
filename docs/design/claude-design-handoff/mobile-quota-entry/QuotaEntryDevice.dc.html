@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+</helmet>
+
+<div data-screen-label="{{ label }}" style="width:402px;height:874px;border-radius:18px;overflow:hidden;position:relative;display:flex;flex-direction:column;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+
+  <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none">
+    <span style="font:600 14px/1 'JetBrains Mono',monospace">9:41</span>
+    <span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid #F3F3F4;border-radius:2px;opacity:.7"></span><span style="width:22px;height:10px;border:1.3px solid #F3F3F4;border-radius:3px;opacity:.7"></span></span>
+  </div>
+
+  <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+  <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+
+    <div style="flex:none;padding:8px 20px 0">
+      <div style="min-height:56px;display:flex;align-items:center;gap:2px">
+        <h1 style="margin:0;flex:1;min-width:0;font:600 33px/1.1 system-ui,sans-serif;letter-spacing:-.025em">Projects</h1>
+        <span role="button" tabIndex="0" aria-label="Computers" style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+          <span aria-hidden="true" style="width:25px;height:18px;border:1.4px solid #B4B5BC;border-radius:3px;position:relative;display:block">
+            <span style="position:absolute;left:50%;bottom:-7px;margin-left:-6px;width:12px;height:2px;background:#B4B5BC;border-radius:1px"></span>
+          </span>
+        </span>
+        <span role="button" tabIndex="0" aria-label="More options" style="width:48px;height:48px;margin-right:-12px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+          <span aria-hidden="true" style="font:500 21px/1 system-ui,sans-serif;color:#B4B5BC;margin-top:-7px">⋯</span>
+        </span>
+      </div>
+    </div>
+
+    <sc-if value="{{ showPlainMachine }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:none;padding:0 20px;min-height:26px;display:flex;align-items:center;gap:9px">
+      <span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:#5CB582;flex:none"></span>
+      <span style="flex:1;min-width:0;font:400 14px/1.35 system-ui,sans-serif;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ machineLine }}</span>
+      <sc-if value="{{ showInline }}" hint-placeholder-val="{{ false }}">
+        <span role="button" tabIndex="0" aria-label="{{ tightAria }}" onClick="{{ openSheet }}" style="flex:none;min-height:44px;margin:-9px -8px -9px 0;padding:0 8px;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:#8C8D95">{{ tight.label }}</span>
+          <span aria-hidden="true" style="{{ tight.track }}"><span style="{{ tight.fill }}"></span></span>
+          <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:{{ tight.ink }}">{{ tight.pct }}</span>
+          <span style="font:400 12.5px/1 system-ui,sans-serif;color:#6E6E76">left</span>
+        </span>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ showBand }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:none;margin-top:2px;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14);padding:9px 20px 10px">
+      <div style="min-height:24px;display:flex;align-items:center;gap:9px">
+        <span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:#5CB582;flex:none"></span>
+        <span style="flex:1;min-width:0;font:400 14px/1.35 system-ui,sans-serif;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ machineLine }}</span>
+      </div>
+      <div role="button" tabIndex="0" aria-label="{{ tightAria }}" onClick="{{ openSheet }}" style="min-height:26px;display:flex;align-items:center;gap:10px;padding-left:18px;cursor:pointer">
+        <span style="flex:1;min-width:0;font:400 12.5px/1.35 system-ui,sans-serif;color:#6E6E76;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ account }}</span>
+        <sc-for list="{{ segs }}" as="s" hint-placeholder-count="2">
+          <span style="flex:none;display:flex;align-items:center;gap:6px">
+            <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:#8C8D95">{{ s.label }}</span>
+            <span aria-hidden="true" style="{{ s.track }}"><span style="{{ s.fill }}"></span></span>
+            <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:{{ s.ink }}">{{ s.pct }}</span>
+          </span>
+        </sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+    <div style="flex:none;padding:8px 20px 0">
+      <div style="display:flex;gap:8px">
+        <div style="flex:1;min-width:0;height:48px;border-radius:11px;background:#141417;border:1px solid rgba(255,255,255,.16);color:#6E6E76;padding:0 14px;font:400 15.5px/48px system-ui,sans-serif">Filter projects</div>
+        <div style="width:88px;height:48px;border-radius:11px;border:1px solid rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;gap:7px;flex:none">
+          <span style="font:500 13px/1 system-ui,sans-serif;color:#6E6E76">Tree</span>
+          <span style="font:500 13px/1 system-ui,sans-serif;color:#F3F3F4">Flat</span>
+        </div>
+      </div>
+      <div style="min-height:52px;display:flex;align-items:center;gap:12px;margin-top:8px;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14)">
+        <span aria-hidden="true" style="width:22px;height:17px;border:1.3px solid #B4B5BC;border-radius:3px;flex:none;position:relative"><span style="position:absolute;top:-4px;left:0;width:9px;height:4px;background:#0B0B0C;border-top:1.3px solid #B4B5BC;border-left:1.3px solid #B4B5BC;border-right:1.3px solid #B4B5BC;border-radius:2px 2px 0 0"></span></span>
+        <span style="flex:1;font:500 15.5px/1.3 system-ui,sans-serif;color:#E6E6E9">Open any folder…</span>
+        <span style="font:300 18px/1 system-ui,sans-serif;color:#6E6E76">›</span>
+      </div>
+    </div>
+
+    <div style="flex:1;min-height:0;overflow:hidden;padding:16px 20px 0">
+      <sc-for list="{{ sections }}" as="sec" hint-placeholder-count="3">
+        <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95;margin-top:{{ sec.gap }}">{{ sec.label }}</div>
+        <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.14)">
+          <sc-for list="{{ sec.rows }}" as="p" hint-placeholder-count="2">
+            <sc-if value="{{ p.active }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:14px 0 16px;border-bottom:1px solid rgba(255,255,255,.14);display:flex;gap:11px">
+              <span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:#5CB582;flex:none;margin-top:7px"></span>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 18px/1.3 system-ui,sans-serif;letter-spacing:-.015em">{{ p.name }}</span><span style="font:500 13px/1.3 system-ui,sans-serif;color:#7ECBA0">Running</span></div>
+                <div style="font:400 15px/1.45 system-ui,sans-serif;color:#E6E6E9;margin-top:6px;text-wrap:pretty">{{ p.liveTitle }}</div>
+                <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#B4B5BC;margin-top:8px;letter-spacing:-.01em">{{ p.meta }}</div>
+                <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:4px;letter-spacing:-.01em;word-break:break-all">{{ p.path }}</div>
+              </div>
+            </div>
+            </sc-if>
+            <sc-if value="{{ p.plain }}" hint-placeholder-val="{{ true }}">
+            <div style="padding:13px 0;border-bottom:1px solid rgba(255,255,255,.14);display:flex;gap:11px">
+              <span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;border:1.5px solid #6E6E76;flex:none;margin-top:6px"></span>
+              <div style="flex:1;min-width:0">
+                <div style="font:500 17px/1.3 system-ui,sans-serif;letter-spacing:-.01em;color:#E6E6E9;text-wrap:pretty">{{ p.name }}</div>
+                <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px;letter-spacing:-.01em;word-break:break-all">{{ p.path }}</div>
+              </div>
+            </div>
+            </sc-if>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+
+    <sc-if value="{{ showDock }}" hint-placeholder-val="{{ false }}">
+    <div role="button" tabIndex="0" aria-label="{{ tightAria }}" onClick="{{ openSheet }}" style="flex:none;border-top:1px solid rgba(255,255,255,.14);background:#0B0B0C;padding:0 20px 8px;min-height:48px;display:flex;align-items:center;gap:18px;cursor:pointer">
+      <sc-for list="{{ segs }}" as="s" hint-placeholder-count="2">
+        <span style="flex:none;display:flex;align-items:center;gap:7px">
+          <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:#8C8D95">{{ s.label }}</span>
+          <span aria-hidden="true" style="{{ s.trackWide }}"><span style="{{ s.fill }}"></span></span>
+          <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:{{ s.ink }}">{{ s.pct }}</span>
+        </span>
+      </sc-for>
+      <span style="flex:1;min-width:0"></span>
+      <span style="flex:none;font:400 12px/1 'JetBrains Mono',monospace;color:#6E6E76;white-space:nowrap">{{ resetShort }}</span>
+    </div>
+    </sc-if>
+
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isSessions }}" hint-placeholder-val="{{ false }}">
+  <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+    <div style="flex:none;padding:2px 20px 0;display:flex;align-items:center;gap:2px;min-height:52px">
+      <span role="button" tabIndex="0" aria-label="Back" style="width:44px;height:44px;margin-left:-12px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+        <span aria-hidden="true" style="width:11px;height:11px;border-left:1.8px solid #E6E6E9;border-bottom:1.8px solid #E6E6E9;transform:rotate(45deg);margin-left:4px"></span>
+      </span>
+      <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:9px">
+        <span style="font:600 20px/1.2 system-ui,sans-serif;letter-spacing:-.02em;white-space:nowrap">cc-pocket</span>
+        <span style="font:400 13px/1.2 'JetBrains Mono',monospace;color:#8C8D95">main</span>
+      </div>
+      <span role="button" tabIndex="0" aria-label="Archived" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+        <span aria-hidden="true" style="width:18px;height:15px;border:1.4px solid #B4B5BC;border-radius:3px;position:relative;display:block"><span style="position:absolute;left:-1.4px;top:3px;width:18px;height:1.4px;background:#B4B5BC"></span></span>
+      </span>
+      <span role="button" tabIndex="0" aria-label="Help" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+        <span aria-hidden="true" style="width:17px;height:17px;border:1.4px solid #B4B5BC;border-radius:50%;display:flex;align-items:center;justify-content:center;font:600 10px/1 system-ui,sans-serif;color:#B4B5BC">?</span>
+      </span>
+      <span role="button" tabIndex="0" aria-label="Settings" style="width:44px;height:44px;margin-right:-12px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+        <span aria-hidden="true" style="width:17px;height:13px;display:flex;flex-direction:column;justify-content:space-between">
+          <span style="height:1.5px;width:17px;background:#B4B5BC"></span><span style="height:1.5px;width:11px;background:#B4B5BC"></span><span style="height:1.5px;width:14px;background:#B4B5BC"></span>
+        </span>
+      </span>
+    </div>
+
+    <div style="flex:1;min-height:0;overflow:hidden;padding:10px 20px 0">
+      <div style="font:500 11px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#8C8D95">Today</div>
+      <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.14)">
+        <sc-for list="{{ sessionRows }}" as="r" hint-placeholder-count="4">
+          <div style="padding:14px 0;border-bottom:1px solid rgba(255,255,255,.14);display:flex;gap:11px">
+            <span aria-hidden="true" style="{{ r.dotStyle }}"></span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:baseline;gap:8px"><span style="flex:1;min-width:0;font:500 16.5px/1.35 system-ui,sans-serif;color:#E6E6E9;text-wrap:pretty">{{ r.title }}</span><span style="font:500 13px/1.3 system-ui,sans-serif;color:{{ r.stateInk }};flex:none">{{ r.state }}</span></div>
+              <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:6px;letter-spacing:-.01em">{{ r.meta }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <sc-if value="{{ showDock }}" hint-placeholder-val="{{ false }}">
+    <div role="button" tabIndex="0" aria-label="{{ tightAria }}" onClick="{{ openSheet }}" style="flex:none;border-top:1px solid rgba(255,255,255,.14);background:#0B0B0C;padding:0 20px 8px;min-height:48px;display:flex;align-items:center;gap:18px;cursor:pointer">
+      <sc-for list="{{ segs }}" as="s" hint-placeholder-count="2">
+        <span style="flex:none;display:flex;align-items:center;gap:7px">
+          <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:#8C8D95">{{ s.label }}</span>
+          <span aria-hidden="true" style="{{ s.trackWide }}"><span style="{{ s.fill }}"></span></span>
+          <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:{{ s.ink }}">{{ s.pct }}</span>
+        </span>
+      </sc-for>
+      <span style="flex:1;min-width:0"></span>
+      <span style="flex:none;font:400 12px/1 'JetBrains Mono',monospace;color:#6E6E76;white-space:nowrap">{{ resetShort }}</span>
+    </div>
+    </sc-if>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ sheetOpen }}" hint-placeholder-val="{{ false }}">
+  <div style="position:absolute;inset:0;z-index:6">
+    <div onClick="{{ closeSheet }}" aria-hidden="true" style="position:absolute;inset:0;background:rgba(6,6,7,.62)"></div>
+    <div role="dialog" aria-label="Usage" style="position:absolute;left:0;right:0;bottom:0;background:#141417;border-radius:20px 20px 0 0;border-top:1px solid rgba(255,255,255,.16);padding:10px 20px 22px">
+      <div aria-hidden="true" style="width:38px;height:4px;border-radius:2px;background:rgba(255,255,255,.22);margin:0 auto 14px"></div>
+      <div style="display:flex;align-items:baseline;gap:9px;padding-bottom:4px">
+        <span style="font:600 20px/1.2 system-ui,sans-serif;letter-spacing:-.02em">Usage</span>
+        <span style="font:400 13px/1.3 system-ui,sans-serif;color:#8C8D95">{{ account }}</span>
+      </div>
+      <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.14)">
+        <sc-for list="{{ sheetRows }}" as="r" hint-placeholder-count="3">
+          <div style="padding:13px 0;border-bottom:1px solid rgba(255,255,255,.14);display:flex;align-items:center;gap:12px">
+            <span style="width:104px;flex:none;font:400 14.5px/1.3 system-ui,sans-serif;color:#E6E6E9">{{ r.label }}</span>
+            <span aria-hidden="true" style="{{ r.track }}"><span style="{{ r.fill }}"></span></span>
+            <span style="flex:none;width:62px;text-align:right;font:500 13.5px/1 'JetBrains Mono',monospace;color:{{ r.ink }}">{{ r.pct }}</span>
+            <span style="flex:none;width:74px;text-align:right;font:400 12px/1 'JetBrains Mono',monospace;color:#6E6E76">{{ r.reset }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;align-items:center;min-height:44px;margin-top:4px">
+        <span style="flex:1;font:400 12.5px/1 'JetBrains Mono',monospace;color:#6E6E76">updated 2 min ago</span>
+        <span role="button" tabIndex="0" style="font:500 14px/1 system-ui,sans-serif;color:#E2795A;cursor:pointer">Refresh</span>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:402,&quot;height&quot;:874},&quot;variant&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;a&quot;,&quot;b&quot;,&quot;c&quot;],&quot;default&quot;:&quot;a&quot;,&quot;tsType&quot;:&quot;'a'|'b'|'c'&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;normal&quot;,&quot;warn&quot;,&quot;absent&quot;],&quot;default&quot;:&quot;normal&quot;,&quot;tsType&quot;:&quot;'normal'|'warn'|'absent'&quot;},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;home&quot;,&quot;sessions&quot;],&quot;default&quot;:&quot;home&quot;,&quot;tsType&quot;:&quot;'home'|'sessions'&quot;},&quot;sheet&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;label&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Home&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { sheet: null };
+
+  PROJECTS = [
+    { label: 'Active', rows: [{ active: true, name: 'cc-pocket', liveTitle: 'Add demo mode for App Review', meta: 'main · 1 session', path: '/Users/alex/code/cc-pocket' }] },
+    { label: 'Pinned', rows: [{ plain: true, name: 'cc-pocket-site', path: '/Users/alex/code/cc-pocket-site · 2h ago' }] },
+    { label: 'Projects', rows: [
+      { plain: true, name: 'relay-server', path: '/Users/alex/code/relay-server · yesterday' },
+      { plain: true, name: 'notes-cli', path: '/Users/alex/code/notes-cli · Mar 4' }
+    ] }
+  ];
+
+  SESSIONS = [
+    { title: 'Add demo mode for App Review', state: 'Running', ink: '#7ECBA0', dot: 'solid #5CB582', meta: 'claude · 12 min ago' },
+    { title: 'Fix scroll position lost after Settings', state: 'Needs you', ink: '#E2795A', dot: 'solid #E2795A', meta: 'codex · 26 min ago' },
+    { title: 'Rate limits counted per computer', state: 'Complete', ink: '#8C8D95', dot: 'ring', meta: 'opencode · 1h ago' },
+    { title: 'Fill two English strings in zh copy', state: 'Complete', ink: '#8C8D95', dot: 'ring', meta: 'kimi · 3h ago' }
+  ];
+
+  FIX = {
+    normal: { h5: 71, d7: 58, fable: 34, reset5: '14:20', reset7: 'Fri 09:00', resetShort: 'resets Fri' },
+    warn:   { h5: 44, d7: 12, fable: 9,  reset5: '14:20', reset7: 'Fri 09:00', resetShort: 'resets Fri' }
+  };
+
+  bar(left, warn, w) {
+    const ink = warn ? '#E0A93B' : '#8C8D95';
+    return {
+      track: 'display:block;width:' + w + 'px;height:2px;border-radius:1px;background:rgba(255,255,255,.14);overflow:hidden;flex:none',
+      trackWide: 'display:block;width:' + (w + 14) + 'px;height:2px;border-radius:1px;background:rgba(255,255,255,.14);overflow:hidden;flex:none',
+      fill: 'display:block;height:2px;border-radius:1px;background:' + ink + ';width:' + left + '%',
+      ink: warn ? '#E0A93B' : '#B4B5BC',
+      pct: left + '%'
+    };
+  }
+
+  renderVals() {
+    const p = this.props;
+    const variant = p.variant || 'a';
+    const mode = p.state || 'normal';
+    const has = mode !== 'absent';
+    const f = this.FIX[mode === 'warn' ? 'warn' : 'normal'];
+    const warn5 = has && f.h5 <= 20, warn7 = has && f.d7 <= 20;
+
+    const seg = (label, left, warn, w) => Object.assign({ label: label }, this.bar(left, warn, w));
+    const segs = has ? [seg('5h', f.h5, warn5, 26), seg('7d', f.d7, warn7, 26)] : [];
+    const tightIs7 = f.d7 <= f.h5;
+    const tight = has ? seg(tightIs7 ? '7d' : '5h', tightIs7 ? f.d7 : f.h5, tightIs7 ? warn7 : warn5, 30) : {};
+
+    const sheetRow = (label, left, warn, reset) => Object.assign({ label: label, reset: reset },
+      this.bar(left, warn, 0), { track: 'flex:1;min-width:0;display:block;height:2px;border-radius:1px;background:rgba(255,255,255,.14);overflow:hidden', pct: left + '% left' });
+
+    const sheetOpen = this.state.sheet === null ? !!p.sheet : this.state.sheet;
+
+    return {
+      label: p.label || 'Home',
+      isHome: (p.screen || 'home') === 'home',
+      isSessions: p.screen === 'sessions',
+      machineLine: 'Mac Studio · online · 1 session',
+      account: 'claude.ai · Max',
+      showPlainMachine: !(variant === 'c' && has),
+      showInline: variant === 'a' && has,
+      showBand: variant === 'c' && has,
+      showDock: variant === 'b' && has,
+      segs: segs, tight: tight,
+      resetShort: f.resetShort,
+      tightAria: has ? 'Usage · ' + tight.label + ' ' + tight.pct + ' left' : 'Usage',
+      sections: this.PROJECTS.map((s, i) => ({ label: s.label, gap: i ? '20px' : '0', rows: s.rows })),
+      sessionRows: this.SESSIONS.map(r => ({
+        title: r.title, state: r.state, stateInk: r.ink, meta: r.meta,
+        dotStyle: r.dot === 'ring'
+          ? 'width:9px;height:9px;border-radius:50%;border:1.5px solid #6E6E76;flex:none;margin-top:6px'
+          : 'width:9px;height:9px;border-radius:50%;background:' + r.dot.split(' ')[1] + ';flex:none;margin-top:6px'
+      })),
+      sheetOpen: sheetOpen,
+      sheetRows: [
+        sheetRow('5h session', f.h5, warn5, f.reset5),
+        sheetRow('7d all models', f.d7, warn7, f.reset7),
+        sheetRow('7d · Fable', f.fable, has && f.fable <= 20, f.reset7)
+      ],
+      openSheet: () => this.setState({ sheet: true }),
+      closeSheet: () => this.setState({ sheet: false })
+    };
+  }
+}
+</script>
+</body>
+</html>

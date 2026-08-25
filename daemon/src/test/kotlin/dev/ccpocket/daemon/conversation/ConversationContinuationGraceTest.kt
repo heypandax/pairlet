@@ -43,6 +43,10 @@ import kotlin.test.assertTrue
 class ConversationContinuationGraceTest {
 
     private val init = """{"type":"system","subtype":"init","session_id":"s-grace","cwd":"/tmp","model":"claude-sonnet-5"}"""
+
+    // 真实 CLI（--replay-user-messages）在跑一个 prompt 前必先回放它——流里省略这一行＝模拟「prompt 从未被
+    // 消费」，而那正是 #285 归属账本要把会话扣成 busy 的状态，会污染本文件对 grace 语义的断言。
+    private val replayGo = """{"type":"user","message":{"content":"go"}}"""
     private val result =
         """{"type":"result","subtype":"success","is_error":false,"result":"plan drafted","usage":{"input_tokens":1,"output_tokens":1}}"""
     private val bgToolUse =
@@ -118,7 +122,7 @@ class ConversationContinuationGraceTest {
         if (isWindows()) return // stubs run via sh/cat
         // generous grace: this test checks "armed at all" — a loaded CI runner can stall seconds
         // between the result line and the assert, so a tight window here is a flake, not a check
-        harness(listOf(init, result), PermissionMode.PLAN, graceMs = 60_000, until = ::turnDone) { convo ->
+        harness(listOf(init, replayGo, result), PermissionMode.PLAN, graceMs = 60_000, until = ::turnDone) { convo ->
             // the premature result cleared `executing`, no ask/jobs — the grace alone must hold isBusy
             assertFalse(convo.isExecuting(), "result must clear executing")
             assertTrue(convo.isBusy(), "plan-mode turn end must expect the unprompted continuation")
@@ -130,7 +134,7 @@ class ConversationContinuationGraceTest {
         if (isWindows()) return
         // …and the hold lapses: poll for the release instead of sleeping a fixed margin — the
         // withTimeout fails the test if an unexpired grace were to hold forever
-        harness(listOf(init, result), PermissionMode.PLAN, graceMs = 500, until = ::turnDone) { convo ->
+        harness(listOf(init, replayGo, result), PermissionMode.PLAN, graceMs = 500, until = ::turnDone) { convo ->
             withTimeout(10_000) { while (convo.isBusy()) delay(50) }
             assertFalse(convo.isBusy(), "an expired grace must release the conversation")
         }
@@ -140,7 +144,7 @@ class ConversationContinuationGraceTest {
     fun default_mode_result_grants_no_grace() {
         if (isWindows()) return
         // only plan mode has the premature-result behavior — a normal turn end stays promptly reapable
-        harness(listOf(init, result), PermissionMode.DEFAULT, graceMs = 60_000, until = ::turnDone) { convo ->
+        harness(listOf(init, replayGo, result), PermissionMode.DEFAULT, graceMs = 60_000, until = ::turnDone) { convo ->
             assertFalse(convo.isBusy(), "a default-mode turn end must not hold the conversation")
         }
     }
@@ -151,7 +155,7 @@ class ConversationContinuationGraceTest {
         // the settled job releases hasBackgroundWork, but the CLI's follow-up turn (probed 2.1.206:
         // a fresh init lands 0.1s after task_notification) is still coming — grace bridges the hand-off.
         // Wire order as probed: task_started at launch, the turn's result, the completion notification.
-        val lines = listOf(init, bgToolUse, taskStarted, result, taskCompleted)
+        val lines = listOf(init, replayGo, bgToolUse, taskStarted, result, taskCompleted)
         val settled = { fs: List<Frame> ->
             fs.filterIsInstance<BackgroundJobs>().any { b -> b.jobs.any { it.status == JobStatus.DONE } }
         }
@@ -165,10 +169,35 @@ class ConversationContinuationGraceTest {
     }
 
     @Test
+    fun backgroundContinuationStartConsumesGraceAndItsResultSettlesImmediately() {
+        if (isWindows()) return
+        val lines = listOf(
+            init,
+            replayGo,
+            bgToolUse,
+            taskStarted,
+            result,          // enclosing user turn settles
+            taskCompleted,   // arms the unprompted-continuation grace
+            init,            // continuation starts: grace becomes real executing work
+            result,          // DEFAULT-mode continuation genuinely settles
+        )
+        harness(
+            lines,
+            PermissionMode.DEFAULT,
+            graceMs = 60_000,
+            until = { frames -> frames.count { it is TurnDone } == 2 },
+        ) { convo ->
+            assertFalse(convo.isExecuting())
+            assertFalse(convo.expectsContinuation(), "the continuation's start must consume the old grace")
+            assertFalse(convo.isBusy(), "its own result must settle immediately, not wait out the old grace")
+        }
+    }
+
+    @Test
     fun dead_process_voids_the_grace() {
         if (isWindows()) return
         // no process = no continuation can ever arrive; a fresh grace must not shield a corpse
-        harness(listOf(init, result), PermissionMode.PLAN, graceMs = 60_000, thenExit = true,
+        harness(listOf(init, replayGo, result), PermissionMode.PLAN, graceMs = 60_000, thenExit = true,
             until = { fs -> turnDone(fs) && fs.any { it is PocketError } }) { convo ->
             assertFalse(convo.isBusy(), "grace must be void once the agent process is dead")
         }

@@ -41,11 +41,19 @@
   themeBtn.addEventListener('click', () => setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
 
   // ── language ──
+  // Localized product media is a PAIR of elements toggled by CSS, so the page reads correctly with
+  // no JS at all; onLang lets the video controller pause whichever one just went off-screen.
+  const langHooks = [];
   function setLang(l){
     root.setAttribute('data-lang', l);
     root.setAttribute('lang', l === 'zh' ? 'zh-CN' : 'en');
-    document.querySelectorAll('[data-setlang]').forEach(b => b.classList.toggle('on', b.dataset.setlang === l));
+    document.querySelectorAll('[data-setlang]').forEach(b => {
+      const on = b.dataset.setlang === l;
+      b.classList.toggle('on', on);
+      if (b.tagName === 'BUTTON') b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
     try { localStorage.setItem('ccp-lang', l); } catch(e){}
+    langHooks.forEach(fn => fn(l));
   }
   let savedLang = 'en';
   try { savedLang = localStorage.getItem('ccp-lang') || 'en'; } catch(e){}
@@ -63,15 +71,21 @@
   const menu = document.getElementById('mobile-menu');
   const BARS = '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.5 5h13M2.5 9h13M2.5 13h13"/></svg>';
   const X = '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l10 10M14 4L4 14"/></svg>';
-  burger.innerHTML = BARS;
-  burger.addEventListener('click', () => {
-    const open = menu.classList.toggle('open');
+  function setMenu(open){
+    menu.classList.toggle('open', open);
     burger.innerHTML = open ? X : BARS;
+    burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  setMenu(false);
+  burger.addEventListener('click', () => setMenu(!menu.classList.contains('open')));
+  menu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => setMenu(false)));
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (menu.classList.contains('open')){ setMenu(false); burger.focus(); }
   });
-  menu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => { menu.classList.remove('open'); burger.innerHTML = BARS; }));
 
   // ── active-section nav indicator ──
-  const sections = ['features','desktop','how','security','start'].map(id => document.getElementById(id)).filter(Boolean);
+  const sections = ['loop','agents','surfaces','security','start'].map(id => document.getElementById(id)).filter(Boolean);
   const navLinks = [...document.querySelectorAll('.nav-links a')];
   const spy = new IntersectionObserver((entries) => {
     entries.forEach(e => {
@@ -95,6 +109,105 @@
     });
   });
 
+  // ── control loop: real-UI video + ordered step list ──
+  // The <ol> is the source of truth and reads in order with no JS. With JS we add three things:
+  // autoplay (unless the visitor asked for reduced motion), click-to-seek, and a highlight driven
+  // by the video's own clock. A video that fails to load is replaced by its poster — never a black
+  // rectangle and never an empty box.
+  const loopSteps = [...document.querySelectorAll('#loop-steps .loop-step')];
+  const loopVideos = [...document.querySelectorAll('.loop-frame video')];
+  if (loopVideos.length){
+    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const visible = () => loopVideos.find(v => v.offsetParent !== null) || loopVideos[0];
+
+    const markStep = (t) => {
+      let active = 0;
+      loopSteps.forEach((li, i) => { if (t + 0.05 >= parseFloat(li.dataset.at)) active = i; });
+      loopSteps.forEach((li, i) => {
+        li.classList.toggle('on', i === active);
+        const btn = li.querySelector('.loop-btn');
+        if (btn) btn.setAttribute('aria-pressed', i === active ? 'true' : 'false');
+      });
+    };
+
+    loopVideos.forEach(v => {
+      v.addEventListener('timeupdate', () => {
+        if (v.offsetParent === null) return;
+        const pending = parseFloat(v.dataset.pendingSeek || '');
+        markStep(Number.isFinite(pending) ? pending : v.currentTime);
+      });
+      // Poster fallback: a source the browser cannot fetch or decode leaves the <img> child in place.
+      v.addEventListener('error', () => replaceWithPoster(v), true);
+      const src = v.querySelector('source');
+      if (src) src.addEventListener('error', () => replaceWithPoster(v));
+    });
+    function replaceWithPoster(v){
+      if (!v.parentNode || v.dataset.failed) return;
+      v.dataset.failed = '1';
+      const img = document.createElement('img');
+      img.src = v.getAttribute('poster');
+      img.width = v.width; img.height = v.height;
+      const inner = v.querySelector('img');
+      img.alt = inner ? inner.alt : '';
+      img.className = v.className;
+      v.parentNode.replaceChild(img, v);
+    }
+
+    loopSteps.forEach((li, i) => {
+      const btn = li.querySelector('.loop-btn');
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        const v = visible();
+        const at = parseFloat(li.dataset.at);
+        markStep(at);
+        if (!v || v.dataset.failed) return;
+        const seek = () => {
+          try { v.currentTime = at; } catch(e){}
+          const clearPending = () => { delete v.dataset.pendingSeek; markStep(v.currentTime); };
+          v.addEventListener('seeked', clearPending, { once:true });
+          if (!reduced) { const p = v.play(); if (p && p.catch) p.catch(() => {}); }
+        };
+        v.dataset.pendingSeek = String(at);
+        if (v.readyState >= 1) seek();
+        else {
+          v.addEventListener('loadedmetadata', seek, { once:true });
+          v.load();
+        }
+      });
+    });
+
+    // Reduced motion: never autoplay. The poster plus controls is the whole experience.
+    if (!reduced){
+      const start = (v) => {
+        if (!v || v.dataset.failed) return;
+        v.preload = 'auto';
+        const p = v.play(); if (p && p.catch) p.catch(() => {});
+      };
+      if ('IntersectionObserver' in window){
+        const vio = new IntersectionObserver((entries) => {
+          entries.forEach(e => {
+            const v = e.target;
+            if (v.offsetParent === null) return;          // the other language's copy
+            if (e.isIntersecting) start(v); else v.pause();
+          });
+        }, { threshold: 0.35 });
+        loopVideos.forEach(v => vio.observe(v));
+      } else {
+        start(visible());
+      }
+    }
+
+    // Language switch: stop the copy that just went off-screen, resume the one that replaced it.
+    langHooks.push(() => {
+      loopVideos.forEach(v => { if (v.offsetParent === null && !v.paused) v.pause(); });
+      if (reduced) return;
+      const v = visible();
+      if (v && !v.dataset.failed && v.paused && v.getBoundingClientRect().top < window.innerHeight){
+        const p = v.play(); if (p && p.catch) p.catch(() => {});
+      }
+    });
+  }
+
   // ── install: OS-aware tabs (detect the visitor's OS, let them switch if wrong) ──
   const osTabs = [...document.querySelectorAll('.os-tab')];
   const osPanels = [...document.querySelectorAll('.os-panel')];
@@ -107,7 +220,11 @@
     };
     const setOS = (os) => {
       if (!osPanels.some(p => p.dataset.os === os)) os = 'mac';
-      osTabs.forEach(t => t.classList.toggle('on', t.dataset.os === os));
+      osTabs.forEach(t => {
+        const on = t.dataset.os === os;
+        t.classList.toggle('on', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
       osPanels.forEach(p => p.classList.toggle('on', p.dataset.os === os));
       try { localStorage.setItem('ccp-os', os); } catch(e){}
     };
@@ -123,7 +240,11 @@
   if (modeTabs.length){
     const setMode = (mode) => {
       if (!modeBlocks.some(b => b.dataset.mode === mode)) mode = 'install';
-      modeTabs.forEach(t => t.classList.toggle('on', t.dataset.mode === mode));
+      modeTabs.forEach(t => {
+        const on = t.dataset.mode === mode;
+        t.classList.toggle('on', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
       modeBlocks.forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
     };
     setMode('install'); // always start on Install; Update is opt-in per visit

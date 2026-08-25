@@ -41,11 +41,14 @@ import dev.ccpocket.protocol.WorkflowAgentDetail
 import dev.ccpocket.protocol.WorkflowUpdate
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.isSubagentTool
 import dev.ccpocket.protocol.isWorkflowTool
@@ -62,6 +65,23 @@ import java.util.concurrent.atomic.AtomicReference
  *  [ToolMetadata.of]) rather than raw input JSON — the phone turns this path into an openable "open file"
  *  chip (read-doc-inline handoff). Kept in lockstep with the mobile `TOOL_FILE_PATH_TOOLS` set. */
 private val FILE_PATH_TOOLS = setOf("Write", "Edit", "MultiEdit", "NotebookEdit")
+
+/**
+ * 一条已发送 prompt 的归属命运（issue #285）。桥接（FeishuEngine）用它把 TurnDone 终态帧和「自己发出的那条
+ * 请求」对上号：恢复长会话时 CLI 会先为遗留后台任务跑一个零轮结算（task_notification 批＋空文本 result），
+ * 那个终态帧与新请求同 convoId 却不属于它——只有拿到消费凭证（UserReplay / 一次性启动结算 / 本地命令回执）
+ * 之后的终态帧才可以结算这条请求。
+ */
+enum class PromptFate {
+    /** 已记入账本、尚无消费凭证——终态帧此刻结算它就是误结算。 */
+    PENDING,
+
+    /** 有消费凭证：这条 prompt 确实开始（或已被本地命令处理）——其后的终态帧属于它。 */
+    CONSUMED,
+
+    /** 账本与消费记录都查无此条：尚未送达（发送仍在途）、或已被判定丢失。 */
+    UNKNOWN,
+}
 
 /**
  * One live conversation: glues an [AgentBackend] (Claude / Codex) to an [OutboundSink]. Owns its own
@@ -85,8 +105,9 @@ class Conversation(
      *  the ask timeout (nobody is watching the sheet live), and arms the ask push below. */
     val origin: String? = null,
     // issue #91 OWNER BYPASS: true when this is the bridge OWNER's OWN dedicated session (the built-in engine
-    // routes non-owner messages to a separate session) → its PermissionBridge auto-allows. Per-session, set at
-    // open by trusted in-process code only; false for every wire-opened session, so it's un-forgeable.
+    // routes non-owner messages to a separate session) → trusted in-process code may mint one-turn
+    // OWNER_BYPASS grants for it. The flag alone does not auto-allow, so cancel revokes the active turn.
+    // Per-session, set at open by trusted in-process code only; false for wire-opened sessions.
     private val ownerBypass: Boolean = false,
     // how a pending permission ask reaches a human who isn't watching: a bridge conversation's owner
     // (issue #91 — the bridge never gets the frame) or an owner session's locked/away phone (issue #138)
@@ -102,6 +123,11 @@ class Conversation(
      *  command auto-runs on this session with no phone prompt (via BridgeCommandPolicy); empty for owner/guest
      *  and for a bridge whose owner configured none. Only consulted when [bridgeSession] is true. */
     private val bridgeAllowedCommands: List<String> = emptyList(),
+    /** BRIDGE only (issue #242): the session-stable "where am I / what can't I see" preamble the bridge
+     *  computed at open time (chat, project, capability boundary). Appended to the agent's SYSTEM prompt at
+     *  every launch, so a relaunch or resume carries it without any per-turn prompt injection. Null for
+     *  owner/guest conversations and for a bridge that supplies none — nothing else changes. */
+    private val bridgeContextPreamble: String? = null,
     /** COLLABORATOR handoff (SESSION-HANDOFF.md §8.3): the Handoff Grant's operation ceiling this
      *  conversation runs under. Non-null → the PermissionBridge HARD-REFUSES write tools
      *  (Write/Edit/…) before any ask exists unless the access explicitly grants scoped writes —
@@ -124,6 +150,15 @@ class Conversation(
         dev.ccpocket.daemon.approval.ApprovalGrantStore(),
     /** M3 deterministic risk radar (advisory badges only). Null in tests keeps pre-M3 behavior. */
     private val riskEngine: dev.ccpocket.daemon.approval.ApprovalRiskEngine? = null,
+    /** Issue #220: how long a manually-entered Full Control lasts before auto-reverting, in ms; 0 = never
+     *  expires (the default). Read at each arm (a mode switch or open), so a preference flip bites the next
+     *  switch. Defaults to the runtime mirror; a knob only so tests can arm a short clock without waiting. */
+    private val fullControlExpiryMs: () -> Long = { dev.ccpocket.daemon.agent.ApprovalTimeout.fullControlExpiryMs },
+    /** The workdir string the phone OPENED with — may be a raw "~"-relative path (issue #219: the phone's
+     *  identity guard matches SessionLive.workdir against the workdir IT sent, which is "~/x" from the
+     *  home anchor, never the daemon's canonicalized absolute form). Announced in SessionLive verbatim so
+     *  the guard matches; null → fall back to the canonical [workdir] (pre-#219 behaviour). */
+    private val announcedWorkdir: String? = null,
 ) {
     // ── approval design M2 §5.4: the task boundary a TASK grant binds to ──────────────────────────
     // One task per top-level user prompt: rotated when a prompt STARTS a new turn (mid-turn queued
@@ -164,6 +199,16 @@ class Conversation(
     // (issue #84): Claude defers its relaunch to the next sendPrompt, Codex carries it in the next turn's params
     @Volatile
     private var mode: PermissionMode = initialMode
+
+    /** Monotonic identity of the current explicit/automatic mode state. Cancellation is not enough to
+     *  retire an expiry coroutine that has already crossed its last suspension, so the timer rechecks this
+     *  generation under [modeStateLock] at the exact write boundary. */
+    private val modeStateLock = Any()
+    private var modeGeneration = 0L
+    /** Serializes the state commit with its backend/grant/notice side effects. Otherwise an expiry can
+     *  commit DEFAULT, lose to a later explicit PLAN switch, then resume and apply DEFAULT to the backend
+     *  after PLAN has already won the visible state. */
+    private val modeMutationMutex = Mutex()
 
     // mutable: a phone can switch the model mid-session via `/model <name>`
     @Volatile
@@ -215,15 +260,27 @@ class Conversation(
         },
     )
 
-    // The authority of the ONE bridge request currently executing — armed at hand-off, revoked at
-    // TurnResult / process end. PermissionBridge reads it dynamically so the request's tools are authorized
-    // without creating a standing allow-rule. OWNER_APPROVED = the owner read it (#190); AUTO_TRUSTED = it
-    // came from a chat the owner pre-trusted (#198), which authorizes only workdir-confined tools.
+    // The authority of the ONE bridge request currently executing. A hand-off creates a PENDING lease bound
+    // to that exact prompt-ledger entry; it becomes ACTIVE only when the backend replays that top-level user
+    // message (proof that THIS prompt, rather than a phantom continuation of the previous turn, was consumed).
+    // PermissionBridge reads only the ACTIVE lease, so a late ControlRequest from turn A cannot spend the
+    // grant staged for turn B. OWNER_BYPASS = one turn in the owner's dedicated bridge
+    // session; OWNER_APPROVED = the owner read it (#190/#233);
+    // AUTO_TRUSTED = the owner's durable full trust for one chat/project; REVIEWER_APPROVED keeps the
+    // Guardian path's closed ceiling. Both are prompt-bound one-turn leases, never standing session state.
     //
-    // An AtomicReference, not a @Volatile var: arming it is a check-THEN-set, and "one grant at a time" is a
-    // security property, so it must not rest on a caller-side mutex living in another file (today only the
-    // engine's per-chat lock serializes hand-offs; a second caller would silently break the invariant).
-    private val bridgeGrant = AtomicReference(BridgeGrant.NONE)
+    private data class PendingBridgeGrant(val token: String, val grant: BridgeGrant)
+    private data class ActiveBridgeGrant(
+        val token: String,
+        val grant: BridgeGrant,
+        val processGeneration: Long,
+    )
+    private val pendingBridgeGrant = AtomicReference<PendingBridgeGrant?>(null)
+    private val activeBridgeGrant = AtomicReference<ActiveBridgeGrant?>(null)
+    // Linearizes bridge-grant use with cancellation/revocation. PermissionBridge holds this mutex only for
+    // the grant check + allow response; requestInterrupt revokes under the same mutex BEFORE
+    // telling the backend to stop, so no post-cancel ControlRequest can consume stale one-turn authority.
+    private val bridgeGrantLock = Mutex()
 
     // An approval and its execution hand-off are mechanically coupled: awaitBridgeRequestApproval mints one
     // permit, sendApprovedBridgePrompt atomically consumes it. Trusted in-process callers still cannot invoke
@@ -269,11 +326,6 @@ class Conversation(
     private data class SubagentRun(val tool: String, val background: Boolean)
     private val subagentRuns = LinkedHashMap<String, SubagentRun>()
 
-    // a user turn is in flight (prompt written, TurnDone not yet seen) — SessionLive carries it so
-    // a (re)attaching phone can reset its ■/streaming state instead of trusting a stale local value
-    @Volatile
-    private var executing = false
-
     // UNPROMPTED-CONTINUATION grace (issue #105 residual). Two probed CLI behaviors (2.1.206) start a
     // new turn with no sendPrompt to arm `executing`: plan mode keeps working after its premature
     // `result` (the research → AskUserQuestion flow of issue #55, reproduced organically: a fresh
@@ -285,8 +337,21 @@ class Conversation(
     // thinking_tokens system lines only flow once the API responds). This stamp keeps [isBusy] true
     // for a bounded grace after those triggers; the continuation's own stream then re-arms
     // `executing`. Gated on a LIVE process, so a dead conversation can never ride the grace.
+    // `executing` and the grace belong to ONE state value. A directory poll is concurrent with the stdout
+    // pump; publishing them as two unrelated volatile fields allowed the WORKING -> grace hand-off to be
+    // observed between writes as a false SETTLED edge. All transitions replace this immutable snapshot.
+    private data class TurnWorkState(
+        val executing: Boolean = false,
+        val continuationGraceUntil: Long = 0L,
+        // Mirrors the two other producer-owned work sources into this SAME atomic snapshot. The detailed
+        // registries still own payload/replay data; these booleans exist so project-list completion inference
+        // never tears across `executing`, a queued prompt, and a background-job transition.
+        val backgroundWork: Boolean = false,
+        val pendingPromptWork: Boolean = false,
+    )
+    private val turnWorkLock = Any()
     @Volatile
-    private var continuationGraceUntil: Long = 0L
+    private var turnWork = TurnWorkState()
 
     @Volatile
     private var intentionalStop = false
@@ -313,6 +378,25 @@ class Conversation(
     // from a mere mode switch before the first message (issue #18/#21 residual).
     @Volatile
     private var openedWithFork = false
+
+    /**
+     * The truncation this conversation was opened as (issue #282, docs/design/REWIND-FORK.md) — set by
+     * [SessionRegistry]'s rewind orchestration and null for every ordinary open. [anchorUuid] is the CLI
+     * chain anchor (already translated from the message the user picked), [dropsTurnUuid] the one-turn
+     * guard rail, [cutSeq] the transcript cursor of the dropped message (used to clip the replay so the
+     * phone sees the branch, not the history the branch discards), and [mode]/[parentSid] the lineage
+     * this branch gets journalled under once the CLI reports the forked id.
+     */
+    data class RewindLaunch(
+        val parentSid: String,
+        val anchorUuid: String,
+        val dropsTurnUuid: String?,
+        val cutSeq: Long,
+        val mode: String,
+    )
+
+    @Volatile
+    private var rewindLaunch: RewindLaunch? = null
 
     // best-guess model for DISPLAY only (header + context window before the first init lands): read back from
     // the resumed transcript, or — for a brand-new session with no --model — the backend's configured default
@@ -349,6 +433,11 @@ class Conversation(
     @Volatile
     private var sawSyntheticThisTurn = false
 
+    // issue #208: the placeholder's own text is the evidence for WHY the turn failed (upstream gateway
+    // 5xx vs. blown context) — keep the last one so the TurnDone error can attribute it correctly.
+    @Volatile
+    private var lastSyntheticText: String? = null
+
     // ■ was pressed for the in-flight turn: its result may report is_error, which must NOT render as a
     // red failure row — the user cancelled it themselves. Cleared when the result lands.
     @Volatile
@@ -367,16 +456,47 @@ class Conversation(
         val text: String,
         val images: List<ImageData>,
         var generation: Long,
+        val bridgeGrantToken: String? = null,
         var redeliveries: Int = 0,
+        // True only when this prompt was accepted BEHIND work already in flight. A TurnResult may settle
+        // the current ledger entry even without UserReplay, but it must never settle one of these queued
+        // successors before its own consumption/start evidence arrives.
+        var queuedWork: Boolean = false,
     )
 
     // the turn-starting prompt handed to a fresh (re)launch, so launchProcess can LEDGER it before it
     // starts the pump — a fast agent echoes the user message within ms, and a record that lands after
     // that replay orphans the entry → a spurious re-injection on the next relaunch (issue #122 race).
-    private class InitialSend(val promptId: String?, val text: String, val images: List<ImageData>)
+    private class InitialSend(
+        val promptId: String?,
+        val text: String,
+        val images: List<ImageData>,
+        val bridgeGrantToken: String? = null,
+    )
 
     private val promptLedger = ArrayDeque<PendingPrompt>()
     private val localPromptSeq = AtomicLong(0)
+
+    // 已拿到消费凭证的 promptId（issue #285）。与账本共用 synchronized(promptLedger) 锁：settle 的
+    // 「移出账本＋记入这里」必须是一次原子迁移，否则 promptFate 的两段查询会在迁移间隙同时扑空。
+    // 有界 LRU——只需覆盖「请求在途」这个窗口，桥接的回复槽一结算就不再查它。
+    private val consumedPromptKeys = LinkedHashSet<String>()
+
+    private fun markPromptConsumed(key: String) = synchronized(promptLedger) {
+        if (consumedPromptKeys.add(key) && consumedPromptKeys.size > SEEN_PROMPTS_MAX) {
+            consumedPromptKeys.iterator().run { next(); remove() }
+        }
+    }
+
+    /** [promptId] 的归属命运——桥接终态帧归属门（issue #285）的唯一凭证来源。先查账本再查消费记录：
+     *  settle 在同一把锁里完成迁移，所以「账本刚移走」时消费记录必然已经写入，不会两头落空。 */
+    fun promptFate(promptId: String): PromptFate = synchronized(promptLedger) {
+        when {
+            promptLedger.any { it.key == promptId } -> PromptFate.PENDING
+            promptId in consumedPromptKeys -> PromptFate.CONSUMED
+            else -> PromptFate.UNKNOWN
+        }
+    }
 
     // which launchProcess call a ledger entry was written to — an entry from a PREVIOUS generation (or
     // with no process at all) can no longer be consumed by anyone: it is lost, not merely queued
@@ -422,22 +542,55 @@ class Conversation(
     // ---- unconsumed-prompt ledger (issue #122) ----
 
     /** Record a prompt handed to backend.sendPrompt — unproven until its UserReplay settles it. */
-    private fun recordPromptWritten(promptId: String?, text: String, images: List<ImageData>) {
-        synchronized(promptLedger) {
-            promptLedger.addLast(
-                PendingPrompt(promptId ?: "local-${localPromptSeq.getAndIncrement()}", text, images, processGeneration),
-            )
-            while (promptLedger.size > LEDGER_MAX) promptLedger.removeFirst()
+    private fun recordPromptWritten(
+        promptId: String?,
+        text: String,
+        images: List<ImageData>,
+        bridgeGrantToken: String? = null,
+        generation: Long = processGeneration,
+        queuedWork: Boolean = false,
+        inferQueuedWork: Boolean = false,
+    ) {
+        synchronized(turnWorkLock) {
+            synchronized(promptLedger) {
+                val state = turnWork
+                val countsAsQueued = queuedWork || inferQueuedWork && (
+                    state.executing || state.backgroundWork || state.pendingPromptWork || continuationExpected(state)
+                )
+                promptLedger.addLast(
+                    PendingPrompt(
+                        promptId ?: "local-${localPromptSeq.getAndIncrement()}",
+                        text,
+                        images,
+                        generation,
+                        bridgeGrantToken,
+                        queuedWork = countsAsQueued,
+                    ),
+                )
+                while (promptLedger.size > LEDGER_MAX) promptLedger.removeFirst()
+                turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
+            }
         }
     }
 
     /** The CLI replayed a consumed user message — settle the first ledger entry with matching text.
      *  Injected plumbing turns (task-notifications, compact summaries) never match a recorded prompt. */
-    private fun settlePromptReplay(text: String?) {
-        text ?: return
-        synchronized(promptLedger) {
-            val iter = promptLedger.iterator()
-            while (iter.hasNext()) if (iter.next().text == text) { iter.remove(); return }
+    private fun settlePromptReplay(text: String?, generation: Long): PendingPrompt? {
+        text ?: return null
+        return synchronized(turnWorkLock) {
+            synchronized(promptLedger) inner@{
+                val iter = promptLedger.iterator()
+                while (iter.hasNext()) {
+                    val entry = iter.next()
+                    if (entry.generation == generation && entry.text == text) {
+                        iter.remove()
+                        markPromptConsumed(entry.key) // 同锁内原子迁移：账本→消费记录（issue #285）
+                        turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
+                        return@inner entry
+                    }
+                }
+                null
+            }
         }
     }
 
@@ -449,37 +602,87 @@ class Conversation(
     private var initialArgSettledGen = -1L
 
     /** One-shot argv prompts have no stdin replay; the process accepting the turn settles the launch prompt. */
-    private fun settleInitialArgPrompt() = synchronized(promptLedger) {
-        if (initialArgSettledGen == processGeneration) return@synchronized
-        initialArgSettledGen = processGeneration
-        val iter = promptLedger.iterator()
-        while (iter.hasNext()) {
-            val entry = iter.next()
-            if (entry.generation == processGeneration) {
-                iter.remove()
-                return@synchronized
+    private fun settleInitialArgPrompt(generation: Long): PendingPrompt? = synchronized(turnWorkLock) {
+        synchronized(promptLedger) inner@{
+            if (initialArgSettledGen == generation) return@inner null
+            initialArgSettledGen = generation
+            val iter = promptLedger.iterator()
+            while (iter.hasNext()) {
+                val entry = iter.next()
+                if (entry.generation == generation) {
+                    iter.remove()
+                    markPromptConsumed(entry.key) // 同锁内原子迁移（issue #285），与 stdin replay 的 settle 同规
+                    turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
+                    return@inner entry
+                }
             }
+            null
         }
     }
 
     private fun hasUnconsumedPrompts(): Boolean = synchronized(promptLedger) { promptLedger.isNotEmpty() }
 
+    /**
+     * Prompts written toward the agent that it has not acknowledged yet (the issue #122 ledger) — the
+     * other half of the rewind admission gate (issue #282), alongside [isBusy]. A queued prompt is
+     * invisible to [isBusy] before its turn starts, and cutting the history under it would either
+     * strand it in a conversation that is about to be closed, or hand it to a branch as an unexplained
+     * first turn. This is a READ of the #285 ledger, not a change to it: nothing here settles, expires
+     * or re-keys an entry.
+     */
+    fun hasQueuedPrompts(): Boolean = hasUnconsumedPrompts()
+
+    /**
+     * The launch knobs this conversation is currently running under, so a rewind/fork branch opens the
+     * copy against the SAME model / effort / permission mode the person was actually talking to instead
+     * of resetting to today's account defaults (issue #282). Deliberately the explicitly-chosen values —
+     * `backfilledModel`, the display guess read back off a transcript, is NOT included, exactly as a
+     * relaunch never bakes it in (issue #27 residual).
+     */
+    data class LaunchKnobs(
+        val mode: PermissionMode,
+        val model: String?,
+        val effort: String?,
+        val permissionMode: String?,
+        val serviceTier: String?,
+    )
+
+    fun launchKnobs(): LaunchKnobs = LaunchKnobs(mode, model, effort, permissionMode, serviceTier)
+
     /** One-shot queue drain: the oldest queued prompt leaves the ledger to become the next spawn's
      *  argv message — launchProcess re-records it (initialSend) under the fresh generation, so the
      *  usual SessionInit settle applies. Pop-then-re-record keeps exactly one live copy. */
-    private fun popQueuedPrompt(): PendingPrompt? = synchronized(promptLedger) { promptLedger.removeFirstOrNull() }
+    private fun popQueuedPrompt(): PendingPrompt? = synchronized(turnWorkLock) {
+        synchronized(promptLedger) {
+            // Transfer, not settlement: keep pendingPromptWork true until launchProcess re-records the
+            // same prompt under the next generation (or its failure path clears the whole work snapshot).
+            promptLedger.removeFirstOrNull()
+        }
+    }
 
     /** /clear + switchDirectory: the old session's undelivered prompts must not leak into a fresh one. */
-    private fun clearPromptLedger() = synchronized(promptLedger) { promptLedger.clear() }
+    private fun clearPromptLedger() = synchronized(turnWorkLock) {
+        synchronized(promptLedger) {
+            promptLedger.clear()
+            turnWork = turnWork.copy(pendingPromptWork = false)
+        }
+    }
 
     /** Ledger entries a fresh process (generation [gen]) must be re-handed, oldest first. Stamps them
      *  onto the new generation and counts the redelivery; an entry redelivered [MAX_REDELIVERIES] times
      *  without ever seeing its replay is dropped — a safety valve against replay-parse drift turning
      *  every relaunch into a duplicate turn. */
-    private fun promptsForRedelivery(gen: Long): List<PendingPrompt> = synchronized(promptLedger) {
-        promptLedger.removeAll { it.redeliveries >= MAX_REDELIVERIES }
-        promptLedger.forEach { it.generation = gen; it.redeliveries++ }
-        promptLedger.toList()
+    private fun promptsForRedelivery(gen: Long): List<PendingPrompt> = synchronized(turnWorkLock) {
+        synchronized(promptLedger) {
+            promptLedger.removeAll { it.redeliveries >= MAX_REDELIVERIES }
+            promptLedger.forEachIndexed { index, entry ->
+                entry.generation = gen
+                entry.redeliveries++
+                entry.queuedWork = index > 0
+            }
+            turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
+            promptLedger.toList()
+        }
     }
 
     /** Issue #122 ④: true when [promptId]'s earlier write is provably LOST — it never produced a user
@@ -487,11 +690,14 @@ class Conversation(
      *  the caller re-runs the prompt through the normal path instead of hollow-re-acking it. An entry
      *  still owned by the LIVE process is merely queued mid-turn — that one stays a re-ack (a duplicate
      *  turn is worse than a duplicate receipt). */
-    private fun releaseLostPrompt(promptId: String): Boolean = synchronized(promptLedger) {
-        val entry = promptLedger.firstOrNull { it.key == promptId } ?: return false
-        val lost = proc == null || entry.generation != processGeneration
-        if (lost) promptLedger.remove(entry)
-        lost
+    private fun releaseLostPrompt(promptId: String): Boolean = synchronized(turnWorkLock) outer@{
+        synchronized(promptLedger) {
+            val entry = promptLedger.firstOrNull { it.key == promptId } ?: return@outer false
+            val lost = proc == null || entry.generation != processGeneration
+            if (lost) promptLedger.remove(entry)
+            turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
+            lost
+        }
     }
 
     /** The model the phone should SEE: the requested/confirmed one, else the transcript backfill. */
@@ -508,7 +714,7 @@ class Conversation(
     /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing, model, effort, agent). */
     private fun live(sid: String?) =
         SessionLive(
-            convoId, workdir.toString(), sid, mode = mode, executing = executing, model = displayModel(), effort = effort,
+            convoId, announcedWorkdir ?: workdir.toString(), sid, mode = mode, executing = isExecuting(), model = displayModel(), effort = effort,
             // stamp the 1M/200k window from the model so the phone's usage % has an authoritative denominator
             // (issue #20) instead of sniffing the id itself. Phones that predate the field simply ignore it.
             contextWindow = claudeWindow(),
@@ -557,7 +763,12 @@ class Conversation(
         sinceSeq: Long? = null,
         permissionMode: String? = null,
         serviceTier: String? = null,
+        // issue #282: open this conversation as a TRUNCATED branch of [resumeId] rather than a plain
+        // resume. Set only by SessionRegistry.rewind, which has already validated the anchor against the
+        // file on disk; null keeps every other open byte-for-byte as it was.
+        rewind: RewindLaunch? = null,
     ) {
+        this.rewindLaunch = rewind
         this.model = model
         this.effort = backend.normalizeEffort(model, effort) // drop stale persisted levels a known model cannot run
         this.permissionMode = normalizePermissionMode(permissionMode)
@@ -629,12 +840,31 @@ class Conversation(
                 // inside replaySlice. An EMPTY delta is never emitted — the client is already caught up,
                 // and an empty non-delta ConvoHistory means /clear to it. A DELTA goes to the OPENER's
                 // sink only (it continues that client's cursor); the full window keeps the fan-out.
-                val slice = backend.replaySlice(workdir.toString(), resumeId, sinceSeq)
+                val slice = clipToRewind(backend.replaySlice(workdir.toString(), resumeId, sinceSeq))
                 if (slice.messages.isNotEmpty()) (if (slice.delta) openerSink else sink).emit(historyFrame(slice))
                 replayWorkflowRuns(resumeId, sink)
             }
             emitCommands()
         }
+    }
+
+    /**
+     * Clip a replay of the PARENT transcript to what the branch actually inherits (issue #282).
+     *
+     * Between a rewind and its first turn this conversation still resumes the parent's session id, so an
+     * unclipped replay would show the phone exactly the turns the rewind just discarded. Rows carry their
+     * transcript cursor since #282, so the cut is a filter on `seq` rather than another parse.
+     *
+     * [ReplaySlice.lastSeq] is dropped deliberately: it is the client's delta cursor, and honouring it on
+     * the next reattach would hand back the very rows clipped here. Null means "no delta" (the pre-#147
+     * contract), and the window is small by construction. Once the first turn lands, the CLI's forked id
+     * takes over and every later replay reads the branch's OWN file, where no clipping applies.
+     */
+    private fun clipToRewind(slice: dev.ccpocket.daemon.disk.ReplaySlice): dev.ccpocket.daemon.disk.ReplaySlice {
+        val cut = rewindLaunch?.cutSeq?.takeIf { sessionId == null } ?: return slice
+        val kept = slice.messages.filter { (it.seq ?: Long.MIN_VALUE) < cut }
+        if (kept.size == slice.messages.size) return slice
+        return slice.copy(messages = kept, lastSeq = null, delta = false)
     }
 
     /** One replayed window/delta as a wire frame — the single place the #147 cursor fields are stamped. */
@@ -728,7 +958,7 @@ class Conversation(
     }
 
     /** True while any background job is still RUNNING — the daemon's idle reaper must not reap such a session. */
-    fun hasBackgroundWork(): Boolean = jobs.hasRunning()
+    fun hasBackgroundWork(): Boolean = turnWork.backgroundWork
 
     /** Labels of the still-RUNNING background jobs — names the work an auth-switch blocker row shows. */
     fun runningJobLabels(): List<String> =
@@ -754,23 +984,92 @@ class Conversation(
 
     /** True while a turn is streaming — the LAN disconnect grace-close re-arms instead of killing it
      *  (in-flight work must survive its owner app quitting; see SessionRegistry.scheduleClose). */
-    fun isExecuting(): Boolean = executing
+    fun isExecuting(): Boolean = turnWork.executing
 
-    private fun armContinuationGrace() {
-        continuationGraceUntil = System.currentTimeMillis() + continuationGraceMs
+    /** A prompt or continuation has produced stream evidence. Set `executing` before dropping the grace
+     *  in the same immutable snapshot, so concurrent directory readers can observe only WORKING states. */
+    private fun markExecuting() = synchronized(turnWorkLock) {
+        turnWork = turnWork.copy(executing = true, continuationGraceUntil = 0L)
     }
 
-    /** True while an unprompted continuation turn may still be coming (see [continuationGraceUntil]):
-     *  the grace is armed and the agent process is alive to deliver it. */
-    private fun continuationExpected(): Boolean =
-        System.currentTimeMillis() < continuationGraceUntil && proc?.isAlive() == true
+    /** The process cannot deliver this turn or a continuation (death, failed spawn, explicit stop). */
+    private fun clearTurnWork() = synchronized(turnWorkLock) {
+        turnWork = TurnWorkState()
+    }
+
+    /** A clean one-shot process ended but its next queued prompt is about to be relaunched. The old
+     *  process's turn/jobs/grace are over; only the transferred prompt remains authoritative work. */
+    private fun carryPendingPromptTransfer() = synchronized(turnWorkLock) {
+        turnWork = TurnWorkState(pendingPromptWork = true)
+    }
+
+    /** Atomically hand a completed result either to its bounded continuation grace or to SETTLED.
+     *  An already-armed background-task grace survives the enclosing turn result. */
+    private fun settleTurnWork(expectContinuation: Boolean) = synchronized(turnWorkLock) {
+        val until = if (expectContinuation) {
+            maxOf(turnWork.continuationGraceUntil, System.currentTimeMillis() + continuationGraceMs)
+        } else {
+            turnWork.continuationGraceUntil
+        }
+        turnWork = turnWork.copy(executing = false, continuationGraceUntil = until)
+    }
+
+    /** Refresh the background-work bit only after the detailed registry mutation. Its previous true value
+     *  remains in [turnWork] until this single replacement installs either the remaining jobs or the grace,
+     *  so a concurrent directory snapshot cannot fall between `job DONE` and `continuation expected`. */
+    private fun syncBackgroundWork(expectContinuation: Boolean = false) = synchronized(turnWorkLock) {
+        val running = jobs.hasRunning()
+        val until = if (expectContinuation) {
+            maxOf(turnWork.continuationGraceUntil, System.currentTimeMillis() + continuationGraceMs)
+        } else {
+            turnWork.continuationGraceUntil
+        }
+        turnWork = turnWork.copy(backgroundWork = running, continuationGraceUntil = until)
+    }
+
+    /** True while an unprompted continuation turn may still be coming: the grace is armed and the
+     *  agent process is alive to deliver it. [state] lets callers make one coherent work-state read. */
+    private fun continuationExpected(state: TurnWorkState = turnWork): Boolean =
+        System.currentTimeMillis() < state.continuationGraceUntil && proc?.isAlive() == true
+
+    /** The agent emitted a nominal result but is still allowed to continue without another user prompt. */
+    fun expectsContinuation(): Boolean = continuationExpected()
+
+    /** One atomic producer view of everything that must OUTLIVE its owner leaving — the reaper/close
+     *  side. Deliberately broader than [isExecuting]: continuation grace is unfinished work as far as
+     *  reclaiming the conversation goes. NOT a client-facing signal — see [hasVisibleTurnWork]. */
+    fun hasAuthoritativeTurnWork(): Boolean {
+        val state = turnWork
+        return state.executing || state.backgroundWork || state.pendingPromptWork || continuationExpected(state)
+    }
+
+    /** The CLIENT-VISIBLE turn state (project list / session row "running"). The SAME atomic snapshot as
+     *  [hasAuthoritativeTurnWork] minus the continuation grace, because those two questions are different:
+     *  the grace answers "may I reclaim this?" and is therefore sized for the WORST case a continuation
+     *  could still show up in ([CONTINUATION_GRACE_MS] = 5 min of API retry backoff — over-holding costs
+     *  nothing there). Publishing it as "running" cost plenty: a plan-mode row stayed pinned on Active for
+     *  five minutes after its answer had already landed, and #239's "new result while you were away"
+     *  marker was delayed by the same window (issue #269).
+     *
+     *  Dropping the grace here is safe in the direction that matters. A real continuation re-arms
+     *  `executing` from its own init (probed 2.1.206: 0.1s after the premature result), and clients only
+     *  ever SAMPLE this bit (the directory list is pull-only — 5s on mobile, 15s on desktop), so that
+     *  0.1s window is caught by ~1 poll in 50 and self-corrects on the next one. The old behaviour had no
+     *  such escape: the row read running with nothing running for a full five minutes, and if the reaper
+     *  took the session when the grace lapsed the row VANISHED — so #239's marker, which needs to observe
+     *  a working→settled transition on a row still in the list, never fired for plan mode at all.
+     *  The reaper keeps using [hasAuthoritativeTurnWork]/[isBusy]; only the published bit narrows. */
+    fun hasVisibleTurnWork(): Boolean {
+        val state = turnWork
+        return state.executing || state.backgroundWork || state.pendingPromptWork
+    }
 
     /** True while the conversation is doing or awaiting anything that must outlive its owner leaving: a
      *  streaming turn, running background jobs, an unanswered permission/question card, or the bounded
      *  window in which the CLI is expected to start an unprompted continuation turn (plan mode's
      *  premature result / a just-completed background task — issue #105 residual). The shared
      *  keep-alive predicate for SessionRegistry.close/scheduleClose/reapIdle. */
-    fun isBusy(): Boolean = isExecuting() || hasBackgroundWork() || hasPendingAsk() || continuationExpected()
+    fun isBusy(): Boolean = hasAuthoritativeTurnWork() || hasPendingAsk()
 
     /** Pre-first-turn (issue #61 lazy start): with no agent process yet, a mode/model/effort switch only
      *  records the field and re-announces — relaunching would spawn the very process the lazy open avoided,
@@ -795,10 +1094,13 @@ class Conversation(
      * report (agent killed outside the daemon / event lost to a crash), so gate it on exactly that.
      */
     suspend fun reapStaleJobs(staleMs: Long): Boolean {
-        if (!jobs.hasRunning()) return false // idle conversation: nothing RUNNING to settle, skip the clock+scan
+        if (!jobs.hasRunning()) return false // detailed ledger survives process death until this cleanup
         if (proc?.isAlive() == true) return false // live agent: trust its eventual task_* completion, never the clock
         val changed = jobs.reapStale(System.currentTimeMillis(), staleMs)
-        if (changed) sink.emit(BackgroundJobs(convoId, jobs.snapshot()))
+        if (changed) {
+            syncBackgroundWork()
+            sink.emit(BackgroundJobs(convoId, jobs.snapshot()))
+        }
         return changed
     }
 
@@ -813,7 +1115,10 @@ class Conversation(
      * forked a duplicate session here. Post-init, fork only for a genuinely foreign id (never today's callers).
      */
     private suspend fun relaunch(resumeId: String? = sessionId, armExecuting: Boolean = false, initialSend: InitialSend? = null) {
-        stopProcess() // clears executing — the fresh launch re-arms it (armExecuting) with the right ordering
+        // A settings relaunch is part of handing off [initialSend], not a cancellation of it. Preserve only
+        // that exact still-PENDING prompt lease; every active/other lease dies with the old process. The fresh
+        // process's matching replay will activate it under the new process generation.
+        stopProcess(preservePendingBridgeGrantToken = initialSend?.bridgeGrantToken)
         val fork = if (sessionId == null) openedWithFork else resumeId != sessionId
         launchProcess(
             AgentSpec(
@@ -837,42 +1142,93 @@ class Conversation(
             sink.emit(live(sessionId))
             return
         }
-        val normalizedNative = normalizePermissionMode(nativeMode)
-        if (newMode == mode && normalizedNative == permissionMode) {
-            // no-op, but still announce: an out-of-sync phone badge corrects itself from this
-            sink.emit(live(sessionId))
-            return
+        modeMutationMutex.withLock {
+            val normalizedNative = normalizePermissionMode(nativeMode)
+            val changed = synchronized(modeStateLock) {
+                if (newMode == mode && normalizedNative == permissionMode) {
+                    false
+                } else {
+                    mode = newMode
+                    permissionMode = normalizedNative
+                    modeGeneration++
+                    armFullControlExpiryLocked()
+                    true
+                }
+            }
+            if (!changed) {
+                // no-op, but still announce: an out-of-sync phone badge corrects itself from this
+                sink.emit(live(sessionId))
+                return@withLock
+            }
+            // approval design M2: a mode switch changes the ground the user granted under — every standing
+            // task grant of this conversation dies with it (design §5.1 "mode change" expiry)
+            grants.endSession(convoId)
+            recordPendingSettings(mode = newMode, model = null, effort = null, permissionModeChanged = true)
         }
-        mode = newMode
-        permissionMode = normalizedNative
-        // approval design M2: a mode switch changes the ground the user granted under — every standing
-        // task grant of this conversation dies with it (design §5.1 "mode change" expiry)
-        grants.endSession(convoId)
-        armFullControlExpiry() // M5: Full Control never runs open-ended
-        recordPendingSettings(mode = newMode, model = null, effort = null, permissionModeChanged = true)
     }
 
-    // ── M5 (approval design §17.5): Full Control auto-expires — min(session close, 1h) — back to the
-    // default ask-driven mode. Renewing it is an explicit re-confirmation, never automatic. ──
+    // ── issue #220: the owner's manually-entered Full Control is a deliberate authorization — by default it
+    // PERSISTS (until the owner leaves it or the session closes), no implicit 1h ceiling. The former M5
+    // (approval design §17.5) auto-expiry is now OPT-IN: when the owner sets a positive expiry duration
+    // ([fullControlExpiryMs]), the clock re-arms at that duration and the revert-to-default surfaces a
+    // VISIBLE in-session notice — never a silent badge flip. The M5 SOURCE ceiling is unaffected: a
+    // restricted origin never reaches BYPASS in the first place (see switchMode's early return), so this
+    // clock only ever governs the owner's own档位 存续. ──
     private var fullControlExpiry: Job? = null
 
-    private fun armFullControlExpiry() {
+    /** Deterministic test seam after the timer's cheap check and before its authoritative generation
+     *  check/write. Deliberately non-suspending: cancellation cannot make the race disappear in tests. */
+    @Volatile
+    internal var beforeFullControlExpiryCommit: (() -> Unit)? = null
+
+    /** Test-only handle for waiting until a timer that crossed the commit seam has fully terminated. */
+    internal fun fullControlExpiryJobForTest(): Job? = synchronized(modeStateLock) { fullControlExpiry }
+
+    private fun armFullControlExpiry() = synchronized(modeStateLock) { armFullControlExpiryLocked() }
+
+    /** Caller holds [modeStateLock]. */
+    private fun armFullControlExpiryLocked() {
         fullControlExpiry?.cancel()
+        fullControlExpiry = null
         if (mode != PermissionMode.BYPASS_PERMISSIONS) return
-        fullControlExpiry = scope.launch {
-            delay(FULL_CONTROL_TTL_MS)
+        val ttl = fullControlExpiryMs()
+        if (ttl <= 0L) return // #220: no expiry configured — the owner's Full Control runs open-ended
+        val armedGeneration = modeGeneration
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            delay(ttl)
+            // Cheap exit for the ordinary case. It is NOT the authority: an explicit switch can happen
+            // immediately after this read, once cancellation has no suspension left at which to bite.
             if (mode != PermissionMode.BYPASS_PERMISSIONS) return@launch // already left it
-            log.info("$convoId Full Control expired after ${FULL_CONTROL_TTL_MS / 60_000}min — back to default mode")
-            mode = PermissionMode.DEFAULT
-            permissionMode = null
-            grants.endSession(convoId) // the ground changed again — nothing standing survives
-            recordPendingSettings(mode = PermissionMode.DEFAULT, model = null, effort = null, permissionModeChanged = true)
-            sink.emit(live(sessionId)) // every attached client's mode badge corrects itself
+            beforeFullControlExpiryCommit?.invoke()
+            modeMutationMutex.withLock {
+                val expired = synchronized(modeStateLock) {
+                    if (modeGeneration != armedGeneration || mode != PermissionMode.BYPASS_PERMISSIONS) {
+                        false
+                    } else {
+                        mode = PermissionMode.DEFAULT
+                        permissionMode = null
+                        modeGeneration++
+                        fullControlExpiry = null
+                        true
+                    }
+                }
+                if (!expired) return@withLock
+                log.info("$convoId Full Control expired after ${ttl / 60_000}min — back to default mode")
+                grants.endSession(convoId) // the ground changed again — nothing standing survives
+                recordPendingSettings(mode = PermissionMode.DEFAULT, model = null, effort = null, permissionModeChanged = true)
+                // #220: make the fallback PERCEPTIBLE — a system line in the transcript, not just a badge flip,
+                // so the owner is never surprised that "the mode changed itself" (design intent of the notice)
+                sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FULL_CONTROL_EXPIRED_NOTICE)))
+                sink.emit(live(sessionId)) // every attached client's mode badge corrects itself
+            }
         }
+        fullControlExpiry = job
+        job.start()
     }
 
     init {
-        // a session OPENED in Full Control (OpenSession.mode = bypass) starts its expiry clock immediately
+        // a session OPENED in Full Control (OpenSession.mode = bypass) arms its expiry clock immediately —
+        // a no-op when no expiry is configured (#220)
         armFullControlExpiry()
     }
 
@@ -973,7 +1329,7 @@ class Conversation(
 
     // Restricted-credential conversations (GUEST folder-share #115, BRIDGE #91) launch their agent
     // clean-room: no MCP servers (can't act through the owner's authenticated integrations) and — the part
-    // that bit for real — `--setting-sources ""`, because the owner's own ~/.claude settings carry
+    // that bit for real — `--setting-sources=` (empty), because the owner's own ~/.claude settings carry
     // permissions.allow rules accumulated for their PERSONAL convenience (a bare "Edit" was live on the
     // machine this shipped from), and the CLI honours those BEFORE the daemon's --permission-prompt-tool
     // ever hears about the call. A stranger in an IM chat inheriting the owner's "don't ask me again"
@@ -993,18 +1349,38 @@ class Conversation(
         val bridgePrompt = if (origin != null && pathScope == null) BRIDGE_SENSITIVE_OUTPUT_PROMPT else null
         val securedSpec = if (bridgePrompt != null) {
             rawSpec.copy(
-                appendSystemPrompt = listOfNotNull(rawSpec.appendSystemPrompt, bridgePrompt)
+                // #242: the bridge's session context (if any) reads BEFORE the security boundary — identity
+                // first, then the rule. Same branch as bridgePrompt, so a non-bridge launch is untouched.
+                appendSystemPrompt = listOfNotNull(rawSpec.appendSystemPrompt, bridgeContextPreamble, bridgePrompt)
                     .joinToString("\n\n"),
             )
         } else {
             rawSpec
         }
-        val spec = if (cleanRoom) securedSpec.copy(cleanRoom = true) else securedSpec
+        val cleanSpec = if (cleanRoom) securedSpec.copy(cleanRoom = true) else securedSpec
+        // REWIND/FORK truncation (issue #282), applied at the ONE choke point every launch path funnels
+        // through so no caller can forget it — and gated on `sessionId == null`, which is what makes it
+        // fire exactly once. Only the FIRST launch is the branching one; after the CLI reports the forked
+        // id every later relaunch (mode switch, model switch, lock heal) resumes THAT id in place, and
+        // re-sending --resume-session-at would truncate the branch again at an anchor uuid the copy still
+        // contains — a silent second cut on every settings change.
+        val spec = rewindLaunch
+            ?.takeIf { sessionId == null && cleanSpec.resumeId != null }
+            ?.let { cleanSpec.copy(resumeSessionAt = it.anchorUuid, resumeDropsTurn = it.dropsTurnUuid, forkSession = true) }
+            ?: cleanSpec
         intentionalStop = false
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
         processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
+        val launchGeneration = processGeneration
         val p = AgentProcess.start(backend.processBuilder(spec), scope)
-        val io = AgentIo(writeLine = p::writeLine, emit = { sink.emit(it) }) // read sink dynamically (reattach)
+        val io = AgentIo(
+            writeLine = p::writeLine,
+            emit = { sink.emit(it) }, // read sink dynamically (reattach)
+            // issue #255: dsh's events arrive on a WebSocket, not on stdout. Route them into the SAME
+            // channel the pump below drains, so there is still exactly one ordering domain and one seq
+            // assigner. Sends after the process exits fail on the closed channel and are dropped.
+            inject = { line -> runCatching { p.stdout.send(line) } },
+        )
         // Ask pushes ride the emit path for two flavors of conversation (issue #91 bridge + #138 owner):
         //  - BRIDGE (origin set, no pathScope): the ask frame fans out normally (the bridge's egress
         //    filter drops it; any interactive device that reattached sees it), AND the ask-push hook tells
@@ -1051,17 +1427,46 @@ class Conversation(
                     ApprovalTimeout.noAutoDeny
             },
             // a bridge-origin ask is a one-off human decision (issue #91): never offer/honor "always
-            // allow", so one owner approval can't be replayed by later attacker-supplied prompts
-            forceNeverRemember = origin != null,
+            // allow", so one owner approval can't be replayed by later attacker-supplied prompts.
+            // dsh joins it for a different reason (issue #291): its approval vocabulary is literally
+            // `allowed-once | rejected` — there IS no "always allow" to grant. Offering one would be the
+            // daemon inventing standing authority the agent never agreed to, and every later tool call
+            // would skip a card dsh still expects a human to answer. This bounds REMEMBERING only;
+            // bypassPermissions still auto-allows ordinary dsh tools exactly as it does for every other
+            // backend (and dsh is itself launched danger-full-access in that mode), which is the user's
+            // own explicit choice rather than an authority this bridge minted.
+            forceNeverRemember = origin != null || backend.kind == AgentKind.DSH,
             // bridge defense-in-depth (issue #91): Bash gated by BridgeCommandPolicy + structured file tools
             // confined to the bound workdir (a bridge Read must not escape to ~/.ssh). Bridge only.
             bridgeSession = origin != null && pathScope == null,
-            // OWNER BYPASS (issue #91): this whole conversation is the owner's dedicated session → auto-allow.
-            // Per-session (set at open) ⇒ race-free: no attributing individual tool calls to a sender.
+            // OWNER BYPASS (issue #91): this is the owner's dedicated session. The Feishu entry point arms a
+            // separate one-turn grant; this standing flag only proves that it is eligible to receive one.
             ownerBypassSession = ownerBypass,
             // issue #190 / #198: the authority of the one exact Feishu request now executing. Dynamic,
             // one-turn state; unlike bridgeAllowedCommands it cannot authorize any later request.
-            bridgeGrant = { bridgeGrant.get() },
+            // This PermissionBridge belongs to exactly this process generation. A superseded process may
+            // still drain buffered stdout after a replacement has activated its own prompt grant; it must
+            // never observe or spend that newer generation's authority.
+            bridgeGrant = {
+                activeBridgeGrant.get()
+                    ?.takeIf { it.processGeneration == launchGeneration }
+                    ?.grant
+                    ?: BridgeGrant.NONE
+            },
+            useBridgeGrant = { expected, allow ->
+                bridgeGrantLock.lock()
+                try {
+                    val active = activeBridgeGrant.get()
+                    if (active?.processGeneration != launchGeneration || active.grant != expected) {
+                        false
+                    } else {
+                        allow()
+                        true
+                    }
+                } finally {
+                    bridgeGrantLock.unlock()
+                }
+            },
             // the owner's Bash allow-list for this bridge — matching commands auto-run with no phone prompt
             // (issue #91 "一次授权跑完全程"). Empty for owner/guest; only consulted on a bridgeSession.
             bridgeAllowedCommands = bridgeAllowedCommands,
@@ -1085,12 +1490,15 @@ class Conversation(
         // re-handed to this fresh process, oldest first, before anything else rides it. This is the old
         // healSessionLock resend generalized to EVERY spawn: crash, shutdown, settings relaunch, lock heal.
         val redeliver = if (backend.promptDelivery == AgentPromptDelivery.STDIN_REPLAY) {
-            promptsForRedelivery(processGeneration)
+            promptsForRedelivery(launchGeneration)
         } else {
             emptyList()
         }
+        // Arm before any ledger replacement/write: the pump has not started yet, so an instant-death clear
+        // cannot race this write, and a one-shot queued transfer never drops its pending shield before the
+        // fresh process becomes executing.
+        if (redeliver.isNotEmpty() || armExecuting) markExecuting()
         if (redeliver.isNotEmpty()) {
-            executing = true // the re-injected prompts start a turn; TurnResult clears it as usual
             log.info("$convoId re-injecting ${redeliver.size} unconsumed prompt(s) into the fresh agent")
             redeliver.forEach { backend.sendPrompt(it.text, it.images) }
         }
@@ -1100,12 +1508,16 @@ class Conversation(
         // the pump, so the CLI's near-instant user-message echo settles the entry instead of orphaning it
         // (issue #122 record-vs-replay race — a spurious re-injection on the next relaunch). NOT re-sent
         // here: it is not in `redeliver` (recorded after that snapshot) — the caller owns its single write.
-        initialSend?.let { recordPromptWritten(it.promptId, it.text, it.images) }
-        // Arm `executing` for a turn-starting (re)launch BEFORE the pump can run (sendPrompt's lazy start /
-        // settings relaunch): the pump's death-branch `executing = false` is then guaranteed to happen-after
-        // this write, so an instant startup death always wins and can't be resurrected by a late arm on the
-        // caller thread (the reap-flake / stranded-■ race). Ordered last so it also covers re-injection.
-        if (armExecuting) executing = true
+        initialSend?.let {
+            recordPromptWritten(
+                it.promptId,
+                it.text,
+                it.images,
+                it.bridgeGrantToken,
+                generation = launchGeneration,
+                queuedWork = redeliver.isNotEmpty(),
+            )
+        }
         // OpenCode startup watchdog: if the process hangs on launch (bad model, resume failure, etc.)
         // with zero stdout for OPENCODE_STARTUP_TIMEOUT_MS, kill it and surface an error — the pump
         // would otherwise block on `for (line in p.stdout)` forever (issue: opencode run with an
@@ -1121,12 +1533,13 @@ class Conversation(
                 if (proc === p && p.isAlive() && !p.sawStdout) {
                     log.warn("$convoId OpenCode watchdog: no stdout in ${windowMs}ms, killing process ${p.pid}")
                     intentionalStop = true
+                    revokeAllBridgeGrants()
                     p.shutdown(eofGraceMs = 1_000, termGraceMs = 1_000, forceGraceMs = 1_000)
                     p.awaitExit()
                     // Null proc + clear state so the next sendPrompt triggers a fresh relaunch
                     // (without this, subsequent prompts would write into the dead stdin and be lost)
                     proc = null
-                    executing = false
+                    clearTurnWork()
                     bridge?.cancelAll()
                     bridge = null
                     // Surface the last stderr (often the real cause) + a clear message
@@ -1141,7 +1554,7 @@ class Conversation(
             }
         }
         scope.launch(CoroutineName("pump-$convoId")) {
-            pump(p, b)
+            pump(p, b, launchGeneration)
         }
     }
 
@@ -1181,14 +1594,20 @@ class Conversation(
         }
     }
 
-    private suspend fun pump(p: AgentProcess, b: PermissionBridge) {
+    private suspend fun pump(p: AgentProcess, b: PermissionBridge, generation: Long) {
         var turnCompleted = false
         for (line in p.stdout) {
             lastActivityMs = System.currentTimeMillis()
             for (ev in backend.parse(line)) {
                 when (ev) {
                     is AgentEvent.SessionInit -> {
-                        if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) settleInitialArgPrompt()
+                        // Claude's unprompted continuation announces a fresh init before its first assistant
+                        // token. Convert the grace to a real executing turn now so a long first-token delay is
+                        // still visible, while ordinary init leaves the caller-armed state untouched.
+                        if (expectsContinuation()) markExecuting()
+                        if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) {
+                            settleInitialArgPrompt(generation)?.let { activateBridgeGrant(it) }
+                        }
                         val firstTime = sessionId == null
                         val prevSid = sessionId
                         ev.sessionId?.let { newSid ->
@@ -1201,6 +1620,19 @@ class Conversation(
                             val parentSid = prevSid ?: openedResumeId
                             if (parentSid != null && parentSid != newSid) {
                                 runCatching { SessionGroups.inherit(workdir.toString(), parentSid, newSid) }
+                                // REWIND/FORK lineage (issue #282). The same choke point, but a NARROWER
+                                // gate: SessionGroups.inherit covers every fork path, while the ledger must
+                                // record only branches the USER asked for — journalling a heal-lock or
+                                // take-over fork here would fold an innocent session away as "rewound".
+                                // Cleared after the first write: this conversation branched once, and a
+                                // later relaunch reporting the same id must not add a second edge.
+                                rewindLaunch?.let { rl ->
+                                    rewindLaunch = null
+                                    runCatching {
+                                        dev.ccpocket.daemon.disk.RewindLineage.note(rl.parentSid, newSid, rl.cutSeq, rl.mode)
+                                    }
+                                    log.info("$convoId ${rl.mode} branch: ${rl.parentSid.take(8)}… → ${newSid.take(8)}… at seq ${rl.cutSeq}")
+                                }
                             }
                             sessionId = newSid
                         }
@@ -1230,15 +1662,15 @@ class Conversation(
                     // speaking — its activity reaches the phone as parent-tagged tool events the client
                     // folds into the Task card instead (issue #77)
                     is AgentEvent.AssistantText -> {
-                        executing = true
+                        markExecuting()
                         if (ev.parentId == null) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
                     }
                     is AgentEvent.AssistantThinking -> {
-                        executing = true
+                        markExecuting()
                         if (ev.parentId == null) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
                     }
                     is AgentEvent.AssistantToolUse -> {
-                        executing = true
+                        markExecuting()
                         val subagent = ev.parentId == null && isSubagentTool(ev.name)
                         // ExitPlanMode's input IS the proposed plan (input["plan"]) — surface it in full via the
                         // shared ToolMetadata extractor so the plan is readable in the phone's chat, not truncated
@@ -1256,6 +1688,11 @@ class Conversation(
                             // content — this is what the phone turns into an openable "open file" chip and it also
                             // reads far better in the transcript (read-doc-inline handoff, Component 2).
                             ev.name in FILE_PATH_TOOLS -> ToolMetadata.of(ev.name, ev.input).preview
+                            // OpenCode's question tool (issue #210): send the parsed questions JSON in
+                            // FULL — the client renders a read-only question card from it, so the 280-char
+                            // cap (which would truncate the JSON unparseable) must not apply. An old client
+                            // just shows this JSON string in a tool row, no worse than the raw JSON today.
+                            dev.ccpocket.protocol.isOpenCodeQuestionTool(ev.name) -> ev.input?.toString() ?: "question"
                             else -> ev.input?.toString()?.take(280)
                         }
                         if (subagent && ev.id != null) rememberSubagent(ev.id, ev.name, ev.input.boolField("run_in_background"))
@@ -1265,16 +1702,25 @@ class Conversation(
                                 toolUseId = ev.id, parentToolUseId = ev.parentId,
                             ),
                         )
-                        if (jobs.onToolUse(ev.id, ev.name, ev.input, System.currentTimeMillis())) emitJobs()
+                        if (jobs.onToolUse(ev.id, ev.name, ev.input, System.currentTimeMillis())) {
+                            syncBackgroundWork()
+                            emitJobs()
+                        }
                     }
                     is AgentEvent.ToolResult -> {
                         if (ev.parentId == null) finishSubagentFromResult(ev)
-                        if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) emitJobs()
+                        if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) {
+                            syncBackgroundWork()
+                            emitJobs()
+                        }
                     }
                     is AgentEvent.BackgroundTaskStarted -> {
                         val now = System.currentTimeMillis()
                         if (ev.taskType == "local_workflow" && workflows.onTaskStarted(ev.taskId, ev.toolUseId, ev.workflowName, now)) emitWorkflow(ev.taskId)
-                        if (jobs.onTaskStarted(ev.taskId, ev.toolUseId, ev.description, ev.taskType, now)) emitJobs()
+                        if (jobs.onTaskStarted(ev.taskId, ev.toolUseId, ev.description, ev.taskType, now)) {
+                            syncBackgroundWork()
+                            emitJobs()
+                        }
                     }
                     is AgentEvent.BackgroundTaskUpdated -> {
                         finishSubagentFromTask(ev)
@@ -1287,8 +1733,9 @@ class Conversation(
                         if (jobs.onTaskUpdated(ev.taskId, ev.status, now)) {
                             // a settled background task triggers the CLI's unprompted follow-up turn
                             // (probed on 2.1.206) — hold the conversation until that continuation's
-                            // own stream re-arms `executing`
-                            armContinuationGrace()
+                            // own stream re-arms `executing`. The prior backgroundWork=true stays in the
+                            // atomic snapshot until this replacement installs grace + the new job state.
+                            syncBackgroundWork(expectContinuation = true)
                             emitJobs()
                         }
                     }
@@ -1307,16 +1754,24 @@ class Conversation(
                     // the CLI's API-failure placeholder — never a real reply. Suppress the chunk (the
                     // TurnDone error row replaces it) but still arm `executing`: a turn did run (issue #65).
                     is AgentEvent.SyntheticReply -> {
-                        executing = true
+                        markExecuting()
                         sawSyntheticThisTurn = true
+                        lastSyntheticText = ev.text // issue #208: retain for error attribution
                     }
                     is AgentEvent.TurnResult -> {
                         turnCompleted = true
-                        // issue #190: this TurnResult is the end of the exact request that was authorized.
-                        // Revoke before processing any later stdout event; the next request starts locked.
-                        bridgeGrant.set(BridgeGrant.NONE)
-                        if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) settleInitialArgPrompt()
-                        executing = false
+                        // Revoke only the ACTIVE lease. A grant staged for a later queued prompt must survive
+                        // a phantom/continuation result from the prior turn, but it still grants NOTHING until
+                        // that exact prompt's replay activates it below.
+                        revokeActiveBridgeGrant(generation)
+                        if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) {
+                            settleInitialArgPrompt(generation)
+                        }
+                        val interrupted = interruptRequested
+                        interruptRequested = false
+                        // Publish the WORKING -> grace/SETTLED hand-off as ONE state replacement before
+                        // any suspend below. A concurrent project poll can never observe both flags false.
+                        settleTurnWork(mode == PermissionMode.PLAN && !interrupted)
                         // relaunch continuation grace anchor (issue #122 ⑤): this result may be a phantom
                         // (fable early result/fallback) — for RELAUNCH_GRACE ms after it, sendPrompt must
                         // not treat `!executing` as license to kill this process. NOTE: the ledger is NOT
@@ -1329,13 +1784,10 @@ class Conversation(
                         settleSubagents(includeBackground = false)
                         val synthetic = sawSyntheticThisTurn
                         sawSyntheticThisTurn = false
-                        val interrupted = interruptRequested
-                        interruptRequested = false
-                        // plan mode's `result` is routinely PREMATURE (issue #55): the CLI continues
-                        // unprompted toward its AskUserQuestion/ExitPlanMode (a fresh init follows the
-                        // result within 0.1s — probed on 2.1.206). Hold the conversation for that
-                        // continuation; a user-interrupted turn genuinely ends, so no grace then.
-                        if (mode == PermissionMode.PLAN && !interrupted) armContinuationGrace()
+                        val syntheticText = lastSyntheticText
+                        lastSyntheticText = null
+                        // Plan mode's `result` is routinely premature (issue #55); its grace was installed
+                        // atomically with the executing clear above. A user interrupt instead settled it.
                         // A result WITHOUT usage (interrupted turn, some error exits) surfaces as usage=null,
                         // never zeros — a zero snaps the phone's statusline to 0% and poisons the resume seed.
                         // Context fields prefer the turn's LAST API call: the result event SUMS input/cache
@@ -1360,10 +1812,11 @@ class Conversation(
                         // below, degraded the session behind it).
                         val error = when {
                             interrupted -> null // ended because the user asked, not because anything failed
+                            // issue #208: attribute by evidence — a placeholder carrying an upstream
+                            // gateway/5xx signal is an API-link failure, not a blown context window.
                             synthetic ->
                                 "API request failed — the agent wrote a placeholder, not a real reply. " +
-                                    "If this keeps happening the session has likely outgrown its context window: " +
-                                    "start a new session or send /clear."
+                                    dev.ccpocket.protocol.SyntheticAttribution.attribution(syntheticText)
                             ev.isError -> ev.finalText?.takeIf { it.isNotBlank() }?.take(300) ?: "turn failed"
                             else -> null
                         }
@@ -1400,7 +1853,12 @@ class Conversation(
                     // the CLI's consumption receipt (issue #122): a top-level user replay proves the
                     // matching prompt reached the model — settle its ledger entry. A parent-tagged
                     // replay is a sub-agent's inner user line, never one of ours.
-                    is AgentEvent.UserReplay -> if (ev.parentId == null) settlePromptReplay(ev.text)
+                    is AgentEvent.UserReplay -> if (ev.parentId == null) {
+                        // Consumption is first-class start evidence for a queued turn. Install executing
+                        // before removing its pending-prompt shield so no directory reader can see a gap.
+                        markExecuting()
+                        settlePromptReplay(ev.text, generation)?.let { activateBridgeGrant(it) }
+                    }
                     is AgentEvent.Ignored -> {}
                     is AgentEvent.Unparseable -> {}
                 }
@@ -1413,8 +1871,7 @@ class Conversation(
             if (proc !== p) return
             // unexpected death: stdout EOF precedes the last transcript flush, so wait for the
             // real process exit before touching the file (intentional stops settle in stopProcess)
-            executing = false // a dead process never delivers TurnResult
-            bridgeGrant.set(BridgeGrant.NONE) // nor may its one-off grant survive into the respawned process
+            revokeAllBridgeGrants() // nor may its one-off grant survive into the respawned process
             p.awaitExit()
             if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && p.exitCode() == 0 && turnCompleted) {
                 log.info("$convoId one-shot process completed normally (sid=${sessionId?.take(8) ?: "-"})")
@@ -1434,6 +1891,7 @@ class Conversation(
                 proc = null // dead handle dropped FIRST — a failed drain-launch below must not leave prompts writing into it
                 val next = popQueuedPrompt()
                 if (next != null) {
+                    carryPendingPromptTransfer()
                     log.info("$convoId one-shot queue: relaunching with queued prompt ${next.key.take(8)}…")
                     runCatching {
                         launchProcess(
@@ -1442,18 +1900,22 @@ class Conversation(
                                 permissionMode = permissionMode, serviceTier = serviceTier, initialPrompt = next.text,
                             ),
                             armExecuting = true,
-                            initialSend = InitialSend(next.key, next.text, next.images),
+                            initialSend = InitialSend(next.key, next.text, next.images, next.bridgeGrantToken),
                         )
                     }.onFailure { e ->
-                        executing = false // the spawn never started a turn
+                        clearTurnWork() // the spawn never started a turn
                         // the popped entry is gone from the ledger — forget its id too, so the client's
                         // resend runs it fresh instead of being hollow-re-acked as "already delivered"
                         synchronized(seenPromptIds) { seenPromptIds.remove(next.key) }
                         sink.emit(PocketError("agent_unavailable", "agent failed to start for a queued message (${e.message})", convoId))
                     }
-                }
+                } else clearTurnWork()
                 return
             }
+            // Not the clean one-shot queue-transfer path: no live process can consume a turn, grace, job,
+            // or pending prompt now. Clear only after awaitExit classified the path, so a queued one-shot
+            // prompt never loses its work shield between the old process and its next spawn.
+            clearTurnWork()
             // workflows died with the process — settle them so no card pulses forever (#106)
             for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId)
             backend.onProcessEnded(sessionId)
@@ -1538,12 +2000,16 @@ class Conversation(
         return true
     }
 
-    /** ADD a re-opened device's view (fan-out — it no longer steals the stream from the others),
-     *  replaying the transcript so far to the newcomer only. [sinceSeq] = the newcomer's transcript
-     *  cursor (issue #147): only the delta past it is replayed when it can be honored. */
-    suspend fun reattach(newSink: OutboundSink, sinceSeq: Long? = null) {
+    /** Install/replace a re-opened device's view without suspending. SessionRegistry uses this inside its
+     *  own mutex so registry membership, stale-close cancellation and sink replacement are one atomic claim. */
+    internal fun registerReattach(newSink: OutboundSink) {
         sinks[sinkKey(newSink)] = newSink
         lastActivityMs = System.currentTimeMillis()
+    }
+
+    /** Replay the current live state to an already-[registerReattach]ed sink. Kept separate because disk
+     *  replay and transport emission suspend and must never run while SessionRegistry's mutex is held. */
+    internal suspend fun replayReattach(newSink: OutboundSink, sinceSeq: Long? = null) {
         // pre-first-turn the agent hasn't minted a sessionId yet — anchor on the resume id (same trick
         // as switchMode) so the reattach still confirms + replays instead of leaving a blank chat
         val sid = sessionId ?: resumeAnchor
@@ -1568,11 +2034,19 @@ class Conversation(
         bridge?.resurfacePending { newSink.emit(it) }
     }
 
+    /** ADD a re-opened device's view (fan-out — it no longer steals the stream from the others),
+     *  replaying the transcript so far to the newcomer only. [sinceSeq] = the newcomer's transcript
+     *  cursor (issue #147): only the delta past it is replayed when it can be honored. */
+    suspend fun reattach(newSink: OutboundSink, sinceSeq: Long? = null) {
+        registerReattach(newSink)
+        replayReattach(newSink, sinceSeq)
+    }
+
     /** Ask the owner to approve this exact bridge request before the prompt reaches the agent. */
     suspend fun awaitBridgeRequestApproval(preview: String): Boolean {
         if (
-            origin == null || pathScope != null || ownerBypass || executing ||
-            bridgeGrant.get().authorizes || bridgeRequestPermit.get()
+            origin == null || pathScope != null || ownerBypass || isExecuting() ||
+            activeBridgeGrant.get() != null || pendingBridgeGrant.get() != null || bridgeRequestPermit.get()
         ) return false
         lastActivityMs = System.currentTimeMillis()
         val approved = bridgeRequestGate.awaitApproval(preview)
@@ -1593,8 +2067,9 @@ class Conversation(
     }
 
     /**
-     * Hand one request from an owner-PRE-TRUSTED chat to the agent (issue #198) — no per-request card was
-     * shown, so it runs under [BridgeGrant.AUTO_TRUSTED], which keeps the Bash-danger and workdir walls up.
+     * Hand one request from an owner-PRE-TRUSTED chat to the agent (issues #198/#233) — no per-request card
+     * was shown, so it receives broad one-turn [BridgeGrant.AUTO_TRUSTED] authority. The durable policy is
+     * chat/project-scoped; the execution grant remains bound to this prompt and is revoked on every terminal path.
      *
      * Deliberately permit-FREE: the authorization here is the owner's standing per-chat grant, checked by the
      * caller (the built-in engine, which reads Feishu's attested chat id), not a human tap to serialize
@@ -1608,8 +2083,8 @@ class Conversation(
 
     /**
      * Hand one Guardian-passed request from a REVIEWED chat to the agent (reviewed-trust design §9.1) — the
-     * reviewer classified it, no human read it, so it runs under [BridgeGrant.REVIEWER_APPROVED]: the same
-     * closed ceiling as AUTO_TRUSTED, distinct only for audit and future tightening.
+     * reviewer classified it, no human read it, so it runs under [BridgeGrant.REVIEWER_APPROVED] and its
+     * closed project-scoped ceiling, distinct from owner-confirmed AUTO_TRUSTED full authority.
      *
      * In-process callers only, permit-free like the trusted path (the authorization is the owner's standing
      * REVIEWED policy plus the daemon-validated review result, both held in-process — no frame can claim
@@ -1622,23 +2097,57 @@ class Conversation(
         return handOff(text, promptId, BridgeGrant.REVIEWER_APPROVED)
     }
 
-    /** Arm [grant] for exactly this prompt's turn and hand it over. Armed by CAS, so two concurrent hand-offs
-     *  can never both believe they hold the grant. A hand-off that starts no turn (a daemon-intercepted slash
-     *  command) or throws revokes it immediately. */
+    /** Hand one request from the configured machine owner's dedicated Feishu session to the agent. The
+     *  session flag proves which in-process route may call this; [BridgeGrant.OWNER_BYPASS] makes the actual
+     *  authority one-turn and therefore revocable by cancel/process end like every other #233 full-turn path. */
+    suspend fun sendOwnerBypassBridgePrompt(text: String, promptId: String? = null): Boolean {
+        if (origin == null || pathScope != null || !ownerBypass) return false
+        return handOff(text, promptId, BridgeGrant.OWNER_BYPASS)
+    }
+
+    /** Stage [grant] for exactly this prompt and hand it over. The lease is deliberately NOT active here:
+     *  only the matching top-level UserReplay (or one-shot SessionInit) activates it. This separates a
+     *  staged next request from a late ControlRequest emitted by a phantom continuation of the prior turn.
+     *
+     *  A top-level TurnResult is not proof that the process has stopped all work: a background Agent/Bash may
+     *  continue emitting permission requests afterward. Until that work (and the bounded continuation window)
+     *  settles, fail closed instead of letting it borrow the next prompt's broad grant. */
     private suspend fun handOff(text: String, promptId: String?, grant: BridgeGrant): Boolean {
-        if (executing) return false
-        if (!bridgeGrant.compareAndSet(BridgeGrant.NONE, grant)) return false
+        if (isBusy()) return false
+        val token = java.util.UUID.randomUUID().toString()
+        val armed = bridgeGrantLock.withLock {
+            if (isBusy() || activeBridgeGrant.get() != null || pendingBridgeGrant.get() != null) {
+                false
+            } else {
+                pendingBridgeGrant.set(PendingBridgeGrant(token, grant))
+                true
+            }
+        }
+        if (!armed) return false
         return runCatching {
-            sendPrompt(text, promptId = promptId)
-            if (!executing) bridgeGrant.set(BridgeGrant.NONE)
+            sendPromptInternal(text, promptId = promptId, bridgeGrantToken = token)
+            if (!isExecuting()) revokeBridgeGrantLease(token)
             true
         }.getOrElse {
-            bridgeGrant.set(BridgeGrant.NONE)
+            revokeBridgeGrantLease(token)
             throw it
         }
     }
 
-    suspend fun sendPrompt(text: String, images: List<ImageData> = emptyList(), promptId: String? = null) {
+    suspend fun sendPrompt(
+        text: String,
+        images: List<ImageData> = emptyList(),
+        promptId: String? = null,
+    ) = sendPromptInternal(text, images, promptId)
+
+    /** [bridgeGrantToken] is intentionally private: only trusted in-process bridge hand-off code may bind
+     *  a staged authority lease to a prompt-ledger entry; wire callers can never supply this correlation. */
+    private suspend fun sendPromptInternal(
+        text: String,
+        images: List<ImageData> = emptyList(),
+        promptId: String? = null,
+        bridgeGrantToken: String? = null,
+    ) {
         // idempotent retry (issue #66): a promptId we already delivered is re-ACKED, never re-run —
         // the client may resend after a lost ack, and a duplicate turn is worse than a duplicate receipt.
         // EXCEPT (issue #122 ④): when the ledger proves the earlier write was LOST (no consumption
@@ -1651,7 +2160,7 @@ class Conversation(
             }
             // fall through: promptId stays in seenPromptIds — it is being run for real right now
         }
-        if (tryIntercept(text)) {
+        if (tryIntercept(text, promptId)) {
             promptId?.let { sink.emit(PromptAck(convoId, it)) } // handled by the daemon = delivered
             return
         }
@@ -1689,7 +2198,9 @@ class Conversation(
         // (issue #104) snapshot the process state BEFORE the (re)launch below: a prompt acked during a fresh
         // spawn or a settings relaunch is exactly the window a client "delivered but no turn" (turnStalled) targets.
         val firstSpawn = proc == null
-        val relaunching = proc != null && !executing && pendingRelaunch && relaunchGraceElapsed() && !continuationExpected()
+        val workAtSend = turnWork
+        val relaunching = proc != null && !workAtSend.executing && pendingRelaunch &&
+            relaunchGraceElapsed() && !continuationExpected(workAtSend)
         // `executing` must be armed with a happens-before edge to the new pump: a process that dies
         // instantly at startup runs its death-branch `executing = false` on the pump thread, and that
         // clear MUST win. Arming AFTER the launch (as before) lost the race under load — the late `true`
@@ -1699,12 +2210,12 @@ class Conversation(
         // send arms it here, where no new pump can race it.
         // the launch's own prompt, LEDGERED inside launchProcess before its pump starts (issue #122
         // record-vs-replay race); the queued-send branch below records it inline instead (no new pump).
-        val initialSend = InitialSend(promptId, text, images)
+        val initialSend = InitialSend(promptId, text, images, bridgeGrantToken)
         if (relaunching) {
             reemitLive = true // the post-relaunch init re-announces SessionLive with the fresh sessionId + model
             val relaunched = runCatching { relaunch(sessionId ?: openedResumeId, armExecuting = true, initialSend = initialSend) }
             if (relaunched.isFailure) {
-                executing = false // the relaunch never started a turn
+                clearTurnWork() // the relaunch never started a turn
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
                 sink.emit(PocketError("agent_unavailable", "agent failed to relaunch for the new settings (${relaunched.exceptionOrNull()?.message})", convoId))
                 return
@@ -1736,7 +2247,7 @@ class Conversation(
                 )
             }
             if (launched.isFailure) {
-                executing = false // the spawn never started a turn
+                clearTurnWork() // the spawn never started a turn
                 // no ack: the prompt did NOT reach an agent — forget the id so the client's retry can run
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
                 sink.emit(PocketError("agent_unavailable", "agent failed to start (${launched.exceptionOrNull()?.message})", convoId))
@@ -1749,14 +2260,14 @@ class Conversation(
             // into the next spawn (one prompt per process). recordPromptWritten stamps the CURRENT
             // generation, so a client resend while this turn runs is a plain re-ack (#122 ④: an entry
             // owned by the live process is queued, not lost).
-            recordPromptWritten(promptId, text, images)
+            recordPromptWritten(promptId, text, images, bridgeGrantToken, queuedWork = true)
         } else {
             // queued send onto the already-live process (mid-turn queue, or a steady-state next turn):
-            // no new pump is starting, so there is no death-branch to race — arm executing directly, and
-            // ledger BEFORE the write (issue #122 ③): even a write that dies inside the backend leaves the
-            // prompt recorded, and only the CLI's consumption replay settles it (ack ≠ consumed).
-            executing = true // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
-            recordPromptWritten(promptId, text, images)
+            // no new pump is starting, so there is no death-branch to race. Ledger FIRST, then arm the turn:
+            // if the old turn's result races this enqueue, either executing or pendingPromptWork remains true.
+            // The write comes only after both, and only the CLI's consumption replay settles the ledger.
+            recordPromptWritten(promptId, text, images, bridgeGrantToken, inferQueuedWork = true)
+            markExecuting() // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
         }
         lastActivityMs = System.currentTimeMillis()
         lockForkRetried = false // each user prompt re-arms one heal
@@ -1775,23 +2286,27 @@ class Conversation(
      * command (and was handled) — the caller then skips the normal prompt path. Custom commands, skills,
      * and prompt-backed built-ins (/review, /compact, …) are NOT intercepted: they pass through to the agent.
      */
-    private suspend fun tryIntercept(text: String): Boolean {
+    private suspend fun tryIntercept(text: String, promptId: String? = null): Boolean {
         val trimmed = text.trim()
-        when (trimmed.substringBefore(' ').substringBefore('\n')) {
-            "/model" -> handleModelCommand(trimmed)
-            "/effort" -> handleEffortCommand(trimmed)
-            "/compact" -> if (backend.kind == AgentKind.CODEX) handleCodexCompactCommand() else return false
-            "/review" -> if (backend.kind == AgentKind.CODEX) handleCodexReviewCommand(trimmed) else return false
-            "/clear" -> handleClearCommand()
+        val handler: suspend () -> Unit = when (trimmed.substringBefore(' ').substringBefore('\n')) {
+            "/model" -> ({ handleModelCommand(trimmed) })
+            "/effort" -> ({ handleEffortCommand(trimmed) })
+            "/compact" -> if (backend.kind == AgentKind.CODEX) ({ handleCodexCompactCommand() }) else return false
+            "/review" -> if (backend.kind == AgentKind.CODEX) ({ handleCodexReviewCommand(trimmed) }) else return false
+            "/clear" -> ({ handleClearCommand() })
             else -> return false
         }
+        // 本地命令没有 UserReplay，但它的回执（reply → TurnDone）确实属于这条请求：先记消费凭证再执行，
+        // 否则桥接的归属门（issue #285）会把回执当成遗留轮次的终态帧丢掉。
+        promptId?.let { markPromptConsumed(it) }
+        handler()
         return true
     }
 
     /** Codex exposes compaction as app-server control-plane RPC, not a slash prompt. The process must be
      * ready because compact applies to its opened thread; a cold resume is launched without creating a turn. */
     private suspend fun handleCodexCompactCommand() {
-        if (executing) {
+        if (isExecuting()) {
             reply("Wait for the current Codex turn to finish before compacting context.")
             return
         }
@@ -1819,7 +2334,7 @@ class Conversation(
     /** Codex code review is another app-server control-plane operation. `/review` defaults to all working
      * tree changes; text after the command becomes the native custom review target. */
     private suspend fun handleCodexReviewCommand(text: String) {
-        if (executing) {
+        if (isExecuting()) {
             reply("Wait for the current Codex turn to finish before starting a review.")
             return
         }
@@ -1850,7 +2365,7 @@ class Conversation(
             reply("Current model: ${displayModel() ?: "default"}.\nUsage: /model <name> — e.g. /model opus, /model sonnet, /model haiku (or a full model id).")
             return
         }
-        val wasExecuting = executing // switchModel doesn't touch it, but read before any await to be safe
+        val wasExecuting = isExecuting() // switchModel doesn't touch it, but read before any await to be safe
         switchModel(arg)
         // issue #84: don't splice a confirmation + TurnDone into a running turn's stream (it would prematurely
         // clear the phone's ■ and inject the notice mid-reply). Mid-turn the optimistic SessionLive badge is the
@@ -1870,7 +2385,7 @@ class Conversation(
             reply("Unsupported effort \"$arg\" for ${displayModel() ?: backend.kind.name.lowercase()}. Choose one of: ${supported.joinToString(", ")}.")
             return
         }
-        val wasExecuting = executing
+        val wasExecuting = isExecuting()
         switchEffort(arg.takeUnless { it == "default" })
         // issue #84: as in handleModelCommand — no mid-stream confirmation; the badge is the feedback when a
         // turn is in flight, and the switch still takes effect on the next turn.
@@ -1894,6 +2409,7 @@ class Conversation(
         sessionTitle = null
         failedTurnStreak = 0 // a fresh session starts healthy — the degraded warning belongs to the old transcript
         sawSyntheticThisTurn = false
+        lastSyntheticText = null
         // fresh window — the live(null) below (and the init backfill announce) must not carry the wiped
         // session's occupancy, which re-seeded the phone's "Context NN%" statusline post-clear (issue #149)
         resumeContextUsed = null
@@ -1922,7 +2438,11 @@ class Conversation(
      * a clean user cancel.
      */
     private suspend fun requestInterrupt() {
-        if (!executing) return
+        // A phantom TurnResult can temporarily clear `executing` while a later bridge prompt is already
+        // staged but not yet replayed. The owner's stop still revokes that pending authority even though
+        // there is no backend turn we can honestly mark/interupt at this instant.
+        revokeAllBridgeGrants()
+        if (!isExecuting()) return
         interruptRequested = true // the coming result's is_error is the user's stop, not a failure to paint red
         backend.interrupt()
     }
@@ -1957,6 +2477,7 @@ class Conversation(
      */
     suspend fun stopBackgroundJob(jobId: String) {
         if (!jobs.markKilled(jobId, System.currentTimeMillis())) return
+        syncBackgroundWork()
         requestInterrupt()
         emitJobs() // reflect KILLED in the panel now (also stamps lastActivityMs)
     }
@@ -1973,6 +2494,7 @@ class Conversation(
         sessionTitle = null
         failedTurnStreak = 0 // fresh session in a new cwd — degraded state died with the old transcript
         sawSyntheticThisTurn = false
+        lastSyntheticText = null
         launchProcess(
             AgentSpec(
                 workdir, resumeId = null, model = null, mode = mode, effort = effort,
@@ -1982,10 +2504,51 @@ class Conversation(
         emitCommands() // project commands differ per workdir
     }
 
-    private suspend fun stopProcess() {
+    /** Activate only the lease carried by the exact prompt entry the backend proved consumed. */
+    private suspend fun activateBridgeGrant(prompt: PendingPrompt) {
+        val token = prompt.bridgeGrantToken ?: return
+        bridgeGrantLock.withLock {
+            val pending = pendingBridgeGrant.get()
+            if (pending?.token != token) return@withLock
+            pendingBridgeGrant.set(null)
+            // Close the race between handOff's busy check and this replay. The stdout pump may have learned
+            // that turn A launched background work after B was staged but before B's replay arrived. B may
+            // still run, but without broad authority; unknown lineage must ask rather than borrowing B's grant.
+            if (hasBackgroundWork() || hasPendingAsk() || continuationExpected()) {
+                log.warn("$convoId refused bridge grant activation: earlier work is still unsettled")
+                return@withLock
+            }
+            if (activeBridgeGrant.get() == null) {
+                activeBridgeGrant.set(ActiveBridgeGrant(token, pending.grant, prompt.generation))
+            } else {
+                log.warn("$convoId refused bridge grant activation: another lease is already active")
+            }
+        }
+    }
+
+    /** A normal result ends the currently consumed request, never a later prompt still pending replay. */
+    private suspend fun revokeActiveBridgeGrant(processGeneration: Long) = bridgeGrantLock.withLock {
+        if (activeBridgeGrant.get()?.processGeneration == processGeneration) {
+            activeBridgeGrant.set(null)
+        }
+    }
+
+    /** Revoke one hand-off without touching a newer lease that may have been staged after cancellation. */
+    private suspend fun revokeBridgeGrantLease(token: String) = bridgeGrantLock.withLock {
+        if (activeBridgeGrant.get()?.token == token) activeBridgeGrant.set(null)
+        if (pendingBridgeGrant.get()?.token == token) pendingBridgeGrant.set(null)
+    }
+
+    /** Cancellation/process loss is a hard boundary: neither active nor not-yet-consumed authority survives. */
+    private suspend fun revokeAllBridgeGrants(preservePendingToken: String? = null) = bridgeGrantLock.withLock {
+        activeBridgeGrant.set(null)
+        if (pendingBridgeGrant.get()?.token != preservePendingToken) pendingBridgeGrant.set(null)
+    }
+
+    private suspend fun stopProcess(preservePendingBridgeGrantToken: String? = null) {
         intentionalStop = true
-        executing = false // any in-flight turn dies with the process
-        bridgeGrant.set(BridgeGrant.NONE)
+        clearTurnWork() // any in-flight turn and continuation grace die with the process
+        revokeAllBridgeGrants(preservePendingToken = preservePendingBridgeGrantToken)
         bridgeRequestPermit.set(false)
         bridge?.cancelAll()
         proc?.shutdown() // waits for real exit (force-kill fallback) — file is quiet after this
@@ -2074,8 +2637,10 @@ class Conversation(
     companion object {
         val CONSERVATIVE_EFFORT_LEVELS = setOf("low", "medium", "high", "xhigh")
 
-        /** M5 (approval design §17.5): Full Control auto-expires after min(session close, this). */
-        const val FULL_CONTROL_TTL_MS = 60 * 60 * 1000L
+        /** Issue #220: the visible in-session line the owner sees when an OPT-IN Full Control expiry
+         *  reverts the session to the default ask-driven mode — so the change is never silent. */
+        const val FULL_CONTROL_EXPIRED_NOTICE =
+            "⏱️ 全自动（Full Control）已到期，已自动切回默认「每步询问」模式。可在设置里调整存续时长，或再次切入全自动。"
 
         // claude's session-lock refusal on stderr: "Error: Session <id> is currently running as a
         // background agent (<kind>). … add --fork-session to branch off a copy." The kind varies

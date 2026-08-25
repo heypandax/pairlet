@@ -10,13 +10,19 @@ import dev.ccpocket.relay.auth.DeviceAuthenticator
 import dev.ccpocket.relay.net.RateLimiter
 import dev.ccpocket.relay.pairing.PairingService
 import dev.ccpocket.relay.store.Db
+import dev.ccpocket.relay.store.Device
 import dev.ccpocket.relay.store.InMemoryRelayStore
+import dev.ccpocket.relay.store.RelayStore
 import dev.ccpocket.relay.store.SqliteRelayStore
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import java.security.KeyPairGenerator
 import java.security.Signature
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -25,6 +31,25 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class RelayCoreTest {
+
+    /** Makes two capacity checks observe the same snapshot, deterministically exposing a check/insert race. */
+    private class CoordinatedCountStore(private val delegate: RelayStore) : RelayStore by delegate {
+        private val arrivals = AtomicInteger()
+        private val firstCounted = CompletableDeferred<Unit>()
+        private val releaseFirst = CompletableDeferred<Unit>()
+
+        override suspend fun countDevices(accountId: String): Int {
+            val snapshot = delegate.countDevices(accountId)
+            if (arrivals.incrementAndGet() == 1) {
+                firstCounted.complete(Unit)
+                releaseFirst.await()
+            }
+            return snapshot
+        }
+
+        suspend fun awaitFirstCount() = firstCounted.await()
+        fun releaseFirstCount() = releaseFirst.complete(Unit)
+    }
 
     // ---- a daemon's Ed25519 identity, mirrored in test to drive the signed-challenge handshake ----
     private class DaemonKeys {
@@ -142,6 +167,44 @@ class RelayCoreTest {
         assertEquals(1, winners.size) // exactly one claim wins the race
     }
 
+    @Test fun device_cap_is_not_exceeded_by_concurrent_distinct_ticket_redeems() = runBlocking {
+        withTimeout(5_000) {
+            val backing = InMemoryRelayStore()
+            backing.insertAccount("acct", ByteArray(32), 0)
+            repeat(49) { i ->
+                backing.insertDevice(
+                    Device("existing-$i", "acct", ByteArray(65), ByteArray(32), 0, null, revoked = false),
+                )
+            }
+            val rawTickets = listOf(ByteArray(32) { 1 }, ByteArray(32) { 2 })
+            rawTickets.forEach { backing.insertTicket(Codec.sha256(it), "acct", 0, Long.MAX_VALUE) }
+            val coordinated = CoordinatedCountStore(backing)
+            val pairing = PairingService(coordinated)
+
+            // UNDISPATCHED runs each request to its first suspension. The first pauses after reading 49;
+            // without redeem serialization the second also reads 49 and inserts before the first is released.
+            // Bound the whole barrier protocol so a future early-return or moved suspension fails promptly
+            // instead of leaving CI blocked on either Deferred.
+            val first = async(start = CoroutineStart.UNDISPATCHED) {
+                pairing.redeem(Codec.b64uEnc(rawTickets[0]), Codec.b64uEnc(ByteArray(65)))
+            }
+            coordinated.awaitFirstCount()
+            val second = async(start = CoroutineStart.UNDISPATCHED) {
+                pairing.redeem(Codec.b64uEnc(rawTickets[1]), Codec.b64uEnc(ByteArray(65) { 1 }))
+            }
+            coordinated.releaseFirstCount()
+            val redeemed = listOf(first, second).awaitAll()
+
+            assertEquals(1, redeemed.count { it is PairingService.RedeemResult.Ok })
+            assertEquals(
+                listOf(PairingService.RedeemResult.Err("too_many_devices")),
+                redeemed.filterIsInstance<PairingService.RedeemResult.Err>(),
+                "the only loser must be the request serialized behind the final device slot",
+            )
+            assertEquals(50, backing.countDevices("acct"))
+        }
+    }
+
     // ===================== rate limiter =====================
 
     @Test fun rate_limiter_windows_and_locks_out() {
@@ -186,5 +249,22 @@ class RelayCoreTest {
         assertEquals(daemon1, superseded)
         superseded!!.close("superseded")
         assertTrue(oldClosed)
+    }
+
+    @Test fun stale_daemon_replay_cannot_send_to_the_replacement_connection() = runBlocking {
+        val broker = Broker()
+        val oldTexts = mutableListOf<String>()
+        val newTexts = mutableListOf<String>()
+        val old = Conn("acct", Role.DAEMON, null, sendText = { oldTexts += it }, sendBinary = {}, close = {})
+        val replacement = Conn("acct", Role.DAEMON, null, sendText = { newTexts += it }, sendBinary = {}, close = {})
+
+        broker.attachDaemon(old)
+        broker.controlToDaemon(old, "old-before-supersede")
+        broker.attachDaemon(replacement)
+        broker.controlToDaemon(old, "stale-replay")
+        broker.controlToDaemon(replacement, "replacement-replay")
+
+        assertEquals(listOf("old-before-supersede"), oldTexts)
+        assertEquals(listOf("replacement-replay"), newTexts)
     }
 }

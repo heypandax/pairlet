@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+  a { color: #B4522F; text-decoration: none; }
+  a:hover { color: #8E3F23; }
+</style>
+</helmet>
+
+<div style="position:fixed;inset:0;z-index:-1;background:#EDEBE6"></div>
+
+<div style="width:1920px;margin:0 auto;padding:64px 72px 96px;font-family:'Public Sans',system-ui,sans-serif;color:#1B1A18">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:940px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · mobile ui 2.0 · chat · master v2 · source of truth</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">Chat Master v2</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Consolidates the Chat frame from A Master Core v1, the 200% proof from A Master Proofs v1, and the confirmed Quick Actions sheet into one current file, with the later context-disclosure fixes folded in. Direction A is unchanged: this corrects and unifies, it does not re-style. Every frame below is a live instance of one shared device component, so state, locale, theme and type size are runtime, not redrawn.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div><div style="color:#1B1A18">402 × 874</div><div>iPhone 17 · 1:1</div></div>
+      <div><div style="color:#1B1A18">5 zones</div><div>1 lead state</div></div>
+      <div><div style="color:#1B1A18">0 new facts</div><div>0 route changes</div></div>
+    </div>
+  </div>
+
+  <div style="padding-top:34px">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0 36px;border-top:1px solid #C9C5BD;border-bottom:1px solid #C9C5BD;padding:18px 0 20px">
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">The four questions</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Which session is this, does it need me, what happened, what can I send. The zone order answers them in that order and nothing else competes for the top of the screen.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Context disclosure, corrected</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Collapsed is two wrapping lines of real facts on one 48 pt target. Expanded groups identity and location, keeps the full path copyable and wrapping, and pins Session info below the scrolling body so it can never hide.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">One lead state</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Approval, Answer, Failure, Running — in that order, one at a time. Streaming under a higher state is a subordinate qualifier, never a second headline. Idle has no block at all.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Held from v1</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">List-first transcript with quiet source labels, hairline tool bands, two-layer composer, and the confirmed Quick Actions sheet reached from the only top-right action. No bubbles, cards, gradients or new navigation.</p>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding-top:44px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">A</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Walk the master</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">The control column is prototype chrome for review. It is not product navigation and ships nowhere.</span>
+    </div>
+
+    <div style="display:flex;gap:52px;align-items:flex-start">
+      <dc-import name="ChatDeviceV2" locale="zh" theme="dark" controls="{{ true }}" stack="{{ 3 }}" ctx-label="34%" hint-size="700px,874px"></dc-import>
+
+      <div style="flex:1;min-width:0;display:grid;grid-template-columns:repeat(2,1fr);gap:0 40px">
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Acceptance path</div>
+          <div style="border-top:1px solid #C9C5BD;font:400 13px/1.55 'Public Sans',sans-serif;color:#3A3730">
+            <sc-for list="{{ pathA }}" as="p" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">{{ p.n }}</span><span style="text-wrap:pretty">{{ p.text }}</span></div>
+            </sc-for>
+          </div>
+        </div>
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">&nbsp;</div>
+          <div style="border-top:1px solid #C9C5BD;font:400 13px/1.55 'Public Sans',sans-serif;color:#3A3730">
+            <sc-for list="{{ pathB }}" as="p" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:24px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #DAD6CE"><span style="font:500 11.5px/1.5 'JetBrains Mono',monospace;color:#8A857C">{{ p.n }}</span><span style="text-wrap:pretty">{{ p.text }}</span></div>
+            </sc-for>
+          </div>
+          <div style="margin-top:18px;background:#E4E1DA;border-radius:11px;padding:14px 16px">
+            <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Fixtures, not telemetry</div>
+            <p style="margin:9px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Title <span style="font-family:'JetBrains Mono',monospace">Review relay reconnect handling</span>, agent Claude, mode Ask every time, model <span style="font-family:'JetBrains Mono',monospace">fable</span>, computer <span style="font-family:'JetBrains Mono',monospace">MacBook-Pro</span>, folder <span style="font-family:'JetBrains Mono',monospace">cc-pocket</span>. Session stack and context occupancy render only because these fixtures supply values; omit the props and the chips disappear rather than showing zero. No timestamp, duration, branch or health value exists anywhere in this file.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">B</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Required proofs</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Ten live instances at exactly 402 × 874. Drive any one without disturbing the others.</span>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">01 · 中文 · dark · canonical</div>
+        <dc-import name="ChatDeviceV2" locale="zh" theme="dark" stack="{{ 3 }}" ctx-label="34%" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Context collapsed to two lines of real facts, no state block because nothing is pending, composer idle with the microphone. This is the reading state the design is tuned for.</p>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">02 · 中文 · dark · context expanded</div>
+        <dc-import name="ChatDeviceV2" locale="zh" theme="dark" ctx-open="{{ true }}" stack="{{ 3 }}" ctx-label="34%" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Identity and location grouped, origin omitted because none is supplied, full path wrapping with its own copy target, Session info pinned under the body. At 100% type nothing here needs an inner scroll.</p>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">03 · EN · dark · running + queued</div>
+        <dc-import name="ChatDeviceV2" locale="en" theme="dark" fixture="running" queued="{{ true }}" stack="{{ 3 }}" ctx-label="41%" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Running leads, the last agent turn is still streaming, and a typed draft puts Stop and Send side by side. The queue explanation is written above the row, not implied by the button.</p>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">04 · EN · dark · approval while running</div>
+        <dc-import name="ChatDeviceV2" locale="en" theme="dark" fixture="approval" stack="{{ 3 }}" ctx-label="41%" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Approval leads with the literal ask title; Running drops to a subordinate qualifier. No Review button here — the approval sheet owns that decision.</p>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">05 · 中文 · dark · answer required</div>
+        <dc-import name="ChatDeviceV2" locale="zh" theme="dark" fixture="answer" stack="{{ 3 }}" ctx-label="41%" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The QuestionCard docks above the bottom area and owns its inputs, so the composer steps aside and says why in one line rather than disappearing silently.</p>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">06 · EN · light · failure, send gated</div>
+        <dc-import name="ChatDeviceV2" locale="en" theme="light" fixture="failure" stack="{{ 3 }}" ctx-label="41%" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The pinned label is the localized Failure label and nothing else — ChatStateUi supplies no detail string for this state, so none is shown. The typed draft and Send stay visible: a gated send returns false and preserves the draft rather than clearing the field.</p>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">07 · 中文 · dark · quick actions open</div>
+        <dc-import name="ChatDeviceV2" locale="zh" theme="dark" sheet-open="{{ true }}" stack="{{ 3 }}" ctx-label="34%" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The entry-point proof: the confirmed v1 hierarchy of four groups with Handoff as an ordinary peer row and no NEW badge. Interaction stays owned by Chat Quick Actions Master v1.</p>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">08 · EN · dark · long content</div>
+        <dc-import name="ChatDeviceV2" locale="en" theme="dark" long-content="{{ true }}" ctx-open="{{ true }}" stack="{{ 3 }}" ctx-label="78%" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Three-line title clear of the overflow, deep path wrapping without ellipsis, a long ripgrep command wrapping inside its hairline band, and the origin row present because this fixture supplies one.</p>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">09 · 中文 · light · 200% type</div>
+        <dc-import name="ChatDeviceV2" locale="zh" theme="light" big="{{ true }}" ctx-open="{{ true }}" stack="{{ 3 }}" ctx-label="34%" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">At 402 × 874 rows grow to 58 pt and the facts body scrolls, while Session info, the transcript and the whole composer stay reachable. Nothing shrank to make this fit.</p>
+      </div>
+
+      <div style="width:402px;flex:none">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">10 · EN · dark · parity check</div>
+        <dc-import name="ChatDeviceV2" locale="en" theme="dark" stack="{{ 3 }}" ctx-label="34%" hint-size="402px,874px"></dc-import>
+        <p style="margin:12px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">English against frame 01's Chinese: identical geometry, identical group structure, only the fixed grammar changes. Model, machine and path stay literal in both.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">C</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Composer state strip</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Component proofs of the accessory row's right slot. Same component the phone above mounts.</span>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,402px);gap:34px 44px">
+
+      <div>
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">idle · empty</div>
+        <div style="border-radius:14px;overflow:hidden"><dc-import name="ChatComposerV2" locale="en" theme="dark" variant="idle" stack="{{ 3 }}" ctx-label="34%" hint-size="402px,150px"></dc-import></div>
+        <p style="margin:10px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Placeholder names the real active agent. Right slot is the microphone.</p>
+      </div>
+
+      <div>
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">text staged</div>
+        <div style="border-radius:14px;overflow:hidden"><dc-import name="ChatComposerV2" locale="en" theme="dark" variant="text" draft="Also check the replay batch cap" stack="{{ 3 }}" ctx-label="34%" hint-size="402px,150px"></dc-import></div>
+        <p style="margin:10px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Any typed content or ready attachment promotes the right slot to Send.</p>
+      </div>
+
+      <div>
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">streaming · empty</div>
+        <div style="border-radius:14px;overflow:hidden"><dc-import name="ChatComposerV2" locale="en" theme="dark" variant="streaming" stack="{{ 3 }}" ctx-label="41%" hint-size="402px,150px"></dc-import></div>
+        <p style="margin:10px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Streaming with an empty field renders Stop alone; no other action occupies the slot.</p>
+      </div>
+
+      <div>
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">streaming · queued</div>
+        <div style="border-radius:14px;overflow:hidden"><dc-import name="ChatComposerV2" locale="en" theme="dark" variant="queued" draft="Also check the replay batch cap" stack="{{ 3 }}" ctx-label="41%" hint-size="402px,150px"></dc-import></div>
+        <p style="margin:10px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Stop and Send coexist. Send queues behind the running turn, and says so.</p>
+      </div>
+
+      <div>
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">upload in progress</div>
+        <div style="border-radius:14px;overflow:hidden"><dc-import name="ChatComposerV2" locale="en" theme="dark" variant="upload" draft="Attached the trace" stack="{{ 3 }}" ctx-label="41%" hint-size="402px,150px"></dc-import></div>
+        <p style="margin:10px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Send is muted with progress; sending waits for the upload to finish.</p>
+      </div>
+
+      <div>
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">voice recording · 中文</div>
+        <div style="border-radius:14px;overflow:hidden"><dc-import name="ChatComposerV2" locale="zh" theme="dark" variant="voice" stack="{{ 3 }}" ctx-label="34%" hint-size="402px,150px"></dc-import></div>
+        <p style="margin:10px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Recording replaces the field per existing behaviour and adds no new route.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <div style="padding-top:56px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:26px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">D</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Zone contract</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">What is pinned, what flexes, and what each zone is forbidden to do.</span>
+    </div>
+
+    <div style="border-top:1px solid #C9C5BD">
+      <div style="display:grid;grid-template-columns:60px 200px 130px 1.15fr 1fr;gap:0 28px;padding:11px 0;border-bottom:1px solid #C9C5BD;font:500 10.5px/1.3 'JetBrains Mono',monospace;letter-spacing:.13em;text-transform:uppercase;color:#8A857C">
+        <span>Zone</span><span>Name</span><span>Height</span><span>Contract</span><span>Never</span>
+      </div>
+      <sc-for list="{{ zones }}" as="z" hint-placeholder-count="5">
+        <div style="display:grid;grid-template-columns:60px 200px 130px 1.15fr 1fr;gap:0 28px;padding:12px 0;border-bottom:1px solid #DAD6CE;font:400 12.5px/1.55 'Public Sans',sans-serif;color:#3A3730">
+          <span style="font-family:'JetBrains Mono',monospace;color:#8A857C">{{ z.n }}</span>
+          <span style="font-weight:600">{{ z.name }}</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#54504A">{{ z.height }}</span>
+          <span style="text-wrap:pretty">{{ z.contract }}</span>
+          <span style="text-wrap:pretty;color:#54504A">{{ z.never }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 40px;padding-top:30px">
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">State derivation</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Approval and Answer come from a real pending request and may print its literal title over three lines. Failure renders the localized Failure label alone; ChatStateUi supplies no detail string, so no cause, banner or recovery wording appears. Running comes only from the streaming fact. Idle renders no block, and there is no Complete state — a finished session simply reads as its transcript. The block never repeats a Review or Answer button that the approval sheet or QuestionCard already owns.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Accessibility</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Back, overflow, disclosure, machine switch, path copy, Session info and every composer control are named targets of at least 48 pt, including the 30 pt model and context chips. Disclosure exposes expanded and collapsed. Copy success is written, not just tinted. The state block is a status region whose label carries the state name, so shape and color stay supplementary. At 200% type rows grow and wrap; nothing shrinks and there is no horizontal scroll.</p>
+      </div>
+      <div>
+        <div style="font:600 13px/1.4 'Public Sans',sans-serif">Unresolved trade-off</div>
+        <p style="margin:7px 0 0;font:400 12.5px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">At 200% type with context expanded, the facts and path body scrolls internally, as specified — Session info and the composer stay pinned and reachable, but the transcript behind the expanded panel is reduced to a few lines. The panel is bounded rather than full-height, so it remains a disclosure and never becomes a page. If review prefers more transcript at that size, the next lever is a shorter bound on the facts body, not smaller type.</p>
+      </div>
+    </div>
+
+    <div style="margin-top:30px;border-top:1px solid #C9C5BD;padding-top:16px;font:400 12.5px/1.7 'Public Sans',sans-serif;color:#6E695F;max-width:1180px;text-wrap:pretty">
+      <span style="font-weight:600;color:#1B1A18">Supersedes.</span> This file is the current Chat source of truth. <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">A Master Core v1</span> frame 02 and <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">A Master Proofs v1</span> frame 05 remain as history and are not edited. Quick Actions remains owned by <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">Chat Quick Actions Master v1</span>; the sheet shown in frame 07 is the entry-point proof from Chat, not a second definition of it — its interactive pickers, capability gates and two-tap Clear live in that file. Secure Approval remains owned by <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">Approval Protocol Handoff v1</span> and is referenced here, never redrawn.
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const P = [
+      'Start on the canonical sheet and scroll the transcript; Jump to latest appears only once you are away from the tail.',
+      'Expand and collapse Context. No navigation happens and the transcript stays behind it.',
+      'Activate the machine · folder row. It is one named switch action and logs the unchanged passthrough.',
+      'Activate the path row. It copies and says so in words; the label itself changes to Copied.',
+      'Open Session info from the pinned footer, then Back. It was reachable without an inner scroll.',
+      'Switch the lead-state fixture across Idle, Running, Approval, Answer and Failure and watch one headline at a time.',
+      'On Running with a typed draft, Stop and Send sit together and the queue behaviour is written above them.',
+      'Open Quick Actions from the overflow: four groups, Handoff ordinary, no NEW. Dismiss returns to the same Chat state.',
+      'Switch locale, theme and 200% type on any state; check no clipped label, no unreachable action, no hidden Session info.'
+    ];
+    return {
+      pathA: P.slice(0, 5).map((t, i) => ({ n: '0' + (i + 1), text: t })),
+      pathB: P.slice(5).map((t, i) => ({ n: '0' + (i + 6), text: t })),
+      zones: [
+        { n: '01', name: 'Navigation header', height: 'pinned · auto', contract: 'Back at 48 pt, title wraps to three lines then ellipsizes, overflow is the only top-right action.', never: 'A second action, a subtitle, or a title that collides with overflow.' },
+        { n: '02', name: 'Context disclosure', height: 'pinned · bounded', contract: 'Two collapsed lines of real facts; expanded groups identity and location, scrolls its body, pins Session info.', never: 'A second nav bar, an invented fact, or a footer hidden below an inner scroll.' },
+        { n: '03', name: 'Lead state block', height: 'pinned · omitted when idle', contract: 'Exactly one state, written and shape-coded, with the literal ask title where one exists.', never: 'Two headlines, a Complete state, or a button the sheet already owns.' },
+        { n: '04', name: 'Transcript stream', height: 'flexible · owns the rest', contract: 'Full-width list turns with quiet source labels; tools are hairline bands with literal payloads.', never: 'Bubbles, cards, reserved timestamp slots, or truncated commands.' },
+        { n: '05', name: 'Interaction dock', height: 'pinned · grows with content', contract: 'Optional cards and banners above the two-layer composer; respects keyboard and safe area.', never: 'A narrow field between controls, a hidden action, or type shrunk to fit.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
+

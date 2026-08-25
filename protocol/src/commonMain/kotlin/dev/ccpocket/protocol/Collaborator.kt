@@ -50,6 +50,39 @@ private object CollaboratorDirectionSerializer : KSerializer<CollaboratorDirecti
 }
 
 /**
+ * What a contact link was established FOR (REVIEW-REQUEST.md §13.3). The two collaboration features
+ * share the Collaborator Link transport but not their recipients: Session Handoff hands over a live
+ * RUNTIME context to a person's App, ReviewRequest hands a TASK to a colleague's DAEMON. Offering one's
+ * contacts as the other's recipients is how a review peer ends up holding a session drive lease.
+ *
+ * The default is [SESSION_HANDOFF] on purpose: a contact minted before this field existed carries no
+ * `purpose` in its JSON, and its historical meaning is exactly Session Handoff — decoding it as
+ * anything else would silently re-scope a link the owner already established.
+ */
+@Serializable(with = CollaboratorPurposeSerializer::class)
+enum class CollaboratorPurpose(internal val wire: String) {
+    /** The historical meaning, and the default for every pre-existing row: a Session Handoff recipient. */
+    SESSION_HANDOFF("session_handoff"),
+
+    /** A ReviewRequest daemon peer (REVIEW-REQUEST.md §9). NEVER a Session Handoff runtime recipient:
+     *  it is somebody's daemon, and a task-context contact must not become a drive credential. */
+    REVIEW("review"),
+
+    /** Decode fallback for a newer peer's value. FAIL CLOSED — eligible for NEITHER feature, because a
+     *  purpose this build cannot read is a purpose it cannot honour. */
+    UNKNOWN("unknown"),
+}
+
+private object CollaboratorPurposeSerializer : KSerializer<CollaboratorPurpose> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("CollaboratorPurpose", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: CollaboratorPurpose) = encoder.encodeString(value.wire)
+    override fun deserialize(decoder: Decoder): CollaboratorPurpose {
+        val s = decoder.decodeString()
+        return CollaboratorPurpose.entries.firstOrNull { it.wire == s } ?: CollaboratorPurpose.UNKNOWN
+    }
+}
+
+/**
  * One collaborator contact as the daemon knows it. [deviceId] is the collaborator's credential id in
  * the owner's account space — the handle Handoff recipient-binding, revoke and push routing all key on.
  * [removed] contacts stay listed (terminal group): past handoffs still reference them by label.
@@ -68,7 +101,32 @@ data class Collaborator(
     /** Whether the contact reported a daemon of their own (null = unknown) — gates "complete the reverse link". */
     val hasDaemon: Boolean? = null,
     val removed: Boolean = false,
+    /** What this link is for. Trailing + defaulted so a pre-purpose contact keeps its historical
+     *  Session Handoff meaning rather than being re-scoped by an upgrade. */
+    val purpose: CollaboratorPurpose = CollaboratorPurpose.SESSION_HANDOFF,
 )
+
+/**
+ * May a Session Handoff be bound to this contact? A [CollaboratorPurpose.REVIEW] peer may not: it is a
+ * colleague's daemon holding a task-context link, and a runtime handoff would hand it a drive lease it
+ * was never established for. An [CollaboratorPurpose.UNKNOWN] purpose fails closed the same way.
+ */
+val Collaborator.acceptsSessionHandoff: Boolean
+    get() = !removed && purpose == CollaboratorPurpose.SESSION_HANDOFF
+
+/**
+ * May a ReviewRequest be sent to this contact? ONLY a [CollaboratorPurpose.REVIEW] link, and the
+ * strictness is the point: the two features are separated by what the owner chose at MINT time, in both
+ * directions. A [CollaboratorPurpose.SESSION_HANDOFF] contact is a person's App, established to receive
+ * a runtime lease — silently widening it into a task-context peer would re-scope a link the owner
+ * already made, which is exactly what the default in [Collaborator.purpose] exists to prevent for
+ * pre-purpose rows. [CollaboratorPurpose.UNKNOWN] fails closed the same way.
+ *
+ * The migration story is deliberately explicit rather than automatic: to use ReviewRequest with someone,
+ * make a Review link with them.
+ */
+val Collaborator.acceptsReviewRequest: Boolean
+    get() = !removed && purpose == CollaboratorPurpose.REVIEW
 
 /**
  * The one-time connect ticket the initiator's App renders as QR/link (§4.1 step 2). Carries ONLY
@@ -85,7 +143,58 @@ data class CollaboratorInvite(
     val ownerLabel: String? = null,
     /** How long the REDEEM ticket is valid (short). The LINK itself has no expiry. */
     val ttlSec: Int = 600,
+    /**
+     * What this invite establishes (REVIEW-REQUEST.md §13.3), so the REDEEMER can tell the two features
+     * apart before burning a single-use ticket.
+     *
+     * Without it the two are byte-identical, and the mint frame being new does not help: the artifact
+     * that crosses machines is this one. A phone scanning a Review QR from its ordinary scanner would
+     * redeem it as a Session Handoff contact — consuming the ticket the colleague's DAEMON was supposed
+     * to redeem, and leaving the owner with a "review contact" that can never answer a review.
+     *
+     * Trailing + defaulted to [CollaboratorPurpose.SESSION_HANDOFF]: an invite minted before this field
+     * existed carries no key, and its historical meaning is exactly that.
+     */
+    val purpose: CollaboratorPurpose = CollaboratorPurpose.SESSION_HANDOFF,
 )
+
+// ---------------------------------------------------------------------------
+//  The deep-link DOOR an invite travels through (REVIEW-REQUEST.md §13.3).
+//
+//  The URI prefix is the OUTER half of a two-layer split; [CollaboratorInvite.purpose]
+//  is the inner one. Both are needed, for different peers:
+//
+//   - the purpose alone does not protect an OLD app. It decodes the trailing
+//     field as its default and happily redeems a Review ticket at the ordinary
+//     Session Handoff door — burning the single-use ticket the colleague's
+//     DAEMON was supposed to redeem;
+//   - the host alone does not protect against a stripped prefix (a bare blob
+//     pasted by hand), which is why every door re-checks the purpose after
+//     decoding.
+//
+//  The strings live HERE, in the one module both the daemon and the app already
+//  depend on, because the codec itself is deliberately PORTED rather than shared
+//  (the daemon must not depend on mobile code). Two ported copies may each keep
+//  their own base64/validation; they must never disagree about which door a
+//  ticket was addressed to.
+// ---------------------------------------------------------------------------
+
+/** The Session Handoff door. FROZEN: released apps parse exactly this, and a QR/link already
+ *  printed or pasted has to keep working. */
+const val COLLAB_INVITE_URI_PREFIX = "ccpocket://collab#"
+
+/** The ReviewRequest contact door. Deliberately a host an older build does not recognise at all,
+ *  so it falls through as "not a link I understand" instead of redeeming the ticket. */
+const val REVIEW_CONTACT_INVITE_URI_PREFIX = "ccpocket://review-contact#"
+
+/**
+ * Which door an invite for [purpose] must be published under. [CollaboratorPurpose.REVIEW] is the only
+ * value that leaves the legacy door, so a purpose this build cannot read ([CollaboratorPurpose.UNKNOWN])
+ * never gets published as a Review invite — the fail-closed half lives in the DECODERS, which require an
+ * exact purpose match per door and therefore refuse UNKNOWN at both.
+ */
+fun inviteUriPrefix(purpose: CollaboratorPurpose): String =
+    if (purpose == CollaboratorPurpose.REVIEW) REVIEW_CONTACT_INVITE_URI_PREFIX else COLLAB_INVITE_URI_PREFIX
 
 // ---------------------------------------------------------------------------
 //  client <-> daemon control frames. Owner side manages contacts; the

@@ -18,4 +18,13 @@ class MainWindowLifecycleTest {
         assertFalse(shouldCloseMainWindowToTray(isWindows = true, menuBarEnabled = true, trayReady = false))
         assertFalse(shouldCloseMainWindowToTray(isWindows = false, menuBarEnabled = true, trayReady = true))
     }
+
+    /** The sidebar's live-dot poll follows what the user can SEE — a #189 hidden window stays composed, so
+     *  "still composed" is not "still visible" and the predicate has to say so. */
+    @Test
+    fun the_directory_poll_runs_only_for_a_window_on_screen() {
+        assertTrue(shouldPollDirectories(windowVisible = true, minimized = false))
+        assertFalse(shouldPollDirectories(windowVisible = false, minimized = false)) // closed to the tray
+        assertFalse(shouldPollDirectories(windowVisible = true, minimized = true))
+    }
 }
