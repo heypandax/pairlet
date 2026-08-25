@@ -28,8 +28,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.animation.AnimatedVisibility
@@ -367,8 +372,16 @@ fun App(scope: CoroutineScope) {
             // Secure Approval is pointer-modal by itself. Clearing the covered tree here also makes it
             // modal to TalkBack/VoiceOver: focus cannot traverse into chat/navigation under the scrim.
             val coveredContent = if (approvalAsk != null) Modifier.clearAndSetSemantics { } else Modifier
+            // Full-bleed bottom edge: the root reserves only the TOP + HORIZONTAL system bars. The
+            // nav-bar / home-indicator band belongs to whichever surface is bottom-most — docked chrome
+            // (QuotaStrip, the new-session dock, the composer bars) extends into it and keeps its content
+            // above it; plain full-screen routes reserve it via [NavBarPadded]. Padding the whole tree
+            // with systemBars here is what used to stack a dead 34dp band UNDER every screen's own
+            // bottom padding on iPhone/gesture-nav phones.
             Column(
-                Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()
+                Modifier.fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    .imePadding()
                     .then(coveredContent),
             ) {
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
@@ -386,18 +399,20 @@ fun App(scope: CoroutineScope) {
                         // a dead transport does NOT leave the content screens — ConnectionGate + auto-retry handle it
                         // issue #278 batch 2: a first run lands on the install guide, not on a code field for
                         // a code nothing is printing yet. entryLanding() holds that decision as a pure rule.
-                        !repo.sessionActive.value -> when (
-                            dev.ccpocket.app.ui.entry.entryLanding(
-                                hasBindings = repo.pairedList.isNotEmpty(),
-                                addingDevice = repo.addingDevice.value,
-                                hasCollaboratorLinks = repo.collaboratorLinks.isNotEmpty(),
-                            )
-                        ) {
-                            dev.ccpocket.app.ui.entry.EntryLanding.FIRST_RUN_CONNECT -> PairingScreen(repo, firstRun = true)
-                            dev.ccpocket.app.ui.entry.EntryLanding.PAIR -> PairingScreen(repo)
-                            dev.ccpocket.app.ui.entry.EntryLanding.COMPUTERS -> ConnectScreen(repo)
+                        !repo.sessionActive.value -> NavBarPadded {
+                            when (
+                                dev.ccpocket.app.ui.entry.entryLanding(
+                                    hasBindings = repo.pairedList.isNotEmpty(),
+                                    addingDevice = repo.addingDevice.value,
+                                    hasCollaboratorLinks = repo.collaboratorLinks.isNotEmpty(),
+                                )
+                            ) {
+                                dev.ccpocket.app.ui.entry.EntryLanding.FIRST_RUN_CONNECT -> PairingScreen(repo, firstRun = true)
+                                dev.ccpocket.app.ui.entry.EntryLanding.PAIR -> PairingScreen(repo)
+                                dev.ccpocket.app.ui.entry.EntryLanding.COMPUTERS -> ConnectScreen(repo)
+                            }
                         }
-                        repo.demoConnecting.value -> DemoConnectScreen { repo.finishDemoConnect() } // PREVIEW opener
+                        repo.demoConnecting.value -> NavBarPadded { DemoConnectScreen { repo.finishDemoConnect() } } // PREVIEW opener
                         else -> Box(Modifier.fillMaxSize()) {
                             ConnectionGate(
                                 repo,
@@ -417,12 +432,12 @@ fun App(scope: CoroutineScope) {
                             }
                             // fleet overlays ride ABOVE the gate: the fleet view is exactly where you
                             // want to be while this machine is reconnecting or another one has news
-                            if (fleetOpen) dev.ccpocket.app.ui.fleet.FleetHomeScreen(repo, onBack = { fleetOpen = false }, onOpenInbox = { inboxOpen = true })
-                            if (inboxOpen) dev.ccpocket.app.ui.fleet.AttentionInboxScreen(repo) { inboxOpen = false }
+                            if (fleetOpen) NavBarPadded { dev.ccpocket.app.ui.fleet.FleetHomeScreen(repo, onBack = { fleetOpen = false }, onOpenInbox = { inboxOpen = true }) }
+                            if (inboxOpen) NavBarPadded { dev.ccpocket.app.ui.fleet.AttentionInboxScreen(repo) { inboxOpen = false } }
                             // registered after the fleet surfaces, so its back handler wins while it is up.
                             // Demoted (08-16): no header entry sets this any more — the only openers left
                             // are the review-contact deep link above and the Settings row's own mount.
-                            if (reviewsOpen) dev.ccpocket.app.ui.review.ReviewCenterRoute(repo) { reviewsOpen = false }
+                            if (reviewsOpen) NavBarPadded { dev.ccpocket.app.ui.review.ReviewCenterRoute(repo) { reviewsOpen = false } }
                         }
                     }
                 }
@@ -511,6 +526,30 @@ fun App(scope: CoroutineScope) {
         else if (appLock.covered.value) AppLockCover()
       }
     }
+}
+
+/**
+ * The pre-edge-to-edge bottom for full-screen routes that own no docked chrome.
+ *
+ * The app root reserves only the TOP + HORIZONTAL system bars (see the root Column), so the
+ * nav-bar/home-indicator band is handed to whichever surface is bottom-most:
+ *  - screens with docked chrome (Projects/Sessions' [QuotaStrip] + new-session dock, Chat's composer
+ *    bars) extend that chrome's background and tap area into the band and keep content above it;
+ *  - every other full-screen route mounts inside THIS wrapper, which simply reserves the band on base —
+ *    exactly what the old whole-tree systemBars padding gave it.
+ * Wrapping a MOUNT covers the route's entire subtree: early-return sub-screens compose in the same
+ * parent context. Nesting is safe — inset padding is consumption-aware, so a wrapped screen that later
+ * grows its own inset handling will not double-pad. [PocketSheet] carries its own navigationBars
+ * padding and needs neither.
+ */
+@Composable
+private fun NavBarPadded(content: @Composable BoxScope.() -> Unit) {
+    // base under the reserved band: overlay routes (fleet/inbox/review) sit ABOVE screens whose docked
+    // chrome now reaches the physical edge — without the fill, that chrome would peek through the band
+    Box(
+        Modifier.fillMaxSize().background(Tok.base).windowInsetsPadding(WindowInsets.navigationBars),
+        content = content,
+    )
 }
 
 /**
@@ -638,12 +677,14 @@ private fun ConnectionGate(
                         Box(Modifier.weight(1f)) { content() }
                     }
                 // guest share ended (design 4b): the precise, calm terminal card — revoked vs expired
-                ended != null -> dev.ccpocket.app.ui.share.GuestEndedCard(
-                    ownerLabel = ended.ownerLabel,
-                    ending = if (ended.reason == ShareEnded.REASON_EXPIRED) GuestEnding.EXPIRED else GuestEnding.REVOKED,
-                    onRemove = { repo.unpairActive() },
-                    onAskNew = { repo.unpairActive() }, // drops the dead binding → lands on Connect to paste a fresh invite
-                )
+                ended != null -> NavBarPadded {
+                    dev.ccpocket.app.ui.share.GuestEndedCard(
+                        ownerLabel = ended.ownerLabel,
+                        ending = if (ended.reason == ShareEnded.REASON_EXPIRED) GuestEnding.EXPIRED else GuestEnding.REVOKED,
+                        onRemove = { repo.unpairActive() },
+                        onAskNew = { repo.unpairActive() }, // drops the dead binding → lands on Connect to paste a fresh invite
+                    )
+                }
                 else -> RecoverySurface(repo, recovery)
             }
         }
@@ -680,11 +721,13 @@ private fun ConnectionGate(
  *  so switching machines reads as an ordinary choice rather than a second alarm (Entry Flow frames 09-11). */
 @Composable
 private fun RecoverySurface(repo: PocketRepository, recovery: dev.ccpocket.app.ui.entry.ConnRecoveryUi) {
-    ComputersSurface(
-        repo, recovery = recovery,
-        onSwitch = { repo.switchDaemon(it) },
-        onAdd = { repo.beginAddDevice() },
-    )
+    NavBarPadded {
+        ComputersSurface(
+            repo, recovery = recovery,
+            onSwitch = { repo.switchDaemon(it) },
+            onAdd = { repo.beginAddDevice() },
+        )
+    }
 }
 
 /**
@@ -1083,9 +1126,9 @@ internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header aga
     onOpenComputers: () -> Unit = {},
 ) {
     var showHelp by remember { mutableStateOf(false) }
-    if (showHelp) { HelpCenterScreen(HelpEntryPoint.PROJECTS, onBack = { showHelp = false }); return }
+    if (showHelp) { NavBarPadded { HelpCenterScreen(HelpEntryPoint.PROJECTS, onBack = { showHelp = false }) }; return }
     var showSettings by remember { mutableStateOf(false) }
-    if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return }
+    if (showSettings) { NavBarPadded { SettingsScreen(repo, onBack = { showSettings = false }) }; return }
     var showQuota by remember { mutableStateOf(false) }
     ProjectsHeader(
         title = stringResource(Res.string.dir_projects),
@@ -1339,18 +1382,18 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     val query = search.query
     var showHelp by remember { mutableStateOf(false) }
     if (showHelp) {
-        HelpCenterScreen(HelpEntryPoint.PROJECTS, onBack = { showHelp = false })
+        NavBarPadded { HelpCenterScreen(HelpEntryPoint.PROJECTS, onBack = { showHelp = false }) }
         return
     }
     var showSettings by remember { mutableStateOf(false) }
-    if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
+    if (showSettings) { NavBarPadded { SettingsScreen(repo, onBack = { showSettings = false }) }; return } // full-screen, replaces this screen
     // The docked strip opens this sheet. Rendered at the overlay END of the screen's Box (with the other
     // sheets), NOT here — composed this early it painted UNDER the FAB stack/scrim (same z-order bug as
     // the strip itself).
     var showQuota by remember { mutableStateOf(false) }
     // long-press a project → "Share this folder…" opens the owner invite flow full-screen (issue #115)
     var shareTarget by remember { mutableStateOf<DirectoryEntry?>(null) }
-    shareTarget?.let { ShareFolderScreen(repo, it, onBack = { shareTarget = null }); return }
+    shareTarget?.let { NavBarPadded { ShareFolderScreen(repo, it, onBack = { shareTarget = null }) }; return }
     // Pull-to-refresh remains available here; the app-level foreground poll keeps the same directory
     // truth fresh while Projects, Sessions, Chat, Settings, or an overlay is mounted (#239).
 
@@ -1413,7 +1456,14 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     // bug: skeleton showed it, the landed list "swallowed" it). 0 when the strip is absent, so the
     // no-snapshot layout stays pixel-identical.
     var quotaStripPx by remember { mutableStateOf(0) }
-    val quotaStripLift = with(LocalDensity.current) { quotaStripPx.toDp() }
+    // The strip now carries the nav-bar/home-indicator inset INSIDE its measured height (it owns the
+    // bottom edge). When it is ABSENT — no snapshot, non-Claude machine, demo — the bottom overlays
+    // (scrim / FAB stack / toast) must still clear that band on their own, hence the max(), which was
+    // previously the root's whole-tree systemBars padding.
+    val quotaStripLift = maxOf(
+        with(LocalDensity.current) { quotaStripPx.toDp() },
+        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+    )
 
     // typing in the filter then scrolling the list dismisses the keyboard (fires once per scroll gesture)
     val focus = LocalFocusManager.current
@@ -2217,16 +2267,16 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
     val starting = repo.opening.value
     var showHelp by remember { mutableStateOf(false) }
     if (showHelp) {
-        HelpCenterScreen(HelpEntryPoint.SESSIONS, onBack = { showHelp = false })
+        NavBarPadded { HelpCenterScreen(HelpEntryPoint.SESSIONS, onBack = { showHelp = false }) }
         return
     }
     var showSettings by remember { mutableStateOf(false) }
-    if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
+    if (showSettings) { NavBarPadded { SettingsScreen(repo, onBack = { showSettings = false }) }; return } // full-screen, replaces this screen
     // the cross-project archive (issue #202) — a full-screen route like Help/Settings. It hangs off THIS
     // screen because archiveSupported arrives on the Sessions frame, so the capability is already known
     // here; there is no gating-order problem to solve.
     var showArchived by remember { mutableStateOf(false) }
-    if (showArchived) { ArchivedSessionsScreen(repo, onBack = { showArchived = false }); return }
+    if (showArchived) { NavBarPadded { ArchivedSessionsScreen(repo, onBack = { showArchived = false }) }; return }
     var showQuota by remember { mutableStateOf(false) } // the allowance pill's detail sheet
     // Session groups (issue #119). Membership + the group list are daemon-owned; these hold only the
     // transient UI: which manage-sheet/dialog is open, and (client-only) which sections are collapsed —
@@ -2434,7 +2484,13 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
             // one, and the board's own rule for that case is that the strip merges with the bottom bar
             // instead of stacking below it — two docked bands fighting for the same edge is exactly what
             // that note forbids. Zero height when there is no snapshot.
-            QuotaStrip(repo) { showQuota = true }
+            // The dock below is the true bottom band and takes the nav-bar/home-indicator inset itself;
+            // this consume-only mark (no padding of its own) is what stops the strip from ALSO padding a
+            // full inset — siblings don't see each other's inset handling, consumption for descendants
+            // is the only way to say "someone below you owns the edge".
+            Box(Modifier.fillMaxWidth().consumeWindowInsets(WindowInsets.navigationBars)) {
+                QuotaStrip(repo) { showQuota = true }
+            }
             // one tap starts right away with the persisted defaults (openSession's own fallbacks); the
             // trailing chip shows those defaults and opens the full agent+mode picker instead
             NewSessionDock(starting = starting, onStart = { repo.openSession(dir) }) {
@@ -2564,109 +2620,121 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     }
     var showHelp by remember { mutableStateOf(false) }
     if (showHelp) {
-        HelpCenterScreen(
-            entryPoint = HelpEntryPoint.CHAT,
-            onBack = { showHelp = false },
-            onOpenChanges = {
-                showHelp = false
-                repo.fetchChangedFiles()
-                showChangedFiles = true
-            },
-            supportContext = SupportContext(
-                screen = "chat",
-                platform = supportPlatformLabel(),
-                appVersion = APP_VERSION,
-                agent = (repo.sessionAgent.value ?: AgentKind.CLAUDE).name.lowercase(),
-                model = repo.model.value?.take(96),
-                state = when {
-                    !repo.connected.value -> "disconnected"
-                    repo.streaming.value -> "generating"
-                    repo.observing.value -> "observing"
-                    else -> "idle"
+        NavBarPadded {
+            HelpCenterScreen(
+                entryPoint = HelpEntryPoint.CHAT,
+                onBack = { showHelp = false },
+                onOpenChanges = {
+                    showHelp = false
+                    repo.fetchChangedFiles()
+                    showChangedFiles = true
                 },
-                controls = listOf("composer", "quick_actions", "changed_files", "terminal", "model_picker"),
-            ),
-        )
+                supportContext = SupportContext(
+                    screen = "chat",
+                    platform = supportPlatformLabel(),
+                    appVersion = APP_VERSION,
+                    agent = (repo.sessionAgent.value ?: AgentKind.CLAUDE).name.lowercase(),
+                    model = repo.model.value?.take(96),
+                    state = when {
+                        !repo.connected.value -> "disconnected"
+                        repo.streaming.value -> "generating"
+                        repo.observing.value -> "observing"
+                        else -> "idle"
+                    },
+                    controls = listOf("composer", "quick_actions", "changed_files", "terminal", "model_picker"),
+                ),
+            )
+        }
         return
     }
     // Connect a colleague (contacts Frame 3): full-screen; success returns to the interrupted draft
     if (showConnectColleague) {
-        ConnectColleagueFlow(
-            repo, fromDraft = true,
-            onBackToHandoff = { showConnectColleague = false; showHandoffDraft = true },
-            onClose = { showConnectColleague = false },
-        )
+        NavBarPadded {
+            ConnectColleagueFlow(
+                repo, fromDraft = true,
+                onBackToHandoff = { showConnectColleague = false; showHandoffDraft = true },
+                onClose = { showConnectColleague = false },
+            )
+        }
         return
     }
     // Recipient trust screen (design Frames 4/4b): full-screen over the chat, same early-return pattern
     if (showHandoffAccept && activeHandoff != null) {
         val expired = activeHandoff.status != HandoffStatus.WAITING
-        HandoffAcceptScreen(
-            ownerLabel = activeHandoff.initiatorLabel ?: repo.paired.value?.displayName() ?: "?",
-            sessionTitle = repo.chatTitle.value ?: stringResource(Res.string.chat_title),
-            path = activeHandoff.workdir.ifBlank { repo.workdir.value ?: "" },
-            branch = null,
-            returnsIn = "2h",
-            roots = listOf(activeHandoff.workdir.ifBlank { repo.workdir.value ?: "" }),
-            briefSections = activeHandoff.brief.toSections(),
-            expiredNote = if (expired) activeHandoff.shortCode() else null,
-            // §3.2.7: the screen closes on DAEMON truth (the handoff leaves WAITING), not on the tap —
-            // an accept that loses the race or hits an old daemon states so instead of vanishing
-            accepting = repo.handoffAccepting.value == activeHandoff.id,
-            onAccept = { repo.acceptHandoff(activeHandoff.id) },
-            onDecline = { repo.declineHandoff(activeHandoff.id); showHandoffAccept = false },
-            onClose = { showHandoffAccept = false },
-            kind = activeHandoff.kind,     // §6: rendered from the daemon's grant, never hardcoded
-            access = activeHandoff.access,
-            errorNote = repo.handoffAcceptError.value?.let { stringResource(it) } ?: repo.handoffUnsupported.value,
-        )
+        NavBarPadded {
+            HandoffAcceptScreen(
+                ownerLabel = activeHandoff.initiatorLabel ?: repo.paired.value?.displayName() ?: "?",
+                sessionTitle = repo.chatTitle.value ?: stringResource(Res.string.chat_title),
+                path = activeHandoff.workdir.ifBlank { repo.workdir.value ?: "" },
+                branch = null,
+                returnsIn = "2h",
+                roots = listOf(activeHandoff.workdir.ifBlank { repo.workdir.value ?: "" }),
+                briefSections = activeHandoff.brief.toSections(),
+                expiredNote = if (expired) activeHandoff.shortCode() else null,
+                // §3.2.7: the screen closes on DAEMON truth (the handoff leaves WAITING), not on the tap —
+                // an accept that loses the race or hits an old daemon states so instead of vanishing
+                accepting = repo.handoffAccepting.value == activeHandoff.id,
+                onAccept = { repo.acceptHandoff(activeHandoff.id) },
+                onDecline = { repo.declineHandoff(activeHandoff.id); showHandoffAccept = false },
+                onClose = { showHandoffAccept = false },
+                kind = activeHandoff.kind,     // §6: rendered from the daemon's grant, never hardcoded
+                access = activeHandoff.access,
+                errorNote = repo.handoffAcceptError.value?.let { stringResource(it) } ?: repo.handoffUnsupported.value,
+            )
+        }
         LaunchedEffect(activeHandoff.status) {
             if (activeHandoff.status == HandoffStatus.IN_PROGRESS) showHandoffAccept = false
         }
         return
     }
-    if (showTerminal) { TerminalScreen(repo) { showTerminal = false }; return } // full-screen, replaces chat (issue #3)
+    if (showTerminal) { NavBarPadded { TerminalScreen(repo) { showTerminal = false } }; return } // full-screen, replaces chat (issue #3)
     // ── Git tab (#280) / worktrees (#281): full-screen, same early-return shape as the terminal.
     // Order matters — the worktree surface is raised FROM the panel, and the diff screen from the
     // list, so the innermost destination is tested first and Back unwinds one level at a time.
     if (showWorktrees) {
-        dev.ccpocket.app.ui.git.WorktreesScreen(
-            repo,
-            // "Open session here" is the ordinary OpenSession at that cwd — leave the git surfaces
-            // first so the new session lands in the chat rather than behind two overlays
-            onOpenSessionHere = { path -> showWorktrees = false; showGit = false; repo.openSession(path) },
-            onBack = { showWorktrees = false },
-        )
+        NavBarPadded {
+            dev.ccpocket.app.ui.git.WorktreesScreen(
+                repo,
+                // "Open session here" is the ordinary OpenSession at that cwd — leave the git surfaces
+                // first so the new session lands in the chat rather than behind two overlays
+                onOpenSessionHere = { path -> showWorktrees = false; showGit = false; repo.openSession(path) },
+                onBack = { showWorktrees = false },
+            )
+        }
         return
     }
     if (repo.gitDiffPath.value != null) {
         // the last path opened from the panel, so its Diff tab has somewhere to return to (the diff
         // screen replaces the panel, taking the panel's own remembered state with it)
         lastGitDiffPath = repo.gitDiffPath.value
-        dev.ccpocket.app.ui.git.GitDiffScreen(
-            repo,
-            onBack = { repo.closeGitDiff() },
-            onOpenFiles = { repo.closeGitDiff(); showGit = false; repo.fetchChangedFiles(); showChangedFiles = true },
-            onOpenTerminal = { repo.closeGitDiff(); showGit = false; showTerminal = true },
-        )
+        NavBarPadded {
+            dev.ccpocket.app.ui.git.GitDiffScreen(
+                repo,
+                onBack = { repo.closeGitDiff() },
+                onOpenFiles = { repo.closeGitDiff(); showGit = false; repo.fetchChangedFiles(); showChangedFiles = true },
+                onOpenTerminal = { repo.closeGitDiff(); showGit = false; showTerminal = true },
+            )
+        }
         return
     }
     if (showGit) {
-        dev.ccpocket.app.ui.git.GitPanelScreen(
-            repo,
-            onBack = { showGit = false },
-            onOpenFiles = { showGit = false; repo.fetchChangedFiles(); showChangedFiles = true },
-            onOpenWorktrees = { showWorktrees = true },
-            lastDiffPath = lastGitDiffPath,
-        )
+        NavBarPadded {
+            dev.ccpocket.app.ui.git.GitPanelScreen(
+                repo,
+                onBack = { showGit = false },
+                onOpenFiles = { showGit = false; repo.fetchChangedFiles(); showChangedFiles = true },
+                onOpenWorktrees = { showWorktrees = true },
+                lastDiffPath = lastGitDiffPath,
+            )
+        }
         return
     }
     if (repo.viewedFilePath.value != null) { // changed-file viewer (issue #36); back → the still-open files list, ✕ → chat (issue #53)
-        FileViewerScreen(repo, onExit = if (showChangedFiles) ({ repo.closeFileViewer(); showChangedFiles = false }) else null) { repo.closeFileViewer() }
+        NavBarPadded { FileViewerScreen(repo, onExit = if (showChangedFiles) ({ repo.closeFileViewer(); showChangedFiles = false }) else null) { repo.closeFileViewer() } }
         return
     }
     if (repo.viewedWorkflowRunId.value != null) { // workflow run view (issue #106): full-screen tree/journal over the chat
-        WorkflowRunScreen(repo) { repo.closeWorkflow() }
+        NavBarPadded { WorkflowRunScreen(repo) { repo.closeWorkflow() } }
         return
     }
     // platform picker resizes/compresses on-device; the repo budgets the picked photos against the 256 KiB frame
@@ -3042,7 +3110,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 // WAITING lock (design Frame 3b): a pinned banner + the composer dimmed-but-present,
                 // so the return to normal is obvious. Neutral — nothing is running yet.
                 val hoClipboard = LocalClipboardManager.current
-                Column(Modifier.fillMaxWidth().background(Tok.base)) {
+                // bottom-most band → owns the nav-bar/home-indicator inset: fill reaches the physical
+                // edge, content stays above it (see the root Column's full-bleed note)
+                Column(Modifier.fillMaxWidth().background(Tok.base).windowInsetsPadding(WindowInsets.navigationBars)) {
                     // Contacts Frame 8 delta: a recipient-bound offer has no code to show — the mono
                     // line states delivery honestly ("notified", never "seen"/"online").
                     val direct = activeHandoff.recipientDeviceId != null
@@ -3066,7 +3136,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 // bar carries the one escape hatch
                 HandoffWatchBar(onRecall = { repo.recallHandoff(activeHandoff.id) })
             } else if (repo.observing.value) {
-                Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().background(Tok.surface).windowInsetsPadding(WindowInsets.navigationBars).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(Res.string.observing_notice), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
                     Button({ repo.takeOver() }) { Text(stringResource(Res.string.continue_here)) }
                 }
@@ -3101,7 +3171,10 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         HandoffFinishReturnButton({ showHandoffReturn = true })
                     }
                 }
-                Column(Modifier.fillMaxWidth().background(Tok.surface)) {
+                // the composer surface owns the bottom edge: its fill runs to the physical edge and the
+                // inset pads INSIDE it. With the keyboard up the root's imePadding has already consumed
+                // the bottom, so this collapses to zero and the field sits flush on the IME as before.
+                Column(Modifier.fillMaxWidth().background(Tok.surface).windowInsetsPadding(WindowInsets.navigationBars)) {
                     LimitResetBanner(repo) // usage-limit hit → one-tap "auto-continue after reset" (issue #137)
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
                     val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing

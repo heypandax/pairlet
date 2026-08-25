@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  body { margin: 0; background: #EDEBE6; -webkit-font-smoothing: antialiased; }
+  a { color: #A9482A; text-decoration: none; }
+  a:hover { color: #8C3A20; text-decoration: underline; }
+</style>
+</helmet>
+
+<div style="background:#EDEBE6;color:#1B1A18;width:1780px;padding:52px 60px 90px;font-family:'Public Sans',system-ui,sans-serif">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:980px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · desktop 2.0 · sidebar ia + usage telemetry · v1</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">Sidebar IA &amp; Usage v2</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Two problems, one restructure. The sidebar's bottom is a five-layer pile where navigation, telemetry and meta all read as the same kind of row; and the subscription quota strip sits in that pile looking bolted-on. This doc reorders the stack so each zone has one grammar, then explores where quota should live across the whole window — header, main pane, popover-only — before recommending the footer status row.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div><div style="color:#1B1A18">1200 × 760</div><div>dark · 1:1</div></div>
+      <div><div style="color:#1B1A18">5 windows</div><div>7 detail crops</div></div>
+      <div><div style="color:#1B1A18">recommended</div><div>footer status row</div></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0 40px;border-bottom:1px solid #C9C5BD;padding:18px 0 20px">
+    <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">One grammar per zone.</span> All projects and Archived stop being footer furniture and become list terminators — the quiet end of the session scroll they continue. The footer keeps exactly two rows: telemetry, then meta.</p>
+    <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">Usage is status, not navigation.</span> A 28px row of mono numbers and 2.5px bars, styled like a status-bar segment. Clicking opens the detail popover; it never navigates, so it never competes with sessions.</p>
+    <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">Escalation is color only.</span> Muted → amber → danger on identical geometry. A warning never reflows the sidebar; blocked adds a reset time in the same slot, not a banner.</p>
+    <p style="margin:0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty"><span style="color:#1B1A18;font-weight:600">Absence is first-class.</span> API-key accounts, no daemon, no snapshot yet — the row is simply gone and the hairlines close up. Every placement in this doc tolerates "not present" without a hole.</p>
+  </div>
+
+  <!-- ═══════════ 1 · SIDEBAR IA V2 ═══════════ -->
+  <div id="s1" style="padding-top:44px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:24px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">1</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Sidebar IA v2</h2>
+      <span style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#fff;background:#B4522F;padding:6px 8px;border-radius:5px">recommended placement · footer status row</span>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start">
+      <div style="flex:none;width:1200px">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">1 · full window · quota normal</div>
+        <dc-import name="DesktopShellDevice" placement="footer" quota="normal" popover="none" label="1 · sidebar ia v2" hint-size="1200px,760px"></dc-import>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:18px;padding-top:26px">
+        <p style="margin:0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The old pile — All projects / Archived / quota strip / help / gear+version — becomes three zones. Nav rows join the scroll as terminators after Recent, with counts in mono. The footer is telemetry plus one meta row (Help &amp; support · version · settings). Usage reads left-to-right as <span style="font-family:'JetBrains Mono',monospace;font-size:11px">5h ▰ 72% · 7d ▰ 41%</span>: label, thin bar, mono percent — the same vocabulary as the detail popover it opens.</p>
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">1w · warning · 5h low</div>
+          <div style="width:400px;height:192px;overflow:hidden;border-radius:10px;border:1px solid #C9C5BD;position:relative;background:#0B0B0C">
+            <div style="position:absolute;left:0;top:0;width:1200px;height:760px;transform:scale(1.6) translate(0px,-640px);transform-origin:0 0"><dc-import name="DesktopShellDevice" placement="footer" quota="warn" popover="none" label="1w · footer warning" hint-size="1200px,760px"></dc-import></div>
+          </div>
+          <p style="margin:9px 0 0;font:400 12px/1.55 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">The low window turns amber — label, bar, percent — and the countdown appears on the right. Same 28px, no reflow.</p>
+        </div>
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">1x · blocked · 5h at 0%</div>
+          <div style="width:400px;height:192px;overflow:hidden;border-radius:10px;border:1px solid #C9C5BD;position:relative;background:#0B0B0C">
+            <div style="position:absolute;left:0;top:0;width:1200px;height:760px;transform:scale(1.6) translate(0px,-640px);transform-origin:0 0"><dc-import name="DesktopShellDevice" placement="footer" quota="blocked" popover="none" label="1x · footer blocked" hint-size="1200px,760px"></dc-import></div>
+          </div>
+          <p style="margin:9px 0 0;font:400 12px/1.55 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">0% in danger ink, empty bar on a danger-tinted track, reset time in the countdown slot. The row states the fact; the popover (<a href="#s3">3</a>) states the consequence.</p>
+        </div>
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">1y · absent · api key / no daemon</div>
+          <div style="width:400px;height:192px;overflow:hidden;border-radius:10px;border:1px solid #C9C5BD;position:relative;background:#0B0B0C">
+            <div style="position:absolute;left:0;top:0;width:1200px;height:760px;transform:scale(1.6) translate(0px,-640px);transform-origin:0 0"><dc-import name="DesktopShellDevice" placement="footer" quota="absent" popover="none" label="1y · footer absent" hint-size="1200px,760px"></dc-import></div>
+          </div>
+          <p style="margin:9px 0 0;font:400 12px/1.55 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">No snapshot, no row. The meta row closes the footer and nothing looks missing.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 2 · PLACEMENT EXPLORATION ═══════════ -->
+  <div style="padding-top:64px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:8px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">2</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Usage placements — exploration</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Three homes outside the sidebar footer, each with its warning treatment.</span>
+    </div>
+    <p style="margin:0 0 28px;font:400 13px/1.6 'Public Sans',sans-serif;color:#54504A;max-width:980px;text-wrap:pretty">All three work; none wins. Quota is account-scope telemetry, so it belongs in app chrome — not beside a machine name, not inside a session's header, and not hidden until it becomes an alarm. The footer status row in <a href="#s1">1</a> stays the recommendation.</p>
+
+    <div id="p2a" style="display:flex;gap:44px;align-items:flex-start;padding-bottom:52px">
+      <div style="flex:none;width:1200px">
+        <div style="display:flex;align-items:center;gap:10px;padding-bottom:12px">
+          <span style="font:600 11px/1 'JetBrains Mono',monospace;color:#fff;background:#B4522F;padding:5px 7px;border-radius:4px">2a</span>
+          <span style="font:600 15px/1.2 'Public Sans',sans-serif">Machine-switcher header · dual micro-ring</span>
+          <span style="font:600 10px/1 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:#54504A;background:#E3E0D9;padding:5px 7px;border-radius:4px">not chosen · wrong scope</span>
+        </div>
+        <dc-import name="DesktopShellDevice" placement="header" quota="normal" popover="none" label="2a · header ring" hint-size="1200px,760px"></dc-import>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:16px;padding-top:34px">
+        <p style="margin:0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Outer ring 5h, inner ring 7d, sitting between the machine name and the bell. Zero footprint, always visible — but it sits in a row that speaks for one machine while quota belongs to the account, and two unlabeled 16px rings can be noticed, never read. Hover would have to do all the work.</p>
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">2a-w · warning · outer ring amber</div>
+          <div style="width:400px;height:128px;overflow:hidden;border-radius:10px;border:1px solid #C9C5BD;position:relative;background:#0B0B0C">
+            <div style="position:absolute;left:0;top:0;width:1200px;height:760px;transform:scale(1.6) translate(0px,-18px);transform-origin:0 0"><dc-import name="DesktopShellDevice" placement="header" quota="warn" popover="none" label="2a-w · ring warning" hint-size="1200px,760px"></dc-import></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="p2b" style="display:flex;gap:44px;align-items:flex-start;padding-bottom:52px">
+      <div style="flex:none;width:1200px">
+        <div style="display:flex;align-items:center;gap:10px;padding-bottom:12px">
+          <span style="font:600 11px/1 'JetBrains Mono',monospace;color:#fff;background:#B4522F;padding:5px 7px;border-radius:4px">2b</span>
+          <span style="font:600 15px/1.2 'Public Sans',sans-serif">Main-pane session header · slim status chip</span>
+          <span style="font:600 10px/1 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:#54504A;background:#E3E0D9;padding:5px 7px;border-radius:4px">not chosen · wrong altitude</span>
+        </div>
+        <dc-import name="DesktopShellDevice" placement="chip" quota="normal" popover="none" label="2b · main-pane chip" hint-size="1200px,760px"></dc-import>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:16px;padding-top:34px">
+        <p style="margin:0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Most glanceable of the three — it sits on the eye line you already use for session status. That is also the problem: a chip inside a session's header implies session-scoped cost, it competes with the transcript's top-right, and it would duplicate the day the main pane splits.</p>
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">2b-w · warning · amber chip + countdown</div>
+          <div style="width:390px;height:90px;overflow:hidden;border-radius:10px;border:1px solid #C9C5BD;position:relative;background:#0B0B0C">
+            <div style="position:absolute;left:0;top:0;width:1200px;height:760px;transform:scale(1.5) translate(-940px,0px);transform-origin:0 0"><dc-import name="DesktopShellDevice" placement="chip" quota="warn" popover="none" label="2b-w · chip warning" hint-size="1200px,760px"></dc-import></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="p2c" style="display:flex;gap:44px;align-items:flex-start">
+      <div style="flex:none;width:1200px">
+        <div style="display:flex;align-items:center;gap:10px;padding-bottom:12px">
+          <span style="font:600 11px/1 'JetBrains Mono',monospace;color:#fff;background:#B4522F;padding:5px 7px;border-radius:4px">2c</span>
+          <span style="font:600 15px/1.2 'Public Sans',sans-serif">Settings / account popover only · sidebar silent until warning</span>
+          <span style="font:600 10px/1 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:#54504A;background:#E3E0D9;padding:5px 7px;border-radius:4px">not chosen · no ambient signal</span>
+        </div>
+        <dc-import name="DesktopShellDevice" placement="none" quota="normal" popover="settings" label="2c · popover only" hint-size="1200px,760px"></dc-import>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:16px;padding-top:34px">
+        <p style="margin:0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The quietest chrome: usage lives under the account in the settings popover, and the sidebar shows nothing at all until a window runs low — then a one-line amber strip surfaces above the meta row. Clean, but burn-down is invisible day to day; the first time most users meet quota is as an alarm, or a hard 0%.</p>
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">2c-w · warning · strip appears</div>
+          <div style="width:400px;height:192px;overflow:hidden;border-radius:10px;border:1px solid #C9C5BD;position:relative;background:#0B0B0C">
+            <div style="position:absolute;left:0;top:0;width:1200px;height:760px;transform:scale(1.6) translate(0px,-640px);transform-origin:0 0"><dc-import name="DesktopShellDevice" placement="none" quota="warn" popover="none" label="2c-w · warning strip" hint-size="1200px,760px"></dc-import></div>
+          </div>
+          <p style="margin:9px 0 0;font:400 12px/1.55 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">The strip is the only escalation chrome this variant owns — it appears, links to the popover, and leaves when the window resets.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 3 · POPOVER V2 ═══════════ -->
+  <div id="s3" style="padding-top:64px">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:24px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">3</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Quota detail popover v2</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Anchored to the footer status row — the same surface every placement in 2 would open.</span>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start">
+      <div style="flex:none;width:1200px">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">3 · open · both windows healthy</div>
+        <dc-import name="DesktopShellDevice" placement="footer" quota="normal" popover="usage" label="3 · usage popover" hint-size="1200px,760px"></dc-import>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:18px;padding-top:26px">
+        <p style="margin:0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Two window rows — name, rolling span in mono, percent left — each with a full-width bar and a mono reset countdown. Below the hairline: staleness (<span style="font-family:'JetBrains Mono',monospace;font-size:11px">updated 3m ago</span>) and a manual Refresh. Row heights and inks match the footer row, so opening the popover reads as zooming into the same instrument.</p>
+        <div>
+          <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:10px">3x · blocked · 5h at 0%</div>
+          <div style="width:408px;height:414px;overflow:hidden;border-radius:10px;border:1px solid #C9C5BD;position:relative;background:#0B0B0C">
+            <div style="position:absolute;left:0;top:0;width:1200px;height:760px;transform:scale(1.2) translate(0px,-415px);transform-origin:0 0"><dc-import name="DesktopShellDevice" placement="footer" quota="blocked" popover="usage" label="3x · popover blocked" hint-size="1200px,760px"></dc-import></div>
+          </div>
+          <p style="margin:9px 0 0;font:400 12px/1.55 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">A danger strip states the consequence and the reset time — <span style="font-family:'JetBrains Mono',monospace;font-size:11px">resets at 14:00</span> — while the weekly window stays readable and Refresh stays live. The footer row underneath shows the same 0% in the same ink.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</x-dc>
+</body>
+</html>

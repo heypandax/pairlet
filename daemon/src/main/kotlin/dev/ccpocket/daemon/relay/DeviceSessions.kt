@@ -328,6 +328,7 @@ class DeviceSessions(
                 link.activeCaps = RequestRouter.ClientCapsHolder()
             }
         }
+        preHandshakeWarnAt.remove(deviceId) // #298 hygiene: the zombie healed, drop its rate-limit slot
         log.info("handshake from ${deviceId.take(8)}… (psk ${psk.size}B${if (twinned) " + empty-PSK twin" else ""}) → session established")
         send(deviceId, Wire.payload(Wire.HANDSHAKE, responderEph))
         // teach the device where this daemon lives on the LAN so its next connect can skip the relay;
@@ -375,9 +376,29 @@ class DeviceSessions(
     internal suspend fun declaredCapsForTest(deviceId: String): RequestRouter.ClientCapsHolder? =
         mutex.withLock { sessions[deviceId]?.activeCaps }
 
+    // #298: a zombied peer (it holds an E2E session we no longer have) retries every few seconds until its
+    // process restarts — one WARN per minute per device keeps the log legible without hiding the loop.
+    // Security review (2026-08-25): entries ONLY for identifiable devices — the deviceId is the relay's
+    // PLAINTEXT routing field, and an attacked relay can mint unlimited fresh ids; an unbounded per-id map
+    // keyed on it was a straight memory-DoS. The cap is a second belt for the same reason.
+    private val preHandshakeWarnAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     private suspend fun transport(deviceId: String, body: ByteArray) {
         val link = mutex.withLock { sessions[deviceId] }
-        if (link == null) { log.warn("transport before handshake from ${deviceId.take(8)}…"); return }
+        if (link == null) {
+            // unknown ids are dropped without a trace: they have no diagnostic value (the #298 zombie is
+            // by definition an already-paired peer) and logging them hands the relay a log-spam lever
+            val known = mutex.withLock { devicePubs.containsKey(deviceId) } || bridges.pubOf(deviceId) != null
+            if (!known) return
+            val now = System.currentTimeMillis()
+            if (preHandshakeWarnAt.size >= PRE_HANDSHAKE_WARN_CAP) preHandshakeWarnAt.clear()
+            val last = preHandshakeWarnAt[deviceId] ?: 0L
+            if (now - last >= 60_000) {
+                preHandshakeWarnAt[deviceId] = now
+                log.warn("transport before handshake from ${deviceId.take(8)}… (repeats suppressed for 60s; the peer should self-heal via silence-deafness #298)")
+            }
+            return
+        }
         // Trial-decrypt newest-first (open() only advances its receive counter on SUCCESS, so probing the
         // wrong session is side-effect free; frames arrive sequentially from the relay loop, so opens
         // never race each other). A FALLBACK hit means the older connection instance is the one actually
@@ -729,5 +750,9 @@ class DeviceSessions(
         // ticket TTL (120s at the relay) + slack: how long after an interactive mint a headless mint
         // is refused (and PairLoopback refuses the reverse via BridgeRegistry.intentPending)
         const val TICKET_EXCLUSION_MS = 130_000L
+
+        /** #298: hard ceiling on the pre-handshake WARN rate-limit map. Known devices number in the tens;
+         *  hitting this means something is minting identities and the honest answer is to start over. */
+        const val PRE_HANDSHAKE_WARN_CAP = 512
     }
 }

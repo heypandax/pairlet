@@ -180,6 +180,13 @@ data class WorktreeEntry(
     val dirtyCount: Int? = null,
     val activeSessionId: String? = null,
     val activeSessionTitle: String? = null,
+    /**
+     * When this checkout was created (epoch millis), read from its `.git` entry — the newest one first
+     * is the order the surface wants, and `git worktree list` only ever answers in registration order.
+     * 0 means "not known": an older daemon that predates the field, or a stat that failed. The client
+     * treats 0 as "keep git's order for this row" rather than sorting it to either end.
+     */
+    val createdAt: Long = 0,
 )
 
 // ---- phone -> daemon ----

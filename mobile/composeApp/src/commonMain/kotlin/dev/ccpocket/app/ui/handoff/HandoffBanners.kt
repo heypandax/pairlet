@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -137,7 +140,10 @@ fun HandoffRibbon(
 @Composable
 fun HandoffWatchBar(onRecall: () -> Unit, modifier: Modifier = Modifier) {
     Row(
-        modifier.fillMaxWidth().background(Tok.surface).padding(14.dp),
+        // replaces the composer → bottom-most band: the surface fill reaches the physical bottom edge
+        // and the nav-bar/home-indicator inset pads inside it (zero on inset-less desktops)
+        modifier.fillMaxWidth().background(Tok.surface)
+            .windowInsetsPadding(WindowInsets.navigationBars).padding(14.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Icon(Icons.Rounded.RemoveRedEye, null, tint = Tok.muted, modifier = Modifier.size(16.dp))

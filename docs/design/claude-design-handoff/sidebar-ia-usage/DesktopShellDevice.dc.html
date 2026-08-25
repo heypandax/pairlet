@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; background: #EDEBE6; }
+  a { color: #D97757; text-decoration: none; }
+  a:hover { color: #E89070; }
+</style>
+</helmet>
+
+<div data-screen-label="{{ label }}" style="width:1200px;height:760px;display:flex;position:relative;overflow:hidden;border-radius:10px;border:1px solid rgba(255,255,255,.09);background:#0B0B0C;box-shadow:0 30px 70px -30px rgba(20,18,16,.55);font-family:'Inter',system-ui,sans-serif;color:#F3F3F4">
+
+  <!-- ══════════ SIDEBAR 240 ══════════ -->
+  <div style="width:240px;flex:none;display:flex;flex-direction:column;background:#101013;border-right:1px solid rgba(255,255,255,.07)">
+
+    <div style="height:34px;flex:none;display:flex;align-items:center;gap:7px;padding:0 14px">
+      <span style="width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.12)"></span>
+      <span style="width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.12)"></span>
+      <span style="width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.12)"></span>
+    </div>
+
+    <button type="button" aria-haspopup="menu" style="appearance:none;border:0;background:none;flex:none;height:34px;display:flex;align-items:center;gap:7px;padding:0 12px;cursor:pointer;text-align:left;color:#F3F3F4" style-hover="background:rgba(255,255,255,.045)">
+      <span style="flex:none;width:6px;height:6px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 3px rgba(126,203,160,.13)"></span>
+      <span style="min-width:0;font:600 11.5px/1 'JetBrains Mono',monospace;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">mbp-m3</span>
+      <span aria-hidden="true" style="flex:none;width:5px;height:5px;border-right:1.4px solid #6E6E76;border-bottom:1.4px solid #6E6E76;transform:rotate(45deg) translateY(-2px)"></span>
+      <span style="flex:1"></span>
+      <sc-if value="{{ showRing }}" hint-placeholder-val="{{ false }}">
+        <span title="Claude usage" style="flex:none;width:16px;height:16px;border-radius:50%;background:{{ r5grad }};display:flex;align-items:center;justify-content:center">
+          <span style="width:11.6px;height:11.6px;border-radius:50%;background:#101013;display:flex;align-items:center;justify-content:center">
+            <span style="width:8.4px;height:8.4px;border-radius:50%;background:{{ r7grad }};display:flex;align-items:center;justify-content:center">
+              <span style="width:5px;height:5px;border-radius:50%;background:#101013"></span>
+            </span>
+          </span>
+        </span>
+      </sc-if>
+      <span aria-label="Attention" style="position:relative;width:13px;height:13px;flex:none;color:#8C8D95;display:block">
+        <span style="position:absolute;left:2px;top:1px;width:9px;height:8px;border:1.4px solid currentColor;border-bottom:0;border-radius:5px 5px 0 0;box-sizing:border-box"></span>
+        <span style="position:absolute;left:0;top:9px;width:13px;height:1.4px;background:currentColor;border-radius:1px"></span>
+        <span style="position:absolute;left:5.4px;top:11px;width:2.2px;height:1.6px;background:currentColor;border-radius:0 0 2px 2px"></span>
+      </span>
+    </button>
+
+    <button type="button" style="appearance:none;border:0;background:none;flex:none;height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:rgba(226,121,90,.07)">
+      <span style="flex:none;width:13px;font:500 12px/1 'Inter',sans-serif;color:#E2795A;text-align:center">＋</span>
+      <span style="font:500 12.5px/1 'Inter',sans-serif;color:#E2795A">New session</span>
+    </button>
+    <button type="button" style="appearance:none;border:0;background:none;flex:none;height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:rgba(255,255,255,.045)">
+      <span aria-hidden="true" style="position:relative;width:13px;height:11px;flex:none">
+        <span style="position:absolute;left:0;top:2.5px;width:12px;height:8px;border:1.4px solid #8C8D95;border-radius:2px;box-sizing:border-box"></span>
+        <span style="position:absolute;left:1px;top:.5px;width:5px;height:3px;border:1.4px solid #8C8D95;border-bottom:0;border-radius:2px 2px 0 0;box-sizing:border-box"></span>
+      </span>
+      <span style="font:400 12.5px/1 'Inter',sans-serif;color:#B4B5BC">Open folder…</span>
+    </button>
+
+    <div style="height:1px;flex:none;margin:6px 12px 0;background:rgba(255,255,255,.07)"></div>
+
+    <!-- session zones + list terminators -->
+    <div style="flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column">
+      <div style="padding:11px 12px 5px;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">PINNED</div>
+      <sc-for list="{{ pinned }}" as="s" hint-placeholder-count="2">
+        <button type="button" style="appearance:none;border:0;background:none;flex:none;height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:rgba(255,255,255,.045)">
+          <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.t }}</span>
+        </button>
+      </sc-for>
+
+      <div style="padding:12px 12px 5px;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">RUNNING</div>
+      <sc-for list="{{ running }}" as="s" hint-placeholder-count="2">
+        <sc-if value="{{ s.active }}" hint-placeholder-val="{{ false }}">
+          <button type="button" style="appearance:none;border:0;flex:none;height:30px;display:flex;align-items:center;gap:8px;padding:0 12px 0 10px;cursor:pointer;text-align:left;background:rgba(255,255,255,.055);box-shadow:inset 2px 0 0 #D97757">
+            <span style="flex:none;width:5px;height:5px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 2.5px rgba(126,203,160,.14)"></span>
+            <span style="flex:1;min-width:0;font:500 12.5px/1 'Inter',sans-serif;color:#F3F3F4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.t }}</span>
+            <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#8C8D95">{{ s.m }}</span>
+          </button>
+        </sc-if>
+        <sc-if value="{{ s.rest }}" hint-placeholder-val="{{ true }}">
+          <button type="button" style="appearance:none;border:0;background:none;flex:none;height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:rgba(255,255,255,.045)">
+            <span style="flex:none;width:5px;height:5px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 2.5px rgba(126,203,160,.14)"></span>
+            <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.t }}</span>
+            <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">{{ s.m }}</span>
+          </button>
+        </sc-if>
+      </sc-for>
+
+      <div style="padding:12px 12px 5px;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">RECENT</div>
+      <sc-for list="{{ recent }}" as="s" hint-placeholder-count="6">
+        <button type="button" style="appearance:none;border:0;background:none;flex:none;height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:rgba(255,255,255,.045)">
+          <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.t }}</span>
+          <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">{{ s.m }}</span>
+        </button>
+      </sc-for>
+
+      <button type="button" style="appearance:none;border:0;background:none;flex:none;height:28px;display:flex;align-items:center;gap:6px;padding:0 12px;margin-top:6px;cursor:pointer;text-align:left" style-hover="background:rgba(255,255,255,.045)">
+        <span style="font:500 12px/1 'Inter',sans-serif;color:#8C8D95">All projects</span>
+        <span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">12</span>
+        <span style="flex:1"></span>
+        <span aria-hidden="true" style="flex:none;width:5px;height:5px;border-right:1.4px solid #6E6E76;border-bottom:1.4px solid #6E6E76;transform:rotate(-45deg)"></span>
+      </button>
+      <button type="button" style="appearance:none;border:0;background:none;flex:none;height:28px;display:flex;align-items:center;gap:6px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:rgba(255,255,255,.045)">
+        <span style="font:500 12px/1 'Inter',sans-serif;color:#8C8D95">Archived</span>
+        <span style="flex:1"></span>
+        <span aria-hidden="true" style="flex:none;width:5px;height:5px;border-right:1.4px solid #6E6E76;border-bottom:1.4px solid #6E6E76;transform:rotate(-45deg)"></span>
+      </button>
+      <div style="flex:1"></div>
+    </div>
+
+    <!-- footer: telemetry + meta only -->
+    <sc-if value="{{ warnStrip }}" hint-placeholder-val="{{ false }}">
+      <div style="height:1px;flex:none;background:rgba(255,255,255,.07)"></div>
+      <button type="button" style="appearance:none;border:0;flex:none;height:26px;display:flex;align-items:center;gap:7px;padding:0 12px;cursor:pointer;text-align:left;background:rgba(224,169,59,.08)" style-hover="background:rgba(224,169,59,.13)">
+        <span style="flex:none;width:5px;height:5px;border-radius:50%;background:#E0A93B"></span>
+        <span style="flex:1;min-width:0;font:500 11px/1 'Inter',sans-serif;color:#E0A93B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">5h window low · 18% left</span>
+        <span aria-hidden="true" style="flex:none;width:4.5px;height:4.5px;border-right:1.4px solid #E0A93B;border-bottom:1.4px solid #E0A93B;transform:rotate(-45deg)"></span>
+      </button>
+    </sc-if>
+
+    <sc-if value="{{ showQuotaRow }}" hint-placeholder-val="{{ true }}">
+      <div style="height:1px;flex:none;background:rgba(255,255,255,.07)"></div>
+      <button type="button" aria-label="Claude usage" style="appearance:none;border:0;background:none;flex:none;height:28px;display:flex;align-items:center;gap:6px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:rgba(255,255,255,.045)">
+        <span style="flex:none;font:500 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">5h</span>
+        <span style="flex:none;width:26px;height:2.5px;border-radius:2px;background:{{ q5.track }};overflow:hidden"><span style="display:block;height:100%;border-radius:2px;width:{{ q5.w }};background:{{ q5.bar }}"></span></span>
+        <span style="flex:none;font:500 10px/1 'JetBrains Mono',monospace;color:{{ q5.ink }}">{{ q5.pctS }}</span>
+        <span style="flex:none;width:8px"></span>
+        <span style="flex:none;font:500 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">7d</span>
+        <span style="flex:none;width:26px;height:2.5px;border-radius:2px;background:{{ q7.track }};overflow:hidden"><span style="display:block;height:100%;border-radius:2px;width:{{ q7.w }};background:{{ q7.bar }}"></span></span>
+        <span style="flex:none;font:500 10px/1 'JetBrains Mono',monospace;color:{{ q7.ink }}">{{ q7.pctS }}</span>
+        <span style="flex:1"></span>
+        <sc-if value="{{ hasNote }}" hint-placeholder-val="{{ false }}">
+          <span style="flex:none;font:500 9.5px/1 'JetBrains Mono',monospace;color:{{ noteInk }}">{{ qNote }}</span>
+        </sc-if>
+      </button>
+    </sc-if>
+
+    <div style="height:1px;flex:none;background:rgba(255,255,255,.07)"></div>
+    <div style="flex:none;height:30px;display:flex;align-items:center;gap:8px;padding:0 12px">
+      <button type="button" style="appearance:none;border:0;background:none;padding:0;font:400 11.5px/1 'Inter',sans-serif;color:#8C8D95;cursor:pointer" style-hover="color:#E6E6E9">Help &amp; support</button>
+      <span style="flex:1"></span>
+      <span style="font:400 10px/1 'JetBrains Mono',monospace;color:#6E6E76">v1.9.1</span>
+      <button type="button" aria-label="Settings" style="appearance:none;border:0;background:none;padding:0;width:16px;height:16px;display:flex;align-items:center;justify-content:center;color:#8C8D95;cursor:pointer;font:400 12px/1 'Inter',sans-serif" style-hover="color:#E6E6E9">⚙︎</button>
+    </div>
+  </div>
+
+  <!-- ══════════ MAIN PANE ══════════ -->
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#0B0B0C">
+    <div style="height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.07)">
+      <span style="font:600 13px/1 'Inter',sans-serif;letter-spacing:-.005em;color:#F3F3F4">fix flaky auth test</span>
+      <span style="flex:none;display:flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;border:1px solid rgba(255,255,255,.09);background:#141417">
+        <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#B4B5BC">⎇ fix/auth-retry</span>
+      </span>
+      <span style="flex:none;display:flex;align-items:center;gap:5px">
+        <span style="width:5px;height:5px;border-radius:50%;background:#7ECBA0"></span>
+        <span style="font:500 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#8C8D95">running · 12m</span>
+      </span>
+      <span style="flex:1"></span>
+      <sc-if value="{{ showChip }}" hint-placeholder-val="{{ false }}">
+        <button type="button" aria-label="Claude usage" style="appearance:none;cursor:pointer;flex:none;display:flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:6px;border:1px solid {{ chipBorder }};background:{{ chipBg }}">
+          <span style="font:500 9.5px/1 'JetBrains Mono',monospace;color:{{ q5.ink }}">5h {{ q5.pctS }}</span>
+          <span style="flex:none;width:20px;height:2.5px;border-radius:2px;background:rgba(255,255,255,.10);overflow:hidden"><span style="display:block;height:100%;border-radius:2px;width:{{ q5.w }};background:{{ q5.bar }}"></span></span>
+          <span style="width:1px;height:9px;background:rgba(255,255,255,.09)"></span>
+          <span style="font:500 9.5px/1 'JetBrains Mono',monospace;color:{{ q7.ink }}">7d {{ q7.pctS }}</span>
+          <sc-if value="{{ hasNote }}" hint-placeholder-val="{{ false }}">
+            <span style="font:500 9.5px/1 'JetBrains Mono',monospace;color:{{ noteInk }}">· {{ qNote }}</span>
+          </sc-if>
+        </button>
+      </sc-if>
+      <button type="button" aria-label="More" style="appearance:none;border:0;background:none;flex:none;width:26px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;gap:2.5px;color:#8C8D95;cursor:pointer" style-hover="background:rgba(255,255,255,.06);color:#F3F3F4">
+        <span style="width:3px;height:3px;border-radius:50%;background:currentColor"></span>
+        <span style="width:3px;height:3px;border-radius:50%;background:currentColor"></span>
+        <span style="width:3px;height:3px;border-radius:50%;background:currentColor"></span>
+      </button>
+    </div>
+
+    <div style="flex:1;min-height:0;overflow:hidden;padding:20px 24px">
+      <div style="max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:18px">
+        <div>
+          <div style="display:flex;align-items:baseline;gap:7px">
+            <span style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#6E6E76">YOU</span>
+            <span style="font:400 9px/1 'JetBrains Mono',monospace;color:#6E6E76">14:02</span>
+          </div>
+          <p style="margin:5px 0 0;font:400 12.5px/1.55 'Inter',sans-serif;color:#E6E6E9;text-wrap:pretty">The auth e2e test flakes on CI — the retry helper in test 4 looks wrong. Can you fix it and re-run the suite?</p>
+        </div>
+        <div>
+          <div style="display:flex;align-items:baseline;gap:7px">
+            <span style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#D97757">CLAUDE</span>
+            <span style="font:400 9px/1 'JetBrains Mono',monospace;color:#6E6E76">14:03</span>
+          </div>
+          <p style="margin:5px 0 0;font:400 12.5px/1.55 'Inter',sans-serif;color:#B4B5BC;text-wrap:pretty">Found it — the retry helper reuses a stale token after the first 401. Patching the fixture to mint a fresh one per attempt, then re-running.</p>
+          <div style="margin-top:9px;border:1px solid rgba(255,255,255,.07);background:#101013;border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:4px">
+            <span style="font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#B4B5BC">$ pnpm vitest run e2e/auth</span>
+            <span style="font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#7ECBA0">✓ e2e/auth · 12 passed · 8.4s</span>
+          </div>
+          <p style="margin:9px 0 0;font:400 12.5px/1.55 'Inter',sans-serif;color:#B4B5BC;text-wrap:pretty">Suite is green. The fix is in <span style="font:400 11px/1 'JetBrains Mono',monospace;color:#E6E6E9">e2e/helpers/retry.ts</span> — one commit, ready to review.</p>
+        </div>
+      </div>
+    </div>
+
+    <div style="flex:none;padding:0 24px 16px">
+      <div style="max-width:640px;margin:0 auto;height:42px;display:flex;align-items:center;gap:10px;padding:0 6px 0 12px;border:1px solid rgba(255,255,255,.09);border-radius:8px;background:#101013">
+        <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#6E6E76">Message this session…</span>
+        <span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">⌘↵</span>
+        <span style="flex:none;width:26px;height:26px;border-radius:6px;background:#1B1B1F;display:flex;align-items:center;justify-content:center;font:500 12px/1 'Inter',sans-serif;color:#8C8D95">↑</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ USAGE POPOVER ══════════ -->
+  <sc-if value="{{ popUsage }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-label="Claude usage" style="position:absolute;left:10px;bottom:70px;width:296px;background:#17171B;border:1px solid rgba(255,255,255,.10);border-radius:8px;box-shadow:0 22px 48px -14px rgba(0,0,0,.72), 0 4px 14px -6px rgba(0,0,0,.5);overflow:hidden">
+      <div style="height:34px;display:flex;align-items:center;gap:8px;padding:0 12px">
+        <span style="font:600 12px/1 'Inter',sans-serif;color:#F3F3F4">Claude usage</span>
+        <span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">max plan</span>
+        <span style="flex:1"></span>
+        <button type="button" aria-label="Refresh" style="appearance:none;border:0;background:none;width:20px;height:20px;border-radius:4px;display:flex;align-items:center;justify-content:center;font:500 12px/1 'Inter',sans-serif;color:#8C8D95;cursor:pointer" style-hover="background:rgba(255,255,255,.06);color:#E6E6E9">↻</button>
+      </div>
+      <div style="height:1px;background:rgba(255,255,255,.07)"></div>
+      <sc-if value="{{ popBlocked }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:9px 12px;background:rgba(229,96,77,.09);border-bottom:1px solid rgba(255,255,255,.06)">
+          <span style="font:500 11.5px/1.45 'Inter',sans-serif;color:#E5604D;display:block;text-wrap:pretty">Session window exhausted — sending pauses until it resets at 14:00.</span>
+        </div>
+      </sc-if>
+      <div style="padding:11px 12px 10px">
+        <div style="display:flex;align-items:baseline;gap:6px">
+          <span style="font:500 11.5px/1 'Inter',sans-serif;color:#E6E6E9">Session</span>
+          <span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">5h rolling</span>
+          <span style="flex:1"></span>
+          <span style="font:500 11px/1 'JetBrains Mono',monospace;color:{{ q5.ink }}">{{ q5.pctL }}</span>
+        </div>
+        <span style="display:block;margin-top:8px;height:3px;border-radius:2px;background:{{ q5.track }};overflow:hidden"><span style="display:block;height:100%;border-radius:2px;width:{{ q5.w }};background:{{ q5.bar }}"></span></span>
+        <div style="display:flex;margin-top:6px">
+          <span style="flex:1"></span>
+          <span style="font:400 10px/1 'JetBrains Mono',monospace;color:{{ q5.resetInk }}">{{ q5.reset }}</span>
+        </div>
+      </div>
+      <div style="padding:2px 12px 12px">
+        <div style="display:flex;align-items:baseline;gap:6px">
+          <span style="font:500 11.5px/1 'Inter',sans-serif;color:#E6E6E9">Weekly</span>
+          <span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">7d rolling</span>
+          <span style="flex:1"></span>
+          <span style="font:500 11px/1 'JetBrains Mono',monospace;color:{{ q7.ink }}">{{ q7.pctL }}</span>
+        </div>
+        <span style="display:block;margin-top:8px;height:3px;border-radius:2px;background:{{ q7.track }};overflow:hidden"><span style="display:block;height:100%;border-radius:2px;width:{{ q7.w }};background:{{ q7.bar }}"></span></span>
+        <div style="display:flex;margin-top:6px">
+          <span style="flex:1"></span>
+          <span style="font:400 10px/1 'JetBrains Mono',monospace;color:{{ q7.resetInk }}">{{ q7.reset }}</span>
+        </div>
+      </div>
+      <div style="height:1px;background:rgba(255,255,255,.07)"></div>
+      <div style="height:30px;display:flex;align-items:center;gap:8px;padding:0 12px">
+        <span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">updated 3m ago</span>
+        <span style="flex:1"></span>
+        <button type="button" style="appearance:none;border:0;background:none;padding:0;font:500 11px/1 'Inter',sans-serif;color:#B4B5BC;cursor:pointer" style-hover="color:#F3F3F4">Refresh</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══════════ SETTINGS / ACCOUNT POPOVER ══════════ -->
+  <sc-if value="{{ popSettings }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-label="Account" style="position:absolute;left:10px;bottom:70px;width:292px;background:#17171B;border:1px solid rgba(255,255,255,.10);border-radius:8px;box-shadow:0 22px 48px -14px rgba(0,0,0,.72), 0 4px 14px -6px rgba(0,0,0,.5);overflow:hidden">
+      <div style="display:flex;align-items:center;gap:9px;padding:11px 12px">
+        <span style="flex:none;width:26px;height:26px;border-radius:6px;background:#1B1B1F;display:flex;align-items:center;justify-content:center;font:600 10px/1 'JetBrains Mono',monospace;color:#B4B5BC">YW</span>
+        <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+          <span style="font:500 12px/1 'Inter',sans-serif;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">yifan@wudev.io</span>
+          <span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">claude max · 5×</span>
+        </span>
+      </div>
+      <div style="height:1px;background:rgba(255,255,255,.07)"></div>
+      <div style="padding:10px 12px 11px;display:flex;flex-direction:column;gap:8px">
+        <span style="font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">USAGE</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="flex:none;width:14px;font:500 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">5h</span>
+          <span style="flex:1;height:2.5px;border-radius:2px;background:{{ q5.track }};overflow:hidden"><span style="display:block;height:100%;border-radius:2px;width:{{ q5.w }};background:{{ q5.bar }}"></span></span>
+          <span style="flex:none;width:56px;text-align:right;font:500 10px/1 'JetBrains Mono',monospace;color:{{ q5.ink }}">{{ q5.pctL }}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="flex:none;width:14px;font:500 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">7d</span>
+          <span style="flex:1;height:2.5px;border-radius:2px;background:{{ q7.track }};overflow:hidden"><span style="display:block;height:100%;border-radius:2px;width:{{ q7.w }};background:{{ q7.bar }}"></span></span>
+          <span style="flex:none;width:56px;text-align:right;font:500 10px/1 'JetBrains Mono',monospace;color:{{ q7.ink }}">{{ q7.pctL }}</span>
+        </div>
+        <span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">updated 3m ago · <span style="color:#8C8D95">refresh</span></span>
+      </div>
+      <div style="height:1px;background:rgba(255,255,255,.07)"></div>
+      <button type="button" style="appearance:none;border:0;background:none;width:100%;height:32px;display:flex;align-items:center;padding:0 12px;font:400 12px/1 'Inter',sans-serif;color:#B4B5BC;cursor:pointer;text-align:left" style-hover="background:rgba(255,255,255,.045);color:#E6E6E9">Open settings…</button>
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:760},&quot;placement&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;footer&quot;,&quot;tsType&quot;:&quot;'footer'|'header'|'chip'|'none'&quot;,&quot;options&quot;:[&quot;footer&quot;,&quot;header&quot;,&quot;chip&quot;,&quot;none&quot;],&quot;section&quot;:&quot;Usage&quot;},&quot;quota&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;normal&quot;,&quot;tsType&quot;:&quot;'normal'|'warn'|'blocked'|'absent'&quot;,&quot;options&quot;:[&quot;normal&quot;,&quot;warn&quot;,&quot;blocked&quot;,&quot;absent&quot;],&quot;section&quot;:&quot;Usage&quot;},&quot;popover&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;none&quot;,&quot;tsType&quot;:&quot;'none'|'usage'|'settings'&quot;,&quot;options&quot;:[&quot;none&quot;,&quot;usage&quot;,&quot;settings&quot;],&quot;section&quot;:&quot;Usage&quot;},&quot;label&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;cc-pocket desktop&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const p = this.props.placement ?? 'footer';
+    const quota = this.props.quota ?? 'normal';
+    const pop = this.props.popover ?? 'none';
+    const mut = 'rgba(255,255,255,.34)', tr = 'rgba(255,255,255,.09)', dim = '#6E6E76';
+    const Q = {
+      normal: {
+        q5: { pctS: '72%', pctL: '72% left', w: '72%', bar: mut, ink: '#B4B5BC', reset: 'resets in 2h 14m', resetInk: dim, track: tr },
+        q7: { pctS: '41%', pctL: '41% left', w: '41%', bar: mut, ink: '#B4B5BC', reset: 'resets Thu 09:00', resetInk: dim, track: tr },
+        note: '', noteInk: dim, r5: '#8C8D95', p5: '72%', r7: '#8C8D95', p7: '41%',
+        chipBorder: 'rgba(255,255,255,.10)', chipBg: 'rgba(255,255,255,.03)'
+      },
+      warn: {
+        q5: { pctS: '18%', pctL: '18% left', w: '18%', bar: '#E0A93B', ink: '#E0A93B', reset: 'resets in 41m', resetInk: '#E0A93B', track: tr },
+        q7: { pctS: '34%', pctL: '34% left', w: '34%', bar: mut, ink: '#B4B5BC', reset: 'resets Thu 09:00', resetInk: dim, track: tr },
+        note: '41m', noteInk: '#E0A93B', r5: '#E0A93B', p5: '18%', r7: '#8C8D95', p7: '34%',
+        chipBorder: 'rgba(224,169,59,.35)', chipBg: 'rgba(224,169,59,.07)'
+      },
+      blocked: {
+        q5: { pctS: '0%', pctL: '0% left', w: '0%', bar: '#E5604D', ink: '#E5604D', reset: 'resets at 14:00', resetInk: '#E5604D', track: 'rgba(229,96,77,.18)' },
+        q7: { pctS: '22%', pctL: '22% left', w: '22%', bar: mut, ink: '#B4B5BC', reset: 'resets Thu 09:00', resetInk: dim, track: tr },
+        note: '14:00', noteInk: '#E5604D', r5: '#E5604D', p5: '0%', r7: '#8C8D95', p7: '22%',
+        chipBorder: 'rgba(229,96,77,.4)', chipBg: 'rgba(229,96,77,.08)'
+      }
+    };
+    const d = Q[quota] ?? Q.normal;
+    const present = quota !== 'absent';
+    return {
+      label: this.props.label ?? 'cc-pocket desktop',
+      q5: d.q5, q7: d.q7, hasNote: !!d.note, qNote: d.note, noteInk: d.noteInk,
+      chipBorder: d.chipBorder, chipBg: d.chipBg,
+      r5grad: `conic-gradient(${d.r5} 0 ${d.p5}, rgba(255,255,255,.13) ${d.p5} 100%)`,
+      r7grad: `conic-gradient(${d.r7} 0 ${d.p7}, rgba(255,255,255,.13) ${d.p7} 100%)`,
+      showQuotaRow: p === 'footer' && present,
+      showRing: p === 'header' && present,
+      showChip: p === 'chip' && present,
+      warnStrip: p === 'none' && (quota === 'warn' || quota === 'blocked'),
+      popUsage: pop === 'usage', popSettings: pop === 'settings',
+      popBlocked: quota === 'blocked',
+      pinned: [{ t: 'cc-pocket · api daemon' }, { t: 'release checklist' }],
+      running: [
+        { t: 'fix flaky auth test', m: '12m', active: true, rest: false },
+        { t: 'migrate settings store', m: '41m', active: false, rest: true }
+      ],
+      recent: [
+        { t: 'refactor tray flyout', m: '18m' }, { t: 'quota popover spike', m: '2h' },
+        { t: 'bump electron 31', m: '5h' }, { t: 'onboarding copy pass', m: '1d' },
+        { t: 'git worktree list v1', m: '2d' }, { t: 'profile memory leak', m: '4d' }
+      ]
+    };
+  }
+}
+
+</script>
+</body>
+</html>
