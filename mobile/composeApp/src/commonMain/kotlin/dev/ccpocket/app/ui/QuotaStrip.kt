@@ -5,7 +5,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
@@ -66,8 +70,14 @@ import org.jetbrains.compose.resources.stringResource
  * what it is today (the handoff's third state). Callers must therefore give it zero-height tolerance:
  * it is a plain sibling in a Column, never an overlay.
  *
- * Safe area is NOT handled here: the app root already applies `windowInsetsPadding(WindowInsets.systemBars)`
- * to the whole tree, so a second inset would double-pad the strip off the bottom of the screen.
+ * Safe area: the strip OWNS the bottom edge it docks to. The app root reserves only the top/horizontal
+ * system bars, so on a full-bleed phone the nav-bar/home-indicator band would otherwise sit under the
+ * strip as dead space. The inset goes INSIDE the row's 48dp minimum via `union(navigationBars, 8dp)`
+ * (max, not sum — inset-less desktops keep the handoff's plain 8dp box): the row grows to inset +
+ * reading and the text rides just above the home indicator, tab-bar style, rather than centring in a
+ * full 48dp band stacked on top of an untouched inset. The whole band down to the physical edge is
+ * one tap target. Inset padding is consumption-aware: on Sessions, where the new-session dock is the
+ * true bottom band, the caller marks the inset consumed and the strip falls back to the plain box.
  */
 @Composable
 fun QuotaStrip(repo: PocketRepository, onOpen: () -> Unit) {
@@ -81,12 +91,16 @@ fun QuotaStrip(repo: PocketRepository, onOpen: () -> Unit) {
     val tightest = tightestLimit(segments)
     val now by rememberQuotaClock()
 
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+        // The inset lives INSIDE the row, under its 48dp minimum: on an edge device the row grows to
+        // inset + reading (~58dp) and the text sits just above the home indicator, instead of a full
+        // 48dp band centring the text ABOVE an untouched 34dp of black — that stack was the "wasted
+        // bottom" complaint. Inset-less devices keep the handoff's 48dp box unchanged (min binds).
         Row(
             Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                .clickable(onClick = onOpen)
-                .padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
+                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets(bottom = 8.dp)))
+                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {

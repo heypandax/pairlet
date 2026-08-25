@@ -245,6 +245,15 @@ class RepoDesktopModel(
     override val worktreesStale: Boolean get() = repo.worktreesUnavailable.value
     override fun fetchWorktrees() = repo.fetchWorktrees()
     override fun addWorktree(branch: String, createBranch: Boolean) = repo.addWorktree(branch, createBranch)
+    override val worktreeCreated get() = repo.worktreeCreated.value
+    override fun dismissWorktreeCreated() = repo.dismissWorktreeCreated()
+    override fun openWorktreeSession(path: String) {
+        showWorktrees = false; showGit = false
+        // same bookkeeping as startSession: the checkout enters RECENT like any clicked project, and
+        // the open itself is the ordinary OpenSession the mobile card overflow sends (#281 §2)
+        openProject(DkProject(path = path, name = folderName(path)))
+        repo.openSession(wd = path)
+    }
     override fun removeWorktree(path: String) = repo.removeWorktree(path)
 
     // ── ReviewRequest (REVIEW-REQUEST.md §12) ──

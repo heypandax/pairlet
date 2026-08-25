@@ -629,7 +629,8 @@ private fun GitConfirmDialog(model: DesktopModel, preview: GitActionPreview) {
 @Composable
 fun WorktreesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
     val list = model.worktrees
-    val trees = list?.worktrees.orEmpty()
+    // newest linked checkout first, main pinned on top (#294 真机反馈) — same order as mobile
+    val trees = remember(list) { dev.ccpocket.app.data.worktreeDisplayOrder(list?.worktrees.orEmpty()) }
     var showNew by remember { mutableStateOf(false) }
     // #295: filter, not navigation — same contract as the mobile surface
     var query by remember { mutableStateOf("") }
@@ -749,7 +750,67 @@ fun WorktreesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
             }
         }
         if (showNew) NewWorktreeDialog(model) { showNew = false }
+        model.worktreeCreated?.let { WorktreeCreatedDialog(model, it) }
         model.gitPendingConfirm?.let { GitConfirmDialog(model, it) }
+    }
+}
+
+/** The post-create receipt as a centered card (#281 功能范围, restored by #294 真机反馈): success in
+ *  words, then open-here or later. Open-here is absent — not disabled — when an older daemon answered
+ *  without the created path. */
+@Composable
+private fun WorktreeCreatedDialog(model: DesktopModel, note: dev.ccpocket.app.data.WorktreeCreated) {
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f))
+            .pointerInput(Unit) { detectTapGestures { model.dismissWorktreeCreated() } },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier.width(380.dp).clip(RoundedCornerShape(14.dp)).background(Tok.surface)
+                .border(1.dp, Tok.hair, RoundedCornerShape(14.dp))
+                .pointerInput(Unit) { detectTapGestures { } }
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                Modifier.size(38.dp).clip(CircleShape).background(Tok.ok.copy(alpha = 0.10f))
+                    .border(1.4.dp, Tok.ok.copy(alpha = 0.45f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) { Text("✓", color = Tok.ok, fontSize = 16.sp) }
+            Text(
+                stringResource(Res.string.wt_created_title), color = Tok.tx, fontFamily = Dk.ui,
+                fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp),
+            )
+            note.branch?.let {
+                Text(
+                    it, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 7.dp),
+                )
+            }
+            note.path?.let {
+                Text(
+                    midTruncatePath(it, 52), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp,
+                    maxLines = 1, modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            note.path?.let { path ->
+                Box(
+                    Modifier.fillMaxWidth().padding(top = 14.dp).height(36.dp).clip(RoundedCornerShape(9.dp))
+                        .background(Tok.accent).clickable { model.dismissWorktreeCreated(); model.openWorktreeSession(path) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        stringResource(Res.string.wt_menu_open), color = Tok.base, fontFamily = Dk.ui,
+                        fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+            Box(
+                Modifier.fillMaxWidth().padding(top = 8.dp).height(34.dp).clip(RoundedCornerShape(9.dp))
+                    .border(1.dp, Tok.hair, RoundedCornerShape(9.dp)).clickable { model.dismissWorktreeCreated() },
+                contentAlignment = Alignment.Center,
+            ) { Text(stringResource(Res.string.wt_created_later), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp) }
+        }
     }
 }
 

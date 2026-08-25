@@ -227,6 +227,22 @@ class ReconnectStormTest {
         assertTrue(RelayE2EConnection.deafTripped(RelayE2EConnection.DEAF_DECRYPT_FAILURES + 5))
     }
 
+    // ── #298: the SILENCE half — a daemon that lost our session sends nothing back at all ────────
+
+    @Test
+    fun silenceDeafnessNeedsBothTheSendCountAndTheSilenceWindow() {
+        val sends = RelayE2EConnection.SILENCE_DEAF_MIN_SENDS
+        val window = RelayE2EConnection.SILENCE_DEAF_WINDOW_MS
+        // a send burst while the daemon is legitimately quiet must NOT trip (window not yet elapsed)
+        assertFalse(RelayE2EConnection.silenceDeafTripped(sends + 10, window - 1))
+        // an idle link that sent (almost) nothing must NOT trip, however stale the clock
+        assertFalse(RelayE2EConnection.silenceDeafTripped(sends - 1, window * 100))
+        assertFalse(RelayE2EConnection.silenceDeafTripped(0, window * 100))
+        // both thresholds met = the zombie loop observed on 2026-08-25 (sends every 15s, zero inbound)
+        assertTrue(RelayE2EConnection.silenceDeafTripped(sends, window))
+        assertTrue(RelayE2EConnection.silenceDeafTripped(sends + 1, window + 15_000))
+    }
+
     @Test
     fun aMidTurnDeafLinkSignalForcesExactlyOneReHandshake() = runBlocking {
         val r = repo()

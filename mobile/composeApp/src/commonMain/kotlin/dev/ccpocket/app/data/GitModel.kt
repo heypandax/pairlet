@@ -192,3 +192,10 @@ fun worktreeRemovable(entry: WorktreeEntry): Boolean = !entry.isMain
  *  raises this, and the sheet it drives offers to open a session in [path]. [path] is null when an
  *  older daemon answered without it — the fact still shows, the open-here verb does not. */
 data class WorktreeCreated(val path: String?, val branch: String?)
+
+/** Display order for the worktree list (#294 真机反馈: a fresh checkout landed at the BOTTOM, where
+ *  nothing says "created"): the main worktree keeps the top — it is the anchor of the surface — and
+ *  linked checkouts follow newest-first. `createdAt == 0` (an older daemon, or a filesystem that
+ *  cannot answer creation time) sorts stably, i.e. keeps git's own registration order among itself. */
+fun worktreeDisplayOrder(trees: List<WorktreeEntry>): List<WorktreeEntry> =
+    trees.sortedWith(compareByDescending<WorktreeEntry> { it.isMain }.thenByDescending { it.createdAt })

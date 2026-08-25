@@ -1921,6 +1921,8 @@
     <string name="wt_seg_existing">已有分支</string>
     <string name="wt_seg_new">新建分支</string>
     <string name="wt_search_branches">搜索分支</string>
+    <string name="wt_created_title">Worktree 已创建</string>
+    <string name="wt_created_later">稍后</string>
     <string name="wt_branch_name">分支名</string>
     <string name="wt_branched_from">从 %1$s 分出 · 尚不存在</string>
     <string name="wt_in_use">已被占用 · %1$s</string>

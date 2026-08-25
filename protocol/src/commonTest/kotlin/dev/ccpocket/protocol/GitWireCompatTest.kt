@@ -182,6 +182,52 @@ class GitWireCompatTest {
         assertEquals(rm, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(rm)))
     }
 
+    /** The row shape a daemon that predates createdAt (#294 sort) would emit. */
+    @Serializable
+    private data class OldWorktreeEntry(
+        val path: String,
+        val branch: String? = null,
+        val head: String? = null,
+        val isMain: Boolean = false,
+    )
+
+    @Test
+    fun worktree_createdAt_and_add_result_path_are_trailing_optionals_both_directions() {
+        // NEW daemon → OLD phone: encodeDefaults emits createdAt on every row; an old-shaped peer
+        // class (no such field) still decodes the row thanks to ignoreUnknownKeys
+        val row = WorktreeEntry("/repo-worktrees/feat-x", branch = "feat/x", createdAt = 1_756_000_000_000)
+        val rowJson = PocketJson.encodeToString(row)
+        assertTrue("\"createdAt\":1756000000000" in rowJson, rowJson)
+        assertEquals("/repo-worktrees/feat-x", PocketJson.decodeFromString<OldWorktreeEntry>(rowJson).path)
+
+        // OLD daemon → NEW phone: absent key decodes to 0 = "keep git's order for this row"
+        val old = PocketJson.decodeFromString<WorktreeEntry>("""{"path":"/repo","isMain":true}""")
+        assertEquals(0L, old.createdAt)
+
+        // a successful add carries the created checkout, and round-trips through an Envelope
+        val add = Envelope(
+            id = "w5", ts = 0,
+            body = GitActionResult("c1", GIT_OP_WORKTREE_ADD, ok = true, path = "/repo-worktrees/feat-x"),
+        )
+        val addJson = PocketJson.encodeToString(add)
+        assertTrue("\"path\":\"/repo-worktrees/feat-x\"" in addJson, addJson)
+        assertEquals(add, PocketJson.decodeFromString<Envelope>(addJson))
+
+        // OLD daemon's result (no path key) → NEW phone: the receipt shows, the open-here verb doesn't
+        val oldResult = PocketJson.decodeFromString<GitActionResult>(
+            """{"convoId":"c1","op":"worktree.add","ok":true}""",
+        )
+        assertNull(oldResult.path)
+    }
+
+    @Test
+    fun a_non_add_action_result_is_byte_identical_to_the_pre_path_shape() {
+        // explicitNulls=false: null path is an ABSENT key, so every op except a successful worktree.add
+        // emits the exact frame an old daemon would — pinned here so encodeDefaults can never leak it
+        val push = PocketJson.encodeToString(GitActionResult("c1", GIT_OP_PUSH, ok = true))
+        assertFalse("\"path\":" in push, push)
+    }
+
     @Test
     fun directoryEntry_worktreeOf_is_a_trailing_optional_both_directions() {
         // an OLD daemon's row (no worktreeOf) decodes with the field null — plain local directory
