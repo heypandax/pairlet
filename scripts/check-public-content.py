@@ -106,11 +106,11 @@ EXPECTED_AGENTS = [
     ("deepseek", "DeepSeek Harness", "narrow v1", "有限 v1", ["yes", "yes", "no", "no"]),
 ]
 
-BASELINE_VERSION = "1.9.0"
-SOURCE_COMMIT = "ec957f2b"
+BASELINE_VERSION = "1.9.2"
+SOURCE_COMMIT = "387bc816"
 # Files that must state the baseline and must not carry the previous public version.
 BASELINE_TARGETS = ["README.md", "README.zh-CN.md", "site/index.html", "site/llms.txt"]
-PREVIOUS_VERSION = r"\b1\.8\.1\b"
+PREVIOUS_VERSION = r"\b1\.9\.0\b"
 
 # Release-asset name shapes that would imply an official Linux desktop build.
 LINUX_DESKTOP_ARTIFACTS = r"cc-pocket-desktop-linux|desktop-linux-(?:x86_64|amd64|arm64)|cc-pocket[-_]desktop[^\s\"'<>]*\.(?:AppImage|deb|rpm)"
@@ -286,7 +286,7 @@ def check_facts(sources: dict[str, str]) -> None:
             fail("baseline", f"{rel} never records the source commit {SOURCE_COMMIT}")
         stale = re.findall(PREVIOUS_VERSION, text)
         if stale:
-            fail("baseline", f"{rel} still carries the previous public version 1.7.7 ({len(stale)}x)")
+            fail("baseline", f"{rel} still carries the previous public version 1.9.0 ({len(stale)}x)")
 
     # OpenCode's limitation must be stated where it is claimed, not only in the contract.
     for rel in ("README.md", "site/index.html", "site/llms.txt"):

@@ -1,6 +1,6 @@
-What's new in 1.9.1 — Git, worktrees, rewind, and dsh answers
+What's new in 1.9.2 — live allowance, stronger Codex sessions, and worktree polish
 
-• Git panel: finish your review on the phone — status, stage, commit, push, pull and branch switching, with two-step confirms for anything destructive.
-• Worktrees: see every checkout of a repo, create one for a new or existing branch, and clean them up safely (live sessions are protected).
-• Rewind & fork: long-press one of your messages to retry it with different wording, or fork a parallel session from that point. Files are never rolled back — only the conversation.
-• dsh sessions: the agent's questions and permission requests now show up on the phone and can be answered there; unanswered requests time out safely instead of hanging the turn.
+• Claude plan allowance stays visible on phone and desktop, with 5-hour and 7-day usage, exact reset times, and a detailed refreshable view.
+• Codex sessions are found and resumed more reliably across macOS, Windows and Linux, with native fork, compact and review controls plus clearer failures instead of silent hangs.
+• Worktrees now show an explicit creation receipt, can open a session in the new checkout immediately, and keep the main checkout first with newer linked worktrees easy to find.
+• Pairing-day reconnects, duplicate resumed history, sheet gestures and bottom-edge controls are more stable and predictable.

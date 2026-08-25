@@ -8,7 +8,7 @@
 
 CC Pocket is an open-source, local-first control plane for command-line coding agents. The agent keeps running on your own machine, against your own checkout; from a phone, a tablet or another computer you watch it work, answer the permission prompts that block it, continue the same session, and read what it changed. Traffic is end-to-end encrypted and passes through a **zero-knowledge relay** that only ever forwards ciphertext — no CC Pocket account, no content logging. Clean-room Kotlin, MIT.
 
-**v1.9.0** drives six agent backends — Claude Code, OpenAI Codex, OpenCode, Kimi Code (Preview), ZCode and DeepSeek. They are not equivalent: see [the capability matrix](#agent-support) before you pick one.
+**v1.9.2** drives six agent backends — Claude Code, OpenAI Codex, OpenCode, Kimi Code (Preview), ZCode and DeepSeek. They are not equivalent: see [the capability matrix](#agent-support) before you pick one.
 
 **🌐 [Website](https://heypandax.github.io/cc-pocket/)** · **📖 [User manual](https://pocket.ark-nexus.cc/manual/en/)** · **💬 [Support, no sign-in](https://pocket.ark-nexus.cc/support/)** · **📦 [Latest release](https://github.com/heypandax/cc-pocket/releases/latest)**
 
@@ -44,7 +44,7 @@ Capability differs by backend — the matrix below is the source of truth.
 
 ## Agent support
 
-Public capability claims for **v1.9.0**, audited against commit [`ec957f2b`](https://github.com/heypandax/cc-pocket/commit/ec957f2b) on `main`. Machine-readable copy: [`site/public-capabilities.json`](site/public-capabilities.json).
+Public capability claims for **v1.9.2**, audited against commit [`387bc816`](https://github.com/heypandax/cc-pocket/commit/387bc816) on `main`. Machine-readable copy: [`site/public-capabilities.json`](site/public-capabilities.json).
 
 | Agent | Core session | Approval & mode | Changes & diff | Usage |
 |---|---|---|---|---|

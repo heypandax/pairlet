@@ -2,14 +2,14 @@
   "$comment": "Public capability contract for CC Pocket. The website, both READMEs and scripts/check-public-content.py all answer to this file. Serving the static site needs no build step — the HTML restates these facts inline and the checker proves the two agree.",
   "schemaVersion": 1,
   "baseline": {
-    "version": "1.9.0",
+    "version": "1.9.2",
     "status": "released",
     "statusLabel": { "en": "Current release", "zh": "当前版本" },
     "sourceRef": "main",
-    "sourceCommit": "ec957f2b",
+    "sourceCommit": "387bc816",
     "note": {
-      "en": "This is the public v1.9.0 capability baseline. Every capability claim below was audited against commit ec957f2b on main.",
-      "zh": "这是 v1.9.0 的公开能力基线。下面的每条能力都已对照 main 分支的 ec957f2b 提交核验。"
+      "en": "This is the public v1.9.2 capability baseline. Every capability claim below was audited against commit 387bc816 on main.",
+      "zh": "这是 v1.9.2 的公开能力基线。下面的每条能力都已对照 main 分支的 387bc816 提交核验。"
     }
   },
   "jobs": [
