@@ -224,6 +224,15 @@ class ClaudeBackend(
 
     override fun transcriptDir(workdir: String): Path = ProjectPaths.dirFor(workdir)
 
+    override fun transcriptPath(workdir: String, sessionId: String): Path? {
+        // sessionId is wire input interpolated into a filename — same guard as SessionFilesService
+        if (sessionId.contains('/') || sessionId.contains('\\') || sessionId.contains("..")) return null
+        return ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl")
+    }
+
+    override fun externalWriterProbe(workdir: String, transcript: Path) =
+        dev.ccpocket.daemon.disk.LiveProcesses.externalClaudeAt(workdir, transcript)
+
     override fun listSessions(workdir: String): List<SessionSummary> =
         TranscriptScanner.scan(ProjectPaths.dirFor(workdir)).map { it.copy(agent = AgentKind.CLAUDE) }
 
@@ -237,14 +246,20 @@ class ClaudeBackend(
     override fun replayPage(workdir: String, sessionId: String, beforeSeq: Long, limit: Int): dev.ccpocket.daemon.disk.ReplaySlice =
         TranscriptReplay.page(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"), beforeSeq, limit)
 
+    // All three resume seeds come from ONE memoized single-pass read (issue #303): Conversation.open
+    // calls them back-to-back, and resumeSeed's (path, mtime) memo turns what were three full-transcript
+    // parses into one. Field semantics are pinned equal to the old lastContextTokens/lastModel/summarize
+    // by ResumeSeedParityTest.
+    private fun seedFile(workdir: String, sessionId: String) = ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl")
+
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? =
-        TranscriptScanner.lastContextTokens(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
+        TranscriptScanner.resumeSeed(seedFile(workdir, sessionId))?.contextTokens
 
     override fun resumeModel(workdir: String, sessionId: String): String? =
-        TranscriptScanner.lastModel(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
+        TranscriptScanner.resumeSeed(seedFile(workdir, sessionId))?.model
 
     override fun resumeTitle(workdir: String, sessionId: String): String? =
-        TranscriptScanner.summarize(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))?.title
+        TranscriptScanner.resumeSeed(seedFile(workdir, sessionId))?.title
 
     // issue #96: read the configured default (settings.json `model` / $ANTHROPIC_MODEL) so a brand-new
     // session's header shows the real model before the first turn. configDir = the daemon's isolated

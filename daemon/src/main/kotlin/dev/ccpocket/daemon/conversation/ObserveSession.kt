@@ -44,6 +44,11 @@ class ObserveSession(
     // the appended delta instead of re-sending the whole 100-row window on every write (issue #147)
     private var sentCursor: Long? = sinceSeq?.takeIf { it > 0 }
 
+    // ONE dispatch point (issue #301): slice/page/state/title all route through the reader picked here,
+    // instead of four separately-maintained `when (agent)` blocks that had to stay consistent by hand.
+    // A future observable backend adds one Reader implementation and one factory arm.
+    private val reader: Reader = Reader.forAgent(agent)
+
     fun start() {
         scope.launch {
             runCatching {
@@ -53,10 +58,7 @@ class ObserveSession(
                     if (mtime != lastMtime) {
                         lastMtime = mtime
                         emitLive() // model/window/occupancy move as the observed terminal writes turns
-                        val slice = when (agent) {
-                            AgentKind.CODEX -> CodexTranscriptReplay.slice(file, sinceSeq = sentCursor)
-                            else -> TranscriptReplay.slice(file, sinceSeq = sentCursor)
-                        }
+                        val slice = reader.slice(file, sentCursor)
                         // an empty DELTA = the client is already caught up (noise-only appends) — nothing
                         // to send. An empty FULL still goes out: that's today's "file gone/empty" wipe.
                         if (slice.messages.isNotEmpty() || !slice.delta) {
@@ -80,10 +82,7 @@ class ObserveSession(
 
     /** Older-history page for an observed session (issue #147) — same shape as Conversation's. */
     suspend fun fetchHistoryPage(beforeSeq: Long, limit: Int, to: OutboundSink) {
-        val slice = when (agent) {
-            AgentKind.CODEX -> CodexTranscriptReplay.page(file, beforeSeq, limit.coerceIn(1, 200))
-            else -> TranscriptReplay.page(file, beforeSeq, limit.coerceIn(1, 200))
-        }
+        val slice = reader.page(file, beforeSeq, limit.coerceIn(1, 200))
         to.emit(dev.ccpocket.protocol.ConvoHistoryPage(convoId, slice.messages, firstSeq = slice.firstSeq, hasMore = slice.hasMore))
     }
 
@@ -91,18 +90,14 @@ class ObserveSession(
      *  model, its usage as occupancy, and the window derived the same way live sessions derive it —
      *  including the observed-usage upgrade for beta-gated 1M models (occupancy > 200k proves 1M). */
     private suspend fun emitLive() {
-        val codex = if (agent == AgentKind.CODEX) runCatching { CodexTranscriptScanner.runtimeState(file) }.getOrNull() else null
+        val state = reader.state(file)
         val title = titleFor(runCatching { file.getLastModifiedTime().toMillis() }.getOrDefault(-1L))
-        val model = codex?.model
-            ?: if (agent == AgentKind.CLAUDE) runCatching { TranscriptScanner.lastModel(file) }.getOrNull() else null
-        val used = codex?.contextUsed
-            ?: if (agent == AgentKind.CLAUDE) runCatching { TranscriptScanner.lastContextTokens(file) }.getOrNull() else null
-        val declaredWindow = codex?.contextWindow ?: model?.let(::contextWindowFor)
-        val window = dev.ccpocket.protocol.provenWindow(declaredWindow, used)
+        val declaredWindow = state.contextWindow ?: state.model?.let(::contextWindowFor)
+        val window = dev.ccpocket.protocol.provenWindow(declaredWindow, state.contextUsed)
         sink.emit(
             SessionLive(
                 convoId, workdir, sessionId, observing = true,
-                model = model, contextWindow = window, contextUsed = used, agent = agent, title = title,
+                model = state.model, contextWindow = window, contextUsed = state.contextUsed, agent = agent, title = title,
             ),
         )
     }
@@ -111,21 +106,64 @@ class ObserveSession(
      * The observed transcript's title, memoized by the file's mtime (PR #296 review). Deriving it re-reads
      * the transcript — a Codex thread with no index title falls all the way back to a full `summarize` — and
      * an announce for an unchanged file must not pay for that twice. Confined to this instance and to the
-     * single tail coroutine, so no locking: the Claude branch's shared [TranscriptScanner] is deliberately
-     * left alone (far wider blast radius than one observer's title).
+     * single tail coroutine, so no locking.
      */
     private var titleMemo: Pair<Long, String?>? = null
 
     private fun titleFor(mtime: Long): String? {
         titleMemo?.let { if (it.first == mtime) return it.second }
-        val title = when (agent) {
-            AgentKind.CODEX -> CodexTranscriptScanner.threadNames()[sessionId]?.takeIf { it.isNotBlank() }
-                ?: runCatching { CodexTranscriptScanner.summarize(file, workdir)?.title }.getOrNull()
-            AgentKind.CLAUDE -> runCatching { TranscriptScanner.summarize(file)?.title }.getOrNull()
-            else -> null // OpenCode/Kimi/ZCode/DSH sessions are never opened through ObserveSession.
-        }
+        val title = reader.title(file, workdir, sessionId)
         titleMemo = mtime to title
         return title
+    }
+
+    /** What one observable backend knows how to read off its transcript file. */
+    internal data class ObservedState(val model: String?, val contextUsed: Long?, val contextWindow: Long?)
+
+    internal interface Reader {
+        fun slice(file: Path, sinceSeq: Long?): dev.ccpocket.daemon.disk.ReplaySlice
+        fun page(file: Path, beforeSeq: Long, limit: Int): dev.ccpocket.daemon.disk.ReplaySlice
+        fun state(file: Path): ObservedState
+        fun title(file: Path, workdir: String, sessionId: String): String?
+
+        companion object {
+            fun forAgent(agent: AgentKind): Reader = when (agent) {
+                AgentKind.CODEX -> CodexReader
+                AgentKind.CLAUDE -> ClaudeReader
+                else -> InertReader // no per-session file → never admitted to observe (SessionRegistry)
+            }
+        }
+    }
+
+    private object CodexReader : Reader {
+        override fun slice(file: Path, sinceSeq: Long?) = CodexTranscriptReplay.slice(file, sinceSeq = sinceSeq)
+        override fun page(file: Path, beforeSeq: Long, limit: Int) = CodexTranscriptReplay.page(file, beforeSeq, limit)
+        override fun state(file: Path): ObservedState {
+            val rt = runCatching { CodexTranscriptScanner.runtimeState(file) }.getOrNull()
+            return ObservedState(rt?.model, rt?.contextUsed, rt?.contextWindow)
+        }
+        override fun title(file: Path, workdir: String, sessionId: String): String? =
+            CodexTranscriptScanner.threadNames()[sessionId]?.takeIf { it.isNotBlank() }
+                ?: runCatching { CodexTranscriptScanner.summarize(file, workdir)?.title }.getOrNull()
+    }
+
+    private object ClaudeReader : Reader {
+        override fun slice(file: Path, sinceSeq: Long?) = TranscriptReplay.slice(file, sinceSeq = sinceSeq)
+        override fun page(file: Path, beforeSeq: Long, limit: Int) = TranscriptReplay.page(file, beforeSeq, limit)
+        override fun state(file: Path) = ObservedState(
+            model = runCatching { TranscriptScanner.lastModel(file) }.getOrNull(),
+            contextUsed = runCatching { TranscriptScanner.lastContextTokens(file) }.getOrNull(),
+            contextWindow = null, // derived from the model by the caller
+        )
+        override fun title(file: Path, workdir: String, sessionId: String): String? =
+            runCatching { TranscriptScanner.summarize(file)?.title }.getOrNull()
+    }
+
+    private object InertReader : Reader {
+        override fun slice(file: Path, sinceSeq: Long?) = dev.ccpocket.daemon.disk.ReplaySlice.EMPTY
+        override fun page(file: Path, beforeSeq: Long, limit: Int) = dev.ccpocket.daemon.disk.ReplaySlice.EMPTY
+        override fun state(file: Path) = ObservedState(null, null, null)
+        override fun title(file: Path, workdir: String, sessionId: String): String? = null
     }
 
     /** True while this observer still streams to [s] — key identity, like Conversation.isAttachedTo:

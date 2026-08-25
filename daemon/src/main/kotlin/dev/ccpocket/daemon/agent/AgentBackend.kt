@@ -41,12 +41,26 @@ interface AgentBackend {
     /** Encode + write an interrupt for the in-flight turn; no-op if the process isn't ready. */
     suspend fun interrupt()
 
+    /** True routes /compact to [compact] as a control-plane op; false lets the slash token pass through
+     *  to the agent as an ordinary prompt (Claude's prompt-backed builtin). This is the ONE switch —
+     *  Conversation must not re-derive it from [kind] (issue #301: the kind-gate made the capability
+     *  unreachable for every future backend and its fallback replies dead code). */
+    val supportsNativeCompact: Boolean get() = false
+
+    /** /review counterpart of [supportsNativeCompact]. */
+    val supportsNativeReview: Boolean get() = false
+
     /** Compact the backend's native conversation context. True means the request was accepted (it may
      * complete asynchronously); false means this backend has no native compaction API. */
     suspend fun compact(): Boolean = false
 
     /** Start the backend's native code-review flow. Null/blank means review all uncommitted changes. */
     suspend fun review(instructions: String? = null): Boolean = false
+
+    /** Rewrite a slash prompt this backend's CLI wouldn't understand into something it does (Codex:
+     *  /simplify → an explicit task). Identity by default. Conversation applies it at the prompt
+     *  boundary so the transport layer ([sendPrompt]) stays string-matching-free (issue #301). */
+    fun expandSlashPrompt(text: String): String = text
 
     /** Ask the LIVE agent process to rename its session (issue #158) — Claude: a `rename_session`
      *  control_request; the CLI appends its own `custom-title` record and acks, so the daemon never
@@ -99,6 +113,28 @@ interface AgentBackend {
 
     /** The on-disk transcript directory for [workdir] (Claude: ~/.claude/projects/<key>; Codex: ~/.codex/sessions). */
     fun transcriptDir(workdir: String): Path
+
+    /**
+     * The durable transcript FILE for [sessionId], or null when this backend keeps no per-session file
+     * the daemon may read (SQLite stores, unverified formats). Non-null is the capability that admits a
+     * session to read-only observe, the external-writer safety checks, and stale-agent correction —
+     * SessionRegistry derives all three from THIS instead of naming kinds (issue #301). Implementations
+     * must treat [sessionId] as wire input: reject separators/dot-dot before building a path from it.
+     */
+    fun transcriptPath(workdir: String, sessionId: String): Path? = null
+
+    /**
+     * Probe whether a process OUTSIDE the daemon currently owns [transcript] (see LiveProcesses).
+     * UNKNOWN is the safe default: callers treat "can't tell" as "assume held" where a wrong ABSENT
+     * would mint a second writer. Backends with no external-CLI story never reach the gate anyway
+     * (their [transcriptPath] is null).
+     */
+    fun externalWriterProbe(workdir: String, transcript: Path): dev.ccpocket.daemon.disk.LiveProcesses.ExternalClaude =
+        dev.ccpocket.daemon.disk.LiveProcesses.ExternalClaude.UNKNOWN
+
+    /** True when this backend's CLI holds its transcript fd even while idle (Codex): the registry must
+     *  then run [externalWriterProbe] BEFORE any mtime-freshness shortcut — an idle holder's file is old. */
+    val holdsTranscriptWhileIdle: Boolean get() = false
 
     /** Resumable sessions for [workdir], newest first (reads transcript headers; no process launch). */
     fun listSessions(workdir: String): List<SessionSummary>

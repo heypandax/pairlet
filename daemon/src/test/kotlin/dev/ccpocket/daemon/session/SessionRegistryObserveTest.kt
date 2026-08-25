@@ -49,7 +49,14 @@ class SessionRegistryObserveReapTest {
 
     @Test
     fun reopen_same_client_reaps_the_stale_observer_but_not_other_clients() = runBlocking {
-        val registry = SessionRegistry(scope, backends = emptyMap(), processProbe = { _, _ -> LiveProcesses.ExternalClaude.PRESENT })
+        val registry = SessionRegistry(
+            scope,
+            backends = emptyMap(),
+            processProbe = { _, _ -> LiveProcesses.ExternalClaude.PRESENT },
+            // the default resolver now derives from registered backends (issue #301); this test's subject
+            // is observer reaping, so pin the Claude path shape directly
+            transcriptResolver = { _, wd, s -> ProjectPaths.dirFor(wd).resolve("$s.jsonl") },
+        )
         // a fresh transcript written AFTER the registry booted → externallyActive gate passes (probe stubbed PRESENT)
         Files.createDirectories(projectDir)
         val transcript = Files.writeString(projectDir.resolve("$sid.jsonl"), "{}")

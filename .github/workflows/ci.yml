@@ -61,3 +61,21 @@ jobs:
           name: test-reports
           path: '**/build/reports/tests/**'
           retention-days: 7
+
+  # issue #302: the Windows external-writer cwd probe (ProcessCwd's PEB walk) is a BLIND port — no
+  # Windows machine was available while writing it. This job runs the daemon's Windows-only tests on a
+  # real windows-latest runner so the PEB offsets self-verify (ProcessCwd.selfCheck reads THIS process's
+  # cwd and compares user.dir). A red here is the "user feedback" loop, mechanized: it means the blind
+  # offsets are wrong and the fallback must stay UNKNOWN. Non-blocking on the required `test` job.
+  windows-cwd-probe:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - name: Daemon Windows cwd-probe self-check
+        run: ./gradlew --no-daemon :daemon:test --tests "*WinCwd*"

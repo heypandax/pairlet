@@ -99,6 +99,64 @@ class CodexScanCacheTest {
         assertEquals("gpt-5.6-mini", CodexTranscriptScanner.runtimeState(f).model)
     }
 
+    @Test
+    fun one_read_answers_both_the_summary_and_the_runtime_state() {
+        // issue #300: the summary parse merges the runtime state on every line anyway, so asking for the
+        // model/context after summarizing must not cost a second full parse of a megabyte-sized rollout.
+        val f = tmp.resolve("rollout-2026-08-25T00-00-03-thr-memo.jsonl")
+        write(f, rollout("first prompt", "gpt-5.6-sol"), stamp)
+
+        val summary = CodexTranscriptScanner.summarize(f, "/repo", emptyMap())!!
+        assertEquals("gpt-5.6-sol", summary.model)
+
+        // Same handle as everywhere else here: changed bytes under a pinned mtime are invisible to a MEMO
+        // and glaringly visible to a re-read. A second parse would report gpt-5.6-mini.
+        write(f, rollout("first prompt", "gpt-5.6-mini"), stamp)
+        assertEquals(
+            "gpt-5.6-sol",
+            CodexTranscriptScanner.runtimeState(f).model,
+            "runtimeState after summarize is answered by that same scan, never by a second read",
+        )
+    }
+
+    @Test
+    fun the_shared_scan_works_in_either_order() {
+        // the observe tick asks for runtime first, a session listing asks for the summary first — one cache
+        val f = tmp.resolve("rollout-2026-08-25T00-00-04-thr-memo.jsonl")
+        write(f, rollout("first prompt", "gpt-5.6-sol"), stamp)
+
+        assertEquals("gpt-5.6-sol", CodexTranscriptScanner.runtimeState(f).model)
+
+        write(f, rollout("second prompt", "gpt-5.6-sol"), stamp)
+        assertEquals(
+            "first prompt",
+            CodexTranscriptScanner.summarize(f, "/repo", emptyMap())?.firstPrompt,
+            "summarize after runtimeState reuses that scan's parse instead of reading again",
+        )
+    }
+
+    @Test
+    fun runtimeState_still_reads_a_rollout_that_has_no_session_meta_header() {
+        // A header-less rollout has no summary at all, but its turn_context/token_count lines are still the
+        // truth about the model and context in use — merging the two caches must not lose that, and the
+        // FIRST line (which the summary path spends on the header) has to be merged too.
+        val f = tmp.resolve("rollout-2026-08-25T00-00-05-thr-nometa.jsonl")
+        write(
+            f,
+            """
+            {"timestamp":"t0","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}
+            {"timestamp":"t1","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":4242},"model_context_window":258400}}}
+            """.trimIndent(),
+            stamp,
+        )
+
+        val state = CodexTranscriptScanner.runtimeState(f)
+        assertEquals("gpt-5.6-sol", state.model, "the first line counts when it isn't a session_meta")
+        assertEquals(4242L, state.contextUsed)
+        assertEquals(258_400L, state.contextWindow)
+        assertNull(CodexTranscriptScanner.summarize(f, "/repo", emptyMap()), "no header → no summary, cached or not")
+    }
+
     // ---- CodexPaths: directory listings + id index -------------------------------------------------
 
     /** `sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl`, the real on-disk layout. */
