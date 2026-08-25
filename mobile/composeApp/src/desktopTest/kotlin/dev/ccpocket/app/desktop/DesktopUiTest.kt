@@ -645,12 +645,12 @@ class DesktopUiTest {
         // option (issue #204), so the bare text is ambiguous — target the agent card explicitly
         onNodeWithTag("agent-card-CODEX").performScrollTo().performClick()
         waitForIdle()
-        assertPresent("GPT 5.1 Codex")
+        assertPresent("gpt-5.6-sol")
         assertTrue(!present("Fable"), "Codex must not show Claude model choices")
-        onAllNodes(hasText("GPT 5.1 Codex")).onFirst().performScrollTo().performClick()
+        onAllNodes(hasText("gpt-5.6-sol")).onFirst().performScrollTo().performClick()
         waitForIdle()
 
-        assertEquals("gpt-5.1-codex", model.defaultModelFor(AgentKind.CODEX))
+        assertEquals("gpt-5.6-sol", model.defaultModelFor(AgentKind.CODEX))
         assertEquals("opus", model.defaultModelFor(AgentKind.CLAUDE), "each agent keeps its own default")
     }
 

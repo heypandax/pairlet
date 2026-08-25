@@ -389,7 +389,9 @@ fun QuickActionsSheet(
                                 // more thing crowding the top bar for a setting touched a few times per session)
                                 ActionRow(
                                     stringResource(Res.string.label_mode),
-                                    value = stringResource(
+                                    value = if (repo.sessionAgent.value == AgentKind.CODEX) {
+                                        stringResource(sessionDefaultsLabel(AgentKind.CODEX, repo.mode.value))
+                                    } else stringResource(
                                         if (repo.permissionMode.value == CLAUDE_PERMISSION_MODE_AUTO) AUTO_MODE.short
                                         else MODE_BY[repo.mode.value]?.short ?: MODES[0].short,
                                     ),

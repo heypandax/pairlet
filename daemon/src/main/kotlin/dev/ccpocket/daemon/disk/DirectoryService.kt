@@ -29,6 +29,9 @@ class DirectoryService(
     private val zcodeCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.zcode.ZCodeTranscriptScanner.cwdsByNewest() },
     private val dshCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.dsh.DshTranscriptScanner.cwdsByNewest() },
     private val liveClaudeCwds: () -> Set<String> = LiveProcesses::claudeCwds,
+    private val liveCodexCwds: () -> Set<String> = LiveProcesses::codexCwds,
+    private val activeCodexSessions: (Set<String>) -> Map<String, dev.ccpocket.protocol.SessionSummary> =
+        dev.ccpocket.daemon.codex.CodexTranscriptScanner::activeSummaries,
     private val nowMillis: () -> Long = System::currentTimeMillis,
     // issue #290 test seam: tests create their fixture workdirs UNDER the real system temp, so they pin
     // this to emptyList() to opt out of the noise filter; production uses the machine's temp roots.
@@ -78,17 +81,65 @@ class DirectoryService(
     ): List<DirectoryEntry> {
         // canonical-keyed so ANY spelling mismatch (tilde, symlink, separators) between OpenSession's
         // workdir and a transcript's recorded cwd still matches
-        val liveNorm = liveByCwd.entries.groupBy({ ProjectPaths.canonicalKey(it.key) }, { it.value }).mapValues { (_, v) -> v.flatten() }
-        // SessionRegistry keys background work by its canonical OpenSession path, while transcript/index
-        // sources may retain a symlink spelling. Busy is project identity, so normalize it at the same merge
-        // boundary as live sessions; otherwise ActiveSession.busy=true can coexist with a false project scalar.
-        val busyNorm = busyCwds.mapTo(HashSet()) { ProjectPaths.canonicalKey(it) }
-        val claude = claudeDirectories(busyNorm, liveNorm)
         val codex = runCatching(codexCwds).getOrDefault(emptyMap())
         val opencode = if (includeOpencode) runCatching(opencodeCwds).getOrDefault(emptyMap()) else emptyMap()
         val kimi = if (includeKimi) runCatching(kimiCwds).getOrDefault(emptyMap()) else emptyMap()
         val zcode = if (includeZcode) runCatching(zcodeCwds).getOrDefault(emptyMap()) else emptyMap()
         val dsh = if (includeDsh) runCatching(dshCwds).getOrDefault(emptyMap()) else emptyMap()
+        val daemonLive = liveByCwd.entries
+            .groupBy({ ProjectPaths.canonicalKey(it.key) }, { it.value })
+            .mapValues { (_, v) -> v.flatten() }
+        // A Codex CLI launched from Terminal/Codex Desktop is outside SessionRegistry, so enrich the
+        // project list from its process cwd and the newest rollout for that cwd. Process presence means
+        // `open`; transcript freshness only decides `executing`. The daemon-owned row wins on a duplicate
+        // session id because it has exact turn state, while this external probe is necessarily heuristic.
+        val codexTranscriptKeys = codex.keys.mapTo(HashSet()) { ProjectPaths.canonicalKey(it) }
+        val externalCodexCwds = runCatching { liveCodexCwds() }.getOrDefault(emptySet())
+            .filterTo(linkedSetOf()) { cwd -> ProjectPaths.canonicalKey(cwd) in codexTranscriptKeys }
+        // A daemon-owned Codex process is already authoritative proof that this session is live. Include
+        // those workdirs even when no separate Terminal/Codex Desktop process exists; otherwise the
+        // transcript probe never runs and the exact daemon row keeps its intentionally-null title.
+        val daemonCodexCwds = liveByCwd.entries
+            .filterTo(linkedSetOf()) { (_, sessions) -> sessions.any { it.agent == AgentKind.CODEX } }
+            .mapTo(linkedSetOf()) { it.key }
+        val codexTitleCwds = externalCodexCwds + daemonCodexCwds
+        val externalCodexLive = runCatching { activeCodexSessions(codexTitleCwds) }.getOrDefault(emptyMap())
+            .map { (cwd, session) ->
+                ProjectPaths.canonicalKey(cwd) to ActiveSession(
+                    sessionId = session.sessionId,
+                    // A rollout with no user turn yet (terminal sitting at a fresh `codex` prompt) now
+                    // answers for its cwd instead of letting a stale older rollout do it (PR #296 review),
+                    // and it has no title to offer. Null, not "": ActiveSession.title is the app's "no
+                    // title known" signal, and an empty string would render as an empty row label.
+                    title = session.title.takeIf { it.isNotBlank() },
+                    executing = session.live,
+                    gitBranch = session.gitBranch,
+                    agent = AgentKind.CODEX,
+                )
+            }
+            .groupBy({ it.first }, { it.second })
+        val liveNorm = (daemonLive.keys + externalCodexLive.keys).associateWith { key ->
+            val external = externalCodexLive[key].orEmpty()
+            val externalById = external.associateBy { it.sessionId }
+            // Keep the daemon's exact execution/busy/origin state, but fill its deliberately-null
+            // presentation metadata from the transcript probe. A plain distinctBy kept the daemon row
+            // whole and discarded the duplicate probe row, so tapping a live Codex project opened the
+            // correct session with a null title and the phone rendered its generic "Chat" fallback.
+            val authoritative = daemonLive[key].orEmpty().map { live ->
+                val transcript = externalById[live.sessionId]
+                live.copy(
+                    title = live.title ?: transcript?.title,
+                    gitBranch = live.gitBranch ?: transcript?.gitBranch,
+                )
+            }
+            (authoritative + external.filterNot { probe -> authoritative.any { it.sessionId == probe.sessionId } })
+                .sortedByDescending { it.executing }
+        }
+        // SessionRegistry keys background work by its canonical OpenSession path, while transcript/index
+        // sources may retain a symlink spelling. Busy is project identity, so normalize it at the same merge
+        // boundary as live sessions; otherwise ActiveSession.busy=true can coexist with a false project scalar.
+        val busyNorm = busyCwds.mapTo(HashSet()) { ProjectPaths.canonicalKey(it) }
+        val claude = claudeDirectories(busyNorm, liveNorm)
         // issue #290: programmatic one-shot sessions (a dsh plugin driving OpenCode per image, …) leave
         // dozens of throwaway cwds under the system temp dir and drown the project list. Hide temp rows
         // unless something keeps them relevant — a live/busy conversation, or the user having opened the

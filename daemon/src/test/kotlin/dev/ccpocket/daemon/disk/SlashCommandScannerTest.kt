@@ -100,6 +100,9 @@ class SlashCommandScannerTest {
         val cmds = SlashCommandScanner.scan(work, home, agent = AgentKind.CODEX)
 
         assertTrue(cmds.none { it.name == "claude-command" || it.name == "claude-skill" })
+        assertTrue(cmds.any { it.name == "compact" })
+        assertTrue(cmds.any { it.name == "clear" })
+        assertTrue(cmds.none { it.name == "init" || it.name == "deep-research" || it.name == "fewer-permission-prompts" })
         assertEquals("user codex", cmds.single { it.name == "user-codex" }.description)
         assertEquals("project codex", cmds.single { it.name == "project-codex" }.description)
     }

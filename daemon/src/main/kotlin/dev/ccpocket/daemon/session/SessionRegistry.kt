@@ -10,6 +10,7 @@ import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.conversation.PromptFate
 import dev.ccpocket.daemon.conversation.PushHook
 import dev.ccpocket.daemon.conversation.sinkKey
+import dev.ccpocket.daemon.codex.CodexPaths
 import dev.ccpocket.daemon.disk.LiveProcesses
 import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.disk.SessionGroups
@@ -58,6 +59,23 @@ class SessionRegistry(
     // decision matrix is unit-testable; the real probe shells out to lsof (LiveProcesses.externalClaudeAt)
     private val processProbe: (workdir: String, transcript: Path) -> LiveProcesses.ExternalClaude =
         LiveProcesses::externalClaudeAt,
+    // Codex equivalent of [processProbe]. Kept separate so the existing Claude decision-matrix tests and
+    // call sites stay source-compatible while Codex gets the same observe/take-over safety semantics.
+    private val codexProcessProbe: (workdir: String, transcript: Path) -> LiveProcesses.ExternalClaude =
+        LiveProcesses::externalCodexAt,
+    // Resolve an agent's durable transcript. Injectable so Codex observe tests use a temp rollout rather
+    // than the developer's real ~/.codex tree.
+    private val transcriptResolver: (agent: AgentKind, workdir: String, sessionId: String) -> Path? = { agent, workdir, sessionId ->
+        // sessionId arrives on the wire (OpenSession.resumeId, including guest/collaborator opens) and is
+        // interpolated into a filename — forbid separators/dot-dot exactly like SessionFilesService.transcriptFor,
+        // or a crafted id escapes the project dir (existence/mtime probing at minimum).
+        if (sessionId.contains('/') || sessionId.contains('\\') || sessionId.contains("..")) null
+        else when (agent) {
+            AgentKind.CLAUDE -> ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl")
+            AgentKind.CODEX -> CodexPaths.findSession(sessionId)
+            else -> null
+        }
+    },
     // Claude transcript root — injectable ONLY so [renameSession]'s disk write is unit-testable against
     // a temp dir instead of the user's real ~/.claude/projects (every other path resolves via the
     // backends / ProjectPaths directly, same default)
@@ -123,9 +141,36 @@ class SessionRegistry(
      *  leaves a fresh mtime for up to 20s — trusting it blindly forked take-overs and demoted plain opens
      *  to read-only observe against a writer that no longer exists (the main "mystery fork" source).
      *  Internal (not private) so the decision matrix is unit-testable with a stubbed [processProbe]. */
-    internal suspend fun externallyActive(sessionId: String, workdir: String, file: Path): Boolean {
+    internal suspend fun externallyActive(
+        sessionId: String,
+        workdir: String,
+        file: Path,
+        agent: AgentKind = AgentKind.CLAUDE,
+    ): Boolean {
         // one stat serves both the freshness gate and the ownership checks below
         val mtime = runCatching { if (file.exists()) file.getLastModifiedTime().toMillis() else null }.getOrNull() ?: return false
+        // Codex keeps the exact active rollout open while idle. Probe before the generic freshness and
+        // restart-amnesia gates so an hours-old but still-owned rollout remains read-only. The production
+        // Codex probe only permits cwd matching for fresh rollouts, so this cannot promote unrelated old
+        // sessions from the same project.
+        val earlyCodexProbe = if (agent == AgentKind.CODEX) {
+            runCatching { withContext(Dispatchers.IO) { codexProcessProbe(workdir, file) } }
+                .getOrDefault(LiveProcesses.ExternalClaude.UNKNOWN)
+        } else null
+        if (earlyCodexProbe == LiveProcesses.ExternalClaude.PRESENT) {
+            log.info("externallyActive(${sessionId.take(8)}…): Codex holds exact rollout → true")
+            return true
+        }
+        if (earlyCodexProbe == LiveProcesses.ExternalClaude.UNKNOWN) {
+            // UNKNOWN from the Codex probe means external codex processes EXIST but rollout ownership could
+            // not be verified (lsof failure/timeout, or Windows where fd probing is impossible — "no codex
+            // at all" reports ABSENT, not UNKNOWN). An idle holder keeps an OLD mtime, so the freshness gate
+            // below would answer false — the exact wrong direction for the one backend with no session lock
+            // (a silent double-writer, probed on codex app-server). Take the safe verdict instead: observe /
+            // fork-on-take-over. A spurious fork is recoverable; a clobbered rollout is not (PR #296 review).
+            log.info("externallyActive(${sessionId.take(8)}…): Codex rollout ownership unverifiable → assume held")
+            return true
+        }
         if (System.currentTimeMillis() - mtime >= TranscriptScanner.LIVE_WINDOW_MS) return false
         // Restart amnesia: a write that predates this daemon's boot came from our PREVIOUS instance's own
         // claude (children die with the daemon, and the restart wiped [selfClosed], which would otherwise
@@ -143,7 +188,7 @@ class SessionRegistry(
         // OS. Only reached on a fresh foreign-looking mtime, so the lsof cost stays off every ordinary open.
         // UNKNOWN (Windows / lsof failure / timeout) keeps the old mtime verdict: a wrongly forked session
         // is recoverable, two writers clobbering one transcript is not.
-        val probe = runCatching { withContext(Dispatchers.IO) { processProbe(workdir, file) } }
+        val probe = earlyCodexProbe ?: runCatching { withContext(Dispatchers.IO) { processProbe(workdir, file) } }
             .getOrDefault(LiveProcesses.ExternalClaude.UNKNOWN)
         val verdict = probe != LiveProcesses.ExternalClaude.ABSENT
         log.info(
@@ -300,6 +345,15 @@ class SessionRegistry(
         announcedWorkdir: String? = null,
     ): String {
         val resume = open.resumeId
+        // A resume id is the durable backend identity. Older Apps did not send `agent`, and a newer App
+        // can still carry a stale per-session guess persisted before Codex support. Trust the transcript
+        // that actually owns the id when the requested backend has no such transcript. Without this
+        // correction a Codex rollout is opened by the Claude backend, so both the badge and replay are
+        // wrong (Claude's scanner quite correctly finds no history in a Codex JSONL).
+        val effectiveAgent = resume?.let { resolveResumeAgent(open.agent, open.workdir, it) } ?: open.agent
+        if (effectiveAgent != open.agent) {
+            log.info("open ${resume?.take(8)}…: corrected stale agent ${open.agent} → $effectiveAgent from transcript")
+        }
         // §3.3 INITIATOR AUTO-SPECTATE: the clients streaming from a conversation the handoff rebuild is
         // about to close, moved onto the rebuilt one below so the owner keeps watching without re-opening.
         var spectators: List<OutboundSink> = emptyList()
@@ -410,13 +464,13 @@ class SessionRegistry(
                 log.info("open ${resume.take(8)}… → live candidate ${attach.convoId.take(8)}… expired before reattach claim; resuming cold")
                 live = null
             }
-            // observe a Claude session running OUTSIDE the daemon (e.g. a terminal) — read-only, no spawn.
-            // Claude-transcript specific; Codex resume falls through to a controlled thread/resume below.
+            // Observe a Claude/Codex session running OUTSIDE the daemon (e.g. a terminal) — read-only,
+            // no second writer. Each backend supplies its own transcript resolver/replay and process probe.
             // externallyActive requires a LIVE external process, not just a fresh mtime — a terminal claude
             // the user quit seconds ago falls through to an ordinary in-place resume, not read-only observe.
-            if (open.agent == AgentKind.CLAUDE && !open.takeOver) {
-                val file = ProjectPaths.dirFor(open.workdir).resolve("$resume.jsonl")
-                val recent = externallyActive(resume, open.workdir, file)
+            if (effectiveAgent in setOf(AgentKind.CLAUDE, AgentKind.CODEX) && !open.takeOver) {
+                val file = transcriptResolver(effectiveAgent, open.workdir, resume)
+                val recent = file != null && externallyActive(resume, open.workdir, file, effectiveAgent)
                 if (recent) {
                     // a bridge gets a clean refusal instead of a read-only ObserveSession: observes have
                     // no prompt path, and a headless adapter can't render "someone else is driving this"
@@ -440,7 +494,10 @@ class SessionRegistry(
                     }
                     val convoId = UUID.randomUUID().toString()
                     log.info("open ${resume.take(8)}… → OBSERVE ${convoId.take(8)}… (live foreign writer)")
-                    val obs = ObserveSession(convoId, open.workdir, resume, file, sink, scope, sinceSeq = open.lastEventSeq)
+                    val obs = ObserveSession(
+                        convoId, open.workdir, resume, file!!, sink, scope,
+                        agent = effectiveAgent, sinceSeq = open.lastEventSeq,
+                    )
                     mutex.withLock { observes[convoId] = obs }
                     obs.start()
                     return convoId
@@ -448,9 +505,9 @@ class SessionRegistry(
             }
         }
         // resume + control: an idle session, or an explicit "Continue here" take-over
-        val factory = backends[open.agent]
+        val factory = backends[effectiveAgent]
         if (factory == null) {
-            sink.emit(PocketError("agent_unavailable", "no backend registered for ${open.agent}"))
+            sink.emit(PocketError("agent_unavailable", "no backend registered for $effectiveAgent"))
             return ""
         }
         // create() is cheap + never throws (the binary resolves lazily on first launch); the real "CLI not
@@ -473,11 +530,12 @@ class SessionRegistry(
         // forks). Otherwise resume IN PLACE on the same sessionId: the phone truly takes over (issue #18 — no
         // duplicate session) and the desktop picks up the phone's turns on its next --resume (issue #22 — sync).
         // Ordinary cold/idle resume already appends in place. Same detector as the ObserveSession guard above.
-        val forkForTakeOver = open.takeOver && resume != null &&
-            externallyActive(resume, open.workdir, ProjectPaths.dirFor(open.workdir).resolve("$resume.jsonl"))
+        val takeOverTranscript = resume?.let { transcriptResolver(effectiveAgent, open.workdir, it) }
+        val forkForTakeOver = open.takeOver && resume != null && takeOverTranscript != null &&
+            externallyActive(resume, open.workdir, takeOverTranscript, effectiveAgent)
         log.info(
             "open ${resume?.take(8) ?: "new"}${if (open.takeOver) " (take-over)" else ""} → " +
-                "convo ${convoId.take(8)}… agent=${open.agent}${if (forkForTakeOver) " FORK" else ""}",
+                "convo ${convoId.take(8)}… agent=$effectiveAgent${if (forkForTakeOver) " FORK" else ""}",
         )
         // takeOver → Conversation.open spawns EAGERLY (seize the session now); a plain open starts lazily on the
         // first prompt (issue #61) so merely previewing a session never holds/occupies it for the desktop.
@@ -496,7 +554,7 @@ class SessionRegistry(
         if (started.isFailure) {
             mutex.withLock { convos.remove(convoId) }
             runCatching { c.close() }
-            sink.emit(PocketError("agent_unavailable", "${open.agent} CLI not found — is it installed? (${started.exceptionOrNull()?.message})"))
+            sink.emit(PocketError("agent_unavailable", "$effectiveAgent CLI not found — is it installed? (${started.exceptionOrNull()?.message})"))
             return ""
         }
         // §3.3 INITIATOR AUTO-SPECTATE (the other half of the hot→cold rebuild above): move the closed
@@ -511,6 +569,19 @@ class SessionRegistry(
         }
         if (spectators.isNotEmpty()) log.info("handoff rebuild: migrated ${spectators.size} spectator view(s) onto ${convoId.take(8)}…")
         return convoId
+    }
+
+    /** Resolve a stale/missing wire agent from the durable transcript id. A positive requested-agent
+     *  match always wins; only a missing transcript permits the unambiguous Claude↔Codex correction. */
+    private fun resolveResumeAgent(requested: AgentKind, workdir: String, sessionId: String): AgentKind {
+        fun hasTranscript(agent: AgentKind): Boolean = runCatching {
+            transcriptResolver(agent, workdir, sessionId)?.exists() == true
+        }.getOrDefault(false)
+
+        if (hasTranscript(requested)) return requested
+        return listOf(AgentKind.CODEX, AgentKind.CLAUDE)
+            .firstOrNull { it != requested && hasTranscript(it) }
+            ?: requested
     }
 
     // ── rewind / fork (issue #282, docs/design/REWIND-FORK.md §6) ──────────────────────────────────

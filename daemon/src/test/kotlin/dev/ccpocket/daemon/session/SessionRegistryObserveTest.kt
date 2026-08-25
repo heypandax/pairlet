@@ -5,12 +5,18 @@ import dev.ccpocket.daemon.conversation.ObserveSession
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.LiveProcesses
 import dev.ccpocket.daemon.disk.ProjectPaths
+import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.ConvoHistory
+import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.OpenSession
+import dev.ccpocket.protocol.SessionLive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import java.nio.file.Files
 import java.util.UUID
 import kotlin.test.AfterTest
@@ -98,5 +104,144 @@ class ObserveSessionAttachIdentityTest {
     @Test
     fun session_id_is_readable_for_the_reap_filter() {
         assertEquals("s1", observe(OutboundSink { }).sessionId)
+    }
+}
+
+/** Codex gets the same external-session UX as Claude: read-only tail first, no second writer on tap. */
+class CodexObserveParityTest {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val dir = Files.createTempDirectory("ccp-codex-observe")
+    private val rollout = dir.resolve("rollout-test.jsonl")
+
+    @AfterTest
+    fun tearDown() {
+        scope.cancel()
+        dir.toFile().deleteRecursively()
+    }
+
+    @Test
+    fun external_codex_opens_as_a_codex_read_only_observer_and_replays_rollout_history() = runBlocking {
+        val registry = SessionRegistry(
+            scope,
+            backends = emptyMap(),
+            codexProcessProbe = { _, _ -> LiveProcesses.ExternalClaude.PRESENT },
+            transcriptResolver = { agent, _, _ -> if (agent == AgentKind.CODEX) rollout else null },
+        )
+        Files.writeString(
+            rollout,
+            """{"type":"session_meta","payload":{"id":"codex-live","cwd":"/repo"}}""" + "\n" +
+                """{"type":"turn_context","payload":{"turn_id":"t1","model":"gpt-5.6-sol"}}""" + "\n" +
+                """{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":12345},"model_context_window":258400}}}""" + "\n" +
+                """{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}""" + "\n" +
+                """{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}}""" + "\n",
+        )
+        Files.setLastModifiedTime(rollout, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis()))
+        val frames = java.util.Collections.synchronizedList(mutableListOf<Frame>())
+        fun snapshot(): List<Frame> = synchronized(frames) { frames.toList() }
+
+        val convo = registry.open(
+            OpenSession("/repo", resumeId = "codex-live", agent = AgentKind.CODEX, lastEventSeq = 0),
+            OutboundSink { frames += it },
+        )
+
+        assertTrue(registry.observing(convo))
+        withTimeout(3_000) {
+            while (snapshot().none { it is SessionLive } || snapshot().none { it is ConvoHistory }) delay(20)
+        }
+        val live = snapshot().filterIsInstance<SessionLive>().last()
+        assertTrue(live.observing)
+        assertEquals(AgentKind.CODEX, live.agent)
+        assertEquals("gpt-5.6-sol", live.model)
+        assertEquals(258_400L, live.contextWindow)
+        assertEquals(12_345L, live.contextUsed)
+        assertEquals("hello", live.title, "an external Codex observer must announce its transcript title")
+        val history = snapshot().filterIsInstance<ConvoHistory>().last()
+        assertEquals(listOf("hello", "hi"), history.messages.map { it.text })
+    }
+
+    @Test
+    fun unverifiable_ownership_of_an_old_codex_rollout_still_opens_read_only() = runBlocking {
+        val registry = SessionRegistry(
+            scope,
+            backends = emptyMap(),
+            // UNKNOWN = external codex processes exist but the fd probe couldn't run (lsof timeout, Windows).
+            // Codex has no session lock, so the safe verdict is observe/fork — not the freshness gate's false.
+            codexProcessProbe = { _, _ -> LiveProcesses.ExternalClaude.UNKNOWN },
+            transcriptResolver = { agent, _, _ -> if (agent == AgentKind.CODEX) rollout else null },
+        )
+        Files.writeString(
+            rollout,
+            """{"type":"session_meta","payload":{"id":"codex-maybe","cwd":"/repo"}}""" + "\n",
+        )
+        Files.setLastModifiedTime(
+            rollout,
+            java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() - 60_000),
+        )
+
+        val convo = registry.open(
+            OpenSession("/repo", resumeId = "codex-maybe", agent = AgentKind.CODEX, lastEventSeq = 0),
+            OutboundSink { },
+        )
+
+        assertTrue(registry.observing(convo), "unverifiable Codex ownership must not resume in place")
+    }
+
+    @Test
+    fun idle_external_codex_holding_an_old_rollout_still_opens_read_only() = runBlocking {
+        val registry = SessionRegistry(
+            scope,
+            backends = emptyMap(),
+            codexProcessProbe = { _, _ -> LiveProcesses.ExternalClaude.PRESENT },
+            transcriptResolver = { agent, _, _ -> if (agent == AgentKind.CODEX) rollout else null },
+        )
+        Files.writeString(
+            rollout,
+            """{"type":"session_meta","payload":{"id":"codex-idle","cwd":"/repo"}}""" + "\n",
+        )
+        // A terminal Codex keeps the rollout open while idle, but may not write it for hours. Its exact
+        // process/FD ownership must outrank the generic transcript freshness window.
+        Files.setLastModifiedTime(
+            rollout,
+            java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() - 60_000),
+        )
+
+        val convo = registry.open(
+            OpenSession("/repo", resumeId = "codex-idle", agent = AgentKind.CODEX, lastEventSeq = 0),
+            OutboundSink { },
+        )
+
+        assertTrue(registry.observing(convo))
+    }
+
+    @Test
+    fun stale_claude_wire_default_is_corrected_from_codex_transcript_and_history_replays() = runBlocking {
+        val registry = SessionRegistry(
+            scope,
+            backends = emptyMap(),
+            codexProcessProbe = { _, _ -> LiveProcesses.ExternalClaude.PRESENT },
+            transcriptResolver = { agent, _, _ -> if (agent == AgentKind.CODEX) rollout else null },
+        )
+        Files.writeString(
+            rollout,
+            """{"type":"session_meta","payload":{"id":"codex-live","cwd":"/repo"}}""" + "\n" +
+                """{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"from codex"}]}}""" + "\n" +
+                """{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"restored"}]}}""" + "\n",
+        )
+        Files.setLastModifiedTime(rollout, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis()))
+        val frames = java.util.Collections.synchronizedList(mutableListOf<Frame>())
+
+        // No agent field on the wire decodes as CLAUDE for compatibility with old Apps.
+        val convo = registry.open(
+            OpenSession("/repo", resumeId = "codex-live", lastEventSeq = 0),
+            OutboundSink { frames += it },
+        )
+
+        assertTrue(registry.observing(convo))
+        withTimeout(3_000) {
+            while (frames.none { it is SessionLive } || frames.none { it is ConvoHistory }) delay(20)
+        }
+        assertEquals(AgentKind.CODEX, frames.filterIsInstance<SessionLive>().last().agent)
+        assertEquals(listOf("from codex", "restored"), frames.filterIsInstance<ConvoHistory>().last().messages.map { it.text })
     }
 }

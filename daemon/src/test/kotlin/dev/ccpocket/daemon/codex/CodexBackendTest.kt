@@ -58,6 +58,25 @@ class CodexBackendTest {
     }
 
     @Test
+    fun take_over_uses_native_thread_fork_instead_of_a_second_writer_on_resume() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = CodexBackend(null)
+        b.attach(
+            AgentIo(writeLine = { w += it }, emit = {}),
+            AgentSpec(Path.of("/repo"), resumeId = "thr-desktop", forkSession = true),
+        )
+        b.parse(initResponse(1))
+
+        val open = w.last { "thread/" in it }
+        assertTrue("\"method\":\"thread/fork\"" in open, open)
+        assertTrue("\"threadId\":\"thr-desktop\"" in open, open)
+        assertFalse("thread/resume" in open, open)
+
+        val ev = b.parse(threadStartResponse(2, "thr-phone"))
+        assertEquals("thr-phone", assertIs<AgentEvent.SessionInit>(ev.single()).sessionId)
+    }
+
+    @Test
     fun first_prompt_buffers_until_thread_ready_then_turn_start() = runBlocking {
         val w = mutableListOf<String>()
         val b = CodexBackend(null)
@@ -74,6 +93,23 @@ class CodexBackendTest {
         // DEFAULT = the "Balanced" Codex preset → ask when needed, edits inside the workspace
         assertTrue("\"approvalPolicy\":\"on-request\"" in turn, turn)
         assertTrue("\"workspaceWrite\"" in turn, turn)
+    }
+
+    @Test
+    fun prompt_sent_during_an_active_turn_uses_native_turn_steer() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.parse(
+            """{"method":"turn/started","params":{"threadId":"thr-1","turn":{"id":"turn-live","status":"inProgress"}}}""",
+        )
+
+        b.sendPrompt("continue with the next batch", emptyList())
+
+        val request = w.last()
+        assertTrue("\"method\":\"turn/steer\"" in request, request)
+        assertTrue("\"threadId\":\"thr-1\"" in request, request)
+        assertTrue("\"expectedTurnId\":\"turn-live\"" in request, request)
+        assertTrue("continue with the next batch" in request, request)
     }
 
     @Test
@@ -128,6 +164,58 @@ class CodexBackendTest {
         b.parse("""{"method":"item/agentMessage/delta","params":{"itemId":"i1","delta":"Hi"}}""")
         val ev = b.parse("""{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"i1","text":"Hi there"}}}""")
         assertTrue(ev.isEmpty(), "final must not re-emit once deltas streamed the message") // text was already streamed
+    }
+
+    @Test
+    fun compact_uses_native_app_server_rpc_when_thread_is_ready() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+
+        assertTrue(b.compact())
+
+        val request = w.last()
+        assertTrue("\"method\":\"thread/compact/start\"" in request, request)
+        assertTrue("\"threadId\":\"thr-1\"" in request, request)
+    }
+
+    @Test
+    fun compact_queued_during_handshake_runs_once_after_thread_opens() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = CodexBackend(null)
+        b.attach(AgentIo({ w += it }, {}), AgentSpec(Path.of("/repo"), resumeId = "thr-old"))
+
+        assertTrue(b.compact())
+        assertTrue(w.none { "thread/compact/start" in it })
+        b.parse(initResponse(1))
+        b.parse(threadStartResponse(2, "thr-1"))
+
+        assertEquals(1, w.count { "thread/compact/start" in it })
+    }
+
+    @Test
+    fun review_uses_native_app_server_target() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+
+        assertTrue(b.review())
+
+        val request = w.last()
+        assertTrue("\"method\":\"review/start\"" in request, request)
+        assertTrue("\"type\":\"uncommittedChanges\"" in request, request)
+        assertTrue("\"delivery\":\"inline\"" in request, request)
+    }
+
+    @Test
+    fun simplify_expands_to_a_codex_task_not_an_unknown_slash_command() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+
+        b.sendPrompt("/simplify keep the public API", emptyList())
+
+        val turn = w.last { "turn/start" in it }
+        assertFalse("/simplify" in turn, turn)
+        assertTrue("simplify the implementation" in turn, turn)
+        assertTrue("keep the public API" in turn, turn)
     }
 
     @Test
@@ -209,6 +297,19 @@ class CodexBackendTest {
         val tr = ev.single()
         assertIs<AgentEvent.TurnResult>(tr)
         assertEquals(null, tr.usage) // zeros would read as "empty window" on the phone's statusline
+    }
+
+    @Test
+    fun failed_turn_surfaces_codex_error_instead_of_generic_turn_failed() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        val ev = b.parse(
+            """{"method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"t1","status":"failed","error":{"message":"Selected model is unavailable"}}}}""",
+        )
+
+        val tr = assertIs<AgentEvent.TurnResult>(ev.single())
+        assertTrue(tr.isError)
+        assertEquals("Selected model is unavailable", tr.finalText)
     }
 
     @Test
@@ -319,5 +420,194 @@ class CodexBackendTest {
         assertEquals("Edit", cr.toolName)
         assertTrue("+new line" in (cr.diff ?: ""), cr.diff ?: "<null>") // diff is a typed field, for the phone's diff view
         assertTrue("src/A.kt" in cr.input.toString(), cr.input.toString())
+    }
+
+    // ── JSON-RPC error responses must not be swallowed (PR #296 review) ──
+
+    @Test
+    fun a_steer_rejected_for_a_stale_turn_is_redelivered_as_turn_start() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w) // ids 1 (initialize) + 2 (thread/start) consumed
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"turn-live","status":"inProgress"}}}""")
+        b.sendPrompt("keep going with the batch", emptyList()) // → turn/steer (id 3)
+        assertTrue(w.last { "turn/steer" in it }.contains("\"expectedTurnId\":\"turn-live\""))
+
+        // the turn completed server-side while the steer was in flight: on the ordered pipe the completion
+        // is parsed FIRST, then the stale-expectedTurnId rejection — that pairing is what "stale" means
+        b.parse("""{"method":"turn/completed","params":{"turn":{"id":"turn-live","status":"completed"}}}""")
+        val ev = b.parse("""{"id":3,"error":{"code":-32602,"message":"expectedTurnId does not match the active turn"}}""")
+
+        assertTrue(ev.isEmpty(), "the retry is silent — no error surfaces for a recovered prompt")
+        val start = w.last { "\"method\":\"turn/start\"" in it }
+        assertTrue("keep going with the batch" in start, start) // the acked prompt is re-delivered, not lost
+    }
+
+    @Test
+    fun a_rejected_turn_start_settles_the_turn_with_a_visible_error() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.sendPrompt("do the thing", emptyList()) // → turn/start (id 3)
+
+        val ev = b.parse("""{"id":3,"error":{"code":-32000,"message":"model overloaded"}}""")
+
+        // Conversation marked this turn executing on ack; only a TurnResult clears that state again
+        val r = ev.filterIsInstance<AgentEvent.TurnResult>().single()
+        assertTrue(r.isError)
+        assertTrue("model overloaded" in (r.finalText ?: ""), r.finalText ?: "<null>")
+    }
+
+    @Test
+    fun a_thread_fork_rejected_by_an_old_app_server_surfaces_instead_of_hanging() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = CodexBackend(null)
+        b.attach(AgentIo(writeLine = { w += it }, emit = {}), AgentSpec(Path.of("/repo"), resumeId = "thr-x", forkSession = true))
+        b.parse(initResponse(1)) // → thread/fork (id 2)
+
+        val ev = b.parse("""{"id":2,"error":{"code":-32601,"message":"method not found: thread/fork"}}""")
+
+        // pre-0.147 app-server: without this the thread never opens and pendingPrompt waits forever
+        val r = ev.filterIsInstance<AgentEvent.TurnResult>().single()
+        assertTrue(r.isError)
+        assertTrue("fork" in (r.finalText ?: ""), r.finalText ?: "<null>")
+    }
+
+    @Test
+    fun a_rejected_compact_reports_failure_instead_of_a_silent_noop() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.compact() // → thread/compact/start (id 3)
+
+        val ev = b.parse("""{"id":3,"error":{"code":-32601,"message":"method not found"}}""")
+
+        val t = ev.filterIsInstance<AgentEvent.AssistantText>().single()
+        assertTrue("compact" in t.text && "method not found" in t.text, t.text)
+    }
+
+    @Test
+    fun an_error_notification_between_turns_is_surfaced_immediately() = runBlocking {
+        val b = ready(mutableListOf())
+
+        // no turn is active → no turn/completed will ever come to carry a stashed error to the phone
+        val ev = b.parse("""{"method":"error","params":{"error":{"message":"stream disconnected"}}}""")
+
+        val t = ev.filterIsInstance<AgentEvent.AssistantText>().single()
+        assertTrue("stream disconnected" in t.text, t.text)
+    }
+
+    @Test
+    fun a_failed_turn_still_reports_the_error_stashed_mid_turn() = runBlocking {
+        val b = ready(mutableListOf())
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"t1"}}}""")
+        b.parse("""{"method":"error","params":{"error":{"message":"boom"}}}""") // mid-turn → stashed, not emitted
+
+        val ev = b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t1","status":"failed"}}}""")
+
+        val r = ev.filterIsInstance<AgentEvent.TurnResult>().single()
+        assertTrue(r.isError)
+        assertEquals("boom", r.finalText)
+    }
+
+    @Test
+    fun a_null_id_error_response_is_tolerated_without_an_exception() = runBlocking {
+        val b = ready(mutableListOf())
+        // JSON-RPC's mandated reply to an invalid request: "id":null. Must not NPE the pending maps
+        // (which would be swallowed upstream and mislogged as a parse failure).
+        val ev = b.parse("""{"id":null,"error":{"code":-32700,"message":"parse error"}}""")
+        assertTrue(ev.isEmpty(), ev.toString())
+    }
+
+    @Test
+    fun a_steer_rejected_before_the_sender_registers_it_is_still_retried() = runBlocking {
+        // The pump can parse an instant rejection while the sender is still inside rpcRequest. Pin that
+        // registration happens BEFORE the write by replaying the server's pipe — turn/completed, then the
+        // rejection — synchronously from within writeLine itself: with register-after-write neither map
+        // has the id yet and the acked prompt would fall to the log-and-drop path.
+        val w = mutableListOf<String>()
+        var fired = false
+        lateinit var b: CodexBackend
+        b = CodexBackend(null)
+        b.attach(
+            AgentIo(
+                writeLine = { line ->
+                    w += line
+                    if ("turn/steer" in line && !fired) {
+                        fired = true
+                        val id = Json.parseToJsonElement(line).jsonObject["id"]!!.jsonPrimitive.content
+                        b.parse("""{"method":"turn/completed","params":{"turn":{"id":"turn-live","status":"completed"}}}""")
+                        b.parse("""{"id":$id,"error":{"code":-32602,"message":"expectedTurnId mismatch"}}""")
+                    }
+                },
+                emit = {},
+            ),
+            AgentSpec(Path.of("/repo")),
+        )
+        b.parse(initResponse(1))
+        b.parse(threadStartResponse(2, "thr-1"))
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"turn-live"}}}""")
+
+        b.sendPrompt("recover me", emptyList())
+
+        val start = w.lastOrNull { "\"method\":\"turn/start\"" in it && "recover me" in it }
+        assertTrue(start != null, w.joinToString("\n"))
+    }
+
+    @Test
+    fun a_steer_rejected_while_its_turn_still_runs_surfaces_instead_of_colliding() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"turn-live"}}}""")
+        b.sendPrompt("mid-turn note", emptyList()) // → turn/steer (id 3)
+
+        // rejection arrives while turn-live is STILL the current turn — not a staleness race
+        val ev = b.parse("""{"id":3,"error":{"code":-32000,"message":"input rejected"}}""")
+
+        val t = ev.filterIsInstance<AgentEvent.AssistantText>().single()
+        assertTrue("input rejected" in t.text, t.text)
+        assertTrue(w.none { "\"method\":\"turn/start\"" in it }, "no blind turn/start against a live turn")
+    }
+
+    @Test
+    fun an_image_prompt_sent_mid_turn_waits_for_the_boundary_instead_of_losing_its_image() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"t1"}}}""")
+
+        b.sendPrompt("look at this", listOf(ImageData("image/png", "iVBORw==")))
+
+        assertTrue(w.none { "turn/steer" in it }, "an image prompt must not ride the image-less steer")
+        b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t1","status":"completed"}}}""")
+        val start = w.last { "\"method\":\"turn/start\"" in it }
+        assertTrue("look at this" in start && "iVBORw==" in start, start)
+    }
+
+    @Test
+    fun a_failed_turn_with_partial_text_still_reports_why_it_failed() = runBlocking {
+        val b = ready(mutableListOf())
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"t1"}}}""")
+        b.parse("""{"method":"item/agentMessage/delta","params":{"itemId":"m1","delta":"partial answer…"}}""")
+        b.parse("""{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"m1","text":"partial answer…"}}}""")
+        b.parse("""{"method":"error","params":{"error":{"message":"usage limit reached"}}}""")
+
+        val ev = b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t1","status":"failed"}}}""")
+
+        val r = ev.filterIsInstance<AgentEvent.TurnResult>().single()
+        assertTrue(r.isError)
+        assertEquals("usage limit reached", r.finalText, "the reason, not the already-streamed partial text")
+    }
+
+    @Test
+    fun a_stashed_error_is_never_billed_to_a_later_successful_turn() = runBlocking {
+        val b = ready(mutableListOf())
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"t1"}}}""")
+        b.parse("""{"method":"error","params":{"error":{"message":"transient rate limit"}}}""")
+        b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t1","status":"completed"}}}""")
+
+        // a tool-only turn: completes fine with no agentMessage text
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"t2"}}}""")
+        val ev = b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t2","status":"completed"}}}""")
+
+        val r = ev.filterIsInstance<AgentEvent.TurnResult>().single()
+        assertFalse(r.isError)
+        assertEquals(null, r.finalText, "an old error must not masquerade as this turn's successful answer")
     }
 }

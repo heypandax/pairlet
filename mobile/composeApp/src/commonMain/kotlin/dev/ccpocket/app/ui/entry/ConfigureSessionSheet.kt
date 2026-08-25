@@ -96,6 +96,7 @@ import dev.ccpocket.app.ui.modelChipLabel
 import dev.ccpocket.app.ui.session.Hairline
 import dev.ccpocket.app.ui.session.PathWithCopy
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AgentModePreset
 import dev.ccpocket.protocol.PermissionMode
 import org.jetbrains.compose.resources.stringResource
 
@@ -132,6 +133,7 @@ fun ConfigureSessionSheet(
     availableAgents: List<AgentKind> = AgentKind.entries,
     modelsFor: (AgentKind) -> List<ModelChoice> = { emptyList() },
     defaultModelFor: (AgentKind) -> String? = { null },
+    modePresetsFor: (AgentKind) -> List<AgentModePreset> = { emptyList() },
     onAgentPicked: (AgentKind) -> Unit = {},
     onPick: (PermissionMode, AgentKind, String?, String?) -> Unit,
     onDismiss: () -> Unit,
@@ -139,18 +141,23 @@ fun ConfigureSessionSheet(
     val selectableAgents = availableAgents.ifEmpty { listOf(AgentKind.CLAUDE) }
     val openedAgent = remember { agent.takeIf { it in selectableAgents } ?: selectableAgents.first() }
     var chosenAgent by remember { mutableStateOf(openedAgent) }
+    // The connected daemon's advertised permission vocabulary for the agent on screen (Codex only today).
+    // It is read per chosen agent because the agent chips switch backends in place, and empty simply means
+    // "this daemon doesn't advertise one" — the ladder falls back to the App's built-in table.
+    val modePresets = modePresetsFor(chosenAgent)
     // null = "follow the default" (Settings / the CLI's own). Reset per agent: a Claude alias is not a model
     // Codex can run, and compatibleModelForAgent would drop it silently anyway.
     var chosenModel by remember(chosenAgent) { mutableStateOf<String?>(null) }
     var chosenMode by remember(chosenAgent) {
-        mutableStateOf(seedModeChoice(chosenAgent, openedAgent, selected, selectedNativeMode, autoAvailable))
+        mutableStateOf(seedModeChoice(chosenAgent, openedAgent, selected, selectedNativeMode, autoAvailable, modePresets))
     }
     // whether the ladder below is the user's answer or still the seed. The peer's capability list can land
-    // a beat AFTER the sheet opens (Claude's native Auto row appears then), and re-seeding at that moment
-    // must never overwrite a rung the user has already chosen.
+    // a beat AFTER the sheet opens (Claude's native Auto row appears then, and Codex's advertised vocabulary
+    // arrives with its ModelsList), and re-seeding at that moment must never overwrite a rung the user has
+    // already chosen.
     var modeTouched by remember(chosenAgent) { mutableStateOf(false) }
-    LaunchedEffect(chosenAgent, autoAvailable) {
-        if (!modeTouched) chosenMode = seedModeChoice(chosenAgent, openedAgent, selected, selectedNativeMode, autoAvailable)
+    LaunchedEffect(chosenAgent, autoAvailable, modePresets) {
+        if (!modeTouched) chosenMode = seedModeChoice(chosenAgent, openedAgent, selected, selectedNativeMode, autoAvailable, modePresets)
     }
     var confirming by remember { mutableStateOf(false) }
     // one start per sheet: a second tap, or a dismiss callback racing the start, has nothing left to fire
@@ -206,7 +213,7 @@ fun ConfigureSessionSheet(
                     }
                     else -> {
                         EntryLabel(stringResource(Res.string.label_mode), Modifier.padding(top = 22.dp, bottom = Metric.gapS))
-                        agentModeChoices(chosenAgent, autoAvailable).forEach { choice ->
+                        agentModeChoices(chosenAgent, autoAvailable, modePresets).forEach { choice ->
                             ModeSelectionRow(
                                 label = modeChoiceLabel(chosenAgent, choice),
                                 body = modeChoiceBody(chosenAgent, choice),

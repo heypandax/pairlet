@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,8 +42,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,9 +55,12 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -63,7 +69,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AgentModePreset
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
@@ -82,6 +90,8 @@ data class ModeInfo(
 
 // same hue as the semantic info token — a getter so it tracks the light/dark palette (#63)
 private val Indigo get() = Tok.info
+
+internal const val POCKET_SHEET_DRAG_HANDLE_TAG = "pocket-sheet-drag-handle"
 
 /** Trims a single line's leading and centers the glyph in it — fixes text riding high when vertically centered. */
 internal val TightCenter = TextStyle(
@@ -115,12 +125,20 @@ fun PocketSheet(onDismiss: () -> Unit, dropKeyboard: Boolean = true, content: @C
     // opens focused on purpose, and a blanket clearFocus here would race its own focus request. That sheet
     // owns the keyboard from the first frame, so the inset fight above never starts.
     val focus = LocalFocusManager.current
+    val dismissThresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
+    var dragY by remember { mutableFloatStateOf(0f) }
+    // The drag detector below must NOT key on [onDismiss]: callers pass inline lambdas whose identity flips on
+    // unrelated recompositions (e.g. the reconnect sheet's `timedOut` toggle), which would cancel the pointerInput
+    // coroutine mid-drag. detectVerticalDragGestures doesn't run onDragCancel in that path, so the remembered
+    // [dragY] keeps its non-zero offset and the sheet stays parked halfway down until the next full drag.
+    val currentOnDismiss by rememberUpdatedState(onDismiss)
     LaunchedEffect(dropKeyboard) { if (dropKeyboard) focus.clearFocus() }
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onDismiss() } // Android back = scrim tap
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color(0x94000000)).pointerInput(Unit) { detectTapGestures { onDismiss() } })
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .graphicsLayer { translationY = dragY }
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                 .background(Tok.raised)
                 .pointerInput(Unit) { detectTapGestures { } } // swallow taps so they don't dismiss via the scrim
@@ -128,17 +146,41 @@ fun PocketSheet(onDismiss: () -> Unit, dropKeyboard: Boolean = true, content: @C
                 .imePadding() // sheets render outside the app's ime-padded Box — never hide behind the keyboard
                 .padding(bottom = 10.dp),
         ) {
-            Box(Modifier.align(Alignment.CenterHorizontally).padding(vertical = 8.dp).size(width = 38.dp, height = 5.dp).clip(CircleShape).background(Tok.hair))
+            // The visible 38×5 handle sits inside a full-width 36dp gesture target. Keeping the drag
+            // detector on this header (rather than the whole sheet) avoids fighting nested model-list
+            // scrolling. The sheet follows the finger downward; an intentional 64dp pull dismisses,
+            // while a short/accidental pull snaps back.
+            Box(
+                Modifier.fillMaxWidth().height(36.dp)
+                    .testTag(POCKET_SHEET_DRAG_HANDLE_TAG)
+                    .pointerInput(dismissThresholdPx) { // density-derived Float — stable across recomposition
+                        detectVerticalDragGestures(
+                            onVerticalDrag = { _, delta -> dragY = (dragY + delta).coerceAtLeast(0f) },
+                            onDragEnd = {
+                                val dismiss = dragY >= dismissThresholdPx
+                                dragY = 0f
+                                if (dismiss) currentOnDismiss()
+                            },
+                            onDragCancel = { dragY = 0f },
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.size(width = 38.dp, height = 5.dp).clip(CircleShape).background(Tok.hair))
+            }
             content()
         }
     }
 }
 
 // ── mode-switch sheet (ladder + bypass confirm + switching + rules) ──
+/** [modePresets] is the connected daemon's advertised permission vocabulary for [agent] (Codex only today).
+ *  Empty = an older daemon that doesn't advertise one, and the sheet falls back to [CODEX_PRESETS]. */
 @Composable
 fun ModeSheet(
     current: PermissionMode, rules: List<String>, switching: Boolean, workdir: String? = null,
     agent: AgentKind? = null, nativeMode: String? = null, autoAvailable: Boolean = false,
+    modePresets: List<AgentModePreset> = emptyList(),
     onSelect: (PermissionMode, String?) -> Unit, onClearRule: (String) -> Unit, onClearAll: () -> Unit, onDismiss: () -> Unit,
 ) {
     var confirmBypass by remember { mutableStateOf(false) }
@@ -165,14 +207,31 @@ fun ModeSheet(
                         Text(stringResource(Res.string.mode_switching), color = Tok.tx2, fontSize = 12.5.sp)
                     }
                 }
-                Column(
-                    Modifier.padding(top = 8.dp).alpha(if (switching) 0.55f else 1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    (MODES + if (agent == AgentKind.CLAUDE && autoAvailable) listOf(AUTO_MODE) else emptyList()).forEach { m ->
-                        ModeRow(m, selected = current == m.key && nativeMode == m.nativeMode, enabled = !switching) {
-                            if (m.key == PermissionMode.BYPASS_PERMISSIONS && current != PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true
-                            else onSelect(m.key, m.nativeMode)
+                if (agent == AgentKind.CODEX) {
+                    Column(
+                        Modifier.padding(top = 8.dp).alpha(if (switching) 0.55f else 1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        codexPresetRows(modePresets).forEach { p ->
+                            PresetRow(p, selected = current == p.mode, enabled = !switching) {
+                                // the confirmation gate keys on the MODE, not on the advertised danger flag:
+                                // BypassConfirm commits BYPASS_PERMISSIONS, so routing any other mode through
+                                // it would start a session under a mode the row never named
+                                if (p.mode == PermissionMode.BYPASS_PERMISSIONS && current != PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true
+                                else onSelect(p.mode, null)
+                            }
+                        }
+                    }
+                } else {
+                    Column(
+                        Modifier.padding(top = 8.dp).alpha(if (switching) 0.55f else 1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        (MODES + if (agent == AgentKind.CLAUDE && autoAvailable) listOf(AUTO_MODE) else emptyList()).forEach { m ->
+                            ModeRow(m, selected = current == m.key && nativeMode == m.nativeMode, enabled = !switching) {
+                                if (m.key == PermissionMode.BYPASS_PERMISSIONS && current != PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true
+                                else onSelect(m.key, m.nativeMode)
+                            }
                         }
                     }
                 }
@@ -220,6 +279,11 @@ private fun BypassConfirm(workdir: String?, onCancel: () -> Unit, onConfirm: () 
  *
  * [computer] is the connected machine's display name — the Full-access confirmation names it, because a
  * blast radius is a place. Null simply drops that clause rather than inventing a host.
+ *
+ * [modePresetsFor] is the connected daemon's advertised permission vocabulary, per agent (Codex only today).
+ * It is a lambda rather than a list because the agent chips switch backends inside the sheet. Leaving it at
+ * the default means the new-session ladder silently ignores what the daemon says it supports — the exact
+ * version-skew the advertisement exists to prevent.
  */
 @Composable
 fun StartSessionModeSheet(
@@ -232,6 +296,7 @@ fun StartSessionModeSheet(
     availableAgents: List<AgentKind> = AgentKind.entries,
     modelsFor: (AgentKind) -> List<ModelChoice> = { emptyList() },
     defaultModelFor: (AgentKind) -> String? = { null },
+    modePresetsFor: (AgentKind) -> List<AgentModePreset> = { emptyList() },
     onAgentPicked: (AgentKind) -> Unit = {},
     onPick: (PermissionMode, AgentKind, String?, String?) -> Unit,
     onDismiss: () -> Unit,
@@ -245,6 +310,7 @@ fun StartSessionModeSheet(
     availableAgents = availableAgents,
     modelsFor = modelsFor,
     defaultModelFor = defaultModelFor,
+    modePresetsFor = modePresetsFor,
     onAgentPicked = onAgentPicked,
     onPick = onPick,
     onDismiss = onDismiss,
@@ -312,28 +378,173 @@ fun SessionDefaultsChip(agent: AgentKind, mode: PermissionMode, modifier: Modifi
 }
 
 /** A Codex execution preset — the two-axis (approval × sandbox) combination behind a named choice.
- *  [mode] is the PermissionMode the daemon's CodexBackend translates into the actual approvalPolicy + sandbox. */
+ *  [mode] is the PermissionMode the daemon's CodexBackend translates into the actual approvalPolicy + sandbox.
+ *  [id] is the daemon's stable semantic key ([AgentModePreset.id]): the join between an advertised row and
+ *  the localized copy below, so a daemon-driven vocabulary still renders in the user's language. */
 data class CodexPreset(
+    val id: String,
     val mode: PermissionMode, val name: StringResource, val desc: StringResource,
     val askChip: StringResource, val fsChip: StringResource,
     val recommended: Boolean = false, val danger: Boolean = false,
 )
 
+/** The BUILT-IN vocabulary: what the App renders when the connected daemon predates [ModelsList.modePresets]
+ *  (empty advertisement), and the localized-copy table for every id it does advertise. */
 val CODEX_PRESETS = listOf(
-    CodexPreset(PermissionMode.PLAN, Res.string.codex_preset_cautious, Res.string.codex_preset_cautious_desc, Res.string.codex_chip_ask_every, Res.string.codex_chip_fs_read),
-    CodexPreset(PermissionMode.DEFAULT, Res.string.codex_preset_balanced, Res.string.codex_preset_balanced_desc, Res.string.codex_chip_ask_needed, Res.string.codex_chip_fs_workspace, recommended = true),
-    CodexPreset(PermissionMode.ACCEPT_EDITS, Res.string.codex_preset_autonomous, Res.string.codex_preset_autonomous_desc, Res.string.codex_chip_ask_never, Res.string.codex_chip_fs_workspace),
-    CodexPreset(PermissionMode.BYPASS_PERMISSIONS, Res.string.codex_preset_full, Res.string.codex_preset_full_desc, Res.string.codex_chip_ask_never, Res.string.codex_chip_fs_full, danger = true),
+    CodexPreset("cautious", PermissionMode.PLAN, Res.string.codex_preset_cautious, Res.string.codex_preset_cautious_desc, Res.string.codex_chip_ask_every, Res.string.codex_chip_fs_read),
+    CodexPreset("balanced", PermissionMode.DEFAULT, Res.string.codex_preset_balanced, Res.string.codex_preset_balanced_desc, Res.string.codex_chip_ask_needed, Res.string.codex_chip_fs_workspace, recommended = true),
+    CodexPreset("autonomous", PermissionMode.ACCEPT_EDITS, Res.string.codex_preset_autonomous, Res.string.codex_preset_autonomous_desc, Res.string.codex_chip_ask_never, Res.string.codex_chip_fs_workspace),
+    CodexPreset("full", PermissionMode.BYPASS_PERMISSIONS, Res.string.codex_preset_full, Res.string.codex_preset_full_desc, Res.string.codex_chip_ask_never, Res.string.codex_chip_fs_full, danger = true),
 )
+
+private val CODEX_PRESET_BY_ID = CODEX_PRESETS.associateBy { it.id }
+
+/**
+ * One preset row's IDENTITY layer, resolved but not yet localized — pure and Compose-free so the mode sheet
+ * and the entry ladder derive the SAME rows in the SAME order from one place.
+ *
+ * [builtin] non-null = an id this App knows, so it renders its own localized name/desc/chips. Null = an id
+ * shipped after this App was built: [wireLabel]/[wireDetail] are then rendered verbatim (plain English beats
+ * an invisible row or a wrong translation), and the chips are dropped rather than guessed — they echo the
+ * approval × sandbox axes, which we cannot know for a preset we've never heard of.
+ */
+data class CodexPresetSpec(
+    val mode: PermissionMode,
+    val danger: Boolean = false,
+    val recommended: Boolean = false,
+    val builtin: CodexPreset? = null,
+    val wireLabel: String = "",
+    val wireDetail: String? = null,
+)
+
+/**
+ * The Codex preset vocabulary to render, merging what the daemon advertises with what this App can say.
+ *
+ * The daemon owns the SET, the ORDER and the danger/recommended emphasis; the App owns the localized copy.
+ * Empty [advertised] means an older daemon (or a failed model fetch), which falls back to [CODEX_PRESETS]
+ * verbatim — today's behaviour, unchanged.
+ *
+ * A known id whose advertised [AgentModePreset.mode] no longer matches our table is deliberately treated as
+ * UNKNOWN: the localized copy and the mono chips describe a specific approval × sandbox pair, so pairing
+ * them with a different mode would state a guarantee the session won't run under. Verbatim wire copy is the
+ * honest degradation.
+ */
+fun codexPresetSpecs(advertised: List<AgentModePreset>): List<CodexPresetSpec> {
+    if (advertised.isEmpty()) {
+        return CODEX_PRESETS.map { CodexPresetSpec(it.mode, it.danger, it.recommended, builtin = it) }
+    }
+    return advertised.map { row ->
+        val builtin = CODEX_PRESET_BY_ID[row.id]?.takeIf { it.mode == row.mode }
+        CodexPresetSpec(
+            mode = row.mode,
+            danger = row.danger,
+            recommended = row.recommended,
+            builtin = builtin,
+            // a blank advertised label would render as an unlabeled tappable row — the id at least names it
+            wireLabel = row.label.trim().ifEmpty { row.id },
+            wireDetail = row.detail?.trim()?.takeIf { it.isNotEmpty() },
+        )
+    }
+}
+
+/** One preset row fully resolved for rendering. [desc]/[askChip]/[fsChip] are null when there is nothing
+ *  honest to show, and the renderer omits those elements rather than drawing an empty one. */
+data class PresetRowUi(
+    val mode: PermissionMode,
+    val name: String,
+    val desc: String? = null,
+    val askChip: String? = null,
+    val fsChip: String? = null,
+    val recommended: Boolean = false,
+    val danger: Boolean = false,
+)
+
+/** [codexPresetSpecs] with the copy resolved — the single source both Codex mode surfaces render from. */
+@Composable
+fun codexPresetRows(advertised: List<AgentModePreset>): List<PresetRowUi> {
+    val rows = mutableListOf<PresetRowUi>()
+    for (spec in codexPresetSpecs(advertised)) {
+        val b = spec.builtin
+        rows += if (b != null) {
+            PresetRowUi(
+                mode = spec.mode,
+                name = stringResource(b.name),
+                desc = stringResource(b.desc),
+                askChip = stringResource(b.askChip),
+                fsChip = stringResource(b.fsChip),
+                recommended = spec.recommended,
+                danger = spec.danger,
+            )
+        } else {
+            PresetRowUi(
+                mode = spec.mode,
+                name = spec.wireLabel,
+                desc = spec.wireDetail,
+                recommended = spec.recommended,
+                danger = spec.danger,
+            )
+        }
+    }
+    return rows
+}
 
 /** A small monospace chip ("ask: never" / "fs: full") echoing the underlying axes of a Codex preset. */
 @Composable
 fun MonoChip(text: String, c: Color = Tok.tx2) {
     Text(
         text, color = c, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
+        style = tightCenter(10.5.sp), // background + border box: line box must come from the size, not the mono fallback
         modifier = Modifier.background(Tok.surface, RoundedCornerShape(6.dp))
             .border(1.dp, Tok.hair, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
     )
+}
+
+/** One Codex preset row: name + RECOMMENDED/warning + plain-language desc + the two raw-axis mono chips.
+ *
+ *  [enabled] false is the *switch in flight* state: the 0.55 alpha the caller paints is a statement, and a row
+ *  that still accepts taps under it would let a second (or third) `switchMode` race the first — on the control
+ *  that decides real filesystem access. Same gate [ModeRow] has always had. */
+@Composable
+private fun PresetRow(p: PresetRowUi, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    val outline = if (p.danger) Tok.danger else if (selected) Tok.codex else Tok.hair
+    val fill = when {
+        !selected -> Tok.surface
+        p.danger -> Tok.danger.copy(alpha = 0.07f)
+        else -> Tok.codex.copy(alpha = 0.12f)
+    }
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(fill).border(1.5.dp, outline, shape)
+            .clickable(enabled = enabled, onClick = onClick).padding(12.dp),
+    ) {
+        // name (14sp) + warning icon + RECOMMENDED pill (9.5sp) share one CenterVertically row — every Text here
+        // needs tightCenter or the mixed font metrics push the glyphs off the shared baseline (project CLAUDE.md).
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                p.name, color = if (p.danger) Tok.danger else Tok.tx, fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold, style = tightCenter(14.sp),
+            )
+            if (p.danger) Icon(Icons.Rounded.WarningAmber, null, tint = Tok.danger, modifier = Modifier.size(14.dp))
+            if (p.recommended) Text(
+                stringResource(Res.string.recommended_badge), color = Tok.codex, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(9.5.sp),
+                modifier = Modifier.border(1.dp, Tok.codex.copy(alpha = 0.42f), RoundedCornerShape(999.dp)).padding(horizontal = 7.dp, vertical = 1.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            if (selected) Icon(Icons.Rounded.Check, null, tint = if (p.danger) Tok.danger else Tok.codex, modifier = Modifier.size(15.dp))
+        }
+        // a preset advertised by a newer daemon may arrive with no description and no axes to echo — the
+        // row then states its name alone rather than reserving space for copy that doesn't exist
+        p.desc?.let { Text(it, color = Tok.tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp, bottom = 8.dp)) }
+        if (p.askChip != null || p.fsChip != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // both axes are only ever "dangerous" on the Full-auto preset, so a single danger flag drives the color
+                val chipColor = if (p.danger) Tok.danger else Tok.tx2
+                p.askChip?.let { MonoChip(it, chipColor) }
+                p.fsChip?.let { MonoChip(it, chipColor) }
+            }
+        }
+    }
 }
 
 @Composable

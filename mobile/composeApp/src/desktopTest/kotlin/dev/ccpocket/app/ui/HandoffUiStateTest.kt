@@ -9,6 +9,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.agent_needs_permission
 import dev.ccpocket.app.resources.always_allow
 import dev.ccpocket.app.resources.cancel
 import dev.ccpocket.app.resources.co_both_ways
@@ -51,6 +52,7 @@ import dev.ccpocket.protocol.HandoffAccess
 import dev.ccpocket.protocol.HandoffKind
 import dev.ccpocket.protocol.SessionHandoff
 import dev.ccpocket.protocol.HandoffStatus
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.collaboratorFingerprint
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.getString
@@ -319,6 +321,9 @@ class HandoffUiStateTest {
         approvalSheet(ask, handoffReview = true)
         assertTrue(present(str(Res.string.always_allow)), "only the command runner loses the standing rule")
     }
+
+    // (The PR-296 "Codex approval names Codex" case left with the legacy PermissionSheet: the Secure
+    // Approval header is agent-neutral by design — see SecureApprovalSheet's ap_required.)
 
     // ── Frame 9: Mark reviewed is the one COMPLETED transition on the result card ──
 

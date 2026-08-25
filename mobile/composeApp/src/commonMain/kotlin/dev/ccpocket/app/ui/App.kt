@@ -249,6 +249,7 @@ import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
+import dev.ccpocket.app.theme.tightCenter
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.Role
 import dev.ccpocket.app.voice.openAppSettings
@@ -1718,6 +1719,7 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                 availableAgents = repo.availableAgents,
                 modelsFor = { a -> repo.newSessionModelChoices(a) },
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
+                modePresetsFor = { a -> repo.modePresetsFor(a) },
                 onAgentPicked = { a -> repo.fetchModels(a) },
                 onPick = { m, a, native, model ->
                     newPathTarget = null
@@ -1931,13 +1933,32 @@ private fun SharedProjectCell(repo: PocketRepository, e: DirectoryEntry, onLongP
 }
 
 /** Long-press a project → pin it to the top, or unpin it, or share it. Small sheet, mirrors the app's other actions. */
+internal fun projectActionAgents(e: DirectoryEntry): List<AgentKind> {
+    val active = e.activeSessions.map { it.agent }.distinct()
+    return (if (active.isNotEmpty()) active else e.sessionAgents)
+        .distinct()
+        .sortedBy { it.ordinal }
+}
+
 @Composable
 private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onShare: () -> Unit, onDismiss: () -> Unit) {
     val pinned = repo.isPinned(e.path)
+    val agents = remember(e.activeSessions, e.sessionAgents) { projectActionAgents(e) }
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp, top = 4.dp)) {
             Text(e.name.ifBlank { e.path }, color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             TailPathText(e.path, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+            if (agents.isNotEmpty()) {
+                Row(
+                    Modifier.padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // label sits next to the AgentTag pills — tightCenter or it rides off their center (CLAUDE.md)
+                    Text(stringResource(Res.string.label_agent), color = Tok.muted, fontSize = 12.sp, style = tightCenter(12.sp))
+                    agents.forEach { AgentTag(it) }
+                }
+            }
             Row(
                 Modifier.padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
                     .clickable { repo.togglePin(e.path); onDismiss() }.padding(horizontal = 14.dp, vertical = 14.dp),
@@ -2489,6 +2510,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 availableAgents = repo.availableAgents,
                 modelsFor = { a -> repo.newSessionModelChoices(a) },
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
+                modePresetsFor = { a -> repo.modePresetsFor(a) },
                 onAgentPicked = { a -> repo.fetchModels(a) },
                 onPick = { m, a, native, model ->
                     pickMode = false
@@ -3371,6 +3393,8 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 agent = repo.sessionAgent.value, // OpenCode renders the immutable full-access notice, not a ladder
                 nativeMode = repo.permissionMode.value,
                 autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+                // the connected daemon's own permission vocabulary; empty (older daemon) → built-in table
+                modePresets = repo.sessionAgent.value?.let { repo.modePresetsFor(it) }.orEmpty(),
                 onSelect = { mode, native -> repo.switchMode(mode, native) }, // keep the sheet open so the "switching" state shows
                 onClearRule = { repo.clearRule(it) }, onClearAll = { repo.clearAllRules() },
                 onDismiss = { showModeSheet = false },

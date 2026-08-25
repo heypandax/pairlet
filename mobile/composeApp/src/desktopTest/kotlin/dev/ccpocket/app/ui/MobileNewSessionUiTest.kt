@@ -10,8 +10,11 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -129,6 +132,29 @@ class MobileNewSessionUiTest {
         waitForIdle()
         assertTrue(present(configureStart), "the defaults chip must open the full picker")
         assertNull(repo.convoId.value, "opening the picker must not start a session yet")
+    }
+
+    @Test
+    fun newSessionPickerDismissesByDraggingTheTopHandleDown() = runComposeUiTest {
+        val repo = composeSessionsScreen()
+        val chipLabel = runBlocking { getString(sessionDefaultsLabel(repo.defaultAgent.value, repo.defaultMode.value)) }
+        // same open-picker marker the defaults-chip test uses (the old subtitle string left with the redesign)
+        val configureStart = runBlocking { getString(Res.string.cfg_start) }
+        onAllNodes(hasText(chipLabel)).onFirst().performClick()
+        waitForIdle()
+        assertTrue(present(configureStart))
+
+        onNodeWithTag(POCKET_SHEET_DRAG_HANDLE_TAG).performTouchInput {
+            swipe(
+                start = center,
+                end = center.copy(y = center.y + 180f),
+                durationMillis = 350,
+            )
+        }
+        waitForIdle()
+
+        assertFalse(present(configureStart), "dragging the top handle down must dismiss the picker")
+        assertNull(repo.convoId.value, "dismissing the picker must not start a session")
     }
 
     @Test

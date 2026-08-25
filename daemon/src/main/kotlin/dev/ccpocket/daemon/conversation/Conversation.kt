@@ -214,6 +214,10 @@ class Conversation(
     @Volatile
     private var model: String? = null
 
+    /** Transcript/index truth for the chat header. Null only for a genuinely unnamed fresh session. */
+    @Volatile
+    private var sessionTitle: String? = null
+
     // mutable: a phone can switch reasoning effort mid-session via `/effort <level>`
     @Volatile
     private var effort: String? = null
@@ -719,6 +723,7 @@ class Conversation(
             origin = origin, // "via <bridge>" label (issue #91); null for interactive sessions
             permissionMode = permissionMode,
             serviceTier = serviceTier,
+            title = sessionTitle,
         )
 
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
@@ -782,8 +787,8 @@ class Conversation(
         // EAGERLY, on purpose. Its whole semantics are "seize this session NOW", and the take-over fork decision
         // (issue #35: branch a fresh id off a possibly-live desktop `claude --resume`, carried in [fork]) was already
         // computed by the registry and must be honored at open time — deferring it to an uncertain first prompt would
-        // break "tap to take over" and could let two writers clobber one transcript. Codex ignores forkSession; a
-        // null resumeId is a brand-new session either way.
+        // break "tap to take over" and could let two writers clobber one transcript. Codex maps forkSession to
+        // app-server thread/fork; a null resumeId is a brand-new session either way.
         if (takeOver) {
             // [resumeId] is valid for every backend here: for OpenCode it is the REAL opencode session id
             // (the scanner read it out of opencode.db — the registry keys conversations by that same id),
@@ -804,6 +809,13 @@ class Conversation(
         // transcript up front; once the first prompt spawns the agent, the pump re-emits SessionLive with the real
         // sessionId.
         scope.launch {
+            // Assign only a real read, and only while nothing better arrived: this launch races the first
+            // prompt's seeding (sendPrompt), and an unconditional write here re-nulled a just-seeded title
+            // after a slow multi-MB transcript parse (PR #296 review) — every later SessionLive (including
+            // the push/deep-link path) then carried title=null again.
+            resumeId?.let { rid ->
+                runCatching { backend.resumeTitle(workdir.toString(), rid) }.getOrNull()?.takeIf(String::isNotBlank)
+            }?.let { read -> if (sessionTitle == null) sessionTitle = read }
             // Seed model + usage from the resumed transcript so the header shows the real model/window and the
             // usage statusline on open — before the first new turn's init lands (a headless claude is silent
             // until then, issue #27). Done off the relay inbound loop; the transcript read can be a multi-MB parse.
@@ -2156,6 +2168,9 @@ class Conversation(
             promptId?.let { sink.emit(PromptAck(convoId, it)) } // handled by the daemon = delivered
             return
         }
+        if (sessionTitle == null && text.isNotBlank()) {
+            sessionTitle = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(60)
+        }
         // approval design M2 §5.4 / §18.1 P1-4: EVERY top-level user prompt begins a new task — the
         // previous task's grants die right here, whether or not the CLI folds the message into a running
         // turn. A new instruction never inherits an old authorization; task identity is decoupled from
@@ -2280,6 +2295,8 @@ class Conversation(
         val handler: suspend () -> Unit = when (trimmed.substringBefore(' ').substringBefore('\n')) {
             "/model" -> ({ handleModelCommand(trimmed) })
             "/effort" -> ({ handleEffortCommand(trimmed) })
+            "/compact" -> if (backend.kind == AgentKind.CODEX) ({ handleCodexCompactCommand() }) else return false
+            "/review" -> if (backend.kind == AgentKind.CODEX) ({ handleCodexReviewCommand(trimmed) }) else return false
             "/clear" -> ({ handleClearCommand() })
             else -> return false
         }
@@ -2288,6 +2305,61 @@ class Conversation(
         promptId?.let { markPromptConsumed(it) }
         handler()
         return true
+    }
+
+    /** Codex exposes compaction as app-server control-plane RPC, not a slash prompt. The process must be
+     * ready because compact applies to its opened thread; a cold resume is launched without creating a turn. */
+    private suspend fun handleCodexCompactCommand() {
+        if (isExecuting()) {
+            reply("Wait for the current Codex turn to finish before compacting context.")
+            return
+        }
+        if (proc == null) {
+            val anchor = sessionId ?: openedResumeId
+            val fork = if (sessionId == null) openedWithFork else false
+            val launched = runCatching {
+                launchProcess(
+                    AgentSpec(
+                        workdir, anchor, model, mode, effort = effort,
+                        permissionMode = permissionMode, serviceTier = serviceTier, forkSession = fork,
+                    ),
+                )
+            }
+            if (launched.isFailure) {
+                reply("Could not start Codex to compact this session: ${launched.exceptionOrNull()?.message ?: "unknown error"}")
+                return
+            }
+        }
+        // CodexBackend queues this across an in-flight thread resume/fork handshake, so a cold session's
+        // first Compact tap still becomes exactly one native thread/compact/start request.
+        if (!backend.compact()) reply("This Codex version does not expose native context compaction.")
+    }
+
+    /** Codex code review is another app-server control-plane operation. `/review` defaults to all working
+     * tree changes; text after the command becomes the native custom review target. */
+    private suspend fun handleCodexReviewCommand(text: String) {
+        if (isExecuting()) {
+            reply("Wait for the current Codex turn to finish before starting a review.")
+            return
+        }
+        if (proc == null) {
+            val anchor = sessionId ?: openedResumeId
+            val fork = if (sessionId == null) openedWithFork else false
+            val launched = runCatching {
+                launchProcess(
+                    AgentSpec(
+                        workdir, anchor, model, mode, effort = effort,
+                        permissionMode = permissionMode, serviceTier = serviceTier, forkSession = fork,
+                    ),
+                )
+            }
+            if (launched.isFailure) {
+                reply("Could not start Codex review: ${launched.exceptionOrNull()?.message ?: "unknown error"}")
+                return
+            }
+        }
+        val instructions = text.removePrefix("/review").trim().takeIf { it.isNotEmpty() }
+        if (!backend.review(instructions)) reply("This Codex version does not expose native code review.")
     }
 
     /** Handle the phone's `/model [name]` — the agent `-p` ignores it, so the daemon honors it. */
@@ -2338,6 +2410,7 @@ class Conversation(
         openedResumeId = null // brand-new session — no resume lineage left to preserve
         openedWithFork = false
         backfilledModel = null
+        sessionTitle = null
         failedTurnStreak = 0 // a fresh session starts healthy — the degraded warning belongs to the old transcript
         sawSyntheticThisTurn = false
         lastSyntheticText = null
@@ -2394,7 +2467,12 @@ class Conversation(
      *  reports it; it must NOT fall back to a disk append while this process lives. */
     suspend fun renameSession(title: String): Boolean {
         if (!hasLiveProcess()) return false
-        return backend.renameSession(title)
+        val renamed = backend.renameSession(title)
+        // Keep the cached title in step with the rename: SessionLive stamps [sessionTitle] and the phone
+        // applies any non-blank value to the chat header (and persists it into the MRU), so a stale cache
+        // here silently reverted a successful rename on the next live() broadcast (PR #296 review).
+        if (renamed) sessionTitle = title.takeIf { it.isNotBlank() }
+        return renamed
     }
 
     /**
@@ -2422,6 +2500,7 @@ class Conversation(
         openedResumeId = null // fresh session in the new cwd — no resume lineage left to preserve
         openedWithFork = false
         backfilledModel = null
+        sessionTitle = null
         failedTurnStreak = 0 // fresh session in a new cwd — degraded state died with the old transcript
         sawSyntheticThisTurn = false
         lastSyntheticText = null

@@ -113,6 +113,23 @@ class GitWireCompatTest {
     }
 
     @Test
+    fun git_action_result_path_is_a_trailing_optional_both_directions() {
+        // new daemon → new app: the worktree.add receipt carries the checkout it created
+        val with = GitActionResult("c1", GIT_OP_WORKTREE_ADD, ok = true, path = "/repo-worktrees/feat-x")
+        val json = PocketJson.encodeToString(Envelope(id = "g8", ts = 0, body = with))
+        assertTrue("\"path\":\"/repo-worktrees/feat-x\"" in json, json)
+        assertEquals(with, (PocketJson.decodeFromString<Envelope>(json).body as GitActionResult))
+
+        // old daemon's frame (no path) → null: the app shows the receipt without the open-here verb
+        val old = """{"id":"g9","ts":0,"body":{"t":"pocket/git.result","convoId":"c1","op":"worktree.add","ok":true}}"""
+        assertEquals(null, (PocketJson.decodeFromString<Envelope>(old).body as GitActionResult).path)
+
+        // explicitNulls=false: an unset path adds no bytes for old phones to trip on
+        val plain = PocketJson.encodeToString(Envelope(id = "g10", ts = 0, body = GitActionResult("c1", GIT_OP_STAGE, ok = true)))
+        assertTrue("path" !in plain, plain)
+    }
+
+    @Test
     fun git_preview_and_diff_roundtrip() {
         val prev = Envelope(
             id = "g6", ts = 0,

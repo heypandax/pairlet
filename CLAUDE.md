@@ -70,6 +70,6 @@ tail -f ~/Library/Logs/cc-pocket/daemon.err.log
 - 验证移动端编译：`JAVA_HOME=... ./gradlew :mobile:composeApp:compileKotlinDesktop`。
 - 三套测试一把跑：`bash scripts/check-all.sh`（protocol + daemon + mobile）。
 - 装机到 Pandaa iPhone：`bash scripts/install-pandaa.sh`（generic 构建 → 新鲜度校验 → devicectl 安装拉起）。
-- **升级 claude CLI 后**跑 `python3 scripts/probe-claude-wire.py`——回归 daemon 依赖的三条 stream-json 行为（中途消息排队/注入、AskUserQuestion answers 形状），漂移会让排队与提问卡静默变坏。
+- **升级 claude CLI 后**跑 `python3 scripts/probe-claude-wire.py`——回归 daemon 依赖的三条 stream-json 行为（中途消息排队/注入、AskUserQuestion answers 形状），漂移会让排队与提问卡静默变坏；**升级 codex CLI 后**同理跑 `python3 scripts/probe-codex-wire.py`——回归 experimental 的 app-server 四条行为（握手/陈旧 steer 被带 id 的 error 拒绝/`thread/fork` 存在/未知方法错误形状），漂移会让提示词被吞与接管防双写静默失效。
 
 > 更细的历史踩坑（daemon 三/四类冲突、relay 容量、fake-IP 代理等）见 Claude 记忆 `cc-pocket-daemon-service-collisions`。

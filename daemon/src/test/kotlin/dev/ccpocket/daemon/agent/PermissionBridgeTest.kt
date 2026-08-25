@@ -1125,6 +1125,32 @@ class PermissionBridgeTest {
     }
 
     @Test
+    fun codex_style_edit_session_scope_auto_allows_the_next_edit() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val rules = mutableSetOf<String>()
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge(
+            "c1", PermissionMode.DEFAULT, coord, { emitted += it }, rules,
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+        )
+
+        // Codex file-change approvals are normalized to Edit with a file_path and diff. A session grant
+        // is intentionally tool-family scoped, so the next Edit is silent even when it targets another file.
+        b.onControlRequest(AgentEvent.ControlRequest("e1", "Edit", buildJsonObject { put("file_path", "/repo/A.kt") }, diff = "+ A"))
+        coord.onVerdict(PermissionVerdict("c1", "e1", Decision.ALLOW, grantScope = "session"))
+        assertTrue("Edit" in rules)
+
+        emitted.clear()
+        b.onControlRequest(AgentEvent.ControlRequest("e2", "Edit", buildJsonObject { put("file_path", "/repo/B.kt") }, diff = "+ B"))
+        assertTrue(emitted.filterIsInstance<PermissionAsk>().isEmpty(), "remembered Edit must not ask again in this session")
+        assertTrue(responses.last().allow)
+        assertFalse(responses.last().remember, "automatic replay is local daemon policy, not a second CLI grant")
+        scope.cancel()
+    }
+
+    @Test
     fun retry_safer_deny_reads_as_replan_guidance_not_a_refusal() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val coord = ApprovalCoordinator(scope)

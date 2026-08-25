@@ -81,6 +81,10 @@ class SessionRegistryRewindTest {
             scope,
             backends = mapOf(kind to AgentBackendFactory { SilentBackend(kind) }),
             processProbe = { _, _ -> LiveProcesses.ExternalClaude.ABSENT },
+            // Pin the Codex probe too: the default shells out to lsof, and on a loaded dev machine with a
+            // real codex running a timeout reads as UNKNOWN → "assume held" → the open under test silently
+            // becomes a read-only observe instead of the owned conversation these cases exercise.
+            codexProcessProbe = { _, _ -> LiveProcesses.ExternalClaude.ABSENT },
             projectsRoot = root,
         )
 

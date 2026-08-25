@@ -19,6 +19,9 @@ import kotlin.test.assertNotNull
  *     and the row is the RESUME file's (the live continuation).
  */
 class CodexResumeRolloutDedupeTest {
+    /** The scanner memoizes parses by (path, mtime) on an object singleton — start from a clean one. */
+    @kotlin.test.BeforeTest
+    fun reset() = CodexTranscriptScanner.clearForTest()
 
     private fun rollout(firstPrompt: String) = """
         {"timestamp":"t0","type":"session_meta","payload":{"id":"01a031bc-9b7d-7070-9537-ba635e85b709","cwd":"/repo","cli_version":"0.124.0"}}
