@@ -1,6 +1,7 @@
-What's new in 1.9.2 — live allowance, stronger Codex sessions, and worktree polish
+What's new in 1.9.3 — everything from 1.9.2, plus Windows companion fixes
 
 • Claude plan allowance stays visible on phone and desktop, with 5-hour and 7-day usage, exact reset times, and a detailed refreshable view.
 • Codex sessions are found and resumed more reliably across macOS, Windows and Linux, with native fork, compact and review controls plus clearer failures instead of silent hangs.
 • Worktrees now show an explicit creation receipt, can open a session in the new checkout immediately, and keep the main checkout first with newer linked worktrees easy to find.
 • Pairing-day reconnects, duplicate resumed history, sheet gestures and bottom-edge controls are more stable and predictable.
+• The Windows desktop companion now renders collaboration QR codes reliably, checks for updates correctly, restores dsh tool steps in history, and adds a draggable scrollbar to wide code blocks.

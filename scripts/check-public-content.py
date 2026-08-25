@@ -106,8 +106,8 @@ EXPECTED_AGENTS = [
     ("deepseek", "DeepSeek Harness", "narrow v1", "有限 v1", ["yes", "yes", "no", "no"]),
 ]
 
-BASELINE_VERSION = "1.9.2"
-SOURCE_COMMIT = "387bc816"
+BASELINE_VERSION = "1.9.3"
+SOURCE_COMMIT = "4016673b"
 # Files that must state the baseline and must not carry the previous public version.
 BASELINE_TARGETS = ["README.md", "README.zh-CN.md", "site/index.html", "site/llms.txt"]
 PREVIOUS_VERSION = r"\b1\.9\.0\b"
