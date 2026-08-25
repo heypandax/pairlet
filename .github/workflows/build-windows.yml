@@ -79,6 +79,8 @@ jobs:
             echo "::warning::createDistributable attempt $attempt failed (network?), retrying in 20s"; sleep 20
           done
           [ "$ok" = 1 ] || { echo "::error::createDistributable failed after 3 attempts"; exit 1; }
+          APP="mobile/composeApp/build/compose/binaries/main/app/CC Pocket"
+          bash scripts/smoke-desktop-image.sh "$APP"
           # MSI needs the WiX Toolset; don't fail the run if it's absent — the portable zip is the guaranteed deliverable.
           ./gradlew :mobile:composeApp:packageMsi --no-daemon || echo "::warning::packageMsi failed (WiX missing?) — portable zip still produced"
 

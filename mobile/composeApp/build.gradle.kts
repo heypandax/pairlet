@@ -13,7 +13,7 @@ plugins {
 // Single source of truth for the app version: the Android versionName AND the in-app "About" version both
 // derive from this (the latter via the generated constant below, so it can never drift — which is how it
 // got stuck at 0.1.0). Keep in lockstep with the iOS CFBundleShortVersionString in iosApp/iosApp/Info.plist.
-val appVersionName = "1.9.2"
+val appVersionName = "1.9.3"
 
 // Emit a commonMain constant from [appVersionName] so the displayed version always matches the build.
 val generateAppVersion by tasks.registering {
@@ -75,6 +75,10 @@ kotlin {
             implementation(libs.ktor.client.cio)
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.cryptography.provider.jdk)
+            // Pure-Java QR matrix generation for the desktop invite card (#251). Rendering is done by
+            // Compose Canvas; keeping this explicit avoids qr-kit's BufferedImage -> Skiko bitmap bridge,
+            // whose first static initialization failed in the packaged Windows app.
+            implementation(libs.nayuki.qrcodegen)
             implementation(libs.jna) // objc bridge: bundle-identity macOS notifications (issue #99); inert off-mac
             // embedded terminal (issue #153): JediTerm Swing widget + local PTY — desktop target ONLY
             implementation(libs.jediterm.core)
@@ -96,6 +100,7 @@ kotlin {
             implementation(compose.uiTest)
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.zxing.core) // independent decode oracle for the desktop QR matrix test
         }
     }
 }
@@ -110,7 +115,7 @@ android {
         applicationId = "com.panda.ccpocket" // matches the iOS bundle id + the Firebase google-services.json client
         minSdk = libs.versions.androidMinSdk.get().toInt()
         targetSdk = libs.versions.androidTargetSdk.get().toInt()
-        versionCode = 26
+        versionCode = 27
         versionName = appVersionName // single source of truth (see top); lockstep with iOS CFBundleShortVersionString
     }
     // release signing comes from ~/.gradle/gradle.properties (CCPOCKET_KEYSTORE*) — keys never
@@ -150,11 +155,15 @@ compose.desktop {
         }
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi) // Dmg built on macOS, Msi on Windows (jpackage picks per host)
+            // ReleaseClient uses JDK HttpClient. Compose's automatic jdeps pass misses that dependency
+            // through the KMP protocol jar, so v1.9.0 shipped a seven-module runtime without java.net.http
+            // and update checks failed before touching the network (#305).
+            modules("java.net.http")
             // User-visible app name (Finder / Dock / taskbar). Release artifacts keep the cc-pocket-desktop-* names —
             // the release scripts rename the jpackage output, but local paths ARE affected: the bundle is now
             // "CC Pocket.app" / app/CC Pocket (see scripts/update-local-desktop.sh and build-windows.yml).
             packageName = "CC Pocket"
-            packageVersion = "1.9.2"
+            packageVersion = "1.9.3"
             windows {
                 iconFile.set(project.file("desktop-icons/cc-pocket.ico"))
             }

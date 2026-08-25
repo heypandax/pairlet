@@ -129,17 +129,55 @@ class DshTranscriptReplayAskTest {
         assertNull(DshTranscriptReplay.read(file).single().ok)
     }
 
-    /** Only `ask_user_question` becomes a row — v1 still renders no tool cards for anything else, and a
-     *  regression here would flood every resumed dsh chat with raw tool dumps. */
     @Test
-    fun other_tool_calls_are_still_dropped() {
+    fun ordinary_tool_call_and_result_replay_as_a_structured_card() {
         val file = transcript(
             header,
             """{"type":"tool/call","seq":1,"time":1,"data":{"turn":1,"step":1,"callId":"c9","name":"bash","arguments":"{'command':'ls'}"}}""",
             """{"type":"tool/result","seq":2,"time":2,"data":{"turn":1,"step":1,"message":{"content":[""" +
                 """{"type":"tool-result","toolCallId":"c9","content":[{"type":"text","text":"a.txt"}]}]}}}""",
         )
-        assertTrue(DshTranscriptReplay.read(file).isEmpty())
+        val card = DshTranscriptReplay.read(file).single()
+        assertEquals(ChatRole.TOOL, card.role)
+        assertEquals("Bash", card.tool)
+        assertEquals("ls", card.text)
+        assertEquals("a.txt", card.output)
+        assertEquals(true, card.ok)
+    }
+
+    @Test
+    fun ordinary_tool_without_a_result_stays_visible_without_inventing_an_outcome() {
+        val file = transcript(
+            header,
+            """{"type":"tool/call","seq":1,"time":1,"data":{"callId":"c9","name":"read","arguments":"{'file_path':'/repo/a.txt'}"}}""",
+        )
+        val card = DshTranscriptReplay.read(file).single()
+        assertEquals("Read", card.tool)
+        assertEquals("/repo/a.txt", card.text)
+        assertNull(card.ok)
+        assertNull(card.output)
+    }
+
+    @Test
+    fun a_truncated_argument_string_is_still_visible_instead_of_becoming_only_the_tool_name() {
+        val file = transcript(
+            header,
+            """{"type":"tool/call","seq":1,"time":1,"data":{"callId":"c9","name":"bash","arguments":"partial command tail"}}""",
+        )
+        assertEquals("partial command tail", DshTranscriptReplay.read(file).single().text)
+    }
+
+    @Test
+    fun an_explicit_failed_tool_result_marks_the_card_failed() {
+        val file = transcript(
+            header,
+            """{"type":"tool/call","seq":1,"time":1,"data":{"callId":"c9","name":"bash","arguments":"{'command':'false'}"}}""",
+            """{"type":"tool/result","seq":2,"time":2,"data":{"message":{"content":[""" +
+                """{"type":"tool-result","toolCallId":"c9","isError":true,"content":[{"type":"text","text":"exit 1"}]}]}}}""",
+        )
+        val card = DshTranscriptReplay.read(file).single()
+        assertEquals(false, card.ok)
+        assertEquals("exit 1", card.output)
     }
 
 
