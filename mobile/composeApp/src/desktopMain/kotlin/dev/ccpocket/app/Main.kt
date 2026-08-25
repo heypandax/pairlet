@@ -47,6 +47,7 @@ import dev.ccpocket.app.desktop.JediTermEngine
 import dev.ccpocket.app.desktop.MacWindow
 import dev.ccpocket.app.desktop.PaletteScope
 import dev.ccpocket.app.desktop.RepoDesktopModel
+import dev.ccpocket.app.desktop.runPackageSmoke
 import dev.ccpocket.app.desktop.toggleEmbeddedTerminal
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.notify_approval_body
@@ -89,7 +90,14 @@ internal fun shouldPollDirectories(windowVisible: Boolean, minimized: Boolean): 
  * then the [DesktopApp] shell. Undecorated so the app paints its own title bar. ⌘K / Ctrl+K opens the
  * command palette (Esc closes it) — handled at the window level so it works regardless of focus.
  */
-fun main() {
+fun main(args: Array<String>) {
+    // Runs from the JPACKAGE IMAGE's bundled runtime in CI — before AWT/Compose/network. This catches
+    // exactly the two Windows-only release regressions from #251/#305: a jlink-stripped JDK module or
+    // a QR path that can initialize only in a developer JVM but not in the produced app image.
+    if (args.firstOrNull() == "--package-smoke") {
+        runPackageSmoke(args.getOrNull(1))
+        return
+    }
     // #251 FIRST, before anything can throw: without it an escape from composition took the default AWT
     // path — a native box reading only "Unknown error" on the packaged Windows launcher — after which the
     // window was gone but the non-daemon SystemTray thread kept the process alive as an unquittable

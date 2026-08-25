@@ -1,6 +1,6 @@
 package dev.ccpocket.app.desktop
 
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -9,14 +9,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
-import qrgenerator.generateCode
+import io.nayuki.qrcodegen.QrCode
 
 /**
  * Issue #251 — a QR that cannot be drawn must not take the window with it.
@@ -24,18 +26,20 @@ import qrgenerator.generateCode
  * The qr-kit `QRCodeImage` composable was the prime suspect in the desktop "Connect a colleague"
  * crash, for two reasons that compound:
  *
- *  1. Its own guard catches `Exception` only. The JVM generator is ZXing `QRCodeWriter.encode` →
- *     `BufferedImage` → `toComposeImageBitmap`, so a `NoClassDefFoundError` (ZXing absent from a
- *     packaged image), an `OutOfMemoryError`, or an AWT `Error` walks straight past it.
+ *  1. Its own guard catches `Exception` only. The old JVM generator was ZXing `QRCodeWriter.encode` →
+ *     `BufferedImage` → `toComposeImageBitmap`. The final conversion initializes Skiko's native Bitmap
+ *     class on first use; the v1.9.0 Windows package reported that exact path as
+ *     `ExceptionInInitializerError`, even though the rest of the Compose window stayed alive.
  *  2. The desktop call sites passed no `onFailure`, so even the failures it DOES catch were swallowed
  *     into a blank square with nothing logged — the user got "it just broke" either way.
  *
  * And the payload itself can throw before the generator is even reached: `CollaboratorInvite.encode()`
- * serializes + base64s daemon-supplied fields, and an over-long blob makes ZXing refuse outright.
+ * serializes + base64s daemon-supplied fields, and any QR encoder rejects a blob beyond its capacity.
  *
- * So this does the generation OURSELVES, synchronously, inside [runCatching] — which catches
- * `Throwable`, unlike the library — and renders the resulting bitmap with a plain [Image]. Nothing on
- * this path can reach the composition as an exception. When it fails the surrounding dialog is
+ * So this builds a pure-Java QR MODULE MATRIX synchronously inside [runCatching] — which catches
+ * `Throwable`, unlike the library — and paints the modules directly on the already-running Compose
+ * canvas. There is no AWT image and no second Skiko bitmap initialization on this path. When it fails
+ * the surrounding dialog is
  * unharmed: the QR square becomes a placeholder carrying [ERR_QR] plus the exception's class name, and
  * the short code / fingerprint words / buttons beside it still work. A colleague can be connected by
  * reading the short code aloud, which is precisely the fallback the QR exists to shortcut.
@@ -56,28 +60,65 @@ fun SafeQrImage(
     modifier: Modifier = Modifier,
     payload: () -> String,
 ) {
-    val outcome = remember(payloadKey) { qrBitmapOrFailure(payload) }
+    val outcome = remember(payloadKey) { qrMatrixOrFailure(payload) }
     outcome.fold(
-        onSuccess = {
-            Image(bitmap = it, contentDescription = contentDescription, modifier = modifier, contentScale = ContentScale.Fit)
-        },
+        onSuccess = { QrMatrixCanvas(it, contentDescription, modifier) },
         onFailure = { QrFailurePlaceholder(qrFailureLabel(it), modifier) },
     )
 }
 
 /**
- * Encode + rasterize, containing everything. `runCatching` catches [Throwable] on purpose (see the
- * file header); a blank payload is rejected up front because ZXing's own error for it is opaque.
+ * Encode to a small module matrix, containing everything. `runCatching` catches [Throwable] on purpose
+ * (see the file header); a blank payload is rejected up front because generator errors are otherwise
+ * opaque. Four quiet modules are stored around the encoded matrix so every renderer preserves the QR
+ * spec's required white border.
  * Every failure is logged with [ERR_QR] so the code on screen has a matching line on disk.
  */
-internal fun qrBitmapOrFailure(payload: () -> String): Result<ImageBitmap> =
+internal fun qrMatrixOrFailure(payload: () -> String): Result<QrMatrix> =
     runCatching {
         val text = payload()
         require(text.isNotBlank()) { "empty QR payload" }
-        // platform type: the generator is Java-facing, so a null here is possible on paper — treat it
-        // as a failure rather than letting an NPE surface somewhere less containable.
-        checkNotNull(generateCode(text)) { "QR generator returned no bitmap" }
+        val qr = QrCode.encodeText(text, QrCode.Ecc.MEDIUM)
+        val size = qr.size + QUIET_ZONE * 2
+        QrMatrix(size, BooleanArray(size * size).also { dark ->
+            for (y in 0 until qr.size) for (x in 0 until qr.size) {
+                if (qr.getModule(x, y)) dark[(y + QUIET_ZONE) * size + x + QUIET_ZONE] = true
+            }
+        })
     }.onFailure { DesktopCrashGuard.note(ERR_QR, it) }
+
+/** Immutable pixels in MODULE coordinates rather than device pixels. */
+internal data class QrMatrix(val size: Int, private val dark: BooleanArray) {
+    init { require(size > 0 && dark.size == size * size) }
+    operator fun get(x: Int, y: Int): Boolean = dark[y * size + x]
+}
+
+/** Draw contiguous dark runs rather than one rectangle per output pixel. A typical invite is a few
+ * hundred runs, so resize/repaint stays cheap and the QR remains vector-sharp at any dialog scale. */
+@Composable
+private fun QrMatrixCanvas(matrix: QrMatrix, description: String, modifier: Modifier) {
+    Canvas(modifier.semantics { contentDescription = description }) {
+        drawRect(Color.White)
+        val cell = minOf(size.width, size.height) / matrix.size
+        val left = (size.width - cell * matrix.size) / 2f
+        val top = (size.height - cell * matrix.size) / 2f
+        for (y in 0 until matrix.size) {
+            var x = 0
+            while (x < matrix.size) {
+                while (x < matrix.size && !matrix[x, y]) x++
+                val start = x
+                while (x < matrix.size && matrix[x, y]) x++
+                if (start < x) {
+                    drawRect(
+                        Color.Black,
+                        topLeft = Offset(left + start * cell, top + y * cell),
+                        size = Size((x - start) * cell, cell),
+                    )
+                }
+            }
+        }
+    }
+}
 
 /** `CCP-QR-01 · WriterException` — short enough to survive being retyped out of a screenshot. */
 internal fun qrFailureLabel(t: Throwable): String = "$ERR_QR · ${t::class.simpleName ?: "Throwable"}"
@@ -105,3 +146,5 @@ private fun QrFailurePlaceholder(label: String, modifier: Modifier) {
         }
     }
 }
+
+private const val QUIET_ZONE = 4

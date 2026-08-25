@@ -1213,7 +1213,16 @@ private fun MessageRow(
             if (isWorkflowTool(item.tool) && workflowRun != null) {
                 WorkflowCard(workflowRun, dense = true) { onOpenWorkflow(workflowRun.runId) }
             } else if (isSubagentTool(item.tool)) SubagentCard(item, dense = true)
-            else ToolRow(item.tool, item.preview, if (item.ok == false) ToolStatus.FAIL else ToolStatus.OK)
+            else ToolRow(
+                item.tool,
+                item.preview,
+                when (item.ok) {
+                    true -> ToolStatus.OK
+                    false -> ToolStatus.FAIL
+                    null -> if (item.taskId != null) ToolStatus.RUN else ToolStatus.UNKNOWN
+                },
+                output = item.output,
+            )
         is ChatItem.Sys -> Text(
             pathLinked(item.text), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.surface)
@@ -1270,21 +1279,38 @@ private fun MessageRow(
     }
 }
 
-enum class ToolStatus { RUN, OK, FAIL }
+enum class ToolStatus { RUN, OK, FAIL, UNKNOWN }
+internal const val TOOL_ROW_TAG = "plain-tool-row"
 
 @Composable
-fun ToolRow(name: String, cmd: String, status: ToolStatus) {
-    val col = when (status) { ToolStatus.OK -> Tok.ok; ToolStatus.FAIL -> Tok.danger; ToolStatus.RUN -> Tok.accent }
+fun ToolRow(name: String, cmd: String, status: ToolStatus, output: String? = null) {
+    val col = when (status) {
+        ToolStatus.OK -> Tok.ok
+        ToolStatus.FAIL -> Tok.danger
+        ToolStatus.RUN -> Tok.accent
+        ToolStatus.UNKNOWN -> Tok.muted
+    }
     var expanded by remember { mutableStateOf(false) }
     // one visual line at 12sp mono inside the stream column holds ~70 chars — beyond that (or any
-    // newline) the ellipsis hides content, so the row becomes a disclosure toggling the full text
-    val expandable = cmd.length > 70 || '\n' in cmd
+    // newline) the ellipsis hides content. A replayed tool result also makes the row expandable: before
+    // #306 desktop threw that output field away even though the daemon had preserved it.
+    val expandable = cmd.length > 70 || '\n' in cmd || !output.isNullOrBlank()
+    val details = remember(cmd, output) {
+        buildString {
+            append(cmd)
+            output?.takeIf { it.isNotBlank() }?.let {
+                if (isNotEmpty()) append("\n\n")
+                append("— output —\n")
+                append(it)
+            }
+        }
+    }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
             .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)),
     ) {
         Row(
-            Modifier.fillMaxWidth()
+            Modifier.fillMaxWidth().testTag(TOOL_ROW_TAG)
                 .then(if (expandable) Modifier.clickable { expanded = !expanded } else Modifier)
                 .padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1305,7 +1331,7 @@ fun ToolRow(name: String, cmd: String, status: ToolStatus) {
             when (status) {
                 ToolStatus.OK -> Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(14.dp))
                 ToolStatus.FAIL -> Icon(Icons.Rounded.Close, null, tint = Tok.danger, modifier = Modifier.size(14.dp))
-                ToolStatus.RUN -> {}
+                ToolStatus.RUN, ToolStatus.UNKNOWN -> {}
             }
         }
         if (expanded) {
@@ -1313,11 +1339,11 @@ fun ToolRow(name: String, cmd: String, status: ToolStatus) {
             Box(Modifier.fillMaxWidth().background(Tok.base.copy(alpha = 0.45f))) {
                 SelectionContainer {
                     Text(
-                        pathLinked(cmd), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp, lineHeight = 18.sp,
+                        pathLinked(details), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp, lineHeight = 18.sp,
                         modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 40.dp, top = 9.dp, bottom = 9.dp),
                     )
                 }
-                CopyButton(cmd, Modifier.align(Alignment.TopEnd).padding(top = 5.dp, end = 6.dp))
+                CopyButton(details, Modifier.align(Alignment.TopEnd).padding(top = 5.dp, end = 6.dp))
             }
         }
     }

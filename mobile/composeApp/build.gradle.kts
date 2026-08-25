@@ -75,6 +75,10 @@ kotlin {
             implementation(libs.ktor.client.cio)
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.cryptography.provider.jdk)
+            // Pure-Java QR matrix generation for the desktop invite card (#251). Rendering is done by
+            // Compose Canvas; keeping this explicit avoids qr-kit's BufferedImage -> Skiko bitmap bridge,
+            // whose first static initialization failed in the packaged Windows app.
+            implementation(libs.nayuki.qrcodegen)
             implementation(libs.jna) // objc bridge: bundle-identity macOS notifications (issue #99); inert off-mac
             // embedded terminal (issue #153): JediTerm Swing widget + local PTY — desktop target ONLY
             implementation(libs.jediterm.core)
@@ -96,6 +100,7 @@ kotlin {
             implementation(compose.uiTest)
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.zxing.core) // independent decode oracle for the desktop QR matrix test
         }
     }
 }
@@ -150,6 +155,10 @@ compose.desktop {
         }
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi) // Dmg built on macOS, Msi on Windows (jpackage picks per host)
+            // ReleaseClient uses JDK HttpClient. Compose's automatic jdeps pass misses that dependency
+            // through the KMP protocol jar, so v1.9.0 shipped a seven-module runtime without java.net.http
+            // and update checks failed before touching the network (#305).
+            modules("java.net.http")
             // User-visible app name (Finder / Dock / taskbar). Release artifacts keep the cc-pocket-desktop-* names —
             // the release scripts rename the jpackage output, but local paths ARE affected: the bundle is now
             // "CC Pocket.app" / app/CC Pocket (see scripts/update-local-desktop.sh and build-windows.yml).

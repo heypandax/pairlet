@@ -1,9 +1,11 @@
 package dev.ccpocket.daemon.dsh
 
+import dev.ccpocket.daemon.agent.ToolMetadata
 import dev.ccpocket.daemon.disk.ReplayBudget
 import dev.ccpocket.daemon.disk.ReplaySlice
 import dev.ccpocket.daemon.disk.ReplaySlicer
 import dev.ccpocket.daemon.disk.TranscriptNoise
+import dev.ccpocket.daemon.opencode.ToolNameMapper
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
 import java.nio.file.Path
@@ -15,7 +17,7 @@ import java.nio.file.Path
  * The rows we surface are deliberately few — v1 scope is "the conversation reads back correctly":
  *  - `user/message` → a user row
  *  - `assistant/message` → an assistant row
- *  - `tool/call`(name=`ask_user_question`) + its `tool/result` → the answered question card (issue #291)
+ *  - `tool/call` + its `tool/result` → a structured tool card (questions keep their answered card)
  *  - `approval/asked` + `approval/decided` → the decided approval card (issue #291)
  *  - everything else → dropped
  *
@@ -86,6 +88,7 @@ object DshTranscriptReplay {
         // rather than re-derived from the row's label so that a question containing a newline cannot
         // shift the answer pairing.
         val questionIdx = HashMap<String, Pair<Int, List<String>>>()
+        val toolIdx = HashMap<String, Int>() // ordinary call id -> replay row to patch with its result
         val approvalIdx = HashMap<String, Int>() // approval id (disk spelling) -> its row's index
         var lineNo = 0L
         for (raw in lines) {
@@ -113,25 +116,48 @@ object DshTranscriptReplay {
                 // app switches its renderer on, and #110's answered-question card is the right one for
                 // this row — the dsh-side name (`ask_user_question`) would fall through to a raw card.
                 DshTranscript.EVENT_TOOL_CALL -> {
-                    if (data?.str("name") != DshAsk.QUESTION_TOOL) continue
-                    val prompts = DshAsk.questionsOf(DshAsk.toolCallArgs(data)).map { it.question }
-                    val text = prompts.joinToString("\n").ifBlank { "Question" }
-                    data.str("callId")?.let { questionIdx[it] = out.size to prompts }
-                    out += MutableRow(
-                        HistoryMessage(ChatRole.TOOL, text.take(MAX_TOOL_TEXT), tool = ASK_TOOL),
-                        lineNo,
-                    )
+                    val rawName = data?.str("name") ?: "tool"
+                    val args = DshAsk.toolCallArgs(data)
+                    if (rawName == DshAsk.QUESTION_TOOL) {
+                        val prompts = DshAsk.questionsOf(args).map { it.question }
+                        val text = prompts.joinToString("\n").ifBlank { "Question" }
+                        data?.str("callId")?.let { questionIdx[it] = out.size to prompts }
+                        out += MutableRow(
+                            HistoryMessage(ChatRole.TOOL, text.take(MAX_TOOL_TEXT), tool = ASK_TOOL),
+                            lineNo,
+                        )
+                    } else {
+                        val name = ToolNameMapper.map(rawName)
+                        val preview = args?.let { ToolMetadata.of(name, it).preview }
+                            ?: data?.str("arguments")?.takeIf { it.isNotBlank() }
+                            ?: name
+                        data?.str("callId")?.let { toolIdx[it] = out.size }
+                        out += MutableRow(
+                            HistoryMessage(ChatRole.TOOL, preview.take(MAX_TOOL_TEXT), tool = name),
+                            lineNo,
+                        )
+                    }
                 }
                 // The answer half. A question with NO result (the turn was cancelled before anyone
                 // answered) simply never reaches here — its row stays in the unanswered form, which the
                 // #110 card already knows how to render.
                 DshTranscript.EVENT_TOOL_RESULT -> {
-                    if (questionIdx.isEmpty()) continue
-                    for ((callId, text) in DshAsk.toolResultTexts(data)) {
-                        val (idx, prompts) = questionIdx.remove(callId) ?: continue
+                    for (result in DshAsk.toolResults(data)) {
+                        val question = questionIdx.remove(result.callId)
+                        if (question != null) {
+                            val (idx, prompts) = question
+                            val row = out.getOrNull(idx) ?: continue
+                            val answers = DshAsk.replayAnswers(result.text, prompts) ?: continue
+                            row.msg = row.msg.copy(answers = answers)
+                            row.patchLine = lineNo
+                            continue
+                        }
+                        val idx = toolIdx.remove(result.callId) ?: continue
                         val row = out.getOrNull(idx) ?: continue
-                        val answers = DshAsk.replayAnswers(text, prompts) ?: continue
-                        row.msg = row.msg.copy(answers = answers)
+                        row.msg = row.msg.copy(
+                            ok = result.failed?.not() ?: true,
+                            output = result.text.take(MAX_TOOL_OUTPUT).ifBlank { null },
+                        )
                         row.patchLine = lineNo
                     }
                 }
@@ -172,4 +198,7 @@ object DshTranscriptReplay {
 
     /** Same clip the Claude replay applies to a tool row's text. */
     private const val MAX_TOOL_TEXT = 4000
+
+    /** Same output cap as the OpenCode/Kimi/ZCode structured replay cards. */
+    private const val MAX_TOOL_OUTPUT = 4000
 }

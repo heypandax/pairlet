@@ -266,6 +266,7 @@ fun CopyChip(text: String, modifier: Modifier = Modifier) {
 private fun CodeBlock(code: String, lang: String?, closed: Boolean = true) {
     val shape = RoundedCornerShape(10.dp)
     val scale = LocalFontScale.current
+    val horizontal = rememberScrollState()
     Column(Modifier.fillMaxWidth().clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape)) {
         Row(
             Modifier.fillMaxWidth().background(Tok.surface).padding(start = 10.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
@@ -284,8 +285,12 @@ private fun CodeBlock(code: String, lang: String?, closed: Boolean = true) {
         val highlighted = remember(code, lang, closed) { if (closed) highlightCodeOrNull(code, lang) else null }
         Text(
             highlighted ?: pathLinked(code), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp * scale,
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(10.dp),
+            modifier = Modifier.fillMaxWidth().horizontalScroll(horizontal).padding(10.dp),
         )
+        // A wheel/trackpad could already pan this state, but a mouse-only Windows user had no visible
+        // indication that clipped columns existed and no thumb to drag (#307). The platform actual is
+        // emitted only when maxValue > 0, so short blocks and touch platforms keep the old compact shape.
+        CodeHorizontalScrollbar(horizontal, Modifier.fillMaxWidth().height(9.dp).padding(horizontal = 4.dp))
     }
 }
 

@@ -395,6 +395,8 @@ jobs:
             echo "::warning::createDistributable attempt $attempt failed (network?), retrying in 20s"; sleep 20
           done
           [ "$ok" = 1 ] || { echo "::error::createDistributable failed after 3 attempts"; exit 1; }
+          APP="mobile/composeApp/build/compose/binaries/main/app/CC Pocket"
+          bash scripts/smoke-desktop-image.sh "$APP"
           ./gradlew :mobile:composeApp:packageMsi --no-daemon
 
       - name: Upload MSI to release v${{ inputs.version }}

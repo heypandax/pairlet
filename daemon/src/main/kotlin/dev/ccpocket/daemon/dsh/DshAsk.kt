@@ -206,6 +206,10 @@ internal object DshAsk {
 
     // ---- disk replay helpers ----
 
+    /** One durable `tool/result` block. [failed] is nullable because rc.6's successful records do not
+     *  need to spell an outcome; callers may treat a present result with no error marker as success. */
+    data class DiskToolResult(val callId: String, val text: String, val failed: Boolean?)
+
     /** `tool/call.arguments` is the model's RAW, UNPARSED JSON string — not an object. Null when it is
      *  absent or is not parseable JSON (a truncated live tail routinely is). */
     fun toolCallArgs(data: JsonObject?): JsonObject? {
@@ -218,7 +222,7 @@ internal object DshAsk {
      * two levels deep and easy to get wrong: `data.message.content[]` are TOOL-RESULT blocks carrying
      * `toolCallId`, and each of those has its own `content[]` of `{type:"text", text}` parts.
      */
-    fun toolResultTexts(data: JsonObject?): List<Pair<String, String>> {
+    fun toolResults(data: JsonObject?): List<DiskToolResult> {
         val blocks = (data?.obj("message")?.get("content") as? JsonArray) ?: return emptyList()
         return blocks.mapNotNull { el ->
             val block = el as? JsonObject ?: return@mapNotNull null
@@ -226,7 +230,15 @@ internal object DshAsk {
             val text = (block["content"] as? JsonArray).orEmpty()
                 .mapNotNull { (it as? JsonObject)?.takeIf { p -> p.str("type") == "text" }?.str("text") }
                 .joinToString("")
-            callId to text
+            val status = block.str("status")?.lowercase()
+            val failed = (block["isError"] as? JsonPrimitive)?.booleanOrNull
+                ?: (block["is_error"] as? JsonPrimitive)?.booleanOrNull
+                ?: when (status) {
+                    "error", "failed", "failure" -> true
+                    "ok", "success", "completed" -> false
+                    else -> null
+                }
+            DiskToolResult(callId, text, failed)
         }
     }
 
