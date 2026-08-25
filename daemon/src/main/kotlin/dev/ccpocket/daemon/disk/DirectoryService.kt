@@ -107,7 +107,11 @@ class DirectoryService(
             .map { (cwd, session) ->
                 ProjectPaths.canonicalKey(cwd) to ActiveSession(
                     sessionId = session.sessionId,
-                    title = session.title,
+                    // A rollout with no user turn yet (terminal sitting at a fresh `codex` prompt) now
+                    // answers for its cwd instead of letting a stale older rollout do it (PR #296 review),
+                    // and it has no title to offer. Null, not "": ActiveSession.title is the app's "no
+                    // title known" signal, and an empty string would render as an empty row label.
+                    title = session.title.takeIf { it.isNotBlank() },
                     executing = session.live,
                     gitBranch = session.gitBranch,
                     agent = AgentKind.CODEX,

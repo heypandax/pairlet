@@ -161,6 +161,33 @@ class CodexObserveParityTest {
     }
 
     @Test
+    fun unverifiable_ownership_of_an_old_codex_rollout_still_opens_read_only() = runBlocking {
+        val registry = SessionRegistry(
+            scope,
+            backends = emptyMap(),
+            // UNKNOWN = external codex processes exist but the fd probe couldn't run (lsof timeout, Windows).
+            // Codex has no session lock, so the safe verdict is observe/fork — not the freshness gate's false.
+            codexProcessProbe = { _, _ -> LiveProcesses.ExternalClaude.UNKNOWN },
+            transcriptResolver = { agent, _, _ -> if (agent == AgentKind.CODEX) rollout else null },
+        )
+        Files.writeString(
+            rollout,
+            """{"type":"session_meta","payload":{"id":"codex-maybe","cwd":"/repo"}}""" + "\n",
+        )
+        Files.setLastModifiedTime(
+            rollout,
+            java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() - 60_000),
+        )
+
+        val convo = registry.open(
+            OpenSession("/repo", resumeId = "codex-maybe", agent = AgentKind.CODEX, lastEventSeq = 0),
+            OutboundSink { },
+        )
+
+        assertTrue(registry.observing(convo), "unverifiable Codex ownership must not resume in place")
+    }
+
+    @Test
     fun idle_external_codex_holding_an_old_rollout_still_opens_read_only() = runBlocking {
         val registry = SessionRegistry(
             scope,

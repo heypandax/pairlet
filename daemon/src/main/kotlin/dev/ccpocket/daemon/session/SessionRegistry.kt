@@ -66,7 +66,11 @@ class SessionRegistry(
     // Resolve an agent's durable transcript. Injectable so Codex observe tests use a temp rollout rather
     // than the developer's real ~/.codex tree.
     private val transcriptResolver: (agent: AgentKind, workdir: String, sessionId: String) -> Path? = { agent, workdir, sessionId ->
-        when (agent) {
+        // sessionId arrives on the wire (OpenSession.resumeId, including guest/collaborator opens) and is
+        // interpolated into a filename — forbid separators/dot-dot exactly like SessionFilesService.transcriptFor,
+        // or a crafted id escapes the project dir (existence/mtime probing at minimum).
+        if (sessionId.contains('/') || sessionId.contains('\\') || sessionId.contains("..")) null
+        else when (agent) {
             AgentKind.CLAUDE -> ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl")
             AgentKind.CODEX -> CodexPaths.findSession(sessionId)
             else -> null
@@ -155,6 +159,16 @@ class SessionRegistry(
         } else null
         if (earlyCodexProbe == LiveProcesses.ExternalClaude.PRESENT) {
             log.info("externallyActive(${sessionId.take(8)}…): Codex holds exact rollout → true")
+            return true
+        }
+        if (earlyCodexProbe == LiveProcesses.ExternalClaude.UNKNOWN) {
+            // UNKNOWN from the Codex probe means external codex processes EXIST but rollout ownership could
+            // not be verified (lsof failure/timeout, or Windows where fd probing is impossible — "no codex
+            // at all" reports ABSENT, not UNKNOWN). An idle holder keeps an OLD mtime, so the freshness gate
+            // below would answer false — the exact wrong direction for the one backend with no session lock
+            // (a silent double-writer, probed on codex app-server). Take the safe verdict instead: observe /
+            // fork-on-take-over. A spurious fork is recoverable; a clobbered rollout is not (PR #296 review).
+            log.info("externallyActive(${sessionId.take(8)}…): Codex rollout ownership unverifiable → assume held")
             return true
         }
         if (System.currentTimeMillis() - mtime >= TranscriptScanner.LIVE_WINDOW_MS) return false

@@ -64,6 +64,12 @@ class CodexBackend(
     // JSON-RPC id correlation: which of our outstanding requests this id belongs to
     @Volatile private var initializeId: Long = -1
     @Volatile private var threadOpenId: Long = -1
+    // Outstanding writes whose ERROR response must not be swallowed (PR #296 review): a steer that raced
+    // turn completion retries as turn/start, a rejected turn/start settles the turn it never started, and
+    // a control-plane op reports its failure instead of no-oping. Cleared on the success response.
+    private val pendingSteers = ConcurrentHashMap<Long, Prompt>() // turn/steer id → prompt to re-deliver
+    private val pendingStarts = ConcurrentHashMap.newKeySet<Long>() // turn/start ids in flight
+    private val pendingControls = ConcurrentHashMap<Long, String>() // compact/review id → op label
 
     // a turn's running state, reset on turn/completed
     @Volatile private var lastAgentText: String? = null
@@ -99,6 +105,7 @@ class CodexBackend(
         bootstrap.withLock { pendingPrompt = null; pendingCompact = false; pendingReview = null }
         lastAgentText = null; lastErrorText = null; lastUsage = Usage(); usageSeen = false
         deltaSeen.clear(); fileChangePaths.clear(); fileChangeDiffs.clear(); pendingApprovals.clear()
+        pendingSteers.clear(); pendingStarts.clear(); pendingControls.clear()
         // kick off the handshake — initialized + thread open happen when the response lands (see handleResponse)
         initializeId = rpcRequest("initialize", buildJsonObject {
             putJsonObject("clientInfo") { put("name", "cc-pocket"); put("version", CLIENT_VERSION) }
@@ -118,7 +125,7 @@ class CodexBackend(
                 method != null && idEl != null -> handleServerRequest(method, idEl, root.obj("params"))
                 method != null -> handleNotification(method, root.obj("params"))
                 root.containsKey("result") -> handleResponse(idEl, root["result"])
-                root.containsKey("error") -> { log.warn("codex error: ${root["error"]}"); emptyList() }
+                root.containsKey("error") -> handleErrorResponse(idEl, root.obj("error"))
                 else -> emptyList()
             }
         }.getOrElse { log.warn("codex parse failed: ${it.message}"); emptyList() }
@@ -127,7 +134,9 @@ class CodexBackend(
     // ---- inbound: responses to our requests ----
 
     private suspend fun handleResponse(idEl: JsonElement?, result: JsonElement?): List<AgentEvent> {
-        return when ((idEl as? JsonPrimitive)?.longOrNull) {
+        val id = (idEl as? JsonPrimitive)?.longOrNull
+        if (id != null) { pendingSteers.remove(id); pendingStarts.remove(id); pendingControls.remove(id) }
+        return when (id) {
             initializeId -> {
                 rpcNotify("initialized", null)
                 openThread()
@@ -136,6 +145,47 @@ class CodexBackend(
             threadOpenId -> onThreadReady(result as? JsonObject)
             else -> emptyList()
         }
+    }
+
+    /**
+     * A JSON-RPC error response used to be logged and dropped — which turned three failure classes into
+     * silence (PR #296 review): a turn/steer whose expectedTurnId went stale lost the user's ALREADY-ACKED
+     * prompt (the issue #84/#104 "swallowed prompt" class), a thread open rejected by an older app-server
+     * (no thread/fork before Codex 0.147) hung the session forever with the first prompt parked in
+     * [pendingPrompt], and a rejected compact/review no-oped with no feedback.
+     */
+    private suspend fun handleErrorResponse(idEl: JsonElement?, error: JsonObject?): List<AgentEvent> {
+        val id = (idEl as? JsonPrimitive)?.longOrNull
+        val msg = error?.str("message") ?: error?.toString() ?: "unknown error"
+        pendingSteers.remove(id)?.let { prompt ->
+            // The steer raced the turn's completion: [currentTurnId] was read before turn/completed landed,
+            // so the server saw a stale expectedTurnId. That turn is over, which makes a plain turn/start
+            // the correct delivery now. One bounded hop — the retry registers in [pendingStarts], so a
+            // second rejection surfaces below instead of looping.
+            log.info("codex steer rejected (${msg.take(120)}) — re-delivering as turn/start")
+            writeTurnStart(prompt.text, prompt.images)
+            return emptyList()
+        }
+        if (pendingStarts.remove(id)) {
+            // Conversation marked the turn executing when it acked this prompt; only a TurnResult clears
+            // that. Settle the turn the server never started, and say so where the user can see it.
+            return listOf(AgentEvent.TurnResult("⚠️ Codex rejected the prompt: $msg", usage = null, isError = true))
+        }
+        pendingControls.remove(id)?.let { op ->
+            return listOf(AgentEvent.AssistantText("⚠️ Codex /$op failed: $msg"))
+        }
+        if (id != null && id == threadOpenId) {
+            // Deliberately NO silent thread/resume fallback for a failed fork: fork exists so a take-over
+            // never becomes a second writer on a rollout another codex may still own. Surface it instead —
+            // a buffered first prompt would otherwise wait forever behind a thread that will never open.
+            val op = if (resumeId == null) "start" else if (forkSession) "fork" else "resume"
+            return listOf(AgentEvent.TurnResult("⚠️ Codex could not $op this session: $msg", usage = null, isError = true))
+        }
+        if (id != null && id == initializeId) {
+            return listOf(AgentEvent.TurnResult("⚠️ Codex failed to initialize: $msg", usage = null, isError = true))
+        }
+        log.warn("codex error: $error")
+        return emptyList()
     }
 
     private suspend fun openThread() {
@@ -185,7 +235,11 @@ class CodexBackend(
             "thread/started" -> { // backup path: usually the thread/start RESULT lands first
                 if (threadId == null) onThreadReady(buildJsonObject { params.obj("thread")?.let { put("thread", it) } }) else emptyList()
             }
-            "turn/started" -> { currentTurnId = params.obj("turn")?.str("id"); emptyList() }
+            "turn/started" -> {
+                currentTurnId = params.obj("turn")?.str("id")
+                lastErrorText = null // a stale between-turns error must not be billed to this new turn
+                emptyList()
+            }
             "item/agentMessage/delta" -> params.str("delta")?.let { d ->
                 params.str("itemId")?.let { deltaSeen.add(it) }
                 listOf(AgentEvent.AssistantText(d))
@@ -206,11 +260,12 @@ class CodexBackend(
             "turn/completed" -> onTurnCompleted(params.obj("turn"))
             "error" -> {
                 val msg = params.obj("error")?.str("message") ?: "codex error"
-                // The v2 protocol guarantees turn.error on a failed completion, but keep this notification
-                // as a fallback for older app-server builds. Emitting it immediately duplicated the error and
-                // left Conversation to synthesize the unhelpful literal "turn failed" afterwards.
-                lastErrorText = msg
-                emptyList()
+                // Mid-turn: the v2 protocol guarantees turn.error on a failed completion, so stash rather
+                // than emit — emitting immediately duplicated the error and left Conversation to synthesize
+                // the unhelpful literal "turn failed" afterwards. BETWEEN turns there is no turn/completed
+                // coming to carry the stash (PR #296 review): surface it now or the user never sees it.
+                if (currentTurnId == null) listOf(AgentEvent.AssistantText("⚠️ $msg"))
+                else { lastErrorText = msg; emptyList() }
             }
             else -> emptyList() // unknown notification type — tolerate (codex adds these over time)
         }
@@ -265,7 +320,10 @@ class CodexBackend(
 
     private fun onTurnCompleted(turn: JsonObject?): List<AgentEvent> {
         val status = turn?.str("status")
-        val failure = turn?.obj("error")?.str("message") ?: lastErrorText
+        // The stashed notification text is only evidence about THIS turn when the turn actually failed:
+        // unconditioned, a leftover error became the "final answer" of a later tool-only turn that
+        // completed fine (isError=false, finalText=<old error>) — PR #296 review.
+        val failure = turn?.obj("error")?.str("message") ?: lastErrorText?.takeIf { status == "failed" }
         val u = lastUsage
         val ev = AgentEvent.TurnResult(
             finalText = lastAgentText ?: failure,
@@ -361,7 +419,7 @@ class CodexBackend(
 
     private suspend fun writeTurnStart(text: String, images: List<ImageData>) {
         val tid = threadId ?: return
-        rpcRequest("turn/start", buildJsonObject {
+        pendingStarts.add(rpcRequest("turn/start", buildJsonObject {
             put("threadId", tid)
             putJsonArray("input") {
                 addJsonObject { put("type", "text"); put("text", text) }
@@ -380,14 +438,14 @@ class CodexBackend(
             codexModel()?.let { put("model", it) }
             effort?.let { put("effort", it) }
             serviceTier?.let { put("serviceTier", it) }
-        })
+        }))
     }
 
     /** Append input to the turn Codex is already running. Starting a second turn on the same thread is
      * rejected by app-server as an active-writer conflict; turn/steer is its native in-flight input API. */
     private suspend fun writeTurnSteer(text: String, images: List<ImageData>, turnId: String) {
         val tid = threadId ?: return
-        rpcRequest("turn/steer", buildJsonObject {
+        val id = rpcRequest("turn/steer", buildJsonObject {
             put("threadId", tid)
             putJsonArray("input") {
                 addJsonObject { put("type", "text"); put("text", text) }
@@ -395,6 +453,8 @@ class CodexBackend(
             }
             put("expectedTurnId", turnId)
         })
+        // remember what rode this steer: a stale-expectedTurnId rejection re-delivers it as turn/start
+        pendingSteers[id] = Prompt(text, images)
     }
 
     override suspend fun interrupt() {
@@ -412,7 +472,7 @@ class CodexBackend(
     }
 
     private suspend fun requestCompact(tid: String) {
-        rpcRequest("thread/compact/start", buildJsonObject { put("threadId", tid) })
+        pendingControls[rpcRequest("thread/compact/start", buildJsonObject { put("threadId", tid) })] = "compact"
     }
 
     override suspend fun review(instructions: String?): Boolean {
@@ -425,7 +485,7 @@ class CodexBackend(
     }
 
     private suspend fun requestReview(tid: String, instructions: String) {
-        rpcRequest("review/start", buildJsonObject {
+        pendingControls[rpcRequest("review/start", buildJsonObject {
             put("threadId", tid)
             put("delivery", "inline")
             putJsonObject("target") {
@@ -435,7 +495,7 @@ class CodexBackend(
                     put("instructions", instructions)
                 }
             }
-        })
+        })] = "review"
     }
 
     override suspend fun respondPermission(

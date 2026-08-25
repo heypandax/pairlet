@@ -24,7 +24,6 @@ import kotlin.test.assertTrue
  * session's persisted draft is cleared up front so the composer deterministically starts blank
  * even when the dev-machine store carries one from an earlier run.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class RepoDesktopModelStopTurnTest {
 
     private fun withDemoModel(block: (PocketRepository, RepoDesktopModel) -> Unit) {

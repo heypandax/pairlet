@@ -47,6 +47,13 @@ object CodexTranscriptScanner {
      * full session list still uses [scan]; the active row only needs id/title/mtime/agent.
      *
      * Returned keys preserve the caller's cwd spelling; matching itself uses [ProjectPaths.canonicalKey].
+     *
+     * A cwd is answered by its NEWEST rollout, prompt or no prompt (PR #296 review). Falling back to an
+     * older rollout when the newest one had no real user turn yet — a terminal sitting at a fresh `codex`
+     * prompt, or a session the phone just opened — resurrected yesterday's finished session as this
+     * project's "active" row (a ghost second row downstream, whose id differs from the daemon's), and left
+     * that cwd in [remaining] forever, so this 10-second refresh reopened and parsed all 800 rollouts on
+     * every tick instead of stopping at the first hit.
      */
     fun activeSummaries(
         workdirs: Set<String>,
@@ -67,7 +74,9 @@ object CodexTranscriptScanner {
         return out
     }
 
-    /** Canonical cwd key + lightweight summary, or null when this rollout is not a requested live cwd. */
+    /** Canonical cwd key + lightweight summary, or null when this rollout is not a requested live cwd.
+     *  Only the cwd decides that: a matching rollout with no real user turn yet still answers for its cwd,
+     *  with a blank title (the index title when Codex already named the thread) — see [activeSummaries]. */
     private fun summarizeActive(
         file: Path,
         wantedKeys: Set<String>,
@@ -92,19 +101,20 @@ object CodexTranscriptScanner {
                 }
                 line = r.readLine()
             }
-            if (firstPrompt == null) return null
         }
         val sid = id ?: return null
         val recorded = cwd ?: return null
-        val fp = firstPrompt ?: return null
+        val fp = firstPrompt
         val mtime = file.getLastModifiedTime().toMillis()
         return ProjectPaths.canonicalKey(recorded) to SessionSummary(
             sessionId = sid,
+            // Blank rather than the session UUID when there is no prompt AND no index title: the phone
+            // renders its generic session label for a blank title, while a raw UUID would be shown as-is.
             title = titles[sid]?.takeIf { it.isNotBlank() }
-                ?: fp.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(60)
-                ?: sid,
-            firstPrompt = fp,
-            messageCount = 1,
+                ?: fp?.let { it.lineSequence().firstOrNull { l -> l.isNotBlank() }?.trim()?.take(60) ?: sid }
+                ?: "",
+            firstPrompt = fp ?: "",
+            messageCount = if (fp != null) 1 else 0,
             cwd = recorded,
             lastModified = mtime,
             version = version,

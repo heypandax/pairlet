@@ -244,6 +244,7 @@ import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
+import dev.ccpocket.app.theme.tightCenter
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.Role
 import dev.ccpocket.app.voice.openAppSettings
@@ -1902,7 +1903,8 @@ private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onSha
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(stringResource(Res.string.label_agent), color = Tok.muted, fontSize = 12.sp)
+                    // label sits next to the AgentTag pills — tightCenter or it rides off their center (CLAUDE.md)
+                    Text(stringResource(Res.string.label_agent), color = Tok.muted, fontSize = 12.sp, style = tightCenter(12.sp))
                     agents.forEach { AgentTag(it) }
                 }
             }

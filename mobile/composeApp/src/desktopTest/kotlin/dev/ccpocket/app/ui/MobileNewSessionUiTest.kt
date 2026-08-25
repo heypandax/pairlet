@@ -138,10 +138,11 @@ class MobileNewSessionUiTest {
     fun newSessionPickerDismissesByDraggingTheTopHandleDown() = runComposeUiTest {
         val repo = composeSessionsScreen()
         val chipLabel = runBlocking { getString(sessionDefaultsLabel(repo.defaultAgent.value, repo.defaultMode.value)) }
-        val pickerSubtitle = runBlocking { getString(Res.string.new_session_subtitle) }
+        // same open-picker marker the defaults-chip test uses (the old subtitle string left with the redesign)
+        val configureStart = runBlocking { getString(Res.string.cfg_start) }
         onAllNodes(hasText(chipLabel)).onFirst().performClick()
         waitForIdle()
-        assertTrue(present(pickerSubtitle))
+        assertTrue(present(configureStart))
 
         onNodeWithTag(POCKET_SHEET_DRAG_HANDLE_TAG).performTouchInput {
             swipe(
@@ -152,7 +153,7 @@ class MobileNewSessionUiTest {
         }
         waitForIdle()
 
-        assertFalse(present(pickerSubtitle), "dragging the top handle down must dismiss the picker")
+        assertFalse(present(configureStart), "dragging the top handle down must dismiss the picker")
         assertNull(repo.convoId.value, "dismissing the picker must not start a session")
     }
 

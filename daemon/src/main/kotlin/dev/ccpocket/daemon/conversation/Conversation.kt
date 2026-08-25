@@ -809,9 +809,13 @@ class Conversation(
         // transcript up front; once the first prompt spawns the agent, the pump re-emits SessionLive with the real
         // sessionId.
         scope.launch {
-            sessionTitle = resumeId?.let {
-                runCatching { backend.resumeTitle(workdir.toString(), it) }.getOrNull()?.takeIf(String::isNotBlank)
-            }
+            // Assign only a real read, and only while nothing better arrived: this launch races the first
+            // prompt's seeding (sendPrompt), and an unconditional write here re-nulled a just-seeded title
+            // after a slow multi-MB transcript parse (PR #296 review) — every later SessionLive (including
+            // the push/deep-link path) then carried title=null again.
+            resumeId?.let { rid ->
+                runCatching { backend.resumeTitle(workdir.toString(), rid) }.getOrNull()?.takeIf(String::isNotBlank)
+            }?.let { read -> if (sessionTitle == null) sessionTitle = read }
             // Seed model + usage from the resumed transcript so the header shows the real model/window and the
             // usage statusline on open — before the first new turn's init lands (a headless claude is silent
             // until then, issue #27). Done off the relay inbound loop; the transcript read can be a multi-MB parse.
@@ -2463,7 +2467,12 @@ class Conversation(
      *  reports it; it must NOT fall back to a disk append while this process lives. */
     suspend fun renameSession(title: String): Boolean {
         if (!hasLiveProcess()) return false
-        return backend.renameSession(title)
+        val renamed = backend.renameSession(title)
+        // Keep the cached title in step with the rename: SessionLive stamps [sessionTitle] and the phone
+        // applies any non-blank value to the chat header (and persists it into the MRU), so a stale cache
+        // here silently reverted a successful rename on the next live() broadcast (PR #296 review).
+        if (renamed) sessionTitle = title.takeIf { it.isNotBlank() }
+        return renamed
     }
 
     /**

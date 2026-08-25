@@ -10,6 +10,7 @@ import kotlin.io.path.writeText
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -266,5 +267,50 @@ class DirectoryServiceMergeTest {
             row.activeSessions.single().title,
             "authoritative live state must retain the transcript title instead of replacing it with null",
         )
+    }
+
+    /** What the probe returns for a session whose rollout has no user turn yet (PR #296 review). */
+    private fun promptless(id: String) = SessionSummary(
+        sessionId = id,
+        title = "",
+        firstPrompt = "",
+        messageCount = 0,
+        cwd = work.toString(),
+        lastModified = future,
+        live = true,
+        agent = AgentKind.CODEX,
+    )
+
+    @Test
+    fun a_promptless_probe_of_a_daemon_owned_session_adds_no_ghost_row() {
+        // PR #296 review: for the first seconds after the phone opens a Codex session its rollout holds no
+        // user turn. The probe used to skip it and answer with an OLDER rollout of the same project, whose
+        // id differs from the daemon's — so the id-based dedup below let it through as a ghost second row.
+        // Now the newest rollout answers, its id matches, and the card keeps exactly one session.
+        val exact = ActiveSession("fresh", executing = true, agent = AgentKind.CODEX, executingAuthoritative = true)
+        val row = service(
+            codex = mapOf(work.toString() to future),
+            liveCodex = emptySet(),
+            activeCodexSessions = { cwds -> cwds.associateWith { promptless("fresh") } },
+        ).listDirectories(null, liveByCwd = mapOf(work.toString() to listOf(exact))).single()
+
+        assertEquals(listOf("fresh"), row.activeSessions.map { it.sessionId }, "no ghost second row")
+        assertNull(row.activeSessions.single().title, "a blank probe title stays null, not an empty row label")
+        assertTrue(row.activeSessions.single().executingAuthoritative, "daemon turn truth survives the merge")
+    }
+
+    @Test
+    fun an_external_codex_that_has_not_been_prompted_yet_is_open_with_no_title() {
+        // A terminal sitting at a fresh `codex` prompt: the project is genuinely open, there is just nothing
+        // to name the session with. Null title → the phone's generic session label; "" would render blank.
+        val row = service(
+            codex = mapOf(work.toString() to future),
+            liveCodex = setOf(link.toString()),
+            activeCodexSessions = { cwds -> cwds.associateWith { promptless("terminal-fresh") } },
+        ).listDirectories(null).single()
+
+        assertTrue(row.open)
+        assertEquals("terminal-fresh", row.activeSessionId)
+        assertNull(row.activeSessionTitle)
     }
 }

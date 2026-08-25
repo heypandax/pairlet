@@ -751,6 +751,9 @@ class SessionCapabilitiesTest {
                     agent = AgentKind.CLAUDE,
                 ),
             )
+            // Leave the chat first: re-opening the session we are LOOKING at is refused outright (#235
+            // alreadyOpen), and this test's subject is the stale cached params, not that guard.
+            repo.backToBrowse()
             sent.clear()
 
             repo.openSession(

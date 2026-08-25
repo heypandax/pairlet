@@ -101,7 +101,10 @@ object LiveProcesses {
         matchesCommand: (String) -> Boolean,
         allowCwdMatch: Boolean = true,
     ): ExternalClaude {
-        if (System.getProperty("os.name").lowercase().contains("win")) return ExternalClaude.UNKNOWN
+        // Process ENUMERATION is cross-platform; only the fd/cwd probes below need lsof. Answering ABSENT
+        // when no matching process exists at all keeps Windows verdicts sharp instead of a blanket UNKNOWN —
+        // which matters since the Codex caller treats UNKNOWN as "assume the rollout is still held".
+        val noLsof = System.getProperty("os.name").lowercase().contains("win")
         val selfPid = ProcessHandle.current().pid()
         val external = runCatching {
             ProcessHandle.allProcesses()
@@ -111,6 +114,7 @@ object LiveProcesses {
                 .toList()
         }.getOrNull() ?: return ExternalClaude.UNKNOWN
         if (external.isEmpty()) return ExternalClaude.ABSENT // no matching agent outside the daemon at all
+        if (noLsof) return ExternalClaude.UNKNOWN // processes exist but ownership can't be probed
         // Exact transcript ownership outranks age and cwd: an idle agent can hold a rollout for hours
         // without touching its mtime, and that writer must never be resumed by a second process.
         val holders = lsofLines(listOf("lsof", "-t", "--", transcript.toString()))

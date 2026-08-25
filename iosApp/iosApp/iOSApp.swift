@@ -5,6 +5,7 @@ import FirebaseAnalytics
 import FirebaseCrashlytics
 import UIKit
 import UserNotifications
+import os
 
 /// Hosts the APNs callbacks SwiftUI's `App` can't receive directly. The first-time authorization *prompt*
 /// is Kotlin-driven (PushController.registrar, after pairing) so it never fires at cold start; but once the
@@ -133,19 +134,46 @@ struct iOSApp: App {
         }
     }
 
+    /// Every rejection below degrades telemetry to the no-op sink, so each one must leave a breadcrumb in
+    /// the device log: the old unconditional `FirebaseApp.configure()` crashed loudly on a bad plist and
+    /// TestFlight caught it within minutes, whereas a silent guard would let a build with a corrupted
+    /// GOOGLE_SERVICE_INFO_PLIST secret (or a future Google key format) pass QA with Analytics AND
+    /// Crashlytics dead all the way to production. The *verdicts* are unchanged — only observability is added.
+    private static let firebaseLog = Logger(subsystem: "com.panda.ccpocket", category: "firebase")
+
     private static func configureFirebaseIfUsable() -> Bool {
-        guard let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
-              let options = FirebaseOptions(contentsOfFile: path),
-              let apiKey = options.apiKey,
-              apiKey.count == 39,
+        guard let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") else {
+            // routine in a clean clone / local build that never copied a plist in — informational, not a fault
+            firebaseLog.info("Firebase plist absent — telemetry disabled")
+            return false
+        }
+        guard let options = FirebaseOptions(contentsOfFile: path) else {
+            firebaseLog.error("Firebase plist present but unparseable — telemetry disabled")
+            return false
+        }
+        guard let apiKey = options.apiKey else {
+            firebaseLog.error("Firebase plist carries no apiKey — telemetry disabled")
+            return false
+        }
+        // A real Google API key is 39 chars, "A"-prefixed, alphanumerics plus `-_`; the placeholder shipped
+        // for local builds is 43 and is meant to land here. Never log the key itself — length and the first
+        // four characters are enough to tell "placeholder" from "mangled secret" apart in a CI/TestFlight log.
+        guard apiKey.count == 39,
               apiKey.hasPrefix("A"),
               apiKey.unicodeScalars.allSatisfy({
                   CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_")).contains($0)
-              }),
-              let projectID = options.projectID,
+              })
+        else {
+            firebaseLog.error(
+                "Firebase apiKey shape rejected (len=\(apiKey.count, privacy: .public), prefix=\(String(apiKey.prefix(4)), privacy: .public)) — telemetry disabled"
+            )
+            return false
+        }
+        guard let projectID = options.projectID,
               !projectID.isEmpty,
               !options.googleAppID.isEmpty
         else {
+            firebaseLog.error("Firebase options missing projectID/googleAppID — telemetry disabled")
             return false
         }
 

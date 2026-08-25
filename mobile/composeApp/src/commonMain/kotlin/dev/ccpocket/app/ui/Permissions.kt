@@ -45,6 +45,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.PermissionAsk
@@ -124,6 +126,11 @@ fun PocketSheet(onDismiss: () -> Unit, dropKeyboard: Boolean = true, content: @C
     val focus = LocalFocusManager.current
     val dismissThresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
     var dragY by remember { mutableFloatStateOf(0f) }
+    // The drag detector below must NOT key on [onDismiss]: callers pass inline lambdas whose identity flips on
+    // unrelated recompositions (e.g. the reconnect sheet's `timedOut` toggle), which would cancel the pointerInput
+    // coroutine mid-drag. detectVerticalDragGestures doesn't run onDragCancel in that path, so the remembered
+    // [dragY] keeps its non-zero offset and the sheet stays parked halfway down until the next full drag.
+    val currentOnDismiss by rememberUpdatedState(onDismiss)
     LaunchedEffect(dropKeyboard) { if (dropKeyboard) focus.clearFocus() }
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onDismiss() } // Android back = scrim tap
     Box(Modifier.fillMaxSize()) {
@@ -145,13 +152,13 @@ fun PocketSheet(onDismiss: () -> Unit, dropKeyboard: Boolean = true, content: @C
             Box(
                 Modifier.fillMaxWidth().height(36.dp)
                     .testTag(POCKET_SHEET_DRAG_HANDLE_TAG)
-                    .pointerInput(onDismiss, dismissThresholdPx) {
+                    .pointerInput(dismissThresholdPx) { // density-derived Float — stable across recomposition
                         detectVerticalDragGestures(
                             onVerticalDrag = { _, delta -> dragY = (dragY + delta).coerceAtLeast(0f) },
                             onDragEnd = {
                                 val dismiss = dragY >= dismissThresholdPx
                                 dragY = 0f
-                                if (dismiss) onDismiss()
+                                if (dismiss) currentOnDismiss()
                             },
                             onDragCancel = { dragY = 0f },
                         )
@@ -376,6 +383,7 @@ val CODEX_PRESETS = listOf(
 fun MonoChip(text: String, c: Color = Tok.tx2) {
     Text(
         text, color = c, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
+        style = tightCenter(10.5.sp), // background + border box: line box must come from the size, not the mono fallback
         modifier = Modifier.background(Tok.surface, RoundedCornerShape(6.dp))
             .border(1.dp, Tok.hair, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
     )
@@ -395,11 +403,17 @@ private fun PresetRow(p: CodexPreset, selected: Boolean, onClick: () -> Unit) {
         Modifier.fillMaxWidth().clip(shape).background(fill).border(1.5.dp, outline, shape)
             .clickable(onClick = onClick).padding(12.dp),
     ) {
+        // name (14sp) + warning icon + RECOMMENDED pill (9.5sp) share one CenterVertically row — every Text here
+        // needs tightCenter or the mixed font metrics push the glyphs off the shared baseline (project CLAUDE.md).
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(p.name), color = if (p.danger) Tok.danger else Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                stringResource(p.name), color = if (p.danger) Tok.danger else Tok.tx, fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold, style = tightCenter(14.sp),
+            )
             if (p.danger) Icon(Icons.Rounded.WarningAmber, null, tint = Tok.danger, modifier = Modifier.size(14.dp))
             if (p.recommended) Text(
                 stringResource(Res.string.recommended_badge), color = Tok.codex, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(9.5.sp),
                 modifier = Modifier.border(1.dp, Tok.codex.copy(alpha = 0.42f), RoundedCornerShape(999.dp)).padding(horizontal = 7.dp, vertical = 1.dp),
             )
             Spacer(Modifier.weight(1f))

@@ -421,4 +421,103 @@ class CodexBackendTest {
         assertTrue("+new line" in (cr.diff ?: ""), cr.diff ?: "<null>") // diff is a typed field, for the phone's diff view
         assertTrue("src/A.kt" in cr.input.toString(), cr.input.toString())
     }
+
+    // ── JSON-RPC error responses must not be swallowed (PR #296 review) ──
+
+    @Test
+    fun a_steer_rejected_for_a_stale_turn_is_redelivered_as_turn_start() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w) // ids 1 (initialize) + 2 (thread/start) consumed
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"turn-live","status":"inProgress"}}}""")
+        b.sendPrompt("keep going with the batch", emptyList()) // → turn/steer (id 3)
+        assertTrue(w.last { "turn/steer" in it }.contains("\"expectedTurnId\":\"turn-live\""))
+
+        // the turn completed server-side while the steer was in flight → stale expectedTurnId rejection
+        val ev = b.parse("""{"id":3,"error":{"code":-32602,"message":"expectedTurnId does not match the active turn"}}""")
+
+        assertTrue(ev.isEmpty(), "the retry is silent — no error surfaces for a recovered prompt")
+        val start = w.last { "\"method\":\"turn/start\"" in it }
+        assertTrue("keep going with the batch" in start, start) // the acked prompt is re-delivered, not lost
+    }
+
+    @Test
+    fun a_rejected_turn_start_settles_the_turn_with_a_visible_error() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.sendPrompt("do the thing", emptyList()) // → turn/start (id 3)
+
+        val ev = b.parse("""{"id":3,"error":{"code":-32000,"message":"model overloaded"}}""")
+
+        // Conversation marked this turn executing on ack; only a TurnResult clears that state again
+        val r = ev.filterIsInstance<AgentEvent.TurnResult>().single()
+        assertTrue(r.isError)
+        assertTrue("model overloaded" in (r.finalText ?: ""), r.finalText ?: "<null>")
+    }
+
+    @Test
+    fun a_thread_fork_rejected_by_an_old_app_server_surfaces_instead_of_hanging() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = CodexBackend(null)
+        b.attach(AgentIo(writeLine = { w += it }, emit = {}), AgentSpec(Path.of("/repo"), resumeId = "thr-x", forkSession = true))
+        b.parse(initResponse(1)) // → thread/fork (id 2)
+
+        val ev = b.parse("""{"id":2,"error":{"code":-32601,"message":"method not found: thread/fork"}}""")
+
+        // pre-0.147 app-server: without this the thread never opens and pendingPrompt waits forever
+        val r = ev.filterIsInstance<AgentEvent.TurnResult>().single()
+        assertTrue(r.isError)
+        assertTrue("fork" in (r.finalText ?: ""), r.finalText ?: "<null>")
+    }
+
+    @Test
+    fun a_rejected_compact_reports_failure_instead_of_a_silent_noop() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.compact() // → thread/compact/start (id 3)
+
+        val ev = b.parse("""{"id":3,"error":{"code":-32601,"message":"method not found"}}""")
+
+        val t = ev.filterIsInstance<AgentEvent.AssistantText>().single()
+        assertTrue("compact" in t.text && "method not found" in t.text, t.text)
+    }
+
+    @Test
+    fun an_error_notification_between_turns_is_surfaced_immediately() = runBlocking {
+        val b = ready(mutableListOf())
+
+        // no turn is active → no turn/completed will ever come to carry a stashed error to the phone
+        val ev = b.parse("""{"method":"error","params":{"error":{"message":"stream disconnected"}}}""")
+
+        val t = ev.filterIsInstance<AgentEvent.AssistantText>().single()
+        assertTrue("stream disconnected" in t.text, t.text)
+    }
+
+    @Test
+    fun a_failed_turn_still_reports_the_error_stashed_mid_turn() = runBlocking {
+        val b = ready(mutableListOf())
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"t1"}}}""")
+        b.parse("""{"method":"error","params":{"error":{"message":"boom"}}}""") // mid-turn → stashed, not emitted
+
+        val ev = b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t1","status":"failed"}}}""")
+
+        val r = ev.filterIsInstance<AgentEvent.TurnResult>().single()
+        assertTrue(r.isError)
+        assertEquals("boom", r.finalText)
+    }
+
+    @Test
+    fun a_stashed_error_is_never_billed_to_a_later_successful_turn() = runBlocking {
+        val b = ready(mutableListOf())
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"t1"}}}""")
+        b.parse("""{"method":"error","params":{"error":{"message":"transient rate limit"}}}""")
+        b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t1","status":"completed"}}}""")
+
+        // a tool-only turn: completes fine with no agentMessage text
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"t2"}}}""")
+        val ev = b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t2","status":"completed"}}}""")
+
+        val r = ev.filterIsInstance<AgentEvent.TurnResult>().single()
+        assertFalse(r.isError)
+        assertEquals(null, r.finalText, "an old error must not masquerade as this turn's successful answer")
+    }
 }
