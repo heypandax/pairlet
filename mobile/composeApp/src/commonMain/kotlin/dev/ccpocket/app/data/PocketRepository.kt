@@ -1156,6 +1156,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val gitFetchNote = mutableStateOf<GitFetchReport?>(null)
     val gitPendingConfirm = mutableStateOf<GitActionPreview?>(null) // a two-step verb's preview → Screen D / C1-C2
     val worktrees = mutableStateOf<WorktreeList?>(null)       // every checkout of this repository (#281 Screen A)
+    // the post-create receipt (#281 功能范围「在新建 worktree 中启动会话」, restored by #294 真机反馈):
+    // a successful worktree.add answers with the created path, and the sheet it drives offers to open a
+    // session there. A receipt, not a state — dismissed by hand or replaced by the next add.
+    val worktreeCreated = mutableStateOf<WorktreeCreated?>(null)
     val worktreesLoading = mutableStateOf(false)
     val worktreesUnavailable = mutableStateOf(false)          // no reply — the daemon predates pocket/worktree.*
     val pathListing = mutableStateOf<PathEntries?>(null)     // latest @-file completion listing (issue #75); match its subPath before use
@@ -2896,7 +2900,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 recomputePhase()
             }
             is Sessions -> {
-                sessionsDir.value = f.workdir; replace(sessions, f.items)
+                // distinctBy: one row per session id NO MATTER what the daemon sent. A codex resume-rollout
+                // (two files, one id) once reached the phone's LazyColumn as two rows with one key — that is
+                // an instant native crash, not a cosmetic glitch. The daemon dedupes too; this edge survives
+                // an older daemon. First occurrence wins = newest (the list arrives sorted by recency).
+                sessionsDir.value = f.workdir; replace(sessions, f.items.distinctBy { it.sessionId })
                 replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
                 groupsSupported.value = f.groups != null // groups=[] (owner, none yet) still enables management
                 renameSupported.value = f.renameSupported // #158: false from an older daemon / a guest
@@ -3524,6 +3532,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 }
                 // the worktree verbs change a list the status snapshot doesn't carry
                 if (f.ok && (f.op == GIT_OP_WORKTREE_ADD || f.op == GIT_OP_WORKTREE_REMOVE)) fetchWorktrees()
+                // the post-create receipt: the daemon names the checkout it just made (an older daemon
+                // omits path — the sheet then shows the fact without the open-here verb)
+                if (f.op == GIT_OP_WORKTREE_ADD) {
+                    if (f.ok) worktreeCreated.value = WorktreeCreated(path = f.path, branch = pendingWorktreeAddBranch)
+                    pendingWorktreeAddBranch = null
+                }
                 // reverting the file on screen makes the open diff a lie — re-read the side we're showing
                 if (f.ok && f.op == GIT_OP_REVERT) gitDiffPath.value?.let { openGitDiff(it, gitDiffStaged.value) }
             }
@@ -5730,6 +5744,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var worktreesDeadline: Job? = null
     private var gitPendingAction: GitAction? = null
     private var gitPendingRemove: RemoveWorktree? = null
+    private var pendingWorktreeAddBranch: String? = null      // names the branch on the post-create receipt
 
     /** Read the whole repository state for the Git tab. [withBranches] rides along when the branch
      *  sheet is about to open, so it costs one round trip instead of two. */
@@ -5812,6 +5827,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val wd = workdir.value ?: return
         val name = branch.trim()
         if (name.isEmpty()) return
+        pendingWorktreeAddBranch = name
         armGitAction(GIT_OP_WORKTREE_ADD)
         scope.launch { send(AddWorktree(c, wd, name, createBranch)) }
     }
@@ -5857,6 +5873,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Close the A5/A6 error strip (× ). Purely local: nothing about the repository changed. */
     fun dismissGitError() { gitError.value = null }
 
+    /** Close the post-create receipt. Nothing is undone — the worktree stays. */
+    fun dismissWorktreeCreated() { worktreeCreated.value = null }
+
     /** Close the fetch receipt (×). Same nothing-changed promise as [dismissGitError]. */
     fun dismissGitFetchNote() { gitFetchNote.value = null }
 
@@ -5887,6 +5906,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         gitBusyOp.value = null; gitError.value = null; gitFetchNote.value = null
         gitPendingConfirm.value = null; gitPendingAction = null; gitPendingRemove = null
         worktrees.value = null; worktreesLoading.value = false; worktreesUnavailable.value = false
+        worktreeCreated.value = null; pendingWorktreeAddBranch = null
         closeGitDiff()
     }
 

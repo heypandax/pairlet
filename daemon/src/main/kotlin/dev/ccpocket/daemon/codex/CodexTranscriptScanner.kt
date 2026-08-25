@@ -25,6 +25,11 @@ object CodexTranscriptScanner {
         val titles = threadNames() // one index read per listing, shared across every rollout summarized below
         return CodexPaths.sessionFiles().mapNotNull { runCatching { summarize(it, workdir, titles) }.getOrNull() }
             .sortedByDescending { it.lastModified }
+            // Newer codex CLIs write a SECOND rollout on resume (`rollout-<ts>-<origId>_<resumeId>.jsonl`)
+            // whose meta carries the ORIGINAL session id — one session, two files. Listing both rows with
+            // one id crashed the phone's session list outright (LazyColumn duplicate key, 2026-08-25).
+            // Newest file wins: it is the live continuation, and resume must target it anyway.
+            .distinctBy { it.sessionId }
     }
 
     // Codex's session_index.jsonl (id → thread title) — memoized by the index's mtime so a directory list
