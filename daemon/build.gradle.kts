@@ -24,6 +24,11 @@ tasks.processResources {
 dependencies {
     implementation(project(":protocol"))
 
+    // Windows-only external-process cwd read (issue #302). Already on the runtime classpath transitively
+    // via mordant; declared explicitly so it's visible at compile time. Pinned to the transitive version
+    // to avoid a second JNA on the classpath.
+    implementation("net.java.dev.jna:jna:5.14.0")
+
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.cryptography.core)          // E2ECrypto / E2ESession (protocol's e2e API)

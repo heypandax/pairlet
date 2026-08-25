@@ -91,6 +91,10 @@ class CodexBackend(
 
     override val kind: AgentKind = AgentKind.CODEX
 
+    // app-server exposes compaction and review as control-plane RPCs (thread/compact/start, review/start)
+    override val supportsNativeCompact: Boolean get() = true
+    override val supportsNativeReview: Boolean get() = true
+
     override fun processBuilder(spec: AgentSpec): ProcessBuilder = CodexLauncher.processBuilder(exe(), spec)
 
     /** Resolve the codex binary lazily — only a launch needs it, so listing/replay work even without codex installed. */
@@ -422,7 +426,7 @@ class CodexBackend(
     // ---- outbound (called by Conversation) ----
 
     override suspend fun sendPrompt(text: String, images: List<ImageData>) {
-        val promptText = codexPrompt(text)
+        val promptText = text // expansion happens at Conversation's prompt boundary (expandSlashPrompt)
         val ready = bootstrap.withLock {
             if (threadId == null) { pendingPrompt = Prompt(promptText, images); false } else true
         }
@@ -448,8 +452,9 @@ class CodexBackend(
     }
 
     /** `/simplify` is a Claude built-in skill, not an app-server method. Keep CC Pocket's action useful
-     * for Codex by expanding it into an explicit, stable task instead of sending an unknown slash token. */
-    private fun codexPrompt(text: String): String {
+     * for Codex by expanding it into an explicit, stable task instead of sending an unknown slash token.
+     * Applied by Conversation at the prompt boundary (issue #301) — one rewrite, ledgered as sent. */
+    override fun expandSlashPrompt(text: String): String {
         val trimmed = text.trim()
         if (trimmed.substringBefore(' ').substringBefore('\n') != "/simplify") return text
         val extra = trimmed.removePrefix("/simplify").trim()
@@ -590,6 +595,17 @@ class CodexBackend(
     // ---- disk: ~/.codex/sessions rollout scanning + replay (filtered by recorded cwd) ----
 
     override fun transcriptDir(workdir: String): Path = CodexPaths.sessionsRoot()
+
+    override fun transcriptPath(workdir: String, sessionId: String): Path? {
+        // findSession is a suffix match against real filenames, but keep the wire-input guard uniform
+        if (sessionId.contains('/') || sessionId.contains('\\') || sessionId.contains("..")) return null
+        return CodexPaths.findSession(sessionId)
+    }
+
+    override fun externalWriterProbe(workdir: String, transcript: Path) =
+        dev.ccpocket.daemon.disk.LiveProcesses.externalCodexAt(workdir, transcript)
+
+    override val holdsTranscriptWhileIdle: Boolean get() = true
     override fun listSessions(workdir: String): List<SessionSummary> = CodexTranscriptScanner.scan(workdir)
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =
         CodexPaths.findSession(sessionId)?.let { CodexTranscriptReplay.read(it) } ?: emptyList()

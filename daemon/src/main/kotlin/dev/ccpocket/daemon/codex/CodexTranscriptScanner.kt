@@ -42,9 +42,10 @@ object CodexTranscriptScanner {
 
     /**
      * The newest resumable Codex session for each externally-live cwd. Unlike [scan], this is called by
-     * the 10-second project-list refresh, so it walks the rollout tree ONCE and stops reading each matching
-     * file after the first real user prompt (messageCount is intentionally only a lower bound here). A
-     * full session list still uses [scan]; the active row only needs id/title/mtime/agent.
+     * the 10-second project-list refresh, so it walks the rollout tree ONCE, skips every file whose
+     * (memoized) cwd isn't wanted without opening it, and reads at most one file per requested cwd — a read
+     * the shared [scanCache] then hands to the observe/resume paths for free. A full session list still uses
+     * [scan]; the active row only needs id/title/mtime/agent.
      *
      * Returned keys preserve the caller's cwd spelling; matching itself uses [ProjectPaths.canonicalKey].
      *
@@ -66,47 +67,35 @@ object CodexTranscriptScanner {
         val titles = threadNames()
         for (file in files) {
             if (remaining.isEmpty()) break
-            val hit = runCatching { summarizeActive(file, remaining, titles) }.getOrNull() ?: continue
-            val requestedCwd = requested[hit.first] ?: continue
-            out[requestedCwd] = hit.second
-            remaining.remove(hit.first)
+            // Prefilter on the memoized first-line cwd (issue #300): the same 10-second refresh has just
+            // called [cwdsByNewest] over this very list, so every unchanged file's cwd is already in
+            // [cwdCache] — a stat, no open. Opening each of the N newer other-project rollouts that sit
+            // ahead of a live project's newest one, only to discard them on their first line, is what this
+            // costs otherwise, every tick, forever.
+            val key = cwdOf(file)?.let(ProjectPaths::canonicalKey) ?: continue
+            if (key !in remaining) continue
+            val summary = runCatching { summarizeActive(file, titles) }.getOrNull() ?: continue
+            val requestedCwd = requested[key] ?: continue
+            out[requestedCwd] = summary
+            remaining.remove(key)
         }
         return out
     }
 
-    /** Canonical cwd key + lightweight summary, or null when this rollout is not a requested live cwd.
-     *  Only the cwd decides that: a matching rollout with no real user turn yet still answers for its cwd,
-     *  with a blank title (the index title when Codex already named the thread) — see [activeSummaries]. */
-    private fun summarizeActive(
-        file: Path,
-        wantedKeys: Set<String>,
-        titles: Map<String, String>,
-    ): Pair<String, SessionSummary>? {
-        var id: String? = null
-        var cwd: String? = null
-        var version: String? = null
-        var firstPrompt: String? = null
-        file.bufferedReader().use { r ->
-            val meta = metaPayload(r) ?: return null
-            id = meta.str("id"); cwd = meta.str("cwd"); version = meta.str("cli_version")
-            val recorded = cwd ?: return null
-            val key = ProjectPaths.canonicalKey(recorded)
-            if (key !in wantedKeys) return null
-            var line = r.readLine()
-            while (line != null && firstPrompt == null) {
-                val obj = runCatching { json.parseToJsonElement(line.trim()) }.getOrNull() as? JsonObject
-                val p = obj?.takeIf { it.str("type") == "response_item" }?.obj("payload")
-                if (p != null && p.str("type") == "message" && p.str("role") == "user") {
-                    codexMessageText(p)?.takeIf { !isSyntheticUserText(it) }?.let { firstPrompt = it }
-                }
-                line = r.readLine()
-            }
-        }
-        val sid = id ?: return null
-        val recorded = cwd ?: return null
-        val fp = firstPrompt
-        val mtime = file.getLastModifiedTime().toMillis()
-        return ProjectPaths.canonicalKey(recorded) to SessionSummary(
+    /** Lightweight summary of a rollout already known (by [activeSummaries]' cwd prefilter) to belong to a
+     *  requested live cwd, or null when it has no usable `session_meta`. A matching rollout with no real user
+     *  turn yet still answers for its cwd, with a blank title (the index title when Codex already named the
+     *  thread) — see [activeSummaries]. The read itself goes through the shared [scanCache], so the observe
+     *  tick and this refresh pay for at most one parse of the file per mtime between them. */
+    private fun summarizeActive(file: Path, titles: Map<String, String>): SessionSummary? {
+        val stamp = stampOf(file)
+        val parsed = scanned(file, stamp, workdir = null)?.parsed ?: return null
+        val sid = parsed.id ?: return null
+        val recorded = parsed.cwd ?: return null
+        val fp = parsed.firstPrompt
+        val version = parsed.version
+        val mtime = stamp?.toMillis() ?: file.getLastModifiedTime().toMillis()
+        return SessionSummary(
             sessionId = sid,
             // Blank rather than the session UUID when there is no prompt AND no index title: the phone
             // renders its generic session label for a blank title, while a raw UUID would be shown as-is.
@@ -114,7 +103,7 @@ object CodexTranscriptScanner {
                 ?: fp?.let { it.lineSequence().firstOrNull { l -> l.isNotBlank() }?.trim()?.take(60) ?: sid }
                 ?: "",
             firstPrompt = fp ?: "",
-            messageCount = if (fp != null) 1 else 0,
+            messageCount = parsed.userCount,
             cwd = recorded,
             lastModified = mtime,
             version = version,
@@ -164,13 +153,18 @@ object CodexTranscriptScanner {
         val out = HashMap<String, Long>()
         for (file in files) {
             val mtime = runCatching { file.getLastModifiedTime().toMillis() }.getOrDefault(0L)
-            val cached = cwdCache[file]
-            val cwd = if (cached != null && cached.first == mtime) cached.second else {
-                runCatching { readCwd(file) }.getOrNull().also { cwdCache[file] = mtime to it }
-            }
+            val cwd = cwdOf(file, mtime)
             if (cwd != null) out.merge(cwd, mtime, ::maxOf)
         }
         return out
+    }
+
+    /** The rollout's recorded cwd, memoized by (path, mtime) — a first-line read at most once per version of
+     *  the file. Shared by [cwdsByNewest] and [activeSummaries]' prefilter, which run back-to-back on the
+     *  same file list every 10 seconds, so the second of them pays a stat and nothing more. */
+    private fun cwdOf(file: Path, mtime: Long = runCatching { file.getLastModifiedTime().toMillis() }.getOrDefault(0L)): String? {
+        cwdCache[file]?.let { if (it.first == mtime) return it.second }
+        return runCatching { readCwd(file) }.getOrNull().also { cwdCache[file] = mtime to it }
     }
 
     private fun readCwd(file: Path): String? = file.bufferedReader().use { metaPayload(it)?.str("cwd") }
@@ -178,7 +172,7 @@ object CodexTranscriptScanner {
     /**
      * A bounded LRU keyed by file path and stamped with that file's mtime. Rollouts are append-only, so a
      * moved mtime is the ONLY way a parse of one can go stale — the same reasoning [cwdCache] already used,
-     * generalized here for the two full-file parses below.
+     * generalized here for the full-file parse below.
      *
      * The stamp is the raw [java.nio.file.attribute.FileTime] rather than millis: nanosecond precision where
      * the filesystem has it makes a same-millisecond rewrite visible instead of silently cached.
@@ -204,25 +198,18 @@ object CodexTranscriptScanner {
     private fun stampOf(file: Path): java.nio.file.attribute.FileTime? =
         runCatching { file.getLastModifiedTime() }.getOrNull()
 
-    private val runtimeCache = MtimeMemo<RuntimeState>(MEMO_MAX)
-
     /** Read the newest Codex model and token metadata from a rollout. Model settings are written in
      * `turn_context`; token counts are `event_msg/token_count`. Older rollouts simply return null fields.
      *
-     * Memoized by (path, mtime): a Codex session open asks for this twice (resumeContextTokens +
-     * resumeModel) and an observe tick asks again, each time re-parsing a file that can reach megabytes. */
+     * Served by the same (path, mtime) memo as [summarize] — one read answers both (issue #300). A Codex
+     * session open asks three accessors (title, model, contextTokens) about the same megabyte-sized file,
+     * and every observe tick asks again; before the merge, the summary pass computed this state line by
+     * line and then threw everything but the model away, so each open cost two full parses. */
     fun runtimeState(file: Path): RuntimeState {
         val stamp = stampOf(file)
-        runtimeCache.get(file, stamp)?.let { return it }
-        var state = RuntimeState()
-        file.bufferedReader().useLines { lines ->
-            for (raw in lines) {
-                val obj = runCatching { json.parseToJsonElement(raw.trim()) }.getOrNull() as? JsonObject ?: continue
-                state = mergeRuntimeState(state, obj)
-            }
-        }
-        runtimeCache.put(file, stamp, state)
-        return state
+        // No workdir filter and no session_meta requirement: a header-less rollout has no summary, but its
+        // turn_context/token_count lines are still the truth about the model and context in use.
+        return scanned(file, stamp, workdir = null, requireMeta = false)?.runtime ?: RuntimeState()
     }
 
     private fun mergeRuntimeState(current: RuntimeState, obj: JsonObject): RuntimeState {
@@ -261,30 +248,58 @@ object CodexTranscriptScanner {
         val version: String?,
         val firstPrompt: String?,
         val userCount: Int,
-        val model: String?,
     )
 
-    private val parseCache = MtimeMemo<Parsed>(MEMO_MAX)
+    /** Everything ONE read of a rollout yields: the summary material ([parsed], null when the file has no
+     *  `session_meta` header) and the runtime settings that were being merged line by line anyway. Keeping
+     *  them together is the whole of issue #300: the summary path and the model/context path used to be two
+     *  separate full parses of the same bytes, always requested within the same session open or tick. */
+    private data class Scanned(val parsed: Parsed?, val runtime: RuntimeState)
 
-    /** Full-file parse behind [summarize], keeping its cheap first-line cwd filter: a rollout for another
-     *  project must still cost one line, not a whole read (a session listing runs this over ~800 files).
-     *  Returns null for those, and for a file without a session_meta header — neither is worth caching. */
-    private fun parseRollout(file: Path, workdir: String?): Parsed? {
+    private val scanCache = MtimeMemo<Scanned>(MEMO_MAX)
+
+    /** Cached [scanRollout]. Null (and nothing cached) only for the early exits that never read the body. */
+    private fun scanned(
+        file: Path,
+        stamp: java.nio.file.attribute.FileTime?,
+        workdir: String?,
+        requireMeta: Boolean = true,
+    ): Scanned? = scanCache.get(file, stamp)
+        ?: scanRollout(file, workdir, requireMeta)?.also { scanCache.put(file, stamp, it) }
+
+    /** The single full read of a rollout, keeping the cheap first-line filters it always had: a rollout for
+     *  another project (or, when [requireMeta], one with no session_meta header) must still cost one line,
+     *  not a whole read — a session listing runs this over ~800 files. Returns null for those, uncached:
+     *  what a one-line read decided must not be remembered as if the body had been seen. */
+    private fun scanRollout(file: Path, workdir: String?, requireMeta: Boolean): Scanned? {
         var id: String? = null
         var cwd: String? = null
         var version: String? = null
         var firstPrompt: String? = null
         var userCount = 0
+        var hasMeta = false
         var runtime = RuntimeState()
         file.bufferedReader().use { r ->
-            val meta = metaPayload(r) ?: return null
-            id = meta.str("id"); cwd = meta.str("cwd"); version = meta.str("cli_version")
-            // Canonical-key compare (slashes / trailing sep / Windows case / symlinks / tilde): codex records
-            // the cwd its own way, and an exact string compare silently dropped sessions on Windows (issue
-            // #19's sibling). Since #184 merges spelling variants into ONE project row, the row's realpath'd
-            // workdir must still match a variant-spelled rollout — same key DirectoryService merges by.
-            val recorded = cwd
-            if (workdir != null && (recorded == null || ProjectPaths.canonicalKey(recorded) != ProjectPaths.canonicalKey(workdir))) return null
+            val first = r.readLine()
+            val firstObj = first?.let { runCatching { json.parseToJsonElement(it.trim()) }.getOrNull() as? JsonObject }
+            val meta = firstObj?.takeIf { it.str("type") == "session_meta" }?.obj("payload")
+            if (meta == null) {
+                // No header: nothing to summarize and no cwd to match, so a caller that needs either stops
+                // here. [runtimeState] needs neither and reads on — including this very first line.
+                if (requireMeta || workdir != null) return null
+            } else {
+                hasMeta = true
+                id = meta.str("id"); cwd = meta.str("cwd"); version = meta.str("cli_version")
+                // Canonical-key compare (slashes / trailing sep / Windows case / symlinks / tilde): codex records
+                // the cwd its own way, and an exact string compare silently dropped sessions on Windows (issue
+                // #19's sibling). Since #184 merges spelling variants into ONE project row, the row's realpath'd
+                // workdir must still match a variant-spelled rollout — same key DirectoryService merges by.
+                val recorded = cwd
+                if (workdir != null && (recorded == null || ProjectPaths.canonicalKey(recorded) != ProjectPaths.canonicalKey(workdir))) return null
+            }
+            // The first line is merged like any other — the runtime pass this replaced merged every line,
+            // and only a line's own `type` decides whether it carries settings. Header or not, same rule.
+            if (firstObj != null) runtime = mergeRuntimeState(runtime, firstObj)
             var line = r.readLine()
             while (line != null) {
                 val obj = runCatching { json.parseToJsonElement(line.trim()) }.getOrNull() as? JsonObject
@@ -302,16 +317,18 @@ object CodexTranscriptScanner {
                 line = r.readLine()
             }
         }
-        return Parsed(id, cwd, version, firstPrompt, userCount, runtime.model)
+        return Scanned(
+            parsed = if (hasMeta) Parsed(id, cwd, version, firstPrompt, userCount) else null,
+            runtime = runtime,
+        )
     }
 
     /** Returns null if [file] isn't a rollout for [workdir] (cheap first-line cwd filter) or has no real turn.
      *  [titles] (id → Codex thread title) supplies the session name; a listing passes one shared map. */
     fun summarize(file: Path, workdir: String?, titles: Map<String, String> = threadNames()): SessionSummary? {
         val stamp = stampOf(file)
-        val parsed = parseCache.get(file, stamp)
-            ?: parseRollout(file, workdir)?.also { parseCache.put(file, stamp, it) }
-            ?: return null
+        val scan = scanned(file, stamp, workdir) ?: return null
+        val parsed = scan.parsed ?: return null
         // A cached parse still re-checks the caller's workdir: the memo is keyed by the FILE, and the same
         // rollout is summarized by both a project-scoped listing and the observe/resume paths.
         val recorded = parsed.cwd
@@ -337,14 +354,13 @@ object CodexTranscriptScanner {
             version = version,
             live = System.currentTimeMillis() - mtime < LIVE_WINDOW_MS,
             agent = AgentKind.CODEX,
-            model = parsed.model,
+            model = scan.runtime.model,
         )
     }
 
     /** Cross-test isolation: every memo here is process-wide state on an object singleton. */
     internal fun clearForTest() {
-        parseCache.clear()
-        runtimeCache.clear()
+        scanCache.clear()
         cwdCache.clear()
         titleCache.set(null)
     }

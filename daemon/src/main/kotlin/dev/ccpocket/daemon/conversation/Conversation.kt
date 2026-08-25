@@ -2171,6 +2171,11 @@ class Conversation(
         if (sessionTitle == null && text.isNotBlank()) {
             sessionTitle = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(60)
         }
+        // Backend-specific slash rewriting (Codex /simplify → an explicit task): applied HERE, after the
+        // title seed (which should keep the user's own words) and before the ledger — so what we record
+        // is exactly what a redelivery re-sends, and the transport layer (sendPrompt/steer) stays free of
+        // prompt string-matching (issue #301).
+        val outgoing = backend.expandSlashPrompt(text)
         // approval design M2 §5.4 / §18.1 P1-4: EVERY top-level user prompt begins a new task — the
         // previous task's grants die right here, whether or not the CLI folds the message into a running
         // turn. A new instruction never inherits an old authorization; task identity is decoupled from
@@ -2214,7 +2219,7 @@ class Conversation(
         // send arms it here, where no new pump can race it.
         // the launch's own prompt, LEDGERED inside launchProcess before its pump starts (issue #122
         // record-vs-replay race); the queued-send branch below records it inline instead (no new pump).
-        val initialSend = InitialSend(promptId, text, images, bridgeGrantToken)
+        val initialSend = InitialSend(promptId, outgoing, images, bridgeGrantToken)
         if (relaunching) {
             reemitLive = true // the post-relaunch init re-announces SessionLive with the fresh sessionId + model
             val relaunched = runCatching { relaunch(sessionId ?: openedResumeId, armExecuting = true, initialSend = initialSend) }
@@ -2244,7 +2249,7 @@ class Conversation(
                     AgentSpec(
                         workdir, anchor, model, mode, effort = effort,
                         permissionMode = permissionMode, serviceTier = serviceTier,
-                        forkSession = fork, initialPrompt = text,
+                        forkSession = fork, initialPrompt = outgoing,
                     ),
                     armExecuting = true,
                     initialSend = initialSend,
@@ -2264,18 +2269,18 @@ class Conversation(
             // into the next spawn (one prompt per process). recordPromptWritten stamps the CURRENT
             // generation, so a client resend while this turn runs is a plain re-ack (#122 ④: an entry
             // owned by the live process is queued, not lost).
-            recordPromptWritten(promptId, text, images, bridgeGrantToken, queuedWork = true)
+            recordPromptWritten(promptId, outgoing, images, bridgeGrantToken, queuedWork = true)
         } else {
             // queued send onto the already-live process (mid-turn queue, or a steady-state next turn):
             // no new pump is starting, so there is no death-branch to race. Ledger FIRST, then arm the turn:
             // if the old turn's result races this enqueue, either executing or pendingPromptWork remains true.
             // The write comes only after both, and only the CLI's consumption replay settles the ledger.
-            recordPromptWritten(promptId, text, images, bridgeGrantToken, inferQueuedWork = true)
+            recordPromptWritten(promptId, outgoing, images, bridgeGrantToken, inferQueuedWork = true)
             markExecuting() // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
         }
         lastActivityMs = System.currentTimeMillis()
         lockForkRetried = false // each user prompt re-arms one heal
-        backend.sendPrompt(text, images)
+        backend.sendPrompt(outgoing, images)
         promptId?.let {
             sink.emit(PromptAck(convoId, it)) // the turn is in the agent's hands — receipt (issue #66)
             // (issue #104) an ack is NOT a started turn. If the client later reports turnStalled for this prompt,
@@ -2295,8 +2300,10 @@ class Conversation(
         val handler: suspend () -> Unit = when (trimmed.substringBefore(' ').substringBefore('\n')) {
             "/model" -> ({ handleModelCommand(trimmed) })
             "/effort" -> ({ handleEffortCommand(trimmed) })
-            "/compact" -> if (backend.kind == AgentKind.CODEX) ({ handleCodexCompactCommand() }) else return false
-            "/review" -> if (backend.kind == AgentKind.CODEX) ({ handleCodexReviewCommand(trimmed) }) else return false
+            // capability-routed, not kind-gated (issue #301): a backend that answers false keeps today's
+            // passthrough (Claude's /compact is a prompt-backed builtin the CLI itself runs)
+            "/compact" -> if (backend.supportsNativeCompact) ({ handleNativeCompactCommand() }) else return false
+            "/review" -> if (backend.supportsNativeReview) ({ handleNativeReviewCommand(trimmed) }) else return false
             "/clear" -> ({ handleClearCommand() })
             else -> return false
         }
@@ -2309,10 +2316,16 @@ class Conversation(
 
     /** Codex exposes compaction as app-server control-plane RPC, not a slash prompt. The process must be
      * ready because compact applies to its opened thread; a cold resume is launched without creating a turn. */
-    private suspend fun handleCodexCompactCommand() {
+    /**
+     * Shared guard + cold start for a control-plane op (/compact, /review): the op applies to the
+     * backend's OPEN conversation, so a cold session is launched first — without creating a turn.
+     * One copy on purpose (issue #301: this block existed three times and the anchor/fork subtleties
+     * below must never drift apart). Returns false when the op cannot proceed (already replied).
+     */
+    private suspend fun ensureProcessForControlOp(opLabel: String): Boolean {
         if (isExecuting()) {
-            reply("Wait for the current Codex turn to finish before compacting context.")
-            return
+            reply("Wait for the current turn to finish before $opLabel.")
+            return false
         }
         if (proc == null) {
             val anchor = sessionId ?: openedResumeId
@@ -2326,40 +2339,26 @@ class Conversation(
                 )
             }
             if (launched.isFailure) {
-                reply("Could not start Codex to compact this session: ${launched.exceptionOrNull()?.message ?: "unknown error"}")
-                return
+                reply("Could not start the agent for $opLabel: ${launched.exceptionOrNull()?.message ?: "unknown error"}")
+                return false
             }
         }
-        // CodexBackend queues this across an in-flight thread resume/fork handshake, so a cold session's
-        // first Compact tap still becomes exactly one native thread/compact/start request.
-        if (!backend.compact()) reply("This Codex version does not expose native context compaction.")
+        return true
     }
 
-    /** Codex code review is another app-server control-plane operation. `/review` defaults to all working
-     * tree changes; text after the command becomes the native custom review target. */
-    private suspend fun handleCodexReviewCommand(text: String) {
-        if (isExecuting()) {
-            reply("Wait for the current Codex turn to finish before starting a review.")
-            return
-        }
-        if (proc == null) {
-            val anchor = sessionId ?: openedResumeId
-            val fork = if (sessionId == null) openedWithFork else false
-            val launched = runCatching {
-                launchProcess(
-                    AgentSpec(
-                        workdir, anchor, model, mode, effort = effort,
-                        permissionMode = permissionMode, serviceTier = serviceTier, forkSession = fork,
-                    ),
-                )
-            }
-            if (launched.isFailure) {
-                reply("Could not start Codex review: ${launched.exceptionOrNull()?.message ?: "unknown error"}")
-                return
-            }
-        }
+    private suspend fun handleNativeCompactCommand() {
+        if (!ensureProcessForControlOp("compacting context")) return
+        // the backend queues this across an in-flight open handshake, so a cold session's first Compact
+        // tap still becomes exactly one native request; a rejection surfaces via its error path
+        backend.compact()
+    }
+
+    /** Native code review. `/review` defaults to all working tree changes; trailing text becomes the
+     * custom review target. */
+    private suspend fun handleNativeReviewCommand(text: String) {
+        if (!ensureProcessForControlOp("starting a review")) return
         val instructions = text.removePrefix("/review").trim().takeIf { it.isNotEmpty() }
-        if (!backend.review(instructions)) reply("This Codex version does not expose native code review.")
+        backend.review(instructions)
     }
 
     /** Handle the phone's `/model [name]` — the agent `-p` ignores it, so the daemon honors it. */

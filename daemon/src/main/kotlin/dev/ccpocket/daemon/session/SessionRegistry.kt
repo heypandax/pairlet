@@ -65,16 +65,12 @@ class SessionRegistry(
         LiveProcesses::externalCodexAt,
     // Resolve an agent's durable transcript. Injectable so Codex observe tests use a temp rollout rather
     // than the developer's real ~/.codex tree.
+    // Derived from the registered backends (issue #301): "which file owns this session id" is a backend
+    // capability, not registry knowledge — a new backend gets observe/take-over safety by overriding
+    // AgentBackend.transcriptPath, no registry edit. The wire-input guard (separators/dot-dot) lives in
+    // each implementation. Injectable so Codex observe tests use a temp rollout.
     private val transcriptResolver: (agent: AgentKind, workdir: String, sessionId: String) -> Path? = { agent, workdir, sessionId ->
-        // sessionId arrives on the wire (OpenSession.resumeId, including guest/collaborator opens) and is
-        // interpolated into a filename — forbid separators/dot-dot exactly like SessionFilesService.transcriptFor,
-        // or a crafted id escapes the project dir (existence/mtime probing at minimum).
-        if (sessionId.contains('/') || sessionId.contains('\\') || sessionId.contains("..")) null
-        else when (agent) {
-            AgentKind.CLAUDE -> ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl")
-            AgentKind.CODEX -> CodexPaths.findSession(sessionId)
-            else -> null
-        }
+        backends[agent]?.create()?.transcriptPath(workdir, sessionId)
     },
     // Claude transcript root — injectable ONLY so [renameSession]'s disk write is unit-testable against
     // a temp dir instead of the user's real ~/.claude/projects (every other path resolves via the
@@ -149,26 +145,37 @@ class SessionRegistry(
     ): Boolean {
         // one stat serves both the freshness gate and the ownership checks below
         val mtime = runCatching { if (file.exists()) file.getLastModifiedTime().toMillis() else null }.getOrNull() ?: return false
-        // Codex keeps the exact active rollout open while idle. Probe before the generic freshness and
-        // restart-amnesia gates so an hours-old but still-owned rollout remains read-only. The production
-        // Codex probe only permits cwd matching for fresh rollouts, so this cannot promote unrelated old
-        // sessions from the same project.
-        val earlyCodexProbe = if (agent == AgentKind.CODEX) {
-            runCatching { withContext(Dispatchers.IO) { codexProcessProbe(workdir, file) } }
+        // Which probe answers for this agent: the two named params stay as the historical test seams for
+        // Claude/Codex; any OTHER backend brings its own via AgentBackend.externalWriterProbe (issue #301).
+        val probeFor: (String, Path) -> LiveProcesses.ExternalClaude = when (agent) {
+            AgentKind.CLAUDE -> processProbe
+            AgentKind.CODEX -> codexProcessProbe
+            else -> { wd, f ->
+                backends[agent]?.create()?.externalWriterProbe(wd, f) ?: LiveProcesses.ExternalClaude.UNKNOWN
+            }
+        }
+        // A backend whose CLI holds its transcript fd even while idle (Codex; declared via
+        // holdsTranscriptWhileIdle) is probed BEFORE the freshness and restart-amnesia gates: an
+        // hours-old but still-owned rollout must remain read-only. The production Codex probe only
+        // permits cwd matching for fresh rollouts, so this cannot promote unrelated old sessions.
+        val holdsWhileIdle = agent == AgentKind.CODEX || backends[agent]?.create()?.holdsTranscriptWhileIdle == true
+        val earlyProbe = if (holdsWhileIdle) {
+            runCatching { withContext(Dispatchers.IO) { probeFor(workdir, file) } }
                 .getOrDefault(LiveProcesses.ExternalClaude.UNKNOWN)
         } else null
-        if (earlyCodexProbe == LiveProcesses.ExternalClaude.PRESENT) {
-            log.info("externallyActive(${sessionId.take(8)}…): Codex holds exact rollout → true")
+        if (earlyProbe == LiveProcesses.ExternalClaude.PRESENT) {
+            log.info("externallyActive(${sessionId.take(8)}…): $agent holds exact transcript → true")
             return true
         }
-        if (earlyCodexProbe == LiveProcesses.ExternalClaude.UNKNOWN) {
-            // UNKNOWN from the Codex probe means external codex processes EXIST but rollout ownership could
-            // not be verified (lsof failure/timeout, or Windows where fd probing is impossible — "no codex
-            // at all" reports ABSENT, not UNKNOWN). An idle holder keeps an OLD mtime, so the freshness gate
-            // below would answer false — the exact wrong direction for the one backend with no session lock
-            // (a silent double-writer, probed on codex app-server). Take the safe verdict instead: observe /
-            // fork-on-take-over. A spurious fork is recoverable; a clobbered rollout is not (PR #296 review).
-            log.info("externallyActive(${sessionId.take(8)}…): Codex rollout ownership unverifiable → assume held")
+        if (earlyProbe == LiveProcesses.ExternalClaude.UNKNOWN) {
+            // UNKNOWN from an idle-holder probe means external processes EXIST but transcript ownership
+            // could not be verified (lsof failure/timeout, or Windows where fd probing is impossible —
+            // "none at all" reports ABSENT, not UNKNOWN). An idle holder keeps an OLD mtime, so the
+            // freshness gate below would answer false — the exact wrong direction for a backend with no
+            // session lock (a silent double-writer, probed on codex app-server). Take the safe verdict
+            // instead: observe / fork-on-take-over. A spurious fork is recoverable; a clobbered
+            // transcript is not (PR #296 review).
+            log.info("externallyActive(${sessionId.take(8)}…): $agent transcript ownership unverifiable → assume held")
             return true
         }
         if (System.currentTimeMillis() - mtime >= TranscriptScanner.LIVE_WINDOW_MS) return false
@@ -184,11 +191,11 @@ class SessionRegistry(
             log.info("externallyActive(${sessionId.take(8)}…): mtime ${now - mtime}ms ago is our own close tail (selfClosed ${now - closedAt}ms ago) → false")
             return false
         }
-        // mtime alone can't tell "terminal claude still running" from "user quit it seconds ago" — ask the
+        // mtime alone can't tell "terminal agent still running" from "user quit it seconds ago" — ask the
         // OS. Only reached on a fresh foreign-looking mtime, so the lsof cost stays off every ordinary open.
         // UNKNOWN (Windows / lsof failure / timeout) keeps the old mtime verdict: a wrongly forked session
         // is recoverable, two writers clobbering one transcript is not.
-        val probe = earlyCodexProbe ?: runCatching { withContext(Dispatchers.IO) { processProbe(workdir, file) } }
+        val probe = earlyProbe ?: runCatching { withContext(Dispatchers.IO) { probeFor(workdir, file) } }
             .getOrDefault(LiveProcesses.ExternalClaude.UNKNOWN)
         val verdict = probe != LiveProcesses.ExternalClaude.ABSENT
         log.info(
@@ -464,11 +471,13 @@ class SessionRegistry(
                 log.info("open ${resume.take(8)}… → live candidate ${attach.convoId.take(8)}… expired before reattach claim; resuming cold")
                 live = null
             }
-            // Observe a Claude/Codex session running OUTSIDE the daemon (e.g. a terminal) — read-only,
-            // no second writer. Each backend supplies its own transcript resolver/replay and process probe.
-            // externallyActive requires a LIVE external process, not just a fresh mtime — a terminal claude
-            // the user quit seconds ago falls through to an ordinary in-place resume, not read-only observe.
-            if (effectiveAgent in setOf(AgentKind.CLAUDE, AgentKind.CODEX) && !open.takeOver) {
+            // Observe a session running OUTSIDE the daemon (e.g. a terminal) — read-only, no second
+            // writer. Admission is the transcript capability itself (issue #301): a backend that resolves
+            // no per-session file (OpenCode's SQLite, Kimi/ZCode/DSH) never reaches the gate — by
+            // declaration, not by a kind list here. externallyActive still requires a LIVE external
+            // process, not just a fresh mtime — a terminal claude the user quit seconds ago falls through
+            // to an ordinary in-place resume, not read-only observe.
+            if (!open.takeOver) {
                 val file = transcriptResolver(effectiveAgent, open.workdir, resume)
                 val recent = file != null && externallyActive(resume, open.workdir, file, effectiveAgent)
                 if (recent) {
@@ -579,7 +588,9 @@ class SessionRegistry(
         }.getOrDefault(false)
 
         if (hasTranscript(requested)) return requested
-        return listOf(AgentKind.CODEX, AgentKind.CLAUDE)
+        // candidates derive from the registered backends (issue #301); the legacy pair stays appended so
+        // test registries built with an empty/partial backends map keep the historical probe order
+        return (backends.keys + listOf(AgentKind.CODEX, AgentKind.CLAUDE)).distinct()
             .firstOrNull { it != requested && hasTranscript(it) }
             ?: requested
     }

@@ -98,6 +98,51 @@ class CodexTranscriptActiveSummariesTest {
     }
 
     @Test
+    fun a_rollout_whose_cwd_is_already_known_to_be_unwanted_is_never_opened() {
+        // issue #300: a live project's newest rollout sits behind every other project's newer ones, and each
+        // of those used to be OPENED (just to be discarded on its first line) on every 10-second tick. They
+        // are prefiltered on the cwd the same tick's cwdsByNewest already memoized by (path, mtime).
+        val other = Files.createTempDirectory("ccp-codex-decoy").toString()
+        try {
+            val decoy = rollout("thr-decoy", other, prompt = "elsewhere", mtime = now)
+            val wanted = rollout("thr-wanted", work, prompt = "the live one", mtime = now - 1_000)
+            val files = listOf(decoy, wanted) // decoy first, exactly where the other-project files sit
+
+            // what the refresh does first in production — this is what fills the cwd memo
+            CodexTranscriptScanner.cwdsByNewest(files)
+
+            // Now make the decoy CLAIM the wanted cwd, with its mtime pinned. Only an actual open of its
+            // first line can see that: if activeSummaries opened it, the decoy — being first in the list —
+            // would answer for `work` and thr-wanted would never be reached.
+            Files.writeString(
+                decoy,
+                """{"timestamp":"t0","type":"session_meta","payload":{"id":"thr-decoy","cwd":"$work","cli_version":"0.124.0"}}""" + "\n" +
+                    """{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"decoy"}]}}""",
+            )
+            Files.setLastModifiedTime(decoy, FileTime.fromMillis(now))
+
+            assertEquals(
+                "thr-wanted",
+                CodexTranscriptScanner.activeSummaries(setOf(work), files).getValue(work).sessionId,
+                "an unwanted cwd costs a stat, not an open",
+            )
+
+            // …and the flip side of that memo, so this test can't pass for the wrong reason (e.g. the decoy
+            // being skipped by something other than the cache): with a cold cache the file IS opened and its
+            // new cwd is seen.
+            CodexTranscriptScanner.clearForTest()
+            assertEquals(
+                "thr-decoy",
+                CodexTranscriptScanner.activeSummaries(setOf(work), files).getValue(work).sessionId,
+                "cold cache → the first line is read, and it now says this file is the wanted cwd's newest",
+            )
+        } finally {
+            java.io.File(other).deleteRecursively()
+            CodexTranscriptScanner.clearForTest()
+        }
+    }
+
+    @Test
     fun a_newest_rollout_that_does_have_a_prompt_still_titles_itself_from_it() {
         val files = listOf(rollout("thr-titled", work, prompt = "build the thing", mtime = now))
 

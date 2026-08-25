@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.FileTime
 import kotlin.io.path.bufferedReader
 import kotlin.io.path.exists
 import kotlin.io.path.getLastModifiedTime
@@ -95,6 +96,107 @@ object TranscriptScanner {
     }
 
     /**
+     * Everything a COLD RESUME needs from a transcript, in the shapes the three single-purpose readers
+     * below produce: [title] as [summarize] computes it (null exactly when summarize returns null, i.e. the
+     * file carries no prompt and no title record), [gitBranch] from the first real user turn, [model] as
+     * [lastModel], [contextTokens] as [lastContextTokens].
+     */
+    data class ResumeSeed(
+        val title: String? = null,
+        val gitBranch: String? = null,
+        val model: String? = null,
+        val contextTokens: Long? = null,
+    )
+
+    /**
+     * All four resume fields in ONE pass, memoized by (path, mtime). Opening a Claude session used to parse
+     * the same .jsonl three times over (summarize → title, [lastModel], [lastContextTokens]) — three full
+     * reads of a file that reaches megabytes, back to back on the open path (issue #303).
+     *
+     * The single-purpose readers stay: they have many other callers, and they remain the SPEC this must
+     * match — `ResumeSeedParityTest` pins the four fields against them line by line.
+     *
+     * Null only when [file] is absent or unreadable. Transcripts are append-only, so a moved mtime is the
+     * only way a parse of one goes stale (the same reasoning CodexTranscriptScanner's memo uses).
+     */
+    fun resumeSeed(file: Path): ResumeSeed? {
+        if (!file.exists()) return null
+        val stamp = runCatching { file.getLastModifiedTime() }.getOrNull()
+        seedCache.get(file, stamp)?.let { return it }
+        val seed = runCatching { readResumeSeed(file) }.getOrNull() ?: return null
+        seedCache.put(file, stamp, seed)
+        return seed
+    }
+
+    private fun readResumeSeed(file: Path): ResumeSeed {
+        val sessionId = file.fileName.toString().removeSuffix(".jsonl")
+        var firstPrompt: String? = null
+        var gitBranch: String? = null
+        var aiTitle: String? = null
+        var customTitle: String? = null
+        var model: String? = null
+        var contextTokens: Long? = null
+
+        file.bufferedReader().useLines { lines ->
+            for (raw in lines) {
+                val line = raw.trim()
+                if (line.isEmpty()) continue
+                val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                when (obj.str("type")) {
+                    "user" -> if (isRealUserTurn(obj) && firstPrompt == null) {
+                        firstPrompt = extractUserText(obj)
+                        gitBranch = obj.str("gitBranch")
+                    }
+                    "assistant" -> {
+                        assistantModel(obj)?.let { model = it } // skips sidechain + <synthetic>, last wins
+                        contextOf(obj)?.let { contextTokens = it } // last MAIN-chain turn carrying usage wins
+                    }
+                    "ai-title" -> aiTitle = obj.str("aiTitle")
+                    "custom-title" -> customTitle = obj.str("customTitle")
+                }
+            }
+        }
+
+        // summarize's guard: without any of the three, that reader answers null and there is no title to seed
+        val title = if (firstPrompt == null && aiTitle == null && customTitle == null) null else {
+            customTitle?.takeIf { it.isNotBlank() }
+                ?: aiTitle?.takeIf { it.isNotBlank() }
+                ?: firstPrompt.orEmpty().lineSequence().firstOrNull()?.take(60)?.takeIf { it.isNotBlank() }
+                ?: sessionId
+        }
+        return ResumeSeed(title = title, gitBranch = gitBranch, model = model, contextTokens = contextTokens)
+    }
+
+    private val seedCache = MtimeMemo<ResumeSeed>(SEED_MEMO_MAX)
+
+    /** A bounded LRU keyed by file path and stamped with that file's mtime — the append-only-file memo
+     *  CodexTranscriptScanner already uses, kept as a local twin rather than shared across two scanners that
+     *  otherwise know nothing about each other. The raw FileTime (not millis) makes a same-millisecond
+     *  rewrite visible instead of silently cached. */
+    private class MtimeMemo<V : Any>(private val max: Int) {
+        private val map = object : LinkedHashMap<Path, Pair<FileTime, V>>(64, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Path, Pair<FileTime, V>>) = size > max
+        }
+
+        @Synchronized
+        fun get(file: Path, stamp: FileTime?): V? =
+            if (stamp == null) null else map[file]?.takeIf { it.first == stamp }?.second
+
+        @Synchronized
+        fun put(file: Path, stamp: FileTime?, value: V) {
+            if (stamp != null) map[file] = stamp to value
+        }
+
+        @Synchronized
+        fun clear() = map.clear()
+    }
+
+    /** Cross-test isolation: the memo is process-wide state on an object singleton. */
+    internal fun clearSeedCacheForTest() = seedCache.clear()
+
+    private const val SEED_MEMO_MAX = 800
+
+    /**
      * Context tokens the LAST completed assistant turn left in the window — its `message.usage` summed
      * through [TokenUsage.contextTokens], i.e. `input + output + cache_read + cache_creation`. Mirrors
      * the live TurnDone sum so the phone's usage statusline reads the same on resume as mid-session.
@@ -170,6 +272,22 @@ object TranscriptScanner {
             }
         }
         return streak
+    }
+
+    /** Context occupancy an assistant line leaves in the window, or null when it doesn't count: a
+     *  Task-subagent turn (isSidechain — that usage describes the SUBAGENT's window), a line with no
+     *  `message.usage`, or a zero sum. Same rules as [lastContextTokens], which is deliberately left
+     *  untouched (many callers); `ResumeSeedParityTest` pins the two against each other. */
+    private fun contextOf(obj: JsonObject): Long? {
+        if (obj.bool("isSidechain") == true) return null
+        val usage = (obj["message"] as? JsonObject)?.get("usage") as? JsonObject ?: return null
+        val total = TokenUsage(
+            inputTokens = usage.long("input_tokens") ?: 0,
+            outputTokens = usage.long("output_tokens") ?: 0,
+            cacheCreationInputTokens = usage.long("cache_creation_input_tokens"),
+            cacheReadInputTokens = usage.long("cache_read_input_tokens"),
+        ).contextTokens
+        return total.takeIf { it > 0 }
     }
 
     /** `message.model` of a MAIN-chain assistant line — null for Task-subagent turns (isSidechain: they share

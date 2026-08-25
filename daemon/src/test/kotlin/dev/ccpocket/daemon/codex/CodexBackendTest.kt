@@ -210,7 +210,9 @@ class CodexBackendTest {
         val w = mutableListOf<String>()
         val b = ready(w)
 
-        b.sendPrompt("/simplify keep the public API", emptyList())
+        // Conversation applies expandSlashPrompt at its prompt boundary (issue #301); this pins the
+        // backend's rewrite AND that the expanded form is what actually reaches the wire.
+        b.sendPrompt(b.expandSlashPrompt("/simplify keep the public API"), emptyList())
 
         val turn = w.last { "turn/start" in it }
         assertFalse("/simplify" in turn, turn)
