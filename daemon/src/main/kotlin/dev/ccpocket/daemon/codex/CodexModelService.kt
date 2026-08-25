@@ -1,10 +1,12 @@
 package dev.ccpocket.daemon.codex
 
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AgentModePreset
 import dev.ccpocket.protocol.CODEX_MODEL_IDS
 import dev.ccpocket.protocol.ModelCapabilities
 import dev.ccpocket.protocol.ModelServiceTier
 import dev.ccpocket.protocol.ModelsList
+import dev.ccpocket.protocol.PermissionMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -38,6 +40,7 @@ class CodexModelService(
                 agent = AgentKind.CODEX,
                 models = models,
                 modelCapabilities = cached.map { it.capabilities },
+                modePresets = MODE_PRESETS,
             )
         }.getOrElse { e ->
             val configured = CodexDefaultModel.resolve(configPath)
@@ -113,6 +116,24 @@ class CodexModelService(
     )
 
     companion object {
+        /**
+         * The permission-mode vocabulary this daemon's [CodexBackend] really implements, advertised so the
+         * App stops baking it in (PR #296 review). One table, and it must stay in step with
+         * `CodexBackend.approvalPolicy`/`sandbox`: PLAN → untrusted + read-only, DEFAULT → on-request +
+         * workspace, ACCEPT_EDITS → never + workspace, BYPASS_PERMISSIONS → never + full access.
+         *
+         * [AgentModePreset.label]/[AgentModePreset.detail] are the ENGLISH FALLBACK for an App that doesn't
+         * know the id — the shipped App renders its own localized copy for these four ids and only reads
+         * the set, the order and the danger/recommended emphasis from here. That is exactly what a future
+         * codex release may change without an app-store round trip.
+         */
+        internal val MODE_PRESETS = listOf(
+            AgentModePreset(PermissionMode.PLAN, "cautious", "Cautious", "Ask before every step; read-only file access"),
+            AgentModePreset(PermissionMode.DEFAULT, "balanced", "Balanced", "Ask when needed; workspace writes", recommended = true),
+            AgentModePreset(PermissionMode.ACCEPT_EDITS, "autonomous", "Autonomous", "Never ask; workspace writes"),
+            AgentModePreset(PermissionMode.BYPASS_PERMISSIONS, "full", "Full access", "Never ask; full filesystem access", danger = true),
+        )
+
         private val json = Json { ignoreUnknownKeys = true; isLenient = true }
         private const val MAX_CACHE_MODELS = 128
         private const val MAX_MODEL_ID_LEN = 128

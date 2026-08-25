@@ -3318,6 +3318,8 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 agent = repo.sessionAgent.value, // OpenCode renders the immutable full-access notice, not a ladder
                 nativeMode = repo.permissionMode.value,
                 autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+                // the connected daemon's own permission vocabulary; empty (older daemon) → built-in table
+                modePresets = repo.sessionAgent.value?.let { repo.modePresetsFor(it) }.orEmpty(),
                 onSelect = { mode, native -> repo.switchMode(mode, native) }, // keep the sheet open so the "switching" state shows
                 onClearRule = { repo.clearRule(it) }, onClearAll = { repo.clearAllRules() },
                 onDismiss = { showModeSheet = false },

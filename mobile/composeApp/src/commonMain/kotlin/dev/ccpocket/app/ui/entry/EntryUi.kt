@@ -1,9 +1,11 @@
 package dev.ccpocket.app.ui.entry
 
 import dev.ccpocket.app.data.ConnPhase
+import dev.ccpocket.app.ui.codexPresetSpecs
 import dev.ccpocket.app.ui.session.StateMark
 import dev.ccpocket.app.ui.session.StateTone
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AgentModePreset
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.PermissionMode
 
@@ -165,8 +167,10 @@ data class ModeChoice(
  * The modes [agent] really offers, in ladder order.
  *
  * Claude: the four-rung ladder, plus its native Auto only when the connected CLI advertises it.
- * Codex: the four `CODEX_PRESETS` rows — same order, same modes (pinned by `EntryUiTest`, because the two
- * lists drifting apart would silently mislabel an approval × sandbox pair).
+ * Codex: [codexPresetSpecs] — the daemon-advertised vocabulary in [codexPresets] when it sent one, else the
+ * built-in `CODEX_PRESETS` rows (same order, same modes, pinned by `EntryUiTest`). Derived rather than
+ * re-listed here, because two hand-kept copies drifting apart would silently mislabel an approval × sandbox
+ * pair — the whole reason the daemon now owns the vocabulary.
  * Kimi: the same ladder minus Accept edits, which has no Kimi equivalent.
  * ZCode: the four shared modes map directly to build / edit / plan / yolo.
  * DSH: Kimi's three rungs. dsh fixes its permission mode at PROCESS LAUNCH — it cannot be changed
@@ -174,7 +178,11 @@ data class ModeChoice(
  * and nothing finer. Accept edits has no dsh equivalent, same as Kimi.
  * OpenCode: one row, and it is a STATEMENT rather than a choice — the daemon runs it `--auto`.
  */
-fun agentModeChoices(agent: AgentKind, autoAvailable: Boolean = false): List<ModeChoice> = when (agent) {
+fun agentModeChoices(
+    agent: AgentKind,
+    autoAvailable: Boolean = false,
+    codexPresets: List<AgentModePreset> = emptyList(),
+): List<ModeChoice> = when (agent) {
     AgentKind.CLAUDE -> buildList {
         add(ModeChoice(PermissionMode.DEFAULT))
         add(ModeChoice(PermissionMode.ACCEPT_EDITS))
@@ -193,13 +201,9 @@ fun agentModeChoices(agent: AgentKind, autoAvailable: Boolean = false): List<Mod
         ModeChoice(PermissionMode.PLAN),
         ModeChoice(PermissionMode.BYPASS_PERMISSIONS, danger = true),
     )
-    // mirrors CODEX_PRESETS: Cautious, Balanced, Autonomous, Full access
-    AgentKind.CODEX -> listOf(
-        ModeChoice(PermissionMode.PLAN),
-        ModeChoice(PermissionMode.DEFAULT),
-        ModeChoice(PermissionMode.ACCEPT_EDITS),
-        ModeChoice(PermissionMode.BYPASS_PERMISSIONS, danger = true),
-    )
+    // one vocabulary, two renderers: Cautious, Balanced, Autonomous, Full access — or whatever the
+    // connected daemon advertises instead
+    AgentKind.CODEX -> codexPresetSpecs(codexPresets).map { ModeChoice(it.mode, danger = it.danger) }
     // BYPASS_PERMISSIONS is not a "choice" here — it is what the CLI already does, stated honestly
     AgentKind.OPENCODE -> listOf(ModeChoice(PermissionMode.BYPASS_PERMISSIONS))
 }

@@ -4100,6 +4100,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun supportsPermissionMode(id: String, agent: AgentKind = AgentKind.CLAUDE): Boolean =
         id in agentModels[agent]?.permissionModes.orEmpty()
 
+    /** The permission-mode presets [agent]'s daemon advertises — the picker's vocabulary when it is
+     *  non-empty. Empty means "not advertised" (an older daemon, or no [ModelsList] for this agent yet),
+     *  never "this backend has no modes": the caller falls back to the App's built-in table. */
+    fun modePresetsFor(agent: AgentKind): List<dev.ccpocket.protocol.AgentModePreset> =
+        agentModels[agent]?.modePresets.orEmpty()
+
     fun fetchModels(agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE) {
         scope.launch { runCatching { send(FetchModels(agent = agent, workdir = workdir.value)) } }
     }

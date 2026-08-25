@@ -2008,7 +2008,37 @@ data class ModelsList(
     val permissionModes: List<String> = emptyList(),
     /** Per-model capabilities sourced from the installed backend's own cache/protocol. */
     val modelCapabilities: List<ModelCapabilities> = emptyList(),
+    /**
+     * The backend's permission-mode vocabulary as PRESET ROWS, daemon-advertised so the pickers stop
+     * baking each backend's mode set into the App (PR #296 review: a codex CLI that adds/drops a preset
+     * forced four UI sites through app-store review in lockstep with the daemon, and version skew showed
+     * modes the backend rejects). Same two-way degradation as [gatewayModels]: trailing + defaulted, an
+     * older daemon simply never sends it and the App falls back to its built-in table, an older App
+     * ignores it. Empty means "not advertised" (→ fallback), never "this backend has no modes".
+     */
+    val modePresets: List<AgentModePreset> = emptyList(),
 ) : ToPhone
+
+/**
+ * One advertised permission-mode preset row. [mode] deliberately stays within the existing
+ * [PermissionMode] enum — a NEW enum value would hard-fail the whole Envelope on already-shipped peers
+ * (the AgentKind lesson), so future backend modes must map onto one of the four wire values; what this
+ * type lets the daemon move without an App release is the SET (count/order), [danger]/[recommended]
+ * emphasis, and the copy fallback. [id] is the stable semantic key the App maps to localized copy
+ * ("cautious"/"balanced"/"autonomous"/"full"); for an id the App doesn't know it renders [label]/[detail]
+ * verbatim — a new preset degrades to plain English, never to invisible or wrongly-localized.
+ */
+@Serializable
+data class AgentModePreset(
+    // defaulted so coerceInputValues can rescue a FUTURE unknown mode value as a Default-mode row
+    // (danger/label intact) instead of hard-failing the whole ModelsList Envelope on shipped phones
+    val mode: PermissionMode = PermissionMode.DEFAULT,
+    val id: String,
+    val label: String,
+    val detail: String? = null,
+    val danger: Boolean = false,
+    val recommended: Boolean = false,
+)
 
 /** One model's dynamic reasoning and service-tier capability. Unknown/older peers ignore this whole field. */
 @Serializable

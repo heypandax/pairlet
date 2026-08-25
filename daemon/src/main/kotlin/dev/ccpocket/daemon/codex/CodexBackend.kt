@@ -151,8 +151,9 @@ class CodexBackend(
      * A JSON-RPC error response used to be logged and dropped — which turned three failure classes into
      * silence (PR #296 review): a turn/steer whose expectedTurnId went stale lost the user's ALREADY-ACKED
      * prompt (the issue #84/#104 "swallowed prompt" class), a thread open rejected by an older app-server
-     * (no thread/fork before Codex 0.147) hung the session forever with the first prompt parked in
-     * [pendingPrompt], and a rejected compact/review no-oped with no feedback.
+     * (one predating thread/fork — present since at least 0.145.0 per probe-codex-wire.py) hung the
+     * session forever with the first prompt parked in [pendingPrompt], and a rejected compact/review
+     * no-oped with no feedback.
      */
     private suspend fun handleErrorResponse(idEl: JsonElement?, error: JsonObject?): List<AgentEvent> {
         val id = (idEl as? JsonPrimitive)?.longOrNull
@@ -194,8 +195,10 @@ class CodexBackend(
             rpcRequest(if (forkSession) "thread/fork" else "thread/resume", buildJsonObject {
                 put("threadId", rid)
                 // thread/fork and thread/resume accept the same relevant overrides in the v2 app-server
-                // protocol (Codex 0.147). Native fork is the Codex mirror of Claude --fork-session: a
-                // phone take-over never creates a second writer on the desktop's live rollout.
+                // protocol (probe-codex-wire.py proves fork on 0.145.0 already — mints a new thread id with
+                // forkedFromId). Native fork is the Codex mirror of Claude --fork-session: a phone take-over
+                // never creates a second writer on the desktop's live rollout. Older servers that lack the
+                // method answer a correlated error response, surfaced by handleErrorResponse.
                 codexModel()?.let { put("model", it) }
                 serviceTier?.let { put("serviceTier", it) }
             })

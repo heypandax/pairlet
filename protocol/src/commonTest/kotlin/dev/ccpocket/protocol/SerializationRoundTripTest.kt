@@ -149,6 +149,42 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun modePresets_are_additive_and_legacy_safe() {
+        // round-trip with the full row shape, including a hypothetical FUTURE preset the App doesn't know
+        val advertised = ModelsList(
+            agent = AgentKind.CODEX,
+            models = listOf("gpt-5.6-sol"),
+            modePresets = listOf(
+                AgentModePreset(PermissionMode.DEFAULT, "balanced", "Balanced", recommended = true),
+                AgentModePreset(PermissionMode.BYPASS_PERMISSIONS, "full", "Full access", danger = true),
+                AgentModePreset(PermissionMode.ACCEPT_EDITS, "yolo-sandboxed", "Sandboxed auto", "New in codex 0.150"),
+            ),
+        )
+        assertEquals(advertised, PocketJson.decodeFromString<ModelsList>(PocketJson.encodeToString(advertised)))
+
+        // an old daemon's frame (no field) decodes to empty = "not advertised", the App's fallback signal
+        assertEquals(
+            emptyList<AgentModePreset>(),
+            PocketJson.decodeFromString<ModelsList>("""{"agent":"codex","models":["gpt-5.5"]}""").modePresets,
+        )
+
+        // a FUTURE daemon's unknown mode value coerces to the declared default instead of hard-failing
+        // the whole frame on a shipped phone (coerceInputValues + the field default — wire-compat review)
+        assertEquals(
+            AgentModePreset(PermissionMode.DEFAULT, "quantum", "Quantum", danger = true),
+            PocketJson.decodeFromString<AgentModePreset>(
+                """{"mode":"some-future-mode","id":"quantum","label":"Quantum","danger":true}""",
+            ),
+        )
+
+        // an already-shipped phone's concrete serializer skips the populated rows entirely
+        assertEquals(
+            OldModelsList(agent = AgentKind.CODEX, models = listOf("gpt-5.6-sol")),
+            PocketJson.decodeFromString<OldModelsList>(PocketJson.encodeToString(advertised)),
+        )
+    }
+
+    @Test
     fun all_permission_modes_roundtrip() {
         val expected = mapOf(
             PermissionMode.DEFAULT to "default",

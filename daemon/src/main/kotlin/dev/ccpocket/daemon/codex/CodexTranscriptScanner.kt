@@ -175,9 +175,45 @@ object CodexTranscriptScanner {
 
     private fun readCwd(file: Path): String? = file.bufferedReader().use { metaPayload(it)?.str("cwd") }
 
+    /**
+     * A bounded LRU keyed by file path and stamped with that file's mtime. Rollouts are append-only, so a
+     * moved mtime is the ONLY way a parse of one can go stale — the same reasoning [cwdCache] already used,
+     * generalized here for the two full-file parses below.
+     *
+     * The stamp is the raw [java.nio.file.attribute.FileTime] rather than millis: nanosecond precision where
+     * the filesystem has it makes a same-millisecond rewrite visible instead of silently cached.
+     */
+    private class MtimeMemo<V : Any>(private val max: Int) {
+        private val map = object : LinkedHashMap<Path, Pair<java.nio.file.attribute.FileTime, V>>(64, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Path, Pair<java.nio.file.attribute.FileTime, V>>) = size > max
+        }
+
+        @Synchronized
+        fun get(file: Path, stamp: java.nio.file.attribute.FileTime?): V? =
+            if (stamp == null) null else map[file]?.takeIf { it.first == stamp }?.second
+
+        @Synchronized
+        fun put(file: Path, stamp: java.nio.file.attribute.FileTime?, value: V) {
+            if (stamp != null) map[file] = stamp to value
+        }
+
+        @Synchronized
+        fun clear() = map.clear()
+    }
+
+    private fun stampOf(file: Path): java.nio.file.attribute.FileTime? =
+        runCatching { file.getLastModifiedTime() }.getOrNull()
+
+    private val runtimeCache = MtimeMemo<RuntimeState>(MEMO_MAX)
+
     /** Read the newest Codex model and token metadata from a rollout. Model settings are written in
-     * `turn_context`; token counts are `event_msg/token_count`. Older rollouts simply return null fields. */
+     * `turn_context`; token counts are `event_msg/token_count`. Older rollouts simply return null fields.
+     *
+     * Memoized by (path, mtime): a Codex session open asks for this twice (resumeContextTokens +
+     * resumeModel) and an observe tick asks again, each time re-parsing a file that can reach megabytes. */
     fun runtimeState(file: Path): RuntimeState {
+        val stamp = stampOf(file)
+        runtimeCache.get(file, stamp)?.let { return it }
         var state = RuntimeState()
         file.bufferedReader().useLines { lines ->
             for (raw in lines) {
@@ -185,6 +221,7 @@ object CodexTranscriptScanner {
                 state = mergeRuntimeState(state, obj)
             }
         }
+        runtimeCache.put(file, stamp, state)
         return state
     }
 
@@ -215,9 +252,24 @@ object CodexTranscriptScanner {
             ?.takeIf { it.str("type") == "session_meta" }?.obj("payload")
     }
 
-    /** Returns null if [file] isn't a rollout for [workdir] (cheap first-line cwd filter) or has no real turn.
-     *  [titles] (id → Codex thread title) supplies the session name; a listing passes one shared map. */
-    fun summarize(file: Path, workdir: String?, titles: Map<String, String> = threadNames()): SessionSummary? {
+    /** Everything a rollout FILE alone decides. The finished [SessionSummary] can't be cached as-is: it also
+     *  depends on the caller's workdir, on the shared title map, and on `live`, which is a function of now —
+     *  so only the parse (the expensive part) is memoized. */
+    private data class Parsed(
+        val id: String?,
+        val cwd: String?,
+        val version: String?,
+        val firstPrompt: String?,
+        val userCount: Int,
+        val model: String?,
+    )
+
+    private val parseCache = MtimeMemo<Parsed>(MEMO_MAX)
+
+    /** Full-file parse behind [summarize], keeping its cheap first-line cwd filter: a rollout for another
+     *  project must still cost one line, not a whole read (a session listing runs this over ~800 files).
+     *  Returns null for those, and for a file without a session_meta header — neither is worth caching. */
+    private fun parseRollout(file: Path, workdir: String?): Parsed? {
         var id: String? = null
         var cwd: String? = null
         var version: String? = null
@@ -250,9 +302,26 @@ object CodexTranscriptScanner {
                 line = r.readLine()
             }
         }
-        val sid = id ?: return null
-        val fp = firstPrompt ?: return null
-        val mtime = file.getLastModifiedTime().toMillis()
+        return Parsed(id, cwd, version, firstPrompt, userCount, runtime.model)
+    }
+
+    /** Returns null if [file] isn't a rollout for [workdir] (cheap first-line cwd filter) or has no real turn.
+     *  [titles] (id → Codex thread title) supplies the session name; a listing passes one shared map. */
+    fun summarize(file: Path, workdir: String?, titles: Map<String, String> = threadNames()): SessionSummary? {
+        val stamp = stampOf(file)
+        val parsed = parseCache.get(file, stamp)
+            ?: parseRollout(file, workdir)?.also { parseCache.put(file, stamp, it) }
+            ?: return null
+        // A cached parse still re-checks the caller's workdir: the memo is keyed by the FILE, and the same
+        // rollout is summarized by both a project-scoped listing and the observe/resume paths.
+        val recorded = parsed.cwd
+        if (workdir != null && (recorded == null || ProjectPaths.canonicalKey(recorded) != ProjectPaths.canonicalKey(workdir))) return null
+        val sid = parsed.id ?: return null
+        val fp = parsed.firstPrompt ?: return null
+        val version = parsed.version
+        val userCount = parsed.userCount
+        val cwd = recorded
+        val mtime = stamp?.toMillis() ?: file.getLastModifiedTime().toMillis()
         return SessionSummary(
             sessionId = sid,
             // Codex's own thread title (session_index.jsonl) beats the first-prompt fallback — the same
@@ -268,8 +337,19 @@ object CodexTranscriptScanner {
             version = version,
             live = System.currentTimeMillis() - mtime < LIVE_WINDOW_MS,
             agent = AgentKind.CODEX,
-            model = runtime.model,
+            model = parsed.model,
         )
     }
 
+    /** Cross-test isolation: every memo here is process-wide state on an object singleton. */
+    internal fun clearForTest() {
+        parseCache.clear()
+        runtimeCache.clear()
+        cwdCache.clear()
+        titleCache.set(null)
+    }
+
+    /** Sized to one full listing ([CodexPaths.sessionFiles]'s own cap), so a session list never evicts
+     *  entries it is still walking. */
+    private const val MEMO_MAX = 800
 }

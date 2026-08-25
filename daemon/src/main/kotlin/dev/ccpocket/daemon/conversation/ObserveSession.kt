@@ -92,12 +92,7 @@ class ObserveSession(
      *  including the observed-usage upgrade for beta-gated 1M models (occupancy > 200k proves 1M). */
     private suspend fun emitLive() {
         val codex = if (agent == AgentKind.CODEX) runCatching { CodexTranscriptScanner.runtimeState(file) }.getOrNull() else null
-        val title = when (agent) {
-            AgentKind.CODEX -> CodexTranscriptScanner.threadNames()[sessionId]?.takeIf { it.isNotBlank() }
-                ?: runCatching { CodexTranscriptScanner.summarize(file, workdir)?.title }.getOrNull()
-            AgentKind.CLAUDE -> runCatching { TranscriptScanner.summarize(file)?.title }.getOrNull()
-            else -> null // OpenCode/Kimi/ZCode/DSH sessions are never opened through ObserveSession.
-        }
+        val title = titleFor(runCatching { file.getLastModifiedTime().toMillis() }.getOrDefault(-1L))
         val model = codex?.model
             ?: if (agent == AgentKind.CLAUDE) runCatching { TranscriptScanner.lastModel(file) }.getOrNull() else null
         val used = codex?.contextUsed
@@ -110,6 +105,27 @@ class ObserveSession(
                 model = model, contextWindow = window, contextUsed = used, agent = agent, title = title,
             ),
         )
+    }
+
+    /**
+     * The observed transcript's title, memoized by the file's mtime (PR #296 review). Deriving it re-reads
+     * the transcript — a Codex thread with no index title falls all the way back to a full `summarize` — and
+     * an announce for an unchanged file must not pay for that twice. Confined to this instance and to the
+     * single tail coroutine, so no locking: the Claude branch's shared [TranscriptScanner] is deliberately
+     * left alone (far wider blast radius than one observer's title).
+     */
+    private var titleMemo: Pair<Long, String?>? = null
+
+    private fun titleFor(mtime: Long): String? {
+        titleMemo?.let { if (it.first == mtime) return it.second }
+        val title = when (agent) {
+            AgentKind.CODEX -> CodexTranscriptScanner.threadNames()[sessionId]?.takeIf { it.isNotBlank() }
+                ?: runCatching { CodexTranscriptScanner.summarize(file, workdir)?.title }.getOrNull()
+            AgentKind.CLAUDE -> runCatching { TranscriptScanner.summarize(file)?.title }.getOrNull()
+            else -> null // OpenCode/Kimi/ZCode/DSH sessions are never opened through ObserveSession.
+        }
+        titleMemo = mtime to title
+        return title
     }
 
     /** True while this observer still streams to [s] — key identity, like Conversation.isAttachedTo:

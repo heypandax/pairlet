@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.codex
 
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PocketJson
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
@@ -89,5 +90,52 @@ class CodexModelServiceTest {
             it.id.length <= 64 && it.name.length <= 64 && (it.description?.length ?: 0) <= 160
         })
         assertTrue(PocketJson.encodeToString(result).encodeToByteArray().size < 512 * 1024)
+    }
+
+    /** The advertised vocabulary IS the App's picker now, so the four rows and their emphasis are a
+     *  contract: drop a row or move `recommended`/`danger` and every client's Codex mode sheet changes. */
+    @Test
+    fun fetch_advertises_the_four_codex_mode_presets_with_their_emphasis() = runBlocking {
+        val dir = Files.createTempDirectory("codex-mode-presets-test")
+        val cache = dir.resolve("models_cache.json")
+        val config = dir.resolve("config.toml")
+        Files.writeString(cache, """{"models":[{"slug":"gpt-5.5","visibility":"list","priority":1,"upgrade":null}]}""")
+
+        val result = CodexModelService(cachePath = cache, configPath = config).fetch()
+
+        assertNull(result.error)
+        assertEquals(
+            listOf("cautious", "balanced", "autonomous", "full"),
+            result.modePresets.map { it.id },
+            "the ladder order the App renders top-down",
+        )
+        assertEquals(
+            listOf(
+                PermissionMode.PLAN,
+                PermissionMode.DEFAULT,
+                PermissionMode.ACCEPT_EDITS,
+                PermissionMode.BYPASS_PERMISSIONS,
+            ),
+            result.modePresets.map { it.mode },
+            "each preset must carry the mode CodexBackend translates into its approval + sandbox pair",
+        )
+        assertEquals("balanced", result.modePresets.single { it.recommended }.id)
+        assertEquals("full", result.modePresets.single { it.danger }.id)
+        // English fallback copy is what an App that doesn't know the id renders verbatim — never blank
+        assertTrue(result.modePresets.all { it.label.isNotBlank() && !it.detail.isNullOrBlank() })
+    }
+
+    /** The error branch says "I could not inspect this backend" — advertising a vocabulary there would
+     *  hand the picker rows the daemon just failed to confirm. */
+    @Test
+    fun failed_fetch_advertises_no_mode_presets() = runBlocking {
+        val dir = Files.createTempDirectory("codex-mode-presets-error-test")
+        val cache = dir.resolve("models_cache.json")
+        Files.writeString(cache, "{ not json")
+
+        val result = CodexModelService(cachePath = cache, configPath = dir.resolve("config.toml")).fetch()
+
+        assertTrue(result.error != null, "a corrupt cache must land on the error branch")
+        assertTrue(result.modePresets.isEmpty())
     }
 }

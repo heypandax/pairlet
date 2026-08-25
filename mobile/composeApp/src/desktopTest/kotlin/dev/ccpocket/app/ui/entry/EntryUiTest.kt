@@ -5,6 +5,7 @@ import dev.ccpocket.app.ui.CODEX_PRESETS
 import dev.ccpocket.app.ui.session.StateMark
 import dev.ccpocket.app.ui.session.StateTone
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AgentModePreset
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.PermissionMode
 import kotlin.test.Test
@@ -171,6 +172,32 @@ class EntryUiTest {
             CODEX_PRESETS.filter { it.danger }.map { it.mode },
             agentModeChoices(AgentKind.CODEX).filter { it.danger }.map { it.mode },
             "danger is the preset table's verdict, not a second opinion",
+        )
+    }
+
+    @Test
+    fun codexLadderFollowsTheDaemonAdvertisedVocabulary() {
+        // the same merge the mode sheet renders (CodexPresetVocabularyTest owns its details) — pinned here
+        // too because a ladder that ignored the advertisement would offer rows the backend no longer has
+        val advertised = listOf(
+            AgentModePreset(PermissionMode.DEFAULT, "balanced", "Balanced", recommended = true),
+            AgentModePreset(PermissionMode.ACCEPT_EDITS, "yolo-sandboxed", "Sandboxed auto"),
+            AgentModePreset(PermissionMode.PLAN, "cautious", "Cautious", danger = true),
+        )
+        val choices = agentModeChoices(AgentKind.CODEX, codexPresets = advertised)
+        assertEquals(
+            listOf(PermissionMode.DEFAULT, PermissionMode.ACCEPT_EDITS, PermissionMode.PLAN),
+            choices.map { it.mode },
+            "the daemon owns the set and the order",
+        )
+        assertEquals(
+            listOf(PermissionMode.PLAN), choices.filter { it.danger }.map { it.mode },
+            "danger travels with the advertised row, not with a mode the App decided is scary",
+        )
+        // and a daemon that advertises nothing leaves today's built-in ladder exactly as it was
+        assertEquals(
+            agentModeChoices(AgentKind.CODEX),
+            agentModeChoices(AgentKind.CODEX, codexPresets = emptyList()),
         )
     }
 

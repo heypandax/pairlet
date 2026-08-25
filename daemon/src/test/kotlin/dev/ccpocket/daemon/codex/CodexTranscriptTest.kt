@@ -13,6 +13,10 @@ import kotlin.test.assertTrue
 /** Verifies the Codex rollout scanner/replay against the real 0.124 `{timestamp,type,payload}` schema:
  *  session_meta carries id+cwd; the first real user turn skips the synthetic <environment_context>/<permissions> blocks. */
 class CodexTranscriptTest {
+    /** The scanner memoizes parses by (path, mtime) on an object singleton — start from a clean one. */
+    @kotlin.test.BeforeTest
+    fun reset() = CodexTranscriptScanner.clearForTest()
+
     private val rollout = """
         {"timestamp":"t0","type":"session_meta","payload":{"id":"thr-xyz","cwd":"/repo","cli_version":"0.124.0"}}
         {"timestamp":"t1","type":"event_msg","payload":{"type":"task_started","turn_id":"u1"}}

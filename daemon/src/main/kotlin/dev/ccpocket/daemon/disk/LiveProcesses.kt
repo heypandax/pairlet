@@ -38,24 +38,63 @@ object LiveProcesses {
      * and would otherwise duplicate/extend liveness after their owning CLI disappeared. Daemon-owned Codex
      * children are excluded because [SessionRegistry.liveByCwd] already reports them with authoritative
      * turn state.
+     *
+     * Memoized for [CODEX_CWD_TTL_MS] because the project list refreshes every ~10 seconds and this is a
+     * full OS process enumeration plus an lsof fork (PR #296 review). This is a DISPLAY signal — a project
+     * row lighting up a few seconds late is invisible; see the never-cache rule on [externalAgentAt] for
+     * the probes where the same staleness would be a correctness bug.
      */
     fun codexCwds(): Set<String> {
         if (System.getProperty("os.name").lowercase().contains("win")) return emptySet() // no lsof
+        return codexCwds(System.currentTimeMillis(), ::codexPids, ::codexCwdsOf)
+    }
+
+    /** [codexCwds]'s memo, with its clock and both probes injected so the TTL is testable. */
+    internal fun codexCwds(nowMs: Long, pids: () -> Set<Long>, cwdsOf: (Set<Long>) -> Set<String>): Set<String> {
+        val cached = codexCwdMemo.get()
+        if (cached != null && nowMs - cached.atMs < CODEX_CWD_TTL_MS) return cached.cwds
+        val live = pids()
+        if (live.isEmpty()) {
+            codexCwdMemo.set(CodexCwdMemo(nowMs, emptySet(), emptySet()))
+            return emptySet()
+        }
+        // Same processes as last time ⇒ same cwds: a running CLI does not chdir. Re-enumerating pids is
+        // cheap and in-process; the lsof fork is what this skips.
+        if (cached != null && cached.pids == live) {
+            codexCwdMemo.set(CodexCwdMemo(nowMs, live, cached.cwds))
+            return cached.cwds
+        }
+        val cwds = cwdsOf(live)
+        codexCwdMemo.set(CodexCwdMemo(nowMs, live, cwds))
+        return cwds
+    }
+
+    private class CodexCwdMemo(val atMs: Long, val pids: Set<Long>, val cwds: Set<String>)
+
+    private val codexCwdMemo = java.util.concurrent.atomic.AtomicReference<CodexCwdMemo?>(null)
+
+    /** External (non-daemon-descendant) `codex` pids, in enumeration order; empty when the walk fails. */
+    private fun codexPids(): Set<Long> {
         val selfPid = ProcessHandle.current().pid()
-        val pids = runCatching {
+        return runCatching {
             ProcessHandle.allProcesses()
                 .filter { isCodexExecutable(it.info().command().orElse("")) }
                 .filter { !hasAncestor(it, selfPid) }
-                .map { it.pid().toString() }
+                .map { it.pid() }
                 .toList()
-        }.getOrDefault(emptyList())
-        if (pids.isEmpty()) return emptySet()
-        return lsofLines(listOf("lsof", "-a", "-d", "cwd", "-p", pids.joinToString(","), "-Fn"))
+                .toSet()
+        }.getOrDefault(emptySet())
+    }
+
+    private fun codexCwdsOf(pids: Set<Long>): Set<String> =
+        lsofLines(listOf("lsof", "-a", "-d", "cwd", "-p", pids.joinToString(","), "-Fn"))
             ?.filter { it.startsWith("n") }
             ?.map { it.substring(1) }
             ?.toSet()
             .orEmpty()
-    }
+
+    /** Cross-test isolation: the memo is process-wide state on an object singleton. */
+    internal fun clearForTest() = codexCwdMemo.set(null)
 
     /** Exact basename match, separator-agnostic so the process probe behaves on Unix and Windows paths. */
     internal fun isCodexExecutable(command: String): Boolean {
@@ -82,6 +121,8 @@ object LiveProcesses {
     /**
      * Codex counterpart of [externalClaudeAt], used by read-only observe / safe take-over.
      *
+     * NEVER CACHED — see the rule on [externalAgentAt].
+     *
      * Unlike Claude, current Codex keeps its active rollout open even while idle. That exact fd is the
      * authoritative signal for an old transcript. cwd remains useful for a RECENT rollout (there is a
      * short interval before/around the fd becoming visible), but must not make every old Codex session in
@@ -95,6 +136,14 @@ object LiveProcesses {
         return externalAgentAt(workdir, transcript, ::isCodexExecutable, allowCwdMatch = recent)
     }
 
+    /**
+     * IRON RULE — this probe and its two callers ([externalClaudeAt] / [externalCodexAt]) must NEVER be
+     * cached or given a TTL, however hot they get. Their verdict is what decides whether we may take over
+     * or write into a transcript another process owns; answering it from a world that is even a few seconds
+     * old is exactly how you manufacture a silent two-writer clobber. The nearby [codexCwds] memo is safe
+     * only because it feeds a project-list badge, not a write gate. If this needs to be faster, make the
+     * probe itself cheaper — do not remember its answer.
+     */
     private fun externalAgentAt(
         workdir: String,
         transcript: Path,
@@ -160,4 +209,8 @@ object LiveProcesses {
     }.getOrNull()
 
     private const val LSOF_TIMEOUT_MS = 1_500L
+
+    /** Shorter than the ~10s project refresh it serves, so a normal tick still sees a fresh-enough world
+     *  while bursts (several refresh triggers landing together) collapse into one probe. */
+    private const val CODEX_CWD_TTL_MS = 5_000L
 }
