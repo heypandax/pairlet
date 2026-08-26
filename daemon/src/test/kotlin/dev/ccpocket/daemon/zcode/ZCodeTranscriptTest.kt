@@ -78,4 +78,56 @@ class ZCodeTranscriptTest {
         assertEquals(true, history[2].ok)
         assertEquals("/repo", history[2].output)
     }
+
+    /** Exact compact-summary and reminder semantics from the official ZCode 3.7.6 store. */
+    private fun compactedDatabase(): Connection = database().also { db ->
+        db.createStatement().use { st ->
+            st.execute("INSERT INTO session VALUES('s3','/compact','Compacted','3.7.6',2000,NULL,'interactive',NULL)")
+            st.execute(
+                """INSERT INTO message VALUES('c1','s3',1,1,'{"role":"user","semantics":{"origin":"real_user","kind":"slash_command","commandName":"compact","uiVisibility":"visible","providerVisibility":"visible","transcriptVisibility":"visible"}}',1)""",
+            )
+            st.execute("""INSERT INTO part VALUES('cp1','c1','s3',1,1,'{"type":"text","text":"/compact"}',1)""")
+            st.execute(
+                """INSERT INTO message VALUES('c2','s3',2,2,'{"role":"user","summary":{"title":"Compact summary","body":"internal"},"semantics":{"origin":"agent_runtime","kind":"compact_summary","uiVisibility":"hidden","providerVisibility":"visible","transcriptVisibility":"hidden"}}',2)""",
+            )
+            st.execute("""INSERT INTO part VALUES('cp2','c2','s3',2,2,'{"type":"text","text":"<summary>large internal compact prompt</summary>","synthetic":true}',1)""")
+            st.execute("""INSERT INTO part VALUES('cp3','c2','s3',2,2,'{"type":"compaction","trigger":"manual"}',2)""")
+            st.execute(
+                """INSERT INTO message VALUES('c3','s3',3,3,'{"role":"user","synthetic":true,"visibility":"model-only","semantics":{"origin":"agent_runtime","kind":"system_reminder","source":"compact_reminder","uiVisibility":"hidden","providerVisibility":"visible","transcriptVisibility":"hidden"}}',3)""",
+            )
+            st.execute("""INSERT INTO part VALUES('cp4','c3','s3',3,3,'{"type":"text","text":"<context>internal post-compact reminder</context>","synthetic":true}',1)""")
+            // Old ZCode rows can carry the authoritative summary marker without the newer semantics object.
+            st.execute(
+                """INSERT INTO message VALUES('c4','s3',4,4,'{"role":"user","summary":{"title":"Compact summary","body":"legacy"}}',4)""",
+            )
+            st.execute("""INSERT INTO part VALUES('cp5','c4','s3',4,4,'{"type":"text","text":"legacy compact body"}',1)""")
+            st.execute(
+                """INSERT INTO message VALUES('c5','s3',5,5,'{"role":"user","semantics":{"origin":"real_user","kind":"user_prompt","uiVisibility":"visible","providerVisibility":"visible","transcriptVisibility":"visible"}}',5)""",
+            )
+            st.execute("""INSERT INTO part VALUES('cp6','c5','s3',5,5,'{"type":"text","text":"why is <summary> visible?"}',1)""")
+            st.execute(
+                """INSERT INTO message VALUES('c6','s3',6,6,'{"role":"assistant","semantics":{"origin":"agent_runtime","kind":"assistant_response","uiVisibility":"visible","providerVisibility":"visible","transcriptVisibility":"visible"}}',6)""",
+            )
+            st.execute("""INSERT INTO part VALUES('cp7','c6','s3',6,6,'{"type":"text","text":"done"}',1)""")
+        }
+    }
+
+    @Test
+    fun `replay hides compact plumbing but keeps literal real user XML`() {
+        val history = ZCodeTranscriptReplay.readFrom(compactedDatabase(), "s3")
+
+        assertEquals(listOf(ChatRole.USER, ChatRole.USER, ChatRole.ASSISTANT), history.map { it.role })
+        assertEquals(listOf("/compact", "why is <summary> visible?", "done"), history.map { it.text })
+        assertFalse(history.any { "internal" in it.text || "legacy compact" in it.text })
+    }
+
+    @Test
+    fun `scanner user projection excludes compact plumbing`() {
+        val db = compactedDatabase()
+
+        assertEquals(
+            listOf("/compact", "why is <summary> visible?"),
+            ZCodeTranscriptScanner.messageParts(db, "s3", "user"),
+        )
+    }
 }

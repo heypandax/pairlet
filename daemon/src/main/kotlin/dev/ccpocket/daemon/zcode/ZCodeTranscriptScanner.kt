@@ -80,16 +80,18 @@ object ZCodeTranscriptScanner {
         return null
     }
 
-    /** Text parts of [role]'s messages, oldest first. User rows are screened through the shared noise
-     *  judgement so a harness injection (system-reminder / task-notification) never becomes the list
-     *  preview — the same filter the replay applies (issue #253). */
+    /** Text parts of [role]'s messages, oldest first. ZCode's own visibility semantics remove compact
+     *  summaries/model-only rows first (#313); the shared noise judgement then catches legacy harness
+     *  injections so neither can become the list preview (#253). The replay applies the same two gates. */
     internal fun messageParts(conn: Connection, sid: String, role: String): List<String> {
         val out = mutableListOf<String>()
         val user = role == "user"
         conn.prepareStatement("SELECT m.id,m.data FROM message m WHERE m.session_id=? ORDER BY m.sequence,m.time_created").use { ms ->
             ms.setString(1, sid)
             ms.executeQuery().use { mr -> while (mr.next()) {
-                if (parse(mr.getString("data"))?.str("role") != role) continue
+                val message = parse(mr.getString("data")) ?: continue
+                if (message.str("role") != role) continue
+                if (user && !ZCodeTranscriptProjection.isVisibleUserRow(message)) continue
                 conn.prepareStatement("SELECT data FROM part WHERE session_id=? AND message_id=? ORDER BY sequence,time_created").use { ps ->
                     ps.setString(1, sid); ps.setString(2, mr.getString("id"))
                     ps.executeQuery().use { pr -> while (pr.next()) {

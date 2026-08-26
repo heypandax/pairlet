@@ -167,6 +167,18 @@ class CodexScanCacheTest {
             .also { it.writeText("""{"timestamp":"t0","type":"session_meta","payload":{"id":"$id","cwd":"/repo"}}""") }
     }
 
+    private fun continuation(root: Path, id: String, runId: String): Path {
+        val leaf = root.resolve("2026/08/25")
+        Files.createDirectories(leaf)
+        return leaf.resolve("rollout-2026-08-25T01-00-00-${id}_$runId.jsonl")
+            .also {
+                it.writeText(
+                    """{"timestamp":"t0","type":"session_meta","payload":{"id":"$id","cwd":"/repo"}}""" + "\n" +
+                        """{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"post-branch turn"}]}}""",
+                )
+            }
+    }
+
     @Test
     fun a_settled_directory_is_listed_once_and_relisted_when_its_mtime_moves() {
         val root = Files.createDirectory(tmp.resolve("settled-root"))
@@ -218,5 +230,29 @@ class CodexScanCacheTest {
         // …and the index is validated by existence, so a deleted rollout falls back to the walk and misses
         Files.delete(file)
         assertNull(CodexPaths.findSession("thr-idx", root))
+    }
+
+    @Test
+    fun findSession_follows_the_newest_continuation_after_a_listing_refresh() {
+        // issue #312, copied from the real Codex Desktop shape:
+        //   rollout-<ts>-<threadId>.jsonl
+        //   rollout-<ts>-<threadId>_<runId>.jsonl
+        // Both headers keep the SAME logical thread id. The second file owns every post-branch turn.
+        val root = Files.createDirectory(tmp.resolve("continuation-root"))
+        val original = tree(root, "thr-branch")
+        Files.setLastModifiedTime(original, FileTime.fromMillis(1_000_000))
+
+        CodexPaths.sessionFiles(root = root)
+        assertEquals(original, CodexPaths.findSession("thr-branch", root))
+
+        val resumed = continuation(root, "thr-branch", "run-2")
+        Files.setLastModifiedTime(resumed, FileTime.fromMillis(2_000_000))
+        // The session-list refresh observes a new path and invalidates the old id→file choice. The next
+        // replay lookup must converge on the same newest file the list row represents.
+        CodexPaths.sessionFiles(root = root)
+
+        val found = CodexPaths.findSession("thr-branch", root)
+        assertEquals(resumed, found)
+        assertEquals("post-branch turn", CodexTranscriptReplay.read(found!!).single().text)
     }
 }
