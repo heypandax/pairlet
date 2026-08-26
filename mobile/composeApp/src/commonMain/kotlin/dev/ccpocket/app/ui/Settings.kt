@@ -406,13 +406,13 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
     )
 
     SectionLabel(stringResource(Res.string.default_mode_section))
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.settingsChoiceContainer()) {
         val modeOptions = MODES + if (
             defaultAgent == AgentKind.CLAUDE &&
             repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO)
         ) listOf(AUTO_MODE) else emptyList()
-        modeOptions.forEach { m ->
-            Hairline()
+        modeOptions.forEachIndexed { index, m ->
+            if (index > 0) Hairline(Modifier.padding(horizontal = 12.dp))
             val sel = repo.defaultMode.value == m.key && effectivePermissionMode == m.nativeMode
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 48.dp)
@@ -420,7 +420,7 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
                     .clickable {
                         if (m.nativeMode == CLAUDE_PERMISSION_MODE_AUTO) repo.setDefaultAutoMode()
                         else repo.setDefaultMode(m.key)
-                    }.padding(vertical = 12.dp),
+                    }.padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("●", color = m.color, fontSize = 9.sp, modifier = Modifier.padding(end = 10.dp))
@@ -431,7 +431,6 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
                 if (sel) Text("✓", color = Tok.accent, fontSize = 13.5.sp)
             }
         }
-        Hairline()
     }
 
     SectionLabel("${stringResource(Res.string.default_model_section)} · ${agentName(defaultAgent)}")
@@ -1234,10 +1233,7 @@ private fun <T> SettingsChoiceRows(
     monospace: (T) -> Boolean = { false },
     onPick: (T) -> Unit,
 ) {
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
-            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)),
-    ) {
+    Column(Modifier.settingsChoiceContainer()) {
         options.forEachIndexed { index, opt ->
             if (index > 0) Hairline(Modifier.padding(horizontal = 12.dp))
             val sel = selected == opt
@@ -1260,6 +1256,11 @@ private fun <T> SettingsChoiceRows(
         }
     }
 }
+
+/** Shared card language for the peer choice groups on Agent & session defaults (#310). */
+private fun Modifier.settingsChoiceContainer(): Modifier =
+    fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+        .border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
 
 /**
  * A settings row with a title + subtitle on the left and a Switch on the right.
