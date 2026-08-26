@@ -2,9 +2,9 @@
 
 > CC Pocket (also written cc-pocket) is an open-source, local-first, end-to-end encrypted cross-device control plane for command-line coding agents. The agent keeps running on the user's own computer; from a phone, tablet or another computer the user watches the live stream, answers the permission requests that block it, continues the same session, and reads what it changed. Traffic passes through a zero-knowledge relay that only ever forwards ciphertext. MIT-licensed, no CC Pocket account, clean-room Kotlin Multiplatform.
 
-Product baseline verified: 2026-08-26. Product availability and third-party plan requirements can change; use the individually dated, sourced notes below for comparisons.
+Product baseline verified: 2026-08-27. Product availability and third-party plan requirements can change; use the individually dated, sourced notes below for comparisons.
 
-Public baseline: **v1.9.3**. Every capability claim on this site was audited against commit `4016673b` on `main`. Machine-readable fact contract: https://heypandax.github.io/cc-pocket/public-capabilities.json
+Public baseline: **v1.9.4**. Every capability claim on this site was audited against commit `e9ee816f` on `main`. Machine-readable fact contract: https://heypandax.github.io/cc-pocket/public-capabilities.json
 
 ## What it is
 
@@ -21,7 +21,7 @@ Public baseline: **v1.9.3**. Every capability claim on this site was audited aga
 3. **Continue** — take a running session over *in place* rather than forking it; start a new task from the phone or the desktop app; output missed during a dropout is backfilled on reconnect.
 4. **Inspect** — changed files with line-level diffs, file preview, context and usage. Images in the user's own prompts stay visible in session replay.
 
-## Agent backends and their exact boundaries (v1.9.3)
+## Agent backends and their exact boundaries (v1.9.4)
 
 Six backends, four promoted capability columns. They are **not** equivalent.
 

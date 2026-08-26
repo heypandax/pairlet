@@ -8,7 +8,7 @@
 
 CC Pocket 是一个开源的本地优先控制面，用来遥控命令行编码 agent。agent 始终跑在你自己的机器、你自己的代码上；你用手机、平板或另一台电脑看它干活、批掉挡路的授权、接着原来的会话往下走、再翻一遍它改了什么。链路端到端加密，只经过一个**零知识中继**转发密文——不需要 CC Pocket 账号，也不记录任何内容。Kotlin 从零写起，MIT 开源。
 
-**v1.9.3** 支持六个 agent 后端：Claude Code、OpenAI Codex、OpenCode、Kimi Code（Preview）、ZCode 和 DeepSeek。它们的能力**并不等价**，选之前先看[能力矩阵](#agent-支持)。
+**v1.9.4** 支持六个 agent 后端：Claude Code、OpenAI Codex、OpenCode、Kimi Code（Preview）、ZCode 和 DeepSeek。它们的能力**并不等价**，选之前先看[能力矩阵](#agent-支持)。
 
 **🌐 [官网](https://heypandax.github.io/cc-pocket/)** · **📖 [用户手册](https://pocket.ark-nexus.cc/manual/zh/)** · **💬 [帮助与客服（免登录）](https://pocket.ark-nexus.cc/support/)** · **📦 [最新 Release](https://github.com/heypandax/cc-pocket/releases/latest)**
 
@@ -44,7 +44,7 @@ irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.p
 
 ## Agent 支持
 
-**v1.9.3** 的公开能力已对照 `main` 分支的 [`4016673b`](https://github.com/heypandax/cc-pocket/commit/4016673b) 提交核验。机器可读版本：[`site/public-capabilities.json`](site/public-capabilities.json)。
+**v1.9.4** 的公开能力已对照 `main` 分支的 [`e9ee816f`](https://github.com/heypandax/cc-pocket/commit/e9ee816f) 提交核验。机器可读版本：[`site/public-capabilities.json`](site/public-capabilities.json)。
 
 | Agent | 核心会话 | 审批与模式 | 改动与 diff | 用量 |
 |---|---|---|---|---|

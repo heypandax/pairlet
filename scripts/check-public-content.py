@@ -11,7 +11,7 @@ It fails non-zero when:
      alt text, the AI index files and the web manifest;
   2. the agent matrix is not exactly six rows x four capability columns, or any cell disagrees with
      the frozen expectation below;
-  3. the v1.9.3 baseline, the source commit, the Preview label, OpenCode's Full-access statement or
+  3. the v1.9.4 baseline, the source commit, the Preview label, OpenCode's Full-access statement or
      DeepSeek's Limited state drift;
   4. an official Linux DESKTOP binary is implied;
   5. the generated-asset manifest is missing, incomplete, or points at a file that is absent, empty
@@ -106,12 +106,12 @@ EXPECTED_AGENTS = [
     ("deepseek", "DeepSeek Harness", "narrow v1", "有限 v1", ["yes", "yes", "no", "no"]),
 ]
 
-BASELINE_VERSION = "1.9.3"
-SOURCE_COMMIT = "4016673b"
+BASELINE_VERSION = "1.9.4"
+SOURCE_COMMIT = "e9ee816f"
 # Files that must state the baseline and must not carry the previous public version.
 BASELINE_TARGETS = ["README.md", "README.zh-CN.md", "site/index.html", "site/zh/index.html", "site/llms.txt"]
-PREVIOUS_VERSION = r"\b1\.9\.0\b"
-STALE_SOURCE_COMMITS = ["6162816a"]
+PREVIOUS_VERSION = r"\b1\.9\.3\b"
+STALE_SOURCE_COMMITS = ["6162816a", "4016673b"]
 BASELINE_PHRASES = {
     "site/index.html": [
         f"Capability claims for v{BASELINE_VERSION} were audited against commit",
