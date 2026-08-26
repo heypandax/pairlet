@@ -25,6 +25,7 @@ object ZCodeTranscriptReplay {
             ms.executeQuery().use { mr -> while (mr.next()) {
                 val msg = parse(mr.getString("data")) ?: continue
                 val role = when (msg.str("role")) { "user" -> ChatRole.USER; "assistant" -> ChatRole.ASSISTANT; else -> continue }
+                if (role == ChatRole.USER && !ZCodeTranscriptProjection.isVisibleUserRow(msg)) continue
                 val text = StringBuilder()
                 // harness injections (system-reminder / task-notification blocks, the resume nudge)
                 // are plumbing, not the user talking — same judgement the claude replay uses (#253)
