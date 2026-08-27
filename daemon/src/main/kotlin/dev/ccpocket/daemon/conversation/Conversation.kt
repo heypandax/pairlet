@@ -1384,6 +1384,10 @@ class Conversation(
             // channel the pump below drains, so there is still exactly one ordering domain and one seq
             // assigner. Sends after the process exits fail on the closed channel and are dropped.
             inject = { line -> runCatching { p.stdout.send(line) } },
+            // Codex's app-server retains an exclusive cross-app writer even after thread/unsubscribe on
+            // newer builds. A stable turn boundary asks for the normal EOF → TERM → KILL ladder off this
+            // stdout pump; processMode classifies the resulting clean exit and lazily resumes next time.
+            requestProcessExit = { scope.launch { p.shutdown() } },
         )
         // Ask pushes ride the emit path for two flavors of conversation (issue #91 bridge + #138 owner):
         //  - BRIDGE (origin set, no pathScope): the ask frame fans out normally (the bridge's egress
@@ -1873,49 +1877,68 @@ class Conversation(
             // superseded: a newer launch already owns this conversation (a relaunch raced this pump's
             // tail) — the old process's death is history, not an error, and must not touch shared state
             if (proc !== p) return
-            // unexpected death: stdout EOF precedes the last transcript flush, so wait for the
-            // real process exit before touching the file (intentional stops settle in stopProcess)
-            revokeAllBridgeGrants() // nor may its one-off grant survive into the respawned process
+            // stdout EOF precedes the last transcript flush, so wait for the real process exit before
+            // classifying it (intentional stops settle in stopProcess)
             p.awaitExit()
             if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && p.exitCode() == 0 && turnCompleted) {
+                // The completed turn's ACTIVE authority always dies here. A later prompt that raced this
+                // clean edge keeps its still-staged token: pending authority grants nothing until that exact
+                // prompt's replay activates it in the fresh process. An unexpected crash below preserves none.
+                revokeActiveBridgeGrant(generation)
                 log.info("$convoId one-shot process completed normally (sid=${sessionId?.take(8) ?: "-"})")
                 // settle any card the clean exit left open (a tool_use that never reported completed)
                 for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId)
                 bridge?.cancelAll()
                 bridge = null
-                // MID-TURN QUEUE, one-shot flavor: prompts that arrived while this process ran were
-                // ledgered (and acked as queued) by sendPrompt — argv can't take a second message, so
-                // the queue drains ONE per process: pop the oldest and relaunch with it as the next
-                // spawn's argv message. launchProcess re-records it as initialSend under the fresh
-                // generation, so SessionInit settles it exactly like a directly-sent prompt. Drain only
-                // on a CLEAN exit: after a crash the entries stay ledgered and the client's resend path
-                // recovers them via releaseLostPrompt (#122 ④) — auto-draining a crash would loop the
-                // same prompt into the same failure forever. No onProcessEnded: a one-shot clean exit
-                // is the turn's natural end, not a death to clean up after.
                 proc = null // dead handle dropped FIRST — a failed drain-launch below must not leave prompts writing into it
-                val next = popQueuedPrompt()
-                if (next != null) {
+                if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) {
+                    // Argv one-shot: drain ONE queued prompt per process. Pop it, then re-record it as the
+                    // next launch's initialSend so SessionInit is its consumption receipt.
+                    val next = popQueuedPrompt()
+                    if (next != null) {
+                        carryPendingPromptTransfer()
+                        log.info("$convoId one-shot queue: relaunching with queued prompt ${next.key.take(8)}…")
+                        runCatching {
+                            launchProcess(
+                                AgentSpec(
+                                    workdir, sessionId ?: openedResumeId, model, mode, effort = effort,
+                                    permissionMode = permissionMode, serviceTier = serviceTier, initialPrompt = next.text,
+                                ),
+                                armExecuting = true,
+                                initialSend = InitialSend(next.key, next.text, next.images, next.bridgeGrantToken),
+                            )
+                        }.onFailure { e ->
+                            clearTurnWork() // the spawn never started a turn
+                            // The popped entry is gone from the ledger — forget its id too, so the client's
+                            // resend runs it fresh instead of being hollow-re-acked as "already delivered".
+                            synchronized(seenPromptIds) { seenPromptIds.remove(next.key) }
+                            sink.emit(PocketError("agent_unavailable", "agent failed to start for a queued message (${e.message})", convoId))
+                        }
+                    } else clearTurnWork()
+                } else if (hasUnconsumedPrompts()) {
+                    // Stdin one-shot (Codex): keep the whole ledger in place. launchProcess's ordinary
+                    // re-injection stamps the fresh generation and replays EVERY entry in original order.
+                    // This closes the turn/completed → process-exit race without dropping a just-acked input.
                     carryPendingPromptTransfer()
-                    log.info("$convoId one-shot queue: relaunching with queued prompt ${next.key.take(8)}…")
+                    log.info("$convoId stdin one-shot queue: relaunching with unconsumed prompt(s)")
                     runCatching {
                         launchProcess(
                             AgentSpec(
                                 workdir, sessionId ?: openedResumeId, model, mode, effort = effort,
-                                permissionMode = permissionMode, serviceTier = serviceTier, initialPrompt = next.text,
+                                permissionMode = permissionMode, serviceTier = serviceTier,
                             ),
                             armExecuting = true,
-                            initialSend = InitialSend(next.key, next.text, next.images, next.bridgeGrantToken),
                         )
                     }.onFailure { e ->
-                        clearTurnWork() // the spawn never started a turn
-                        // the popped entry is gone from the ledger — forget its id too, so the client's
-                        // resend runs it fresh instead of being hollow-re-acked as "already delivered"
-                        synchronized(seenPromptIds) { seenPromptIds.remove(next.key) }
-                        sink.emit(PocketError("agent_unavailable", "agent failed to start for a queued message (${e.message})", convoId))
+                        clearTurnWork()
+                        sink.emit(PocketError("agent_unavailable", "agent failed to restart for queued messages (${e.message})", convoId))
                     }
                 } else clearTurnWork()
                 return
             }
+            // Unexpected process loss is a hard authority boundary: neither active nor staged grants may
+            // survive into a later lazy respawn.
+            revokeAllBridgeGrants()
             // Not the clean one-shot queue-transfer path: no live process can consume a turn, grace, job,
             // or pending prompt now. Clear only after awaitExit classified the path, so a queued one-shot
             // prompt never loses its work shield between the old process and its next spawn.
@@ -2350,7 +2373,7 @@ class Conversation(
         if (!ensureProcessForControlOp("compacting context")) return
         // the backend queues this across an in-flight open handshake, so a cold session's first Compact
         // tap still becomes exactly one native request; a rejection surfaces via its error path
-        backend.compact()
+        if (!backend.compact()) reply("The agent is finishing the previous turn. Please retry /compact.")
     }
 
     /** Native code review. `/review` defaults to all working tree changes; trailing text becomes the
@@ -2358,7 +2381,7 @@ class Conversation(
     private suspend fun handleNativeReviewCommand(text: String) {
         if (!ensureProcessForControlOp("starting a review")) return
         val instructions = text.removePrefix("/review").trim().takeIf { it.isNotEmpty() }
-        backend.review(instructions)
+        if (!backend.review(instructions)) reply("The agent is finishing the previous turn. Please retry /review.")
     }
 
     /** Handle the phone's `/model [name]` — the agent `-p` ignores it, so the daemon honors it. */

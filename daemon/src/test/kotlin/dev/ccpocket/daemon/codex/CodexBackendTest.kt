@@ -2,6 +2,7 @@ package dev.ccpocket.daemon.codex
 
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
+import dev.ccpocket.daemon.agent.AgentProcessMode
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.PermissionMode
@@ -39,10 +40,17 @@ class CodexBackendTest {
     private fun JsonArray.field(index: Int, key: String): String? =
         this[index].jsonObject[key]?.jsonPrimitive?.content
 
+    private fun requestId(line: String): Int =
+        Json.parseToJsonElement(line).jsonObject["id"]!!.jsonPrimitive.content.toInt()
+
     /** attach + handshake to a live thread "thr-1". Leaves `w` holding every line the backend wrote. */
-    private suspend fun ready(w: MutableList<String>, mode: PermissionMode = PermissionMode.DEFAULT): CodexBackend {
+    private suspend fun ready(
+        w: MutableList<String>,
+        mode: PermissionMode = PermissionMode.DEFAULT,
+        onExit: () -> Unit = {},
+    ): CodexBackend {
         val b = CodexBackend(null)
-        b.attach(AgentIo(writeLine = { w += it }, emit = {}), AgentSpec(Path.of("/repo"), mode = mode))
+        b.attach(AgentIo(writeLine = { w += it }, emit = {}, requestProcessExit = onExit), AgentSpec(Path.of("/repo"), mode = mode))
         b.parse(initResponse(1))          // → initialized + thread/start (id 2)
         b.parse(threadStartResponse(2, "thr-1"))
         return b
@@ -51,10 +59,22 @@ class CodexBackendTest {
     @Test
     fun attach_sends_initialize_then_initialized_and_thread_start() = runBlocking {
         val w = mutableListOf<String>()
-        ready(w)
+        val b = ready(w)
         assertTrue("\"method\":\"initialize\"" in w[0], w[0])
         assertTrue(w.any { "\"method\":\"initialized\"" in it })
         assertTrue(w.any { "\"method\":\"thread/start\"" in it })
+        assertEquals(AgentProcessMode.ONE_SHOT_TURN, b.processMode)
+    }
+
+    @Test
+    fun user_message_item_is_the_prompt_consumption_receipt() = runBlocking {
+        val b = ready(mutableListOf())
+
+        val ev = b.parse(
+            """{"method":"item/started","params":{"item":{"type":"userMessage","id":"u1","content":[{"type":"text","text":"hello ledger"}]}}}""",
+        )
+
+        assertEquals("hello ledger", assertIs<AgentEvent.UserReplay>(ev.single()).text)
     }
 
     @Test
@@ -110,6 +130,77 @@ class CodexBackendTest {
         assertTrue("\"threadId\":\"thr-1\"" in request, request)
         assertTrue("\"expectedTurnId\":\"turn-live\"" in request, request)
         assertTrue("continue with the next batch" in request, request)
+    }
+
+    @Test
+    fun second_prompt_before_turn_started_waits_for_the_next_boundary() = runBlocking {
+        val w = mutableListOf<String>()
+        var exits = 0
+        val b = ready(w, onExit = { exits += 1 })
+
+        b.sendPrompt("first", emptyList())
+        b.sendPrompt("second", emptyList())
+
+        assertEquals(1, w.count { "\"method\":\"turn/start\"" in it })
+        b.parse("""{"method":"turn/started","params":{"turn":{"id":"t1"}}}""")
+        b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t1","status":"completed"}}}""")
+        assertEquals(2, w.count { "\"method\":\"turn/start\"" in it })
+        assertTrue("second" in w.last(), w.last())
+        assertEquals(0, exits, "queued work owns the next turn")
+    }
+
+    @Test
+    fun completed_turn_requests_a_clean_process_exit_for_cross_app_handoff() = runBlocking {
+        val w = mutableListOf<String>()
+        var exits = 0
+        val b = ready(w, onExit = { exits += 1 })
+        b.sendPrompt("finish this", emptyList())
+        val startId = requestId(w.last { "\"method\":\"turn/start\"" in it })
+        b.parse("""{"method":"turn/started","params":{"threadId":"thr-1","turn":{"id":"t1"}}}""")
+
+        b.parse("""{"method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"t1","status":"completed"}}}""")
+        assertEquals(0, exits, "the turn/start response still owns the stdout pipe")
+        b.parse("""{"id":$startId,"result":{"turn":{"id":"t1"}}}""")
+
+        assertEquals(1, exits)
+        assertTrue(w.none { "thread/unsubscribe" in it }, "unsubscribe is not a writer-release boundary on newer Codex")
+        assertFalse(b.compact(), "a control op racing process exit must ask the caller to retry")
+        assertFalse(b.review(), "a control op racing process exit must ask the caller to retry")
+    }
+
+    @Test
+    fun re_injected_prompt_on_the_next_process_resumes_before_starting_a_turn() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.parse("""{"method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"t1","status":"completed"}}}""")
+
+        b.attach(AgentIo(writeLine = { w += it }, emit = {}), AgentSpec(Path.of("/repo"), resumeId = "thr-1"))
+        b.sendPrompt("continue after handoff", emptyList()) // Conversation's clean-exit ledger re-injection
+        val initId = requestId(w.last { "\"method\":\"initialize\"" in it })
+        b.parse(initResponse(initId))
+
+        val resume = w.last()
+        assertTrue("\"method\":\"thread/resume\"" in resume, resume)
+        assertTrue("\"threadId\":\"thr-1\"" in resume, resume)
+
+        b.parse(threadStartResponse(requestId(resume), "thr-1"))
+        val turn = w.last()
+        assertTrue("\"method\":\"turn/start\"" in turn, turn)
+        assertTrue("continue after handoff" in turn, turn)
+    }
+
+    @Test
+    fun prompt_racing_the_exit_is_not_written_into_the_dying_process() = runBlocking {
+        val w = mutableListOf<String>()
+        var exits = 0
+        val b = ready(w, onExit = { exits += 1 })
+        b.parse("""{"method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"t1","status":"completed"}}}""")
+        val writesBefore = w.size
+
+        b.sendPrompt("arrived during handoff", emptyList())
+
+        assertEquals(1, exits)
+        assertEquals(writesBefore, w.size, "the process-exit ledger, not this dying pipe, owns the prompt")
     }
 
     @Test
@@ -169,13 +260,16 @@ class CodexBackendTest {
     @Test
     fun compact_uses_native_app_server_rpc_when_thread_is_ready() = runBlocking {
         val w = mutableListOf<String>()
-        val b = ready(w)
+        var exits = 0
+        val b = ready(w, onExit = { exits += 1 })
 
         assertTrue(b.compact())
 
         val request = w.last()
         assertTrue("\"method\":\"thread/compact/start\"" in request, request)
         assertTrue("\"threadId\":\"thr-1\"" in request, request)
+        b.parse("""{"id":${requestId(request)},"result":{}}""")
+        assertEquals(1, exits, "compact has no turn/completed, so its response is the handoff boundary")
     }
 
     @Test
@@ -195,13 +289,16 @@ class CodexBackendTest {
     @Test
     fun review_uses_native_app_server_target() = runBlocking {
         val w = mutableListOf<String>()
-        val b = ready(w)
+        var exits = 0
+        val b = ready(w, onExit = { exits += 1 })
 
         assertTrue(b.review())
 
         val request = w.last()
         assertTrue("\"method\":\"review/start\"" in request, request)
         assertTrue("\"type\":\"uncommittedChanges\"" in request, request)
+        b.parse("""{"id":${requestId(request)},"result":{}}""")
+        assertEquals(0, exits, "review success owns a real turn and must wait for turn/completed")
         assertTrue("\"delivery\":\"inline\"" in request, request)
     }
 
@@ -453,6 +550,7 @@ class CodexBackendTest {
         val ev = b.parse("""{"id":3,"error":{"code":-32000,"message":"model overloaded"}}""")
 
         // Conversation marked this turn executing on ack; only a TurnResult clears that state again
+        assertEquals("do the thing", ev.filterIsInstance<AgentEvent.UserReplay>().single().text)
         val r = ev.filterIsInstance<AgentEvent.TurnResult>().single()
         assertTrue(r.isError)
         assertTrue("model overloaded" in (r.finalText ?: ""), r.finalText ?: "<null>")
@@ -476,13 +574,15 @@ class CodexBackendTest {
     @Test
     fun a_rejected_compact_reports_failure_instead_of_a_silent_noop() = runBlocking {
         val w = mutableListOf<String>()
-        val b = ready(w)
+        var exits = 0
+        val b = ready(w, onExit = { exits += 1 })
         b.compact() // → thread/compact/start (id 3)
 
         val ev = b.parse("""{"id":3,"error":{"code":-32601,"message":"method not found"}}""")
 
         val t = ev.filterIsInstance<AgentEvent.AssistantText>().single()
         assertTrue("compact" in t.text && "method not found" in t.text, t.text)
+        assertEquals(1, exits, "a rejected control has no later terminal notification")
     }
 
     @Test
@@ -571,7 +671,8 @@ class CodexBackendTest {
     @Test
     fun an_image_prompt_sent_mid_turn_waits_for_the_boundary_instead_of_losing_its_image() = runBlocking {
         val w = mutableListOf<String>()
-        val b = ready(w)
+        var exits = 0
+        val b = ready(w, onExit = { exits += 1 })
         b.parse("""{"method":"turn/started","params":{"turn":{"id":"t1"}}}""")
 
         b.sendPrompt("look at this", listOf(ImageData("image/png", "iVBORw==")))
@@ -580,6 +681,7 @@ class CodexBackendTest {
         b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t1","status":"completed"}}}""")
         val start = w.last { "\"method\":\"turn/start\"" in it }
         assertTrue("look at this" in start && "iVBORw==" in start, start)
+        assertEquals(0, exits, "queued work owns the next turn")
     }
 
     @Test

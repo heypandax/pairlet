@@ -4,6 +4,7 @@ import dev.ccpocket.protocol.TokenUsage
 import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
+import dev.ccpocket.daemon.agent.AgentProcessMode
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AgentKind
@@ -43,7 +44,7 @@ class CodexBackend(
     private val log = logger("CodexBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val idSeq = AtomicLong(1)
-    private val bootstrap = Mutex() // guards threadId + pendingPrompt so the first turn is never lost to a race
+    private val bootstrap = Mutex() // guards thread/process state so prompts and the stable-turn exit cannot cross
 
     @Volatile private var io: AgentIo? = null
     @Volatile private var resolvedExe: Path? = null // codex binary, resolved lazily on first launch
@@ -58,17 +59,21 @@ class CodexBackend(
     @Volatile private var threadId: String? = null
     @Volatile private var currentTurnId: String? = null
     private var pendingPrompt: Prompt? = null // buffered first turn (guarded by [bootstrap])
+    private var phase = ProcessPhase.OPENING // guarded by [bootstrap]
+    private var startingTurn = false // turn/start selected but turn/started has not landed (guarded by [bootstrap])
+    private var promptWriteInFlight = 0 // closes sendPrompt selection -> JSON-RPC registration race (guarded by [bootstrap])
     private var pendingCompact = false // /compact may arrive while thread resume/fork is still handshaking
     private var pendingReview: String? = null // empty marker = uncommitted-changes review
 
     // JSON-RPC id correlation: which of our outstanding requests this id belongs to
     @Volatile private var initializeId: Long = -1
     @Volatile private var threadOpenId: Long = -1
+    @Volatile private var threadOpenOperation: String = "start"
     // Outstanding writes whose ERROR response must not be swallowed (PR #296 review): a steer that raced
     // turn completion retries as turn/start, a rejected turn/start settles the turn it never started, and
     // a control-plane op reports its failure instead of no-oping. Cleared on the success response.
     private val pendingSteers = ConcurrentHashMap<Long, SteerAttempt>() // turn/steer id → what rode it
-    private val pendingStarts = ConcurrentHashMap.newKeySet<Long>() // turn/start ids in flight
+    private val pendingStarts = ConcurrentHashMap<Long, Prompt>() // turn/start id → prompt (for rejection receipt)
     private val pendingControls = ConcurrentHashMap<Long, String>() // compact/review id → op label
     // Prompts that arrived mid-turn but can't ride turn/steer (it has no image transport — Tier C):
     // parked until the turn boundary instead of silently dropping their images (PR #296 re-review).
@@ -88,8 +93,16 @@ class CodexBackend(
 
     private data class Prompt(val text: String, val images: List<ImageData>)
     private data class Usage(val input: Long = 0, val output: Long = 0, val cached: Long = 0)
+    private enum class ProcessPhase { OPENING, READY, EXITING }
+    private sealed interface PromptAction {
+        data class Start(val prompt: Prompt) : PromptAction
+        data class Steer(val prompt: Prompt, val turnId: String) : PromptAction
+    }
 
     override val kind: AgentKind = AgentKind.CODEX
+    // A live app-server owns the rollout across applications even while idle on newer Codex builds.
+    // End it after each stable turn; Conversation treats that clean exit as normal and lazily resumes.
+    override val processMode: AgentProcessMode get() = AgentProcessMode.ONE_SHOT_TURN
 
     // app-server exposes compaction and review as control-plane RPCs (thread/compact/start, review/start)
     override val supportsNativeCompact: Boolean get() = true
@@ -111,7 +124,12 @@ class CodexBackend(
         this.serviceTier = normalizeServiceTier(spec.model, spec.serviceTier)
         // reset per-process protocol state (this runs on every (re)launch)
         threadId = null; currentTurnId = null
-        bootstrap.withLock { pendingPrompt = null; pendingCompact = false; pendingReview = null }
+        bootstrap.withLock {
+            pendingPrompt = null; pendingCompact = false; pendingReview = null
+            phase = ProcessPhase.OPENING
+            startingTurn = false
+            promptWriteInFlight = 0
+        }
         lastAgentText = null; lastErrorText = null; lastUsage = Usage(); usageSeen = false
         deltaSeen.clear(); fileChangePaths.clear(); fileChangeDiffs.clear(); pendingApprovals.clear()
         pendingSteers.clear(); pendingStarts.clear(); pendingControls.clear()
@@ -145,8 +163,10 @@ class CodexBackend(
 
     private suspend fun handleResponse(idEl: JsonElement?, result: JsonElement?): List<AgentEvent> {
         val id = (idEl as? JsonPrimitive)?.longOrNull
-        if (id != null) { pendingSteers.remove(id); pendingStarts.remove(id); pendingControls.remove(id) }
-        return when (id) {
+        val completedSteer = if (id != null) pendingSteers.remove(id) else null
+        val completedStart = if (id != null) pendingStarts.remove(id) else null
+        val completedControl = if (id != null) pendingControls.remove(id) else null
+        val events = when (id) {
             initializeId -> {
                 rpcNotify("initialized", null)
                 openThread()
@@ -155,6 +175,14 @@ class CodexBackend(
             threadOpenId -> onThreadReady(result as? JsonObject)
             else -> emptyList()
         }
+        // A steer may be accepted just as its turn completes. turn/completed deliberately waits while the
+        // steer response is outstanding; once success lands there is no next turn to start, so release now.
+        // Compact is a bounded control operation and emits no turn/completed of its own. Review does start
+        // a real turn, so its successful response deliberately waits for that turn's terminal notification.
+        if (completedSteer != null || completedStart != null || completedControl == "compact") {
+            maybeRequestProcessExit()
+        }
+        return events
     }
 
     /**
@@ -175,7 +203,7 @@ class CodexBackend(
             return emptyList()
         }
         pendingSteers.remove(id)?.let { attempt ->
-            if (currentTurnId == attempt.expectedTurnId) {
+            if (bootstrap.withLock { currentTurnId == attempt.expectedTurnId }) {
                 // Rejected while — by this pipe's own ordering — the steered turn is STILL running (its
                 // turn/completed would have been processed before this response). Not staleness: a blind
                 // turn/start retry would hit the active-writer conflict and its rejection would falsely
@@ -187,26 +215,53 @@ class CodexBackend(
             // the correct delivery now. One bounded hop — the retry registers in [pendingStarts], so a
             // second rejection surfaces below instead of looping.
             log.info("codex steer rejected (${msg.take(120)}) — re-delivering as turn/start")
-            writeTurnStart(attempt.prompt.text, attempt.prompt.images)
+            deliverPrompt(attempt.prompt)
             return emptyList()
         }
-        if (pendingStarts.remove(id)) {
+        pendingStarts.remove(id)?.let { rejected ->
             // Conversation marked the turn executing when it acked this prompt; only a TurnResult clears
-            // that. Settle the turn the server never started, and say so where the user can see it.
-            return listOf(AgentEvent.TurnResult("⚠️ Codex rejected the prompt: $msg", usage = null, isError = true))
+            // that. The correlated prompt is also a consumption receipt: without it, the deliberate clean
+            // process exit would classify this visible rejection as a lost write and auto-reinject it.
+            bootstrap.withLock { startingTurn = false }
+            maybeRequestProcessExit()
+            return listOf(
+                AgentEvent.UserReplay(rejected.text),
+                AgentEvent.TurnResult("⚠️ Codex rejected the prompt: $msg", usage = null, isError = true),
+            )
         }
         pendingControls.remove(id)?.let { op ->
+            // A rejected control cannot produce a later terminal notification. Release the idle writer now;
+            // the visible error below remains the operation's final result.
+            maybeRequestProcessExit()
             return listOf(AgentEvent.AssistantText("⚠️ Codex /$op failed: $msg"))
         }
         if (id == threadOpenId) {
             // Deliberately NO silent thread/resume fallback for a failed fork: fork exists so a take-over
             // never becomes a second writer on a rollout another codex may still own. Surface it instead —
             // a buffered first prompt would otherwise wait forever behind a thread that will never open.
-            val op = if (resumeId == null) "start" else if (forkSession) "fork" else "resume"
-            return listOf(AgentEvent.TurnResult("⚠️ Codex could not $op this session: $msg", usage = null, isError = true))
+            val op = threadOpenOperation
+            val rejected = bootstrap.withLock {
+                phase = ProcessPhase.EXITING
+                startingTurn = false
+                pendingPrompt.also { pendingPrompt = null }
+                    .also { queuedStarts.clear() }
+            }
+            io?.requestProcessExit?.invoke()
+            return listOfNotNull(
+                rejected?.let { AgentEvent.UserReplay(it.text) },
+                AgentEvent.TurnResult("⚠️ Codex could not $op this session: $msg", usage = null, isError = true),
+            )
         }
         if (id == initializeId) {
-            return listOf(AgentEvent.TurnResult("⚠️ Codex failed to initialize: $msg", usage = null, isError = true))
+            val rejected = bootstrap.withLock {
+                phase = ProcessPhase.EXITING
+                pendingPrompt.also { pendingPrompt = null }
+            }
+            io?.requestProcessExit?.invoke()
+            return listOfNotNull(
+                rejected?.let { AgentEvent.UserReplay(it.text) },
+                AgentEvent.TurnResult("⚠️ Codex failed to initialize: $msg", usage = null, isError = true),
+            )
         }
         log.warn("codex error: $error")
         return emptyList()
@@ -214,8 +269,10 @@ class CodexBackend(
 
     private suspend fun openThread() {
         val rid = resumeId
-        threadOpenId = if (rid != null) {
-            rpcRequest(if (forkSession) "thread/fork" else "thread/resume", buildJsonObject {
+        val operation = if (rid == null) "start" else if (forkSession) "fork" else "resume"
+        threadOpenOperation = operation
+        if (rid != null) {
+            rpcRequest("thread/$operation", register = { threadOpenId = it }, params = buildJsonObject {
                 put("threadId", rid)
                 // thread/fork and thread/resume accept the same relevant overrides in the v2 app-server
                 // protocol (probe-codex-wire.py proves fork on 0.145.0 already — mints a new thread id with
@@ -226,7 +283,7 @@ class CodexBackend(
                 serviceTier?.let { put("serviceTier", it) }
             })
         } else {
-            rpcRequest("thread/start", buildJsonObject {
+            rpcRequest("thread/start", register = { threadOpenId = it }, params = buildJsonObject {
                 put("cwd", workdir)
                 put("approvalPolicy", approvalPolicy())
                 put("sandbox", sandbox().flat) // thread/start takes the flat SandboxMode string
@@ -242,7 +299,9 @@ class CodexBackend(
         result.str("model")?.let { model = it }
         val flush = bootstrap.withLock {
             threadId = tid
+            phase = ProcessPhase.READY
             val prompt = pendingPrompt.also { pendingPrompt = null }
+            startingTurn = prompt != null
             val compact = pendingCompact.also { pendingCompact = false }
             val review = pendingReview.also { pendingReview = null }
             Triple(prompt, compact, review)
@@ -251,6 +310,32 @@ class CodexBackend(
         if (flush.second) requestCompact(tid)
         flush.third?.let { requestReview(tid, it) }
         return listOf(AgentEvent.SessionInit(sessionId = tid, cwd = workdir, model = result.str("model")))
+    }
+
+    /** Newer app-server builds retain the rollout's exclusive writer after thread/unsubscribe. A clean
+     * process exit is the only version-stable handoff boundary. Flip [phase] before asking Conversation to
+     * close the pipe: a prompt racing this edge stays in its delivery ledger and is re-injected by the
+     * clean one-shot exit path instead of being written into a dying process. */
+    private suspend fun maybeRequestProcessExit() {
+        val shouldExit = bootstrap.withLock {
+            if (
+                phase == ProcessPhase.READY &&
+                currentTurnId == null &&
+                !startingTurn &&
+                promptWriteInFlight == 0 &&
+                pendingPrompt == null &&
+                queuedStarts.isEmpty() &&
+                pendingSteers.isEmpty() &&
+                pendingStarts.isEmpty() &&
+                pendingControls.isEmpty()
+            ) {
+                phase = ProcessPhase.EXITING
+                true
+            } else {
+                false
+            }
+        }
+        if (shouldExit) io?.requestProcessExit?.invoke()
     }
 
     // ---- inbound: server notifications ----
@@ -262,7 +347,10 @@ class CodexBackend(
                 if (threadId == null) onThreadReady(buildJsonObject { params.obj("thread")?.let { put("thread", it) } }) else emptyList()
             }
             "turn/started" -> {
-                currentTurnId = params.obj("turn")?.str("id")
+                bootstrap.withLock {
+                    currentTurnId = params.obj("turn")?.str("id")
+                    startingTurn = false
+                }
                 lastErrorText = null // a stale between-turns error must not be billed to this new turn
                 emptyList()
             }
@@ -285,8 +373,14 @@ class CodexBackend(
             }
             "turn/completed" -> {
                 val events = onTurnCompleted(params.obj("turn"))
-                // one parked image-prompt per boundary: it becomes the NEXT turn; any others wait their own
-                bootstrap.withLock { queuedStarts.removeFirstOrNull() }?.let { writeTurnStart(it.text, it.images) }
+                // One parked prompt per boundary becomes the NEXT turn. If none exists, end this app-server
+                // process so another app can own the rollout immediately (#316).
+                val next = bootstrap.withLock {
+                    currentTurnId = null
+                    startingTurn = false
+                    queuedStarts.removeFirstOrNull()?.also { startingTurn = true }
+                }
+                if (next != null) writeTurnStart(next.text, next.images) else maybeRequestProcessExit()
                 events
             }
             "error" -> {
@@ -306,6 +400,16 @@ class CodexBackend(
         item ?: return emptyList()
         val id = item.str("id")
         return when (item.str("type")) {
+            "userMessage" -> {
+                // This is app-server's consumption receipt. Conversation's unconsumed-prompt ledger needs
+                // the exact text before a deliberate post-turn process exit, or it would re-inject an
+                // already-completed prompt into the next app-server and duplicate the turn.
+                val text = item.arr("content")
+                    ?.mapNotNull { (it as? JsonObject)?.takeIf { part -> part.str("type") == "text" }?.str("text") }
+                    ?.joinToString("")
+                    ?: ""
+                listOf(AgentEvent.UserReplay(text))
+            }
             "commandExecution" -> listOf(
                 AgentEvent.AssistantToolUse(id, "Bash", buildJsonObject {
                     item.str("command")?.let { put("command", it) }
@@ -366,7 +470,6 @@ class CodexBackend(
         )
         lastAgentText = null
         lastErrorText = null
-        currentTurnId = null
         deltaSeen.clear()
         fileChangePaths.clear(); fileChangeDiffs.clear() // approvals for this turn are resolved by now — don't accumulate
         return listOf(ev)
@@ -426,29 +529,67 @@ class CodexBackend(
     // ---- outbound (called by Conversation) ----
 
     override suspend fun sendPrompt(text: String, images: List<ImageData>) {
-        val promptText = text // expansion happens at Conversation's prompt boundary (expandSlashPrompt)
-        val ready = bootstrap.withLock {
-            if (threadId == null) { pendingPrompt = Prompt(promptText, images); false } else true
-        }
-        if (ready) {
-            val activeTurn = currentTurnId
-            when {
-                activeTurn != null && images.isNotEmpty() -> {
-                    // turn/steer has no image transport (Tier C): steering would silently drop the images
-                    // and answer the question without them. Park the whole prompt for the turn boundary —
-                    // delivered as its own turn/start from onTurnCompleted's drain, images intact.
-                    bootstrap.withLock { queuedStarts.addLast(Prompt(promptText, images)) }
-                    // The turn can complete between the activeTurn read and the enqueue — then no future
-                    // turn/completed exists to drain this. Re-check and drain ourselves; the lock makes
-                    // the two drains take each prompt exactly once.
-                    if (currentTurnId == null) {
-                        bootstrap.withLock { queuedStarts.removeFirstOrNull() }?.let { writeTurnStart(it.text, it.images) }
+        // Expansion happens at Conversation's prompt boundary (expandSlashPrompt).
+        deliverPrompt(Prompt(text, images))
+    }
+
+    /** Select under the same mutex that finishes a turn and requests process exit. This is the key #316
+     * invariant: a prompt either reserves this live process first, or stays solely in Conversation's
+     * delivery ledger for the clean-exit relaunch — it is never written into a dying app-server. */
+    private suspend fun deliverPrompt(prompt: Prompt) {
+        val action = bootstrap.withLock {
+            when (phase) {
+                ProcessPhase.OPENING -> {
+                    bufferPrompt(prompt)
+                    null
+                }
+                ProcessPhase.EXITING -> null // Conversation's ledger re-injects it after the clean exit
+                ProcessPhase.READY -> {
+                    val activeTurn = currentTurnId
+                    when {
+                        activeTurn != null && prompt.images.isNotEmpty() -> {
+                            // turn/steer has no image transport (Tier C): preserve the whole prompt and
+                            // start it at the boundary instead of silently dropping its images.
+                            queuedStarts.addLast(prompt)
+                            null
+                        }
+                        activeTurn != null -> {
+                            // Reserve the pipe before releasing the mutex. turn/completed can otherwise
+                            // select process exit in the tiny gap before writeTurnSteer registers its id.
+                            promptWriteInFlight += 1
+                            PromptAction.Steer(prompt, activeTurn)
+                        }
+                        startingTurn -> {
+                            // turn/start is accepted asynchronously; until turn/started supplies its id,
+                            // a second turn/start would collide with that writer. Preserve this as next turn.
+                            queuedStarts.addLast(prompt)
+                            null
+                        }
+                        else -> {
+                            startingTurn = true
+                            PromptAction.Start(prompt)
+                        }
                     }
                 }
-                activeTurn != null -> writeTurnSteer(promptText, images, activeTurn)
-                else -> writeTurnStart(promptText, images)
             }
         }
+        when (action) {
+            is PromptAction.Start -> writeTurnStart(action.prompt.text, action.prompt.images)
+            is PromptAction.Steer -> {
+                try {
+                    writeTurnSteer(action.prompt.text, action.prompt.images, action.turnId)
+                } finally {
+                    bootstrap.withLock { promptWriteInFlight -= 1 }
+                    maybeRequestProcessExit()
+                }
+            }
+            null -> Unit
+        }
+    }
+
+    /** [pendingPrompt] is the first turn after an open/resume; later inputs retain order in queuedStarts. */
+    private fun bufferPrompt(prompt: Prompt) {
+        if (pendingPrompt == null) pendingPrompt = prompt else queuedStarts.addLast(prompt)
     }
 
     /** `/simplify` is a Claude built-in skill, not an app-server method. Keep CC Pocket's action useful
@@ -467,7 +608,8 @@ class CodexBackend(
 
     private suspend fun writeTurnStart(text: String, images: List<ImageData>) {
         val tid = threadId ?: return
-        rpcRequest("turn/start", register = { pendingStarts.add(it) }, params = buildJsonObject {
+        val prompt = Prompt(text, images)
+        rpcRequest("turn/start", register = { pendingStarts[it] = prompt }, params = buildJsonObject {
             put("threadId", tid)
             putJsonArray("input") {
                 addJsonObject { put("type", "text"); put("text", text) }
@@ -512,11 +654,22 @@ class CodexBackend(
     }
 
     override suspend fun compact(): Boolean {
+        var accepted = true
         val tid = bootstrap.withLock {
-            threadId.also { if (it == null) pendingCompact = true }
+            when (phase) {
+                ProcessPhase.READY -> threadId
+                ProcessPhase.OPENING -> {
+                    pendingCompact = true
+                    null
+                }
+                ProcessPhase.EXITING -> {
+                    accepted = false
+                    null
+                }
+            }
         }
         if (tid != null) requestCompact(tid)
-        return true
+        return accepted
     }
 
     private suspend fun requestCompact(tid: String) {
@@ -525,11 +678,22 @@ class CodexBackend(
 
     override suspend fun review(instructions: String?): Boolean {
         val review = instructions?.trim().orEmpty()
+        var accepted = true
         val tid = bootstrap.withLock {
-            threadId.also { if (it == null) pendingReview = review }
+            when (phase) {
+                ProcessPhase.READY -> threadId
+                ProcessPhase.OPENING -> {
+                    pendingReview = review
+                    null
+                }
+                ProcessPhase.EXITING -> {
+                    accepted = false
+                    null
+                }
+            }
         }
         if (tid != null) requestReview(tid, review)
-        return true
+        return accepted
     }
 
     private suspend fun requestReview(tid: String, instructions: String) {

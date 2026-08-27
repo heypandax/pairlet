@@ -24,4 +24,8 @@ class AgentIo(
      * has nowhere meaningful to go. Default no-op for the stdio backends, which never need it.
      */
     val inject: suspend (String) -> Unit = {},
+    /** Ask the owner to end this process after a provider-defined stable boundary. The callback launches
+     * the bounded graceful-shutdown ladder off the stdout pump; default no-op keeps backend unit tests and
+     * long-running providers unchanged. Codex uses it after turn/completed to release its cross-app writer. */
+    val requestProcessExit: () -> Unit = {},
 )

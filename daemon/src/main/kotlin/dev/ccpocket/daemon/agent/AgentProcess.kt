@@ -8,6 +8,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.TimeUnit
@@ -52,6 +54,7 @@ class AgentProcess private constructor(
 
     /** Every write (prompt / allow / deny / rpc) funnels through this one writer -> no interleaving. */
     private val stdin: Channel<String> = Channel(capacity = 64)
+    private val shutdownLock = Mutex()
 
     // completed when the stderr pump has read its pipe to EOF — the OS exit alone does NOT imply
     // lastStderr is populated yet (the reader coroutine may not have been scheduled), and a startup
@@ -153,7 +156,7 @@ class AgentProcess private constructor(
         eofGraceMs: Long = EOF_GRACE_MS,
         termGraceMs: Long = TERM_GRACE_MS,
         forceGraceMs: Long = FORCE_GRACE_MS,
-    ) {
+    ) = shutdownLock.withLock {
         stdin.close()
         runCatching { process.outputStream.close() } // EOF — the CLI's stream-json shutdown signal
         var exited = withContext(Dispatchers.IO) { process.waitFor(eofGraceMs, TimeUnit.MILLISECONDS) }

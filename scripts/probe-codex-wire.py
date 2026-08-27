@@ -2,7 +2,7 @@
 """codex app-server 行为回归探针 —— 升级 codex CLI 后跑一次，防依赖漂移。
 
 `codex app-server` 是**官方标注 experimental** 的 JSON-RPC 接口，版本间会漂移。daemon 的
-CodexBackend（daemon/src/main/kotlin/dev/ccpocket/daemon/codex/CodexBackend.kt）押了四条未写进
+CodexBackend（daemon/src/main/kotlin/dev/ccpocket/daemon/codex/CodexBackend.kt）押了六条未写进
 正式契约的行为，任一条漂移都会让 App 静默变坏：
 
   handshake   initialize 应答 → `initialized` 通知 → thread/start，响应 result.thread.id 非空。
@@ -15,12 +15,20 @@ CodexBackend（daemon/src/main/kotlin/dev/ccpocket/daemon/codex/CodexBackend.kt�
               （PR #296 评审修的「已 ack 的提示词被吞」类，issue #84/#104 同源）。
               若漂成静默、或漂成不带 id 的 `error` 通知 → 用户的话直接消失，且没有任何报错
 
+  receipt     item/started 的 userMessage.content 必须逐字带回刚消费的文本。Conversation 用它结算
+              unconsumed-prompt ledger；回合后的主动进程退出若缺这张收据，会把已完成的 prompt 当成
+              丢失写入，在下一 app-server 中重复执行
+
   fork        thread/fork 存在且铸出**新的** thread id（result.thread.forkedFromId 指回原 thread）。
               这是接管防双写的唯一手段：手机接管一个桌面还开着的会话时走 fork，绝不让两个 writer
               同时写一份 rollout。它一消失，openThread 会被 error 打回（daemon 故意不静默退回
               thread/resume），接管功能须整体重估。
               ⚠️ fork 认的是**盘上的 rollout**，而 rollout 随第一个 turn 懒创建 —— 所以这条 check
               必须排在 steer_stale 的 turn 之后，否则只会拿到 "no rollout found"（非漂移）
+
+  handoff     回合结束后给 app-server stdin EOF，进程须干净退出；另一个 app-server 随后能 resume 同一 id。
+              新版 Codex 的 thread/unsubscribe 仍可能保留 active writer，daemon 因此以进程退出作为
+              跨 App 交接边界；若 EOF 不退出或退出后仍占用，ChatGPT App 会继续提示「已在另一个应用中打开」
 
   unknown     未知方法必须回**带 id 的 error response**，而不是断连或静默。handleErrorResponse 的
               全部关联逻辑（pendingSteers / pendingStarts / pendingControls / threadOpenId /
@@ -29,7 +37,7 @@ CodexBackend（daemon/src/main/kotlin/dev/ccpocket/daemon/codex/CodexBackend.kt�
 说的是 CodexBackend 那套方言：裸 {id, method, params}，**不带 `jsonrpc` 字段**（与
 probe-codex-concurrent.py 一致）。
 
-用法：python3 scripts/probe-codex-wire.py [handshake|steer_stale|fork|unknown|all]（默认 all）
+用法：python3 scripts/probe-codex-wire.py [handshake|steer_stale|fork|handoff|unknown|all]（默认 all）
       CC_POCKET_CODEX_BIN=/path/to/codex 可覆盖二进制。
 退出码：0 全绿 / 1 有 FAIL（行为漂移）/ 2 缺依赖（找不到 codex）。
 探针在临时目录起真实 codex app-server（approvalPolicy=never + sandbox=read-only，只碰自己新建的
@@ -84,8 +92,10 @@ class Server:
         self.notes = queue.Queue()   # 服务端 → 客户端的通知，按到达顺序
         self.orphans = []            # 带 id 的应答但没人等 —— id 关联漂移的证据
         self.stderr_tail = []
-        threading.Thread(target=self._read, daemon=True).start()
-        threading.Thread(target=self._read_err, daemon=True).start()
+        self._stdout_thread = threading.Thread(target=self._read, daemon=True)
+        self._stderr_thread = threading.Thread(target=self._read_err, daemon=True)
+        self._stdout_thread.start()
+        self._stderr_thread.start()
 
     def _record(self, tag, line):
         self.log.write("%s %s\n" % (tag, line))
@@ -173,6 +183,26 @@ class Server:
     def kill(self):
         if self.alive():
             self.proc.kill()
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            return
+        # Drain both pipes before main closes the wire log; otherwise a fast teardown can make the reader
+        # thread write to an already-closed file and print a misleading post-PASS traceback.
+        self._stdout_thread.join(timeout=1)
+        self._stderr_thread.join(timeout=1)
+
+    def close_input(self, timeout=10):
+        """Close stdin like AgentProcess.shutdown's first rung; return exit code, or None on timeout."""
+        if self.proc.stdin and not self.proc.stdin.closed:
+            self.proc.stdin.close()
+        try:
+            code = self.proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None
+        self._stdout_thread.join(timeout=1)
+        self._stderr_thread.join(timeout=1)
+        return code
 
 
 # ── checks ────────────────────────────────────────────────────────────────────────────────────────
@@ -220,9 +250,10 @@ def check_steer_stale(srv, thread_id, cwd):
         return check("前置 thread 可用", False, "handshake 没拿到 thread id，跳过")
 
     # 唯一一个真实 turn：prompt 尽量小，只为拿一个「已完结」的 turn id
+    probe_prompt = "Reply with exactly: ok"
     rid, env = srv.request("turn/start", {
         "threadId": thread_id,
-        "input": [{"type": "text", "text": "Reply with exactly: ok"}],
+        "input": [{"type": "text", "text": probe_prompt}],
         "cwd": cwd,
         "approvalPolicy": "never",
         # 两处 sandbox 拼写不同且都会被服务端强校验（CodexBackend.sandbox() 的 flat/tag 双拼写就为这个）：
@@ -233,7 +264,23 @@ def check_steer_stale(srv, thread_id, cwd):
         show("turn/start <<<", env if env else "<silence>")
         return check("turn/start 被接受", False, excerpt((env or {}).get("error"), 200) if env else "静默")
 
-    note = srv.wait_note({"turn/completed", "turn/failed"}, TURN_TIMEOUT)
+    note = None
+    user_receipts = []
+    deadline = time.time() + TURN_TIMEOUT
+    while time.time() < deadline:
+        try:
+            candidate = srv.notes.get(timeout=min(1.0, max(0.05, deadline - time.time())))
+        except queue.Empty:
+            continue
+        if candidate.get("method") == "item/started":
+            item = (candidate.get("params") or {}).get("item") or {}
+            if item.get("type") == "userMessage":
+                text = "".join(part.get("text", "") for part in (item.get("content") or [])
+                               if part.get("type") == "text")
+                user_receipts.append(text)
+        if candidate.get("method") in ("turn/completed", "turn/failed"):
+            note = candidate
+            break
     if note is None:
         return check("turn 跑到 turn/completed", False, "%.0fs 内没有终态通知" % TURN_TIMEOUT)
     show("turn 终态 <<<", note)
@@ -243,6 +290,8 @@ def check_steer_stale(srv, thread_id, cwd):
     if not check("turn/completed 带 turn.id（steer 的 expectedTurnId 来源）", bool(turn_id),
                  turn_id or excerpt(note.get("params"), 200)):
         return False
+    check("userMessage item 是逐字 prompt 消费收据（退出前结算 ledger）",
+          probe_prompt in user_receipts, excerpt(user_receipts, 200))
 
     srv.drain_notes()   # 清干净，好判断「拒绝」是不是漂成了通知
     rid, env = srv.request("turn/steer", {
@@ -303,8 +352,41 @@ def check_fork(srv, thread_id):
     return ok
 
 
+def check_handoff(srv, thread_id, cwd):
+    """④ 稳定回合后的 stdin EOF 必须退出并允许另一 app-server 接手。"""
+    print("── handoff：A stdin EOF/exit → B resume 同一 thread ──")
+    if not thread_id:
+        return check("前置 thread 可用", False, "handshake 没拿到 thread id，跳过")
+
+    exit_code = srv.close_input()
+    ok = check("stdin EOF 后 app-server 干净退出", exit_code == 0,
+               "exit=%s alive=%s" % (exit_code, srv.alive()))
+    if exit_code is None:
+        return ok
+
+    # A second process is the real ChatGPT/cc-pocket boundary. Process death, not an RPC result, must have
+    # released the active writer for this to succeed on Codex builds whose unsubscribe is insufficient.
+    peer = Server(cwd, srv.log)
+    try:
+        _rid, peer_init = peer.request("initialize", {
+            "clientInfo": {"name": "cc-pocket-handoff-peer", "version": "0"},
+            "capabilities": {"experimentalApi": False},
+        })
+        if peer_init is None or "error" in peer_init:
+            return check("另一 app-server 初始化", False, excerpt(peer_init or "silence", 200)) and ok
+        peer.notify("initialized")
+        _rid, peer_resume = peer.request("thread/resume", {"threadId": thread_id})
+        show("peer thread/resume <<<", peer_resume or "<silence>")
+        peer_id = (((peer_resume or {}).get("result") or {}).get("thread") or {}).get("id")
+        ok &= check("A 退出后另一 app-server 可接手同一 thread", peer_id == thread_id,
+                    excerpt((peer_resume or {}).get("error"), 200) if peer_id != thread_id else peer_id)
+    finally:
+        peer.kill()
+    return ok
+
+
 def check_unknown(srv):
-    """④ 未知方法 → 带 id 的 error response，连接不断、不静默。"""
+    """⑤ 未知方法 → 带 id 的 error response，连接不断、不静默。"""
     print("── unknown：未知方法 → 带 id 的 error response ──")
     rid, env = srv.request("thread/nonexistent/probe", {})
     if env is None:
@@ -327,8 +409,8 @@ def check_unknown(srv):
 def main():
     global CODEX
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
-    if which not in ("all", "handshake", "steer_stale", "fork", "unknown"):
-        print("用法：python3 scripts/probe-codex-wire.py [handshake|steer_stale|fork|unknown|all]",
+    if which not in ("all", "handshake", "steer_stale", "fork", "handoff", "unknown"):
+        print("用法：python3 scripts/probe-codex-wire.py [handshake|steer_stale|fork|handoff|unknown|all]",
               file=sys.stderr)
         return 2
     resolved = shutil.which(CODEX) if CODEX else None
@@ -352,8 +434,9 @@ def main():
         thread_id = check_handshake(srv, cwd)
         if which in ("all", "handshake") and thread_id:
             print()
-        # steer_stale / fork 都要一个真 thread；单跑它们时也得先握手（握手的 check 结果照常计入）
-        if which in ("all", "steer_stale"):
+        # steer_stale / handoff / fork 都要一份真实落盘的 rollout；thread/start 本身只创建内存
+        # thread，第一轮 turn 才落盘。单跑后两项也复用 steer_stale 的唯一真实 turn 建前置。
+        if which in ("all", "steer_stale", "handoff", "fork"):
             check_steer_stale(srv, thread_id, cwd)
             print()
         if which in ("all", "fork"):
@@ -361,6 +444,10 @@ def main():
             print()
         if which in ("all", "unknown"):
             check_unknown(srv)
+            print()
+        # Handoff exits the primary process, so it is deliberately LAST in `all`.
+        if which in ("all", "handoff"):
+            check_handoff(srv, thread_id, cwd)
     finally:
         srv.kill()
         log.close()
@@ -378,7 +465,10 @@ def main():
               "（handleErrorResponse / openThread / writeTurnSteer）确认是否要适配。")
         print("完整 wire：%s" % log_path)
         return 1
-    print("codex app-server wire 契约完好 —— CodexBackend 依赖的四条行为全部成立。")
+    if which == "all":
+        print("codex app-server wire 契约完好 —— CodexBackend 依赖的六条行为全部成立。")
+    else:
+        print("codex app-server wire 契约完好 —— 本次请求的行为及其前置检查全部成立。")
     print("完整 wire：%s" % log_path)
     return 0
 
