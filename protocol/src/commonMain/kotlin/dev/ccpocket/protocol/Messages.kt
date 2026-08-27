@@ -800,6 +800,20 @@ data class Usage(
     val requestsWindow: Long? = null,
     val cacheHitPctWindow: Int? = null,
     val costUsdWindow: Double? = null,
+    /**
+     * The raw numerator/denominator behind [cacheHitPctWindow] (issue #323), in tokens: the window's
+     * accumulated cache-read total and (input + cache-read) themselves. Sent so a reader can trace the
+     * percentage back to the columns it was computed from instead of having to take a bare number on
+     * faith — this page aggregates EVERY backend it scanned, and a cache-poor one legitimately drags the
+     * mix far below what a single Anthropic-heavy account sees.
+     * NOTE: the denominator deliberately EXCLUDES cache-creation — tokens spent WRITING the cache were
+     * never a hit opportunity. That is this page's one consistent reading; a rate that also counts
+     * cache-creation in its denominator (a lower number) is a different metric, not a correction of this
+     * one. Trailing optionals: an old daemon omits them (the client drops the line), an old app ignores
+     * them. Non-null exactly when [cacheHitPctWindow] is, so the three never disagree about the window.
+     */
+    val cacheReadTokensWindow: Long? = null,
+    val cacheBaseTokensWindow: Long? = null,
 ) : ToPhone
 
 /**

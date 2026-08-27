@@ -158,6 +158,11 @@ internal fun modelChipLabel(model: String?): String {
 
 /** Compact human token count: 45200 -> "45k", 1000000 -> "1.0M" (one decimal, truncated). */
 fun formatTokens(n: Long): String = when {
+    // A billion tokens is an ordinary 30d figure on a busy machine, and without this tier it read as
+    // "4388.8M" — four significant digits in front of a unit, which is exactly the number nobody parses.
+    // Added with the cache-hit traceability line (issue #323), whose whole job is being read; it only ever
+    // changes output that was already past the M tier's useful range.
+    n >= 1_000_000_000 -> "${(n / 100_000_000) / 10.0}B"
     n >= 1_000_000 -> "${(n / 100_000) / 10.0}M" // integer /100k then /10.0 = one truncated decimal
     n >= 1_000 -> "${n / 1000}k"
     else -> n.toString()
@@ -195,7 +200,16 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit, onHandoff: (
                     AgentTag(repo.sessionAgent.value ?: AgentKind.CLAUDE, small = false)
                 }
                 Hairline()
-                AboutRow(stringResource(Res.string.label_model), repo.model.value ?: stringResource(Res.string.value_default))
+                // Same rule as the desktop header (issue #320): "default" is only true for Claude, whose
+                // account HAS a default model. A dsh/OpenCode session whose backend never named its model
+                // is unknown — and this row is a status readout, so it must not invent one.
+                AboutRow(
+                    stringResource(Res.string.label_model),
+                    repo.model.value ?: stringResource(
+                        if ((repo.sessionAgent.value ?: AgentKind.CLAUDE) == AgentKind.CLAUDE) Res.string.value_default
+                        else Res.string.value_unknown,
+                    ),
+                )
                 Hairline()
                 AboutRow(stringResource(Res.string.label_effort), repo.effort.value ?: stringResource(Res.string.value_default))
                 if (repo.serviceTier.value == "priority") {

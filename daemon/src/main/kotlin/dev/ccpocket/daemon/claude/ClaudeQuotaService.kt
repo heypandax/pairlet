@@ -117,7 +117,12 @@ class ClaudeQuotaService(
         val token = when (val c = withContext(Dispatchers.IO) { credentials() }) {
             is QuotaCredential.Present -> c.accessToken
             QuotaCredential.Missing -> return ClaudeQuota(status = CLAUDE_QUOTA_NO_TOKEN, error = "not signed in to a Claude subscription")
-            QuotaCredential.Expired -> return ClaudeQuota(status = CLAUDE_QUOTA_NO_TOKEN, error = "the stored Claude login has expired")
+            // TRANSIENT, not signed-out: the OAuth token expires ~8h after the last claude run and renews
+            // itself the next time ANY claude runs. Mapping this to NO_TOKEN made the strip vanish every
+            // night and reappear mid-morning (observed daily in the QuotaRoute log, 08-24→08-27) — the
+            // client clears its snapshot on NO_TOKEN but keeps an aging one on a transient status, which
+            // is the honest render for "the numbers are stale until claude next runs".
+            QuotaCredential.Expired -> return ClaudeQuota(status = CLAUDE_QUOTA_NETWORK, error = "the stored Claude login has expired — it renews the next time Claude runs")
         }
         return when (val out = transport(token)) {
             is HttpOutcome.Body -> parse(out.text, now())

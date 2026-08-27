@@ -49,7 +49,8 @@ import java.nio.file.Path
  * ## v1 scope (deliberately narrow)
  *
  * Session discovery, history replay, opening a session, sending/receiving messages including live
- * streaming, and (issue #291) the question/approval bridge. NOT included: usage accounting, model
+ * streaming, (issue #291) the question/approval bridge, and (issue #320) the session's self-reported
+ * model / reasoning effort / context window plus its live per-call token usage. NOT included: model
  * switching, tool cards, the web UI, plugins.
  *
  * ## Two product constraints worth quoting in the follow-up work
@@ -94,12 +95,27 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
      *  backend's whole life (not per process) and is [DshAskLedger.reset] on every attach, because an
      *  rpcId only means anything to the host process that minted it. */
     private val asks = DshAskLedger(
-        ourSession = { sessionId },
+        ourSession = { ourSessionId() },
         send = { rpcId, value -> api?.respond(rpcId, value) ?: DshRespond.UNREACHABLE },
         // A refused reply is surfaced as a NOTICE, not a turn error: the dsh turn really is still running
         // (that is the whole problem), and faking a TurnResult would tell the phone it had ended.
         report = { message -> io?.inject?.invoke(syntheticNotice("⚠️ $message")) },
     )
+
+    /**
+     * The session id this backend may claim frames for — issue #321.
+     *
+     * `resumeId` stands in until `session.create`/resume has landed [sessionId], and a RESUMED id is
+     * provably ours: the conversation asked the host for exactly that session. That closes the one window
+     * where an ask that really was ours got dropped — the host replays still-pending `…/requested` frames
+     * the moment a mux subscribes, which is BEFORE `openSession` assigns [sessionId]. A dropped ask is not
+     * a lost card, it is a dsh turn that then waits forever (dsh has no timeout of its own).
+     *
+     * A FRESH session keeps the strict null, and must: before `session.create` returns our session does not
+     * exist yet, so no pending ask can possibly belong to it, and claiming one would be claiming somebody
+     * else's.
+     */
+    private fun ourSessionId(): String? = sessionId ?: resumeId
 
     /** Guards [sessionId] and [pendingPrompts] so the opening turn can never be lost to a race between
      *  "the session is not open yet, buffer it" and "the session just opened, flush the buffer". */
@@ -268,7 +284,7 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         // The mux is MULTIPLEXED across every session the host holds — including sub-agents' own
         // sessions. Without this filter another session's output would be spliced into this chat.
         val frameSession = payload.str("sessionId")
-        val ours = sessionId
+        val ours = ourSessionId()
         if (frameSession != null && ours != null && frameSession != ours) return emptyList()
 
         return when (method) {
@@ -319,8 +335,31 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
                     else -> emptyList()
                 }
             }
-            // Dropped on purpose — already streamed as chunks above.
-            "assistant/message" -> emptyList()
+            // The session's real context window, straight off dsh's own wire (issue #320) — the header's
+            // usage % has no denominator without it, because no window table on our side knows deepseek ids.
+            "request/context" -> listOf(
+                runtimeMeta(model = data?.str("model"), contextWindow = data?.long("contextWindow"))
+                    ?: AgentEvent.Ignored(type),
+            )
+            // The resolved per-request configuration. `reasoningEffort` is the session header's only source
+            // for the level a dsh turn actually runs at.
+            // ⚠️ `config.maxTokens` is deliberately NOT read: it is the OUTPUT cap (256k on the same model
+            // that reports a 1,000,000-token window above), and mistaking it for the context window would
+            // understate occupancy four-fold. The window comes from `request/context`, full stop.
+            "request/header" -> {
+                val config = data?.obj("header")?.obj("config")
+                listOf(
+                    runtimeMeta(model = config?.str("model"), effort = config?.str("reasoningEffort"))
+                        ?: AgentEvent.Ignored(type),
+                )
+            }
+            // The assembled reply is still NOT rendered — it was already streamed as chunks above (see the
+            // class comment: live takes the deltas, disk takes the message). What it IS mined for is the two
+            // facts nothing else on the live wire carries: which model answered, and what the call cost.
+            "assistant/message" -> listOfNotNull(
+                runtimeMeta(model = data?.obj("message")?.obj("source")?.str("model")),
+                assistantUsage(data),
+            )
             "turn/end" -> listOf(AgentEvent.TurnResult(finalText = null, usage = null, isError = false))
             // v1 is text-only in BOTH the live and the replay path, so tool events render nothing. Doing
             // it in one path only would make a resumed session look different from the live one.
@@ -328,6 +367,49 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
                 listOf(AgentEvent.Ignored(type))
             else -> listOf(AgentEvent.Ignored(type ?: "dsh-event"))
         }
+    }
+
+    /** A [AgentEvent.RuntimeMeta] only when at least one field is really present — an all-null event would
+     *  travel to the Conversation to say nothing, and blanks are dropped so a `""` can never displace a
+     *  model we already know. */
+    private fun runtimeMeta(
+        model: String? = null,
+        effort: String? = null,
+        contextWindow: Long? = null,
+    ): AgentEvent.RuntimeMeta? {
+        val m = model?.takeIf { it.isNotBlank() }
+        val e = effort?.takeIf { it.isNotBlank() }
+        val w = contextWindow?.takeIf { it > 0 }
+        return if (m == null && e == null && w == null) null else AgentEvent.RuntimeMeta(m, e, w)
+    }
+
+    /**
+     * One `assistant/message`'s token spend, normalized to cc-pocket's disjoint columns (issue #320).
+     *
+     * ⚠️ `usage` sits under `data` as a SIBLING of `message`, NOT inside it — the same trap
+     * [DshUsageScanner] calls out; reading `message.usage` yields nothing and the statusline stays empty.
+     *
+     * DeepSeek is OpenAI-lineage, so `cacheReadTokens` is a SUBSET of `inputTokens`, while
+     * [dev.ccpocket.protocol.TokenUsage.contextTokens] adds its four columns as DISJOINT sets. Passing the
+     * pair through raw would count the cached prefix twice and overstate occupancy. Subtracting is exactly
+     * what [DshUsageScanner] does on the disk path, so the live statusline and the usage page agree.
+     *
+     * Absent or all-zero usage returns null rather than zeros: a zero [AgentEvent.AssistantUsage] becomes a
+     * zero TurnDone usage, which snaps the phone's context readout back to 0% mid-session — the same reason
+     * [AgentEvent.TurnResult] carries a null usage instead of placeholder zeros.
+     */
+    private fun assistantUsage(data: JsonObject?): AgentEvent.AssistantUsage? {
+        val usage = data?.obj("usage") ?: return null
+        val input = usage.long("inputTokens") ?: 0L
+        val cacheRead = usage.long("cacheReadTokens") ?: 0L
+        if (input <= 0L && cacheRead <= 0L) return null
+        return AgentEvent.AssistantUsage(
+            inputTokens = (input - cacheRead).coerceAtLeast(0L),
+            // null vs 0 is a real distinction here: dsh has NO cache-write counter (null = never reported),
+            // while `cacheReadTokens` IS reported and is simply 0 on a cold prompt (a measurement).
+            cacheCreationInputTokens = null,
+            cacheReadInputTokens = cacheRead,
+        )
     }
 
     // ---- outbound ----
@@ -373,6 +455,12 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
      */
     internal fun bindSessionForTest(id: String) {
         sessionId = id
+    }
+
+    /** VISIBLE FOR TESTS ONLY. Stands in for the `resumeId` [attach] would have taken off the spec, so the
+     *  pre-`session.create` window issue #321 closes can be exercised without a live host. */
+    internal fun bindResumeForTest(id: String) {
+        resumeId = id
     }
 
     override suspend fun interrupt() {
@@ -438,8 +526,10 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         DshTranscriptScanner.find(sessionId, workdir)?.let { DshTranscriptReplay.page(it.file, beforeSeq, limit) }
             ?: ReplaySlice.EMPTY
 
-    /** dsh records per-turn usage in `assistant/message.usage`, but usage accounting is out of v1 scope
-     *  and a half-populated statusline reads worse than an absent one. */
+    /** The RESUME SEED only — the occupancy a reopened session shows BEFORE its first new turn. Still null:
+     *  issue #320 wired the LIVE path (`assistant/message.usage` → [assistantUsage]), so the readout appears
+     *  as soon as the session answers once, but seeding it off disk means re-reading the transcript's tail
+     *  and is a separate piece of work. Null (no readout) beats a stale or wrong one. */
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
 
     // ---- synthetic frames (our own injections, distinguished from dsh's by their `type`) ----

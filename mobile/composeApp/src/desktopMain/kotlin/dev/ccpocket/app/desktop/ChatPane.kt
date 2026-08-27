@@ -178,6 +178,7 @@ import dev.ccpocket.app.resources.thinking_streaming
 import dev.ccpocket.app.resources.thought_for
 import dev.ccpocket.app.resources.turn_done_marker
 import dev.ccpocket.app.resources.value_default
+import dev.ccpocket.app.resources.value_unknown
 import org.jetbrains.compose.resources.stringResource
 import dev.ccpocket.app.share.previewFile
 import dev.ccpocket.app.ui.CheckMiniGlyph
@@ -1070,9 +1071,16 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
         val ctx = model.contextUsed?.let { u ->
             model.contextWindow?.let { w -> "  ·  ctx ${(u * 100 / w)}%" } ?: "  ·  ctx ~${u / 1000}k"
         } ?: ""
-        // model segment falls back to "default" (never a dangling " · ") for a pre-first-turn session the
-        // daemon couldn't eager-resolve — mirrors mobile's placeholder + the ⋯ Model row (issue #96)
-        val modelLabel = model.chatModel.ifBlank { stringResource(Res.string.value_default) }
+        // model segment always says SOMETHING (never a dangling " · ") for a pre-first-turn session the
+        // daemon couldn't eager-resolve — mirrors mobile's placeholder + the ⋯ Model row (issue #96).
+        // "default" is a Claude FACT (the account's default model when the user pinned none); for every
+        // other agent it was a lie the header told for the whole session — a dsh chat running
+        // deepseek-v4-flash read "default" (issue #320). If the backend hasn't named its model, say so.
+        val unknownModel = stringResource(Res.string.value_unknown)
+        val defaultModel = stringResource(Res.string.value_default)
+        val modelLabel = model.chatModel.ifBlank {
+            if (model.chatAgent == AgentKind.CLAUDE) defaultModel else unknownModel
+        }
         // pathLinked left-clicks OPEN the workdir (when it's local); right-click adds "Copy path" so the
         // cwd is grabbable even on a remote session where it isn't a link at all. Copies the bare workdir,
         // not the whole machine·branch·model meta line.
@@ -1268,6 +1276,10 @@ private fun MessageRow(
         is ChatItem.QuestionsWithdrawn -> Text(
             stringResource(Res.string.questions_withdrawn), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
         )
+        // asked but never answered (issue #321) — the read-only counterpart of the live card the tail
+        // item docks. It used to fall through to a plain tool row named "AskUserQuestion", which is why
+        // it read as a question you could see and not complete.
+        is ChatItem.QuestionsUnanswered -> dev.ccpocket.app.ui.QuestionsUnansweredRow(item.text)
         // OpenCode asked a question — read-only card (no answer channel yet, issue #210)
         is ChatItem.OpenCodeQuestion -> dev.ccpocket.app.ui.OpenCodeQuestionCard(item.questions)
         // a live turn's end: quiet ✓ divider so "finished" stays visible after the caret stops blinking

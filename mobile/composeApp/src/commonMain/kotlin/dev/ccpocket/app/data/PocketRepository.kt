@@ -344,6 +344,11 @@ private data class PendingGrantMutation(
     val clearAll: Boolean = false,
 )
 
+/** The tool name every backend's transcript replay files an AskUserQuestion under (the daemon's own
+ *  `TranscriptReplay.ASK_TOOL` / `DshTranscriptReplay.ASK_TOOL`, and the live `AskQuestions.TOOL`). It is
+ *  a display key on the wire, not an enum, so the client matches the same literal. */
+private const val ASK_QUESTION_TOOL = "AskUserQuestion"
+
 sealed interface ChatItem {
     /** [pending] = sent from this device but the daemon hasn't echoed any evidence back yet (stream
      *  chunk / tool event / turn end). Stays true while the link is down so the UI can say so —
@@ -419,6 +424,21 @@ sealed interface ChatItem {
 
     /** Claude withdrew its questions (control_cancel) — muted one-liner where the card used to be. */
     data object QuestionsWithdrawn : ChatItem
+
+    /**
+     * A replayed AskUserQuestion that NOBODY ever answered — issue #321.
+     *
+     * The live, answerable card is a [dev.ccpocket.protocol.PermissionAsk]; this is its historical
+     * counterpart, and until now the two were indistinguishable on screen: an unanswered question replayed
+     * as a plain [Tool] row whose preview happened to be the question text, so it read as "a question I
+     * can see but cannot complete" — exactly the report. dsh makes it bite hardest (its turns wait on an
+     * unanswered question forever), but the shape is backend-agnostic: any interrupted Claude turn leaves
+     * the same row behind.
+     *
+     * [text] is the question text the daemon carried on the row, rendered read-only and clearly labelled
+     * as unanswered. A card that cannot be answered must SAY so rather than look like one that can.
+     */
+    data class QuestionsUnanswered(val text: String) : ChatItem
 
     /** OpenCode's `question` tool surfaced as a READ-ONLY question card (issue #210, phase 1): the
      *  parsed questions + options, rendered like the AskUserQuestion card but non-interactive with a
@@ -2924,7 +2944,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 replace(archivedSessions, f.items)
                 archivedRefreshing.value = false
             }
-            is Usage -> { usage.value = f; usageLoading.value = false }
+            // usageAgent advances WITH the reply, never with the selection (issue #323): the page keeps
+            // rendering the previous reply while the next fetch is in flight, so a label read off the
+            // chip would name an agent whose numbers are not on screen yet — a mislabeled ratio, which is
+            // the exact failure the per-agent label exists to remove.
+            is Usage -> { usage.value = f; usageAgent.value = usageRequestedAgent; usageLoading.value = false }
             // The Claude subscription allowance behind the CLI's `/usage` panel. Two different kinds of
             // non-OK reply, deliberately handled differently:
             //  · NO_TOKEN is AUTHORITATIVE — the machine signed out, or authenticates with an API key.
@@ -3770,6 +3794,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // workflowRunId binds a Workflow card to its separately-pushed run (issue #106)
         ChatRole.TOOL -> h.answers?.let { a -> ChatItem.QuestionsAnswered(a.map { it.question to it.answer }) }
             ?: OpenCodeQuestionParse.parse(h.tool ?: "", h.text)?.let { ChatItem.OpenCodeQuestion(it) }
+            // …and one with NO answers is a question that never got one (issue #321). Falling through to
+            // the plain tool row below made it read as a live-looking card with nothing to tap; say what
+            // it actually is. Every backend's replay names the tool the same way (see the daemon's
+            // TranscriptReplay / DshTranscriptReplay ASK_TOOL), so this needs no per-agent branch.
+            ?: h.text.takeIf { h.tool == ASK_QUESTION_TOOL }?.let { ChatItem.QuestionsUnanswered(it) }
             ?: ChatItem.Tool(h.tool ?: "tool", h.text, ok = h.ok, output = h.output, workflowRunId = h.workflowRunId)
     }
 
@@ -4162,10 +4191,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val usage = mutableStateOf<Usage?>(null)
     val usageLoading = mutableStateOf(false)
 
+    /** Which backend [usage] actually covers — null = the all-backends total (issue #323). Distinct from
+     *  the page's chip selection: this one only moves when a reply lands, so whatever labels the snapshot
+     *  describes the snapshot. The daemon does not echo the filter it applied, and asking it to would
+     *  mislabel every filter-capable daemon released before the echo — so the client remembers instead. */
+    val usageAgent = mutableStateOf<AgentKind?>(null)
+    private var usageRequestedAgent: AgentKind? = null
+
     /** Ask the daemon to aggregate usage over the last [days] local days; the reply lands in [usage].
      *  [agent] non-null narrows it to one backend (issue #258); null is the all-backends total. */
     fun fetchUsage(days: Int = 7, agent: AgentKind? = null) {
         usageLoading.value = true
+        usageRequestedAgent = agent
         scope.launch { send(FetchUsage(days, agent)) }
     }
 

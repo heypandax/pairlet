@@ -48,6 +48,7 @@ import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.usage_agent_all
 import dev.ccpocket.app.resources.usage_by_model
 import dev.ccpocket.app.resources.usage_cache
+import dev.ccpocket.app.resources.usage_cache_ratio
 import dev.ccpocket.app.resources.usage_cost
 import dev.ccpocket.app.resources.usage_empty
 import dev.ccpocket.app.resources.usage_empty_hint
@@ -62,6 +63,8 @@ import dev.ccpocket.app.resources.usage_per_hour
 import dev.ccpocket.app.resources.usage_period_range
 import dev.ccpocket.app.resources.usage_period_today
 import dev.ccpocket.app.resources.usage_requests
+import dev.ccpocket.app.resources.usage_scope_all_agents
+import dev.ccpocket.app.resources.usage_scope_no_filter
 import dev.ccpocket.app.resources.usage_selected
 import dev.ccpocket.app.resources.usage_title
 import dev.ccpocket.app.resources.usage_tokens
@@ -69,6 +72,7 @@ import dev.ccpocket.app.resources.usage_trend
 import dev.ccpocket.app.resources.usage_vs_prev_days
 import dev.ccpocket.app.resources.usage_vs_yesterday
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.Usage
 import dev.ccpocket.protocol.UsageDay
@@ -92,7 +96,10 @@ private fun money(v: Double): String {
  * All views branch on the reply's own shape (u.days.size), so a stale reply keeps rendering coherently while
  * the next fetch is in flight. Data is aggregated by the daemon from EVERY backend's own records — Claude
  * and Codex transcripts, the OpenCode and ZCode databases, and Kimi Code's wire logs (issue #258).
- * A second header row filters that total to ONE agent; "All" (the default) is the unfiltered view.
+ * A second header row filters that total to ONE agent; "All" (the default) is the unfiltered view — and
+ * the cache-hit card names that scope in its own label (issue #323), because a RATIO mixed across backends
+ * with very different cache behaviour is unreadable without knowing whose it is, and prints the raw
+ * cache-read / (input + cache-read) tokens beneath it so the percentage can be traced, not just believed.
  *
  * [embedded] drops the page's OWN back arrow + title (and its system-back interception) for a host that
  * already provides them — the desktop settings modal, which frames it as one pane among ten. Everything
@@ -167,7 +174,15 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit, embedded: Boolean = 
         // strip in the desktop sidebar footer (desktop/QuotaBar.kt). This page stays what it always was:
         // token accounting read out of local transcripts.
         when {
-            u != null && (u.tokensToday > 0 || u.models.isNotEmpty() || u.days.any { it.tokens > 0 }) -> Populated(u)
+            u != null && (u.tokensToday > 0 || u.models.isNotEmpty() || u.days.any { it.tokens > 0 }) ->
+                // The cache-hit card names WHOSE number it is (issue #323), so it needs the effective
+                // agent — and `filterable`, since a daemon that ignores the filter hides the chips above
+                // and would otherwise leave a whole-machine mix looking like one agent's rate.
+                // …and it names the agent the RENDERED reply covers (repo.usageAgent), not the chip that
+                // is currently lit: the page deliberately keeps the previous reply on screen while the
+                // next fetch runs, so labelling from the selection would put a new agent's name over an
+                // old agent's numbers every time the chips are tapped.
+                Populated(u, repo.usageAgent.value, filterable)
             u != null -> Empty(u.days.size)
             !connected || timedOut -> Offline()
             else -> Loading()
@@ -176,7 +191,7 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit, embedded: Boolean = 
 }
 
 @Composable
-private fun Populated(u: Usage) {
+private fun Populated(u: Usage, agent: AgentKind?, filterable: Boolean) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         // Range-scoped headline: the Tokens hero is the WINDOW total (== the sum of the trend it sits above),
         // so the top number and the chart never contradict, and switching Today/7d/30d visibly changes it.
@@ -211,13 +226,42 @@ private fun Populated(u: Usage) {
         val requests = u.requestsWindow ?: u.requestsToday
         val cacheHit = if (windowMode) u.cacheHitPctWindow else u.cacheHitPct
         val cost = if (windowMode) u.costUsdWindow else u.costUsdToday
+        // issue #323: cache hit is the one sub-metric that is unreadable unless you know WHOSE it is. The
+        // page aggregates every backend the daemon scanned, and their real hit rates differ by tens of
+        // points — a DeepSeek-heavy machine reading 55% next to an Anthropic-heavy account's 95% looks like
+        // a parsing bug when it is simply two different populations. So the label always carries the agent
+        // dimension, "all agents" included: it was the UNLABELED aggregate that made the number impossible
+        // to argue with. The other two cards stay scope-only — requests and cost are sums, and a sum over
+        // more agents is self-evidently bigger; a RATIO over more agents is just a number you can't place.
+        val cacheAgent = agent?.let(::agentName) ?: stringResource(Res.string.usage_scope_all_agents)
+        // The raw numerator/denominator the percentage was computed from. They come off the SAME window
+        // accumulators as cacheHitPctWindow, so they ride the same windowMode gate: a ratio describing a
+        // different window than the number above it would re-create the "where is this from?" problem it
+        // exists to answer. An old daemon sends neither → no line, calmly.
+        val cacheRead = if (windowMode) u.cacheReadTokensWindow else null
+        val cacheBase = if (windowMode) u.cacheBaseTokensWindow else null
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             StatCard(Modifier.weight(1f), scopeLabel(stringResource(Res.string.usage_requests), metricScope), requests.toString())
             if (cost != null) StatCard(Modifier.weight(1f), scopeLabel(stringResource(Res.string.usage_cost), metricScope), money(cost))
         }
         Spacer(Modifier.height(10.dp))
-        StatCard(Modifier.fillMaxWidth(), scopeLabel(stringResource(Res.string.usage_cache), metricScope), cacheHit?.let { "$it%" }, arcPct = cacheHit)
+        StatCard(
+            Modifier.fillMaxWidth(),
+            agentScopeLabel(stringResource(Res.string.usage_cache), metricScope, cacheAgent),
+            cacheHit?.let { "$it%" },
+            arcPct = cacheHit,
+            foot = if (cacheRead != null && cacheBase != null)
+                stringResource(Res.string.usage_cache_ratio, formatTokens(cacheRead), formatTokens(cacheBase)) else null,
+        )
+        // A daemon that can't filter hides the chip row entirely, so without this line NOTHING on the page
+        // would say the rate covers the whole machine — the worst case of #323, since it's also the case
+        // where the label's "all agents" can't be changed by the reader to check it.
+        if (!filterable) Text(
+            stringResource(Res.string.usage_scope_no_filter),
+            color = Tok.muted, fontSize = 11.sp, style = tightCenter(11.sp),
+            modifier = Modifier.padding(top = 6.dp),
+        )
 
         // Each range answers its own question: Today → hourly bars, 7d → daily bars, 30d → a calendar heatmap.
         // Branch on the reply's own shape (span == days.size), not the selected tab — while a fetch is in flight
@@ -292,10 +336,11 @@ private fun HeroCard(tokens: Long, scope: String, period: String, deltaPct: Int?
  * A secondary scope-tagged metric (its label carries "· today"/"· 7d"/"· 30d"). [value] null → a labeled "not
  * available yet" placeholder (never a bare dash), so a missing cache-hit reads as calm-not-broken; the caller
  * drops the cost card entirely instead (a null cost is common — subscriptions/Codex record none). Optional
- * [arcPct] draws the cache-hit gauge.
+ * [arcPct] draws the cache-hit gauge; optional [foot] is a muted line UNDER the value showing the raw
+ * numbers it was derived from (issue #323) — omitted, and the card is exactly the two-line card it was.
  */
 @Composable
-private fun StatCard(modifier: Modifier, label: String, value: String?, arcPct: Int? = null) {
+private fun StatCard(modifier: Modifier, label: String, value: String?, arcPct: Int? = null, foot: String? = null) {
     Column(
         modifier.clip(RoundedCornerShape(14.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(14.dp))
             .padding(horizontal = 15.dp, vertical = 13.dp),
@@ -307,12 +352,21 @@ private fun StatCard(modifier: Modifier, label: String, value: String?, arcPct: 
             else Text(stringResource(Res.string.usage_na), color = Tok.muted, fontSize = 12.5.sp, modifier = Modifier.weight(1f, fill = false).padding(bottom = 3.dp))
             if (arcPct != null) Arc(arcPct)
         }
+        // tightCenter: this file's small type is set next to geometry (the arc) and to 22sp values, and a
+        // font-metric line box drifts between Roboto Mono / SF Mono / the desktop fallback — pin it to the
+        // size instead (project rule, TightText.kt).
+        if (foot != null) Text(foot, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = tightCenter(11.sp))
     }
 }
 
 /** "Requests" -> "Requests · 7d": pins a sub-metric's baseline in its label — the window scope ("today"/"7d"/
  *  "30d"), or "today" when falling back to an old daemon's today-only values. */
 private fun scopeLabel(metric: String, scope: String) = "$metric · $scope"
+
+/** "Cache hit" -> "Cache hit · 7d · Claude" / "… · all agents": a RATIO also needs the population it was
+ *  taken over, not just the time window (issue #323). [agent] is the selected agent's name, or the explicit
+ *  all-agents wording — never blank, because an unlabeled aggregate is the thing this fixes. */
+private fun agentScopeLabel(metric: String, scope: String, agent: String) = "${scopeLabel(metric, scope)} · $agent"
 
 private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 

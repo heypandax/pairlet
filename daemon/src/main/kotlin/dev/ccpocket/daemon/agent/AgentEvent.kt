@@ -14,6 +14,25 @@ sealed interface AgentEvent {
     /** The authoritative session_id carrier (Claude system/init; Codex thread/started → thread.id). */
     data class SessionInit(val sessionId: String?, val cwd: String?, val model: String?) : AgentEvent
 
+    /**
+     * Session metadata a backend MEASURED on its own wire after the init frame — issue #320.
+     *
+     * [SessionInit] is the wrong carrier for it: it arrives once, before the facts exist (dsh only names
+     * its model on the first `request/context` / `assistant/message`), and the Conversation hangs fork
+     * convergence, group inheritance and rewind journalling off it — re-emitting one to carry a late model
+     * would replay all of that. This event carries nothing BUT the metadata.
+     *
+     * Every field is independently optional: null = "this frame didn't say", never "no value". A non-null
+     * field is always a runtime FACT off the wire — never inferred from a model name, which is exactly the
+     * guesswork issue #320 forbids (a context window sniffed from an id is how "default" got invented in
+     * the first place).
+     */
+    data class RuntimeMeta(
+        val model: String? = null,
+        val effort: String? = null,
+        val contextWindow: Long? = null,
+    ) : AgentEvent
+
     /** [parentId] on the assistant/tool events = the enclosing sub-agent's Task/Agent tool_use id
      *  (Claude stream-json `parent_tool_use_id`); null for main-chain events and for Codex. */
     data class AssistantText(val text: String, val parentId: String? = null) : AgentEvent

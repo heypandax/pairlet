@@ -458,6 +458,44 @@ class SerializationRoundTripTest {
         assertFalse("costUsdWindow" in unset, unset)
     }
 
+    /**
+     * issue #323: the raw cache-hit numerator/denominator are TRAILING optionals. The App only draws the
+     * "traced back to these tokens" line when it has BOTH, so the compatibility requirement is the usual
+     * one — an old daemon's frame, which has no such keys, must decode with both null rather than throw
+     * (a throw would drop the whole usage frame and blank a page that used to work).
+     */
+    @Test
+    fun usage_cache_raw_tokens_are_trailing_optionals() {
+        // new daemon → new app: the two accumulators ride alongside the percentage they produced
+        val env = Envelope(
+            id = "u11", ts = 0,
+            body = Usage(
+                days = listOf(UsageDay("Mon", 100, date = "2026-07-06")),
+                requestsWindow = 428, cacheHitPctWindow = 97,
+                cacheReadTokensWindow = 4_388_842_059, cacheBaseTokensWindow = 4_389_087_518,
+            ),
+        )
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"cacheReadTokensWindow\":4388842059" in json, json)
+        assertTrue("\"cacheBaseTokensWindow\":4389087518" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        // new app ← OLD daemon (no keys at all): everything around them still decodes and both read null,
+        // so the card keeps its percentage and simply omits the traceability line
+        val old = """{"id":"u12","ts":0,"to":"PEER","body":{"t":"pocket/usage","days":[{"label":"Mon","tokens":100}],
+            "models":[],"tokensToday":100,"requestsToday":2,"requestsWindow":2,"cacheHitPctWindow":50}}"""
+        val back = PocketJson.decodeFromString<Envelope>(old).body as Usage
+        assertEquals(50, back.cacheHitPctWindow, "the neighbouring window fields must survive untouched")
+        assertNull(back.cacheReadTokensWindow)
+        assertNull(back.cacheBaseTokensWindow)
+
+        // unset (null) is omitted on the wire (explicitNulls=false) — byte-identical to an old daemon's frame,
+        // so a daemon with no cache sample sends exactly what a daemon that never knew the field sends
+        val unset = PocketJson.encodeToString(Envelope(id = "u13", ts = 0, body = Usage(days = listOf(UsageDay("Mon", 1)))))
+        assertFalse("cacheReadTokensWindow" in unset, unset)
+        assertFalse("cacheBaseTokensWindow" in unset, unset)
+    }
+
     @Test
     fun sessionGone_roundtrips() {
         val env = Envelope(id = "3", ts = 0, body = SessionGone("c9"))

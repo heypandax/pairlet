@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.protocol.AskQuestion
 import dev.ccpocket.protocol.PermissionAsk
 import org.jetbrains.compose.resources.stringResource
@@ -477,6 +478,42 @@ private fun TinyChip(text: String, muted: Boolean = false) {
             .background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(6.dp))
             .padding(horizontal = 7.dp, vertical = 2.dp),
     )
+}
+
+/**
+ * Unanswered: a replayed question NOBODY ever answered — issue #321.
+ *
+ * Sits between [QuestionsAnsweredRow] (it has answers) and [QuestionsWithdrawnRow] (the agent took it
+ * back): this one was asked, went unanswered, and the turn ended around it. It borrows the answered row's
+ * frame so it still reads as a question, but everything actionable is gone and the label says why — the
+ * whole complaint in #321 was a question card you could see and not complete, with nothing explaining it.
+ * Muted, not alarming: an unanswered question is a dead end, not an error.
+ */
+@Composable
+fun QuestionsUnansweredRow(text: String) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier.fillMaxWidth().clip(shape).background(Tok.surface).border(1.dp, Tok.hair, shape)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        QBadge(22.dp)
+        Column(Modifier.weight(1f)) {
+            Text(
+                stringResource(Res.string.questions_unanswered), color = Tok.muted, fontSize = 11.5.sp,
+                style = tightCenter(11.5.sp),
+            )
+            // Both Texts carry tightCenter, never just one: this Column is geometrically centred against
+            // the QBadge beside it, and a mixed row is the alignment trap CLAUDE.md's rule exists for.
+            if (text.isNotBlank()) {
+                Text(
+                    text, color = Tok.tx2, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    style = tightCenter(13.sp), modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+    }
 }
 
 /** Withdrawn: the muted one-liner left where the card used to be (dot + text, no drama). */

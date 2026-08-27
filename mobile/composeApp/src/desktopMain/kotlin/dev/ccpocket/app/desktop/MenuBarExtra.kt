@@ -26,12 +26,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.rememberWindowState
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.tray_exit_app
+import dev.ccpocket.app.resources.tray_open_app
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.Font
 import java.awt.GraphicsConfiguration
+import java.awt.GraphicsDevice
 import java.awt.GraphicsEnvironment
 import java.awt.RenderingHints
 import java.awt.Toolkit
@@ -40,6 +44,7 @@ import java.awt.geom.Path2D
 import java.awt.image.BaseMultiResolutionImage
 import java.awt.image.BufferedImage
 import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.skiko.SystemTheme
 import org.jetbrains.skiko.currentSystemTheme
 
@@ -55,6 +60,8 @@ import org.jetbrains.skiko.currentSystemTheme
  * Compose [Window] packed to the popover's content, anchored under the click (macOS) or above it
  * (bottom taskbars), dismissed on focus loss / Esc; ⌘⏎ raises the main window. The popover renders the
  * SAME [TrayPopover] the title-bar dot shows in-window — one surface, promoted to the OS layer.
+ * Windows additionally gets a right-click menu drawn by the OS ([trayContextMenu]) and a transparent
+ * flyout shell so the 8dp corners can actually read ([trayWindowChrome]) — both issue #322.
  *
  * Headless / unsupported trays (Linux without a tray, CI) compose to nothing, so every other platform
  * behavior is unchanged.
@@ -143,10 +150,54 @@ internal fun MenuBarExtra(
             if (added) runCatching { java.awt.SystemTray.getSystemTray().remove(trayIcon) }
         }
     }
+
+    // ── 右键：Windows 的原生上下文菜单（issue #322） ──
+    // stringResource 是 composable，effect 里调不了，所以文案先在组合作用域取出来，再当 key 用
+    // （换语言 → 菜单重建；托盘图标本身不重挂，避免语言开关顺带让通知区图标闪一下）。
+    val openLabel = stringResource(Res.string.tray_open_app)
+    val exitLabel = stringResource(Res.string.tray_exit_app)
+    val menuSpec = trayContextMenu(isWindows, openLabel, exitLabel, canExit = onExitApplication != null)
+    // 菜单项活得比一次组合长，回调用 rememberUpdatedState 取最新的一份，避免钉死首次组合的闭包
+    val activate by rememberUpdatedState(onActivateWindow)
+    val exitApp by rememberUpdatedState(onExitApplication)
+    DisposableEffect(menuSpec) {
+        val items = menuSpec ?: return@DisposableEffect onDispose { }
+        // PopupMenu 在 headless 下构造即抛 HeadlessException；这里已被 supported 挡住，兜底照 file 里
+        // 其它 AWT 调用的写法用 runCatching，起不来就当没有右键菜单，左键那条路不受影响
+        val built = runCatching {
+            val menu = java.awt.PopupMenu()
+            val wired = items.map { item ->
+                val mi = java.awt.MenuItem(item.label)
+                val l = java.awt.event.ActionListener {
+                    anchor = null // 右键选中即收起左键浮层——两条路不该同时占着屏幕
+                    closedAt = System.currentTimeMillis()
+                    when (item.action) {
+                        TrayMenuAction.OPEN_MAIN -> activate()
+                        TrayMenuAction.EXIT_APP -> exitApp?.invoke()
+                    }
+                }
+                mi.addActionListener(l)
+                menu.add(mi)
+                mi to l
+            }
+            trayIcon.popupMenu = menu
+            menu to wired
+        }.getOrNull()
+        onDispose {
+            if (built != null) {
+                val (menu, wired) = built
+                trayIcon.popupMenu = null // 先摘引用，AWT 才肯放掉 popup 的 isTrayIconPopup 标记
+                wired.forEach { (mi, l) -> mi.removeActionListener(l) }
+                menu.removeAll()
+            }
+        }
+    }
     // every redraw asks the OS afresh; an appearance flip alone lands on the next state change or click
     LaunchedEffect(spec, appearancePing) { trayIcon.image = menuBarImage(spec, darkMenuBar = menuBarIsDark()) }
 
     // ── the anchored popover window ──
+    // 外壳（透明与否 / 谁画投影）在 issue #322 里分叉，探一次逐像素透明能力就够——同一台机器上它不会变
+    val chrome = remember(isWindows) { trayWindowChrome(isWindows, perPixelTranslucencySupported()) }
     val a = anchor
     if (a != null) {
         Window(
@@ -161,12 +212,17 @@ internal fun MenuBarExtra(
                 size = DpSize.Unspecified, // pack to the popover's content
             ),
             undecorated = true,
-            // OPAQUE on purpose: skiko 0.8.18 (CMP 1.7.3) crashes creating the Metal device for a
+            // OPAQUE on purpose ON macOS: skiko 0.8.18 (CMP 1.7.3) crashes creating the Metal device for a
             // TRANSPARENT window on macOS 26 "Tahoe" — EXC_BREAKPOINT in AppKit _NSWindowSetShadowProperties
             // via MetalRedrawer.createMetalDevice (JetBrains CMP-7352 / compose-multiplatform#3171). The
             // main window is undecorated+opaque and renders fine on the same OS, so this popover matches it:
             // the card fills an opaque root (below) and leans on the native window shadow instead of the
             // transparent-gutter self-shadow. Restore transparency (for rounded corners) after a skiko bump.
+            // 那个崩溃是 **macOS 独有的**（Metal/AppKit 路径），Windows 的 DirectX 后端不受影响，所以
+            // issue #322 在这里分叉：Windows 走透明。必须分叉是因为 DWM 只给「有 caption 的窗口」补圆角，
+            // 不透明的无边框窗口在 Win11 上永远是方角——浮层自己画的 8dp 圆角会被那块方角底盖掉，
+            // 发仔复报的「圆角没有正确呈现」就是这个。见 [trayWindowChrome]。
+            transparent = chrome.transparent,
             resizable = false,
             alwaysOnTop = true,
             title = "cc-pocket",
@@ -181,12 +237,14 @@ internal fun MenuBarExtra(
             },
         ) {
             // anchor under the glyph (or above a bottom taskbar); re-place whenever packing/content resizes
-            DisposableEffect(a) {
+            // 透明外壳时窗口比卡片大一圈（自绘投影的留白），落点要把那一圈扣回去——见 [winFlyoutWindowOrigin]
+            val gutter = if (chrome.selfShadow) WIN_FLYOUT_SHADOW_GUTTER else 0
+            DisposableEffect(a, gutter) {
                 val w = window
                 val l = object : java.awt.event.ComponentAdapter() {
-                    override fun componentResized(e: java.awt.event.ComponentEvent?) { placePopover(w, a) }
+                    override fun componentResized(e: java.awt.event.ComponentEvent?) { placePopover(w, a, gutter) }
                 }
-                placePopover(w, a)
+                placePopover(w, a, gutter)
                 w.addComponentListener(l)
                 onDispose { w.removeComponentListener(l) }
             }
@@ -207,9 +265,8 @@ internal fun MenuBarExtra(
             val rowCounts = model.attention.size to model.running.size
             LaunchedEffect(rowCounts) { window.pack() }
             PocketTheme(mode = model.themeMode) {
-                // Opaque root so the borderless window's square corners blend into the card colour; the
-                // OS supplies the drop shadow an opaque window gets for free. flat (elevated=false) card,
-                // no transparent-gutter self-shadow, no pointer triangle (it needs transparency to read).
+                // 两种外壳，见 [trayWindowChrome]：Windows 走透明窗口（圆角/投影归浮层自己），
+                // mac/Linux 走不透明窗口（圆角画不出来，但避开了 skiko 在 Tahoe 上的必崩）。
                 if (a.corner) {
                     // issue #292 — Windows flyout。入场按稿子上升 22dp + 淡入 250ms ease-out，但用
                     // graphicsLayer 而不是 AnimatedVisibility：后者在动画期间内容不参与测量，窗口会先
@@ -217,7 +274,7 @@ internal fun MenuBarExtra(
                     // 关闭那一刻窗口已经没了，没有可以淡的东西。
                     val intro = remember { Animatable(0f) }
                     LaunchedEffect(Unit) { intro.animateTo(1f, tween(250, easing = LinearOutSlowInEasing)) }
-                    Box(Modifier.background(Tok.surface)) {
+                    val flyout: @Composable () -> Unit = {
                         WinTrayFlyout(
                             model,
                             onOpenMain = { anchor = null; onActivateWindow() },
@@ -226,10 +283,19 @@ internal fun MenuBarExtra(
                                 alpha = intro.value
                                 translationY = (1f - intro.value) * 22.dp.toPx()
                             },
+                            // 透明外壳下窗口只是一块透明画布：圆角、描边、投影全由浮层自己画
+                            elevated = chrome.selfShadow,
                             onRelayout = { window.pack() },
                         )
                     }
+                    // issue #322：透明化之后**不能**再包这层不透明底——Tok.surface 会铺满整扇方角窗口，
+                    // 正好把浮层自己的 8dp 圆角填回直角。逐像素透明拿不到时（虚拟机 / 远程桌面 / 老驱动，
+                    // 见 [perPixelTranslucencySupported]）退回旧的不透明底，至少不比改动前差。
+                    if (chrome.transparent) flyout() else Box(Modifier.background(Tok.surface)) { flyout() }
                 } else {
+                    // Opaque root so the borderless window's square corners blend into the card colour; the
+                    // OS supplies the drop shadow an opaque window gets for free. flat (elevated=false) card,
+                    // no transparent-gutter self-shadow, no pointer triangle (it needs transparency to read).
                     Box(Modifier.background(Tok.raised)) {
                         TrayPopover(
                             model,
@@ -253,9 +319,81 @@ internal const val POPOVER_W = 360 // the opaque card's width (placePopover re-c
 /** Windows 浮层与工作区边缘的间距（issue #292 稿子：距右屏边 12px、任务栏上方 12px）。 */
 internal const val WIN_FLYOUT_GAP = 12
 
+/**
+ * 透明外壳下，浮层自绘投影要用的一圈透明外扩（issue #322）。
+ *
+ * 投影画在内容盒**之外**，而承载窗口是 pack 到内容的，不留这一圈就等于把投影整块裁掉——透明白开了。
+ * 取值**故意等于** [WIN_FLYOUT_GAP]：窗口整体外扩 12、落点再往回缩 12（[winFlyoutWindowOrigin]），
+ * 于是卡片与工作区边缘仍是稿子要的 12px，而窗口本身刚好贴齐工作区角、一个像素都不压到任务栏上——
+ * 透明像素照样吃鼠标事件，压过去就会吞掉任务栏上的点击。
+ */
+internal const val WIN_FLYOUT_SHADOW_GUTTER = WIN_FLYOUT_GAP
+
 /** 宿主是否 Windows —— [MenuBarExtra] 的载体分叉默认值（Main.kt 也各自算过一次，两处含义相同）。 */
 internal fun hostIsWindows(): Boolean =
     System.getProperty("os.name").orEmpty().lowercase().contains("windows")
+
+// ── 托盘右键菜单（issue #322） ────────────────────────────────────────────────────────────────────
+
+/** 右键菜单一项对应的出口。 */
+internal enum class TrayMenuAction { OPEN_MAIN, EXIT_APP }
+
+/** 右键菜单的一项：[label] 已本地化，[action] 是它落到哪个出口。 */
+internal data class TrayMenuItem(val action: TrayMenuAction, val label: String)
+
+/**
+ * 托盘图标右键该弹什么 —— **纯函数**，因为另一半（[java.awt.PopupMenu]）在 headless 下构造即抛，
+ * 测不了；把「挂不挂、挂哪几项」的决策搬到 AWT 之外，至少这一半是可断言的。
+ *
+ * `null` = **一个 popupMenu 都不挂**。issue #322 的边界写死「不改 macOS／Linux 行为」：mac 菜单栏图标
+ * 的右键由系统给（等同左键那套），Linux 各家托盘实现也自带右键语义，硬塞一个 AWT 菜单只是多一层
+ * 不属于那个平台的东西。
+ *
+ * Windows 反过来——通知区图标右键弹菜单是刻在肌肉记忆里的，而 #322 之前 [MenuBarExtra] 只监听
+ * BUTTON1，右键**完全没有出口**（发仔复报的「右键无响应」）。走 AWT 原生 [java.awt.PopupMenu] 而不是
+ * 自己监听 BUTTON3 再弹一扇 Compose 窗口：Win32 的托盘右键菜单由系统绘制、定位和消失，自绘的那种
+ * 在多屏 + 任务栏靠侧边时必然错位，还得自己复刻「点别处就关」。
+ *
+ * [canExit] 为假时只留「打开」：[dev.ccpocket.app.main] 只在 Windows 传 onExitApplication（#189，
+ * mac/Linux 的关窗语义不同），菜单里不该长出一个点了没反应的退出项。
+ */
+internal fun trayContextMenu(
+    isWindows: Boolean,
+    openLabel: String,
+    exitLabel: String,
+    canExit: Boolean,
+): List<TrayMenuItem>? {
+    if (!isWindows) return null
+    val items = mutableListOf(TrayMenuItem(TrayMenuAction.OPEN_MAIN, openLabel))
+    if (canExit) items += TrayMenuItem(TrayMenuAction.EXIT_APP, exitLabel)
+    return items
+}
+
+// ── 浮层外壳：透明 / 圆角 / 投影归谁（issue #322） ────────────────────────────────────────────────
+
+/** 承载窗口的外壳形态：[transparent] 交给 Compose 的 Window，[selfShadow] 交给 [WinTrayFlyout]。 */
+internal data class TrayWindowChrome(val transparent: Boolean, val selfShadow: Boolean)
+
+/**
+ * 谁来画圆角和投影。
+ *
+ * - **Windows + 支持逐像素透明** → 透明窗口，圆角/描边/投影全归浮层自己（[WinTrayFlyout] 的
+ *   `elevated`）。DWM 只给带 caption 的窗口补圆角，不透明的无边框窗口在 Win11 上永远是方角，
+ *   浮层画的 8dp 圆角会被那块方角底盖掉——这就是 #322 复报的圆角失真。
+ * - **macOS / Linux** → 一字不动的不透明窗口。macOS 那边不是审美选择而是硬约束：skiko 0.8.18 建
+ *   **透明** Compose 窗口在 macOS 26 "Tahoe" 上必崩（CMP-7352，见 [MenuBarExtra] 里的长注释）。
+ * - **Windows 但拿不到逐像素透明**（虚拟机 / 远程桌面 / 老驱动）→ 退回不透明。宁可维持改动前的
+ *   方角，也不能让 `setBackground(alpha<255)` 在窗口创建时抛异常把整个 App 带崩。
+ */
+internal fun trayWindowChrome(isWindows: Boolean, translucencySupported: Boolean): TrayWindowChrome =
+    if (isWindows && translucencySupported) TrayWindowChrome(transparent = true, selfShadow = true)
+    else TrayWindowChrome(transparent = false, selfShadow = false)
+
+/** 本机窗口系统是否支持逐像素透明。查不到 / 抛异常一律当不支持——见 [trayWindowChrome] 的退路。 */
+internal fun perPixelTranslucencySupported(): Boolean = runCatching {
+    GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice
+        .isWindowTranslucencySupported(GraphicsDevice.WindowTranslucency.PERPIXEL_TRANSLUCENT)
+}.getOrDefault(false)
 
 /**
  * Where the popover hangs: the glyph's screen X, the edge Y to grow from, and which way it grows.
@@ -298,10 +436,21 @@ internal fun winFlyoutAnchor(gc: GraphicsConfiguration): TrayAnchor {
     )
 }
 
-/** 角锚定的窗口左上角：工作区右缘 −12 −宽、任务栏顶 −12 −高，并夹在屏幕内（超大浮层不会跑出屏外）。 */
+/** 角锚定的**卡片**左上角：工作区右缘 −12 −宽、任务栏顶 −12 −高，并夹在屏幕内（超大浮层不会跑出屏外）。 */
 internal fun winFlyoutOrigin(a: TrayAnchor, w: Int, h: Int): Pair<Int, Int> =
     (a.workRight - WIN_FLYOUT_GAP - w).coerceAtLeast(a.screen.x + WIN_FLYOUT_GAP) to
         (a.workBottom - WIN_FLYOUT_GAP - h).coerceAtLeast(a.screen.y + WIN_FLYOUT_GAP)
+
+/**
+ * 角锚定的**窗口**左上角（issue #322）。透明外壳下窗口比卡片四周各大 [gutter]（自绘投影的留白），
+ * 所以先按卡片尺寸算贴角落点、再整体外扩一圈；[gutter] = 0 时与 [winFlyoutOrigin] 完全等价。
+ *
+ * 桌面端窗口几何 1 AWT 点 = 1 dp，所以这里的 [gutter] 和 [WinTrayFlyout] 里那圈 padding 是同一个数。
+ */
+internal fun winFlyoutWindowOrigin(a: TrayAnchor, winW: Int, winH: Int, gutter: Int): Pair<Int, Int> {
+    val (x, y) = winFlyoutOrigin(a, winW - 2 * gutter, winH - 2 * gutter)
+    return (x - gutter) to (y - gutter)
+}
 
 private fun screenConfigAt(x: Int, y: Int): GraphicsConfiguration {
     val ge = GraphicsEnvironment.getLocalGraphicsEnvironment()
@@ -310,10 +459,10 @@ private fun screenConfigAt(x: Int, y: Int): GraphicsConfiguration {
 }
 
 /** Center the (now measured) window on the glyph, clamped to the screen, growing down or up per anchor.
- *  角锚定（Windows）走 [winFlyoutOrigin]，与点击点无关。 */
-internal fun placePopover(w: java.awt.Window, a: TrayAnchor) {
+ *  角锚定（Windows）走 [winFlyoutWindowOrigin]，与点击点无关；[gutter] 是透明外壳自绘投影的留白。 */
+internal fun placePopover(w: java.awt.Window, a: TrayAnchor, gutter: Int = 0) {
     if (a.corner) {
-        val (cx, cy) = winFlyoutOrigin(a, w.width, w.height)
+        val (cx, cy) = winFlyoutWindowOrigin(a, w.width, w.height, gutter)
         w.setLocation(cx, cy)
         return
     }
