@@ -191,17 +191,24 @@ class ClaudeQuotaServiceTest {
     // ── service behaviour ──────────────────────────────────────────────────────────────────────────
 
     @Test
-    fun no_credential_and_an_expired_one_both_answer_no_token_without_a_request() = runBlocking {
-        for (cred in listOf(QuotaCredential.Missing, QuotaCredential.Expired)) {
+    fun a_missing_credential_answers_no_token_but_an_expired_one_is_only_transient() = runBlocking {
+        // Missing = never signed in / API-key machine → authoritative NO_TOKEN (client hides the strip).
+        // Expired = the ~8h OAuth token lapsed between claude runs → TRANSIENT (client keeps its aging
+        // snapshot); mapping it to NO_TOKEN made the strip vanish every night (QuotaRoute log, 08-24→27).
+        // Neither state may burn a doomed request on Anthropic.
+        for ((cred, want) in listOf(
+            QuotaCredential.Missing to CLAUDE_QUOTA_NO_TOKEN,
+            QuotaCredential.Expired to dev.ccpocket.protocol.CLAUDE_QUOTA_NETWORK,
+        )) {
             val calls = AtomicInteger()
             val svc = ClaudeQuotaService(
                 credentials = { cred },
                 transport = { calls.incrementAndGet(); HttpOutcome.Body(fixture) },
             )
             val q = svc.get()
-            assertEquals(CLAUDE_QUOTA_NO_TOKEN, q.status, "for $cred")
+            assertEquals(want, q.status, "for $cred")
             assertTrue(q.limits.isEmpty())
-            assertEquals(0, calls.get(), "a signed-out machine must not call Anthropic at all")
+            assertEquals(0, calls.get(), "a token-less machine must not call Anthropic at all")
         }
     }
 
