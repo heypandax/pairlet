@@ -73,6 +73,59 @@ class ConversationOpenCodeOneShotTest {
         override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
     }
 
+    /** Codex-shaped one-shot: prompt travels over stdin, a user replay is its receipt, and the backend
+     * asks Conversation to close the process after a stable result. Each child intentionally ignores any
+     * second stdin line so the clean-exit ledger must re-inject it into the next launch. */
+    private class StdinOneShotBackend : AgentBackend {
+        val specs = CopyOnWriteArrayList<AgentSpec>()
+        val sends = CopyOnWriteArrayList<String>()
+        @Volatile private var io: AgentIo? = null
+        override val kind = AgentKind.CODEX
+        override val processMode = AgentProcessMode.ONE_SHOT_TURN
+        override val promptDelivery = AgentPromptDelivery.STDIN_REPLAY
+
+        override fun processBuilder(spec: AgentSpec): ProcessBuilder {
+            specs += spec
+            val sid = spec.resumeId ?: "codex-stdin-1"
+            val script = """
+                IFS= read -r line
+                printf 'session:%s\n' '$sid'
+                printf 'user:%s\n' "${'$'}line"
+                sleep 0.3
+                printf 'result\n'
+                while IFS= read -r ignored; do :; done
+            """.trimIndent()
+            return ProcessBuilder("sh", "-c", script)
+        }
+
+        override suspend fun attach(io: AgentIo, spec: AgentSpec) { this.io = io }
+        override suspend fun parse(line: String): List<AgentEvent> = when {
+            line.startsWith("session:") -> listOf(AgentEvent.SessionInit(line.removePrefix("session:"), specCwd(), model = null))
+            line.startsWith("user:") -> listOf(AgentEvent.UserReplay(line.removePrefix("user:")))
+            line == "result" -> {
+                io?.requestProcessExit?.invoke()
+                listOf(AgentEvent.TurnResult("ok", usage = null, isError = false))
+            }
+            else -> emptyList()
+        }
+        private fun specCwd() = specs.lastOrNull()?.workdir?.toString().orEmpty()
+        override suspend fun sendPrompt(text: String, images: List<ImageData>) {
+            sends += text
+            io?.writeLine?.invoke(text)
+        }
+        override suspend fun interrupt() {}
+        override suspend fun respondPermission(
+            askId: String, allow: Boolean, remember: Boolean,
+            originalInput: JsonObject?, updatedInput: String?, denyMessage: String?,
+        ) {}
+        override fun applySettings(mode: PermissionMode?, model: String?, effort: String?) = false
+        override suspend fun onProcessEnded(sessionId: String?) {}
+        override fun transcriptDir(workdir: String): Path = Path.of(workdir)
+        override fun listSessions(workdir: String): List<SessionSummary> = emptyList()
+        override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = emptyList()
+        override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+    }
+
     private fun okTurn(sessionId: String, text: String = "ok") = listOf(
         """{"type":"step_start","sessionID":"$sessionId","part":{"sessionID":"$sessionId","type":"step-start"}}""",
         """{"type":"text","sessionID":"$sessionId","part":{"type":"text","text":"$text"}}""",
@@ -282,6 +335,32 @@ class ConversationOpenCodeOneShotTest {
             assertEquals(2, backend.specs.size)
             assertEquals("second", backend.specs[1].initialPrompt)
             assertEquals("ses_open_1", backend.specs[1].resumeId) // queued turn continues the SAME session
+        } finally {
+            convo.close()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun stdin_one_shot_reinjects_a_prompt_that_raced_the_clean_exit() = runBlocking {
+        if (win()) return@runBlocking
+        val frames = CopyOnWriteArrayList<Frame>()
+        val scope = CoroutineScope(Dispatchers.Default)
+        val backend = StdinOneShotBackend()
+        val convo = Conversation("cCodex", Files.createTempDirectory("ccp-codex-one-shot"), PermissionMode.DEFAULT, { frames.add(it) }, scope, backend)
+        try {
+            convo.open(resumeId = null, model = null)
+            convo.sendPrompt("first", promptId = "p1")
+            await { frames.any { it is PromptAck && it.promptId == "p1" } }
+            convo.sendPrompt("second", promptId = "p2") // old child receives but deliberately never acknowledges it
+
+            await { frames.count { it is TurnDone } >= 2 }
+
+            assertFalse(frames.any { it is PocketError }, frames.toString())
+            assertEquals(2, backend.specs.size)
+            assertEquals("codex-stdin-1", backend.specs[1].resumeId)
+            assertEquals(listOf("first", "second", "second"), backend.sends.toList())
+            assertEquals(1, frames.count { it is PromptAck && it.promptId == "p2" })
         } finally {
             convo.close()
             scope.cancel()
