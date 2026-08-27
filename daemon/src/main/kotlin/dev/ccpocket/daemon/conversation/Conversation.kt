@@ -428,6 +428,19 @@ class Conversation(
      *  the TurnResult branch, which prefers it over the result event's across-calls sum. */
     private var lastCallUsage: AgentEvent.AssistantUsage? = null
 
+    // Reasoning effort the BACKEND reported for itself (dsh's `request/header.config.reasoningEffort`) —
+    // issue #320. Distinct from [effort], which is what the USER asked for: a session opened without an
+    // explicit level still runs at some level, and this is the only place that fact exists. Display only,
+    // and always yields to [effort] (see [live]).
+    @Volatile
+    private var runtimeEffort: String? = null
+
+    // Context window the BACKEND reported for itself (dsh's `request/context.contextWindow`) — issue #320.
+    // Backends other than Claude have no window table we could derive one from, so before this every
+    // non-Claude session announced contextWindow=null and the phone could only show raw tokens.
+    @Volatile
+    private var runtimeContextWindow: Long? = null
+
     // the turn emitted a `<synthetic>` placeholder (every API call failed) — consumed by TurnResult,
     // which reports the turn as an ERROR instead of letting the placeholder pass for a real reply (issue #65)
     @Volatile
@@ -714,10 +727,17 @@ class Conversation(
     /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing, model, effort, agent). */
     private fun live(sid: String?) =
         SessionLive(
-            convoId, announcedWorkdir ?: workdir.toString(), sid, mode = mode, executing = isExecuting(), model = displayModel(), effort = effort,
+            convoId, announcedWorkdir ?: workdir.toString(), sid, mode = mode, executing = isExecuting(), model = displayModel(),
+            // the user's chosen level leads; [runtimeEffort] only fills the gap left by "never chose one"
+            // (issue #320 — a dsh session runs at `high` whether or not anybody asked for it).
+            effort = effort ?: runtimeEffort,
             // stamp the 1M/200k window from the model so the phone's usage % has an authoritative denominator
             // (issue #20) instead of sniffing the id itself. Phones that predate the field simply ignore it.
-            contextWindow = claudeWindow(),
+            // Claude goes through [claudeWindow] because its window is DERIVED (id table + the observed-usage
+            // upgrade — beta-gated 1M models declare 200k); every other backend has no such table, so the only
+            // honest denominator is the one it reported about itself (issue #320). Never both: a derived
+            // Claude window and a self-reported dsh window can never be in play for the same session.
+            contextWindow = claudeWindow() ?: runtimeContextWindow,
             contextUsed = resumeContextUsed, agent = backend.kind,
             degraded = degraded(),
             origin = origin, // "via <bridge>" label (issue #91); null for interactive sessions
@@ -1759,6 +1779,27 @@ class Conversation(
                         if (workflows.onProgress(ev.taskId, ev.toolUseId, ev.items, System.currentTimeMillis())) emitWorkflow(ev.taskId)
                     }
                     is AgentEvent.AssistantUsage -> lastCallUsage = ev
+                    // Session metadata the backend measured on its own wire AFTER init (issue #320). dsh
+                    // names its model/effort/window on `request/context`, `request/header` and every
+                    // `assistant/message` — never on the init that SessionLive was stamped from — so the
+                    // header read "default" with no denominator for the session's whole life.
+                    is AgentEvent.RuntimeMeta -> {
+                        var changed = false
+                        // The user's pick outranks it: `model` is a deliberate choice (switchModel clears
+                        // the backfill precisely so an echo can't undo it), so only the DISPLAY backfill
+                        // moves here — exactly like the transcript guess it shares a field with.
+                        ev.model?.takeIf { it.isNotBlank() && model == null && it != backfilledModel }?.let {
+                            backfilledModel = it
+                            changed = true
+                        }
+                        ev.effort?.takeIf { it.isNotBlank() && it != runtimeEffort }?.let { runtimeEffort = it; changed = true }
+                        // > 0 only: a zero window would divide the phone's usage % by nothing.
+                        ev.contextWindow?.takeIf { it > 0 && it != runtimeContextWindow }?.let { runtimeContextWindow = it; changed = true }
+                        // Re-announce only on a REAL change. dsh restates the model on every
+                        // assistant/message, so an unconditional emit would push one SessionLive per step
+                        // of every turn — the same frame, over the relay, forever.
+                        if (changed) sink.emit(live(sessionId))
+                    }
                     // the CLI's API-failure placeholder — never a real reply. Suppress the chunk (the
                     // TurnDone error row replaces it) but still arm `executing`: a turn did run (issue #65).
                     is AgentEvent.SyntheticReply -> {
@@ -2440,6 +2481,10 @@ class Conversation(
         // session's occupancy, which re-seeded the phone's "Context NN%" statusline post-clear (issue #149)
         resumeContextUsed = null
         lastCallUsage = null // nor may a killed mid-flight turn's usage leak into the fresh session's first TurnDone
+        // the backend re-reports these on the new session's first frames (issue #320); carrying them over
+        // would state as fact what the fresh process has not said yet
+        runtimeEffort = null
+        runtimeContextWindow = null
         launchProcess(
             AgentSpec(
                 workdir, resumeId = null, model = model, mode = mode, effort = effort,

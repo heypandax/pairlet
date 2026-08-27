@@ -191,6 +191,54 @@ class UsageServiceTest {
         }
     }
 
+    /**
+     * issue #323: the window cache-hit percentage now ships the two accumulators it was computed from.
+     * The whole value of that is MACHINE-CHECKABLE traceability, so this pins the ratio against the
+     * printed percentage — if the three could ever disagree, the "here is where the number came from"
+     * line would itself be something the user has to take on faith, which is the bug.
+     */
+    @Test
+    fun window_cache_hit_ships_the_numerator_and_denominator_behind_it() {
+        withProjects { root ->
+            val proj = root.resolve("-Users-x-proj").also { it.createDirectories() }
+            proj.resolve("s1.jsonl").writeText(
+                listOf(
+                    richTurn(0, 100, 100, 0.10, "a"),  // today
+                    richTurn(3, 300, 100, 0.30, "b"),  // mid-window
+                    richTurn(6, 200, 200, 0.20, "c"),  // oldest in-window day
+                    richTurn(8, 999, 999, 9.90, "d"),  // prev window — must feed neither accumulator
+                ).joinToString("\n") + "\n",
+            )
+            val u = hermetic(7, projectsRoot = root)
+            // the accumulators themselves: cache-read 400, and its base input(600) + cache-read(400)
+            assertEquals(400L, u.cacheReadTokensWindow, "numerator = the window's cache-read tokens")
+            assertEquals(1000L, u.cacheBaseTokensWindow, "denominator = input + cache-read over the same window")
+            // …and they reproduce the percentage the card prints, under the page's own formula
+            assertEquals(40, u.cacheHitPctWindow)
+            assertEquals(
+                u.cacheHitPctWindow,
+                ((u.cacheReadTokensWindow!! * 100) / u.cacheBaseTokensWindow!!).toInt(),
+                "the shipped ratio must reproduce the shipped percentage exactly",
+            )
+            // the denominator EXCLUDES cache-creation on purpose (writing the cache was never a hit
+            // opportunity) — it is input + cache-read and nothing else
+            assertEquals(600L + u.cacheReadTokensWindow!!, u.cacheBaseTokensWindow)
+        }
+    }
+
+    /** No sample at all → both null, never a tidy-looking 0. Same "unknown vs measured zero" distinction
+     *  cacheHitPctWindow has always drawn: 0/0 rendered as "0 / 0 tokens" would read as a real measurement
+     *  of a cache that never got asked anything. */
+    @Test
+    fun window_cache_raw_tokens_are_null_without_a_sample() {
+        withProjects { root ->
+            val u = hermetic(7, projectsRoot = root)
+            assertNull(u.cacheHitPctWindow, "an empty window is unknown, not 0%")
+            assertNull(u.cacheReadTokensWindow)
+            assertNull(u.cacheBaseTokensWindow)
+        }
+    }
+
     @Test
     fun window_cost_is_null_when_no_transcript_records_a_cost() {
         withProjects { root ->

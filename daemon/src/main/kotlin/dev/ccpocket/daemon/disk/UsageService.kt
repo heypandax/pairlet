@@ -283,8 +283,14 @@ object UsageService {
             UsageModel(it.key, it.value, agent)
         }
         val cacheHit = (inputToday + cacheReadToday).takeIf { it > 0 }?.let { ((cacheReadToday * 100) / it).toInt() }
-        // window cache-hit: the exact today formula over the window accumulators (cacheRead / (input + cacheRead))
-        val cacheHitWindow = (inputWindow + cacheReadWindow).takeIf { it > 0 }?.let { ((cacheReadWindow * 100) / it).toInt() }
+        // window cache-hit: the exact today formula over the window accumulators (cacheRead / (input + cacheRead)).
+        // issue #323: the same base also SHIPS, so the App can show the raw numerator/denominator under the
+        // percentage. Deriving all three from this one `takeIf` is the point — a separately-gated numerator
+        // could go null (or non-null) while the percentage didn't, and a ratio that doesn't reproduce the
+        // number printed above it is worse than printing no ratio at all. No sample (base 0) => all null,
+        // matching the today fields' "null means unknown, 0 means measured zero" semantics.
+        val cacheBaseWindow = (inputWindow + cacheReadWindow).takeIf { it > 0 }
+        val cacheHitWindow = cacheBaseWindow?.let { ((cacheReadWindow * 100) / it).toInt() }
 
         return Usage(
             days = trend,
@@ -298,6 +304,8 @@ object UsageService {
             requestsWindow = requestsWindow,
             cacheHitPctWindow = cacheHitWindow,
             costUsdWindow = if (costWindowSeen) costWindow else null,
+            cacheReadTokensWindow = cacheBaseWindow?.let { cacheReadWindow },
+            cacheBaseTokensWindow = cacheBaseWindow,
         )
     }
 

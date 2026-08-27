@@ -3747,6 +3747,9 @@ private fun MessageItem(
         // the quiet residue of a question exchange: an expandable answered row / a muted withdrawn note
         is ChatItem.QuestionsAnswered -> QuestionsAnsweredRow(m.items)
         is ChatItem.QuestionsWithdrawn -> QuestionsWithdrawnRow()
+        // …and asked-but-never-answered (issue #321): read-only and labelled as such, so it can't be
+        // mistaken for the live card docked above the composer
+        is ChatItem.QuestionsUnanswered -> QuestionsUnansweredRow(m.text)
         // OpenCode asked a question — read-only card (no answer channel yet, issue #210)
         is ChatItem.OpenCodeQuestion -> OpenCodeQuestionCard(m.questions)
         // a live turn's end: quiet ✓ line so "finished" stays visible in the transcript

@@ -90,24 +90,37 @@ internal class DshAskLedger(
     fun reset() = synchronized(lock) { pending.clear(); byApproval.clear() }
 
     /**
-     * A `…/requested` frame → the [AgentEvent.ControlRequest] the permission bridge turns into a card, or
-     * null when there is nothing new to show (a replay of a card already pending, or a frame we cannot
-     * answer and must therefore not pretend to).
+     * A `…/requested` frame → the [AgentEvent.ControlRequest] the permission bridge turns into a card.
+     *
+     * Three other outcomes, and the difference between them is the whole point (issue #321):
+     *  - **null, silently** — nothing new to show: a replay of a card already pending, or an ask for a
+     *    session that is not ours. Someone else's turn, or one we already deal.
+     *  - **a [hangNotice]** — the ask IS (or may well be) ours but is unanswerable as it arrived. dsh will
+     *    wait on it forever, so the user is told rather than left watching a turn that never moves.
+     *  - a real card, below.
      */
-    fun requested(method: String, rpcId: String?, payload: JsonObject): AgentEvent.ControlRequest? {
+    fun requested(method: String, rpcId: String?, payload: JsonObject): AgentEvent? {
         if (rpcId.isNullOrEmpty()) {
             log.warn("dsh $method with no rpcId — unanswerable, ignored")
-            return null
+            return hangNotice(method, "the request carried no id to answer it with")
         }
-        // Fail-closed session check (see [ourSession]). A dropped ask means a HUNG dsh turn and dsh never
-        // reports one, so this is logged loudly rather than silently discarded.
         val ours = ourSession()
         val sessionId = payload.str("sessionId")
-        if (ours == null || sessionId == null || sessionId != ours) {
-            log.warn(
-                "dsh $method for session=$sessionId is not ours (${ours ?: "session not open yet"}) — " +
-                    "dropped, and dsh will block that turn until it is cancelled",
-            )
+        // `sessionId` is mandatory in dsh's own frame schema, so a frame without one is host breakage
+        // rather than a foreign session — we can neither prove it is ours nor route an answer to it, and
+        // it is the one drop that is BOTH unprovable and probably ours. Say so.
+        if (sessionId == null) {
+            log.warn("dsh $method named no session — unanswerable, dropped")
+            return hangNotice(method, "the request named no session")
+        }
+        // Fail-closed session check (see [ourSession]). Silent on purpose here, unlike the two cases
+        // above: the mux is multiplexed across every session the host holds, so a frame for a session
+        // that is not ours belongs to somebody else's turn and is not ours to announce or to answer.
+        // `ours == null` means our own session does not exist yet (fresh create, pre-`session.create`),
+        // which likewise cannot be the session this ask names — issue #321 seeds the resumed id into
+        // [ourSession] precisely so a RESUME no longer lands in this branch.
+        if (ours == null || sessionId != ours) {
+            log.info("dsh $method for session=$sessionId is not ours (${ours ?: "session not open yet"}) — ignored")
             return null
         }
         return when (method) {
@@ -115,7 +128,7 @@ internal class DshAskLedger(
                 val questions = DshAsk.questionsOf(payload)
                 if (questions.isEmpty()) {
                     log.warn("dsh question/requested carried no answerable question — ignored")
-                    return null
+                    return hangNotice(method, "it carried no question anyone could answer")
                 }
                 if (!claim(rpcId, QuestionEntry(rpcId, sessionId, questions))) return null
                 AgentEvent.ControlRequest(
@@ -140,6 +153,26 @@ internal class DshAskLedger(
             }
             else -> null
         }
+    }
+
+    /**
+     * The chat line for an ask we refuse to claim — issue #321.
+     *
+     * dsh has NO timeout (probe-verified), so an unclaimed request does not degrade, it WEDGES: the turn
+     * sits waiting for an answer that can never arrive, and until now the only trace was a daemon log line
+     * nobody reads from a phone. That is indistinguishable, from the outside, from "the model is thinking",
+     * and it is exactly what #321 describes as a question you can see but cannot complete.
+     *
+     * Deliberately an [AgentEvent.AssistantText] rather than a [AgentEvent.TurnResult]: the turn genuinely
+     * IS still running on dsh's side, and minting a fake result would tell the phone it had ended (the same
+     * judgement [DshBackend]'s `report` channel makes for a refused answer).
+     */
+    private fun hangNotice(method: String, why: String): AgentEvent.AssistantText {
+        val what = if (method == QUESTION_REQUESTED) "asked a question" else "asked for an approval"
+        return AgentEvent.AssistantText(
+            "⚠️ DeepSeek Harness $what that cc-pocket cannot answer — $why. That turn is now waiting on a " +
+                "reply nothing can deliver; stop it and send the prompt again.",
+        )
     }
 
     /**

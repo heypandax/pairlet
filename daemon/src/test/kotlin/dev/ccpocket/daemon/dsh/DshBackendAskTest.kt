@@ -60,21 +60,69 @@ class DshBackendAskTest {
     fun another_sessions_ask_never_becomes_a_card() = runBlocking<Unit> {
         // dropped by the backend's own session filter…
         assertTrue(backend().parse(approvalLine("session-someone-else")).isEmpty())
-        // …and, for a frame that carries no sessionId at all to filter on, by the ledger's fail-closed
-        // check — which is the half that also covers the pre-`session.create` boot window
+        // …and a frame that carries no sessionId at all still deals no card. It does NOT stay silent
+        // though (issue #321): `sessionId` is mandatory in dsh's own schema, so its absence is host
+        // breakage rather than somebody else's session — unprovable AND probably ours, the one drop the
+        // user has to hear about, because the turn behind it now waits forever.
         val noSession = frame(
             """
             {"type":"server-request","rpcId":"$rpcId","method":"approval/requested",
              "payload":{"type":"approval/requested","approvalId":"a-2","toolName":"bash","reason":"nope"}}
             """,
         )
-        assertIs<AgentEvent.Ignored>(backend().parse(noSession).single())
+        assertIs<AgentEvent.AssistantText>(backend().parse(noSession).single())
     }
 
     /** Before `session.create` returns there is nothing to prove an ask is ours against. */
     @Test
     fun no_card_is_dealt_before_the_session_is_open() = runBlocking<Unit> {
         assertIs<AgentEvent.Ignored>(DshBackend(null).parse(approvalLine()).single())
+    }
+
+    /**
+     * issue #321. A RESUME is the one case where a still-pending ask can exist BEFORE `session.create`
+     * lands `sessionId`: the host replays undecided `…/requested` frames the moment a mux subscribes. The
+     * resumed id is provably ours, so the card must be dealt rather than dropped into a turn that then
+     * waits forever (dsh has no timeout of its own).
+     */
+    @Test
+    fun a_resumed_session_claims_an_ask_that_beats_session_create() = runBlocking<Unit> {
+        val backend = DshBackend(null).apply { bindResumeForTest(SESSION) } // note: no bindSessionForTest
+        val ask = assertIs<AgentEvent.ControlRequest>(backend.parse(questionLine()).single())
+        assertEquals("dsh-$rpcId", ask.requestId)
+    }
+
+    /** …but only for the resumed id: another session's ask still gets nothing (fail-closed). */
+    @Test
+    fun a_resumed_session_still_refuses_a_foreign_ask() = runBlocking<Unit> {
+        val backend = DshBackend(null).apply { bindResumeForTest(SESSION) }
+        assertTrue(backend.parse(approvalLine("session-someone-else")).isEmpty())
+    }
+
+    /**
+     * issue #321. An ask we cannot answer does not "degrade" — it WEDGES the dsh turn permanently, and a
+     * daemon log line is invisible from a phone. Every drop that leaves a turn hanging must reach the chat.
+     */
+    @Test
+    fun an_unanswerable_ask_says_so_in_the_chat_instead_of_hanging_silently() = runBlocking<Unit> {
+        // no rpcId → nothing to answer against
+        val noRpc = frame(
+            """
+            {"type":"server-request","method":"question/requested",
+             "payload":{"type":"question/requested","sessionId":"$SESSION","questions":[
+               {"id":"q1","question":"Ship it?","options":[{"label":"Yes"}]}]}}
+            """,
+        )
+        assertIs<AgentEvent.AssistantText>(backend().parse(noRpc).single())
+
+        // an empty question batch is equally unanswerable
+        val noQuestions = frame(
+            """
+            {"type":"server-request","rpcId":"$rpcId","method":"question/requested",
+             "payload":{"type":"question/requested","sessionId":"$SESSION","questions":[]}}
+            """,
+        )
+        assertIs<AgentEvent.AssistantText>(backend().parse(noQuestions).single())
     }
 
     @Test

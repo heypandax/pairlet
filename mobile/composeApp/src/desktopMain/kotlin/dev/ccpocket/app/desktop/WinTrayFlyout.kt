@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.epochMillis
@@ -85,6 +86,11 @@ import org.jetbrains.compose.resources.stringResource
  * 颜色一律走 [Tok]，不硬编码稿子里的十六进制（稿子的 `#16171B` / `#E2795A` 就是本 App 暗色板的
  * 同位色，只差一两级）。硬编码会同时废掉亮色主题和 Codex 强调色主题——那才是真的改设计。
  * 稿子里的白色叠层（wash / hover fill / 高光线）按 [Tok.tx] 取 alpha，亮色板下自然反相成压暗。
+ *
+ * **issue #322 的两处收敛**（发仔在正式安装包上复报）：
+ * 1. `elevated` 从「窗内浮层的可选投影」变成「透明外壳」的开关——承载窗口透明之后，圆角、描边、
+ *    投影全归这里画，见 [WIN_FLYOUT_SHADOW_GUTTER] 与 [trayWindowChrome]。
+ * 2. 页脚三样东西原本都是裸文字、读作三条等重的链接；现在收敛成两级，形态表在 [winActionLook]。
  */
 @Composable
 fun WinTrayFlyout(
@@ -116,8 +122,13 @@ fun WinTrayFlyout(
 
     val shape = RoundedCornerShape(WIN_FLYOUT_RADIUS)
     Box(
-        modifier.width(360.dp)
-            .then(if (elevated) Modifier.shadow(28.dp, shape) else Modifier)
+        // elevated = 透明外壳（issue #322）。窗口不再给不透明底、Win11 的 DWM 也不给无 caption 窗口补
+        // 圆角和投影，所以圆角/描边/投影全在这一串里自己画。先 padding 出 [WIN_FLYOUT_SHADOW_GUTTER]
+        // 一圈透明外扩：投影落在内容盒之外，而承载窗口 pack 到内容，不留白就等于把投影裁光。投影高度
+        // 取与留白同值——铺开范围约等于 elevation，正好用满这一圈、又不至于外溢成一片糊。
+        (if (elevated) modifier.padding(WIN_FLYOUT_SHADOW_GUTTER.dp) else modifier)
+            .width(360.dp)
+            .then(if (elevated) Modifier.shadow(WIN_FLYOUT_SHADOW_GUTTER.dp, shape) else Modifier)
             .clip(shape).background(Tok.surface).border(1.dp, Tok.hair, shape)
             .then(if (menuOpen && menuH > 0.dp) Modifier.heightIn(min = WIN_MENU_TOP + menuH + 8.dp) else Modifier),
     ) {
@@ -223,9 +234,45 @@ internal val WIN_CTRL_RADIUS = 4.dp
 private val WIN_MENU_TOP = 52.dp
 
 /** 稿子的暖色两档：填充用 [Tok.accent] 本色，hover 暖一阶，标签/计数/溢出行则提亮以便在暗底上认读。
- *  用 lerp 从既有 token 推导，而不是新增 token——亮色板下同样成立。 */
-private val accentHot: Color @Composable get() = lerp(Tok.accent, Tok.tx, 0.12f)
-private val accentSoft: Color @Composable get() = lerp(Tok.accent, Tok.tx, 0.30f)
+ *  用 lerp 从既有 token 推导，而不是新增 token——亮色板下同样成立。
+ *  刻意**不是** `@Composable get()`：[Tok] 是全局 snapshot 对象，在组合里读照样会触发重组，去掉这个
+ *  修饰才能让 [winActionLook] 这张形态表留在组合之外、被单测直接调用（issue #322）。 */
+private val accentHot: Color get() = lerp(Tok.accent, Tok.tx, 0.12f)
+private val accentSoft: Color get() = lerp(Tok.accent, Tok.tx, 0.30f)
+
+// ── 页脚两级动作的形态表（issue #322） ───────────────────────────────────────────────────────────
+
+/** 一级动作长什么样：填充、字色、字重、字号。 */
+internal data class WinActionLook(val fill: Color, val ink: Color, val weight: FontWeight, val size: TextUnit)
+
+/**
+ * 页脚「打开 cc-pocket」/「退出」的两级形态。
+ *
+ * 抽成函数不是为了复用（就两个调用点），是为了让「主操作明显重于次操作」这条**能被断言**：Compose
+ * 的语义树里读不到填充色和字重，形态留在渲染里就只剩真机目验一条路，而 #322 复报的正是「按钮层级
+ * 不协调」——改版前两个动作都是裸文字，只差 1sp 字号和 tx/muted 两级灰，在 42dp 页脚里读作两条等重
+ * 的链接，主操作根本认不出来。
+ *
+ * 现在：主操作是实心 [Tok.accent] 块——整个浮层里只有它和审批行的「允许」是实心的，两者含义一致
+ * （按下去立刻发生事情）；次操作退回 [Tok.muted] 纯文字，只在 hover 时浮出一层极淡 wash 提示可点。
+ * 颜色一律取自 [Tok]，不新增色值，亮暗两套板与 Codex 强调色下都成立。
+ */
+internal fun winActionLook(primary: Boolean, hovered: Boolean): WinActionLook =
+    if (primary) {
+        WinActionLook(
+            fill = if (hovered) accentHot else Tok.accent,
+            ink = Tok.base,
+            weight = FontWeight.SemiBold,
+            size = 12.sp,
+        )
+    } else {
+        WinActionLook(
+            fill = if (hovered) Tok.tx.copy(alpha = 0.07f) else Color.Transparent,
+            ink = if (hovered) Tok.tx2 else Tok.muted,
+            weight = FontWeight.Normal,
+            size = 11.5.sp,
+        )
+    }
 
 // ── 组件 ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -427,7 +474,13 @@ private fun WinRunningRow(title: String, computer: String, elapsed: String?, onC
     }
 }
 
-/** 页脚 42dp：打开 CC Pocket（左）· +N 个会话（灰，居中）· 退出（右）。 */
+/**
+ * 页脚 42dp：主操作「打开 cc-pocket」（实心 accent，左）· +N 个会话（灰字，居中）· 退出（次级，右）。
+ *
+ * 两级形态见 [winActionLook]。中间那句刻意保持**不可点**——它是状态陈述而不是动作，做成第三个可点
+ * 目标只会稀释「这里只有一个主操作」。三段文字字号不同、又与实心块同排几何居中，所以按项目铁律
+ * 全部带 [tightCenter]（少给一个就会整排错位）。
+ */
 @Composable
 private fun WinFlyoutFooter(moreSessions: Int, onOpenMain: () -> Unit, onExitApp: (() -> Unit)?) {
     WinFlyoutDivider()
@@ -435,22 +488,32 @@ private fun WinFlyoutFooter(moreSessions: Int, onOpenMain: () -> Unit, onExitApp
         Modifier.fillMaxWidth().height(42.dp).background(Tok.tx.copy(alpha = 0.018f)).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(
-            stringResource(Res.string.tray_open_app), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp,
-            fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.clickable(onClick = onOpenMain),
-        )
+        WinActionButton(stringResource(Res.string.tray_open_app), primary = true, onClick = onOpenMain)
         Text(
             if (moreSessions > 0) stringResource(Res.string.win_tray_more_sessions, moreSessions) else "",
-            color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, maxLines = 1,
+            color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, style = tightCenter(11.5.sp), maxLines = 1,
             overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.weight(1f),
         )
         if (onExitApp != null) {
-            Text(
-                stringResource(Res.string.win_tray_exit), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
-                maxLines = 1, modifier = Modifier.clickable(onClick = onExitApp),
-            )
+            WinActionButton(stringResource(Res.string.win_tray_exit), primary = false, onClick = onExitApp)
         }
     }
+}
+
+/** 页脚动作钮：主/次共用一具排版（28dp 高、方角 [WIN_CTRL_RADIUS]、文字压中），差别全在 [winActionLook]。 */
+@Composable
+private fun WinActionButton(text: String, primary: Boolean, onClick: () -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    val look = winActionLook(primary, hovered)
+    Text(
+        text, color = look.ink, fontFamily = Dk.ui, fontSize = look.size, fontWeight = look.weight,
+        style = tightCenter(look.size), maxLines = 1,
+        modifier = Modifier.height(28.dp).clip(RoundedCornerShape(WIN_CTRL_RADIUS)).background(look.fill)
+            .hoverable(src).clickable(onClick = onClick)
+            .padding(horizontal = if (primary) 12.dp else 9.dp)
+            .wrapContentHeightCentered(),
+    )
 }
 
 /** (…) 溢出菜单：214dp 宽、[Tok.raised] 面、圆角 8dp。「隐藏此浮层」直接写 `menuBarEnabled` 这个

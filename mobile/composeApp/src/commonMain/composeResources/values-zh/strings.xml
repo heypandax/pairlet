@@ -516,6 +516,10 @@
     <string name="usage_selected">%1$s · %2$s tokens</string>
     <string name="usage_na">暂无数据</string>
     <string name="usage_agent_all">全部</string>
+    <!-- issue #323：缓存命中是 daemon 扫到的所有后端的混合值，卡片要自己说明覆盖范围 -->
+    <string name="usage_scope_all_agents">全部 agent</string>
+    <string name="usage_scope_no_filter">这是本机所有 agent 的合计——当前 daemon 还不支持按 agent 拆开看。</string>
+    <string name="usage_cache_ratio">%1$s / %2$s tokens</string>
     <!-- ── Claude 订阅额度（CLI /usage 面板背后的 5 小时 / 7 天窗口）── -->
     <string name="quota_title">Claude 订阅额度</string>
     <string name="quota_5h">5 小时</string>
@@ -617,6 +621,8 @@
     <string name="label_context">上下文</string>
     <string name="value_default">默认</string>
     <string name="value_model_default">账号默认</string>
+    <!-- issue #320：只有 Claude 才有真正的「账号默认模型」；其他 agent 报不出模型就是未知，写「默认」等于编造事实。 -->
+    <string name="value_unknown">未知</string>
     <string name="session_actions_open">会话操作</string>
     <string name="quick_actions_title">快捷操作</string>
     <string name="qa_model">切换模型</string>
@@ -678,6 +684,7 @@
     <string name="questions_answered_one">回答了 %1$d 个问题</string>
     <string name="questions_answered_many">回答了 %1$d 个问题</string>
     <string name="questions_withdrawn">Claude 已继续，无需再回答</string>
+    <string name="questions_unanswered">未作答的提问——该回合已结束，没有收到回答</string>
     <string name="path_copy">复制</string>
     <string name="path_open">在浏览器打开</string>
     <string name="path_copied">已复制</string>

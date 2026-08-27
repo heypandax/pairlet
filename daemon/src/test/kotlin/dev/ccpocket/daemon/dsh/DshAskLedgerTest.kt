@@ -86,8 +86,9 @@ class DshAskLedgerTest {
     fun a_replayed_rpcId_does_not_deal_a_second_card() {
         val f = Fixture()
         val frame = questionFrame()
-        val first = f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(frame))
-        assertNotNull(first)
+        val first = assertIs<AgentEvent.ControlRequest>(
+            f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(frame)),
+        )
         assertEquals(DshAsk.ASK_ID_PREFIX + askRpc, first.requestId)
         assertEquals(AskQuestions.TOOL, first.toolName)
 
@@ -100,11 +101,17 @@ class DshAskLedgerTest {
         assertEquals(1, f.sent.size)
     }
 
+    /**
+     * No rpcId = nothing to answer against, so no card. But NOT silence (issue #321): dsh has no timeout,
+     * so the turn behind that ask now waits forever, and a daemon log line is invisible from a phone.
+     * The drop reaches the chat as a notice instead.
+     */
     @Test
-    fun a_frame_without_an_rpcId_is_unanswerable_and_ignored() {
+    fun a_frame_without_an_rpcId_deals_no_card_but_says_so() {
         val f = Fixture()
-        assertNull(f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, null, payload(questionFrame())))
-        assertNull(f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, "", payload(approvalFrame())))
+        assertIs<AgentEvent.AssistantText>(f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, null, payload(questionFrame())))
+        assertIs<AgentEvent.AssistantText>(f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, "", payload(approvalFrame())))
+        assertTrue(f.sent.isEmpty(), "nothing may be answered on dsh's side")
     }
 
     /**
@@ -132,7 +139,7 @@ class DshAskLedgerTest {
     @Test
     fun the_response_carries_our_own_session_id() {
         val f = Fixture()
-        val ask = f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame()))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame())))
         runBlocking { f.ledger.answer(ask.requestId, allow = true, updatedInput = null) }
         assertEquals("session-abc", f.sent.single().value.str("sessionId"))
     }
@@ -142,7 +149,7 @@ class DshAskLedgerTest {
     @Test
     fun question_resolved_withdraws_the_card_and_clears_the_entry() {
         val f = Fixture()
-        val ask = f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame()))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame())))
         val resolved = json(
             """{"method":"question/resolved","payload":{"type":"question/resolved",
                 "sessionId":"session-abc","questionRpcId":"$askRpc","outcome":"cancelled"}}""",
@@ -161,7 +168,7 @@ class DshAskLedgerTest {
     @Test
     fun approval_resolved_matches_on_approvalId_not_rpcId() {
         val f = Fixture()
-        val ask = f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame()))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame())))
         val resolved = json(
             """{"method":"approval/resolved","payload":{"type":"approval/resolved",
                 "sessionId":"session-abc","approvalId":"apr-77","outcome":"cancelled"}}""",
@@ -188,7 +195,7 @@ class DshAskLedgerTest {
     @Test
     fun answers_are_translated_by_text_to_id_positionally_for_every_question() {
         val f = Fixture()
-        val ask = f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame(multi = true)))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame(multi = true))))
         // the phone answers by question TEXT and in whatever order it likes; dsh needs question ORDER + ids
         val updated = AskQuestions.answeredInput(
             ask.input,
@@ -219,7 +226,7 @@ class DshAskLedgerTest {
     @Test
     fun an_unanswered_question_still_gets_an_entry_with_empty_selected() {
         val f = Fixture()
-        val ask = f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame()))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame())))
         val updated = AskQuestions.answeredInput(ask.input, mapOf("Which color do you prefer?" to "Blue"), null)
         runBlocking { f.ledger.answer(ask.requestId, allow = true, updatedInput = updated) }
 
@@ -236,7 +243,7 @@ class DshAskLedgerTest {
     @Test
     fun a_freeform_response_becomes_custom_on_every_unpicked_question() {
         val f = Fixture()
-        val ask = f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame()))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame())))
         val updated = AskQuestions.answeredInput(ask.input, null, "neither — use whatever the theme says")
         runBlocking { f.ledger.answer(ask.requestId, allow = true, updatedInput = updated) }
 
@@ -254,7 +261,7 @@ class DshAskLedgerTest {
     @Test
     fun an_other_text_rides_in_custom_beside_the_matched_labels() {
         val f = Fixture()
-        val ask = f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame(multi = true)))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame(multi = true))))
         val updated = AskQuestions.answeredInput(
             ask.input,
             mapOf("Which sizes should I build?" to "Small, XXL please"),
@@ -271,7 +278,7 @@ class DshAskLedgerTest {
     @Test
     fun single_select_other_text_drops_the_selected_array() {
         val f = Fixture()
-        val ask = f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame()))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame())))
         val updated = AskQuestions.answeredInput(ask.input, mapOf("Which color do you prefer?" to "Teal"), null)
         runBlocking { f.ledger.answer(ask.requestId, allow = true, updatedInput = updated) }
 
@@ -286,7 +293,7 @@ class DshAskLedgerTest {
     fun an_approval_allow_sends_allowed_once_with_both_ids() {
         val f = Fixture()
         val frame = approvalFrame()
-        val ask = f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(frame))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(frame)))
         assertEquals("bash", ask.toolName)
         // the model's own escalation reason is what the human reads
         assertEquals("needs to delete build/ which is outside the sandbox", ask.input?.str("description"))
@@ -301,7 +308,7 @@ class DshAskLedgerTest {
     @Test
     fun an_approval_deny_sends_rejected() {
         val f = Fixture()
-        val ask = f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame()))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame())))
         runBlocking { f.ledger.answer(ask.requestId, allow = false, updatedInput = null) }
         assertEquals(DshAsk.OUTCOME_REJECT, f.sent.single().value.str("outcome"))
     }
@@ -311,7 +318,7 @@ class DshAskLedgerTest {
     @Test
     fun a_bad_response_is_surfaced_in_the_chat() {
         val f = Fixture(result = { DshRespond(false, "bad-response") })
-        val ask = f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame()))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame())))
         runBlocking { f.ledger.answer(ask.requestId, allow = true, updatedInput = null) }
         assertEquals(1, f.reported.size)
         assertTrue("bad-response" in f.reported.single(), f.reported.single())
@@ -320,7 +327,7 @@ class DshAskLedgerTest {
     @Test
     fun not_pending_is_a_benign_race_and_stays_quiet() {
         val f = Fixture(result = { DshRespond(false, DshRespond.NOT_PENDING) })
-        val ask = f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame()))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame())))
         runBlocking { f.ledger.answer(ask.requestId, allow = true, updatedInput = null) }
         assertTrue(f.reported.isEmpty())
     }
@@ -338,7 +345,7 @@ class DshAskLedgerTest {
     @Test
     fun reset_drops_every_pending_entry() {
         val f = Fixture()
-        val ask = f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame()))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame())))
         f.ledger.reset()
         runBlocking { assertFalse(f.ledger.answer(ask.requestId, allow = true, updatedInput = null)) }
         // …and the rpcId is claimable again (a fresh host process may legitimately reuse nothing, but the
@@ -360,7 +367,9 @@ class DshAskLedgerTest {
             verdictTimeoutMs = 60, questionTimeoutMs = 60,
             forceNeverRemember = true, // what Conversation sets for AgentKind.DSH
         )
-        val ask = f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame()))!!
+        val ask = assertIs<AgentEvent.ControlRequest>(
+            f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame())),
+        )
         bridge.onControlRequest(ask)
 
         val card = emitted.filterIsInstance<PermissionAsk>().single()
@@ -388,7 +397,10 @@ class DshAskLedgerTest {
             respond = { askId, allow, _, _, updated, _ -> f.ledger.answer(askId, allow, updated) },
             verdictTimeoutMs = 30_000, questionTimeoutMs = 30_000, forceNeverRemember = true,
         )
-        val ask = f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame()))!!
+        // a well-formed frame yields a real CARD, never the #321 "cannot answer this" chat notice
+        val ask = assertIs<AgentEvent.ControlRequest>(
+            f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame())),
+        )
         bridge.onControlRequest(ask)
 
         val card = emitted.filterIsInstance<PermissionAsk>().single()
