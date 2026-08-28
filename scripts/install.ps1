@@ -69,8 +69,10 @@ if ($sumsUrl) {
     } else { Write-Host "warning: SHA256SUMS has no entry for $assetName - skipping verification" }
 } else { Write-Host "warning: release has no SHA256SUMS - skipping verification" }
 
-# stop a running daemon so binaries can be replaced (the service restarts it below)
-schtasks /End /TN cc-pocket-daemon 2>$null | Out-Null
+# stop a running daemon so binaries can be replaced (the service restarts it below).
+# No schtasks /End here: the Scheduled Task runs a WScript wrapper that detaches the
+# daemon, so /End only ends an already-finished wrapper and can't stop the daemon itself
+# (see UpdateService.restartWindowsService). Killing the process is what frees the binaries.
 Get-Process cc-pocket-daemon -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 
