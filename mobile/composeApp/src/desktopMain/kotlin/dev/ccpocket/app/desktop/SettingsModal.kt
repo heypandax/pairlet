@@ -105,6 +105,7 @@ import dev.ccpocket.app.ui.agentName
 import dev.ccpocket.app.ui.agentTintFill
 import dev.ccpocket.app.ui.agentTintBorder
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AuthState
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import dev.ccpocket.protocol.PresetEnv
@@ -712,6 +713,67 @@ private fun ModeRow(m: DkMode, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** `claude auth status --json` "authMethod" values, verbatim (CLI 2.1.x). */
+private const val AUTH_CLAUDE_AI = "claude.ai"   // a real OAuth subscription login — switchable / logout-able
+private const val AUTH_API_KEY = "api_key"       // ANTHROPIC_API_KEY (or a key helper)
+private const val AUTH_OAUTH_TOKEN = "oauth_token" // ANTHROPIC_AUTH_TOKEN, typically with ANTHROPIC_BASE_URL
+private const val AUTH_THIRD_PARTY = "third_party" // Bedrock / Vertex — provider-managed, no key to name
+private const val AUTH_NONE = "none"
+private const val ENV_AUTH_TOKEN = "ANTHROPIC_AUTH_TOKEN"
+
+/** Which authentication card the account pane renders once a preset isn't driving sessions. */
+internal enum class AuthCard {
+    /** Env-supplied credential (key / gateway token / managed provider): no OAuth actions apply. */
+    Credential,
+
+    /** A real claude.ai login: sign in / switch / log out all work. */
+    Oauth,
+
+    /** Nothing configured — the actionable Sign in entry point. */
+    Unconfigured,
+}
+
+/** How the credential card names its source (#318 — the badge and body differ per flavor). */
+internal enum class CredentialFlavor {
+    /** The daemon named the variable (apiKeySource, e.g. ANTHROPIC_API_KEY) — the classic API-key card. */
+    EnvKey,
+
+    /** authMethod oauth_token with nothing named: a gateway token in ANTHROPIC_AUTH_TOKEN. */
+    EnvToken,
+
+    /** authMethod third_party (Bedrock / Vertex): provider-managed, there is no env var to show. */
+    Managed,
+}
+
+/**
+ * Pick the authentication card from an [AuthState] — authMethod first, legacy heuristic as the fallback.
+ *
+ * The CLI reports gateway auth (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN) and Bedrock/Vertex as
+ * `loggedIn: true` with NO email and NO apiKeySource, so the old `loggedIn && apiKeySource != null`
+ * test missed them and dropped both into the OAuth "signed in" card — which then offers a switch/logout
+ * that cannot possibly work (#318). authMethod distinguishes them cleanly.
+ *
+ * A daemon that predates the field (or a CLI that grows a value we don't know yet) sends null/unknown:
+ * fall back to the exact pre-#318 judgement so old pairs behave identically.
+ */
+internal fun authPresentation(s: AuthState): AuthCard = when (s.authMethod?.takeIf { it.isNotBlank() }) {
+    AUTH_CLAUDE_AI -> AuthCard.Oauth
+    AUTH_API_KEY, AUTH_OAUTH_TOKEN, AUTH_THIRD_PARTY -> AuthCard.Credential
+    AUTH_NONE -> AuthCard.Unconfigured
+    else -> when { // null (old daemon) or an unknown future value → legacy judgement, unchanged
+        s.loggedIn && !s.apiKeySource.isNullOrBlank() -> AuthCard.Credential
+        s.loggedIn -> AuthCard.Oauth
+        else -> AuthCard.Unconfigured
+    }
+}
+
+/** Only meaningful when [authPresentation] said [AuthCard.Credential]. A named source always wins. */
+internal fun credentialFlavor(s: AuthState): CredentialFlavor = when {
+    !s.apiKeySource.isNullOrBlank() -> CredentialFlavor.EnvKey
+    s.authMethod == AUTH_OAUTH_TOKEN -> CredentialFlavor.EnvToken
+    else -> CredentialFlavor.Managed // third_party, or an api_key the CLI declined to name
+}
+
 /**
  * The active computer's Claude CLI auth (OAuth account switch, issue #73 lineage) PLUS API presets
  * (issue #113): named env overrides (base URL / token / model routing) a third-party API user switches
@@ -841,29 +903,43 @@ private fun AccountPane(model: DesktopModel) {
                 // design 1a/3b. The daemon's own login/env still exists underneath; Deactivate returns to it.
                 activePreset != null -> PresetAuthCard(activePreset) { runOp(PresetOp.Activate(null)) }
 
-                // an API key / forwarding endpoint authenticates via env var, not an OAuth login: the CLI
-                // still reports loggedIn + authMethod "claude.ai", but email/plan are null and `claude auth
-                // login/logout` can't override the key (#73). Presets below are the actionable path now.
-                s.loggedIn && !s.apiKeySource.isNullOrBlank() -> Column(
+                // a key / gateway token / third-party provider authenticates the CLI through the
+                // environment, not an OAuth login — `claude auth login/logout` can't override it (#73, #318).
+                // Which flavor it is comes from authMethod (see [authPresentation]); presets below are the
+                // actionable path now, so this card offers no dead account switch.
+                authPresentation(s) == AuthCard.Credential -> Column(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
                         .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
                 ) {
-                    val keySource = s.apiKeySource.orEmpty() // non-blank per the branch guard (a protocol prop can't smart-cast cross-module)
+                    val flavor = credentialFlavor(s)
+                    // the env var to name: the daemon's own apiKeySource when it has one, else the variable
+                    // the authMethod implies. Bedrock/Vertex (Managed) has none — a neutral label instead.
+                    val envVar = when (flavor) {
+                        CredentialFlavor.EnvKey -> s.apiKeySource.orEmpty() // non-blank per credentialFlavor
+                        CredentialFlavor.EnvToken -> ENV_AUTH_TOKEN
+                        CredentialFlavor.Managed -> null
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Rounded.Lock, null, tint = Tok.tx2, modifier = Modifier.size(15.dp))
-                        Text(stringResource(Res.string.settings_api_key), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            // "API key" stays the title for the classic named-key case; a gateway token or a
+                            // managed provider is a credential but not an API key, so it gets a neutral one
+                            stringResource(if (flavor == CredentialFlavor.EnvKey) Res.string.settings_api_key else Res.string.settings_credential),
+                            color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        )
                         Spacer(Modifier.weight(1f))
-                        MonoPill("env · $keySource", accent = false)
+                        MonoPill(envVar?.let { "env · $it" } ?: stringResource(Res.string.settings_credential_managed), accent = false)
                     }
                     Hairline(vertical = 13.dp)
                     Text(
-                        stringResource(Res.string.settings_env_key_body, keySource) + " " +
+                        (envVar?.let { stringResource(Res.string.settings_env_key_body, it) }
+                            ?: stringResource(Res.string.settings_credential_managed_body)) + " " +
                             stringResource(if (ps != null) Res.string.settings_env_key_presets else Res.string.settings_env_key_computer),
                         color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp,
                     )
                 }
 
-                s.loggedIn -> Column(
+                authPresentation(s) == AuthCard.Oauth -> Column(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
                         .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
                 ) {
@@ -893,9 +969,9 @@ private fun AccountPane(model: DesktopModel) {
                         }
                     } else Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         // only a real OAuth login (which always carries an email) can actually be switched or
-                        // logged out. An env-token / gateway auth reports loggedIn=true with a null email and no
-                        // apiKeySource (so it lands here, not the API-key branch), yet `claude auth login/logout`
-                        // can't touch it — grey these out rather than leave them as no-ops the user keeps poking.
+                        // logged out. A pre-authMethod daemon can still land an env-token / gateway auth here
+                        // (loggedIn=true, null email, no apiKeySource) where `claude auth login/logout` can't
+                        // touch it — grey these out rather than leave them as no-ops the user keeps poking.
                         val canManage = s.email != null
                         TextBtn(stringResource(Res.string.settings_switch_account), Tok.accent, enabled = canManage) { confirmSwitch = true }
                         TextBtn(stringResource(Res.string.settings_log_out), Tok.danger, enabled = canManage) { model.logoutAccount() }
@@ -940,7 +1016,9 @@ private fun AccountPane(model: DesktopModel) {
                 ps = ps,
                 timedOut = timedOut,
                 connected = model.connected,
-                oauthActive = activePreset == null && s?.loggedIn == true && s.apiKeySource.isNullOrBlank(),
+                // same judgement the card above renders (#318): a gateway/Bedrock credential is NOT an
+                // OAuth login, so it must not get the "presets replace your Claude login" framing
+                oauthActive = activePreset == null && s != null && authPresentation(s) == AuthCard.Oauth,
                 computerName = model.activeComputer?.name,
                 inFlight = inFlight,
                 reachError = reachError,
