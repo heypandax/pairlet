@@ -22,10 +22,11 @@ import kotlin.io.path.isDirectory
 
 /**
  * Aggregates token usage from EVERY backend's on-disk records (issue #26, extended by #217 and #258):
- *  - Claude transcripts under ~/.claude/projects — the same files ccusage reads. Per assistant turn it sums
- *    `message.usage` (input + output + cache) and reads the transcript's OWN `costUSD` (no fragile price
- *    table). Turns are deduped by `message.id` + `requestId` so a turn duplicated across resumed/forked
- *    `.jsonl` isn't double counted.
+ *  - Claude transcripts under ~/.claude/projects — the same files ccusage reads, at BOTH depths the CLI
+ *    writes them (see [claudeTranscriptFiles]; the sub-agent depth was missing until issue #323). Per
+ *    assistant turn it sums `message.usage` (input + output + cache) and reads the transcript's OWN
+ *    `costUSD` (no fragile price table). Turns are deduped by `message.id` + `requestId` so a turn
+ *    duplicated across resumed/forked `.jsonl` isn't double counted.
  *  - Codex rollouts under ~/.codex/sessions — `event_msg`/`token_count` records carry the turn's delta
  *    (`last_token_usage`) with a timestamp, and `turn_context` carries the model. Codex stamps no cost, so
  *    `costUsdToday`/`costUsdWindow` stay Claude-only.
@@ -120,46 +121,42 @@ object UsageService {
             }
         }
 
-        if (projectsRoot.isDirectory() && (agent == null || agent == AgentKind.CLAUDE)) Files.newDirectoryStream(projectsRoot).use { dirs ->
-            for (dir in dirs) {
-                if (!dir.isDirectory()) continue
-                val files = runCatching { Files.newDirectoryStream(dir, "*.jsonl").use { it.toList() } }.getOrNull() ?: continue
-                for (file in files) runCatching {
-                    file.bufferedReader().useLines { lines ->
-                        for (raw in lines) {
-                            val line = raw.trim()
-                            if (line.isEmpty() || "\"assistant\"" !in line) continue // cheap prefilter before JSON parse
-                            val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
-                            if (obj.str("type") != "assistant") continue
-                            val msg = obj["message"] as? JsonObject ?: continue
-                            val when_ = obj.str("timestamp")?.let(::parseWhen) ?: continue
-                            val date = when_.toLocalDate()
-                            if (date.isBefore(prevStart)) continue
-                            // dedupe: the same turn reappears in multiple .jsonl after a resume/fork
-                            val key = (msg.str("id") ?: "") + ":" + (obj.str("requestId") ?: "")
-                            if (key != ":" && !seen.add(key)) continue
-                            val usage = msg["usage"] as? JsonObject
-                            val input = usage.long("input_tokens")
-                            val cacheRead = usage.long("cache_read_input_tokens")
-                            val total = input + usage.long("output_tokens") + usage.long("cache_creation_input_tokens") + cacheRead
-                            if (date.isBefore(start)) { prevWindowTokens += total; continue } // prev-window turn: baseline only
-                            perDay[date] = (perDay[date] ?: 0) + total
-                            val model = msg.str("model") ?: "unknown"
-                            perModel[model] = (perModel[model] ?: 0) + total
-                            modelAgent[model] = AgentKind.CLAUDE
-                            requestsWindow++
-                            inputWindow += input
-                            cacheReadWindow += cacheRead
-                            (obj["costUSD"] as? JsonPrimitive)?.doubleOrNull?.let { costWindow += it; costWindowSeen = true }
-                            if (date == today) {
-                                perHour[when_.hour] += total
-                                tokensToday += total
-                                requestsToday++
-                                inputToday += input
-                                cacheReadToday += cacheRead
-                                (obj["costUSD"] as? JsonPrimitive)?.doubleOrNull?.let { costToday += it; costSeen = true }
-                            }
-                        }
+        if (agent == null || agent == AgentKind.CLAUDE) for (file in claudeTranscriptFiles(projectsRoot)) runCatching {
+            file.bufferedReader().useLines { lines ->
+                for (raw in lines) {
+                    val line = raw.trim()
+                    if (line.isEmpty() || "\"assistant\"" !in line) continue // cheap prefilter before JSON parse
+                    val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                    if (obj.str("type") != "assistant") continue
+                    val msg = obj["message"] as? JsonObject ?: continue
+                    val when_ = obj.str("timestamp")?.let(::parseWhen) ?: continue
+                    val date = when_.toLocalDate()
+                    if (date.isBefore(prevStart)) continue
+                    // dedupe: the same turn reappears in multiple .jsonl after a resume/fork — and, since
+                    // issue #323, potentially in BOTH a session's top-level transcript and its subagent
+                    // file, if a CLI version writes the sidechain turn to each. Same key, counted once.
+                    val key = (msg.str("id") ?: "") + ":" + (obj.str("requestId") ?: "")
+                    if (key != ":" && !seen.add(key)) continue
+                    val usage = msg["usage"] as? JsonObject
+                    val input = usage.long("input_tokens")
+                    val cacheRead = usage.long("cache_read_input_tokens")
+                    val total = input + usage.long("output_tokens") + usage.long("cache_creation_input_tokens") + cacheRead
+                    if (date.isBefore(start)) { prevWindowTokens += total; continue } // prev-window turn: baseline only
+                    perDay[date] = (perDay[date] ?: 0) + total
+                    val model = msg.str("model") ?: "unknown"
+                    perModel[model] = (perModel[model] ?: 0) + total
+                    modelAgent[model] = AgentKind.CLAUDE
+                    requestsWindow++
+                    inputWindow += input
+                    cacheReadWindow += cacheRead
+                    (obj["costUSD"] as? JsonPrimitive)?.doubleOrNull?.let { costWindow += it; costWindowSeen = true }
+                    if (date == today) {
+                        perHour[when_.hour] += total
+                        tokensToday += total
+                        requestsToday++
+                        inputToday += input
+                        cacheReadToday += cacheRead
+                        (obj["costUSD"] as? JsonPrimitive)?.doubleOrNull?.let { costToday += it; costSeen = true }
                     }
                 }
             }
@@ -307,6 +304,50 @@ object UsageService {
             cacheReadTokensWindow = cacheBaseWindow?.let { cacheReadWindow },
             cacheBaseTokensWindow = cacheBaseWindow,
         )
+    }
+
+    /** The `subagents/` directory Claude Code writes each session's sidechain transcripts into. */
+    private const val SUBAGENTS = "subagents"
+
+    /**
+     * Every Claude transcript under [projectsRoot], at BOTH depths the CLI writes (issue #323):
+     *  - `projects/<dirKey>/<sessionId>.jsonl` — the session's own turns, the only depth this ever read;
+     *  - `projects/<dirKey>/<sessionId>/subagents/agent-*.jsonl` — the sidechain turns of that session's
+     *    sub-agents, which a modern CLI parks two levels deeper.
+     *
+     * Missing the second depth silently under-counted every Task-heavy user: on the author's machine 326 of
+     * 623 files (26% of tokens, 41% of requests) lived there, which is exactly why this total never matched
+     * the recursive doublestar glob ccusage walks. We deliberately do NOT copy that unbounded recursion — a
+     * stray deep tree under ~/.claude/projects (a checked-out repo, a symlinked mount) would turn the usage
+     * card into a full-disk walk. Two named levels, one `subagents` hop, nothing else.
+     *
+     * Every path is composed with [Path.resolve] and matched by filename glob only, so the Windows
+     * separator never enters the picture. Order matters for dedup: a session's own transcript comes before
+     * its subagents, so on a duplicated turn the first-wins `seen` set keeps the parent copy — the one that
+     * may carry `costUSD`. An unreadable directory drops that branch and never the whole scan.
+     */
+    private fun claudeTranscriptFiles(projectsRoot: Path): List<Path> {
+        if (!projectsRoot.isDirectory()) return emptyList()
+        val out = ArrayList<Path>()
+        runCatching {
+            Files.newDirectoryStream(projectsRoot).use { projects ->
+                for (projectDir in projects) {
+                    if (!projectDir.isDirectory()) continue
+                    runCatching { Files.newDirectoryStream(projectDir, "*.jsonl").use { out.addAll(it) } }
+                    runCatching {
+                        Files.newDirectoryStream(projectDir).use { entries ->
+                            for (sessionDir in entries) {
+                                if (!sessionDir.isDirectory()) continue
+                                val subagents = sessionDir.resolve(SUBAGENTS)
+                                if (!subagents.isDirectory()) continue
+                                runCatching { Files.newDirectoryStream(subagents, "*.jsonl").use { out.addAll(it) } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return out
     }
 
     private fun parseWhen(ts: String): ZonedDateTime? = runCatching { Instant.parse(ts).atZone(zone) }.getOrNull()
