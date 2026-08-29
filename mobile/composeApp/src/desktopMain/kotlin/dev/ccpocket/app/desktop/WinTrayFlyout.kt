@@ -539,6 +539,7 @@ private fun WinFlyoutMenu(onHide: () -> Unit, onSettings: () -> Unit) {
 private fun WinMenuItem(text: String, onClick: () -> Unit) {
     Text(
         text, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        style = tightCenter(12.5.sp),
         modifier = Modifier.fillMaxWidth().height(34.dp).clip(RoundedCornerShape(5.dp))
             .hoverFill(RoundedCornerShape(5.dp), hover = Tok.tx.copy(alpha = 0.06f))
             .clickable(onClick = onClick).padding(horizontal = 9.dp)

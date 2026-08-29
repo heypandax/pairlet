@@ -148,19 +148,19 @@ fun GitOverlay(model: DesktopModel, onDismiss: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
-                    Text("⎇", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp)
+                    Text("⎇", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp, style = tightCenter(12.sp))
                     Text(
                         status?.branch ?: "…", color = Tok.tx, fontFamily = Dk.mono, fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium, maxLines = 1,
+                        fontWeight = FontWeight.Medium, maxLines = 1, style = tightCenter(13.sp),
                     )
-                    Text("▾", color = Tok.muted, fontSize = 9.sp)
+                    Text("▾", color = Tok.muted, fontSize = 9.sp, style = tightCenter(9.sp))
                     val divergence = divergenceText(status)
                     when {
-                        gitInSync(status) -> Text(stringResource(Res.string.git_in_sync), color = Tok.ok, fontFamily = Dk.mono, fontSize = 11.5.sp)
-                        divergence.isNotEmpty() -> Text(divergence, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp)
+                        gitInSync(status) -> Text(stringResource(Res.string.git_in_sync), color = Tok.ok, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
+                        divergence.isNotEmpty() -> Text(divergence, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
                     }
                 }
-                status?.upstream?.let { Text(it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp) }
+                status?.upstream?.let { Text(it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp)) }
                 Box(Modifier.weight(1f))
                 // #294: the chip is the only door to the worktree surface, so a single-checkout repo
                 // must still get it — otherwise the first worktree can never be created from here
@@ -168,7 +168,7 @@ fun GitOverlay(model: DesktopModel, onDismiss: () -> Unit) {
                     val wtCount = status.worktreeCount ?: 1
                     Text(
                         if (wtCount > 1) stringResource(Res.string.wt_count, wtCount) else stringResource(Res.string.wt_count_one),
-                        color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
+                        color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp),
                         modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
                             .clickable { model.openWorktrees() }.padding(horizontal = 9.dp, vertical = 4.dp),
                     )
@@ -323,7 +323,7 @@ private fun DesktopGitRow(
             }
             if (action != GitRowAction.NONE && (hovered || selected)) Text(
                 stringResource(if (action == GitRowAction.STAGE) Res.string.git_stage else Res.string.git_unstage),
-                color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
                 modifier = Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, Tok.hair, RoundedCornerShape(7.dp))
                     .clickable(onClick = onAct).padding(horizontal = 9.dp, vertical = 4.dp),
             )
@@ -349,7 +349,7 @@ private fun GitDiffPane(model: DesktopModel, path: String) {
                 val on = staged == isStaged
                 Text(
                     label, color = if (on) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp,
-                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium, style = tightCenter(11.5.sp),
                     modifier = Modifier.clip(RoundedCornerShape(6.dp))
                         .background(if (on) Tok.surface else Color.Transparent)
                         .clickable(enabled = !on) { model.openGitDiff(path, isStaged) }
@@ -360,17 +360,18 @@ private fun GitDiffPane(model: DesktopModel, path: String) {
             seg(stringResource(Res.string.git_staged), isStaged = true)
         }
         if (diff?.ok == true) {
-            Text("+${diff.adds}", color = Tok.ok, fontFamily = Dk.mono, fontSize = 11.5.sp)
-            Text("−${diff.dels}", color = Tok.danger, fontFamily = Dk.mono, fontSize = 11.5.sp)
+            Text("+${diff.adds}", color = Tok.ok, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
+            Text("−${diff.dels}", color = Tok.danger, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
             val hunks = remember(diff.diff) { parseUnifiedDiff(diff.diff ?: "").size }
             Text(
                 if (hunks == 1) stringResource(Res.string.git_hunk_one) else stringResource(Res.string.git_hunks, hunks),
-                color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp,
+                color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
             )
         }
         // the destructive verb is one level down and never acts immediately (design B3)
         Text(
             stringResource(Res.string.git_revert_file), color = Tok.danger, fontFamily = Dk.ui, fontSize = 11.5.sp,
+            style = tightCenter(11.5.sp),
             modifier = Modifier.clip(RoundedCornerShape(7.dp))
                 .clickable { model.gitAct(GIT_OP_REVERT, paths = listOf(path)) }
                 .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -511,6 +512,7 @@ private fun BranchPopover(model: DesktopModel, branches: List<GitBranchInfo>, cu
                     stringResource(Res.string.git_create),
                     color = if (on) Tok.base else Tok.tx.copy(alpha = 0.34f),
                     fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    style = tightCenter(12.sp),
                     modifier = Modifier.clip(RoundedCornerShape(8.dp))
                         .background(if (on) Tok.accent else Tok.accent.copy(alpha = 0.16f))
                         .then(if (on) Modifier.clickable { model.gitAct(GIT_OP_BRANCH, branch = name.trim()); onDismiss() } else Modifier)
@@ -825,18 +827,21 @@ private fun DesktopWorktreeCard(model: DesktopModel, w: WorktreeEntry) {
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("⎇", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp)
+            Text("⎇", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
             Text(
                 w.branch ?: w.head?.take(8) ?: "?", color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.5.sp,
-                fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(12.5.sp),
+                modifier = Modifier.weight(1f),
             )
             if (w.isMain) Text(
                 stringResource(Res.string.wt_main_badge).uppercase(), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 9.sp,
+                style = tightCenter(9.sp),
                 modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Tok.tx.copy(alpha = 0.08f)).padding(horizontal = 5.dp, vertical = 3.dp),
             )
             // Remove is ABSENT for the main worktree, never merely disabled (design A6)
             if (worktreeRemovable(w)) Text(
                 stringResource(Res.string.wt_menu_remove), color = Tok.danger, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                style = tightCenter(11.5.sp),
                 modifier = Modifier.clip(RoundedCornerShape(7.dp)).clickable { model.removeWorktree(w.path) }
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             )

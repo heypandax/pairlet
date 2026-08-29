@@ -168,7 +168,7 @@ fun TrayPopover(
                 if (hiddenRunning > 0) {
                     Text(
                         stringResource(Res.string.tray_more_sessions, hiddenRunning),
-                        color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                        color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp),
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).hoverFill(RoundedCornerShape(9.dp))
                             .clickable(onClick = openMain).padding(horizontal = 8.dp, vertical = 8.dp),
                     )
@@ -238,7 +238,7 @@ internal fun jumpToMachine(model: DesktopModel, accountId: String) {
 @Composable
 private fun TrayGroupLabel(text: String, count: Int = 0) {
     Row(Modifier.padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(text.uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.7.sp)
+        Text(text.uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.7.sp, style = tightCenter(11.sp))
         // the accent count pill beside NEEDS YOU — the one coloured cue inside the popover chrome
         if (count > 0) {
             Text(
@@ -306,26 +306,31 @@ private fun TrayApprovalRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> U
                 Text(
                     "${s / 60}:${(s % 60).toString().padStart(2, '0')}",
                     color = if (s <= 25) Tok.warn else Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp,
+                    style = tightCenter(10.5.sp),
                 )
             }
         }
         Text(
             a.preview, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            style = tightCenter(11.5.sp),
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 9.dp).clip(RoundedCornerShape(7.dp)).background(Tok.base)
                 .border(1.dp, Tok.hair, RoundedCornerShape(7.dp)).padding(horizontal = 9.dp, vertical = 7.dp),
         )
         if (a.question) {
             Text(
                 stringResource(Res.string.tray_answer_in_session), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                style = tightCenter(12.sp),
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).clickable(onClick = onOpen).padding(vertical = 7.dp),
             )
         } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 stringResource(Res.string.deny), color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                style = tightCenter(12.5.sp),
                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).border(1.dp, Tok.danger.copy(alpha = 0.4f), RoundedCornerShape(8.dp)).clickable(onClick = onDeny).padding(vertical = 7.dp),
             )
             Text(
                 stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                style = tightCenter(12.5.sp),
                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Tok.accent).clickable(onClick = onAllow).padding(vertical = 7.dp),
             )
         }
@@ -360,7 +365,7 @@ private fun TrayMore(hidden: Int, onClick: () -> Unit) {
     if (hidden <= 0) return
     Text(
         stringResource(Res.string.tray_more_waiting, hidden),
-        color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp,
+        color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp),
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp)).hoverFill(RoundedCornerShape(7.dp)).clickable(onClick = onClick).padding(horizontal = 6.dp, vertical = 7.dp),
     )
 }

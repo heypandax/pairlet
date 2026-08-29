@@ -141,9 +141,10 @@ internal fun OneShotCredentialCard(name: String, ttlSec: Int, json: String, onDo
             Text(
                 stringResource(Res.string.bridge_cred_title, name),
                 color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(12.sp),
             )
             Spacer(Modifier.weight(1f))
-            Text(stringResource(Res.string.done), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp, modifier = Modifier.clickable(onClick = onDone))
+            Text(stringResource(Res.string.done), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp, style = tightCenter(10.sp), modifier = Modifier.clickable(onClick = onDone))
         }
         Spacer(Modifier.height(4.dp))
         Text(
@@ -326,6 +327,7 @@ internal fun NewBridgeForm(
             )
             Text(
                 stringResource(Res.string.cancel), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
+                style = tightCenter(12.sp),
                 modifier = Modifier.clickable(onClick = onCancel).padding(horizontal = 8.dp, vertical = 7.dp),
             )
         }
@@ -453,6 +455,7 @@ internal fun EditRunnerForm(
             )
             Text(
                 stringResource(Res.string.cancel), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
+                style = tightCenter(11.sp),
                 modifier = Modifier.clickable(onClick = onCancel).padding(horizontal = 6.dp, vertical = 6.dp),
             )
         }

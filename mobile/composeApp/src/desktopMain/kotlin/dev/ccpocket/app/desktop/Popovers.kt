@@ -529,6 +529,7 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
             )
             if (custom.isNotBlank()) Text(
                 "→", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                style = tightCenter(13.sp),
                 modifier = Modifier.clip(RoundedCornerShape(6.dp))
                     .clickable { model.switchModel(custom.trim()); onDismiss() }.padding(horizontal = 4.dp),
             )
@@ -619,12 +620,12 @@ private fun GatewayPresetRow(p: GatewayModelPreset, active: Boolean, suggested: 
         GatewayVendorMonogram(p, 24.dp)
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(p.vendor, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
-                if (suggested) Text("✓ " + stringResource(Res.string.model_gateway_suggested), color = Tok.accent, fontFamily = Dk.ui, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold)
+                Text(p.vendor, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(12.5.sp))
+                if (suggested) Text("✓ " + stringResource(Res.string.model_gateway_suggested), color = Tok.accent, fontFamily = Dk.ui, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(9.5.sp))
             }
             Text(p.id, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
         }
-        if (active) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp)
+        if (active) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp))
     }
 }
 

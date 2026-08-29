@@ -138,6 +138,7 @@ private fun canRemember(ask: PermissionAsk): Boolean = ask.rule != null && !ask.
 private fun DenyButton(big: Boolean = false, onClick: () -> Unit) {
     Text(
         stringResource(Res.string.deny), color = Tok.danger, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.SemiBold,
+        style = tightCenter(if (big) 13.5.sp else 13.sp),
         modifier = Modifier.clip(RoundedCornerShape(if (big) 10.dp else 9.dp))
             .border(1.dp, Tok.danger.copy(alpha = 0.4f), RoundedCornerShape(if (big) 10.dp else 9.dp))
             .clickable(onClick = onClick).padding(horizontal = if (big) 18.dp else 16.dp, vertical = if (big) 10.dp else 8.dp),
@@ -151,7 +152,7 @@ private fun AllowButton(big: Boolean = false, key: Boolean = true, onClick: () -
             .padding(horizontal = if (big) 18.dp else 16.dp, vertical = if (big) 10.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Text(stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.Bold)
+        Text(stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.Bold, style = tightCenter(if (big) 13.5.sp else 13.sp))
         if (key) Key("⌘⏎")
     }
 }
@@ -161,6 +162,7 @@ private fun AllowButton(big: Boolean = false, key: Boolean = true, onClick: () -
 private fun OnceButton(onClick: () -> Unit) {
     Text(
         stringResource(Res.string.allow_once), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+        style = tightCenter(13.sp),
         modifier = Modifier.clip(RoundedCornerShape(9.dp)).border(1.dp, Tok.hair, RoundedCornerShape(9.dp))
             .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
     )
@@ -174,7 +176,7 @@ private fun TaskAllowButton(onClick: () -> Unit) {
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Text(stringResource(Res.string.allow_for_task), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text(stringResource(Res.string.allow_for_task), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold, style = tightCenter(13.sp))
         Key("⌘⏎")
     }
 }
@@ -218,11 +220,13 @@ private fun DesktopSaferPanel(onBack: () -> Unit, onSend: (List<String>) -> Unit
             Spacer(Modifier.weight(1f))
             Text(
                 stringResource(Res.string.cancel), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                style = tightCenter(12.5.sp),
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onBack).padding(horizontal = 10.dp, vertical = 6.dp),
             )
             val enabled = picked.isNotEmpty() || custom.isNotBlank()
             Text(
                 stringResource(Res.string.retry_safer_send), color = if (enabled) Tok.base else Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+                style = tightCenter(12.5.sp),
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (enabled) Tok.accent else Tok.surface)
                     .clickable(enabled = enabled) { onSend(picked + listOfNotNull(custom.trim().takeIf { it.isNotBlank() })) }
                     .padding(horizontal = 14.dp, vertical = 7.dp),
@@ -369,6 +373,7 @@ fun InlinePermCard(
                                 if (canRemember(ask) && ask.grantOptions?.contains("session") == true) {
                                     Text(
                                         "⋯", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
+                                        style = tightCenter(13.sp),
                                         modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { moreOpen = !moreOpen }.padding(horizontal = 7.dp, vertical = 4.dp),
                                     )
                                 }
@@ -423,6 +428,7 @@ private fun TimedOutBlock(onDismiss: () -> Unit) {
         }
         Text(
             stringResource(Res.string.dismiss), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            style = tightCenter(13.sp),
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onDismiss).padding(horizontal = 10.dp, vertical = 6.dp),
         )
     }

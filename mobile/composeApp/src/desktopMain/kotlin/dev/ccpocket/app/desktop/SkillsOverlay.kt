@@ -369,6 +369,7 @@ private fun DetailScaffold(
                             Row(Modifier.padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                 Text(
                                     f.key, color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp,
+                                    style = tightCenter(12.sp),
                                     textAlign = TextAlign.End, modifier = Modifier.width(96.dp),
                                 )
                                 if (f.kind == FactKind.CMDS) {
@@ -488,6 +489,6 @@ private fun FootHintText(keycap: String, label: String) {
             keycap, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp),
             modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Tok.hair.copy(alpha = 0.5f)).padding(horizontal = 5.dp, vertical = 1.dp),
         )
-        Text(label, color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp)
+        Text(label, color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp))
     }
 }

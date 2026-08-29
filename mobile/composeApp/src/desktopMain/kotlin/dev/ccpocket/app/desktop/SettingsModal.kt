@@ -1194,6 +1194,7 @@ private fun PresetForm(
     Column {
         Text(
             stringResource(Res.string.settings_presets_back), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+            style = tightCenter(12.5.sp),
             modifier = Modifier.clip(RoundedCornerShape(6.dp)).hoverFill(RoundedCornerShape(6.dp)).clickable(onClick = onClose).padding(horizontal = 4.dp, vertical = 2.dp),
         )
         Text(
@@ -1273,6 +1274,7 @@ private fun PresetForm(
             Spacer(Modifier.weight(1f))
             Text(
                 stringResource(Res.string.cancel), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                style = tightCenter(12.5.sp),
                 modifier = Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, Tok.hair, RoundedCornerShape(7.dp))
                     .hoverFill(RoundedCornerShape(7.dp)).clickable(onClick = onClose).padding(horizontal = 14.dp, vertical = 8.dp),
             )
@@ -1400,6 +1402,7 @@ private fun SegChip(label: String, selected: Boolean, onClick: () -> Unit) {
 private fun FilledBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
     Text(
         label, color = if (enabled) Tok.base else Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+        style = tightCenter(12.5.sp),
         modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(if (enabled) Tok.accent else Tok.surface)
             .border(1.dp, if (enabled) Tok.accent else Tok.hair, RoundedCornerShape(7.dp))
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -1548,6 +1551,7 @@ private fun ComputersPane(model: DesktopModel) {
 private fun TextBtn(label: String, color: androidx.compose.ui.graphics.Color, enabled: Boolean = true, onClick: () -> Unit) {
     Text(
         label, color = if (enabled) color else Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+        style = tightCenter(12.5.sp),
         modifier = Modifier.clip(RoundedCornerShape(7.dp))
             .then(if (enabled) Modifier.hoverFill(RoundedCornerShape(7.dp)) else Modifier)
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 9.dp, vertical = 5.dp),
@@ -1605,6 +1609,7 @@ private fun SchedulesPane(model: DesktopModel) {
                     }
                     Text(
                         stringResource(Res.string.schedule_remove), color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                        style = tightCenter(12.sp),
                         modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { model.cancelSchedule(s.id) }.padding(6.dp),
                     )
                 }
@@ -1689,6 +1694,7 @@ private fun ShareCreateForm(model: DesktopModel) {
         Spacer(Modifier.height(14.dp))
         Text(
             stringResource(Res.string.share_create), color = if (path.isBlank()) Tok.muted else Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+            style = tightCenter(13.sp),
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(if (path.isBlank()) Tok.surface else Tok.accent)
                 .then(if (path.isBlank()) Modifier else Modifier.clickable { model.createShare(path.trim(), tier, expiry.seconds) }).padding(vertical = 10.dp),
         )
@@ -1722,7 +1728,7 @@ private fun InviteResultCard(folder: String, tier: String, code: String, onDone:
         Text(stringResource(Res.string.share_invite_ready), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         Text("$folder · $tier — " + stringResource(Res.string.share_invite_hint), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, modifier = Modifier.padding(top = 3.dp, bottom = 10.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(code, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 9.dp))
+            Text(code, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(11.sp), modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 9.dp))
             TextBtn(stringResource(Res.string.path_copy), Tok.accent) { clipboard.setText(AnnotatedString(code)) }
             TextBtn(stringResource(Res.string.share_done), Tok.tx2, onClick = onDone)
         }

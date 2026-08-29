@@ -390,7 +390,7 @@ private fun ProjectPinRow(model: DesktopModel, p: DkProjectPin, index: Int) {
     ) {
         Icon(Icons.Outlined.Folder, null, tint = Tok.muted, modifier = Modifier.size(12.dp))
         Text(
-            p.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, lineHeight = 12.sp,
+            p.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, style = tightCenter(12.sp),
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
         if (hovered) {
@@ -440,15 +440,15 @@ private fun RunningRow(m: DkMachine, p: DkProject, onBrowse: () -> Unit, onClick
     ) {
         PulseDot(Tok.accent, 5.dp)
         Text(
-            p.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, lineHeight = 12.sp,
+            p.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, style = tightCenter(12.sp),
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
         if (p.sharedBy != null) SharedPill() // a guest's shared folder (issue #115) — provenance at a glance
         if (hovered) Text(
-            "≡", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp,
+            "≡", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp),
             modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable(onClick = onBrowse).padding(horizontal = 3.dp),
         ) else Text(
-            m.computer.name, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp,
+            m.computer.name, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp),
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
         )
     }
@@ -477,7 +477,7 @@ private fun RecentHeader(model: DesktopModel) {
     ) {
         Text(
             stringResource(Res.string.switcher_recent).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp, style = tightCenter(11.sp),
         )
         Spacer(Modifier.width(8.dp))
         Box(Modifier.width(1.dp)) // keep the row baseline stable pre-hover (SectionLabel parity)
@@ -487,7 +487,7 @@ private fun RecentHeader(model: DesktopModel) {
             Text(
                 stringResource(if (arm) Res.string.sidebar_clear_confirm else Res.string.sidebar_clear),
                 color = if (arm) Tok.accent else Tok.tx2,
-                fontFamily = Dk.ui, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+                fontFamily = Dk.ui, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(10.5.sp),
                 modifier = Modifier.clip(RoundedCornerShape(4.dp))
                     .clickable { if (arm) { arm = false; model.clearRecent() } else arm = true }
                     .padding(horizontal = 3.dp),
@@ -850,20 +850,20 @@ private fun CustomGroupHeader(model: DesktopModel, projectPath: String, sec: Ses
         Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted, modifier = Modifier.size(12.dp).rotate(if (collapsed) -90f else 0f))
         Text(
             sec.name ?: stringResource(Res.string.group_ungrouped),
-            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(11.sp),
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
         )
-        Text("${sec.sessions.size}", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
+        Text("${sec.sessions.size}", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp))
         Spacer(Modifier.weight(1f))
         if (canEdit && hovered) {
             Text(
                 stringResource(Res.string.group_rename), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold, maxLines = 1,
+                fontWeight = FontWeight.SemiBold, maxLines = 1, style = tightCenter(10.sp),
                 modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { editing = true }.padding(horizontal = 3.dp),
             )
             Text(
                 stringResource(Res.string.group_delete), color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold, maxLines = 1,
+                fontWeight = FontWeight.SemiBold, maxLines = 1, style = tightCenter(10.sp),
                 modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { confirming = true }.padding(horizontal = 3.dp),
             )
         }
@@ -880,6 +880,7 @@ private fun GroupDeleteConfirm(onConfirm: () -> Unit, onCancel: () -> Unit) {
         Text(stringResource(Res.string.group_delete_confirm), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 10.5.sp, lineHeight = 14.sp, modifier = Modifier.weight(1f))
         Text(
             stringResource(Res.string.group_delete), color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+            style = tightCenter(10.5.sp),
             modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable(onClick = onConfirm).padding(horizontal = 3.dp),
         )
         Icon(Icons.Rounded.Close, null, tint = Tok.muted, modifier = Modifier.size(12.dp).clip(RoundedCornerShape(4.dp)).clickable(onClick = onCancel))

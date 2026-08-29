@@ -131,18 +131,19 @@ private fun AttentionRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> Unit
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             DkMachineChip(a.machine, a.os, fontSize = 10.5.sp, glyph = 12.dp)
-            Text("·", color = Tok.hair, fontFamily = Dk.ui, fontSize = 11.5.sp)
-            Text(a.tool, color = Tok.tx, fontFamily = Dk.ui, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+            Text("·", color = Tok.hair, fontFamily = Dk.ui, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
+            Text(a.tool, color = Tok.tx, fontFamily = Dk.ui, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(11.5.sp))
             Spacer(Modifier.weight(1f))
             a.seconds?.let { s ->
                 Text(
                     "${s / 60}:${(s % 60).toString().padStart(2, '0')}",
                     color = if (s <= 25) Tok.warn else Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp,
+                    style = tightCenter(10.5.sp),
                 )
             }
         }
         Text(
-            a.preview, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp,
+            a.preview, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp),
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(7.dp))
                 .background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(7.dp))
