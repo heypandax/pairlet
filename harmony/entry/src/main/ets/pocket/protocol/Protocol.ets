@@ -550,6 +550,24 @@ export class PermissionAsk {
 /** HistoryMessage.role / 流式行的渲染角色。 */
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'thinking' | 'error';
 
+/**
+ * 一条已作答提问留在回放里的 (问题 → 答案) 对（对齐 protocol 的 `QuestionAnswer`）。
+ *
+ * 自由输入的回答是单个 question 为空串的对，与 commonMain 同形。
+ */
+export class QuestionAnswer {
+  question = '';
+  answer = '';
+
+  static from(v: Object): QuestionAnswer {
+    const o = jo(v);
+    const a = new QuestionAnswer();
+    a.question = js(o['question']);
+    a.answer = js(o['answer']);
+    return a;
+  }
+}
+
 export class HistoryMessage {
   role: ChatRole = 'assistant';
   text = '';
@@ -557,6 +575,13 @@ export class HistoryMessage {
   error = false;
   ok: boolean | null = null;
   output: string | null = null;
+  /**
+   * 已作答的 AskUserQuestion 行携带的 (问题 → 答案) 对（issue #321）。
+   *
+   * wire 上这个字段一直都在（daemon 的回放对每个后端都填），只是鸿蒙客户端此前不解析，于是已答与
+   * 未答的提问一起掉进通用工具卡。null = 这一行没带 answers（未作答的提问，或者根本不是提问）。
+   */
+  answers: QuestionAnswer[] | null = null;
 
   static from(v: Object): HistoryMessage {
     const o = jo(v);
@@ -569,6 +594,10 @@ export class HistoryMessage {
     const ok = o['ok'];
     m.ok = typeof ok === 'boolean' ? ok : null;
     m.output = jstr(o['output']);
+    // 字段缺席与空数组必须区分：缺席 = 没作答，空数组 = 作答了但没选任何项（对齐 commonMain 的
+    // `h.answers?.let {}`，它同样按「键在不在」而不是「有没有元素」分流）。
+    const ans = o['answers'];
+    m.answers = Array.isArray(ans) ? ja(ans).map((x: Object) => QuestionAnswer.from(x)) : null;
     return m;
   }
 }
