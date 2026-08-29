@@ -1570,8 +1570,8 @@ class Conversation(
                     clearTurnWork()
                     bridge?.cancelAll()
                     bridge = null
-                    // Surface the last stderr (often the real cause) + a clear message
-                    val why = p.lastStderr?.let { " — ${it.take(300)}" } ?: ""
+                    // Surface the stderr tail's diagnosis (often the real cause) + a clear message
+                    val why = p.stderrDiagnostic()?.let { " — $it" } ?: ""
                     sink.emit(PocketError(
                         "opencode_startup_timeout",
                         "OpenCode did not produce any output within ${windowMs / 1000}s ($why). " +
@@ -1991,7 +1991,9 @@ class Conversation(
             // opencode "Session not found" after state DB relocation or stale resume id
             // (e.g. XDG_STATE_HOME change): clear the resume lineage so the next spawn creates a
             // fresh session instead of looping on an id the agent can no longer locate.
-            if (p.lastStderr?.contains(SESSION_NOT_FOUND) == true) {
+            // scan the whole retained tail, not just the last line: the marker is routinely followed by
+            // more output (a runtime footer, a usage hint) that used to hide it (issue #328)
+            if (p.stderrTail().any { it.contains(SESSION_NOT_FOUND) }) {
                 log.warn("$convoId opencode: session not found — clearing stale resumeId, fresh session on next prompt")
                 sessionId = null; openedResumeId = null
             }
@@ -2001,10 +2003,11 @@ class Conversation(
             proc = null
             bridge?.cancelAll()
             bridge = null
-            // carry the exit code + the agent's last stderr line: a --resume that dies before its first
-            // init (bad session id, context overflow) used to surface as a bare "agent process ended"
-            val why = p.lastStderr?.let { " — ${it.take(300)}" } ?: ""
-            val summary = "agent process ended (exit ${p.exitCode() ?: "?"})$why"
+            // carry the exit code + the agent's stderr diagnosis: a --resume that dies before its first
+            // init (bad session id, context overflow) used to surface as a bare "agent process ended",
+            // and a multi-line runtime crash used to surface as only its version footer (issue #328)
+            val why = p.stderrDiagnostic()?.let { " — $it" } ?: ""
+            val summary = "agent process ended (exit ${p.exitCode() ?: "?"})$why".take(MAX_EXIT_SUMMARY_CHARS)
             sink.emit(PocketError("process_exited", summary, convoId))
             // an UNEXPECTED death is exactly what a locked phone must hear about (issue #138): the
             // session died with no TurnDone push coming. Same hook + presence gate as a failed turn;
@@ -2036,7 +2039,9 @@ class Conversation(
      * heal surfaces its own PocketError.
      */
     private suspend fun healSessionLock(p: AgentProcess): Boolean {
-        if (lockForkRetried || p.lastStderr?.contains(SESSION_LOCK_MARKER) != true) return false
+        // the refusal hint is not necessarily the LAST line — a runtime footer or a second complaint
+        // printed after it used to bury the marker and cost the heal entirely (issue #328)
+        if (lockForkRetried || p.stderrTail().none { it.contains(SESSION_LOCK_MARKER) }) return false
         val anchor = sessionId ?: openedResumeId ?: return false // nothing to fork off
         lockForkRetried = true
         openedWithFork = true // pre-init relaunches (mode/model switch) must keep the fork decision
@@ -2723,6 +2728,10 @@ class Conversation(
         // (bg / interactive / …); this prefix doesn't. Probed on 2.1.204 — scripts/probe-claude-wire.py
         // `lock` scenario guards the wording against CLI drift.
         const val SESSION_LOCK_MARKER = "is currently running as a background agent"
+
+        // Belt-and-braces cap on the process_exited summary. stderrDiagnostic() already bounds its own
+        // share; this keeps the assembled line bounded no matter how the prefix grows.
+        const val MAX_EXIT_SUMMARY_CHARS = 800
 
         // opencode emits this on stderr when the --session id is not in its state DB (state DB
         // was relocated or the id never existed). The daemon must clear its resume lineage on

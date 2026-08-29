@@ -141,6 +141,59 @@ class ConversationSessionLockTest {
         assertTrue("No conversation found" in (err.message))
     }
 
+    /** Issue #328: the refusal hint is not always the LAST stderr line. A last-line-only reader lost
+     *  the heal (and the phone got a meaningless "Node.js v…" as the whole reason) whenever the
+     *  runtime printed anything after it; the tail scan must still find the marker. */
+    @Test
+    fun lock_refusal_buried_above_later_stderr_still_heals() {
+        if (System.getProperty("os.name").lowercase().contains("win")) return
+        val script = Files.createTempDirectory("ccp-lock-fx").resolve("stream.jsonl")
+            .apply { writeText(fixture.joinToString("\n") + "\n") }
+        // multi-line death: the marker, then two more lines ending in a bare Node version footer
+        val buried = "$lockStderr\nnode:internal/process/esm_loader:34\nNode.js v24.16.0"
+        val backend = LockingBackend(script, buried, refuseLaunches = 1)
+
+        val frames = runPrompt(backend) { fs -> fs.any { it is TurnDone } }
+
+        assertEquals(listOf(false, true), backend.specs.map { it.forkSession }, backend.specs.toString())
+        assertTrue(frames.none { it is PocketError }, frames.filterIsInstance<PocketError>().toString())
+    }
+
+    /** Issue #328: a non-lock death's process_exited must carry the real cause from the middle of a
+     *  multi-line dump, not merely the runtime footer that happened to be printed last. */
+    @Test
+    fun process_exited_carries_the_real_cause_from_a_multi_line_crash() {
+        if (System.getProperty("os.name").lowercase().contains("win")) return
+        val script = Files.createTempDirectory("ccp-lock-fx").resolve("stream.jsonl")
+            .apply { writeText(fixture.joinToString("\n") + "\n") }
+        // no apostrophes: the stub interpolates this into a single-quoted sh string
+        val crash = "node:internal/fs/utils:355\n" +
+            "Error: ENOENT: no such file or directory, open /tmp/gone.json\n" +
+            "    at Object.openSync (node:fs:596:3)\n" +
+            "Node.js v24.16.0"
+        val backend = LockingBackend(script, crash, refuseLaunches = 1)
+
+        val frames = runPrompt(backend) { fs -> fs.any { it is PocketError } }
+
+        val err = frames.filterIsInstance<PocketError>().first()
+        assertEquals("process_exited", err.code)
+        assertTrue("ENOENT: no such file or directory" in err.message, err.message)
+        assertTrue("Node.js v24.16.0" !in err.message, err.message)
+        assertTrue(err.message.length <= Conversation.MAX_EXIT_SUMMARY_CHARS, err.message)
+    }
+
+    /** The cleartext push copy is unchanged by the richer summary: a usage-limit death still words the
+     *  push (it carries the reset epoch the phone needs), any other death stays generic — the multi-line
+     *  stderr must never leak onto the unsealed TEXT plane. */
+    @Test
+    fun usage_limit_wording_survives_a_multi_line_summary() {
+        val summary = "agent process ended (exit 1) — node:internal/x:1\n" +
+            "Claude AI usage limit reached|1751990400\nNode.js v24.16.0"
+        assertTrue(dev.ccpocket.daemon.relay.PushPolicy.isUsageLimit(summary))
+        assertEquals(1751990400_000L, dev.ccpocket.daemon.relay.PushPolicy.usageLimitResetAtMs(summary))
+        assertEquals(false, dev.ccpocket.daemon.relay.PushPolicy.isUsageLimit("agent process ended (exit 1)"))
+    }
+
     @Test
     fun lock_refusal_heals_at_most_once() {
         if (System.getProperty("os.name").lowercase().contains("win")) return
