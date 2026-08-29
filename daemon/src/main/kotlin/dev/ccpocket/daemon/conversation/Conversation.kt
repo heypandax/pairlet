@@ -441,6 +441,18 @@ class Conversation(
     @Volatile
     private var runtimeContextWindow: Long? = null
 
+    // LIVE BEATS DISK, ALWAYS (issue #320). The open-time backfill below reads these same facts off the
+    // resumed transcript, on a coroutine that can take a multi-MB parse — long enough for the first live
+    // `request/context` / `request/header` to land first. Without a barrier that is a check-then-act window
+    // in which a STALE transcript value overwrites the newer live one. The pump sets this the moment the
+    // backend states anything about itself; the backfill only writes while it is unset, under [runtimeMetaLock].
+    // Never cleared: a backend that has spoken once will speak again, and no backfill runs after the open.
+    @Volatile
+    private var sawLiveRuntimeMeta = false
+
+    /** Serializes the open-time metadata backfill against the pump's [AgentEvent.RuntimeMeta] writes. */
+    private val runtimeMetaLock = Any()
+
     // the turn emitted a `<synthetic>` placeholder (every API call failed) — consumed by TurnResult,
     // which reports the turn as an ERROR instead of letting the placeholder pass for a real reply (issue #65)
     @Volatile
@@ -840,7 +852,13 @@ class Conversation(
             // usage statusline on open — before the first new turn's init lands (a headless claude is silent
             // until then, issue #27). Done off the relay inbound loop; the transcript read can be a multi-MB parse.
             if (model == null && resumeId != null) {
-                runCatching { backend.resumeModel(workdir.toString(), resumeId) }.getOrNull()?.let { backfilledModel = it }
+                val disk = runCatching { backend.resumeModel(workdir.toString(), resumeId) }.getOrNull()
+                // Same barrier as the two reads below: a backend that already named its model on the live
+                // wire (dsh does, on every assistant/message) must not be contradicted by an older
+                // transcript this parse only just finished reading (issue #320).
+                synchronized(runtimeMetaLock) {
+                    if (!sawLiveRuntimeMeta) disk?.let { backfilledModel = it }
+                }
             }
             // issue #96: no explicit --model AND nothing recovered from a transcript (a brand-new session, or a
             // resume whose transcript named no model) — eagerly resolve the backend's CONFIGURED default so the
@@ -850,6 +868,24 @@ class Conversation(
             // "account default" placeholder. The first turn's init still wins (it clears backfilledModel).
             if (model == null && backfilledModel == null) {
                 runCatching { backend.defaultModel(workdir.toString()) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { backfilledModel = it }
+            }
+            // …and the other two facts the header needs: the real context window (the denominator for
+            // "Context NN%" — no window table on our side knows a dsh/deepseek model id) and the level the
+            // session actually runs at. A dsh session states both only on the `request/*` frames of a
+            // RUNNING request, so before this a REOPENED session read "default" with no denominator until it
+            // happened to run another turn (issue #320). BLANKS ONLY, and only while the live wire has said
+            // nothing: this is the older evidence of the two, so it fills gaps and never overwrites.
+            if (resumeId != null) {
+                val diskWindow = runCatching { backend.resumeContextWindow(workdir.toString(), resumeId) }.getOrNull()
+                val diskEffort = runCatching { backend.resumeEffort(workdir.toString(), resumeId) }.getOrNull()
+                synchronized(runtimeMetaLock) {
+                    if (!sawLiveRuntimeMeta) {
+                        // > 0 / non-blank only: a zero window would divide the phone's usage % by nothing,
+                        // and a "" effort would displace a level we might otherwise learn.
+                        if (runtimeContextWindow == null) diskWindow?.takeIf { it > 0 }?.let { runtimeContextWindow = it }
+                        if (runtimeEffort == null) diskEffort?.takeIf { it.isNotBlank() }?.let { runtimeEffort = it }
+                    }
+                }
             }
             resumeContextUsed = resumeId?.let { runCatching { backend.resumeContextTokens(workdir.toString(), it) }.getOrNull() }
             // seed the degraded flag from the transcript's tail: a session that died over its context
@@ -1785,16 +1821,21 @@ class Conversation(
                     // header read "default" with no denominator for the session's whole life.
                     is AgentEvent.RuntimeMeta -> {
                         var changed = false
-                        // The user's pick outranks it: `model` is a deliberate choice (switchModel clears
-                        // the backfill precisely so an echo can't undo it), so only the DISPLAY backfill
-                        // moves here — exactly like the transcript guess it shares a field with.
-                        ev.model?.takeIf { it.isNotBlank() && model == null && it != backfilledModel }?.let {
-                            backfilledModel = it
-                            changed = true
+                        synchronized(runtimeMetaLock) {
+                            // From here on the resume backfill is locked out: whatever it read off disk is,
+                            // by construction, no newer than this frame (issue #320).
+                            sawLiveRuntimeMeta = true
+                            // The user's pick outranks it: `model` is a deliberate choice (switchModel clears
+                            // the backfill precisely so an echo can't undo it), so only the DISPLAY backfill
+                            // moves here — exactly like the transcript guess it shares a field with.
+                            ev.model?.takeIf { it.isNotBlank() && model == null && it != backfilledModel }?.let {
+                                backfilledModel = it
+                                changed = true
+                            }
+                            ev.effort?.takeIf { it.isNotBlank() && it != runtimeEffort }?.let { runtimeEffort = it; changed = true }
+                            // > 0 only: a zero window would divide the phone's usage % by nothing.
+                            ev.contextWindow?.takeIf { it > 0 && it != runtimeContextWindow }?.let { runtimeContextWindow = it; changed = true }
                         }
-                        ev.effort?.takeIf { it.isNotBlank() && it != runtimeEffort }?.let { runtimeEffort = it; changed = true }
-                        // > 0 only: a zero window would divide the phone's usage % by nothing.
-                        ev.contextWindow?.takeIf { it > 0 && it != runtimeContextWindow }?.let { runtimeContextWindow = it; changed = true }
                         // Re-announce only on a REAL change. dsh restates the model on every
                         // assistant/message, so an unconditional emit would push one SessionLive per step
                         // of every turn — the same frame, over the relay, forever.

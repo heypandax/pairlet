@@ -532,6 +532,50 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
      *  and is a separate piece of work. Null (no readout) beats a stale or wrong one. */
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
 
+    // ---- resume metadata (issue #320) ----
+    //
+    // dsh states its model / effort / context window on `request/*` frames of a RUNNING request, never on
+    // the session header and never on our synthetic init. So a reopened session showed "default" with no
+    // denominator until it happened to run another turn. These three read the same facts off the same
+    // records, on disk — see [DshTranscript.resumeMeta]. No evidence ⇒ null ⇒ the phone keeps saying
+    // unknown; nothing here is inferred from a model name or from the local config.
+
+    override fun resumeModel(workdir: String, sessionId: String): String? =
+        resumeMeta(workdir, sessionId).model
+
+    override fun resumeContextWindow(workdir: String, sessionId: String): Long? =
+        resumeMeta(workdir, sessionId).contextWindow
+
+    override fun resumeEffort(workdir: String, sessionId: String): String? =
+        resumeMeta(workdir, sessionId).effort
+
+    private data class CachedMeta(val mtime: Long, val meta: DshTranscript.ResumeMeta)
+
+    /** The Conversation asks for the three facts one at a time; the answer costs a full-transcript stream, so
+     *  it is parsed ONCE per (file, mtime). Keyed by mtime rather than cached outright: a live session's file
+     *  keeps growing, and a resume that landed on a stale parse would announce yesterday's model. */
+    private val metaCache = java.util.concurrent.ConcurrentHashMap<String, CachedMeta>()
+
+    private fun resumeMeta(workdir: String, sessionId: String): DshTranscript.ResumeMeta {
+        val found = runCatching { DshTranscriptScanner.find(sessionId, workdir, storeRoot()) }.getOrNull()
+            ?: return DshTranscript.ResumeMeta.EMPTY
+        metaCache[found.file.toString()]?.takeIf { it.mtime == found.mtime }?.let { return it.meta }
+        val fresh = runCatching { DshTranscript.resumeMeta(found.file) }
+            .getOrDefault(DshTranscript.ResumeMeta.EMPTY)
+        metaCache[found.file.toString()] = CachedMeta(found.mtime, fresh)
+        return fresh
+    }
+
+    /** VISIBLE FOR TESTS ONLY. The store root is `$DSH_HOME/sessions` in production and cannot be moved from
+     *  inside the JVM, so the resume hooks (the only readers that take no explicit root) get this seam. */
+    @Volatile private var storeRootForTest: Path? = null
+
+    internal fun bindStoreRootForTest(root: Path) {
+        storeRootForTest = root
+    }
+
+    private fun storeRoot(): Path = storeRootForTest ?: DshPaths.sessionsRoot()
+
     // ---- synthetic frames (our own injections, distinguished from dsh's by their `type`) ----
 
     private fun syntheticInit(sid: String): String =

@@ -163,6 +163,19 @@ interface AgentBackend {
      *  e.g. Codex). Claude reads it from the transcript. */
     fun resumeModel(workdir: String, sessionId: String): String? = null
 
+    /** The context window the last completed turn of [sessionId] ran under, read off the transcript — the
+     *  denominator the phone's "Context NN%" needs on a COLD resume. Only the backend can know it: no window
+     *  table on our side maps a dsh/deepseek model id to a size. Null when unknown / not on disk (default;
+     *  Claude derives its own from the model id instead). MUST NOT be guessed from a model name or a config
+     *  default: no readout beats a wrong one (issue #320). */
+    fun resumeContextWindow(workdir: String, sessionId: String): Long? = null
+
+    /** The reasoning effort the last completed turn of [sessionId] actually ran at, read off the transcript.
+     *  Distinct from the user's chosen level (which the Conversation already holds): a session opened without
+     *  an explicit level still runs at one, and on a cold resume the transcript is the only record of it.
+     *  Null when unknown / not on disk (default; issue #320). */
+    fun resumeEffort(workdir: String, sessionId: String): String? = null
+
     /** Human-facing title persisted by the backend. Used to make SessionLive self-contained for entry
      *  points (push/deep link) that know only workdir + session id. Backends may override with a cheaper
      *  direct lookup; the default keeps OpenCode and third-party implementations correct. */
