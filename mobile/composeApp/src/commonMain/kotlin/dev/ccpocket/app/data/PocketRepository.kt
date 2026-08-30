@@ -6343,6 +6343,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         grantScope: String? = null,          // "task" | "session" — 允许本任务 / Session 记忆
         retrySafer: Boolean = false,         // 换种安全方式 (rides a DENY)
         constraints: List<String>? = null,
+        message: String? = null,             // the note that rides a question SKIP (#57)
     ) {
         val key = ApprovalKey(ask.convoId, ask.askId)
         if (pendingApprovals.remove(key) != null) {
@@ -6366,7 +6367,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             send(
                 PermissionVerdict(
                     ask.convoId, ask.askId, if (allow) Decision.ALLOW else Decision.DENY,
-                    remember = remember, grantScope = grantScope,
+                    message = message, remember = remember, grantScope = grantScope,
                     retrySafer = retrySafer, constraints = constraints,
                 ),
             )
@@ -6386,12 +6387,45 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val a = pendingAsk.value ?: return
         val c = convoId.value ?: return
         advanceAsk()
-        val items = response?.takeIf { it.isNotBlank() }?.let { listOf("" to it.trim()) }
-            ?: a.questions.orEmpty().mapNotNull { q -> answers?.get(q.question)?.takeIf { it.isNotBlank() }?.let { q.question to it } }
-        messages.add(ChatItem.QuestionsAnswered(items))
+        messages.add(ChatItem.QuestionsAnswered(answeredItems(a, answers, response)))
         Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to "answered"))
         scope.launch { send(PermissionVerdict(c, a.askId, Decision.ALLOW, answers = answers, response = response)) }
     }
+
+    /**
+     * Answer an AskUserQuestion named by the ASK ITSELF rather than by the focused card (issue #311).
+     *
+     * Same reason [resolveAskDirect] exists: a split column holds its own ask, and answering it must not
+     * consult — let alone consume — whatever the focused conversation happens to be blocked on. The wire
+     * is byte-identical to [answerQuestions]: an ALLOW carrying the `answers` map keyed by the EXACT
+     * question text, which is what the daemon merges into claude's `updatedInput.answers`. Any other shape
+     * reads to the CLI as "the user did not answer" (#57), so this must stay one construction with the
+     * focused path, never a parallel one.
+     */
+    fun answerQuestionsDirect(ask: PermissionAsk, answers: Map<String, String>?, response: String? = null) {
+        // the note lands in the column that showed the card, and that column's queue advances — both live
+        // in SidePanes so there is exactly one place a pane's card is retired
+        sidePanes.noteQuestionsAnswered(ask.convoId, ask.askId, answeredItems(ask, answers, response))
+        Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to "answered"))
+        scope.launch {
+            send(PermissionVerdict(ask.convoId, ask.askId, Decision.ALLOW, answers = answers, response = response))
+        }
+    }
+
+    /** Skip a question named by the ask itself (issue #311): a DENY carrying the note, so claude learns the
+     *  user opted out instead of waiting out the timeout — the focused path's skip, one column over. */
+    fun skipQuestionsDirect(ask: PermissionAsk, message: String) =
+        resolveAskDirect(ask, allow = false, message = message)
+
+    /** The stream note for an answered question: a freeform reply stands alone (no question owns it),
+     *  otherwise one row per question the user actually picked something for. */
+    private fun answeredItems(
+        ask: PermissionAsk,
+        answers: Map<String, String>?,
+        response: String?,
+    ): List<Pair<String, String>> =
+        response?.takeIf { it.isNotBlank() }?.let { listOf("" to it.trim()) }
+            ?: ask.questions.orEmpty().mapNotNull { q -> answers?.get(q.question)?.takeIf { it.isNotBlank() }?.let { q.question to it } }
 
     /** Timeout: the daemon already auto-denied; clear the prompt without re-sending, show the next queued ask. */
     fun dismissAsk() { if (pendingAsk.value != null) advanceAsk() }

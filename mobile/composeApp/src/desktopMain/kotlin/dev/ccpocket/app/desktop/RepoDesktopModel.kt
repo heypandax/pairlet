@@ -450,6 +450,15 @@ class RepoDesktopModel(
     override fun retryPaneSafer(ask: PermissionAsk, constraints: List<String>) =
         repo.resolveAskDirect(ask, allow = false, retrySafer = true, constraints = constraints)
 
+    // AskUserQuestion in a column (W3): same wire as the focused card — answers ride an ALLOW, a skip
+    // denies with the note — but addressed by the column's own ask.
+    override fun answerPaneQuestions(ask: PermissionAsk, answers: Map<String, String>?, response: String?) =
+        repo.answerQuestionsDirect(ask, answers, response)
+
+    override fun skipPaneQuestions(ask: PermissionAsk, message: String) = repo.skipQuestionsDirect(ask, message)
+
+    override fun dismissPaneAsk(ask: PermissionAsk) = repo.sidePanes.noteApprovalResolved(ask.convoId, ask.askId)
+
     // ── workflow orchestration (issue #106): delegate to the repository; dock state is ui-local ──
     override val workflowRuns: Map<String, dev.ccpocket.protocol.WorkflowRun> get() = repo.workflowRuns
     override val dockedWorkflowRunId: String? get() = repo.viewedWorkflowRunId.value

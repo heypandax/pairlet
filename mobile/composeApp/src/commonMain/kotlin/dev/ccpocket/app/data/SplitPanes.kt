@@ -4,6 +4,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AskWithdrawn
+import dev.ccpocket.protocol.AskWithdrawnReason
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.CloseSession
@@ -71,9 +72,32 @@ class SidePane(
     val openFailed = mutableStateOf(false)
     val error = mutableStateOf<String?>(null)
 
-    /** The approval this pane's session is blocked on. Resolved through the repository's inbox verbs, so a
-     *  decision made here and one made in the bell popover travel the exact same path. */
+    /** The approval — or the AskUserQuestion — this pane's session is blocked on. Resolved through the
+     *  repository's ask-keyed verbs, so a decision made here and one made in the bell popover travel the
+     *  exact same path. Questions belong here too: the bell inbox deliberately excludes them (they are
+     *  conversation, answered inside their own session), so this slot is the ONLY surface a column's
+     *  question can ever reach. */
     val pendingAsk = mutableStateOf<PermissionAsk?>(null)
+
+    /**
+     * The asks that arrived while [pendingAsk] was already showing one (approval design M1, one column over).
+     *
+     * The daemon's ApprovalCoordinator lets one conversation hold SEVERAL open asks at once, and on a
+     * reattach it resurfaces every one of them back to back. A single-value slot kept only the last —
+     * every other question and approval was destroyed before it was ever drawn, and the agent sat waiting
+     * for a verdict no surface would ever offer. So they wait in line, exactly as the focused chat's do.
+     */
+    val askQueue = mutableStateListOf<PermissionAsk>()
+
+    /**
+     * The askId the daemon reported TIMED_OUT (issue #100), for THIS column's current card.
+     *
+     * Kept as an id rather than a flag for the same reason the focused path keeps one: matched against the
+     * card actually on screen, a stale value cannot bleed onto the next ask. A bare askId is enough here
+     * (the focused path needs the composite key) because a pane only ever holds its own conversation's
+     * asks, and askIds are unique within one.
+     */
+    val timedOutAskId = mutableStateOf<String?>(null)
 
     /** #147 reattach cursor for THIS pane's transcript, so a reconnect replays a delta, not the whole tail. */
     internal var historySeq: Long? = null
@@ -287,20 +311,108 @@ class SidePanes(
             is ToolEvent -> byConvo(f.convoId)?.let { it.transcript.finishThinking(); it.transcript.onToolEvent(f) }
             is TurnDone -> byConvo(f.convoId)?.let { endTurn(it, f) }
             is PromptAck -> byConvo(f.convoId)?.let { it.error.value = null }
-            is PermissionAsk -> if (!f.isQuestion) byConvo(f.convoId)?.let { it.pendingAsk.value = f }
-            is AskWithdrawn -> byConvo(f.convoId)?.let { pane ->
-                if (pane.pendingAsk.value?.askId == f.askId) pane.pendingAsk.value = null
+            // Questions route here too. Filtering them out left AskUserQuestion in a column with NO surface
+            // at all — the bell inbox excludes questions by design, and the focused question card is gated
+            // on the focused conversation — so the column streamed until the daemon timed the ask out and
+            // the turn died in silence. That is exactly the "lost ask" class v1.9.5 just closed (#321/#326),
+            // reappearing one column over.
+            is PermissionAsk -> byConvo(f.convoId)?.let { fileAsk(it, f) }
+            is AskWithdrawn -> byConvo(f.convoId)?.let { withdrawAsk(it, f) }
+            is SessionGone -> byConvo(f.convoId)?.let {
+                it.gone.value = true
+                it.streaming.value = false
+                // no verdict can be delivered to a conversation that no longer exists, so nothing may keep
+                // offering one — a card left behind here answers into the void and reads as "it worked"
+                clearAsks(it)
             }
-            is SessionGone -> byConvo(f.convoId)?.let { it.gone.value = true; it.streaming.value = false }
             is PocketError -> f.convoId?.let { c -> byConvo(c)?.let { it.error.value = f.message } }
             else -> Unit
         }
     }
 
-    /** Resolving an approval anywhere clears the card here too — the pane must not keep offering a decision
-     *  that has already been made (from the bell popover, the phone, or the computer itself). */
+    /**
+     * File [f] into [pane]'s card slot, with the focused chat's M1 queueing semantics (see [SidePane.askQueue]).
+     *
+     * The four cases are the focused path's, one for one: a duplicate of the card on screen (the daemon
+     * resurfaces pending asks on every reattach) refreshes it in place, a duplicate of a QUEUED one
+     * refreshes there, an empty slot takes the ask, and anything else waits its turn.
+     */
+    private fun fileAsk(pane: SidePane, f: PermissionAsk) {
+        // a card sitting in its terminal "timed out" display must not dam the queue: a NEW live ask retires
+        // it, which is also the only way that terminal state is ever left behind by something other than a tap
+        pane.pendingAsk.value?.let { if (pane.timedOutAskId.value == it.askId) advanceAsk(pane) }
+        val current = pane.pendingAsk.value
+        val queuedAt = pane.askQueue.indexOfFirst { it.askId == f.askId }
+        when {
+            current?.askId == f.askId -> pane.pendingAsk.value = f
+            queuedAt >= 0 -> pane.askQueue[queuedAt] = f
+            current == null -> pane.pendingAsk.value = f
+            else -> pane.askQueue.add(f)
+        }
+    }
+
+    /** The daemon retired one of [pane]'s asks — mirrors the focused path's AskWithdrawn handling. */
+    private fun withdrawAsk(pane: SidePane, f: AskWithdrawn) {
+        val current = pane.pendingAsk.value
+        if (current?.askId != f.askId) {
+            // a queued card the user never saw was retired (agent cancel / timeout) — drop it silently,
+            // there is nothing to explain about a card that was never drawn
+            pane.askQueue.removeAll { it.askId == f.askId }
+            return
+        }
+        if (f.reason == AskWithdrawnReason.TIMED_OUT && !current.isQuestion) {
+            // issue #100, one column over: hold the card in its terminal "timed out" state instead of
+            // letting it vanish — a card that silently disappears reads as "my decision went through"
+            pane.timedOutAskId.value = f.askId
+            return
+        }
+        // agent moved on / session closed / a question timed out. A question leaves a muted note, because
+        // a question card that just evaporates leaves the column looking like the agent stopped talking
+        // for no reason; then whatever queued behind it comes up.
+        if (current.isQuestion) pane.messages.add(ChatItem.QuestionsWithdrawn)
+        advanceAsk(pane)
+    }
+
+    /** Retire [pane]'s current card and surface the next queued ask, if any. The terminal timeout state
+     *  dies with the card it described. */
+    private fun advanceAsk(pane: SidePane) {
+        pane.timedOutAskId.value = null
+        pane.pendingAsk.value = pane.askQueue.removeFirstOrNull()
+    }
+
+    /** Drop every ask a pane is holding — for the paths where no verdict can land anymore. */
+    private fun clearAsks(pane: SidePane) {
+        pane.askQueue.clear()
+        pane.timedOutAskId.value = null
+        pane.pendingAsk.value = null
+    }
+
+    /** Resolving an approval anywhere retires the card here too — the pane must not keep offering a decision
+     *  that has already been made (from the bell popover, the phone, or the computer itself). Also how a
+     *  column's OWN verdict retires its card: the decision goes out through the repository, which lands
+     *  back here, so one path advances the queue no matter which surface decided. */
     fun noteApprovalResolved(convoId: String, askId: String) {
-        byConvo(convoId)?.let { if (it.pendingAsk.value?.askId == askId) it.pendingAsk.value = null }
+        val pane = byConvo(convoId) ?: return
+        if (pane.pendingAsk.value?.askId == askId) advanceAsk(pane)
+        else pane.askQueue.removeAll { it.askId == askId }
+    }
+
+    /**
+     * The user answered a column's question card: note the picks in THAT column's stream, then advance.
+     *
+     * The note is what makes the answer readable afterwards — the agent's next turn quotes nothing back,
+     * so without it the transcript shows a question and then, apparently, nothing. Mirrors the focused
+     * path's `ChatItem.QuestionsAnswered`, and lives here (not in the repository) because it belongs to
+     * the pane's own transcript, and because the queue must advance in exactly one place.
+     */
+    fun noteQuestionsAnswered(convoId: String, askId: String, items: List<Pair<String, String>>) {
+        val pane = byConvo(convoId) ?: return
+        if (pane.pendingAsk.value?.askId != askId) {
+            pane.askQueue.removeAll { it.askId == askId }
+            return
+        }
+        pane.messages.add(ChatItem.QuestionsAnswered(items))
+        advanceAsk(pane)
     }
 
     /** Send [text] into [pane]'s conversation. False = nothing to send, or the pane's open has not landed. */

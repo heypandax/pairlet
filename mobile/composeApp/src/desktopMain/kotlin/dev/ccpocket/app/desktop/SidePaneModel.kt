@@ -58,10 +58,26 @@ class SidePaneModel(
     override val observing: Boolean get() = false
     override val selectedSessionId: String get() = pane.sessionId
 
-    /** The approval THIS session raised. Same frame the bell popover shows, so the two never disagree. */
+    /** The approval — or question — THIS session raised. Same frame the bell popover shows for approvals,
+     *  so the two never disagree; for questions this column is the only surface there is. */
     override val ask: PermissionAsk? get() = pane.pendingAsk.value
-    override val askTimedOut: Boolean get() = false
-    override val askQueuePosition: Pair<Int, Int>? get() = null
+
+    /** issue #100 in a column: matched against the card actually on screen, exactly as the focused model
+     *  matches its own id, so a stale timeout can never grey out the NEXT ask. */
+    override val askTimedOut: Boolean
+        get() = pane.timedOutAskId.value?.let { it == pane.pendingAsk.value?.askId } ?: false
+
+    /**
+     * "n / m" for this column's own burst.
+     *
+     * The focused path counts a burst UP (1/3 → 2/3) from counters it keeps across resolutions; a column
+     * keeps no such history, so it reports what it can prove: this card, plus everything still waiting
+     * behind it. Both answer the one question the chip exists for — "is there more after this one" — and
+     * neither can outlive its queue.
+     */
+    override val askQueuePosition: Pair<Int, Int>?
+        get() = pane.askQueue.size.takeIf { it > 0 }?.let { 1 to (1 + it) }
+
     override val askRisk: String? get() = null
 
     override fun send(text: String) {
@@ -78,24 +94,36 @@ class SidePaneModel(
      *  (as the first cut did) demoted 始终允许 to a one-off allow with no sign anything was lost. */
     override fun resolve(allow: Boolean, remember: Boolean) {
         val a = pane.pendingAsk.value ?: return
-        pane.pendingAsk.value = null
         base.resolvePaneApproval(a, allow, remember)
     }
 
     override fun resolveTaskGrant() {
         val a = pane.pendingAsk.value ?: return
-        pane.pendingAsk.value = null
         base.resolvePaneTaskGrant(a)
     }
 
     override fun retrySafer(constraints: List<String>) {
         val a = pane.pendingAsk.value ?: return
-        pane.pendingAsk.value = null
         base.retryPaneSafer(a, constraints)
     }
 
+    /** Answering is a verdict like any other, addressed to THIS column's ask. Delegated, it read the
+     *  repository's own pendingAsk: the column drew its question and answered the focused session's. */
+    override fun answerQuestions(answers: Map<String, String>?, response: String?) {
+        val a = pane.pendingAsk.value ?: return
+        base.answerPaneQuestions(a, answers, response)
+    }
+
+    override fun skipQuestions(message: String) {
+        val a = pane.pendingAsk.value ?: return
+        base.skipPaneQuestions(a, message)
+    }
+
+    /** The timed-out card's Dismiss: nothing goes on the wire (the daemon already auto-denied), the card
+     *  is simply retired and whatever queued behind it comes up. */
     override fun dismissAsk() {
-        pane.pendingAsk.value = null
+        val a = pane.pendingAsk.value ?: return
+        base.dismissPaneAsk(a)
     }
 
     override val paneScoped: Boolean get() = true
@@ -148,10 +176,6 @@ class SidePaneModel(
     // absolute deadline was always the real one), never a lease bought for the wrong ask.
     override fun askHeartbeat() {}
     override fun askHeartbeatRelease() {}
-    /** AskUserQuestion has no pane surface yet: `SidePanes.route` never files a question into a pane, so
-     *  this could only ever have skipped the FOCUSED session's questions. Upgrade it when a column can
-     *  hold a question of its own. */
-    override fun skipQuestions(message: String) {}
     override fun canRewind(item: ChatItem.User): Boolean = false
     override val chatModelId: String get() = ""
     override val chatPermissionMode: String? get() = null
@@ -171,7 +195,6 @@ class SidePaneModel(
     override fun clearConversation() {}
     override fun retryOpen() = base.retrySplitOpen(pane)
     override fun takeOver() {}
-    override fun answerQuestions(answers: Map<String, String>?, response: String?) {}
     override fun workflowRunFor(item: ChatItem.Tool): dev.ccpocket.protocol.WorkflowRun? = null
     override fun openWorkspaceFile(path: String) {}
     override fun tightenAutoRun(item: ChatItem.AutoRun) {}

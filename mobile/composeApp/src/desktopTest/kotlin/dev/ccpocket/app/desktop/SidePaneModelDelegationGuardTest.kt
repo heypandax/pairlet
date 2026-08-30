@@ -47,6 +47,11 @@ class SidePaneModelDelegationGuardTest {
         "messages", "streaming", "selectedSessionId",
         "composerState", "composer", "send", "stopTurn",
         "ask", "resolve", "resolveTaskGrant", "retrySafer", "dismissAsk",
+        // W3: the column's ask has a full life cycle of its own — its queue position, its issue-#100
+        // terminal timeout state, and (for an AskUserQuestion, which the bell inbox deliberately never
+        // carries) the answer/skip verbs. Inert, a column drew its own question and answered the FOCUSED
+        // session's, or drew the focused burst's "2 / 3" over a single card of its own.
+        "askTimedOut", "askQueuePosition", "answerQuestions", "skipQuestions",
         "paneScoped", "focusThisPane", "closeThisPane",
     )
 
@@ -79,10 +84,9 @@ class SidePaneModelDelegationGuardTest {
         "pendingFiles", "attachFiles", "removePendingFile", "retryPendingFile",
         "uploadsBusy", "hasLandedFiles",
         // the approval card: the ask is this column's, but these three reach the repository's own
-        // pendingAsk, i.e. the focused one. Answers/lease upgrade when a column can hold a question (W3).
-        "askTimedOut", "askQueuePosition", "askRisk",
-        "askHeartbeat", "askHeartbeatRelease",
-        "answerQuestions", "skipQuestions",
+        // pendingAsk, i.e. the FOCUSED one — an advisory risk badge read off another session's assessment,
+        // and a lease heartbeat that bought reading time for another session's ask.
+        "askRisk", "askHeartbeat", "askHeartbeatRelease",
     )
 
     /** The window, the machine, the app. None of these is reachable holding a [SidePaneModel] — see the
@@ -128,6 +132,7 @@ class SidePaneModelDelegationGuardTest {
         // split-pane plumbing itself: these take the pane as an argument, so they are already explicit
         "sidePanes", "canSplit", "openInSplit", "closeSplit", "promoteSplit", "retrySplitOpen",
         "sendSidePrompt", "stopSideTurn", "resolvePaneApproval", "resolvePaneTaskGrant", "retryPaneSafer",
+        "answerPaneQuestions", "skipPaneQuestions", "dismissPaneAsk",
         // workflow orchestration panel (docked at window level)
         "workflowRuns", "dockedWorkflowRunId", "openWorkflowPanel", "closeWorkflowPanel",
         "workflowAgentDetails", "fetchWorkflowAgentDetail",

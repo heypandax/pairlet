@@ -389,6 +389,17 @@ interface DesktopModel {
     /** 换种安全方式 on a pane's card: a constrained DENY back to THAT ask's agent. */
     fun retryPaneSafer(ask: PermissionAsk, constraints: List<String>) {}
 
+    /** Answer a pane's AskUserQuestion — the picks/free text ride an ALLOW verdict for THAT ask. A column
+     *  is the ONLY surface its questions have (the bell inbox excludes them), so this cannot be inert. */
+    fun answerPaneQuestions(ask: PermissionAsk, answers: Map<String, String>?, response: String?) {}
+
+    /** Skip a pane's AskUserQuestion: a DENY carrying the note, for THAT ask. */
+    fun skipPaneQuestions(ask: PermissionAsk, message: String) {}
+
+    /** Retire a pane's card locally, sending nothing — the timed-out card's Dismiss. The daemon already
+     *  answered that ask, so a verdict now would be a decision nobody is waiting for. */
+    fun dismissPaneAsk(ask: PermissionAsk) {}
+
     /**
      * True when this model views ONE split column rather than the whole shell (issue #311).
      *
