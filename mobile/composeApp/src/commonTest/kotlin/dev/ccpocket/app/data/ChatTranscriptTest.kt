@@ -1,6 +1,9 @@
 package dev.ccpocket.app.data
 
 import dev.ccpocket.protocol.AssistantChunk
+import dev.ccpocket.protocol.ChatRole
+import dev.ccpocket.protocol.ConvoHistory
+import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.ToolEvent
 import dev.ccpocket.protocol.ToolPhase
@@ -87,5 +90,78 @@ class ChatTranscriptTest {
         assertTrue(t.messages.isEmpty())
         assertTrue(!t.replayEcho)
         assertTrue(!t.streaming.value)
+    }
+
+    /** A conversation boundary must also disarm the THINKING clock, or the next session's first tool call
+     *  stamps a row that belongs to a conversation the user already left. */
+    @Test
+    fun resetDisarmsTheThinkingClockToo() {
+        val t = ChatTranscript()
+        t.appendChunk(thinking("mid-thought when the user switched away"))
+        t.reset()
+        t.appendChunk(thinking("a brand-new block"))
+        t.onToolEvent(ToolEvent("c", 1, ToolPhase.START, "Read", "src/App.kt", toolUseId = "t1"))
+        // exactly one block, stamped by ITS OWN start — nothing carried over the boundary
+        assertEquals(1, t.messages.count { it is ChatItem.Thinking })
+        assertNotNull(t.messages.filterIsInstance<ChatItem.Thinking>().single().seconds)
+    }
+
+    /** A tool starting closes the thinking block — the transcript's own rule now, not a convention each
+     *  caller had to remember to hand-pair with [ChatTranscript.onToolEvent]. */
+    @Test
+    fun aToolStartingStampsTheOpenThinkingBlock() {
+        val t = ChatTranscript()
+        t.appendChunk(thinking("which file?"))
+        t.onToolEvent(ToolEvent("c", 1, ToolPhase.START, "Read", "src/App.kt", toolUseId = "t1"))
+        assertNotNull(t.messages.filterIsInstance<ChatItem.Thinking>().single().seconds)
+    }
+
+    @Test
+    fun endTurnReportsWhetherATurnWasWatchedAndShowsAnErrorWhereTheReplyWouldBe() {
+        val t = ChatTranscript()
+        t.appendChunk(thinking("about to fail"))
+        t.replayEcho = true
+        assertTrue(t.endTurn("API request failed"), "a turn that was streaming counts as watched")
+        assertTrue(!t.streaming.value)
+        assertTrue(!t.replayEcho, "a turn boundary disarms the echo — the next block starts a new turn")
+        assertNotNull(t.messages.filterIsInstance<ChatItem.Thinking>().single().seconds)
+        assertEquals("API request failed", t.messages.filterIsInstance<ChatItem.Sys>().single().text)
+
+        // a second boundary with nothing running is NOT a watched turn (no completion marker for it)
+        assertTrue(!t.endTurn(null))
+    }
+
+    @Test
+    fun mergeHistoryReturnsTheCursorAndArmsTheEchoDedupe() {
+        val t = ChatTranscript()
+        val full = ConvoHistory(
+            "c",
+            listOf(HistoryMessage(ChatRole.USER, "what changed?"), HistoryMessage(ChatRole.ASSISTANT, "three files")),
+            lastSeq = 42,
+        )
+        assertEquals(42L, t.mergeHistory(full))
+        assertEquals(2, t.messages.size)
+        assertTrue(t.replayEcho)
+
+        // an EMPTY delta merges nothing and arms nothing — but still carries the cursor forward
+        t.replayEcho = false
+        assertEquals(77L, t.mergeHistory(ConvoHistory("c", emptyList(), delta = true, lastSeq = 77)))
+        assertEquals(2, t.messages.size)
+        assertTrue(!t.replayEcho)
+    }
+
+    /** The receipt hook the focused path layers on top sees the lists as they were and as they became. */
+    @Test
+    fun mergeHistoryHandsTheCallerTheBeforeAndAfterRows() {
+        val t = ChatTranscript()
+        t.appendChunk(text("already on screen"))
+        var before: List<ChatItem>? = null
+        var after: List<ChatItem>? = null
+        t.mergeHistory(ConvoHistory("c", listOf(HistoryMessage(ChatRole.USER, "typed at the computer")))) { b, a ->
+            before = b
+            after = a
+        }
+        assertEquals(1, before?.size)
+        assertEquals(t.messages.toList(), after)
     }
 }

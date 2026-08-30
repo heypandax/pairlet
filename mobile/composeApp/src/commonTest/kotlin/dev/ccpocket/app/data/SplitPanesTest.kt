@@ -167,6 +167,63 @@ class SplitPanesTest {
         assertEquals(42L, pane.historySeq)
     }
 
+    /** An EMPTY delta is the daemon saying "already caught up". It carries no rows, but it DOES carry the
+     *  cursor — dropping it (the column's old behaviour) left the pane re-asking from a stale seq forever
+     *  while the focused chat, on the identical frame, moved on. One shared [ChatTranscript.mergeHistory],
+     *  one answer. */
+    @Test
+    fun anEmptyDeltaStillAdvancesTheReattachCursor() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        p.route(ConvoHistory("convo-a", listOf(HistoryMessage(ChatRole.ASSISTANT, "earlier")), lastSeq = 5))
+        p.route(ConvoHistory("convo-a", emptyList(), delta = true, lastSeq = 9))
+        assertEquals(9L, pane.historySeq)
+        assertEquals(1, pane.messages.size) // …and nothing was merged, appended or wiped
+    }
+
+    /**
+     * A turn killed MID-THINKING never sends TurnDone, so the reattach that reports `executing = false` is
+     * the only chance to stamp its block — the focused path has always taken it, the column did not.
+     *
+     * Without the stamp the row renders "Thinking…" forever (no history replay can repair it: a replay
+     * carries no thinking rows at all) AND the thinking clock stays armed, so the next turn's first tool
+     * call stamps that stale row with the wall time since the dead turn.
+     */
+    @Test
+    fun aReattachThatReportsIdleStampsAThinkingBlockNoTurnDoneWillEverClose() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        p.route(AssistantChunk("convo-a", 1, StreamPiece.Thinking("weighing the options")))
+        assertNull(pane.messages.filterIsInstance<ChatItem.Thinking>().single().seconds)
+
+        // link came back; the daemon says that turn is over
+        p.route(SessionLive(convoId = "convo-a", workdir = "/w", sessionId = "sid-a", executing = false))
+        assertFalse(pane.streaming.value)
+        assertNotNull(
+            pane.messages.filterIsInstance<ChatItem.Thinking>().single().seconds,
+            "the block is stamped, not left mid-thought",
+        )
+
+        // …and the clock is disarmed: the NEXT turn's first tool call must not re-stamp the old row
+        val stamped = pane.messages.filterIsInstance<ChatItem.Thinking>().single().seconds
+        p.route(ToolEvent("convo-a", 2, ToolPhase.START, "Bash", "ls", toolUseId = "t1"))
+        assertEquals(stamped, pane.messages.filterIsInstance<ChatItem.Thinking>().single().seconds)
+    }
+
+    /** A reattach that reports a turn STILL running leaves the block open — it is genuinely mid-thought. */
+    @Test
+    fun aReattachThatReportsRunningLeavesTheThinkingBlockOpen() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        p.route(AssistantChunk("convo-a", 1, StreamPiece.Thinking("still weighing")))
+        p.route(SessionLive(convoId = "convo-a", workdir = "/w", sessionId = "sid-a", executing = true))
+        assertTrue(pane.streaming.value)
+        assertNull(pane.messages.filterIsInstance<ChatItem.Thinking>().single().seconds)
+    }
+
     @Test
     fun sendIsRefusedUntilTheOpenLands() {
         val p = panes()

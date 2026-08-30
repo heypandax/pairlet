@@ -60,13 +60,12 @@ class SidePane(
     val transcript = ChatTranscript()
     val messages get() = transcript.messages
     val streaming get() = transcript.streaming
-    val composer = mutableStateOf("")
     val opening = mutableStateOf(true)
 
     /** The session ended underneath us (daemon-side close / crash) — the pane says so instead of going blank. */
     val gone = mutableStateOf(false)
 
-    /** The open never landed inside [SidePanes.OPEN_TIMEOUT_MS] (issue #235's problem, one column over):
+    /** The open never landed inside [SESSION_OPEN_TIMEOUT_MS] (issue #235's problem, one column over):
      *  a column stuck on "Opening…" forever reads as "my click never happened", so say it failed and
      *  offer the retry instead. */
     val openFailed = mutableStateOf(false)
@@ -102,6 +101,12 @@ class SidePane(
     /** #147 reattach cursor for THIS pane's transcript, so a reconnect replays a delta, not the whole tail. */
     internal var historySeq: Long? = null
     internal var turnStartMark: TimeSource.Monotonic.ValueTimeMark? = null
+
+    /** A prompt sent from THIS column is still showing as unsent — the focused path's `promptPending`, one
+     *  column over, and for the same reason: a turn boundary only has a bubble to settle when this device
+     *  actually sent one. Most TurnDone frames (a reattached turn, work started at the computer) have none,
+     *  and scanning the whole transcript for a bubble that cannot be there is pure waste on every turn. */
+    internal var promptOutstanding = false
 
     /** The mode this column was opened under, replayed verbatim by a retry or a reconnect re-attach. */
     internal var mode: PermissionMode = PermissionMode.DEFAULT
@@ -229,7 +234,7 @@ class SidePanes(
             )
         }
         scope.launch {
-            delay(OPEN_TIMEOUT_MS)
+            delay(SESSION_OPEN_TIMEOUT_MS)
             // only THIS open's deadline, and only while it is still unanswered
             if (gen == pane.openGen && pane.convoId.value == null) {
                 pane.opening.value = false
@@ -308,7 +313,7 @@ class SidePanes(
             is SessionLive -> bind(f)
             is ConvoHistory -> byConvo(f.convoId)?.let { replay(it, f) }
             is AssistantChunk -> byConvo(f.convoId)?.transcript?.appendChunk(f)
-            is ToolEvent -> byConvo(f.convoId)?.let { it.transcript.finishThinking(); it.transcript.onToolEvent(f) }
+            is ToolEvent -> byConvo(f.convoId)?.transcript?.onToolEvent(f)
             is TurnDone -> byConvo(f.convoId)?.let { endTurn(it, f) }
             is PromptAck -> byConvo(f.convoId)?.let { it.error.value = null }
             // Questions route here too. Filtering them out left AskUserQuestion in a column with NO surface
@@ -421,7 +426,7 @@ class SidePanes(
         if (text.isBlank()) return false
         val promptId = newPromptId()
         pane.messages.add(ChatItem.User(text, pending = true, promptId = promptId))
-        pane.composer.value = ""
+        pane.promptOutstanding = true // there is now a bubble for the next turn boundary to settle
         pane.turnStartMark = TimeSource.Monotonic.markNow()
         pane.streaming.value = true
         scope.launch { send(SendPrompt(convo, text, promptId = promptId)) }
@@ -441,12 +446,6 @@ class SidePanes(
         val convo = pane.convoId.value ?: return
         if (!pane.streaming.value) return
         scope.launch { send(CancelTurn(convo)) }
-    }
-
-    private companion object {
-        /** Matches the focused chat's own open window — long enough for a cold resume, short enough that
-         *  a column does not sit on "Opening…" past the point a person decides it is broken. */
-        const val OPEN_TIMEOUT_MS = 8_000L
     }
 
     private fun byConvo(convoId: String): SidePane? = panes.firstOrNull { it.convoId.value == convoId }
@@ -469,38 +468,38 @@ class SidePanes(
         pane.opening.value = false
         pane.openFailed.value = false
         pane.gone.value = false
-        f.executing?.let { pane.streaming.value = it }
+        // daemon truth beats the local guess, exactly as the focused path takes it — the stamp included:
+        // a turn killed MID-THINKING has no TurnDone coming to close its block, so a reattach that reports
+        // idle is the only chance to stamp it. Without this the column keeps an eternal "Thinking…" row
+        // (no history replay can fix it — a replay carries no thinking rows at all) and, worse, leaves the
+        // thinking clock armed, so the NEXT turn's first tool call stamps that stale row with the wall time
+        // since the dead turn.
+        f.executing?.let { exec ->
+            pane.streaming.value = exec
+            if (!exec) pane.transcript.finishThinking()
+        }
     }
 
-    /** The pane flavour of the focused path's ConvoHistory handling (issue #147 full/delta, issue #107 echo). */
+    /** This column's ConvoHistory, merged by the same [ChatTranscript.mergeHistory] the focused chat uses
+     *  (issue #147 full/delta, issue #107 echo). Only the cursor is the pane's own — it keeps a bare one,
+     *  where the repository keys its cursor by session. */
     private fun replay(pane: SidePane, f: ConvoHistory) {
-        val local = pane.messages.toList()
-        val merged = if (f.delta) {
-            if (f.messages.isEmpty()) return
-            TranscriptMerge.mergeDelta(local, f.messages.map(::historyItem))
-        } else {
-            TranscriptMerge.merge(local, f.messages.map(::historyItem))
-        }
-        if (merged != local) {
-            pane.messages.clear()
-            pane.messages.addAll(merged)
-        }
-        pane.transcript.replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race
-        f.lastSeq?.let { pane.historySeq = it }
+        pane.transcript.mergeHistory(f)?.let { pane.historySeq = it }
     }
 
     private fun endTurn(pane: SidePane, f: TurnDone) {
-        pane.transcript.replayEcho = false // turn boundary — the next block starts a new turn, never an echo
-        val wasLive = pane.streaming.value
-        pane.transcript.finishThinking()
-        pane.streaming.value = false
         // the turn is over, so no bubble is still "sending" — the pane has no delivery watchdog of its
-        // own, and a bubble stuck at pending would misreport a prompt the agent demonstrably answered
-        for (i in pane.messages.indices) {
-            val row = pane.messages[i]
-            if (row is ChatItem.User && row.pending) pane.messages[i] = row.copy(pending = false)
+        // own, and a bubble stuck at pending would misreport a prompt the agent demonstrably answered.
+        // Gated and tail-scanned exactly like the focused path's promptEvidence: a TurnDone with nothing
+        // outstanding (a reattached turn, work started at the computer) settles nothing at all.
+        if (pane.promptOutstanding) {
+            pane.promptOutstanding = false
+            val i = pane.messages.indexOfLast { it is ChatItem.User && it.pending }
+            (pane.messages.getOrNull(i) as? ChatItem.User)?.let { pane.messages[i] = it.copy(pending = false) }
         }
-        f.error?.let { pane.messages.add(ChatItem.Sys(it)) }
+        // …and the boundary itself is the shared one (see [ChatTranscript.endTurn]); the completion marker
+        // and its stopwatch stay here, because each path times ITS OWN turn from its own send.
+        val wasLive = pane.transcript.endTurn(f.error)
         if (wasLive && f.error == null) {
             pane.messages.add(ChatItem.TurnEnded(pane.turnStartMark?.elapsedNow()?.inWholeSeconds?.toInt()))
         }
