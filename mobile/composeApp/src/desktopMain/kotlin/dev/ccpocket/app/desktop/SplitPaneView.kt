@@ -1,22 +1,9 @@
 package dev.ccpocket.app.desktop
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.SidePane
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.split_pane_close
@@ -47,26 +34,17 @@ fun SplitPane(base: DesktopModel, pane: SidePane, modifier: Modifier = Modifier)
 /**
  * A column whose session ended underneath it (daemon-side close, a crash, a machine that went away).
  * Said plainly, with the only useful verb, rather than leaving a blank chat that reads as "still loading".
+ *
+ * Rendered by the focused chat's own [ChatNotice] rather than a look-alike rebuilt here: the hand-made
+ * copy had drifted from it in exactly the ways a second copy always does — no hover feedback on the one
+ * clickable thing, and a capsule label missing `tightCenter`.
  */
 @Composable
 private fun EndedPane(model: DesktopModel, modifier: Modifier = Modifier) {
-    Column(
-        modifier.fillMaxSize().background(Tok.base).padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            stringResource(Res.string.split_session_ended),
-            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text(
-            stringResource(Res.string.split_pane_close),
-            color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp,
-            modifier = Modifier.clip(RoundedCornerShape(999.dp))
-                .background(Tok.surface)
-                .clickable { model.closeThisPane() }
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-        )
-    }
+    ChatNotice(
+        title = stringResource(Res.string.split_session_ended),
+        modifier = modifier.background(Tok.base), // a column is not opaque on its own
+        actionLabel = stringResource(Res.string.split_pane_close),
+        onAction = { model.closeThisPane() },
+    )
 }

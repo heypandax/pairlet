@@ -11,6 +11,7 @@ import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.SidePane
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.split_pane_close
 import dev.ccpocket.app.resources.split_pane_focus
 import dev.ccpocket.app.resources.split_session_ended
 import dev.ccpocket.app.str
@@ -109,5 +110,19 @@ class SplitPaneUiTest {
         waitForIdle()
         assertPresent(str(Res.string.split_session_ended))
         assertTrue(!present("CI is green")) // the dead stream is not left on screen looking live
+    }
+
+    /** The ended column's one verb has to WORK — it is now drawn by the focused chat's shared notice
+     *  ([ChatNotice]) rather than a look-alike built in the split view, so this pins the wiring that the
+     *  reuse could have quietly dropped. (Its `tightCenter` alignment is a visual claim no unit test can
+     *  make; that stays a device check.) */
+    @Test
+    fun theEndedColumnsCloseActuallyClosesThatColumn() = runComposeUiTest {
+        val p = pane(1, "Tidy CI workflow", "CI is green").apply { gone.value = true }
+        val model = SplitSeed(listOf(p))
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        onAllNodes(hasText(str(Res.string.split_pane_close))).onFirst().performClick()
+        assertEquals(1L, model.closed)
     }
 }

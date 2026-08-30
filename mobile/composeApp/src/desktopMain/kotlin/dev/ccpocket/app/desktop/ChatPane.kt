@@ -269,7 +269,15 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         Column(modifier.fillMaxSize().background(Tok.base)) {
             when {
                 model.opening -> OpeningChat(model.chatTitle)
-                model.openFailed -> FailedChat(model.chatTitle) { model.retryOpen() }
+                // the open that never landed (issue #235) — named by the session the user actually asked for
+                model.openFailed -> ChatNotice(
+                    title = model.chatTitle.takeIf { it.isNotBlank() }
+                        ?.let { stringResource(Res.string.chat_open_failed_named, it) }
+                        ?: stringResource(Res.string.chat_open_failed),
+                    hint = stringResource(Res.string.chat_open_failed_hint),
+                    actionLabel = stringResource(Res.string.action_retry),
+                    onAction = { model.retryOpen() },
+                )
                 else -> EmptyChat(model)
             }
         }
@@ -1001,30 +1009,52 @@ private fun OpeningChat(title: String) {
     }
 }
 
-/** The open that never landed (issue #235). Same two-line shape as [EmptyChat] — this replaces it, it does
- *  not add a layer — but it names the session the user actually asked for and offers the one action that
- *  can help. Sticky by design: the desktop has nowhere else to put this, so it stays until the user retries
- *  or opens something else. */
+/**
+ * The centred "this chat has nothing to show, and here is why" state: a headline, an optional line of
+ * explanation, and the one action that can help.
+ *
+ * Two states share it — the open that never landed (issue #235) and the column whose session ended under
+ * it (issue #311). The column used to hand-rebuild this shape a file away and got it subtly wrong: no
+ * hover feedback on the only clickable thing on screen, and a capsule label without [tightCenter], which
+ * is the alignment rule this project has now re-learned four times. One composable, one set of answers.
+ *
+ * Sticky by design: the desktop has nowhere else to put this, so it stays until the user acts or opens
+ * something else.
+ */
 @Composable
-private fun FailedChat(title: String, onRetry: () -> Unit) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+internal fun ChatNotice(
+    title: String,
+    modifier: Modifier = Modifier,
+    hint: String? = null,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Text(
-                if (title.isBlank()) stringResource(Res.string.chat_open_failed) else stringResource(Res.string.chat_open_failed_named, title),
+                title,
                 color = Tok.tx, fontFamily = Dk.ui, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                stringResource(Res.string.chat_open_failed_hint),
-                color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, textAlign = TextAlign.Center,
-            )
-            Text(
-                stringResource(Res.string.action_retry),
-                color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(7.dp))
-                    .hoverFill(RoundedCornerShape(7.dp))
-                    .clickable(onClick = onRetry).padding(horizontal = 10.dp, vertical = 5.dp),
-            )
+            hint?.let {
+                Text(it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, textAlign = TextAlign.Center)
+            }
+            if (actionLabel != null && onAction != null) {
+                Text(
+                    actionLabel,
+                    color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                    // a capsule's height is its 5dp padding plus the line box, so the label must not sit
+                    // wherever the platform's fallback font's metrics put it (see [tightCenter]'s KDoc)
+                    style = tightCenter(12.5.sp),
+                    modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(7.dp))
+                        .hoverFill(RoundedCornerShape(7.dp))
+                        .clickable(onClick = onAction).padding(horizontal = 10.dp, vertical = 5.dp),
+                )
+            }
         }
     }
 }

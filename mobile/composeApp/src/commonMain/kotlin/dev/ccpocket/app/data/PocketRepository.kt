@@ -348,6 +348,15 @@ private data class PendingGrantMutation(
  *  a display key on the wire, not an enum, so the client matches the same literal. */
 internal const val ASK_QUESTION_TOOL = "AskUserQuestion"
 
+/** How long an [OpenSession] may go unanswered before the surface that asked stops saying "Opening…" and
+ *  says it failed instead (issue #41 / #235). Long enough for a cold resume, short enough that nobody sits
+ *  watching a spinner past the point they decide it is broken.
+ *
+ *  ONE constant for the focused chat and the desktop's split columns (issue #311): a column's window was
+ *  documented as "matches the focused chat's own", which a literal `8000` on the other side could not
+ *  actually keep. Tuning it now moves both, which is the only honest meaning of "matches". */
+internal const val SESSION_OPEN_TIMEOUT_MS = 8_000L
+
 sealed interface ChatItem {
     /** [pending] = sent from this device but the daemon hasn't echoed any evidence back yet (stream
      *  chunk / tool event / turn end). Stays true while the link is down so the UI can say so —
@@ -2581,6 +2590,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      * link would open a ghost session nobody is watching.
      */
     internal fun demoteToSatellite() {
+        sidePanes.clear() // #311: a column's conversation must not stay mounted on a headless satellite link
         // The UI open worker is not a transport job and therefore survives the fleet swap unless it is
         // explicitly retired. A headless satellite must never execute a click queued by the old primary.
         openGen++
@@ -3231,7 +3241,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // be dropped — else it renders into whatever convo is now open. Reopening the source replays its
             // full transcript via ConvoHistory, so nothing is actually lost. (Matches the BackgroundJobs guard.)
             is AssistantChunk -> if (f.convoId == convoId.value) { promptEvidence(); appendChunk(f) }
-            is ToolEvent -> if (f.convoId == convoId.value) { promptEvidence(); finishThinking(); onToolEvent(f) }
+            // (the thinking block's stamp is [ChatTranscript.onToolEvent]'s own first act now — it was a
+            // hand-paired call here and one more in the split panes, i.e. a convention waiting to be forgotten)
+            is ToolEvent -> if (f.convoId == convoId.value) { promptEvidence(); onToolEvent(f) }
             is PendingApprovals -> {
                 pendingApprovals.clear()
                 f.items.filterNot { it.ask.isQuestion }.forEach { pendingApprovals[ApprovalKey(it.ask.convoId, it.ask.askId)] = it }
@@ -3330,12 +3342,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // was lost, keep the bubble pending, but the NEXT stream frame can now safely prove that
                 // prompt started; it can no longer be mistaken for output from the preceding turn.
                 if (queuedReceiptStillPending) promptQueued = false
-                transcript.replayEcho = false // turn boundary — the next block belongs to a new turn, never a replay echo
-                val turnWasLive = streaming.value // gate the marker/notify on a turn we actually watched run
-                finishThinking(); streaming.value = false
-                // a FAILED turn (API error / synthetic placeholder — issue #65): show the error row where
-                // the reply would be; no green ✓ marker for a turn that produced nothing
-                f.error?.let { messages.add(ChatItem.Sys(it)) }
+                // the turn-boundary core (echo disarm → was-it-live → thinking stamp → leave streaming →
+                // error row) is [ChatTranscript.endTurn]; a split column runs the very same one. What stays
+                // here is what is genuinely the focused conversation's — the limit offer, the notification,
+                // the sidebar dot and the usage statusline.
+                val turnWasLive = transcript.endTurn(f.error) // gate the marker/notify on a turn we actually watched run
                 // usage-limit hit with a parsed reset moment (issue #137): light the one-tap
                 // "auto-continue after reset" banner. Null (ordinary error / old daemon) = no offer.
                 if (f.error != null) {
@@ -3450,34 +3461,23 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // scrollback past the replay window, a bubble ahead of a lagging disk read) — TranscriptMerge
             // reconciles without flashing, duplicating, or reordering.
             is ConvoHistory -> if (f.convoId == convoId.value) {
+                // an EMPTY full replay is only ever the daemon's explicit /clear wipe (every other emit
+                // site guards isNotEmpty) — the fresh session's window is empty, so the "Context NN%"
+                // statusline resets and hides until the first new turn reports usage (issue #149).
+                // Without this a composer-typed /clear pinned the badge at the wiped session's % forever:
+                // TurnDone deliberately ignores zero-usage frames, and the menu path's optimistic reset
+                // (clearConversation) never runs for a typed command.
+                if (!f.delta && f.messages.isEmpty()) contextUsed.value = null
+                // the merge itself (full or #147 delta) + the #107 echo arming is [ChatTranscript.mergeHistory],
+                // shared with the split columns. Only the bookkeeping AROUND it is this conversation's:
+                // the receipt reconciliation and the session-keyed cursor / paging anchors.
+                val lastSeq = transcript.mergeHistory(f, ::reconcilePromptReceiptFromHistory)
                 if (f.delta) {
-                    // incremental reattach (issue #147): only the rows past the cursor we sent — merged at
-                    // the tail (or into the live-received overlap), NEVER a wipe/replace. An empty delta
-                    // means "already caught up" (the daemon normally doesn't even send one).
-                    if (f.messages.isNotEmpty()) {
-                        val localRows = messages.toList()
-                        val merged = TranscriptMerge.mergeDelta(localRows, f.messages.map(::historyItem))
-                        if (merged != localRows) replace(messages, merged)
-                        reconcilePromptReceiptFromHistory(localRows, merged)
-                        transcript.replayEcho = true // same replay/stream race as the full path
-                    }
-                    f.lastSeq?.let { historySeq = it; historySeqSession = currentSessionId }
+                    lastSeq?.let { historySeq = it; historySeqSession = currentSessionId }
                 } else {
-                    // an EMPTY full replay is only ever the daemon's explicit /clear wipe (every other emit
-                    // site guards isNotEmpty) — the fresh session's window is empty, so the "Context NN%"
-                    // statusline resets and hides until the first new turn reports usage (issue #149).
-                    // Without this a composer-typed /clear pinned the badge at the wiped session's % forever:
-                    // TurnDone deliberately ignores zero-usage frames, and the menu path's optimistic reset
-                    // (clearConversation) never runs for a typed command.
-                    if (f.messages.isEmpty()) contextUsed.value = null
-                    val localRows = messages.toList()
-                    val merged = TranscriptMerge.merge(localRows, f.messages.map(::historyItem))
-                    if (merged != localRows) replace(messages, merged)
-                    reconcilePromptReceiptFromHistory(localRows, merged)
-                    transcript.replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race
                     // reattach cursor + paging anchors (issue #147); null fields = a pre-#147 daemon
-                    historySeq = f.lastSeq
-                    historySeqSession = if (f.lastSeq != null) currentSessionId else null
+                    historySeq = lastSeq
+                    historySeqSession = if (lastSeq != null) currentSessionId else null
                     historyFirstSeq = f.firstSeq
                     historyHasMore.value = f.hasMore && f.firstSeq != null
                     // a full replay re-anchors the window; a page still in flight against the OLD anchor
@@ -5163,6 +5163,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // A DIFFERENT target still goes through — latest-wins switching is unchanged (#165), and the losing
         // open's late SessionLive is still refused by the #219 identity guard.
         if (openInFlightFor(wd, resumeId) || alreadyOpen(wd, resumeId)) return false
+        // #311: a session can never be in a split column AND the focused chat at once. Focusing one that
+        // IS in a column therefore means promote it — whatever the gesture was (sidebar click, promotion,
+        // push tap, deep link), because they all funnel through here. The column must let go BEFORE the
+        // OpenSession goes out: otherwise SidePanes.claimsSessionLive still recognises the answer as that
+        // column's, the focused area's open is never answered, and the click ends in "open failed" with a
+        // Retry that fails the same way forever. Synchronous, and placed AFTER the two refusals above so
+        // an idempotent no-op click never tears a column down.
+        if (resumeId != null) sidePanes.releaseToFocus(resumeId)
         sessionNavigationFenced = false // an explicit tap/push is the only way out of #226's browse fence
         openInFlight = attempt
         lastOpenAttempt = attempt
@@ -5198,7 +5206,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // sessionId and reattaches the still-live conversation (registry live-match), no fork.
         convoId.value?.let { if (observing.value || !streaming.value) send(CloseSession(it)) }
         if (gen != openGen) return // the close send can suspend while a newer navigation decision wins
-        messages.clear(); convoId.value = null; transcript.replayEcho = false
+        // the conversation boundary the transcript itself defines (rows + echo arming + thinking clock +
+        // streaming), instead of the hand-rolled subset that used to live here: that subset left the
+        // half-open thinking block and the streaming flag of the session we are LEAVING armed, so the next
+        // session's first tool call could stamp a duration onto a block from a different conversation.
+        transcript.reset()
+        convoId.value = null
         resetHistoryPaging() // #147: a fresh open replays in full — a stale cursor must not ask for a delta
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
         // #219: a brand-new session's SessionLive has no sessionId to recognize it by — arm the workdir
@@ -5285,7 +5298,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 serviceTier = openServiceTier,
             ),
         )
-        delay(8000) // safety: clear if the daemon never answers (matches `switching`)
+        delay(SESSION_OPEN_TIMEOUT_MS) // safety: clear if the daemon never answers (matches `switching`)
         if (gen == openGen && opening.value) {
             openJob = null
             opening.value = false
@@ -6298,23 +6311,70 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
-    /** Resolve any account-wide inbox row directly, without opening or attaching its conversation. */
+    /** Resolve any account-wide inbox ROW directly, without opening or attaching its conversation. The
+     *  row is the subject here: no row, nothing to decide — which is why this may early-return, and why
+     *  a surface holding the ask itself must use [resolveAskDirect] instead. */
     fun resolvePendingApproval(convoId: String?, askId: String, allow: Boolean) {
         // P1-3: exact composite removal; a caller that (legacy) only knows the askId falls back to the
         // first row carrying it — single-session behavior, unchanged
         val key = if (convoId != null) ApprovalKey(convoId, askId)
         else pendingApprovals.keys.firstOrNull { it.askId == askId } ?: return
-        val row = pendingApprovals.remove(key) ?: return
-        if (pendingAsk.value?.let { ApprovalKey(it.convoId, it.askId) } == key) {
-            advanceAsk()
-        } else if (askQueue.removeAll { it.convoId == key.convoId && it.askId == key.askId }) { // resolved from the inbox while queued
-            askBurstTotal--
-            updateAskProgress()
+        val row = pendingApprovals[key] ?: return
+        resolveAskDirect(row.ask, allow)
+    }
+
+    /**
+     * Decide an approval named by the ASK ITSELF rather than by an inbox row (issue #311).
+     *
+     * The distinction is not pedantic. [resolvePendingApproval] answers a bell-popover row, so it gives
+     * up when that row is missing — correct there, fatal for a card that is on screen. A split column
+     * holds its own [PermissionAsk], and the inbox can legitimately not have it: a `PendingApprovals`
+     * reply clears and refills the map wholesale, so an ask arriving in that window is wiped, and an ask
+     * decided elsewhere while we were offline is gone from the refill. The old path then destroyed the
+     * card with NO verdict on the wire and the CLI sat there until it auto-denied — a click that looked
+     * like it worked and did nothing. So the verdict is UNCONDITIONAL here, exactly as it is on the
+     * focused path ([resolve]); the inbox bookkeeping is best-effort on top of it.
+     *
+     * Deliberately absent: the focused path's [allowRules] + `RuleChip` bookkeeping. Those describe the
+     * OPEN conversation's UI — the chip lands in its transcript, the rule list gates its own cards — and
+     * this ask belongs to a different one. The rule the user asked for rides `remember`/`grantScope` on
+     * the verdict, which is where it actually takes effect (daemon-side), so nothing is lost.
+     */
+    fun resolveAskDirect(
+        ask: PermissionAsk,
+        allow: Boolean,
+        remember: Boolean = false,
+        grantScope: String? = null,          // "task" | "session" — 允许本任务 / Session 记忆
+        retrySafer: Boolean = false,         // 换种安全方式 (rides a DENY)
+        constraints: List<String>? = null,
+        message: String? = null,             // the note that rides a question SKIP (#57)
+    ) {
+        val key = ApprovalKey(ask.convoId, ask.askId)
+        if (pendingApprovals.remove(key) != null) {
+            if (pendingAsk.value?.let { ApprovalKey(it.convoId, it.askId) } == key) {
+                advanceAsk()
+            } else if (askQueue.removeAll { it.convoId == key.convoId && it.askId == key.askId }) { // resolved elsewhere while queued
+                askBurstTotal--
+                updateAskProgress()
+            }
         }
-        sidePanes.noteApprovalResolved(key.convoId, askId) // #311: same decision, every surface showing it
-        Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to if (allow) "allow" else "deny"))
+        sidePanes.noteApprovalResolved(ask.convoId, ask.askId) // #311: same decision, every surface showing it
+        val decisionLabel = when { // same vocabulary as [resolve] — one funnel, whichever surface decided
+            retrySafer -> "retry-safer"
+            grantScope != null -> "allow-$grantScope"
+            remember -> "always"
+            allow -> "allow"
+            else -> "deny"
+        }
+        Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to decisionLabel))
         scope.launch {
-            send(PermissionVerdict(row.ask.convoId, askId, if (allow) Decision.ALLOW else Decision.DENY))
+            send(
+                PermissionVerdict(
+                    ask.convoId, ask.askId, if (allow) Decision.ALLOW else Decision.DENY,
+                    message = message, remember = remember, grantScope = grantScope,
+                    retrySafer = retrySafer, constraints = constraints,
+                ),
+            )
         }
     }
 
@@ -6331,12 +6391,45 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val a = pendingAsk.value ?: return
         val c = convoId.value ?: return
         advanceAsk()
-        val items = response?.takeIf { it.isNotBlank() }?.let { listOf("" to it.trim()) }
-            ?: a.questions.orEmpty().mapNotNull { q -> answers?.get(q.question)?.takeIf { it.isNotBlank() }?.let { q.question to it } }
-        messages.add(ChatItem.QuestionsAnswered(items))
+        messages.add(ChatItem.QuestionsAnswered(answeredItems(a, answers, response)))
         Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to "answered"))
         scope.launch { send(PermissionVerdict(c, a.askId, Decision.ALLOW, answers = answers, response = response)) }
     }
+
+    /**
+     * Answer an AskUserQuestion named by the ASK ITSELF rather than by the focused card (issue #311).
+     *
+     * Same reason [resolveAskDirect] exists: a split column holds its own ask, and answering it must not
+     * consult — let alone consume — whatever the focused conversation happens to be blocked on. The wire
+     * is byte-identical to [answerQuestions]: an ALLOW carrying the `answers` map keyed by the EXACT
+     * question text, which is what the daemon merges into claude's `updatedInput.answers`. Any other shape
+     * reads to the CLI as "the user did not answer" (#57), so this must stay one construction with the
+     * focused path, never a parallel one.
+     */
+    fun answerQuestionsDirect(ask: PermissionAsk, answers: Map<String, String>?, response: String? = null) {
+        // the note lands in the column that showed the card, and that column's queue advances — both live
+        // in SidePanes so there is exactly one place a pane's card is retired
+        sidePanes.noteQuestionsAnswered(ask.convoId, ask.askId, answeredItems(ask, answers, response))
+        Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to "answered"))
+        scope.launch {
+            send(PermissionVerdict(ask.convoId, ask.askId, Decision.ALLOW, answers = answers, response = response))
+        }
+    }
+
+    /** Skip a question named by the ask itself (issue #311): a DENY carrying the note, so claude learns the
+     *  user opted out instead of waiting out the timeout — the focused path's skip, one column over. */
+    fun skipQuestionsDirect(ask: PermissionAsk, message: String) =
+        resolveAskDirect(ask, allow = false, message = message)
+
+    /** The stream note for an answered question: a freeform reply stands alone (no question owns it),
+     *  otherwise one row per question the user actually picked something for. */
+    private fun answeredItems(
+        ask: PermissionAsk,
+        answers: Map<String, String>?,
+        response: String?,
+    ): List<Pair<String, String>> =
+        response?.takeIf { it.isNotBlank() }?.let { listOf("" to it.trim()) }
+            ?: ask.questions.orEmpty().mapNotNull { q -> answers?.get(q.question)?.takeIf { it.isNotBlank() }?.let { q.question to it } }
 
     /** Timeout: the daemon already auto-denied; clear the prompt without re-sending, show the next queued ask. */
     fun dismissAsk() { if (pendingAsk.value != null) advanceAsk() }

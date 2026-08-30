@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import dev.ccpocket.app.epochMillis
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.ChatRole
+import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.ToolEvent
@@ -73,6 +74,11 @@ class ChatTranscript {
     }
 
     fun onToolEvent(f: ToolEvent) {
+        // a tool starting = the thinking block (if any) is done, same as prose starting in [appendChunk].
+        // Folded in here rather than left to each caller: it was a hand-paired `finishThinking(); onToolEvent(f)`
+        // at both the focused and the split-pane call sites, and a third call site that forgot the pairing
+        // would leave an un-stamped "Thinking…" row that the NEXT turn stamps with an absurd duration.
+        finishThinking()
         val parent = f.parentToolUseId
         // one-shot replay-echo dedupe (issue #107), tool flavor: a START right after a merged
         // ConvoHistory may duplicate the replayed tail card (which has no taskId). Fold into it —
@@ -108,6 +114,63 @@ class ChatTranscript {
                 ?.let { messages.add(ChatItem.OpenCodeQuestion(it)) }
                 ?: messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "", taskId = f.toolUseId))
         }
+    }
+
+    /**
+     * A turn boundary: close the thinking block, leave streaming, and show [error] where the reply would be.
+     * Returns whether a turn was actually being watched run — the caller's gate for its completion marker,
+     * its notification, and anything else that must not fire for a boundary nobody was streaming through.
+     *
+     * Shared by the focused conversation and every split column (issue #311): the two used to keep private,
+     * line-for-line identical copies of this, which is how the replay-echo disarm and the "Thought for 5s"
+     * stamp would have drifted apart on the first later change. What stays with each caller is what is
+     * genuinely theirs — the focused path's limit offer / notify / sidebar dot / usage, the column's own
+     * TurnEnded marker and turn-start mark.
+     */
+    fun endTurn(error: String?): Boolean {
+        replayEcho = false // turn boundary — the next block belongs to a new turn, never a replay echo
+        val wasLive = streaming.value
+        finishThinking()
+        streaming.value = false
+        // a FAILED turn (API error / synthetic placeholder — issue #65): show the error row where the
+        // reply would be; the caller's completion marker stays off for a turn that produced nothing
+        error?.let { messages.add(ChatItem.Sys(it)) }
+        return wasLive
+    }
+
+    /**
+     * Apply one [ConvoHistory] — full replay or #147 delta — and arm the #107 replay-echo dedupe.
+     * Returns `f.lastSeq` so the caller can advance ITS reattach cursor (the repository keys the cursor by
+     * session, a pane keeps a bare one), or null when the daemon predates #147.
+     *
+     * MERGED, not replaced (issue #107): the replay is the backfill channel for output streamed while the
+     * link was down, but the app may hold rows the transcript doesn't (pending bubbles, dividers, scrollback
+     * past the replay window, a bubble ahead of a lagging disk read) — [TranscriptMerge] reconciles without
+     * flashing, duplicating, or reordering. [onMerged] sees the before/after lists for the receipt
+     * reconciliation the focused path layers on top.
+     *
+     * An empty delta means "already caught up" (the daemon normally does not even send one): nothing merges
+     * and the echo dedupe is NOT armed — there was no replay to echo — but the cursor still advances, which
+     * is the focused path's long-standing semantics and now the column's too.
+     */
+    fun mergeHistory(
+        f: ConvoHistory,
+        onMerged: (before: List<ChatItem>, after: List<ChatItem>) -> Unit = { _, _ -> },
+    ): Long? {
+        val local = messages.toList()
+        val merged = if (f.delta) {
+            if (f.messages.isEmpty()) return f.lastSeq
+            TranscriptMerge.mergeDelta(local, f.messages.map(::historyItem))
+        } else {
+            TranscriptMerge.merge(local, f.messages.map(::historyItem))
+        }
+        if (merged != local) {
+            messages.clear()
+            messages.addAll(merged)
+        }
+        onMerged(local, merged)
+        replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race
+        return f.lastSeq
     }
 
     /** Stamp the duration onto a still-open Thinking block (design: "Thought for 5s"). */

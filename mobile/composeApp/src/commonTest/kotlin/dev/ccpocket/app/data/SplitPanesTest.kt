@@ -1,6 +1,10 @@
 package dev.ccpocket.app.data
 
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AskOption
+import dev.ccpocket.protocol.AskQuestion
+import dev.ccpocket.protocol.AskWithdrawn
+import dev.ccpocket.protocol.AskWithdrawnReason
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.CloseSession
@@ -55,6 +59,15 @@ class SplitPanesTest {
     private fun live(convo: String, sid: String) = SessionLive(convoId = convo, workdir = "/w", sessionId = sid)
 
     private fun text(convo: String, s: String) = AssistantChunk(convo, 1, StreamPiece.Text(s))
+
+    private fun ask(convo: String, askId: String, tool: String = "Edit") =
+        PermissionAsk(convo, askId, tool, inputPreview = "…", rule = tool)
+
+    /** An AskUserQuestion: same frame type, `questions` non-null — which is the whole difference. */
+    private fun question(convo: String, askId: String) = PermissionAsk(
+        convo, askId, "AskUserQuestion", inputPreview = "…",
+        questions = listOf(AskQuestion("Which parser?", options = listOf(AskOption("recursive descent"), AskOption("PEG")))),
+    )
 
     @Test
     fun openSendsAResumeAndBindsItsOwnSessionLive() {
@@ -154,6 +167,63 @@ class SplitPanesTest {
         assertEquals(42L, pane.historySeq)
     }
 
+    /** An EMPTY delta is the daemon saying "already caught up". It carries no rows, but it DOES carry the
+     *  cursor — dropping it (the column's old behaviour) left the pane re-asking from a stale seq forever
+     *  while the focused chat, on the identical frame, moved on. One shared [ChatTranscript.mergeHistory],
+     *  one answer. */
+    @Test
+    fun anEmptyDeltaStillAdvancesTheReattachCursor() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        p.route(ConvoHistory("convo-a", listOf(HistoryMessage(ChatRole.ASSISTANT, "earlier")), lastSeq = 5))
+        p.route(ConvoHistory("convo-a", emptyList(), delta = true, lastSeq = 9))
+        assertEquals(9L, pane.historySeq)
+        assertEquals(1, pane.messages.size) // …and nothing was merged, appended or wiped
+    }
+
+    /**
+     * A turn killed MID-THINKING never sends TurnDone, so the reattach that reports `executing = false` is
+     * the only chance to stamp its block — the focused path has always taken it, the column did not.
+     *
+     * Without the stamp the row renders "Thinking…" forever (no history replay can repair it: a replay
+     * carries no thinking rows at all) AND the thinking clock stays armed, so the next turn's first tool
+     * call stamps that stale row with the wall time since the dead turn.
+     */
+    @Test
+    fun aReattachThatReportsIdleStampsAThinkingBlockNoTurnDoneWillEverClose() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        p.route(AssistantChunk("convo-a", 1, StreamPiece.Thinking("weighing the options")))
+        assertNull(pane.messages.filterIsInstance<ChatItem.Thinking>().single().seconds)
+
+        // link came back; the daemon says that turn is over
+        p.route(SessionLive(convoId = "convo-a", workdir = "/w", sessionId = "sid-a", executing = false))
+        assertFalse(pane.streaming.value)
+        assertNotNull(
+            pane.messages.filterIsInstance<ChatItem.Thinking>().single().seconds,
+            "the block is stamped, not left mid-thought",
+        )
+
+        // …and the clock is disarmed: the NEXT turn's first tool call must not re-stamp the old row
+        val stamped = pane.messages.filterIsInstance<ChatItem.Thinking>().single().seconds
+        p.route(ToolEvent("convo-a", 2, ToolPhase.START, "Bash", "ls", toolUseId = "t1"))
+        assertEquals(stamped, pane.messages.filterIsInstance<ChatItem.Thinking>().single().seconds)
+    }
+
+    /** A reattach that reports a turn STILL running leaves the block open — it is genuinely mid-thought. */
+    @Test
+    fun aReattachThatReportsRunningLeavesTheThinkingBlockOpen() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        p.route(AssistantChunk("convo-a", 1, StreamPiece.Thinking("still weighing")))
+        p.route(SessionLive(convoId = "convo-a", workdir = "/w", sessionId = "sid-a", executing = true))
+        assertTrue(pane.streaming.value)
+        assertNull(pane.messages.filterIsInstance<ChatItem.Thinking>().single().seconds)
+    }
+
     @Test
     fun sendIsRefusedUntilTheOpenLands() {
         val p = panes()
@@ -187,6 +257,150 @@ class SplitPanesTest {
 
         p.noteApprovalResolved("convo-a", "ask-1") // decided from the bell popover / the phone
         assertNull(pane.pendingAsk.value)
+    }
+
+    // ── AskUserQuestion + the ask life cycle in a column (W3) ─────────────────────────────────────────
+
+    @Test
+    fun aQuestionReachesItsPaneInsteadOfDyingInSilence() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+
+        p.route(question("convo-a", "q-1"))
+
+        // Filtered out, this frame had NO surface anywhere: the machine-wide bell inbox excludes questions
+        // by design, and the focused question card is gated on the focused conversation. The column just
+        // streamed until the daemon timed the ask out — the turn died without a word.
+        assertEquals("q-1", pane.pendingAsk.value?.askId)
+    }
+
+    @Test
+    fun aSecondAskQueuesBehindTheCardAndSurfacesWhenItIsDecided() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+
+        p.route(ask("convo-a", "ask-1"))
+        p.route(ask("convo-a", "ask-2"))
+        // the daemon holds several asks per conversation at once; overwriting kept only the last, and the
+        // agent waited out a verdict for the first that no surface would ever offer
+        assertEquals("ask-1", pane.pendingAsk.value?.askId)
+        assertEquals(listOf("ask-2"), pane.askQueue.map { it.askId })
+
+        p.noteApprovalResolved("convo-a", "ask-1")
+        assertEquals("ask-2", pane.pendingAsk.value?.askId)
+        assertTrue(pane.askQueue.isEmpty())
+
+        p.noteApprovalResolved("convo-a", "ask-2")
+        assertNull(pane.pendingAsk.value)
+    }
+
+    @Test
+    fun aResurfacedAskRefreshesInPlaceInsteadOfQueueingTwice() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        p.route(ask("convo-a", "ask-1"))
+        p.route(ask("convo-a", "ask-2"))
+
+        // a reattach resurfaces EVERY pending ask of the conversation, current card included
+        p.route(ask("convo-a", "ask-1", tool = "Bash"))
+        p.route(ask("convo-a", "ask-2", tool = "Write"))
+
+        assertEquals("Bash", pane.pendingAsk.value?.tool, "the card on screen refreshes where it stands")
+        assertEquals(listOf("ask-2" to "Write"), pane.askQueue.map { it.askId to it.tool })
+    }
+
+    @Test
+    fun aTimedOutCardStaysUpUntilANewAskOrATapRetiresIt() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        p.route(ask("convo-a", "ask-1"))
+
+        p.route(AskWithdrawn("convo-a", "ask-1", AskWithdrawnReason.TIMED_OUT))
+        // issue #100: a card that simply vanishes reads as "my decision went through"
+        assertEquals("ask-1", pane.pendingAsk.value?.askId)
+        assertEquals("ask-1", pane.timedOutAskId.value)
+
+        p.route(ask("convo-a", "ask-2"))
+        assertEquals("ask-2", pane.pendingAsk.value?.askId, "a live ask retires the terminal card")
+        assertNull(pane.timedOutAskId.value, "and the terminal state dies with the card it described")
+        assertTrue(pane.askQueue.isEmpty(), "the timed-out card must not dam the queue")
+
+        p.route(AskWithdrawn("convo-a", "ask-2", AskWithdrawnReason.TIMED_OUT))
+        p.noteApprovalResolved("convo-a", "ask-2") // the terminal card's Dismiss
+        assertNull(pane.pendingAsk.value)
+        assertNull(pane.timedOutAskId.value)
+    }
+
+    @Test
+    fun aWithdrawnQuestionLeavesANoteAndSurfacesTheNextAsk() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        p.route(question("convo-a", "q-1"))
+        p.route(ask("convo-a", "ask-2"))
+
+        // a question has no "timed out" card state — it goes, and says so, so the column does not look
+        // like the agent stopped talking for no reason
+        p.route(AskWithdrawn("convo-a", "q-1", AskWithdrawnReason.TIMED_OUT))
+
+        assertTrue(pane.messages.any { it is ChatItem.QuestionsWithdrawn })
+        assertEquals("ask-2", pane.pendingAsk.value?.askId)
+        assertNull(pane.timedOutAskId.value)
+    }
+
+    @Test
+    fun aQueuedAskWithdrawnBeforeItWasEverDrawnGoesSilently() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        p.route(ask("convo-a", "ask-1"))
+        p.route(question("convo-a", "q-2"))
+
+        p.route(AskWithdrawn("convo-a", "q-2", AskWithdrawnReason.WITHDRAWN))
+
+        assertEquals("ask-1", pane.pendingAsk.value?.askId, "the card on screen is untouched")
+        assertTrue(pane.askQueue.isEmpty())
+        // nothing to explain about a card the user never saw — a note here would be about a question that
+        // was never asked of them
+        assertTrue(pane.messages.none { it is ChatItem.QuestionsWithdrawn })
+    }
+
+    @Test
+    fun answeringAQuestionNotesThePicksInThatColumnAndAdvances() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        p.route(question("convo-a", "q-1"))
+        p.route(ask("convo-a", "ask-2"))
+
+        p.noteQuestionsAnswered("convo-a", "q-1", listOf("Which parser?" to "recursive descent"))
+
+        assertEquals(
+            listOf(listOf("Which parser?" to "recursive descent")),
+            pane.messages.filterIsInstance<ChatItem.QuestionsAnswered>().map { it.items },
+        )
+        assertEquals("ask-2", pane.pendingAsk.value?.askId)
+    }
+
+    @Test
+    fun sessionGoneRetiresEveryAskTheColumnWasHolding() {
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        p.route(ask("convo-a", "ask-1"))
+        p.route(question("convo-a", "q-2"))
+        p.route(AskWithdrawn("convo-a", "ask-1", AskWithdrawnReason.TIMED_OUT))
+
+        p.route(SessionGone("convo-a"))
+
+        // no verdict can reach a conversation that is gone, so nothing may keep offering one
+        assertNull(pane.pendingAsk.value)
+        assertTrue(pane.askQueue.isEmpty())
+        assertNull(pane.timedOutAskId.value)
     }
 
     @Test
@@ -281,6 +495,107 @@ class SplitPanesTest {
         val reopen = sent.filterIsInstance<OpenSession>().single()
         assertEquals("sid-a", reopen.resumeId)
         assertEquals(77L, reopen.lastEventSeq) // backfill past the cursor, not a whole-tail replay
+    }
+
+    @Test
+    fun aColumnRebindsWhenTheReconnectAnswersWithADifferentConversation() {
+        // The daemon restarted while the link was down, so the resume lands on a FRESH convoId. Holding
+        // the dead one used to freeze the column forever: it matched neither the bind fallback nor the
+        // claim, and the answer was taken by the focused chat instead.
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-old", "sid-a"))
+        p.route(ConvoHistory("convo-old", listOf(HistoryMessage(ChatRole.ASSISTANT, "earlier")), lastSeq = 12))
+        sent.clear()
+
+        p.reopenAll()
+        assertNull(pane.convoId.value, "the conversation died with the link it was announced on")
+        assertTrue(pane.opening.value)
+        assertEquals(12L, sent.filterIsInstance<OpenSession>().single().lastEventSeq) // still a delta
+
+        p.route(live("convo-new", "sid-a"))
+        assertEquals("convo-new", pane.convoId.value)
+        assertFalse(pane.opening.value)
+        assertTrue(p.claimsSessionLive(live("convo-new", "sid-a")))
+
+        // and the new conversation's frames route into THIS pane (streaming appends to the replayed tail)
+        p.route(text("convo-new", " back online"))
+        assertEquals(
+            listOf("earlier back online"),
+            pane.messages.filterIsInstance<ChatItem.Assistant>().map { it.text },
+        )
+    }
+
+    @Test
+    fun aReconnectClearsTheFailedOpenItIsAboutToReplace() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        val pane = open(p)
+        advanceTimeBy(9_000)
+        assertTrue(pane.openFailed.value)
+
+        p.reopenAll()
+        // "opening AND failed" is a contradiction the user can see — the re-attach owns the state now
+        assertFalse(pane.openFailed.value)
+        assertTrue(pane.opening.value)
+    }
+
+    @Test
+    fun closingAColumnMidOpenHandsTheLateAnswerBackToTheDaemon() {
+        val p = panes()
+        val pane = open(p)
+        sent.clear()
+        p.close(pane.paneId)
+        assertTrue(p.panes.isEmpty())
+        assertTrue(sent.isEmpty(), "no conversation exists yet, so there is nothing to close")
+
+        // the answer to an open nobody can call back: it must not be adopted by the focused chat…
+        assertTrue(p.claimsSessionLive(live("convo-a", "sid-a")))
+        p.route(live("convo-a", "sid-a"))
+        // …and it must not be left mounted on the daemon with no viewer either
+        assertEquals("convo-a", sent.filterIsInstance<CloseSession>().single().convoId)
+        assertTrue(p.panes.isEmpty(), "a disowned answer never manufactures a column")
+
+        // consumed once: asking for the same session again binds normally
+        sent.clear()
+        val again = open(p, "sid-a")
+        p.route(live("convo-a2", "sid-a"))
+        assertEquals("convo-a2", again.convoId.value)
+        assertTrue(sent.filterIsInstance<CloseSession>().isEmpty())
+    }
+
+    @Test
+    fun detachingAColumnMidOpenLeavesTheAnswerForTheFocusedChat() {
+        // A promotion clicked before the column's own open landed: the session is WANTED, so this must
+        // stay the mirror image of close() — no claim, and above all no CloseSession racing the promotion.
+        val p = panes()
+        val pane = open(p)
+        sent.clear()
+        p.detach(pane.paneId)
+        assertFalse(p.claimsSessionLive(live("convo-a", "sid-a")))
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(sent.filterIsInstance<CloseSession>().isEmpty())
+        assertTrue(p.panes.isEmpty())
+    }
+
+    @Test
+    fun focusingASessionReleasesItsColumnAndUndoesADisowning() {
+        val p = panes()
+        val bound = open(p, "sid-a")
+        p.route(live("convo-a", "sid-a"))
+        sent.clear()
+        p.releaseToFocus(bound.sessionId)
+        assertTrue(p.panes.isEmpty())
+        assertTrue(sent.filterIsInstance<CloseSession>().isEmpty(), "a promotion never reclaims the session")
+        assertFalse(p.claimsSessionLive(live("convo-a", "sid-a")), "the focused chat may have its answer")
+
+        // …and the change of mind: closed while opening, then focused anyway
+        val b = p.open("/w", "sid-b", "B", AgentKind.CLAUDE, PermissionMode.DEFAULT)!!
+        p.close(b.paneId)
+        p.releaseToFocus("sid-b")
+        assertFalse(p.claimsSessionLive(live("convo-b", "sid-b")))
+        sent.clear()
+        p.route(live("convo-b", "sid-b"))
+        assertTrue(sent.filterIsInstance<CloseSession>().isEmpty(), "the focused chat is waiting for this one")
     }
 
     @Test

@@ -375,8 +375,30 @@ interface DesktopModel {
     /** Send into a pane's own conversation. False = blank, or its open hasn't landed yet. */
     fun sendSidePrompt(pane: SidePane, text: String): Boolean = false
 
-    /** Decide a pane's approval through the machine-wide inbox (keyed by convo + ask id). */
-    fun resolvePaneApproval(ask: PermissionAsk, allow: Boolean) {}
+    /** Interrupt a pane's OWN turn (its ■ / Esc). Without this the column's stop reached the focused
+     *  conversation and killed the turn the user was watching one column over. */
+    fun stopSideTurn(pane: SidePane) {}
+
+    /** Decide a pane's approval. Keyed by the ASK the column is holding — not by whatever the focused
+     *  conversation happens to be blocked on, and not by an inbox row that may not be there. */
+    fun resolvePaneApproval(ask: PermissionAsk, allow: Boolean, remember: Boolean = false) {}
+
+    /** 允许本任务 on a pane's card: a TASK grant for THAT ask (approval design M2). */
+    fun resolvePaneTaskGrant(ask: PermissionAsk) {}
+
+    /** 换种安全方式 on a pane's card: a constrained DENY back to THAT ask's agent. */
+    fun retryPaneSafer(ask: PermissionAsk, constraints: List<String>) {}
+
+    /** Answer a pane's AskUserQuestion — the picks/free text ride an ALLOW verdict for THAT ask. A column
+     *  is the ONLY surface its questions have (the bell inbox excludes them), so this cannot be inert. */
+    fun answerPaneQuestions(ask: PermissionAsk, answers: Map<String, String>?, response: String?) {}
+
+    /** Skip a pane's AskUserQuestion: a DENY carrying the note, for THAT ask. */
+    fun skipPaneQuestions(ask: PermissionAsk, message: String) {}
+
+    /** Retire a pane's card locally, sending nothing — the timed-out card's Dismiss. The daemon already
+     *  answered that ask, so a verdict now would be a decision nobody is waiting for. */
+    fun dismissPaneAsk(ask: PermissionAsk) {}
 
     /**
      * True when this model views ONE split column rather than the whole shell (issue #311).
