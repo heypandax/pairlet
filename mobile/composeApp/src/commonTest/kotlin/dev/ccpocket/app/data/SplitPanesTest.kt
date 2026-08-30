@@ -284,6 +284,107 @@ class SplitPanesTest {
     }
 
     @Test
+    fun aColumnRebindsWhenTheReconnectAnswersWithADifferentConversation() {
+        // The daemon restarted while the link was down, so the resume lands on a FRESH convoId. Holding
+        // the dead one used to freeze the column forever: it matched neither the bind fallback nor the
+        // claim, and the answer was taken by the focused chat instead.
+        val p = panes()
+        val pane = open(p)
+        p.route(live("convo-old", "sid-a"))
+        p.route(ConvoHistory("convo-old", listOf(HistoryMessage(ChatRole.ASSISTANT, "earlier")), lastSeq = 12))
+        sent.clear()
+
+        p.reopenAll()
+        assertNull(pane.convoId.value, "the conversation died with the link it was announced on")
+        assertTrue(pane.opening.value)
+        assertEquals(12L, sent.filterIsInstance<OpenSession>().single().lastEventSeq) // still a delta
+
+        p.route(live("convo-new", "sid-a"))
+        assertEquals("convo-new", pane.convoId.value)
+        assertFalse(pane.opening.value)
+        assertTrue(p.claimsSessionLive(live("convo-new", "sid-a")))
+
+        // and the new conversation's frames route into THIS pane (streaming appends to the replayed tail)
+        p.route(text("convo-new", " back online"))
+        assertEquals(
+            listOf("earlier back online"),
+            pane.messages.filterIsInstance<ChatItem.Assistant>().map { it.text },
+        )
+    }
+
+    @Test
+    fun aReconnectClearsTheFailedOpenItIsAboutToReplace() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        val pane = open(p)
+        advanceTimeBy(9_000)
+        assertTrue(pane.openFailed.value)
+
+        p.reopenAll()
+        // "opening AND failed" is a contradiction the user can see — the re-attach owns the state now
+        assertFalse(pane.openFailed.value)
+        assertTrue(pane.opening.value)
+    }
+
+    @Test
+    fun closingAColumnMidOpenHandsTheLateAnswerBackToTheDaemon() {
+        val p = panes()
+        val pane = open(p)
+        sent.clear()
+        p.close(pane.paneId)
+        assertTrue(p.panes.isEmpty())
+        assertTrue(sent.isEmpty(), "no conversation exists yet, so there is nothing to close")
+
+        // the answer to an open nobody can call back: it must not be adopted by the focused chat…
+        assertTrue(p.claimsSessionLive(live("convo-a", "sid-a")))
+        p.route(live("convo-a", "sid-a"))
+        // …and it must not be left mounted on the daemon with no viewer either
+        assertEquals("convo-a", sent.filterIsInstance<CloseSession>().single().convoId)
+        assertTrue(p.panes.isEmpty(), "a disowned answer never manufactures a column")
+
+        // consumed once: asking for the same session again binds normally
+        sent.clear()
+        val again = open(p, "sid-a")
+        p.route(live("convo-a2", "sid-a"))
+        assertEquals("convo-a2", again.convoId.value)
+        assertTrue(sent.filterIsInstance<CloseSession>().isEmpty())
+    }
+
+    @Test
+    fun detachingAColumnMidOpenLeavesTheAnswerForTheFocusedChat() {
+        // A promotion clicked before the column's own open landed: the session is WANTED, so this must
+        // stay the mirror image of close() — no claim, and above all no CloseSession racing the promotion.
+        val p = panes()
+        val pane = open(p)
+        sent.clear()
+        p.detach(pane.paneId)
+        assertFalse(p.claimsSessionLive(live("convo-a", "sid-a")))
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(sent.filterIsInstance<CloseSession>().isEmpty())
+        assertTrue(p.panes.isEmpty())
+    }
+
+    @Test
+    fun focusingASessionReleasesItsColumnAndUndoesADisowning() {
+        val p = panes()
+        val bound = open(p, "sid-a")
+        p.route(live("convo-a", "sid-a"))
+        sent.clear()
+        p.releaseToFocus(bound.sessionId)
+        assertTrue(p.panes.isEmpty())
+        assertTrue(sent.filterIsInstance<CloseSession>().isEmpty(), "a promotion never reclaims the session")
+        assertFalse(p.claimsSessionLive(live("convo-a", "sid-a")), "the focused chat may have its answer")
+
+        // …and the change of mind: closed while opening, then focused anyway
+        val b = p.open("/w", "sid-b", "B", AgentKind.CLAUDE, PermissionMode.DEFAULT)!!
+        p.close(b.paneId)
+        p.releaseToFocus("sid-b")
+        assertFalse(p.claimsSessionLive(live("convo-b", "sid-b")))
+        sent.clear()
+        p.route(live("convo-b", "sid-b"))
+        assertTrue(sent.filterIsInstance<CloseSession>().isEmpty(), "the focused chat is waiting for this one")
+    }
+
+    @Test
     fun detachDropsAColumnWithoutReclaimingItsSession() {
         val p = panes()
         val pane = open(p)

@@ -2581,6 +2581,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      * link would open a ghost session nobody is watching.
      */
     internal fun demoteToSatellite() {
+        sidePanes.clear() // #311: a column's conversation must not stay mounted on a headless satellite link
         // The UI open worker is not a transport job and therefore survives the fleet swap unless it is
         // explicitly retired. A headless satellite must never execute a click queued by the old primary.
         openGen++
@@ -5163,6 +5164,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // A DIFFERENT target still goes through — latest-wins switching is unchanged (#165), and the losing
         // open's late SessionLive is still refused by the #219 identity guard.
         if (openInFlightFor(wd, resumeId) || alreadyOpen(wd, resumeId)) return false
+        // #311: a session can never be in a split column AND the focused chat at once. Focusing one that
+        // IS in a column therefore means promote it — whatever the gesture was (sidebar click, promotion,
+        // push tap, deep link), because they all funnel through here. The column must let go BEFORE the
+        // OpenSession goes out: otherwise SidePanes.claimsSessionLive still recognises the answer as that
+        // column's, the focused area's open is never answered, and the click ends in "open failed" with a
+        // Retry that fails the same way forever. Synchronous, and placed AFTER the two refusals above so
+        // an idempotent no-op click never tears a column down.
+        if (resumeId != null) sidePanes.releaseToFocus(resumeId)
         sessionNavigationFenced = false // an explicit tap/push is the only way out of #226's browse fence
         openInFlight = attempt
         lastOpenAttempt = attempt

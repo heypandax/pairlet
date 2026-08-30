@@ -108,7 +108,19 @@ class SidePanes(
     private var paneSeq = 0L
 
     /**
-     * [panes.size] as a PLAIN field, not snapshot state — and the only thing [route] and
+     * Sessions whose column was closed while its open was still in flight — see [close].
+     *
+     * The daemon cannot be told to stop an open it has not answered yet, so the answer arrives for a
+     * column that no longer exists. Without a record of that, the focused pane's last acceptance rule
+     * ("nothing is open here yet") would take it and the session the user just closed would open itself
+     * in the main area. Membership is consumed once, by whichever comes first: the late `SessionLive`
+     * (which is answered with a [CloseSession], handing the conversation back), or the user re-opening
+     * that session — in a column ([open]) or as the focused chat ([releaseToFocus]).
+     */
+    private val disowned = mutableSetOf<String>()
+
+    /**
+     * `panes.size + disowned.size` as a PLAIN field, not snapshot state — and the only thing [route] and
      * [claimsSessionLive] consult before deciding they have nothing to do.
      *
      * Both run on the inbound frame path, which is every chunk of every turn, and which is not a
@@ -116,8 +128,13 @@ class SidePanes(
      * global snapshot, flushing pending apply notifications at a moment nothing else would have — which
      * is exactly the kind of invisible retiming that moves a composer draft under the user. Nobody opens
      * a pane on the phone, so on mobile this keeps the hook to one integer comparison, forever.
+     *
+     * [disowned] counts into it because a disowned session's late answer must still be recognised after
+     * its column is gone — the whole point of the record.
      */
     private var openCount = 0
+
+    private fun recount() { openCount = panes.size + disowned.size }
 
     /** Room for another column, focused pane included. */
     fun canOpen(): Boolean = panes.size < MAX_SPLIT_PANES - 1
@@ -133,9 +150,10 @@ class SidePanes(
      */
     fun open(workdir: String, sessionId: String, title: String, agent: AgentKind, mode: PermissionMode): SidePane? {
         if (!canOpen() || paneFor(sessionId) != null) return null
+        disowned.remove(sessionId) // asking for it again withdraws any pending disowning of this session
         val pane = SidePane(++paneSeq, sessionId, workdir, title, agent)
         panes.add(pane)
-        openCount = panes.size
+        recount()
         pane.mode = mode
         dispatchOpen(pane, lastEventSeq = 0L)
         return pane
@@ -154,12 +172,23 @@ class SidePanes(
      * Re-attach every column after the link comes back, the way the focused chat does: resume by session
      * id and ask for the DELTA past the transcript cursor we already hold (issue #147), so a reconnect
      * backfills what streamed while the link was down instead of replaying the whole tail per column.
+     *
+     * Every live column goes back to "opening", convoId included, because the answer may name a DIFFERENT
+     * conversation: a daemon that restarted while we were away resumes the session under a fresh convoId.
+     * Holding the old one would freeze the column forever — [bind]'s session-id fallback only fires while
+     * convoId is null, [claimsSessionLive] would match neither id, and the orphaned answer would be taken
+     * by the focused area instead. Nothing is lost by clearing it: the link that carried the old
+     * conversation's frames is gone, so none can still arrive. The transcript and its [SidePane.historySeq]
+     * cursor stay, which is what keeps the re-attach a delta. Clearing [SidePane.openFailed] alongside also
+     * retires the contradictory "opening AND failed" state a reconnect used to leave behind.
      */
     fun reopenAll() {
         if (openCount == 0) return
         for (pane in panes.toList()) {
             if (pane.gone.value) continue
-            pane.opening.value = pane.convoId.value == null
+            pane.convoId.value = null
+            pane.opening.value = true
+            pane.openFailed.value = false
             dispatchOpen(pane, lastEventSeq = pane.historySeq ?: 0L)
         }
     }
@@ -193,7 +222,11 @@ class SidePanes(
         val i = panes.indexOfFirst { it.paneId == paneId }
         if (i < 0) return
         val pane = panes.removeAt(i)
-        openCount = panes.size
+        // Closed before the open landed: there is no conversation to reclaim YET, but one is on its way.
+        // Record the session as disowned so the answer is recognised when it arrives — see [disowned].
+        // A pane whose session is already gone has no answer coming and needs no record.
+        if (pane.convoId.value == null && !pane.gone.value) disowned += pane.sessionId
+        recount()
         val convo = pane.convoId.value ?: return
         if (pane.streaming.value) return
         scope.launch { send(CloseSession(convo)) }
@@ -202,16 +235,32 @@ class SidePanes(
     /**
      * Drop a column WITHOUT reclaiming its session — for a promotion, which re-opens that very session as
      * the focused chat a moment later. Sending [CloseSession] here would race that re-open on the daemon
-     * and could close the conversation the user just promoted.
+     * and could close the conversation the user just promoted. For the same reason this never disowns:
+     * the session is about to be wanted, so its answer must reach the focused chat, not a [CloseSession].
      */
     fun detach(paneId: Long) {
         panes.removeAll { it.paneId == paneId }
-        openCount = panes.size
+        recount()
+    }
+
+    /**
+     * The focused chat is taking [sessionId] over. Called from the repository's one open chokepoint, so
+     * EVERY way of focusing a session — a sidebar click, a promotion, a push tap, a deep link — means the
+     * same thing when that session is currently in a column: promote it. The column lets go first, without
+     * reclaiming the session ([detach]'s rule), so the answering `SessionLive` is no longer claimed here
+     * and reaches the focused chat. Re-opening a just-disowned session also withdraws the disowning: the
+     * user changed their mind, and that answer must not be met with a [CloseSession].
+     */
+    fun releaseToFocus(sessionId: String) {
+        disowned.remove(sessionId)
+        paneFor(sessionId)?.let { detach(it.paneId) }
+        recount()
     }
 
     /** Drop every column without touching the sessions behind them (disconnect, machine switch, sign-out). */
     fun clear() {
         panes.clear()
+        disowned.clear()
         openCount = 0
     }
 
@@ -219,9 +268,13 @@ class SidePanes(
      * True when [f] answers a side pane's open, so the focused pane must NOT treat it as its own.
      * See the class doc — this is the single point where side panes take priority.
      */
-    fun claimsSessionLive(f: SessionLive): Boolean = openCount > 0 && panes.any { pane ->
-        pane.convoId.value?.let { it == f.convoId } ?: (f.sessionId != null && f.sessionId == pane.sessionId)
-    }
+    fun claimsSessionLive(f: SessionLive): Boolean = openCount > 0 && (
+        panes.any { pane ->
+            pane.convoId.value?.let { it == f.convoId } ?: (f.sessionId != null && f.sessionId == pane.sessionId)
+        } ||
+            // a column closed mid-open: its answer belongs to nobody, and least of all to the focused area
+            (f.sessionId != null && f.sessionId in disowned)
+        )
 
     /** Mirror [f] into the pane it belongs to. Never consumes: the caller's own handling runs regardless. */
     fun route(f: Frame) {
@@ -273,7 +326,17 @@ class SidePanes(
     private fun bind(f: SessionLive) {
         val pane = panes.firstOrNull { it.convoId.value == f.convoId }
             ?: panes.firstOrNull { it.convoId.value == null && f.sessionId != null && f.sessionId == it.sessionId }
-            ?: return
+        if (pane == null) {
+            // Nobody is waiting for this answer, but it may be the one we disowned in [close]: the daemon
+            // has now mounted a conversation with no viewer at all. Hand it straight back — the record is
+            // consumed here, so a legitimate later open of the same session binds normally.
+            val orphan = f.sessionId ?: return
+            if (disowned.remove(orphan)) {
+                recount()
+                scope.launch { send(CloseSession(f.convoId)) }
+            }
+            return
+        }
         pane.convoId.value = f.convoId
         pane.opening.value = false
         pane.openFailed.value = false
