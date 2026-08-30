@@ -12,6 +12,7 @@ import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.FleetCoordinator
 import dev.ccpocket.app.data.FleetRuntime
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.data.SidePane
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.Res
@@ -399,6 +400,42 @@ class RepoDesktopModel(
     }
 
     override val watch: DkWatch? get() = null // needs a second live stream — multi-connection repo work
+
+    // ── split panes (issue #311) ──────────────────────────────────────────────────────────────────
+    // The repository keeps the extra conversations (SidePanes); this maps them onto the shell's verbs.
+    // Everything here rides wire and state that already existed: a pane opens with the same OpenSession
+    // the sidebar sends, and promotion is literally [selectSession] on the pane's session.
+
+    override val sidePanes: List<SidePane> get() = repo.sidePanes.panes
+
+    override val canSplit: Boolean get() = connected && repo.sidePanes.canOpen()
+
+    override fun openInSplit(s: DkSession) {
+        if (s.sessionId == repo.sessionKey.value) return // already the focused chat
+        repo.sidePanes.open(s.cwd, s.sessionId, s.title, s.agent, repo.defaultMode.value)
+    }
+
+    override fun closeSplit(paneId: Long) = repo.sidePanes.close(paneId)
+
+    override fun promoteSplit(pane: SidePane) {
+        // Promotion is an ordinary session open: the daemon answers by reattaching the conversation it
+        // already holds, so nothing forks and nothing restarts. The column is DETACHED rather than closed
+        // — reclaiming the session here would race the open that is about to resume it.
+        //
+        // The outgoing session is deliberately NOT auto-moved into the freed column. openSession already
+        // reclaims an idle conversation as it switches, so re-opening it as a column in the same breath
+        // would put a CloseSession and an OpenSession for one session in flight together. Sending it back
+        // to a column is one gesture away (the sidebar's "Open in split"), and that gesture is ordered.
+        repo.sidePanes.detach(pane.paneId)
+        selectSession(DkSession(pane.sessionId, pane.workdir, pane.title.value, agent = pane.agent))
+    }
+
+    override fun retrySplitOpen(pane: SidePane) = repo.sidePanes.retry(pane)
+
+    override fun sendSidePrompt(pane: SidePane, text: String): Boolean = repo.sidePanes.sendPrompt(pane, text)
+
+    override fun resolvePaneApproval(ask: PermissionAsk, allow: Boolean) =
+        repo.resolvePendingApproval(ask.convoId, ask.askId, allow)
 
     // ── workflow orchestration (issue #106): delegate to the repository; dock state is ui-local ──
     override val workflowRuns: Map<String, dev.ccpocket.protocol.WorkflowRun> get() = repo.workflowRuns

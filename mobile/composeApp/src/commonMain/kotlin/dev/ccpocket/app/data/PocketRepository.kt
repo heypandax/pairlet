@@ -65,7 +65,6 @@ import dev.ccpocket.protocol.RemoveWorktree
 import dev.ccpocket.protocol.WorktreeList
 import dev.ccpocket.protocol.CLAUDE_QUOTA_NO_TOKEN
 import dev.ccpocket.protocol.CLAUDE_QUOTA_OK
-import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ClaudeQuota
 import dev.ccpocket.protocol.ClaudeQuotaGet
 import dev.ccpocket.protocol.ClearAllowRule
@@ -347,7 +346,7 @@ private data class PendingGrantMutation(
 /** The tool name every backend's transcript replay files an AskUserQuestion under (the daemon's own
  *  `TranscriptReplay.ASK_TOOL` / `DshTranscriptReplay.ASK_TOOL`, and the live `AskQuestions.TOOL`). It is
  *  a display key on the wire, not an enum, so the client matches the same literal. */
-private const val ASK_QUESTION_TOOL = "AskUserQuestion"
+internal const val ASK_QUESTION_TOOL = "AskUserQuestion"
 
 sealed interface ChatItem {
     /** [pending] = sent from this device but the daemon hasn't echoed any evidence back yet (stream
@@ -590,7 +589,6 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // a ConvoHistory was just merged (issue #107): the very next stream event may be the block the
     // replay's disk read already caught (chunks parsed during the read race its ConvoHistory on the
     // wire) — one-shot flag; consumed by the first AssistantChunk/ToolEvent, reset at turn boundaries
-    private var replayEcho = false
 
     // ── push notifications: register the device's APNs/FCM token so the relay can wake it while offline ──
     private var pushToken: PushToken? = null
@@ -1105,7 +1103,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  answer against the live conversation would drop it exactly when it succeeded. Cleared by the answer
      *  (or by a conversation switch, which orphans it). */
     private var rewindAwaiting: RewindTarget? = null
-    val messages = mutableStateListOf<ChatItem>()
+    /** The open conversation's stream. Extracted to [ChatTranscript] (issue #311) so the desktop's split
+     *  panes assemble their extra conversations with the same code; the field stays the repository's own. */
+    val transcript = ChatTranscript()
+    val messages get() = transcript.messages
+
+    /** Conversations the desktop keeps live BESIDE this one (issue #311). Empty everywhere else — the
+     *  phone opens no panes — which is what makes [SidePanes.route] below a no-op on mobile. */
+    val sidePanes = SidePanes(scope, ::send, ::newPromptId)
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
     val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
     private var fileUploadJob: Job? = null                 // the chunk-send loop of the ONE Uploading file
@@ -1114,7 +1119,6 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val convoId = mutableStateOf<String?>(null)
     val workdir = mutableStateOf<String?>(null)
     val chatTitle = mutableStateOf<String?>(null)            // session title for the chat header (client-side)
-    private var thinkStartMs: Long? = null                   // first Thinking chunk of the in-progress block
     val pendingAsk = mutableStateOf<PermissionAsk?>(null)
     /** Ordered waiting room behind [pendingAsk] (approval design M1): a same-session ask arriving while a
      * card is already up QUEUES here instead of overwriting it — three back-to-back asks are shown one by
@@ -1310,7 +1314,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  the desktop's open-failed pane offers a retry and must not silently re-open under other flags. */
     private var lastOpenAttempt: OpenAttempt? = null
     val autoFocusComposer = mutableStateOf(false)            // brand-new session: ChatScreen raises the keyboard once on landing (consumed there)
-    val streaming = mutableStateOf(false)
+    val streaming get() = transcript.streaming
     val observing = mutableStateOf(false) // viewing a session running outside the daemon (read-only tail)
     private var currentSessionId: String? = null
 
@@ -2369,6 +2373,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // §3.2.8: offer/accept/decline/return/recall/expire are all recovered from DAEMON TRUTH after a
         // reconnect — the inbox re-pulls its whole list rather than trusting whatever it held locally.
         if (isCollaboratorInbox) send(ListHandoffs())
+        sidePanes.reopenAll() // #311: every split column re-attaches the same way the focused chat does
         when {
             // daemon finds the still-live conversation by sessionId → reattach + history replay, which the
             // ConvoHistory MERGE turns into a backfill of whatever streamed while the link was down (#107)
@@ -2388,6 +2393,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Drop the live connection and return to the Connect screen (pairing is kept). */
     fun disconnect() {
+        sidePanes.clear() // #311: nothing behind a pane survives the link
         sessionActive.value = false
         // An OpenSession worker belongs to the link/computer that accepted the click. It may still be
         // queued (or suspended on a full reconnect outbox), so invalidating only the claim is insufficient:
@@ -2501,6 +2507,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  This is the COLD path — [FleetCoordinator.switchTo] promotes a hot satellite instead when it can
      *  (issue #103) and only falls back here when no live link to [target] exists yet. */
     fun switchDaemon(target: PairedDaemon) {
+        sidePanes.clear() // #311: panes name sessions on the machine we are leaving
         if (paired.value?.accountId == target.accountId && sessionActive.value) return
         onBeforeSwitch?.invoke(target.accountId)
         disconnect()
@@ -2868,6 +2875,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *    (cold-start seams and a background announce while browsing both land here harmlessly).
      */
     private fun acceptsSessionLive(f: SessionLive): Boolean {
+        // #311: a split pane's open is answered by the same frame shape. Decided before every rule below,
+        // because the last one is a catch-all for "nothing is open here yet" — without this, opening a
+        // pane while the main area is empty would land the pane's session in the main area instead.
+        if (sidePanes.claimsSessionLive(f)) return false
         // #226: BACK is an authoritative navigation decision. The daemon may already have queued a
         // SessionLive for the chat we just left (turn-state reannounce, close race, reconnect replay).
         // sessionKey still names that chat for draft durability, so reject before consulting identity.
@@ -2909,6 +2920,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // that branch is filtered to the currently-open conversation (chat-state bookkeeping) and would
         // miss a turn finishing in another session/window on the same machine.
         if (f is TurnDone) turnCompletions.value++
+        // #311: a split pane's conversation is not this repository's conversation, so every branch below
+        // filters it out. Mirror it into its pane FIRST, then let the branches run exactly as they always
+        // have — including the machine-wide bookkeeping (approvals inbox, quota) that is not per-chat.
+        sidePanes.route(f)
         when (f) {
             is Directories -> {
                 replace(directories, f.entries); refreshing.value = false
@@ -3315,7 +3330,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // was lost, keep the bubble pending, but the NEXT stream frame can now safely prove that
                 // prompt started; it can no longer be mistaken for output from the preceding turn.
                 if (queuedReceiptStillPending) promptQueued = false
-                replayEcho = false // turn boundary — the next block belongs to a new turn, never a replay echo
+                transcript.replayEcho = false // turn boundary — the next block belongs to a new turn, never a replay echo
                 val turnWasLive = streaming.value // gate the marker/notify on a turn we actually watched run
                 finishThinking(); streaming.value = false
                 // a FAILED turn (API error / synthetic placeholder — issue #65): show the error row where
@@ -3444,7 +3459,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                         val merged = TranscriptMerge.mergeDelta(localRows, f.messages.map(::historyItem))
                         if (merged != localRows) replace(messages, merged)
                         reconcilePromptReceiptFromHistory(localRows, merged)
-                        replayEcho = true // same replay/stream race as the full path
+                        transcript.replayEcho = true // same replay/stream race as the full path
                     }
                     f.lastSeq?.let { historySeq = it; historySeqSession = currentSessionId }
                 } else {
@@ -3459,7 +3474,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     val merged = TranscriptMerge.merge(localRows, f.messages.map(::historyItem))
                     if (merged != localRows) replace(messages, merged)
                     reconcilePromptReceiptFromHistory(localRows, merged)
-                    replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race
+                    transcript.replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race
                     // reattach cursor + paging anchors (issue #147); null fields = a pre-#147 daemon
                     historySeq = f.lastSeq
                     historySeqSession = if (f.lastSeq != null) currentSessionId else null
@@ -3725,82 +3740,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  - an event tagged with a parent folds into that parent's card as "N tool uses · latest" progress
      *    (falling back to today's inline card when the parent isn't on screen, e.g. attached mid-run).
      */
-    private fun onToolEvent(f: ToolEvent) {
-        val parent = f.parentToolUseId
-        // one-shot replay-echo dedupe (issue #107), tool flavor: a START right after a merged
-        // ConvoHistory may duplicate the replayed tail card (which has no taskId). Fold into it —
-        // patching the live toolUseId in even upgrades the card for later RESULT correlation.
-        if (replayEcho) {
-            replayEcho = false
-            if (f.phase == ToolPhase.START && parent == null) {
-                val i = TranscriptMerge.echoToolIndex(messages, f.tool, f.inputPreview)
-                if (i >= 0) {
-                    messages[i] = (messages[i] as ChatItem.Tool).copy(taskId = f.toolUseId)
-                    return
-                }
-            }
-        }
-        fun cardIndex(taskId: String?) =
-            if (taskId == null) -1 else messages.indexOfLast { it is ChatItem.Tool && it.taskId == taskId }
-        when {
-            f.phase == ToolPhase.RESULT -> {
-                val i = cardIndex(f.toolUseId)
-                // no card on screen (opened mid-run): the reattach history replay carries the outcome instead
-                if (i >= 0) messages[i] = (messages[i] as ChatItem.Tool).copy(ok = f.ok, output = f.output)
-            }
-            parent != null -> {
-                val i = cardIndex(parent)
-                if (i >= 0) {
-                    val card = messages[i] as ChatItem.Tool
-                    messages[i] = card.copy(childCount = card.childCount + 1, lastChild = f.tool)
-                } else messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: ""))
-            }
-            // OpenCode's question tool renders as a read-only question card, not a raw JSON row (issue
-            // #210); a parse miss (old truncated preview / malformed) falls back to the plain tool card.
-            else -> OpenCodeQuestionParse.parse(f.tool, f.inputPreview)
-                ?.let { messages.add(ChatItem.OpenCodeQuestion(it)) }
-                ?: messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "", taskId = f.toolUseId))
-        }
-    }
-
-    @OptIn(ExperimentalEncodingApi::class)
-    private fun historyItem(h: HistoryMessage): ChatItem = when (h.role) {
-        // images the prompt carried replay as real tiles (issue #254) — a turn composed at the computer
-        // is no longer text-only here, and an image-ONLY turn is no longer a blank bubble. A base64 blob
-        // the platform can't decode is dropped rather than rendered as a broken tile; the renderer's own
-        // decode-failure card covers bytes that only fail later (on the image decoder).
-        ChatRole.USER -> ChatItem.User(
-            h.text,
-            images = h.images.mapNotNull { runCatching { Base64.Default.decode(it.base64) }.getOrNull() },
-            imagesTruncated = h.imagesTruncated,
-            // rewind/fork anchor coordinates (issue #282) — carried verbatim, including their absence
-            seq = h.seq,
-            uuid = h.uuid,
-        )
-        // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65).
-        // Attribution follows the placeholder text so the replay reads the same as the daemon live prompt:
-        // an upstream gateway/5xx signal stops blaming context (issue #208).
-        ChatRole.ASSISTANT -> if (h.error) {
-            ChatItem.Sys(
-                "API request failed — the agent wrote a placeholder, not a real reply. " +
-                    dev.ccpocket.protocol.SyntheticAttribution.attribution(h.text) +
-                    "\n\nplaceholder reply: ${h.text}",
-            )
-        } else {
-            ChatItem.Assistant(h.text)
-        }
-        // an answered AskUserQuestion replays as the same compact answered row the live path leaves, not a
-        // raw-JSON tool card (issue #110); ok/output keep a sub-agent card's outcome + report (issue #77);
-        // workflowRunId binds a Workflow card to its separately-pushed run (issue #106)
-        ChatRole.TOOL -> h.answers?.let { a -> ChatItem.QuestionsAnswered(a.map { it.question to it.answer }) }
-            ?: OpenCodeQuestionParse.parse(h.tool ?: "", h.text)?.let { ChatItem.OpenCodeQuestion(it) }
-            // …and one with NO answers is a question that never got one (issue #321). Falling through to
-            // the plain tool row below made it read as a live-looking card with nothing to tap; say what
-            // it actually is. Every backend's replay names the tool the same way (see the daemon's
-            // TranscriptReplay / DshTranscriptReplay ASK_TOOL), so this needs no per-agent branch.
-            ?: h.text.takeIf { h.tool == ASK_QUESTION_TOOL }?.let { ChatItem.QuestionsUnanswered(it) }
-            ?: ChatItem.Tool(h.tool ?: "tool", h.text, ok = h.ok, output = h.output, workflowRunId = h.workflowRunId)
-    }
+    private fun onToolEvent(f: ToolEvent) = transcript.onToolEvent(f)
 
     private fun <T> replace(list: MutableList<T>, items: List<T>) {
         list.clear(); list.addAll(items)
@@ -3814,46 +3754,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         viewedWorkflowRunId.value = null
     }
 
-    private fun appendChunk(c: AssistantChunk) {
-        streaming.value = true
-        when (val p = c.piece) {
-            is StreamPiece.Text -> {
-                finishThinking() // prose starting = the thinking block (if any) is done
-                // one-shot replay-echo dedupe (issue #107): the first block after a merged ConvoHistory
-                // can be the very block the replay already included — appending it would double the
-                // bubble's tail. Only an exact tail match is dropped; anything else streams normally.
-                val echo = replayEcho && TranscriptMerge.isEchoText(messages, p.text)
-                replayEcho = false
-                if (echo) return
-                val last = messages.lastOrNull()
-                if (last is ChatItem.Assistant) messages[messages.lastIndex] = last.copy(text = last.text + p.text)
-                else messages.add(ChatItem.Assistant(p.text))
-            }
-            is StreamPiece.Thinking -> {
-                replayEcho = false // replay carries no thinking rows — a thinking chunk can't be an echo
-                val last = messages.lastOrNull()
-                if (last is ChatItem.Thinking && last.seconds == null) {
-                    messages[messages.lastIndex] = last.copy(text = last.text + p.text)
-                } else {
-                    thinkStartMs = dev.ccpocket.app.epochMillis()
-                    messages.add(ChatItem.Thinking(p.text))
-                }
-            }
-        }
-    }
+    private fun appendChunk(c: AssistantChunk) = transcript.appendChunk(c)
 
     /** Stamp the duration onto a still-open Thinking block (design: "Thought for 5s"). */
-    private fun finishThinking() {
-        val start = thinkStartMs ?: return
-        thinkStartMs = null
-        val i = messages.indexOfLast { it is ChatItem.Thinking }
-        if (i < 0) return
-        val t = messages[i] as ChatItem.Thinking
-        if (t.seconds == null) {
-            val secs = (((dev.ccpocket.app.epochMillis() - start) + 500) / 1000).toInt().coerceAtLeast(1)
-            messages[i] = t.copy(seconds = secs)
-        }
-    }
+    private fun finishThinking() = transcript.finishThinking()
 
     /** Pull-to-refresh the project list (re-scans the daemon's directories + live state). */
     fun refreshDirectories() = refreshWithSpinner(refreshing, ListDirectories())
@@ -5294,7 +5198,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // sessionId and reattaches the still-live conversation (registry live-match), no fork.
         convoId.value?.let { if (observing.value || !streaming.value) send(CloseSession(it)) }
         if (gen != openGen) return // the close send can suspend while a newer navigation decision wins
-        messages.clear(); convoId.value = null; replayEcho = false
+        messages.clear(); convoId.value = null; transcript.replayEcho = false
         resetHistoryPaging() // #147: a fresh open replays in full — a stale cursor must not ask for a delta
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
         // #219: a brand-new session's SessionLive has no sessionId to recognize it by — arm the workdir
@@ -6407,6 +6311,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             askBurstTotal--
             updateAskProgress()
         }
+        sidePanes.noteApprovalResolved(key.convoId, askId) // #311: same decision, every surface showing it
         Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to if (allow) "allow" else "deny"))
         scope.launch {
             send(PermissionVerdict(row.ask.convoId, askId, if (allow) Decision.ALLOW else Decision.DENY))

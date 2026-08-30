@@ -1280,6 +1280,13 @@
     <!-- window chrome & misc -->
     <string name="exit_fullscreen">Exit Full Screen</string>
     <string name="show_sidebar">Show sidebar</string>
+    <!-- split panes (issue #311) -->
+    <string name="split_pane_focus">Focus</string>
+    <string name="split_pane_close">Close column</string>
+    <string name="split_open">Open in split</string>
+    <string name="split_full">Split is full</string>
+    <string name="split_opening">Opening…</string>
+    <string name="split_session_ended">This session has ended.</string>
     <string name="qa_terminal">Open terminal</string>
     <string name="qa_clear_armed">Clear chat — tap again</string>
     <string name="popover_where">Where</string>

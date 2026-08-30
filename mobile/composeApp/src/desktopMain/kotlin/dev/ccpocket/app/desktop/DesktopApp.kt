@@ -96,13 +96,26 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 )
             }
             val watch = model.watch
-            if (watch == null) {
-                ChatPane(model, Modifier.weight(1f))
-            } else {
-                // split: chat with the focused session while watching a second one read-only (Fleet ⑥)
-                ChatPane(model, Modifier.weight(1f), focused = true)
-                Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
-                WatchPane(watch, model, Modifier.weight(1f))
+            val split = model.sidePanes
+            when {
+                watch != null -> {
+                    // split: chat with the focused session while watching a second one read-only (Fleet ⑥)
+                    ChatPane(model, Modifier.weight(1f), focused = true)
+                    Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
+                    WatchPane(watch, model, Modifier.weight(1f))
+                }
+                // split panes (issue #311): the focused conversation keeps the leftmost column and the full
+                // chat surface; every other open conversation gets an equal-width column of its own, each
+                // with its own stream, composer and approvals. Equal widths on purpose — the first version
+                // deliberately has no drag-to-resize tiling to get wrong.
+                split.isEmpty() -> ChatPane(model, Modifier.weight(1f))
+                else -> {
+                    ChatPane(model, Modifier.weight(1f), focused = true)
+                    split.forEach { pane ->
+                        Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
+                        SplitPane(model, pane, Modifier.weight(1f))
+                    }
+                }
             }
             // workflow orchestration (issue #106): a persistent ~360dp docked panel — the chat stays
             // fully usable beside it (docked beats overlay, per the workflow-view handoff)

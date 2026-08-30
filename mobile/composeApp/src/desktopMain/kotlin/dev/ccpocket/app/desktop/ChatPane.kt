@@ -109,6 +109,8 @@ import dev.ccpocket.app.data.ImgState
 import dev.ccpocket.app.data.PendingFile
 import dev.ccpocket.app.data.SentFile
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.split_pane_close
+import dev.ccpocket.app.resources.split_pane_focus
 import dev.ccpocket.app.resources.ho_continuing
 import dev.ccpocket.app.resources.ho_copy_invite
 import dev.ccpocket.app.resources.ho_finish_return
@@ -1054,15 +1056,32 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
                         .padding(horizontal = 9.dp, vertical = 3.dp),
                 )
             }
-            ChangesPill(model) // "± N" — the session's changed files, opens the Changes browser
-            GitPill(model) // "⎇ branch ↑2" — the repository's state, opens the Git panel (issue #280)
-            // the permission-mode switch lives in the ⋯ popover now, mirroring mobile's quick-actions
-            // sheet (the old header pill was display-only and read as a broken control)
-            Icon(
-                Icons.Rounded.MoreHoriz, null, tint = Tok.tx2,
-                modifier = Modifier.size(26.dp).clip(RoundedCornerShape(999.dp))
-                    .clickable { model.showQuickActions = true }.padding(4.dp),
-            )
+            if (model.paneScoped) {
+                // split column (issue #311): Changes / Git / ⋯ all drive the FOCUSED conversation, so from
+                // here they would act on a session the user is not looking at. A column carries its own two
+                // verbs instead — take the focus (which is what unlocks the full set), or close the column.
+                Text(
+                    stringResource(Res.string.split_pane_focus), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp,
+                    style = tightCenter(11.sp),
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
+                        .clickable { model.focusThisPane() }.padding(horizontal = 9.dp, vertical = 3.dp),
+                )
+                Icon(
+                    Icons.Rounded.Close, stringResource(Res.string.split_pane_close), tint = Tok.tx2,
+                    modifier = Modifier.size(26.dp).clip(RoundedCornerShape(999.dp))
+                        .clickable { model.closeThisPane() }.padding(5.dp),
+                )
+            } else {
+                ChangesPill(model) // "± N" — the session's changed files, opens the Changes browser
+                GitPill(model) // "⎇ branch ↑2" — the repository's state, opens the Git panel (issue #280)
+                // the permission-mode switch lives in the ⋯ popover now, mirroring mobile's quick-actions
+                // sheet (the old header pill was display-only and read as a broken control)
+                Icon(
+                    Icons.Rounded.MoreHoriz, null, tint = Tok.tx2,
+                    modifier = Modifier.size(26.dp).clip(RoundedCornerShape(999.dp))
+                        .clickable { model.showQuickActions = true }.padding(4.dp),
+                )
+            }
         }
         val branch = model.chatBranch?.let { "  ·  ⑂ $it" } ?: ""
         // machine-first line: which computer this session lives on leads the mono meta (fleet language)

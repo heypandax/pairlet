@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.data.SidePane
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.ui.ComposerState
@@ -343,6 +344,54 @@ interface DesktopModel {
     /** On-demand full prompt/return per agent, keyed "runId#index". */
     val workflowAgentDetails: Map<String, dev.ccpocket.protocol.WorkflowAgentDetail> get() = emptyMap()
     fun fetchWorkflowAgentDetail(runId: String, agentIndex: Int, agentId: String?) {}
+
+    // ── split panes (issue #311): more than one conversation open side by side in the main area ────
+    // The shell shows [sidePanes] to the RIGHT of the focused chat, in order. Defaults leave the
+    // seed/preview models with no split at all, so every existing screenshot and UI test is unchanged.
+
+    /** Conversations open beside the focused one, left to right. Empty = the classic single-chat main area. */
+    val sidePanes: List<SidePane> get() = emptyList()
+
+    /** Room for one more column (see [MAX_SPLIT_PANES]) and a live link to open it over. */
+    val canSplit: Boolean get() = false
+
+    /** Put [s] in a new column beside the current chat. A session already shown somewhere is a no-op. */
+    fun openInSplit(s: DkSession) {}
+
+    /** Drop a column. The session keeps running — closing a view never stops an agent. */
+    fun closeSplit(paneId: Long) {}
+
+    /**
+     * Make [pane] the focused conversation, which is what gives it the full chat surface (model/mode
+     * switching, Changes, Git, rewind, attachments). Implemented as an ordinary session open: the daemon
+     * answers by reattaching the conversation it already holds, so nothing forks and nothing restarts.
+     * The outgoing focused session takes the freed column.
+     */
+    fun promoteSplit(pane: SidePane) {}
+
+    /** Re-send a column's open after it timed out — the failure pane's retry. */
+    fun retrySplitOpen(pane: SidePane) {}
+
+    /** Send into a pane's own conversation. False = blank, or its open hasn't landed yet. */
+    fun sendSidePrompt(pane: SidePane, text: String): Boolean = false
+
+    /** Decide a pane's approval through the machine-wide inbox (keyed by convo + ask id). */
+    fun resolvePaneApproval(ask: PermissionAsk, allow: Boolean) {}
+
+    /**
+     * True when this model views ONE split column rather than the whole shell (issue #311).
+     *
+     * The chat header's Changes / Git / ⋯ controls all act on the FOCUSED conversation. Rendered inside a
+     * side column they would look like they act on the column and quietly act on another session, so the
+     * header swaps them for the two verbs that do belong to a column: [focusThisPane] and [closeThisPane].
+     */
+    val paneScoped: Boolean get() = false
+
+    /** Promote the column this model views — see [promoteSplit]. Meaningless unless [paneScoped]. */
+    fun focusThisPane() {}
+
+    /** Close the column this model views. Meaningless unless [paneScoped]. */
+    fun closeThisPane() {}
 
     // fleet: the sidebar's machine groups, the attention queue, and the read-only watch pane
     val machines: List<DkMachine>

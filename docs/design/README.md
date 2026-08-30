@@ -16,6 +16,7 @@ cc-pocket 移动端设计资料，**统一采用 claude.ai/design**。Stitch 的
 | `APPROVAL-SYSTEM.md` | **审批最终方案，作为实现与评审的唯一依据** —— 现有场景盘点、统一 Approval Coordinator、Task Contract/Grant、Agent 自主参与、审批路由、通知/队列/软超时、自动执行留痕、协议与分期验收 |
 | `SMART-APPROVAL.md` | **风险评估子设计** —— 纳入统一审批系统：确定性行为序列＋Agent 风险建议＋高风险审批升级；不再作为独立审批架构 |
 | `CHANNEL-INTEGRATIONS-EVALUATING.md` | ⚠️ **评估中** —— 官方渠道集成（Claude Channels / Slack、Codex Slack / Linear）机制调研与机会分析。含五条方向层候选，**均未定案、未录台账**；定案后去掉 `-EVALUATING` 后缀 |
+| `SPLIT-PANES.md` | **桌面分屏（issue #311）** —— 主内容区同时放下多个会话，每列独立滚动 / 输入 / 审批。为什么走「一条链路按 convoId 分流」而不是第二条连接、两个挂点各自守什么、一列有什么没什么 |
 | `TASKBOARD-EVALUATING.md` | ⚠️ **评估中** —— 评估 dashi-taskboard 的持久任务能力与 cc-pocket 的适配性；建议原生实现 Task 层、拒绝直接嵌入，并给出 M0/M1 边界、架构、安全与验收条件 |
 
 > 命名约定：文件名带 `-EVALUATING` 后缀 = 调研 / 提案阶段，结论未定，不可作为实现依据。

@@ -66,7 +66,7 @@ repo 仍是**单连接**（一次只连一台，`switchDaemon` 整体切换）�
 
 - **跨机审批广播（daemon 侧，下一步）**：daemon 把会话的 PermissionAsk 绑定在「打开它的设备连接（sink）」上——卫星链路收得到 Directories/Sessions，收不到别的设备开的会话的 ask。跨机审批收件箱/横幅要真正点亮，需 daemon 将 ask 广播给账号下所有 attached 设备（+ 显式 resolve 路由与竞态处理），属 daemon+协议改造，走 wire-compat 审查。聚合层已就位，daemon 落地即亮。
 - **连接策略（常驻 vs 按需）**：当前默认全部常驻（桌面无感；手机电量策略见「真并发交互缺口」brief ②）。
-- **卫星会话流（watch pane 数据源）**：卫星可开会话但激活手势未设计（brief ③）——`watch` 仍 null。
+- **卫星会话流（watch pane 数据源）**：卫星可开会话但激活手势未设计（brief ③）——`watch` 仍 null。同机的多会话同览已由 issue #311 的分屏落地（`data/SplitPanes.kt` + `desktop/SplitPaneView.kt`，见 `docs/design/SPLIT-PANES.md`）：那条路走的是「一条链路按 convoId 分流」，不是第二条链路，所以跨机器的列仍待卫星会话流。
 - **机器 OS 与主机名**：配对凭据不含 OS/hostname（QR 只有账号身份），暂按用户命名启发式判断（`osFromName`：win→WIN、linux→LINUX、默认 MAC）；协议层补 hostname/os 上报是后续项（涉及 wire 兼容，须走 protocol-wire-compat 审查）。
 - **"this Mac" 标签**：桌面端无法可靠自识别本机 daemon → 仅 Seed 展示；live 不标。
 - **倒计时**：live attention 行不显示倒计时（`seconds = null`，不臆造 deadline）；PermissionSheet/InlinePermCard 上的真实 30s 倒计时不变。移动端收件箱行沿用 sheet 的 30s 约定本地走表。

@@ -113,6 +113,7 @@ import dev.ccpocket.app.resources.new_session_title
 import dev.ccpocket.app.resources.open_folder
 import dev.ccpocket.app.resources.running
 import dev.ccpocket.app.resources.session_rename
+import dev.ccpocket.app.resources.split_open
 import dev.ccpocket.app.resources.session_rename_hint
 import dev.ccpocket.app.resources.settings_title
 import dev.ccpocket.app.resources.support_title
@@ -1044,7 +1045,11 @@ private fun SessionRow(
     }
     // #202 widened this short-circuit: archiving is available on rows that can neither be renamed nor
     // grouped, so "no groups and no rename" no longer means "no menu".
-    if (menuGroups.isEmpty() && !canRename && !canArchive) { SessionRowBody(model, s, selected, indented, onClick); return }
+    // #311 widened it again: "Open in split" is available on any row while the split has room, so a row
+    // with no rename/group/archive verbs still earns a menu.
+    val splittable = model.canSplit && model.sidePanes.none { it.sessionId == s.sessionId } && s.sessionId != model.selectedSessionId
+    if (menuGroups.isEmpty() && !canRename && !canArchive && !splittable) { SessionRowBody(model, s, selected, indented, onClick); return }
+    val openInSplit = stringResource(Res.string.split_open)
     val rename = stringResource(Res.string.session_rename)
     val moveTo = stringResource(Res.string.group_move_to)
     val moveOut = stringResource(Res.string.group_move_out)
@@ -1056,6 +1061,9 @@ private fun SessionRow(
             // "Remove from recents" on purpose: the two are the pair users most need to tell apart, and
             // reading them adjacently is what teaches the difference (persistent+shared vs local+temporary).
             buildList {
+                // #311: the sidebar is where a session is picked, so it is also where one is sent to its
+                // own column. First in the list — it navigates, and navigation outranks editing.
+                if (splittable) add(ContextMenuItem(openInSplit) { model.openInSplit(s) })
                 if (canRename) add(ContextMenuItem(rename) { renaming = true })
                 menuGroups.filter { it.id != s.group }.forEach { grp ->
                     add(ContextMenuItem("$moveTo · ${grp.name}") { model.assignGroup(s.sessionId, grp.id) })
