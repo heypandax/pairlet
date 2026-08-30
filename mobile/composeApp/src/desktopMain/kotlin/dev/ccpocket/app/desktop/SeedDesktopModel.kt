@@ -238,7 +238,7 @@ open class SeedDesktopModel : DesktopModel {
     // honest inert state rather than faked ledger data
     override var showReviewCenter by mutableStateOf(false)
 
-    override val appVersion = "1.9.5"
+    override val appVersion = "1.9.6"
     override val relayUrl = "wss://pocket.ark-nexus.cc"
     override var defaultAgent by mutableStateOf(AgentKind.CLAUDE)
     override var defaultMode by mutableStateOf(PermissionMode.DEFAULT)

@@ -1,7 +1,6 @@
-What's new in 1.9.5
+What's new in 1.9.6
 
-• DeepSeek Harness sessions now show the model that actually answered and their real context usage, instead of a placeholder "default".
-• A question nobody answered is now labelled as such in the transcript, and a question the app cannot answer says so instead of leaving the turn waiting forever.
-• Windows tray: the icon now has a right-click menu, and its flyout keeps proper rounded corners with a clearer primary action.
-• The usage page now names which agent its cache-hit rate covers and prints the token counts the percentage came from.
-• The subscription allowance strip no longer disappears after a few hours without running Claude.
+• The desktop window can now show several conversations side by side, each with its own input, and the session sidebar can be collapsed to give them the room.
+• Clicking a session that is already open in a column now focuses it instead of leaving the main area stuck on "Opening…".
+• A column keeps working after the daemon restarts, and a question raised in a column can now be answered right there.
+• Buttons inside a column — stop, approvals, "always allow" — now act on that column's conversation instead of the focused one.
