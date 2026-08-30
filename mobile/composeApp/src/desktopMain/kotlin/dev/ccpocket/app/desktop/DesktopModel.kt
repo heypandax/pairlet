@@ -375,8 +375,19 @@ interface DesktopModel {
     /** Send into a pane's own conversation. False = blank, or its open hasn't landed yet. */
     fun sendSidePrompt(pane: SidePane, text: String): Boolean = false
 
-    /** Decide a pane's approval through the machine-wide inbox (keyed by convo + ask id). */
-    fun resolvePaneApproval(ask: PermissionAsk, allow: Boolean) {}
+    /** Interrupt a pane's OWN turn (its ■ / Esc). Without this the column's stop reached the focused
+     *  conversation and killed the turn the user was watching one column over. */
+    fun stopSideTurn(pane: SidePane) {}
+
+    /** Decide a pane's approval. Keyed by the ASK the column is holding — not by whatever the focused
+     *  conversation happens to be blocked on, and not by an inbox row that may not be there. */
+    fun resolvePaneApproval(ask: PermissionAsk, allow: Boolean, remember: Boolean = false) {}
+
+    /** 允许本任务 on a pane's card: a TASK grant for THAT ask (approval design M2). */
+    fun resolvePaneTaskGrant(ask: PermissionAsk) {}
+
+    /** 换种安全方式 on a pane's card: a constrained DENY back to THAT ask's agent. */
+    fun retryPaneSafer(ask: PermissionAsk, constraints: List<String>) {}
 
     /**
      * True when this model views ONE split column rather than the whole shell (issue #311).

@@ -434,8 +434,21 @@ class RepoDesktopModel(
 
     override fun sendSidePrompt(pane: SidePane, text: String): Boolean = repo.sidePanes.sendPrompt(pane, text)
 
-    override fun resolvePaneApproval(ask: PermissionAsk, allow: Boolean) =
-        repo.resolvePendingApproval(ask.convoId, ask.askId, allow)
+    override fun stopSideTurn(pane: SidePane) = repo.sidePanes.stopTurn(pane)
+
+    // The three verdict verbs all ride [PocketRepository.resolveAskDirect]: the ask the COLUMN is showing
+    // decides, and the verdict goes out whether or not the machine-wide inbox still carries a row for it
+    // (it legitimately may not — see that function's doc). The verdict fields mirror the focused path's
+    // [resolveTaskGrant] / [retrySafer] one-for-one, so a decision means the same thing on the wire
+    // wherever it was taken.
+    override fun resolvePaneApproval(ask: PermissionAsk, allow: Boolean, remember: Boolean) =
+        repo.resolveAskDirect(ask, allow, remember = remember)
+
+    override fun resolvePaneTaskGrant(ask: PermissionAsk) =
+        repo.resolveAskDirect(ask, allow = true, grantScope = "task")
+
+    override fun retryPaneSafer(ask: PermissionAsk, constraints: List<String>) =
+        repo.resolveAskDirect(ask, allow = false, retrySafer = true, constraints = constraints)
 
     // ── workflow orchestration (issue #106): delegate to the repository; dock state is ui-local ──
     override val workflowRuns: Map<String, dev.ccpocket.protocol.WorkflowRun> get() = repo.workflowRuns

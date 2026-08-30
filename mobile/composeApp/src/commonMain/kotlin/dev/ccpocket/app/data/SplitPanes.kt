@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AskWithdrawn
 import dev.ccpocket.protocol.AssistantChunk
+import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.Frame
@@ -313,6 +314,21 @@ class SidePanes(
         pane.streaming.value = true
         scope.launch { send(SendPrompt(convo, text, promptId = promptId)) }
         return true
+    }
+
+    /**
+     * Interrupt [pane]'s OWN turn — the column's ■ button and its Esc, which used to reach the focused
+     * conversation's `cancelTurn` through the delegating pane model and stop whatever the user was
+     * watching in the other column instead.
+     *
+     * Nothing flips locally: the answering `TurnDone` ends the column's streaming state, exactly as it
+     * does for the focused chat. Guessing here would only mean a column that says "idle" while the agent
+     * is still writing, and the frame that tells the truth is milliseconds away.
+     */
+    fun stopTurn(pane: SidePane) {
+        val convo = pane.convoId.value ?: return
+        if (!pane.streaming.value) return
+        scope.launch { send(CancelTurn(convo)) }
     }
 
     private companion object {

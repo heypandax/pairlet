@@ -6307,23 +6307,69 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
-    /** Resolve any account-wide inbox row directly, without opening or attaching its conversation. */
+    /** Resolve any account-wide inbox ROW directly, without opening or attaching its conversation. The
+     *  row is the subject here: no row, nothing to decide — which is why this may early-return, and why
+     *  a surface holding the ask itself must use [resolveAskDirect] instead. */
     fun resolvePendingApproval(convoId: String?, askId: String, allow: Boolean) {
         // P1-3: exact composite removal; a caller that (legacy) only knows the askId falls back to the
         // first row carrying it — single-session behavior, unchanged
         val key = if (convoId != null) ApprovalKey(convoId, askId)
         else pendingApprovals.keys.firstOrNull { it.askId == askId } ?: return
-        val row = pendingApprovals.remove(key) ?: return
-        if (pendingAsk.value?.let { ApprovalKey(it.convoId, it.askId) } == key) {
-            advanceAsk()
-        } else if (askQueue.removeAll { it.convoId == key.convoId && it.askId == key.askId }) { // resolved from the inbox while queued
-            askBurstTotal--
-            updateAskProgress()
+        val row = pendingApprovals[key] ?: return
+        resolveAskDirect(row.ask, allow)
+    }
+
+    /**
+     * Decide an approval named by the ASK ITSELF rather than by an inbox row (issue #311).
+     *
+     * The distinction is not pedantic. [resolvePendingApproval] answers a bell-popover row, so it gives
+     * up when that row is missing — correct there, fatal for a card that is on screen. A split column
+     * holds its own [PermissionAsk], and the inbox can legitimately not have it: a `PendingApprovals`
+     * reply clears and refills the map wholesale, so an ask arriving in that window is wiped, and an ask
+     * decided elsewhere while we were offline is gone from the refill. The old path then destroyed the
+     * card with NO verdict on the wire and the CLI sat there until it auto-denied — a click that looked
+     * like it worked and did nothing. So the verdict is UNCONDITIONAL here, exactly as it is on the
+     * focused path ([resolve]); the inbox bookkeeping is best-effort on top of it.
+     *
+     * Deliberately absent: the focused path's [allowRules] + `RuleChip` bookkeeping. Those describe the
+     * OPEN conversation's UI — the chip lands in its transcript, the rule list gates its own cards — and
+     * this ask belongs to a different one. The rule the user asked for rides `remember`/`grantScope` on
+     * the verdict, which is where it actually takes effect (daemon-side), so nothing is lost.
+     */
+    fun resolveAskDirect(
+        ask: PermissionAsk,
+        allow: Boolean,
+        remember: Boolean = false,
+        grantScope: String? = null,          // "task" | "session" — 允许本任务 / Session 记忆
+        retrySafer: Boolean = false,         // 换种安全方式 (rides a DENY)
+        constraints: List<String>? = null,
+    ) {
+        val key = ApprovalKey(ask.convoId, ask.askId)
+        if (pendingApprovals.remove(key) != null) {
+            if (pendingAsk.value?.let { ApprovalKey(it.convoId, it.askId) } == key) {
+                advanceAsk()
+            } else if (askQueue.removeAll { it.convoId == key.convoId && it.askId == key.askId }) { // resolved elsewhere while queued
+                askBurstTotal--
+                updateAskProgress()
+            }
         }
-        sidePanes.noteApprovalResolved(key.convoId, askId) // #311: same decision, every surface showing it
-        Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to if (allow) "allow" else "deny"))
+        sidePanes.noteApprovalResolved(ask.convoId, ask.askId) // #311: same decision, every surface showing it
+        val decisionLabel = when { // same vocabulary as [resolve] — one funnel, whichever surface decided
+            retrySafer -> "retry-safer"
+            grantScope != null -> "allow-$grantScope"
+            remember -> "always"
+            allow -> "allow"
+            else -> "deny"
+        }
+        Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to decisionLabel))
         scope.launch {
-            send(PermissionVerdict(row.ask.convoId, askId, if (allow) Decision.ALLOW else Decision.DENY))
+            send(
+                PermissionVerdict(
+                    ask.convoId, ask.askId, if (allow) Decision.ALLOW else Decision.DENY,
+                    remember = remember, grantScope = grantScope,
+                    retrySafer = retrySafer, constraints = constraints,
+                ),
+            )
         }
     }
 
