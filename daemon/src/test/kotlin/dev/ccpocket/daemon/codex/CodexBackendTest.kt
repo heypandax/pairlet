@@ -133,6 +133,74 @@ class CodexBackendTest {
     }
 
     @Test
+    fun subagent_thread_notifications_do_not_mutate_or_complete_the_parent_turn() = runBlocking {
+        val w = mutableListOf<String>()
+        var exits = 0
+        val b = ready(w, onExit = { exits += 1 })
+        b.parse(
+            """{"method":"turn/started","params":{"threadId":"thr-1","turn":{"id":"turn-parent","status":"inProgress"}}}""",
+        )
+
+        // Codex multiplexes spawned sub-agent threads onto the parent's app-server connection. Their
+        // lifecycle must not become the lifecycle of the thread cc-pocket explicitly resumed.
+        assertTrue(
+            b.parse(
+                """{"method":"turn/started","params":{"threadId":"thr-child","turn":{"id":"turn-child","status":"inProgress"}}}""",
+            ).isEmpty(),
+        )
+        b.interrupt()
+        val interrupt = w.last()
+        assertTrue("\"threadId\":\"thr-1\"" in interrupt, interrupt)
+        assertTrue("\"turnId\":\"turn-parent\"" in interrupt, interrupt)
+
+        val foreignEvents = buildList {
+            addAll(
+                b.parse(
+                    """{"method":"item/agentMessage/delta","params":{"threadId":"thr-child","turnId":"turn-child","itemId":"m-child","delta":"child-only text"}}""",
+                ),
+            )
+            addAll(
+                b.parse(
+                    """{"method":"item/started","params":{"threadId":"thr-child","turnId":"turn-child","item":{"type":"userMessage","id":"u-child","content":[{"type":"text","text":"child prompt"}]}}}""",
+                ),
+            )
+            addAll(
+                b.parse(
+                    """{"method":"thread/tokenUsage/updated","params":{"threadId":"thr-child","turnId":"turn-child","tokenUsage":{"last":{"inputTokens":99,"outputTokens":5,"cachedInputTokens":0}}}}""",
+                ),
+            )
+            addAll(
+                b.parse(
+                    """{"method":"error","params":{"threadId":"thr-child","turnId":"turn-child","willRetry":false,"error":{"message":"child failure"}}}""",
+                ),
+            )
+            addAll(
+                b.parse(
+                    """{"method":"item/completed","params":{"threadId":"thr-child","turnId":"turn-child","item":{"type":"agentMessage","id":"m-child","text":"child final"}}}""",
+                ),
+            )
+            addAll(
+                b.parse(
+                    """{"method":"turn/completed","params":{"threadId":"thr-child","turn":{"id":"turn-child","status":"completed"}}}""",
+                ),
+            )
+        }
+        assertTrue(foreignEvents.isEmpty(), foreignEvents.toString())
+        assertEquals(0, exits, "a child turn boundary must not release the parent's app-server writer")
+        b.interrupt()
+        val interruptAfterChild = w.last()
+        assertTrue("\"turnId\":\"turn-parent\"" in interruptAfterChild, interruptAfterChild)
+
+        val parentEvents = b.parse(
+            """{"method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"turn-parent","status":"completed"}}}""",
+        )
+        val result = assertIs<AgentEvent.TurnResult>(parentEvents.single())
+        assertFalse(result.isError, "a child error must not poison the successful parent turn")
+        assertEquals(null, result.finalText, "child-only text must not become the parent's final answer")
+        assertEquals(1, exits, "the actual parent boundary still owns the one-shot handoff")
+    }
+
+    @Test
     fun second_prompt_before_turn_started_waits_for_the_next_boundary() = runBlocking {
         val w = mutableListOf<String>()
         var exits = 0
@@ -519,6 +587,24 @@ class CodexBackendTest {
         assertEquals("Edit", cr.toolName)
         assertTrue("+new line" in (cr.diff ?: ""), cr.diff ?: "<null>") // diff is a typed field, for the phone's diff view
         assertTrue("src/A.kt" in cr.input.toString(), cr.input.toString())
+    }
+
+    @Test
+    fun subagent_file_change_stays_hidden_but_keeps_approval_context() = runBlocking {
+        val b = ready(mutableListOf())
+
+        val started = b.parse(
+            """{"method":"item/started","params":{"threadId":"thr-child","turnId":"turn-child","item":{"type":"fileChange","id":"f-child","status":"inProgress","changes":[{"path":"src/Child.kt","diff":"-old child\n+new child"}]}}}""",
+        )
+        assertTrue(started.isEmpty(), "a child edit must not appear as a root-thread tool card")
+
+        val ev = b.parse(
+            """{"id":"ap-child","method":"item/fileChange/requestApproval","params":{"itemId":"f-child","startedAtMs":1,"threadId":"thr-child","turnId":"turn-child"}}""",
+        )
+        val cr = assertIs<AgentEvent.ControlRequest>(ev.single())
+        assertEquals("Edit", cr.toolName)
+        assertTrue("+new child" in (cr.diff ?: ""), cr.diff ?: "<null>")
+        assertTrue("src/Child.kt" in cr.input.toString(), cr.input.toString())
     }
 
     // ── JSON-RPC error responses must not be swallowed (PR #296 review) ──
