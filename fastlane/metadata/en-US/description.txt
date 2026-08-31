@@ -4,7 +4,7 @@ CC Pocket is an open-source, local-first companion for command-line AI coding ag
 
 SUPPORTED AGENTS
 • Claude Code
-• OpenAI Codex
+• Codex
 • OpenCode
 • Kimi Code (Preview)
 • ZCode

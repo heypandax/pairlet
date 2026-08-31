@@ -4,7 +4,7 @@ CC Pocket 是一款开源、本地优先的命令行 AI 编程 Agent 伴侣。Ag
 
 支持的 AGENT
 • Claude Code
-• OpenAI Codex
+• Codex
 • OpenCode
 • Kimi Code（Preview）
 • ZCode
