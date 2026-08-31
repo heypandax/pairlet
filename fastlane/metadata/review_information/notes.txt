@@ -1,5 +1,7 @@
 CC Pocket is a companion app for the open-source cc-pocket daemon that runs on the user's own computer (https://github.com/heypandax/cc-pocket). Pairing therefore requires a desktop machine.
 
-TO REVIEW WITHOUT A COMPUTER: on the pairing screen, tap "Try Demo · no computer needed". The entire UI (project list, chat, tool approvals, usage dashboard) then runs on built-in sample data — no account, no pairing, no network dependency.
+TO REVIEW WITHOUT A COMPUTER: on the pairing screen, tap "Try Demo - no computer needed". The entire UI (project list, chat, tool approvals, usage dashboard) then runs on built-in sample data - no account, no pairing, no network dependency, no AI calls.
 
-No login or account exists anywhere in the app. All communication with the user's own computer is end-to-end encrypted (standard algorithms only: TLS + Noise/X25519/AES-GCM — ITSAppUsesNonExemptEncryption is false).
+NO THIRD-PARTY AI SERVICE: the app does not integrate or call any third-party AI SDK/API. It is a remote control for command-line coding tools that the user has separately installed and authenticated on their own computer. All prompts and session content are end-to-end encrypted phone-to-computer; our relay only forwards ciphertext. Voice dictation uses Apple's system Speech framework by default; the optional alternative sends audio end-to-end encrypted to the user's own computer for offline transcription by locally installed whisper.cpp. Privacy policy: https://heypandax.github.io/cc-pocket/privacy.html
+
+No login or account exists anywhere in the app. All communication with the user's own computer is end-to-end encrypted (standard algorithms only: TLS + Noise/X25519/AES-GCM - ITSAppUsesNonExemptEncryption is false).
