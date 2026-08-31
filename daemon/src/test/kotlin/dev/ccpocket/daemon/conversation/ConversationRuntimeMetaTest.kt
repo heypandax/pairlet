@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
@@ -43,7 +44,24 @@ class ConversationRuntimeMetaTest {
      * [ConversationContinuationGraceTest] gates its own: the process is launched BEFORE `executing` is
      * armed, so an ungated `cat` can race its whole script past the pump.
      */
-    private class MetaBackend(private val script: Path) : AgentBackend {
+    private class MetaBackend(private val script: Path, private val disk: Disk = Disk()) : AgentBackend {
+        /**
+         * What the RESUMED transcript is supposed to contain — the three `resume*` hooks, stubbed.
+         * [gate], when set, holds every hook until the test releases it: that is how a multi-MB transcript
+         * parse finishing AFTER the first live frame is reproduced deterministically.
+         */
+        class Disk(
+            val model: String? = null,
+            val window: Long? = null,
+            val effort: String? = null,
+            val gate: java.util.concurrent.CountDownLatch? = null,
+        )
+
+        private fun <T> onDisk(read: () -> T): T {
+            disk.gate?.await()
+            return read()
+        }
+
         override val kind = AgentKind.DSH
         private var io: AgentIo? = null
         override fun processBuilder(spec: AgentSpec): ProcessBuilder =
@@ -69,6 +87,9 @@ class ConversationRuntimeMetaTest {
         override fun listSessions(workdir: String): List<SessionSummary> = emptyList()
         override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = emptyList()
         override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+        override fun resumeModel(workdir: String, sessionId: String): String? = onDisk { disk.model }
+        override fun resumeContextWindow(workdir: String, sessionId: String): Long? = onDisk { disk.window }
+        override fun resumeEffort(workdir: String, sessionId: String): String? = onDisk { disk.effort }
     }
 
     private fun harness(
@@ -137,8 +158,144 @@ class ConversationRuntimeMetaTest {
         }
     }
 
+    // ---- the RESUME half: what a reopened session announces before it has run a turn ----
+
+    /** A conversation opened on [RESUMED] with [disk] standing in for its transcript. A plain open launches
+     *  NOTHING (lazy start, issue #61) — which is exactly the state this half of #320 is about: a session
+     *  the user reopened and has not spoken to yet. */
+    private class Resumed(
+        val convo: Conversation,
+        private val raw: ArrayList<Frame>,
+        private val scope: CoroutineScope,
+    ) {
+        fun lives(): List<SessionLive> = synchronized(raw) { raw.filterIsInstance<SessionLive>() }
+
+        /** The newest announce satisfying [pred], waited for rather than sampled: every emit here is a
+         *  coroutine hop behind the call that caused it. */
+        suspend fun awaitLive(what: String, pred: (SessionLive) -> Boolean): SessionLive =
+            try {
+                withTimeout(10_000) {
+                    var hit: SessionLive? = null
+                    while (hit == null) {
+                        hit = lives().lastOrNull(pred)
+                        if (hit == null) delay(20)
+                    }
+                    hit
+                }
+            } catch (_: TimeoutCancellationException) {
+                throw AssertionError("timed out waiting for $what; announces so far: ${lives()}")
+            }
+
+        suspend fun shutdown() {
+            convo.close()
+            scope.cancel()
+        }
+    }
+
+    private fun resumed(disk: MetaBackend.Disk, script: List<String> = emptyList()): Resumed {
+        val file = Files.createTempDirectory("ccp-resume-fx").resolve("stream.txt")
+            .apply { writeText(script.joinToString("\n") + "\n") }
+        val frames = ArrayList<Frame>()
+        val scope = CoroutineScope(Dispatchers.Default)
+        val convo = Conversation(
+            convoId = "cResume", initialWorkdir = Files.createTempDirectory("ccp-resume"),
+            initialMode = PermissionMode.DEFAULT,
+            initialSink = { f -> synchronized(frames) { frames.add(f) } },
+            parentScope = scope, backend = MetaBackend(file, disk),
+        )
+        return Resumed(convo, frames, scope)
+    }
+
+    /**
+     * (a) THE BUG. A dsh session names its model, level and window only on the `request/context` and
+     * `request/header` frames of a RUNNING request, so a session the user merely reopened had nothing to
+     * announce and its header read
+     * "default" with no denominator until it happened to run another turn.
+     */
+    @Test
+    fun a_resumed_session_announces_the_model_window_and_effort_its_transcript_recorded() {
+        if (isWindows()) return
+        runBlocking {
+            val fx = resumed(MetaBackend.Disk(model = MODEL, window = 1_000_000, effort = "high"))
+            try {
+                fx.convo.open(resumeId = RESUMED, model = null)
+                val live = fx.awaitLive("the resume announce") { it.sessionId == RESUMED }
+                assertEquals(MODEL, live.model)
+                assertEquals(1_000_000L, live.contextWindow)
+                assertEquals("high", live.effort)
+            } finally {
+                fx.shutdown()
+            }
+        }
+    }
+
+    /** (b) The honest negative: a transcript that recorded none of the three resumes as UNKNOWN — no guessed
+     *  window, no config-default level — and the FIRST live frame then fills it in. */
+    @Test
+    fun a_transcript_with_no_metadata_stays_unknown_until_the_live_wire_speaks() {
+        if (isWindows()) return
+        runBlocking {
+            val fx = resumed(MetaBackend.Disk(), script = listOf("init", "meta"))
+            try {
+                fx.convo.open(resumeId = RESUMED, model = null)
+                val opened = fx.awaitLive("the resume announce") { it.sessionId == RESUMED }
+                assertNull(opened.model, "nothing on disk said which model — inventing one is worse than blank")
+                assertNull(opened.contextWindow)
+                assertNull(opened.effort)
+
+                fx.convo.sendPrompt("go") // lazy start: this is what launches the scripted process
+                val corrected = fx.awaitLive("the live correction") { it.contextWindow == 1_000_000L }
+                assertEquals(MODEL, corrected.model)
+                assertEquals("high", corrected.effort)
+            } finally {
+                fx.shutdown()
+            }
+        }
+    }
+
+    /**
+     * (c) THE RACE, and the reason the backfill takes a lock at all. The open-time read can be a multi-MB
+     * transcript parse, so the first live `request/context` may well land while it is still running — and
+     * what it eventually returns is by construction the OLDER of the two. A stale window/level/model must
+     * never overwrite the live one it arrived after. [MetaBackend.Disk.gate] pins that ordering instead of
+     * hoping for it.
+     */
+    @Test
+    fun a_slow_transcript_read_can_never_overwrite_a_live_value_that_already_landed() {
+        if (isWindows()) return
+        runBlocking {
+            val gate = java.util.concurrent.CountDownLatch(1)
+            val fx = resumed(
+                // deliberately ALL stale: yesterday's model, a narrower window, a lower level
+                MetaBackend.Disk(model = "deepseek-v4", window = 200_000, effort = "low", gate = gate),
+                script = listOf("init", "meta"),
+            )
+            try {
+                fx.convo.open(resumeId = RESUMED, model = null)
+                fx.convo.sendPrompt("go")
+                // the live wire speaks first…
+                fx.awaitLive("the live metadata") { it.contextWindow == 1_000_000L }
+                // …and only then does the transcript parse come back with its older answer
+                gate.countDown()
+                val announced = fx.awaitLive("the post-backfill announce") { it.sessionId == RESUMED }
+                assertEquals(1_000_000L, announced.contextWindow, "the live window must survive the backfill")
+                assertEquals("high", announced.effort)
+                assertEquals(MODEL, announced.model)
+                // and no announce anywhere in the session ever carried the stale readings
+                val stale = fx.lives().filter {
+                    it.contextWindow == 200_000L || it.effort == "low" || it.model == "deepseek-v4"
+                }
+                assertEquals(emptyList(), stale, "a stale transcript value must never reach the phone")
+            } finally {
+                gate.countDown() // never leave a hook blocked if an assertion threw first
+                fx.shutdown()
+            }
+        }
+    }
+
     private companion object {
         const val SID = "dsh-sid"
         const val MODEL = "deepseek-v4-flash"
+        const val RESUMED = "dsh-resumed-sid"
     }
 }

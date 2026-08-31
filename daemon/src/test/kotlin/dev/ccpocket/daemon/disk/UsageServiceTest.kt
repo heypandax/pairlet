@@ -303,6 +303,94 @@ class UsageServiceTest {
         }
     }
 
+    // ── issue #323: sub-agent transcripts live two levels deeper and were never scanned ─────────
+
+    /** A sidechain assistant turn as the CLI writes it into `<sessionId>/subagents/agent-*.jsonl`:
+     *  same shape as a top-level turn plus the sidechain markers, and no `costUSD`. */
+    private fun subagentTurn(daysAgo: Long, tokens: Long, id: String): String {
+        val ts = LocalDate.now(ZoneId.systemDefault()).minusDays(daysAgo).atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant()
+        return """{"parentUuid":"p-$id","isSidechain":true,"agentId":"a1","type":"assistant","timestamp":"$ts",""" +
+            """"requestId":"r-$id","message":{"id":"m-$id","model":"claude-opus-5","type":"message","role":"assistant",""" +
+            """"usage":{"input_tokens":$tokens,"output_tokens":0}}}"""
+    }
+
+    /**
+     * The whole bug: `~/.claude/projects/<dirKey>/<sessionId>/subagents/agent-*.jsonl` is two levels below
+     * the top-level transcript, and the old two-level enumeration stopped one level short — so on a
+     * Task-heavy machine a quarter of the tokens never reached this aggregation, which is why the total
+     * never reconciled with the recursive glob ccusage walks.
+     */
+    @Test
+    fun subagent_transcripts_two_levels_deep_are_counted_too() {
+        withProjects { root ->
+            val proj = root.resolve("-Users-x-proj").also { it.createDirectories() }
+            proj.resolve("s1.jsonl").writeText(turn(0, 300, "top") + "\n")
+            val subagents = proj.resolve("s1").resolve("subagents").also { it.createDirectories() }
+            subagents.resolve("agent-aaa111.jsonl").writeText(subagentTurn(0, 500, "sub1") + "\n")
+            subagents.resolve("agent-bbb222.jsonl").writeText(subagentTurn(0, 200, "sub2") + "\n")
+
+            val u = hermetic(1, projectsRoot = root)
+            assertEquals(1000L, u.tokensToday, "the session's own 300 plus both sub-agents' 500 + 200")
+            assertEquals(3L, u.requestsToday, "each sub-agent turn is a request too")
+            assertEquals(1000L, u.days.last().tokens)
+            // the sub-agents ran on a different model, so they surface as their own by-model bar
+            assertEquals(700L, u.models.single { it.model == "claude-opus-5" }.tokens)
+            assertEquals(AgentKind.CLAUDE, u.models.single { it.model == "claude-opus-5" }.agent)
+        }
+    }
+
+    /**
+     * Double-count guard. Nothing stops a CLI version from writing the same sidechain turn into BOTH the
+     * session transcript and the sub-agent file — adding a second enumeration depth would then inflate the
+     * total instead of fixing it. The existing `message.id:requestId` dedup has to absorb that, and the
+     * PARENT copy has to be the one kept, since it is the copy that may carry `costUSD`.
+     */
+    @Test
+    fun a_turn_present_in_both_the_session_and_its_subagent_file_counts_once() {
+        withProjects { root ->
+            val proj = root.resolve("-Users-x-proj").also { it.createDirectories() }
+            // the parent carries the cost stamp; the sub-agent copy of the very same turn does not
+            proj.resolve("s1.jsonl").writeText(richTurn(0, 400, 0, 0.25, "shared") + "\n")
+            val subagents = proj.resolve("s1").resolve("subagents").also { it.createDirectories() }
+            subagents.resolve("agent-aaa111.jsonl").writeText(
+                listOf(
+                    subagentTurn(0, 400, "shared"), // same message id + requestId as the parent's turn
+                    subagentTurn(0, 100, "own"),    // genuinely new, must still land
+                ).joinToString("\n") + "\n",
+            )
+
+            val u = hermetic(1, projectsRoot = root)
+            assertEquals(500L, u.tokensToday, "the duplicated turn counts once (400), plus the sub-agent's own 100")
+            assertEquals(2L, u.requestsToday)
+            assertEquals(0.25, u.costUsdToday!!, 1e-9, "first-wins dedup keeps the parent copy, so its costUSD survives")
+        }
+    }
+
+    /** The added depth must be inert where it doesn't apply: no `subagents/` dir, an empty one, a session
+     *  dir holding something else entirely, and non-jsonl noise inside `subagents/` all read as before. */
+    @Test
+    fun missing_empty_and_non_jsonl_subagent_dirs_change_nothing() {
+        withProjects { root ->
+            val proj = root.resolve("-Users-x-proj").also { it.createDirectories() }
+            proj.resolve("s1.jsonl").writeText(turn(0, 300, "top") + "\n")
+            // s1 has no subagents dir at all; s2 has an empty one
+            proj.resolve("s2").resolve("subagents").createDirectories()
+            // s3's subagents dir holds only non-jsonl noise, and s3 itself holds a stray unrelated dir
+            val s3sub = proj.resolve("s3").resolve("subagents").also { it.createDirectories() }
+            s3sub.resolve("agent-aaa111.jsonl.tmp").writeText(subagentTurn(0, 999, "tmp") + "\n")
+            s3sub.resolve("notes.txt").writeText(subagentTurn(0, 999, "txt") + "\n")
+            s3sub.resolve("nested").createDirectories()
+            proj.resolve("s3").resolve("checkpoints").createDirectories()
+            // a .jsonl one level too shallow (directly under the session dir) is NOT a transcript location
+            proj.resolve("s3").resolve("stray.jsonl").writeText(subagentTurn(0, 999, "stray") + "\n")
+
+            val u = hermetic(1, projectsRoot = root)
+            assertEquals(300L, u.tokensToday, "only the session's own transcript counts — none of the noise does")
+            assertEquals(1L, u.requestsToday)
+            assertEquals(1, u.models.size)
+        }
+    }
+
     // ── issue #258: ZCode + Kimi join the total, and one agent can be viewed alone ──────────────
 
     private fun msToday(hour: Int): Long =

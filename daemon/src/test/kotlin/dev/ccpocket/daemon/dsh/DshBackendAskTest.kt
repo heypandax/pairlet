@@ -73,10 +73,14 @@ class DshBackendAskTest {
         assertIs<AgentEvent.AssistantText>(backend().parse(noSession).single())
     }
 
-    /** Before `session.create` returns there is nothing to prove an ask is ours against. */
+    /** Before `session.create` returns there is nothing to prove an ask is ours against — so no CARD.
+     *  But on a fresh conversation there is nobody else it could belong to either, and dsh will wait on
+     *  it forever, so the drop is ANNOUNCED instead of silent (issue #326; same wedge as #321). */
     @Test
-    fun no_card_is_dealt_before_the_session_is_open() = runBlocking<Unit> {
-        assertIs<AgentEvent.Ignored>(DshBackend(null).parse(approvalLine()).single())
+    fun no_card_is_dealt_before_the_session_is_open_but_the_drop_is_announced() = runBlocking<Unit> {
+        val out = DshBackend(null).parse(approvalLine()).single()
+        val notice = assertIs<AgentEvent.AssistantText>(out)
+        assertTrue("approval" in notice.text) // hangNotice keys its wording off the method kind
     }
 
     /**

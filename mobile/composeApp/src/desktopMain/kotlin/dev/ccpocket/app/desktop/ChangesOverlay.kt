@@ -204,7 +204,7 @@ fun ChangesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
 private fun FootHint(keycap: String, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Key(keycap)
-        Text(label, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+        Text(label, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp))
     }
 }
 

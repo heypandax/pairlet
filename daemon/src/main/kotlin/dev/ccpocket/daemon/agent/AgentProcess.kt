@@ -28,12 +28,44 @@ class AgentProcess private constructor(
 
     val pid: Long get() = process.pid()
 
+    // Bounded tail of the non-blank stderr lines — a dying agent's parting words. A single-slot
+    // "last line" loses the diagnosis whenever the runtime prints a MULTI-LINE death (a Node crash
+    // dump ends with a bare "Node.js v24.16.0" footer that overwrites the `Error: …` above it), so
+    // the whole tail is kept and compressed at read time. Bounded twice — per line and in line count
+    // — because stderr is attacker-adjacent unbounded output that must never grow the heap.
+    // Guarded by its own monitor: the writer is the stderr pump coroutine, readers run on other
+    // threads after awaitExit / stderrDrained.
+    private val stderrTailBuf = ArrayDeque<String>()
+
     /** The last non-blank stderr line — a dying agent's parting words ("No conversation found with
      *  session ID …", context-overflow errors). Carried into the process_exited error so the phone
      *  sees WHY a resume died before its first init, not just "agent process ended". */
-    @Volatile
-    var lastStderr: String? = null
-        private set
+    val lastStderr: String? get() = synchronized(stderrTailBuf) { stderrTailBuf.lastOrNull() }
+
+    /** Snapshot of the retained stderr tail, oldest first. Callers scanning for a marker
+     *  (session-lock refusal, "Session not found") must use this rather than [lastStderr]: a marker
+     *  printed mid-dump is otherwise invisible once the runtime prints its footer after it. */
+    fun stderrTail(): List<String> = synchronized(stderrTailBuf) { stderrTailBuf.toList() }
+
+    /**
+     * The stderr tail compressed to the part worth showing a human, or null when nothing was printed.
+     *
+     * Deterministic, never a guess: strip the runtime's trailing footer lines (a Node crash dump's
+     * bare `Node.js v24.16.0`, which is what a last-line-only reader used to surface — issue #328),
+     * then start from the first line carrying a strong error signal so the real cause leads. With no
+     * signal line the retained head is returned as-is; if stripping consumed everything, the raw last
+     * line stands (the compressed view must never be WORSE than the single line it replaced).
+     *
+     * E2E-only: this rides the sealed [dev.ccpocket.protocol.PocketError], never a cleartext push.
+     */
+    fun stderrDiagnostic(maxChars: Int = MAX_DIAGNOSTIC_CHARS): String? {
+        val lines = stderrTail()
+        if (lines.isEmpty()) return null
+        val body = lines.dropLastWhile { RUNTIME_FOOTER.matches(it.trim()) }
+        if (body.isEmpty()) return lines.last()
+        val from = body.indexOfFirst { ERROR_SIGNAL.containsMatchIn(it) }.let { if (it < 0) 0 else it }
+        return body.subList(from, body.size).joinToString("\n").take(maxChars)
+    }
 
     /** True once the process produced at least one stdout line. The startup watchdog's liveness
      *  signal: "alive but sawStdout=false after the window" = hung on launch; a long healthy turn
@@ -82,7 +114,11 @@ class AgentProcess private constructor(
             runCatching {
                 process.errorStream.bufferedReader().forEachLine {
                     if (it.isNotBlank()) {
-                        lastStderr = it
+                        synchronized(stderrTailBuf) {
+                            stderrTailBuf.addLast(it.take(MAX_STDERR_LINE_CHARS))
+                            while (stderrTailBuf.size > MAX_STDERR_TAIL_LINES) stderrTailBuf.removeFirst()
+                        }
+                        // per-line local log stays the forensic record: the tail is bounded, this isn't
                         log.warn("agent stderr: ${it.take(200)}")
                     }
                 }
@@ -190,6 +226,26 @@ class AgentProcess private constructor(
         private const val TERM_GRACE_MS = 2_000L
         // settle time after SIGKILL / taskkill — preserved from the pre-#101 code.
         private const val FORCE_GRACE_MS = 2_000L
+
+        // stderr tail bounds. 50 lines × 400 chars caps the retained tail at ~20 KB per process,
+        // enough for a whole Node crash dump (message + a dozen stack frames + footer) while staying
+        // far below anything that could pressure the heap when an agent spews output.
+        private const val MAX_STDERR_TAIL_LINES = 50
+        private const val MAX_STDERR_LINE_CHARS = 400
+        // what a phone can actually read in an error card; the caller no longer truncates.
+        private const val MAX_DIAGNOSTIC_CHARS = 700
+
+        // A runtime's parting footer carries no diagnosis — Node prints a bare `Node.js v24.16.0` as
+        // the LAST line of a fatal dump, which is exactly the line a last-line-only reader surfaced.
+        private val RUNTIME_FOOTER = Regex("""^Node\.js v\d[\d.]*$""")
+
+        // Word-boundary signals that a line states the failure rather than framing it (stack frames,
+        // "at …" lines, blank separators). Kept literal and case-insensitive: no inference, a line
+        // either says one of these or it doesn't.
+        private val ERROR_SIGNAL = Regex(
+            """\b(error|exception|unhandled|fatal|panic|throw|cannot|not found|ENOENT|EACCES|EADDRINUSE|ECONNREFUSED|ETIMEDOUT)\b""",
+            RegexOption.IGNORE_CASE,
+        )
 
         fun start(pb: ProcessBuilder, scope: CoroutineScope): AgentProcess =
             AgentProcess(pb.start(), scope).also { it.launchPumps() }

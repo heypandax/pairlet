@@ -209,6 +209,7 @@ fun HandoffModal(model: DesktopModel, onDismiss: () -> Unit) {
             Spacer(Modifier.weight(1f))
             Text(
                 stringResource(Res.string.cancel), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                style = tightCenter(13.sp),
                 modifier = Modifier.clip(RoundedCornerShape(10.dp)).border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
                     .clickable(onClick = onDismiss).padding(horizontal = 16.dp, vertical = 10.dp),
             )
@@ -216,6 +217,7 @@ fun HandoffModal(model: DesktopModel, onDismiss: () -> Unit) {
             Text(
                 if (p2 != null) stringResource(Res.string.ho_send_to, p2.label.ifBlank { "?" }) else stringResource(Res.string.ho_create_invite),
                 color = Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(13.sp),
                 modifier = Modifier.clip(RoundedCornerShape(10.dp))
                     .background(if (model.handoffCreating || p2 == null) Tok.accent.copy(alpha = 0.4f) else Tok.accent)
                     .clickable(enabled = !model.handoffCreating && p2 != null) {
@@ -262,13 +264,13 @@ fun HandoffInviteModal(model: DesktopModel, onDismiss: () -> Unit) {
         Row(Modifier.padding(top = 16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 stringResource(Res.string.ho_copy_link), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = tightCenter(13.sp),
                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(Tok.accent)
                     .clickable { clipboard.setText(AnnotatedString(inv.inviteBlob())) }.padding(vertical = 11.dp),
             )
             Text(
                 stringResource(Res.string.ho_close), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = tightCenter(13.sp),
                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
                     .clickable(onClick = onDismiss).padding(vertical = 11.dp),
             )
@@ -298,13 +300,13 @@ fun HandoffReturnModal(model: DesktopModel, onDismiss: () -> Unit) {
         Row(Modifier.padding(top = 18.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 stringResource(Res.string.ho_return_action), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = tightCenter(13.sp),
                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(Tok.accent)
                     .clickable { model.handoffReturn(verdict); onDismiss() }.padding(vertical = 11.dp),
             )
             Text(
                 stringResource(Res.string.ho_keep_working), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = tightCenter(13.sp),
                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
                     .clickable(onClick = onDismiss).padding(vertical = 11.dp),
             )
@@ -346,7 +348,7 @@ fun HandoffConnectModal(model: DesktopModel, onBack: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Text(
                 stringResource(Res.string.co_back_to_handoff), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = tightCenter(13.sp),
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.accent).clickable(onClick = onBack).padding(vertical = 11.dp),
             )
             return
@@ -467,7 +469,7 @@ fun CollaboratorsPane(model: DesktopModel) {
                     }
                     if (c.direction == dev.ccpocket.protocol.CollaboratorDirection.MUTUAL) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(stringResource(Res.string.co_direction).uppercase(), color = Tok.muted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+                            Text(stringResource(Res.string.co_direction).uppercase(), color = Tok.muted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, style = tightCenter(10.sp))
                             Text(
                                 "✓ " + stringResource(Res.string.co_both_ways), color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.5.sp,
                                 style = tightCenter(10.5.sp),
@@ -491,6 +493,7 @@ fun CollaboratorsPane(model: DesktopModel) {
                             }
                             Text(
                                 stringResource(Res.string.co_remove), color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                                style = tightCenter(12.sp),
                                 modifier = Modifier.clip(RoundedCornerShape(9.dp)).border(1.dp, Tok.danger.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
                                     .clickable { model.removeCollaborator(c.deviceId) }.padding(horizontal = 11.dp, vertical = 7.dp),
                             )

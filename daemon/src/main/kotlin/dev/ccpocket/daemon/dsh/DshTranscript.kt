@@ -200,6 +200,64 @@ object DshTranscript {
     }
 
     /**
+     * What a RESUMED session can learn about itself from its own transcript (issue #320).
+     *
+     * A null field means NO EVIDENCE, and that is the whole contract: the phone shows "unknown" rather than
+     * a guess. Nothing here may be derived from a model NAME or from the local dsh config — the transcript
+     * either recorded the fact or it did not.
+     */
+    data class ResumeMeta(val model: String?, val contextWindow: Long?, val effort: String?) {
+        companion object {
+            val EMPTY = ResumeMeta(null, null, null)
+        }
+    }
+
+    /**
+     * Scan a transcript for the session metadata dsh states on its wire but never on the header (issue #320).
+     *
+     * The live path ([DshBackend.parse]) mines the SAME three records; this is their disk twin, so a resumed
+     * session announces what the running one would have. Three sources, all LAST-WINS in file order — a
+     * session that switched model or effort mid-chat must resume as what it is NOW, not what it started as:
+     *  - `request/context` → `data.model`, `data.contextWindow`
+     *  - `request/header`  → `data.header.config.model`, `data.header.config.reasoningEffort`
+     *  - `assistant/message` → `data.message.source.model` (who actually answered)
+     *
+     * ⚠️ `config.maxTokens` is deliberately NOT read here either — it is the OUTPUT cap of the very model
+     * whose window is 1,000,000, and mistaking it for the window understates occupancy four-fold.
+     *
+     * Streams the whole file at O(1) memory (renames taught us the tail matters, see [lastTitle]), and a line
+     * is only JSON-parsed after a plain substring hit on one of the three event names.
+     */
+    fun resumeMeta(file: Path): ResumeMeta {
+        var model: String? = null
+        var window: Long? = null
+        var effort: String? = null
+        forEachLine(file, MAX_DECOMPRESSED_BYTES) { line ->
+            if (META_NEEDLES.none { it in line }) return@forEachLine
+            val root = parseLine(line) ?: return@forEachLine
+            // dsh's own "this record carries no meaning" marker — the live path drops these too
+            if (root["ignorable"]?.toString() == "true") return@forEachLine
+            val data = root.obj("data") ?: return@forEachLine
+            when (root.str("type")) {
+                EVENT_REQUEST_CONTEXT -> {
+                    data.str("model")?.takeIf { it.isNotBlank() }?.let { model = it }
+                    data.long("contextWindow")?.takeIf { it > 0 }?.let { window = it }
+                }
+                EVENT_REQUEST_HEADER -> {
+                    val config = data.obj("header")?.obj("config") ?: return@forEachLine
+                    config.str("model")?.takeIf { it.isNotBlank() }?.let { model = it }
+                    config.str("reasoningEffort")?.takeIf { it.isNotBlank() }?.let { effort = it }
+                }
+                EVENT_ASSISTANT ->
+                    data.obj("message")?.obj("source")?.str("model")
+                        ?.takeIf { it.isNotBlank() }?.let { model = it }
+                else -> {}
+            }
+        }
+        return ResumeMeta(model, window, effort)
+    }
+
+    /**
      * Stream every line through [onLine] without holding the transcript in memory. Same decoding
      * tolerance as [lines] (concatenated zstd, ragged live tail survives as a truncated prefix), at most
      * [maxBytes] decompressed bytes visited. Unlike [lines] a half-flushed FINAL line IS offered to
@@ -353,4 +411,16 @@ object DshTranscript {
     const val EVENT_TOOL_RESULT = "tool/result"
     const val EVENT_APPROVAL_ASKED = "approval/asked"
     const val EVENT_APPROVAL_DECIDED = "approval/decided"
+
+    // issue #320 — the per-request metadata records. They are the ONLY place a dsh session states its model,
+    // its reasoning effort and its real context window; the session header carries none of the three.
+    const val EVENT_REQUEST_CONTEXT = "request/context"
+    const val EVENT_REQUEST_HEADER = "request/header"
+
+    /** Cheap prefilter for [resumeMeta]: a line without one of these substrings can be skipped unparsed. */
+    private val META_NEEDLES = listOf(
+        "\"$EVENT_REQUEST_CONTEXT\"",
+        "\"$EVENT_REQUEST_HEADER\"",
+        "\"$EVENT_ASSISTANT\"",
+    )
 }

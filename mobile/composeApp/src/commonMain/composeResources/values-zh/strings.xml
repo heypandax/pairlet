@@ -974,6 +974,9 @@
     <string name="settings_login_paste_code">粘贴授权码</string>
     <string name="settings_login_submit">提交</string>
     <string name="settings_api_key">API key</string>
+    <string name="settings_credential">凭证</string>
+    <string name="settings_credential_managed">第三方托管</string>
+    <string name="settings_credential_managed_body">这台电脑的 Claude CLI 通过第三方托管凭证（Bedrock、Vertex 或网关）认证，不是 Claude 登录。</string>
     <string name="settings_env_key_body">由电脑的环境变量（%1$s / ANTHROPIC_BASE_URL）配置，不是 Claude 登录。</string>
     <string name="settings_env_key_presets">可在下方启用一个预设，让新会话改用保存的端点；或直接在电脑上修改环境变量。</string>
     <string name="settings_env_key_computer">如需更换 key 或端点，请在电脑上修改环境变量后重新连接。</string>
@@ -982,7 +985,7 @@
     <string name="settings_switch_account">切换账号…</string>
     <string name="settings_log_out">退出登录</string>
     <string name="settings_no_auth_title">这台电脑尚未设置账号或 API key</string>
-    <string name="settings_no_auth_body">这台电脑的 Claude CLI 没有登录，环境里也没有 base URL 或 auth token。</string>
+    <string name="settings_no_auth_body">这台电脑的 Claude CLI 没有登录，daemon 进程环境里也没有发现 base URL 或 auth token——后台服务可能没有继承你在 shell 里设置的环境变量。</string>
     <string name="settings_no_auth_presets">用 Claude 登录，或在下方保存一个预设，让新会话指向某个端点。</string>
     <string name="settings_no_auth_signin">用 Claude 登录即可开始。</string>
     <string name="settings_sign_in">登录…</string>

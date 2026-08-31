@@ -127,12 +127,49 @@ class DshAskLedgerTest {
     }
 
     /** Fail CLOSED in the boot window: the mux is live before `session.create` returns, and until we know
-     *  our own id we cannot prove an ask is ours. */
+     *  our own id we cannot prove an ask is ours — so nothing is ever claimed OR answered there. */
     @Test
     fun no_ask_is_claimed_before_our_session_is_open() {
         val f = Fixture(ourSession = null)
-        assertNull(f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame())))
+        assertIs<AgentEvent.AssistantText>(f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame())))
+        assertIs<AgentEvent.AssistantText>(f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame())))
+        assertTrue(f.sent.isEmpty(), "an unprovable ask is never answered on dsh's side")
+        // and nothing was put in the pending table either — a verdict for it finds nothing to send
+        runBlocking { assertFalse(f.ledger.answer(DshAsk.ASK_ID_PREFIX + askRpc, allow = true, updatedInput = null)) }
+    }
+
+    /**
+     * The fresh-create half of #321: an ask that beats our own `session.create` to the mux.
+     *
+     * #321 seeded the RESUMED session id into [DshAskLedger.ourSession] so a resume stopped landing in the
+     * pre-create window — but a fresh conversation has no id to seed, so it still lands there, and until
+     * now that was the one drop in this file that said NOTHING. dsh has no timeout, so the turn behind it
+     * waits forever: from the phone it is indistinguishable from thinking. Announce it like every other
+     * unanswerable ask.
+     */
+    @Test
+    fun a_pre_create_ask_is_announced_instead_of_dropped_silently() {
+        val f = Fixture(ourSession = null)
+        val notice = assertIs<AgentEvent.AssistantText>(
+            f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame())),
+        )
+        // the notice must name what happened and what to do — the same shape the other hang notices use
+        assertTrue("asked a question" in notice.text, notice.text)
+        assertTrue("created" in notice.text, notice.text)
+        assertTrue("send the prompt again" in notice.text, notice.text)
+    }
+
+    /**
+     * …and the contrast that keeps the notice from becoming noise: a DIFFERENT session's ask is normal
+     * multiplexing (the mux carries every session the host holds, sub-agents included), it is not lost —
+     * its own mux sees it — so it stays silent. Only "probably ours and unanswerable" is announced.
+     */
+    @Test
+    fun an_ask_for_a_foreign_session_stays_silent_unlike_the_pre_create_one() {
+        val f = Fixture(ourSession = "session-mine")
         assertNull(f.ledger.requested(DshAskLedger.QUESTION_REQUESTED, askRpc, payload(questionFrame())))
+        assertNull(f.ledger.requested(DshAskLedger.APPROVAL_REQUESTED, approvalRpc, payload(approvalFrame())))
+        assertTrue(f.sent.isEmpty())
     }
 
     /** The response echoes the session that asked — which the claim check has already proven is ours. */

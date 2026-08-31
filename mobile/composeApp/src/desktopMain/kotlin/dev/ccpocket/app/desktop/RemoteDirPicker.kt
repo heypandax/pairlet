@@ -145,6 +145,7 @@ internal fun RemoteDirPickerCard(
             )
             Text(
                 stringResource(Res.string.cancel), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
+                style = tightCenter(12.sp),
                 modifier = Modifier.clickable(onClick = onDismiss).padding(horizontal = 8.dp, vertical = 8.dp),
             )
         }
@@ -186,7 +187,7 @@ private fun RemoteCrumbBar(
     val switchable = roots.isNotEmpty()
     Column(Modifier.padding(top = 12.dp, bottom = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("‹", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onUp).padding(end = 2.dp))
+            Text("‹", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 16.sp, style = tightCenter(16.sp), modifier = Modifier.clickable(onClick = onUp).padding(end = 2.dp))
             crumbs.forEachIndexed { i, s ->
                 val last = i == crumbs.lastIndex
                 if (i == 0 && switchable) {
@@ -227,9 +228,9 @@ private fun RemoteRootRow(label: String, selected: Boolean, onClick: () -> Unit)
         Text(
             label, color = if (selected) Tok.accent else Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
-            overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            overflow = TextOverflow.Ellipsis, style = tightCenter(12.sp), modifier = Modifier.weight(1f),
         )
-        if (selected) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 11.sp)
+        if (selected) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp))
     }
 }
 
@@ -241,7 +242,7 @@ private fun RemoteDirRow(name: String, isProject: Boolean, onClick: () -> Unit) 
     ) {
         Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(9.dp))
-        Text(name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(12.5.sp), modifier = Modifier.weight(1f))
         if (isProject) { Box(Modifier.size(5.dp).clip(RoundedCornerShape(3.dp)).background(Tok.accent)); Spacer(Modifier.width(8.dp)) }
         Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(16.dp))
     }

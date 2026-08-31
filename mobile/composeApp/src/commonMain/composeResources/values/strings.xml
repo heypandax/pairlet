@@ -977,6 +977,9 @@
     <string name="settings_login_paste_code">Paste authorization code</string>
     <string name="settings_login_submit">Submit</string>
     <string name="settings_api_key">API key</string>
+    <string name="settings_credential">Credential</string>
+    <string name="settings_credential_managed">third-party</string>
+    <string name="settings_credential_managed_body">This computer\'s Claude CLI authenticates through a third-party provider (Bedrock, Vertex, or a gateway), not a Claude login.</string>
     <string name="settings_env_key_body">Set in the computer\'s environment (%1$s / ANTHROPIC_BASE_URL), not a Claude login.</string>
     <string name="settings_env_key_presets">Activate a preset below to run new sessions on a saved endpoint instead, or edit the variables on the computer.</string>
     <string name="settings_env_key_computer">To change the key or endpoint, edit the variables on the computer and reconnect.</string>
@@ -985,7 +988,7 @@
     <string name="settings_switch_account">Switch account…</string>
     <string name="settings_log_out">Log out</string>
     <string name="settings_no_auth_title">No account or API key set on this computer</string>
-    <string name="settings_no_auth_body">This computer\'s Claude CLI has no login and no base URL or auth token in its environment.</string>
+    <string name="settings_no_auth_body">This computer\'s Claude CLI has no login, and the daemon\'s own process environment has no base URL or auth token — a background service may not inherit the variables your shell sets.</string>
     <string name="settings_no_auth_presets">Sign in with Claude, or save a preset below to point new sessions at an endpoint.</string>
     <string name="settings_no_auth_signin">Sign in with Claude to get started.</string>
     <string name="settings_sign_in">Sign in…</string>

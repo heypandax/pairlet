@@ -441,6 +441,18 @@ class Conversation(
     @Volatile
     private var runtimeContextWindow: Long? = null
 
+    // LIVE BEATS DISK, ALWAYS (issue #320). The open-time backfill below reads these same facts off the
+    // resumed transcript, on a coroutine that can take a multi-MB parse — long enough for the first live
+    // `request/context` / `request/header` to land first. Without a barrier that is a check-then-act window
+    // in which a STALE transcript value overwrites the newer live one. The pump sets this the moment the
+    // backend states anything about itself; the backfill only writes while it is unset, under [runtimeMetaLock].
+    // Never cleared: a backend that has spoken once will speak again, and no backfill runs after the open.
+    @Volatile
+    private var sawLiveRuntimeMeta = false
+
+    /** Serializes the open-time metadata backfill against the pump's [AgentEvent.RuntimeMeta] writes. */
+    private val runtimeMetaLock = Any()
+
     // the turn emitted a `<synthetic>` placeholder (every API call failed) — consumed by TurnResult,
     // which reports the turn as an ERROR instead of letting the placeholder pass for a real reply (issue #65)
     @Volatile
@@ -840,7 +852,13 @@ class Conversation(
             // usage statusline on open — before the first new turn's init lands (a headless claude is silent
             // until then, issue #27). Done off the relay inbound loop; the transcript read can be a multi-MB parse.
             if (model == null && resumeId != null) {
-                runCatching { backend.resumeModel(workdir.toString(), resumeId) }.getOrNull()?.let { backfilledModel = it }
+                val disk = runCatching { backend.resumeModel(workdir.toString(), resumeId) }.getOrNull()
+                // Same barrier as the two reads below: a backend that already named its model on the live
+                // wire (dsh does, on every assistant/message) must not be contradicted by an older
+                // transcript this parse only just finished reading (issue #320).
+                synchronized(runtimeMetaLock) {
+                    if (!sawLiveRuntimeMeta) disk?.let { backfilledModel = it }
+                }
             }
             // issue #96: no explicit --model AND nothing recovered from a transcript (a brand-new session, or a
             // resume whose transcript named no model) — eagerly resolve the backend's CONFIGURED default so the
@@ -850,6 +868,24 @@ class Conversation(
             // "account default" placeholder. The first turn's init still wins (it clears backfilledModel).
             if (model == null && backfilledModel == null) {
                 runCatching { backend.defaultModel(workdir.toString()) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { backfilledModel = it }
+            }
+            // …and the other two facts the header needs: the real context window (the denominator for
+            // "Context NN%" — no window table on our side knows a dsh/deepseek model id) and the level the
+            // session actually runs at. A dsh session states both only on the `request/*` frames of a
+            // RUNNING request, so before this a REOPENED session read "default" with no denominator until it
+            // happened to run another turn (issue #320). BLANKS ONLY, and only while the live wire has said
+            // nothing: this is the older evidence of the two, so it fills gaps and never overwrites.
+            if (resumeId != null) {
+                val diskWindow = runCatching { backend.resumeContextWindow(workdir.toString(), resumeId) }.getOrNull()
+                val diskEffort = runCatching { backend.resumeEffort(workdir.toString(), resumeId) }.getOrNull()
+                synchronized(runtimeMetaLock) {
+                    if (!sawLiveRuntimeMeta) {
+                        // > 0 / non-blank only: a zero window would divide the phone's usage % by nothing,
+                        // and a "" effort would displace a level we might otherwise learn.
+                        if (runtimeContextWindow == null) diskWindow?.takeIf { it > 0 }?.let { runtimeContextWindow = it }
+                        if (runtimeEffort == null) diskEffort?.takeIf { it.isNotBlank() }?.let { runtimeEffort = it }
+                    }
+                }
             }
             resumeContextUsed = resumeId?.let { runCatching { backend.resumeContextTokens(workdir.toString(), it) }.getOrNull() }
             // seed the degraded flag from the transcript's tail: a session that died over its context
@@ -1570,8 +1606,8 @@ class Conversation(
                     clearTurnWork()
                     bridge?.cancelAll()
                     bridge = null
-                    // Surface the last stderr (often the real cause) + a clear message
-                    val why = p.lastStderr?.let { " — ${it.take(300)}" } ?: ""
+                    // Surface the stderr tail's diagnosis (often the real cause) + a clear message
+                    val why = p.stderrDiagnostic()?.let { " — $it" } ?: ""
                     sink.emit(PocketError(
                         "opencode_startup_timeout",
                         "OpenCode did not produce any output within ${windowMs / 1000}s ($why). " +
@@ -1785,16 +1821,21 @@ class Conversation(
                     // header read "default" with no denominator for the session's whole life.
                     is AgentEvent.RuntimeMeta -> {
                         var changed = false
-                        // The user's pick outranks it: `model` is a deliberate choice (switchModel clears
-                        // the backfill precisely so an echo can't undo it), so only the DISPLAY backfill
-                        // moves here — exactly like the transcript guess it shares a field with.
-                        ev.model?.takeIf { it.isNotBlank() && model == null && it != backfilledModel }?.let {
-                            backfilledModel = it
-                            changed = true
+                        synchronized(runtimeMetaLock) {
+                            // From here on the resume backfill is locked out: whatever it read off disk is,
+                            // by construction, no newer than this frame (issue #320).
+                            sawLiveRuntimeMeta = true
+                            // The user's pick outranks it: `model` is a deliberate choice (switchModel clears
+                            // the backfill precisely so an echo can't undo it), so only the DISPLAY backfill
+                            // moves here — exactly like the transcript guess it shares a field with.
+                            ev.model?.takeIf { it.isNotBlank() && model == null && it != backfilledModel }?.let {
+                                backfilledModel = it
+                                changed = true
+                            }
+                            ev.effort?.takeIf { it.isNotBlank() && it != runtimeEffort }?.let { runtimeEffort = it; changed = true }
+                            // > 0 only: a zero window would divide the phone's usage % by nothing.
+                            ev.contextWindow?.takeIf { it > 0 && it != runtimeContextWindow }?.let { runtimeContextWindow = it; changed = true }
                         }
-                        ev.effort?.takeIf { it.isNotBlank() && it != runtimeEffort }?.let { runtimeEffort = it; changed = true }
-                        // > 0 only: a zero window would divide the phone's usage % by nothing.
-                        ev.contextWindow?.takeIf { it > 0 && it != runtimeContextWindow }?.let { runtimeContextWindow = it; changed = true }
                         // Re-announce only on a REAL change. dsh restates the model on every
                         // assistant/message, so an unconditional emit would push one SessionLive per step
                         // of every turn — the same frame, over the relay, forever.
@@ -1991,7 +2032,9 @@ class Conversation(
             // opencode "Session not found" after state DB relocation or stale resume id
             // (e.g. XDG_STATE_HOME change): clear the resume lineage so the next spawn creates a
             // fresh session instead of looping on an id the agent can no longer locate.
-            if (p.lastStderr?.contains(SESSION_NOT_FOUND) == true) {
+            // scan the whole retained tail, not just the last line: the marker is routinely followed by
+            // more output (a runtime footer, a usage hint) that used to hide it (issue #328)
+            if (p.stderrTail().any { it.contains(SESSION_NOT_FOUND) }) {
                 log.warn("$convoId opencode: session not found — clearing stale resumeId, fresh session on next prompt")
                 sessionId = null; openedResumeId = null
             }
@@ -2001,10 +2044,11 @@ class Conversation(
             proc = null
             bridge?.cancelAll()
             bridge = null
-            // carry the exit code + the agent's last stderr line: a --resume that dies before its first
-            // init (bad session id, context overflow) used to surface as a bare "agent process ended"
-            val why = p.lastStderr?.let { " — ${it.take(300)}" } ?: ""
-            val summary = "agent process ended (exit ${p.exitCode() ?: "?"})$why"
+            // carry the exit code + the agent's stderr diagnosis: a --resume that dies before its first
+            // init (bad session id, context overflow) used to surface as a bare "agent process ended",
+            // and a multi-line runtime crash used to surface as only its version footer (issue #328)
+            val why = p.stderrDiagnostic()?.let { " — $it" } ?: ""
+            val summary = "agent process ended (exit ${p.exitCode() ?: "?"})$why".take(MAX_EXIT_SUMMARY_CHARS)
             sink.emit(PocketError("process_exited", summary, convoId))
             // an UNEXPECTED death is exactly what a locked phone must hear about (issue #138): the
             // session died with no TurnDone push coming. Same hook + presence gate as a failed turn;
@@ -2036,7 +2080,9 @@ class Conversation(
      * heal surfaces its own PocketError.
      */
     private suspend fun healSessionLock(p: AgentProcess): Boolean {
-        if (lockForkRetried || p.lastStderr?.contains(SESSION_LOCK_MARKER) != true) return false
+        // the refusal hint is not necessarily the LAST line — a runtime footer or a second complaint
+        // printed after it used to bury the marker and cost the heal entirely (issue #328)
+        if (lockForkRetried || p.stderrTail().none { it.contains(SESSION_LOCK_MARKER) }) return false
         val anchor = sessionId ?: openedResumeId ?: return false // nothing to fork off
         lockForkRetried = true
         openedWithFork = true // pre-init relaunches (mode/model switch) must keep the fork decision
@@ -2723,6 +2769,10 @@ class Conversation(
         // (bg / interactive / …); this prefix doesn't. Probed on 2.1.204 — scripts/probe-claude-wire.py
         // `lock` scenario guards the wording against CLI drift.
         const val SESSION_LOCK_MARKER = "is currently running as a background agent"
+
+        // Belt-and-braces cap on the process_exited summary. stderrDiagnostic() already bounds its own
+        // share; this keeps the assembled line bounded no matter how the prefix grows.
+        const val MAX_EXIT_SUMMARY_CHARS = 800
 
         // opencode emits this on stderr when the --session id is not in its state DB (state DB
         // was relocated or the id never existed). The daemon must clear its resume lineage on

@@ -94,6 +94,7 @@ private fun JoinSharedFolder(repo: PocketRepository) {
     if (!open) {
         Text(
             stringResource(Res.string.join_scan_title), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
+            style = tightCenter(12.sp),
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = true }.padding(horizontal = 12.dp, vertical = 6.dp),
         )
         return
@@ -133,6 +134,7 @@ private fun PairingForm(repo: PocketRepository) {
         Spacer(Modifier.height(8.dp))
         Text(
             stringResource(Res.string.action_back), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
+            style = tightCenter(12.sp),
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { repo.cancelAddDevice() }.padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
@@ -227,7 +229,7 @@ private fun StatusLine(text: String, color: Color, spinner: Boolean = false) {
             CircularProgressIndicator(Modifier.size(11.dp), color = color, strokeWidth = 1.5.dp)
             Spacer(Modifier.width(7.dp))
         }
-        Text(text, color = color, fontFamily = Dk.mono, fontSize = 11.5.sp)
+        Text(text, color = color, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
     }
 }
 
@@ -235,6 +237,7 @@ private fun StatusLine(text: String, color: Color, spinner: Boolean = false) {
 private fun PrimaryButton(label: String, enabled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Text(
         label, color = if (enabled) Tok.base else Tok.muted, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+        style = tightCenter(14.sp),
         modifier = modifier.clip(RoundedCornerShape(10.dp))
             .background(if (enabled) Tok.accent else Tok.surface)
             .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)

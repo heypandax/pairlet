@@ -17,7 +17,7 @@ import {
 } from '../media/Attach';
 import {
   ChangedFile, DirectoryEntry, FileContent, FileUploaded, HistoryMessage, ImageData, ModelsList,
-  PermissionAsk, SessionSummary, SlashCommand,
+  PermissionAsk, QuestionAnswer, SessionSummary, SlashCommand,
   controlRegisterPush,
   frameCancelTurn, frameClientCaps, frameCloseSession, frameCommand, frameFetchModels,
   frameFileCancel, frameFileChunk, frameListSessionFiles,
@@ -57,7 +57,17 @@ export class ChatMessage {
   ok: boolean | null = null;
   images: image.PixelMap[] = []; // user 消息内联图片（本会话内有效；历史回放不带图）
   files: SentFile[] = [];        // user 消息附带的落盘文件 chip
+  // ── 回放提问行的三态（issue #321，对齐 commonMain 的 ChatItem.QuestionsAnswered /
+  //    QuestionsUnanswered / Tool 分流）。两者都只在 tool 行上有意义，且互斥。 ──
+  /** 非 null = 这一行是已作答的提问，渲染 (问题 → 答案) 只读列表而不是通用工具卡。 */
+  answers: QuestionAnswer[] | null = null;
+  /** true = 这一行是提问但从未被作答；只读并明确标注，不假装还能点。 */
+  unanswered: boolean = false;
 }
+
+/** 回放里提问行的工具名。与 commonMain 的 ASK_QUESTION_TOOL 同字面量——daemon 的各后端回放
+ *  （TranscriptReplay / DshTranscriptReplay）都用它命名提问行，所以这里不需要分后端判断。 */
+const ASK_QUESTION_TOOL = 'AskUserQuestion';
 
 // ── 附件（对齐 PocketRepository 的 pendingImages / pendingFiles 语义与常量） ──
 
@@ -1308,6 +1318,13 @@ export class Repository {
     m.text = h.text;
     m.tool = h.tool;
     m.ok = h.ok;
+    // 提问行三态（issue #321）。此前这里不看 tool/answers，于是已答和未答的提问一起被渲染成
+    // 「🔧 AskUserQuestion」通用卡——未答的那种看着像张还能点的卡，实际点不了，正是 #321 的报告。
+    // 带 answers → 已作答只读行；叫 AskUserQuestion 但没 answers → 未作答只读行；其余照旧。
+    if (h.role === 'tool') {
+      m.answers = h.answers;
+      m.unanswered = h.answers === null && h.tool === ASK_QUESTION_TOOL;
+    }
     return m;
   }
 }

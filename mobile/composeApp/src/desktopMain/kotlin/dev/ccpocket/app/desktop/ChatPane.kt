@@ -620,12 +620,14 @@ private fun HandoffComposerZone(model: DesktopModel, questionOwnsInput: Boolean)
                 val clipboard = LocalClipboardManager.current
                 Text(
                     stringResource(Res.string.ho_copy_invite), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    style = tightCenter(12.sp),
                     modifier = Modifier.clip(RoundedCornerShape(9.dp)).border(1.dp, Tok.hair, RoundedCornerShape(9.dp))
                         .clickable { clipboard.setText(AnnotatedString(ho.inviteBlob())) }
                         .padding(horizontal = 11.dp, vertical = 7.dp),
                 )
                 Text(
                     stringResource(Res.string.ho_recall), color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    style = tightCenter(12.sp),
                     modifier = Modifier.clip(RoundedCornerShape(9.dp)).border(1.dp, Tok.danger.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
                         .clickable { model.handoffCancel() }.padding(horizontal = 11.dp, vertical = 7.dp),
                 )
@@ -863,6 +865,7 @@ private fun EmptyChat(model: DesktopModel) {
                 Text(
                     stringResource(Res.string.chat_start_choose),
                     color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                    style = tightCenter(12.5.sp),
                     modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(7.dp))
                         .hoverFill(RoundedCornerShape(7.dp))
                         .clickable { model.openNewSession() }.padding(horizontal = 10.dp, vertical = 5.dp),
@@ -1462,10 +1465,11 @@ private fun ObserveBar(model: DesktopModel) {
             Dot(Tok.warn, 7.dp)
             Text(
                 stringResource(Res.string.observe_readonly),
-                color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f),
+                color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp), modifier = Modifier.weight(1f),
             )
             Text(
                 stringResource(Res.string.continue_here), color = Tok.base, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(12.5.sp),
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Tok.accent)
                     .clickable { model.takeOver() }.padding(horizontal = 12.dp, vertical = 7.dp),
             )
@@ -1767,7 +1771,7 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                                                     .border(1.dp, Tok.hair, RoundedCornerShape(8.dp))
                                                     .clickable { diaConfirm = false }.padding(vertical = 7.dp),
                                                 contentAlignment = Alignment.Center,
-                                            ) { Text(stringResource(Res.string.cancel), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp) }
+                                            ) { Text(stringResource(Res.string.cancel), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp)) }
                                             Box(
                                                 Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Tok.accent)
                                                     .clickable {
@@ -1775,7 +1779,7 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                                                         scope.launch { val r = launchDiaCdp(); diaBusy = false; diaStatus = r.message }
                                                     }.padding(vertical = 7.dp),
                                                 contentAlignment = Alignment.Center,
-                                            ) { Text(stringResource(Res.string.action_launch), color = Tok.base, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                                            ) { Text(stringResource(Res.string.action_launch), color = Tok.base, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(12.sp)) }
                                         }
                                     }
                                 }

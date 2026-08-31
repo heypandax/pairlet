@@ -94,9 +94,11 @@ internal class DshAskLedger(
      *
      * Three other outcomes, and the difference between them is the whole point (issue #321):
      *  - **null, silently** — nothing new to show: a replay of a card already pending, or an ask for a
-     *    session that is not ours. Someone else's turn, or one we already deal.
-     *  - **a [hangNotice]** — the ask IS (or may well be) ours but is unanswerable as it arrived. dsh will
-     *    wait on it forever, so the user is told rather than left watching a turn that never moves.
+     *    DIFFERENT session. Someone else's turn, or one we already deal.
+     *  - **a [hangNotice]** — the ask IS (or may well be) ours but is unanswerable as it arrived: no id to
+     *    answer with, no session named, no answerable question in it, or it beat our own `session.create`
+     *    to the mux. dsh will wait on it forever, so the user is told rather than left watching a turn
+     *    that never moves.
      *  - a real card, below.
      */
     fun requested(method: String, rpcId: String?, payload: JsonObject): AgentEvent? {
@@ -113,14 +115,24 @@ internal class DshAskLedger(
             log.warn("dsh $method named no session — unanswerable, dropped")
             return hangNotice(method, "the request named no session")
         }
-        // Fail-closed session check (see [ourSession]). Silent on purpose here, unlike the two cases
-        // above: the mux is multiplexed across every session the host holds, so a frame for a session
-        // that is not ours belongs to somebody else's turn and is not ours to announce or to answer.
-        // `ours == null` means our own session does not exist yet (fresh create, pre-`session.create`),
-        // which likewise cannot be the session this ask names — issue #321 seeds the resumed id into
-        // [ourSession] precisely so a RESUME no longer lands in this branch.
-        if (ours == null || sessionId != ours) {
-            log.info("dsh $method for session=$sessionId is not ours (${ours ?: "session not open yet"}) — ignored")
+        // Fail-closed session check (see [ourSession]), split in two because the two drops mean opposite
+        // things to a person.
+        //
+        // No session of our own YET (fresh create, pre-`session.create`): we cannot prove this ask is
+        // ours, but on a fresh conversation there is nobody ELSE it could plausibly belong to either, and
+        // dsh will wait on it forever. Refusing it silently is the same invisible wedge #321 describes —
+        // so say so, exactly like the two unanswerable cases above. (#321 seeds the resumed id into
+        // [ourSession] so a RESUME never reaches here; this is the half that seeding cannot cover, since
+        // a fresh session has no id to seed.) Still fail-closed: we announce the hang, we never answer.
+        if (ours == null) {
+            log.warn("dsh $method for session=$sessionId arrived before our session existed — unanswerable, dropped")
+            return hangNotice(method, "it arrived before the session had been created, so nothing can answer it")
+        }
+        // A DIFFERENT session, on the other hand, is normal multiplexing and stays silent: the mux carries
+        // every session the host holds (sub-agents included), so this frame belongs to somebody else's
+        // turn and is neither ours to announce nor ours to answer. Nothing is lost — its own mux sees it.
+        if (sessionId != ours) {
+            log.info("dsh $method for session=$sessionId is not ours ($ours) — ignored")
             return null
         }
         return when (method) {

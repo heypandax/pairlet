@@ -321,17 +321,17 @@ fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
             Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            Key("↑"); Key("↓"); Text(stringResource(Res.string.key_navigate), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+            Key("↑"); Key("↓"); Text(stringResource(Res.string.key_navigate), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp))
             Spacer(Modifier.width(6.dp))
-            Key("⏎"); Text(stringResource(Res.string.key_open), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+            Key("⏎"); Text(stringResource(Res.string.key_open), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp))
             // #202: a PERSISTENT legend, not a hover hint — this is what actually makes the second verb
             // discoverable (an icon that only appears on hover does not).
             if (model.palette == PaletteScope.ARCHIVED) {
                 Spacer(Modifier.width(6.dp))
-                Key("⌘⏎"); Text(stringResource(Res.string.archive_unarchive), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+                Key("⌘⏎"); Text(stringResource(Res.string.archive_unarchive), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp))
             }
             Spacer(Modifier.weight(1f))
-            Text(stringResource(if (items.size == 1) Res.string.palette_results_one else Res.string.palette_results_many, items.size), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
+            Text(stringResource(if (items.size == 1) Res.string.palette_results_one else Res.string.palette_results_many, items.size), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
         }
     }
 }
@@ -360,7 +360,7 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
             )
             if (item.agent != null && item.agent != AgentKind.CLAUDE) AgentTag(item.agent)
             Text(
-                item.detail, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp,
+                item.detail, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
             if (item.badge > 0) AttentionBadge(item.badge)
@@ -376,7 +376,7 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
             }
             when {
                 item.hint != null -> Key(item.hint)
-                else -> Text(stringResource(item.kind.tag), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                else -> Text(stringResource(item.kind.tag), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
             }
         }
     }
