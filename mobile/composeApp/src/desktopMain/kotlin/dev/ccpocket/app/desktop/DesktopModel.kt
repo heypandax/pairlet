@@ -355,8 +355,12 @@ interface DesktopModel {
     /** Room for one more column (see [MAX_SPLIT_PANES]) and a live link to open it over. */
     val canSplit: Boolean get() = false
 
-    /** Put [s] in a new column beside the current chat. A session already shown somewhere is a no-op. */
-    fun openInSplit(s: DkSession) {}
+    /**
+     * Put [s] in a new column beside the current chat. A session already shown somewhere is a no-op.
+     * [at] picks the column's position (negative = append at the right end); the drag-to-split drop
+     * passes the index under the zone it was released on.
+     */
+    fun openInSplit(s: DkSession, at: Int = -1) {}
 
     /** Drop a column. The session keeps running — closing a view never stops an agent. */
     fun closeSplit(paneId: Long) {}

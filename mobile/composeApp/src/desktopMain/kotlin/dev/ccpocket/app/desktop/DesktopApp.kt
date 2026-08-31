@@ -1,6 +1,7 @@
 package dev.ccpocket.app.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -15,12 +16,16 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,11 +34,17 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.dir_picker_choose_here
 import dev.ccpocket.app.resources.dir_picker_remote_title
@@ -78,6 +89,10 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
         if (!model.chatAgent.canInitiateSessionHandoff()) model.showHandoff = false
     }
     Box(Modifier.fillMaxSize().background(Tok.base)) {
+        // drag-to-split: the one gesture state shared between the sidebar (where a drag starts) and the
+        // chat columns (where it lands). Provided here so every row below can reach the same instance.
+        val drag = remember { SplitDragState() }
+        CompositionLocalProvider(LocalSplitDrag provides drag) {
         Row(Modifier.fillMaxSize()) {
             if (collapsed) {
                 SidebarRevealStrip { setCollapsed(false) }
@@ -99,21 +114,23 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
             val split = model.sidePanes
             when {
                 watch != null -> {
-                    // split: chat with the focused session while watching a second one read-only (Fleet ⑥)
+                    // split: chat with the focused session while watching a second one read-only (Fleet ⑥).
+                    // No drop columns here — the watch pane is a read-only mirror, not a split target.
                     ChatPane(model, Modifier.weight(1f), focused = true)
                     Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
                     WatchPane(watch, model, Modifier.weight(1f))
                 }
                 // split panes (issue #311): the focused conversation keeps the leftmost column and the full
                 // chat surface; every other open conversation gets an equal-width column of its own, each
-                // with its own stream, composer and approvals. Equal widths on purpose — the first version
-                // deliberately has no drag-to-resize tiling to get wrong.
-                split.isEmpty() -> ChatPane(model, Modifier.weight(1f))
+                // with its own stream, composer and approvals. Equal widths on purpose — still no
+                // drag-to-resize tiling; what dragging DOES buy is where a NEW column appears (see
+                // [SplitDropColumn]/[SplitDropOverlay] and the sidebar row's drag gesture).
+                split.isEmpty() -> SplitDropColumn(drag, 0, Modifier.weight(1f)) { ChatPane(model, Modifier.fillMaxSize()) }
                 else -> {
-                    ChatPane(model, Modifier.weight(1f), focused = true)
-                    split.forEach { pane ->
+                    SplitDropColumn(drag, 0, Modifier.weight(1f)) { ChatPane(model, Modifier.fillMaxSize(), focused = true) }
+                    split.forEachIndexed { i, pane ->
                         Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
-                        SplitPane(model, pane, Modifier.weight(1f))
+                        SplitDropColumn(drag, i + 1, Modifier.weight(1f)) { SplitPane(model, pane, Modifier.fillMaxSize()) }
                     }
                 }
             }
@@ -124,6 +141,7 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
                 WorkflowPanel(model, dockedWf)
             }
+        }
         }
         if (model.showNewSession) {
             LaunchedEffect(Unit) { model.fetchModels(AgentKind.CLAUDE) }
@@ -246,6 +264,45 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 )
             }
         }
+        // drag-to-split feedback: above every column, below every modal — a drag in progress must not
+        // be able to hide behind a popover, and a popover must not be droppable-through
+        SplitDropOverlay(drag, model)
+    }
+}
+
+/** A chat column that reports where it laid out, so the drag-to-split zones can hover over it. */
+@Composable
+private fun SplitDropColumn(drag: SplitDragState, index: Int, modifier: Modifier, content: @Composable () -> Unit) {
+    Box(modifier.onGloballyPositioned { drag.setColumnBounds(index, it.boundsInRoot()) }) { content() }
+}
+
+/**
+ * The drag-to-split feedback, in VS Code's editor-drop language: while a sidebar row is dragged over
+ * a column, tint exactly the region that would catch the drop — left/right edges (a new split column
+ * appears there) at full strength, the centre (the row's ordinary click) fainter. Edge zones only
+ * show when the drag can actually open a split, so the highlight is never a promise the drop breaks.
+ * Nothing renders the rest of the time.
+ */
+@Composable
+private fun SplitDropOverlay(drag: SplitDragState, model: DesktopModel) {
+    val s = drag.session ?: return
+    val target = resolveDropTarget(drag.columnBounds, drag.position) ?: return
+    if (target.zone != DropZone.CENTER && !splittableNow(model, s)) return
+    val rect = zoneRect(drag.columnBounds[target.column], target.zone)
+    // bounds are root coordinates; subtract this overlay's own root origin so the tint lands exactly
+    // on the zone even if the shell ever grows chrome above the main Box
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot() }) {
+        Box(
+            Modifier
+                .offset { IntOffset((rect.left - origin.x).roundToInt(), (rect.top - origin.y).roundToInt()) }
+                .size(with(LocalDensity.current) { rect.size.toDpSize() })
+                .background(
+                    Tok.accent.copy(alpha = if (target.zone == DropZone.CENTER) 0.10f else 0.20f),
+                    RoundedCornerShape(4.dp),
+                )
+                .border(1.dp, Tok.accent.copy(alpha = 0.60f), RoundedCornerShape(4.dp)),
+        )
     }
 }
 

@@ -177,12 +177,17 @@ class SidePanes(
      *
      * The open rides the ordinary [OpenSession] wire with `lastEventSeq = 0`, which tells the daemon this
      * client understands delta replays (see the field's contract) while still asking for a full first tail.
+     *
+     * [at] picks the position in [panes] (negative = the right end, the context menu's append); the
+     * drag-to-split drop passes the index under the zone it was released on, so a column lands where
+     * the pointer said it would. Clamped rather than trusted — a stale index after a concurrent close
+     * must not crash the gesture that quoted it.
      */
-    fun open(workdir: String, sessionId: String, title: String, agent: AgentKind, mode: PermissionMode): SidePane? {
+    fun open(workdir: String, sessionId: String, title: String, agent: AgentKind, mode: PermissionMode, at: Int = -1): SidePane? {
         if (!canOpen() || paneFor(sessionId) != null) return null
         disowned.remove(sessionId) // asking for it again withdraws any pending disowning of this session
         val pane = SidePane(++paneSeq, sessionId, workdir, title, agent)
-        panes.add(pane)
+        panes.add(if (at < 0) panes.size else at.coerceIn(0, panes.size), pane)
         recount()
         pane.mode = mode
         dispatchOpen(pane, lastEventSeq = 0L)

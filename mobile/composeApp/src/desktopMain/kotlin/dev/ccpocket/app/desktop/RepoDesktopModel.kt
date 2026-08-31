@@ -410,9 +410,9 @@ class RepoDesktopModel(
 
     override val canSplit: Boolean get() = connected && repo.sidePanes.canOpen()
 
-    override fun openInSplit(s: DkSession) {
+    override fun openInSplit(s: DkSession, at: Int) {
         if (s.sessionId == repo.sessionKey.value) return // already the focused chat
-        repo.sidePanes.open(s.cwd, s.sessionId, s.title, s.agent, repo.defaultMode.value)
+        repo.sidePanes.open(s.cwd, s.sessionId, s.title, s.agent, repo.defaultMode.value, at)
     }
 
     override fun closeSplit(paneId: Long) = repo.sidePanes.close(paneId)

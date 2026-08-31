@@ -81,6 +81,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -1084,7 +1087,26 @@ private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean,
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     val bg = if (selected || hovered) Tok.raised else Color.Transparent
-    Box(Modifier.fillMaxWidth().height(32.dp).hoverable(src).clickable(onClick = onClick).background(bg)) {
+    // drag-to-split: press a session row and drag it over the chat area — the hovered column grows
+    // VS-Code-style drop zones (left/right edge = a new split column there, centre = this row's
+    // ordinary click). A click never crosses the drag slop, so the row's behaviour is untouched.
+    // Position math rides the ROW's coordinate space: the gesture keeps delivering events here after
+    // the pointer leaves the sidebar, and origin + event position = pointer in root coordinates.
+    val drag = LocalSplitDrag.current
+    var origin by remember(s.sessionId) { mutableStateOf(Offset.Zero) }
+    Box(
+        Modifier.fillMaxWidth().height(32.dp).hoverable(src).clickable(onClick = onClick)
+            .onGloballyPositioned { origin = it.positionInRoot() }
+            .pointerInput(s.sessionId) {
+                detectDragGestures(
+                    onDragStart = { drag.begin(s, origin + it) },
+                    onDrag = { change, _ -> drag.moveTo(origin + change.position) },
+                    onDragEnd = { performDrop(model, s, drag, onClick); drag.clear() },
+                    onDragCancel = { drag.clear() },
+                )
+            }
+            .background(bg),
+    ) {
         if (selected) {
             Box(Modifier.align(Alignment.CenterStart).padding(vertical = 4.dp).width(2.dp).fillMaxHeight().background(Tok.accent, RoundedCornerShape(2.dp)))
         }
