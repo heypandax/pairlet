@@ -1087,9 +1087,9 @@ private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean,
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     val bg = if (selected || hovered) Tok.raised else Color.Transparent
-    // drag-to-split: press a session row and drag it over the chat area — the hovered column grows
-    // VS-Code-style drop zones (left/right edge = a new split column there, centre = this row's
-    // ordinary click). A click never crosses the drag slop, so the row's behaviour is untouched.
+    // drag-to-split: press a session row and drag it over the chat area — the hovered column splits
+    // into two drop halves (left = new column to its left, right = to its right; issue #336). A click
+    // never crosses the drag slop, so the row's behaviour is untouched.
     // Position math rides the ROW's coordinate space: the gesture keeps delivering events here after
     // the pointer leaves the sidebar, and origin + event position = pointer in root coordinates.
     val drag = LocalSplitDrag.current
@@ -1101,7 +1101,7 @@ private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean,
                 detectDragGestures(
                     onDragStart = { drag.begin(s, origin + it) },
                     onDrag = { change, _ -> drag.moveTo(origin + change.position) },
-                    onDragEnd = { performDrop(model, s, drag, onClick); drag.clear() },
+                    onDragEnd = { performDrop(model, s, drag); drag.clear() },
                     onDragCancel = { drag.clear() },
                 )
             }

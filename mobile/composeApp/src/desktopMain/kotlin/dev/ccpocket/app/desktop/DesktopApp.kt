@@ -120,17 +120,24 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                     Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
                     WatchPane(watch, model, Modifier.weight(1f))
                 }
-                // split panes (issue #311): the focused conversation keeps the leftmost column and the full
-                // chat surface; every other open conversation gets an equal-width column of its own, each
-                // with its own stream, composer and approvals. Equal widths on purpose — still no
-                // drag-to-resize tiling; what dragging DOES buy is where a NEW column appears (see
+                // split panes (issue #311): the focused conversation keeps the full chat surface; every
+                // other open conversation gets an equal-width column of its own, each with its own stream,
+                // composer and approvals. Columns render in VISUAL slot order with the focused chat at
+                // [splitFocusedSlot] (issue #336) — a drop on a column's left half really does land the
+                // new column to its left, the chat included. Equal widths on purpose — still no
+                // drag-to-resize tiling; what dragging buys is where a NEW column appears (see
                 // [SplitDropColumn]/[SplitDropOverlay] and the sidebar row's drag gesture).
                 split.isEmpty() -> SplitDropColumn(drag, 0, Modifier.weight(1f)) { ChatPane(model, Modifier.fillMaxSize()) }
                 else -> {
-                    SplitDropColumn(drag, 0, Modifier.weight(1f)) { ChatPane(model, Modifier.fillMaxSize(), focused = true) }
-                    split.forEachIndexed { i, pane ->
-                        Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
-                        SplitDropColumn(drag, i + 1, Modifier.weight(1f)) { SplitPane(model, pane, Modifier.fillMaxSize()) }
+                    val focusedAt = model.splitFocusedSlot.coerceIn(0, split.size)
+                    for (slot in 0..split.size) {
+                        if (slot > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
+                        if (slot == focusedAt) {
+                            SplitDropColumn(drag, slot, Modifier.weight(1f)) { ChatPane(model, Modifier.fillMaxSize(), focused = true) }
+                        } else {
+                            val pane = split[if (slot > focusedAt) slot - 1 else slot]
+                            SplitDropColumn(drag, slot, Modifier.weight(1f)) { SplitPane(model, pane, Modifier.fillMaxSize()) }
+                        }
                     }
                 }
             }
@@ -277,17 +284,16 @@ private fun SplitDropColumn(drag: SplitDragState, index: Int, modifier: Modifier
 }
 
 /**
- * The drag-to-split feedback, in VS Code's editor-drop language: while a sidebar row is dragged over
- * a column, tint exactly the region that would catch the drop — left/right edges (a new split column
- * appears there) at full strength, the centre (the row's ordinary click) fainter. Edge zones only
- * show when the drag can actually open a split, so the highlight is never a promise the drop breaks.
- * Nothing renders the rest of the time.
+ * The drag-to-split feedback: while a sidebar row is dragged over a column, tint exactly the half
+ * that would catch the drop — the new column lands on that side of the hovered column (issue #336).
+ * The highlight only shows when the drag can actually open a split, so it is never a promise the
+ * drop breaks. Nothing renders the rest of the time.
  */
 @Composable
 private fun SplitDropOverlay(drag: SplitDragState, model: DesktopModel) {
     val s = drag.session ?: return
     val target = resolveDropTarget(drag.columnBounds, drag.position) ?: return
-    if (target.zone != DropZone.CENTER && !splittableNow(model, s)) return
+    if (!splittableNow(model, s)) return
     val rect = zoneRect(drag.columnBounds[target.column], target.zone)
     // bounds are root coordinates; subtract this overlay's own root origin so the tint lands exactly
     // on the zone even if the shell ever grows chrome above the main Box
@@ -297,10 +303,7 @@ private fun SplitDropOverlay(drag: SplitDragState, model: DesktopModel) {
             Modifier
                 .offset { IntOffset((rect.left - origin.x).roundToInt(), (rect.top - origin.y).roundToInt()) }
                 .size(with(LocalDensity.current) { rect.size.toDpSize() })
-                .background(
-                    Tok.accent.copy(alpha = if (target.zone == DropZone.CENTER) 0.10f else 0.20f),
-                    RoundedCornerShape(4.dp),
-                )
+                .background(Tok.accent.copy(alpha = 0.20f), RoundedCornerShape(4.dp))
                 .border(1.dp, Tok.accent.copy(alpha = 0.60f), RoundedCornerShape(4.dp)),
         )
     }

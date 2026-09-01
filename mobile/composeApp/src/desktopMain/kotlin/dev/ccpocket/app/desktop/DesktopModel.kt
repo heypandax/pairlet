@@ -346,19 +346,24 @@ interface DesktopModel {
     fun fetchWorkflowAgentDetail(runId: String, agentIndex: Int, agentId: String?) {}
 
     // ── split panes (issue #311): more than one conversation open side by side in the main area ────
-    // The shell shows [sidePanes] to the RIGHT of the focused chat, in order. Defaults leave the
-    // seed/preview models with no split at all, so every existing screenshot and UI test is unchanged.
+    // The shell shows [sidePanes] around the focused chat in visual order — [splitFocusedSlot] says
+    // which column the chat itself is (issue #336: a drop on a column's left half lands the new column
+    // to ITS left, so the chat is no longer pinned leftmost). Defaults leave the seed/preview models
+    // with no split at all, so every existing screenshot and UI test is unchanged.
 
     /** Conversations open beside the focused one, left to right. Empty = the classic single-chat main area. */
     val sidePanes: List<SidePane> get() = emptyList()
+
+    /** Which visual slot (0..sidePanes.size) the focused chat occupies. 0 = leftmost, the historic layout. */
+    val splitFocusedSlot: Int get() = 0
 
     /** Room for one more column (see [MAX_SPLIT_PANES]) and a live link to open it over. */
     val canSplit: Boolean get() = false
 
     /**
      * Put [s] in a new column beside the current chat. A session already shown somewhere is a no-op.
-     * [at] picks the column's position (negative = append at the right end); the drag-to-split drop
-     * passes the index under the zone it was released on.
+     * [at] is the visual SLOT the column lands at, counted over every column including the focused
+     * chat (negative = append at the right end); the drag-to-split drop passes [dropSlot]'s answer.
      */
     fun openInSplit(s: DkSession, at: Int = -1) {}
 

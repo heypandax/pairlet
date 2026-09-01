@@ -8,20 +8,19 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 
 /**
- * Drag-to-split (the sidebar-row gesture, issue #311's follow-up).
+ * Drag-to-split (the sidebar-row gesture, issue #311's follow-up; halves per issue #336).
  *
  * The right-click "Open in split" answers WHERE a new column comes from, but not WHERE it lands: panes
- * append at the right end in click order. This is the VS Code editor-drag design adapted to the flat
- * column model — press a session row, drag it over the chat area, and the hovered column grows drop
- * zones: LEFT/RIGHT edges insert a new column at that position, CENTER is the row's ordinary click
- * (focus that session here). Everything positional is plain geometry over root-coordinate rects, so the
- * interesting rules live in testable functions rather than in gesture callbacks.
+ * append at the right end in click order. Dragging answers the position: press a session row, drag it
+ * over the chat area, and the hovered column splits into two drop halves — LEFT means "the new column
+ * goes to my left", RIGHT "to my right". Two halves, not thirds-plus-centre: a drop has exactly two
+ * possible outcomes, so the geometry offers exactly two zones, and each zone can honour what it
+ * highlights (the old CENTER=switch-session rode a gesture whose intent is splitting; switching stays
+ * on the row's ordinary click). Everything positional is plain geometry over root-coordinate rects, so
+ * the interesting rules live in testable functions rather than in gesture callbacks.
  */
 
-/** How much of a column's width each edge zone claims. 0.30 → left third / centre 40% / right third. */
-const val SPLIT_EDGE_FRACTION = 0.30f
-
-enum class DropZone { LEFT, CENTER, RIGHT }
+enum class DropZone { LEFT, RIGHT }
 
 /** A drag hovering [zone] over column [column] — 0 is the focused chat, i ≥ 1 is sidePanes[i-1]. */
 data class DropTarget(val column: Int, val zone: DropZone)
@@ -77,31 +76,23 @@ fun resolveDropTarget(bounds: List<Rect>, pos: Offset): DropTarget? {
     val column = bounds.indexOfFirst { it.contains(pos) }
     if (column < 0) return null
     val r = bounds[column]
-    val zone = when {
-        pos.x < r.left + r.width * SPLIT_EDGE_FRACTION -> DropZone.LEFT
-        pos.x > r.right - r.width * SPLIT_EDGE_FRACTION -> DropZone.RIGHT
-        else -> DropZone.CENTER
-    }
+    val zone = if (pos.x < r.left + r.width / 2) DropZone.LEFT else DropZone.RIGHT
     return DropTarget(column, zone)
 }
 
 /** The part of column rect [r] a [zone] highlight covers — exactly the region that triggers it. */
 fun zoneRect(r: Rect, zone: DropZone): Rect = when (zone) {
-    DropZone.LEFT -> Rect(r.left, r.top, r.left + r.width * SPLIT_EDGE_FRACTION, r.bottom)
-    DropZone.RIGHT -> Rect(r.right - r.width * SPLIT_EDGE_FRACTION, r.top, r.right, r.bottom)
-    DropZone.CENTER -> Rect(r.left + r.width * SPLIT_EDGE_FRACTION, r.top, r.right - r.width * SPLIT_EDGE_FRACTION, r.bottom)
+    DropZone.LEFT -> Rect(r.left, r.top, r.left + r.width / 2, r.bottom)
+    DropZone.RIGHT -> Rect(r.left + r.width / 2, r.top, r.right, r.bottom)
 }
 
 /**
- * Where an edge drop on [target] inserts into the panes list. Column 0 is the focused chat, which
- * stays leftmost by design, so both of its edges mean "first column after it"; on side column c the
- * RIGHT edge lands after panes[c-1] and the LEFT edge before it. CENTER never consults this.
+ * Which visual SLOT a drop on [target] inserts at — [target.column] is already a visual slot (the
+ * shell numbers droppable columns left to right, the focused chat included), so LEFT of column c is
+ * slot c and RIGHT of it is slot c+1. Adjacent halves of neighbouring columns therefore name the SAME
+ * landing point ("between A and B"), which is exactly what the eye expects of them.
  */
-fun paneInsertIndex(target: DropTarget): Int = when (target.zone) {
-    DropZone.RIGHT -> target.column
-    DropZone.LEFT -> (target.column - 1).coerceAtLeast(0)
-    DropZone.CENTER -> 0 // not reachable — [performDrop] routes CENTER to the ordinary open
-}
+fun dropSlot(target: DropTarget): Int = target.column + if (target.zone == DropZone.RIGHT) 1 else 0
 
 /**
  * The same "may this row open a split" the right-click menu gates its entry on, so a drag and a menu
@@ -112,18 +103,14 @@ fun splittableNow(model: DesktopModel, s: DkSession): Boolean =
     model.canSplit && s.sessionId != model.selectedSessionId && model.sidePanes.none { it.sessionId == s.sessionId }
 
 /**
- * End a drag the way the zone under the pointer reads: CENTER is the row's own click ([openHere]),
- * an edge is [model.openInSplit] at [paneInsertIndex], and anything off the columns (or an edge with
- * no room left) is a cancelled drag — no-op, exactly like letting go over the sidebar.
+ * End a drag the way the half under the pointer reads: [model.openInSplit] at [dropSlot]. Anything off
+ * the columns, or a drop with no room left, is a cancelled drag — no-op, exactly like letting go over
+ * the sidebar.
  */
-fun performDrop(model: DesktopModel, s: DkSession, drag: SplitDragState, openHere: () -> Unit) {
+fun performDrop(model: DesktopModel, s: DkSession, drag: SplitDragState) {
     val target = resolveDropTarget(drag.columnBounds, drag.position) ?: return
-    if (target.zone == DropZone.CENTER) {
-        openHere()
-        return
-    }
     if (!splittableNow(model, s)) return
-    model.openInSplit(s, paneInsertIndex(target))
+    model.openInSplit(s, dropSlot(target))
 }
 
 /**

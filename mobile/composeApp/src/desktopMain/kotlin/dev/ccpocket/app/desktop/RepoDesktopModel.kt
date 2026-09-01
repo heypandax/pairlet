@@ -417,16 +417,19 @@ class RepoDesktopModel(
 
     override fun closeSplit(paneId: Long) = repo.sidePanes.close(paneId)
 
+    override val splitFocusedSlot: Int get() = repo.sidePanes.focusedSlot.value
+
     override fun promoteSplit(pane: SidePane) {
         // Promotion is an ordinary session open: the daemon answers by reattaching the conversation it
-        // already holds, so nothing forks and nothing restarts. The column is DETACHED rather than closed
-        // — reclaiming the session here would race the open that is about to resume it.
+        // already holds, so nothing forks and nothing restarts. The column release rides the repository's
+        // open chokepoint ([SidePanes.releaseToFocus]) rather than a manual detach here, because that is
+        // also what moves the focus INTO this column's slot (issue #336) — the chat walks over to the
+        // column the user promoted instead of yanking its conversation to wherever the chat was.
         //
         // The outgoing session is deliberately NOT auto-moved into the freed column. openSession already
         // reclaims an idle conversation as it switches, so re-opening it as a column in the same breath
         // would put a CloseSession and an OpenSession for one session in flight together. Sending it back
         // to a column is one gesture away (the sidebar's "Open in split"), and that gesture is ordered.
-        repo.sidePanes.detach(pane.paneId)
         selectSession(DkSession(pane.sessionId, pane.workdir, pane.title.value, agent = pane.agent))
     }
 
