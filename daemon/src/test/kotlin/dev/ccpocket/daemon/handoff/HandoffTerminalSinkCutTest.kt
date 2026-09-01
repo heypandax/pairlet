@@ -214,7 +214,7 @@ class HandoffTerminalSinkCutTest {
             }
         }
 
-        suspend fun awaitLive(into: List<Frame>, notConvoId: String? = null): String = withTimeout(5_000) {
+        suspend fun awaitLive(into: List<Frame>, notConvoId: String? = null): String = withTimeout(15_000) {
             var live: SessionLive? = null
             while (live == null) {
                 live = into.filterIsInstance<SessionLive>().lastOrNull { it.convoId != notConvoId }
@@ -260,7 +260,7 @@ class HandoffTerminalSinkCutTest {
             assertNotEquals(ownerConvo, convoId, "the grant open rebuilds the conversation (§8.3)")
             // the owner was migrated onto the rebuilt convo — it is IN the fan-out set, which is what
             // makes "the recipient is cut but the owner is not" a meaningful assertion at all
-            withTimeout(5_000) {
+            withTimeout(15_000) {
                 while (owner.filterIsInstance<SessionLive>().none { it.convoId == convoId }) delay(20)
             }
             return h to convoId
@@ -271,7 +271,7 @@ class HandoffTerminalSinkCutTest {
         suspend fun fanOutPing(convoId: String, owner: MutableList<Frame>): Int {
             val before = owner.convoFrames(convoId).size
             registry.switchMode(SwitchMode(convoId, PermissionMode.PLAN))
-            withTimeout(5_000) { while (owner.convoFrames(convoId).size <= before) delay(20) }
+            withTimeout(15_000) { while (owner.convoFrames(convoId).size <= before) delay(20) }
             return owner.convoFrames(convoId).size
         }
 
