@@ -410,24 +410,35 @@ class RepoDesktopModel(
 
     override val canSplit: Boolean get() = connected && repo.sidePanes.canOpen()
 
-    override fun openInSplit(s: DkSession) {
+    override fun openInSplit(s: DkSession, at: Int) {
         if (s.sessionId == repo.sessionKey.value) return // already the focused chat
-        repo.sidePanes.open(s.cwd, s.sessionId, s.title, s.agent, repo.defaultMode.value)
+        repo.sidePanes.open(s.cwd, s.sessionId, s.title, s.agent, repo.defaultMode.value, at)
     }
 
     override fun closeSplit(paneId: Long) = repo.sidePanes.close(paneId)
 
+    override val splitFocusedSlot: Int get() = repo.sidePanes.focusedSlot.value
+
     override fun promoteSplit(pane: SidePane) {
         // Promotion is an ordinary session open: the daemon answers by reattaching the conversation it
-        // already holds, so nothing forks and nothing restarts. The column is DETACHED rather than closed
-        // — reclaiming the session here would race the open that is about to resume it.
+        // already holds, so nothing forks and nothing restarts. The column release rides the repository's
+        // open chokepoint ([SidePanes.releaseToFocus]) rather than a manual detach here, because that is
+        // also what moves the focus INTO this column's slot (issue #336) — the chat walks over to the
+        // column the user promoted instead of yanking its conversation to wherever the chat was.
         //
         // The outgoing session is deliberately NOT auto-moved into the freed column. openSession already
         // reclaims an idle conversation as it switches, so re-opening it as a column in the same breath
         // would put a CloseSession and an OpenSession for one session in flight together. Sending it back
         // to a column is one gesture away (the sidebar's "Open in split"), and that gesture is ordered.
-        repo.sidePanes.detach(pane.paneId)
-        selectSession(DkSession(pane.sessionId, pane.workdir, pane.title.value, agent = pane.agent))
+        //
+        // A refusal never comes back, so releaseToFocus never runs for it — openSession's synchronous
+        // gates (#235 in-flight/already-open, unsupported agent) return false BEFORE the chokepoint.
+        // Without the fallback the column stayed up beside a focused chat showing the same session
+        // (already-open is exactly the double-render state), and repeated clicks stayed refused forever.
+        // The old unconditional detach was precisely the repair for that state — keep it for the refusal.
+        if (!selectSessionReporting(DkSession(pane.sessionId, pane.workdir, pane.title.value, agent = pane.agent))) {
+            repo.sidePanes.detach(pane.paneId)
+        }
     }
 
     override fun retrySplitOpen(pane: SidePane) = repo.sidePanes.retry(pane)
@@ -830,11 +841,14 @@ class RepoDesktopModel(
         else if (!collapsed && has) { groupCollapsedState.remove(k); saveGroupCollapsed() }
     }
 
-    override fun selectSession(s: DkSession) {
+    override fun selectSession(s: DkSession) { selectSessionReporting(s) }
+
+    /** [selectSession] with [PocketRepository.openSession]'s verdict kept — promotion needs it. */
+    private fun selectSessionReporting(s: DkSession): Boolean {
         navGen++ // user navigation — stop an in-flight RECENT refill from repointing the list (#102)
         focusDir(s.cwd) // clicking a session focuses its project too, so a following ⌘N lands there
         optimisticSelectedId = s.sessionId // light the clicked row NOW, don't wait out the open (#82)
-        repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
+        return repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
     }
 
     // ── pinned sessions: persisted in the SecureStore beside the pairing list ────────────────────

@@ -611,6 +611,21 @@ class SplitPanesTest {
     }
 
     @Test
+    fun reFocusingASessionDisownedBeforeItsOpenLandedRestoresTheShortCircuit() {
+        // Slow link: the column is closed before its SessionLive arrives (the session goes to disowned,
+        // the frame-path counter stays 1 so the answer is recognised), then the user clicks the same
+        // session in the sidebar. releaseToFocus withdraws the disowning — and must recount even though
+        // no pane matched, or the counter sticks at 1 with nothing tracked and route()/claimsSessionLive
+        // read snapshot state on every inbound frame from then on.
+        val p = panes()
+        val pane = open(p)
+        p.close(pane.paneId)
+        assertEquals(1, p.openCountForTest())
+        p.releaseToFocus("sid-a")
+        assertEquals(0, p.openCountForTest())
+    }
+
+    @Test
     fun clearDropsEveryColumnWithoutTouchingTheSessions() {
         val p = panes()
         open(p, "sid-a")

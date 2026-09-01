@@ -36,6 +36,11 @@ import kotlin.time.TimeSource
  */
 const val MAX_SPLIT_PANES = 3
 
+/** Pane-list index behind visual [slot] given where the focused chat sits — THE #336 invariant
+ *  (highlighted slot == rendered position), defined once for the store and the shell both. For an
+ *  insertion the same formula answers "at which pane index does slot k land". */
+fun paneIndexForSlot(slot: Int, focusedSlot: Int): Int = if (slot > focusedSlot) slot - 1 else slot
+
 /**
  * One conversation kept live BESIDE the focused one.
  *
@@ -138,6 +143,19 @@ class SidePanes(
     private var paneSeq = 0L
 
     /**
+     * Which visual SLOT the focused chat occupies among the columns, 0-based over `panes.size + 1`
+     * columns (issue #336). 0 = leftmost, the historic layout. Kept HERE and not in the shell because
+     * every structural verb below must move it in the same breath as the list it describes — a close on
+     * the focused chat's left that forgot to slide this down by one would visually teleport the focus.
+     *
+     * Snapshot state on purpose: the shell composes column order from it. It is only ever written by
+     * the UI-thread verbs (open/close/detach/release/clear), never on the frame path — [openCount]
+     * remains the only thing [route]/[claimsSessionLive] read.
+     */
+    val focusedSlot = mutableStateOf(0)
+
+
+    /**
      * Sessions whose column was closed while its open was still in flight — see [close].
      *
      * The daemon cannot be told to stop an open it has not answered yet, so the answer arrives for a
@@ -166,6 +184,9 @@ class SidePanes(
 
     private fun recount() { openCount = panes.size + disowned.size }
 
+    /** The frame-path counter, for tests pinning the recount invariant — never for production reads. */
+    internal fun openCountForTest(): Int = openCount
+
     /** Room for another column, focused pane included. */
     fun canOpen(): Boolean = panes.size < MAX_SPLIT_PANES - 1
 
@@ -177,12 +198,22 @@ class SidePanes(
      *
      * The open rides the ordinary [OpenSession] wire with `lastEventSeq = 0`, which tells the daemon this
      * client understands delta replays (see the field's contract) while still asking for a full first tail.
+     *
+     * [at] picks the position in [panes] (negative = the right end, the context menu's append); the
+     * drag-to-split drop passes the index under the zone it was released on, so a column lands where
+     * the pointer said it would. Clamped rather than trusted — a stale index after a concurrent close
+     * must not crash the gesture that quoted it.
      */
-    fun open(workdir: String, sessionId: String, title: String, agent: AgentKind, mode: PermissionMode): SidePane? {
+    fun open(workdir: String, sessionId: String, title: String, agent: AgentKind, mode: PermissionMode, at: Int = -1): SidePane? {
         if (!canOpen() || paneFor(sessionId) != null) return null
         disowned.remove(sessionId) // asking for it again withdraws any pending disowning of this session
         val pane = SidePane(++paneSeq, sessionId, workdir, title, agent)
-        panes.add(pane)
+        // [at] is a visual SLOT over panes.size + 1 columns, the focused chat included (issue #336):
+        // slot k lands the new column at position k, pushing the focused chat right when k is at or
+        // before it. -1 keeps the historic append-at-the-right-end (the context-menu path).
+        val slot = if (at < 0) panes.size + 1 else at.coerceIn(0, panes.size + 1)
+        panes.add(paneIndexForSlot(slot, focusedSlot.value), pane)
+        if (slot <= focusedSlot.value) focusedSlot.value += 1
         recount()
         pane.mode = mode
         dispatchOpen(pane, lastEventSeq = 0L)
@@ -249,9 +280,7 @@ class SidePanes(
      * whether a window is showing it, so closing the column must not kill work in flight.
      */
     fun close(paneId: Long) {
-        val i = panes.indexOfFirst { it.paneId == paneId }
-        if (i < 0) return
-        val pane = panes.removeAt(i)
+        val pane = removePane(paneId) ?: return
         // Closed before the open landed: there is no conversation to reclaim YET, but one is on its way.
         // Record the session as disowned so the answer is recognised when it arrives — see [disowned].
         // A pane whose session is already gone has no answer coming and needs no record.
@@ -263,14 +292,24 @@ class SidePanes(
     }
 
     /**
-     * Drop a column WITHOUT reclaiming its session — for a promotion, which re-opens that very session as
-     * the focused chat a moment later. Sending [CloseSession] here would race that re-open on the daemon
-     * and could close the conversation the user just promoted. For the same reason this never disowns:
-     * the session is about to be wanted, so its answer must reach the focused chat, not a [CloseSession].
+     * Drop a column WITHOUT reclaiming its session and WITHOUT disowning it. The ordinary promotion path
+     * does not come through here any more (releasing inlines in [releaseToFocus], on the open chokepoint);
+     * what remains is the REPAIR verb for a refused promotion — a column whose session the focused chat
+     * already shows must go away without a [CloseSession] that would hit the live conversation.
      */
     fun detach(paneId: Long) {
-        panes.removeAll { it.paneId == paneId }
+        removePane(paneId) ?: return
         recount()
+    }
+
+    /** Remove one pane and keep [focusedSlot] pointing at the same on-screen column: a removal LEFT of
+     *  the focus slides it down by one. The shared half of [close] and [detach]. */
+    private fun removePane(paneId: Long): SidePane? {
+        val i = panes.indexOfFirst { it.paneId == paneId }
+        if (i < 0) return null
+        val pane = panes.removeAt(i)
+        if (i < focusedSlot.value) focusedSlot.value -= 1
+        return pane
     }
 
     /**
@@ -283,7 +322,18 @@ class SidePanes(
      */
     fun releaseToFocus(sessionId: String) {
         disowned.remove(sessionId)
-        paneFor(sessionId)?.let { detach(it.paneId) }
+        paneFor(sessionId)?.let { pane ->
+            // The focus moves INTO this column's place (issue #336): promoting a left column must not
+            // teleport its conversation to wherever the focused chat happened to sit. Removing pane
+            // index p and putting the focus at slot p is exactly "the chat walks over to that column".
+            val p = panes.indexOfFirst { it.paneId == pane.paneId }
+            panes.removeAt(p)
+            focusedSlot.value = p
+        }
+        // Unconditional: disowned.remove above changes openCount's truth even when no pane matched
+        // (a column closed before its open landed, then the same session re-focused — leaving the
+        // stale count ≥ 1 would keep route()/claimsSessionLive reading snapshot state on every frame,
+        // the exact hazard [openCount]'s doc exists to prevent).
         recount()
     }
 
@@ -291,6 +341,7 @@ class SidePanes(
     fun clear() {
         panes.clear()
         disowned.clear()
+        focusedSlot.value = 0
         openCount = 0
     }
 

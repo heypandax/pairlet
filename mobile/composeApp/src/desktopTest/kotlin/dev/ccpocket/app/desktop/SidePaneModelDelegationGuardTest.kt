@@ -130,7 +130,8 @@ class SidePaneModelDelegationGuardTest {
         "machines", "attention", "watch", "resolveAttention", "jumpMachine",
         "running", "runningVisible", "openRunning", "browseRunning",
         // split-pane plumbing itself: these take the pane as an argument, so they are already explicit
-        "sidePanes", "canSplit", "openInSplit", "closeSplit", "promoteSplit", "retrySplitOpen",
+        // (splitFocusedSlot is window layout — WHERE the focused chat renders — not conversation state)
+        "sidePanes", "canSplit", "splitFocusedSlot", "openInSplit", "closeSplit", "promoteSplit", "retrySplitOpen",
         "sendSidePrompt", "stopSideTurn", "resolvePaneApproval", "resolvePaneTaskGrant", "retryPaneSafer",
         "answerPaneQuestions", "skipPaneQuestions", "dismissPaneAsk",
         // workflow orchestration panel (docked at window level)
