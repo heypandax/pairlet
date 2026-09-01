@@ -8,6 +8,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
 import dev.ccpocket.app.data.SidePanes
@@ -130,8 +131,11 @@ class SplitDragTest {
         override fun openInSplit(s: DkSession, at: Int) { opened += s.sessionId to at }
     }
 
-    /** Drag the seed's "Fix stream parser test" row (s2, never the selected one) to [target]. */
-    private fun ComposeUiTest.dragSessionRowTo(target: (rootWidth: Float, sidebarRight: Float) -> Offset): DragSeed {
+    /** Drag the seed's "Fix stream parser test" row (s2, never the selected one) HORIZONTALLY to root
+     *  x = [targetX]. The y stays on the row's own line on purpose: the gesture's direction lock reads
+     *  the vector at slop-crossing, and a drag toward a target far above/below the row would read as the
+     *  list scrolling — which is also not how a human drags a row sideways into the chat area. */
+    private fun ComposeUiTest.dragSessionRowTo(targetX: (rootWidth: Float, sidebarRight: Float) -> Float): DragSeed {
         val model = DragSeed()
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
@@ -140,10 +144,10 @@ class SplitDragTest {
         val sidebar = onNodeWithTag("sidebar-list").fetchSemanticsNode()
         val sidebarRight = sidebar.positionInRoot.x + sidebar.size.width
         val rowOrigin = row.fetchSemanticsNode().positionInRoot
-        // performTouchInput speaks the ROW's coordinates; a root-space target translates through it
+        // performTouchInput speaks the ROW's coordinates; a root-space x translates through it
         row.performTouchInput {
             down(center)
-            moveTo(target(rootWidth, sidebarRight) - rowOrigin)
+            moveTo(Offset(targetX(rootWidth, sidebarRight) - rowOrigin.x, center.y))
             up()
         }
         waitForIdle()
@@ -151,9 +155,70 @@ class SplitDragTest {
     }
 
     @Test
+    fun trimmedColumnsStopCatchingDrops() {
+        // a closed third column's rect must not keep winning drops over whatever covers that area now
+        val drag = SplitDragState()
+        drag.setColumnBounds(0, Rect(0f, 0f, 100f, 700f))
+        drag.setColumnBounds(1, Rect(100f, 0f, 200f, 700f))
+        drag.setColumnBounds(2, Rect(200f, 0f, 300f, 700f))
+        drag.trimColumnBounds(2)
+        assertNull(resolveDropTarget(drag.columnBounds, Offset(250f, 350f)))
+        assertEquals(1, resolveDropTarget(drag.columnBounds, Offset(150f, 350f))?.column)
+    }
+
+    @Test
+    fun aPlainMouseClickOnARowIsAClickNotAConsumedDrag() = runComposeUiTest {
+        // the pin rows' documented trap: mouse drag slop is ~0.125dp, so a whole-row drag gesture turned
+        // any real click's 1px jitter into a consumed drag and the row never opened. The split drag must
+        // leave a sub-threshold press entirely alone — including one that wobbles a couple of pixels.
+        val model = DragSeed()
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        onAllNodes(hasText("Fix stream parser test", substring = true)).onFirst().performMouseInput {
+            moveTo(center)
+            press()
+            moveBy(Offset(2f, 1f)) // the jitter of a human click
+            release()
+        }
+        waitForIdle()
+        assertEquals("s2", model.selectedSessionId)
+        assertTrue(model.opened.isEmpty(), "a click must never open a split")
+    }
+
+    @Test
+    fun aVerticalTouchDragBelongsToTheListNotTheSplit() = runComposeUiTest {
+        // direction lock: a vertical swipe starting on a row is the list scrolling. The row gesture must
+        // abandon it (unconsumed) instead of crossing its slop first and cancelling the scroll.
+        val model = DragSeed()
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        onAllNodes(hasText("Fix stream parser test", substring = true)).onFirst().performTouchInput {
+            down(center)
+            moveBy(Offset(0f, 90f))
+            up()
+        }
+        waitForIdle()
+        assertTrue(model.opened.isEmpty(), "a vertical swipe must not open a split")
+        assertNotEquals("s2", model.selectedSessionId)
+    }
+
+    @Test
+    fun aDropWhileAModalIsOpenIsACancelledDrag() {
+        // the feedback overlay stands down under a modal; the drop itself must match it, or a release
+        // over the scrim would still open a column through the modal
+        val model = DragSeed().apply { showSettings = true }
+        val s = DkSession("s2", "/w", "Fix stream parser test")
+        val drag = SplitDragState()
+        drag.setColumnBounds(0, Rect(100f, 0f, 400f, 700f))
+        drag.begin(s, Offset(150f, 350f))
+        performDrop(model, s, drag)
+        assertTrue(model.opened.isEmpty(), "a drop through a modal must be a no-op")
+    }
+
+    @Test
     fun droppingOnTheRightHalfOpensTheSplitToTheRight() = runComposeUiTest {
         // 80px from the right edge of the window = deep inside the sole chat column's RIGHT half
-        val model = dragSessionRowTo { w, _ -> Offset(w - 80f, 300f) }
+        val model = dragSessionRowTo { w, _ -> w - 80f }
         assertEquals(listOf("s2" to 1), model.opened)
     }
 
@@ -162,14 +227,14 @@ class SplitDragTest {
         // just inside the chat column's left edge — its left half for any width the shell renders at.
         // The drop is a SPLIT, not the row's click: the selection must not move (the old centre zone
         // is gone on purpose; switching sessions stays on the ordinary click, issue #336).
-        val model = dragSessionRowTo { _, sidebarRight -> Offset(sidebarRight + 60f, 300f) }
+        val model = dragSessionRowTo { _, sidebarRight -> sidebarRight + 60f }
         assertEquals(listOf("s2" to 0), model.opened)
         assertNotEquals("s2", model.selectedSessionId)
     }
 
     @Test
     fun aDragReleasedOverTheSidebarIsACancelledDrag() = runComposeUiTest {
-        val model = dragSessionRowTo { _, sidebarRight -> Offset(sidebarRight - 60f, 300f) }
+        val model = dragSessionRowTo { _, sidebarRight -> sidebarRight - 60f }
         assertTrue(model.opened.isEmpty(), "letting go before the chat area must not open a split")
         assertNotEquals("s2", model.selectedSessionId)
     }

@@ -51,6 +51,7 @@ import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1050,7 +1051,7 @@ private fun SessionRow(
     // grouped, so "no groups and no rename" no longer means "no menu".
     // #311 widened it again: "Open in split" is available on any row while the split has room, so a row
     // with no rename/group/archive verbs still earns a menu.
-    val splittable = model.canSplit && model.sidePanes.none { it.sessionId == s.sessionId } && s.sessionId != model.selectedSessionId
+    val splittable = splittableNow(model, s)
     if (menuGroups.isEmpty() && !canRename && !canArchive && !splittable) { SessionRowBody(model, s, selected, indented, onClick); return }
     val openInSplit = stringResource(Res.string.split_open)
     val rename = stringResource(Res.string.session_rename)
@@ -1088,23 +1089,31 @@ private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean,
     val hovered by src.collectIsHoveredAsState()
     val bg = if (selected || hovered) Tok.raised else Color.Transparent
     // drag-to-split: press a session row and drag it over the chat area — the hovered column splits
-    // into two drop halves (left = new column to its left, right = to its right; issue #336). A click
-    // never crosses the drag slop, so the row's behaviour is untouched.
-    // Position math rides the ROW's coordinate space: the gesture keeps delivering events here after
-    // the pointer leaves the sidebar, and origin + event position = pointer in root coordinates.
+    // into two drop halves (left = new column to its left, right = to its right; issue #336). NOT
+    // detectDragGestures: its mouse slop (~0.125dp) turns any real click's jitter into a consumed drag
+    // (the pin rows' documented trap), and its first vertical touch move steals the list's scroll —
+    // sessionRowSplitDrag watches without consuming until a real horizontal drag declares itself.
+    // Coordinates ride a plain Ref (not snapshot state): every layout pass repositions rows, and only
+    // the drag ever reads it.
     val drag = LocalSplitDrag.current
-    var origin by remember(s.sessionId) { mutableStateOf(Offset.Zero) }
+    val rowCoords = remember(s.sessionId) { androidx.compose.ui.node.Ref<androidx.compose.ui.layout.LayoutCoordinates>() }
+    // A row can leave the composition MID-DRAG (a Sessions push archives it / drops it from RECENTS):
+    // the gesture coroutine dies with it and neither end nor cancel ever runs, freezing the highlight
+    // over the chat area. Disposal is the one hook that still fires — release the drag it owned.
+    DisposableEffect(s.sessionId) {
+        onDispose { if (drag.session?.sessionId == s.sessionId) drag.clear() }
+    }
     Box(
         Modifier.fillMaxWidth().height(32.dp).hoverable(src).clickable(onClick = onClick)
-            .onGloballyPositioned { origin = it.positionInRoot() }
-            .pointerInput(s.sessionId) {
-                detectDragGestures(
-                    onDragStart = { drag.begin(s, origin + it) },
-                    onDrag = { change, _ -> drag.moveTo(origin + change.position) },
-                    onDragEnd = { performDrop(model, s, drag); drag.clear() },
-                    onDragCancel = { drag.clear() },
-                )
-            }
+            .onGloballyPositioned { rowCoords.value = it }
+            .sessionRowSplitDrag(
+                key = s.sessionId,
+                coords = { rowCoords.value },
+                begin = { drag.begin(s, it) },
+                move = { drag.moveTo(it) },
+                end = { performDrop(model, s, drag); drag.clear() },
+                cancel = { drag.clear() },
+            )
             .background(bg),
     ) {
         if (selected) {

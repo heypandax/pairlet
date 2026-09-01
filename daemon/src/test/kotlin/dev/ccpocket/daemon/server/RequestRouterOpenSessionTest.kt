@@ -112,7 +112,7 @@ class RequestRouterOpenSessionTest {
     @Test
     fun a_directory_with_no_history_opens_a_new_session() = runBlocking {
         val fresh = Files.createTempDirectory("ccp-open-fresh") // no ~/.claude project, no rollouts — nothing
-        val emitted = Collections.synchronizedList(mutableListOf<Frame>())
+        val emitted = java.util.concurrent.CopyOnWriteArrayList<Frame>() // COW, not synchronizedList: assertions iterate while daemon coroutines still emit (CME)
         router(CoroutineScope(Dispatchers.Default)).handle(OpenSession(fresh.toString()), { emitted += it })
 
         val live = awaitLive(emitted)
@@ -129,7 +129,7 @@ class RequestRouterOpenSessionTest {
         // must succeed (proof the daemon expanded it internally), but the ANNOUNCE must echo "~"
         // untouched: the phone's #219 guard matches the exact string it sent, and a home-expanded
         // announce is the "new session from the ~ anchor times out" bug this pins against.
-        val emitted = Collections.synchronizedList(mutableListOf<Frame>())
+        val emitted = java.util.concurrent.CopyOnWriteArrayList<Frame>() // COW, not synchronizedList: assertions iterate while daemon coroutines still emit (CME)
         router(CoroutineScope(Dispatchers.Default)).handle(OpenSession("~"), { emitted += it })
 
         val live = awaitLive(emitted)
@@ -139,7 +139,7 @@ class RequestRouterOpenSessionTest {
 
     @Test
     fun a_path_without_an_existing_parent_is_bad_workdir() = runBlocking {
-        val emitted = Collections.synchronizedList(mutableListOf<Frame>())
+        val emitted = java.util.concurrent.CopyOnWriteArrayList<Frame>() // COW, not synchronizedList: assertions iterate while daemon coroutines still emit (CME)
         router(CoroutineScope(Dispatchers.Default)).handle(OpenSession("/no/such/ccp-parent/child"), { emitted += it })
 
         val err = emitted.filterIsInstance<PocketError>().firstOrNull()
@@ -152,7 +152,7 @@ class RequestRouterOpenSessionTest {
     fun a_guest_open_outside_its_shared_root_is_refused_at_the_router_too() = runBlocking {
         val root = Files.createTempDirectory("ccp-open-root")
         val outside = Files.createTempDirectory("ccp-open-outside")
-        val emitted = Collections.synchronizedList(mutableListOf<Frame>())
+        val emitted = java.util.concurrent.CopyOnWriteArrayList<Frame>() // COW, not synchronizedList: assertions iterate while daemon coroutines still emit (CME)
         router(CoroutineScope(Dispatchers.Default))
             .handle(OpenSession(outside.toString()), { emitted += it }, origin = "share:alex", guestScope = guestScope(root))
 
@@ -166,7 +166,7 @@ class RequestRouterOpenSessionTest {
     fun a_guest_open_of_a_fresh_subfolder_under_its_root_still_works() = runBlocking {
         val root = Files.createTempDirectory("ccp-open-root2")
         val sub = Files.createDirectory(root.resolve("fresh-project")) // exists, zero history
-        val emitted = Collections.synchronizedList(mutableListOf<Frame>())
+        val emitted = java.util.concurrent.CopyOnWriteArrayList<Frame>() // COW, not synchronizedList: assertions iterate while daemon coroutines still emit (CME)
         router(CoroutineScope(Dispatchers.Default))
             .handle(OpenSession(sub.toString()), { emitted += it }, origin = "share:alex", guestScope = guestScope(root))
 

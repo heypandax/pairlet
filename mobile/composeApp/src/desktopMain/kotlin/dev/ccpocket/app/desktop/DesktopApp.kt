@@ -26,6 +26,8 @@ import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +52,7 @@ import dev.ccpocket.app.resources.dir_picker_choose_here
 import dev.ccpocket.app.resources.dir_picker_remote_title
 import dev.ccpocket.app.resources.show_sidebar
 import dev.ccpocket.app.resources.your_computer
+import dev.ccpocket.app.data.paneIndexForSlot
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.Tok
@@ -127,20 +130,26 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 // new column to its left, the chat included. Equal widths on purpose — still no
                 // drag-to-resize tiling; what dragging buys is where a NEW column appears (see
                 // [SplitDropColumn]/[SplitDropOverlay] and the sidebar row's drag gesture).
-                split.isEmpty() -> SplitDropColumn(drag, 0, Modifier.weight(1f)) { ChatPane(model, Modifier.fillMaxSize()) }
                 else -> {
+                    // one path for 1..N columns — the single-chat case is the loop's size-0 degenerate
+                    // form, and the focused accent only means anything once there is a second column
                     val focusedAt = model.splitFocusedSlot.coerceIn(0, split.size)
                     for (slot in 0..split.size) {
                         if (slot > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
                         if (slot == focusedAt) {
-                            SplitDropColumn(drag, slot, Modifier.weight(1f)) { ChatPane(model, Modifier.fillMaxSize(), focused = true) }
+                            SplitDropColumn(drag, slot, Modifier.weight(1f)) { ChatPane(model, Modifier.fillMaxSize(), focused = split.isNotEmpty()) }
                         } else {
-                            val pane = split[if (slot > focusedAt) slot - 1 else slot]
+                            val pane = split[paneIndexForSlot(slot, focusedAt)]
                             SplitDropColumn(drag, slot, Modifier.weight(1f)) { SplitPane(model, pane, Modifier.fillMaxSize()) }
                         }
                     }
                 }
             }
+            // Retract the bounds of columns that no longer render (a closed column, the watch branch):
+            // [SplitDragState.columnBounds] otherwise only ever grows, and a stale rect from a closed
+            // third column kept catching drops over whatever now covers that area (the docked workflow
+            // panel), where resolveDropTarget promises null.
+            SideEffect { drag.trimColumnBounds(if (watch != null) 0 else split.size + 1) }
             // workflow orchestration (issue #106): a persistent ~360dp docked panel — the chat stays
             // fully usable beside it (docked beats overlay, per the workflow-view handoff)
             val dockedWf = model.dockedWorkflowRunId?.let { model.workflowRuns[it] }
@@ -150,6 +159,10 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
             }
         }
         }
+        // drag-to-split feedback: composed right after the columns, so it paints above them and BELOW
+        // every modal/popover that follows — and both it and the drop itself stand down entirely while
+        // any overlay is open, so a popover can neither hide the highlight nor be dropped through
+        SplitDropOverlay(drag, model)
         if (model.showNewSession) {
             LaunchedEffect(Unit) { model.fetchModels(AgentKind.CLAUDE) }
             // anchored under the sidebar's New-session row (header 48 + row 32)
@@ -271,9 +284,6 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 )
             }
         }
-        // drag-to-split feedback: above every column, below every modal — a drag in progress must not
-        // be able to hide behind a popover, and a popover must not be droppable-through
-        SplitDropOverlay(drag, model)
     }
 }
 
@@ -292,9 +302,13 @@ private fun SplitDropColumn(drag: SplitDragState, index: Int, modifier: Modifier
 @Composable
 private fun SplitDropOverlay(drag: SplitDragState, model: DesktopModel) {
     val s = drag.session ?: return
-    val target = resolveDropTarget(drag.columnBounds, drag.position) ?: return
+    if (model.anyOverlayOpen) return // a modal owns the screen — no highlight under it, no drop through it
+    // the guards run BEFORE anything reads drag.position: an unsplittable drag must not recompose this
+    // on every pointer move; derivedStateOf then collapses moves WITHIN one half to a single target
     if (!splittableNow(model, s)) return
-    val rect = zoneRect(drag.columnBounds[target.column], target.zone)
+    val target by remember(drag) { derivedStateOf { resolveDropTarget(drag.columnBounds, drag.position) } }
+    val t = target ?: return
+    val rect = zoneRect(drag.columnBounds[t.column], t.zone)
     // bounds are root coordinates; subtract this overlay's own root origin so the tint lands exactly
     // on the zone even if the shell ever grows chrome above the main Box
     var origin by remember { mutableStateOf(Offset.Zero) }

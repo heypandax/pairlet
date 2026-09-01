@@ -43,7 +43,7 @@ daemon 对每台设备只保持一条 E2E 会话，第二次握手会让第一�
 
 「聚焦」= 一次普通的 `openSession(resumeId)`，daemon 用它已经持有的会话重挂，不 fork 不重启。让出主区的那个会话**不会**自动搬进空出来的列：`openSession` 在切换时本来就会回收空闲会话，同一口气再把它开成一列，等于让同一个会话的 `CloseSession` 与 `OpenSession` 同时在飞。把它送回列里只差一个手势（侧栏「在分屏中打开」），而那个手势是有序的。
 
-同理，晋升时那一列走 `detach` 而不是 `close`——`close` 会发 `CloseSession`，和紧接着的重挂抢同一个会话。
+晋升的列释放内联在聚焦咽喉 `releaseToFocus` 里（不发 `CloseSession`，焦点走进那一列的位置）；`detach` 只剩一个修复用途：晋升被 `openSession` 的同步拒绝（#235 幂等 / 不支持的后端）挡下时，把与焦点会话重复的列撤掉，不碰会话本身。
 
 ## 拖拽分屏（issue #336 修订）
 

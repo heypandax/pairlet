@@ -49,9 +49,12 @@ class SessionRegistryRewindTest {
 
     private val workdir = "/tmp/ccp-rewind-reg"
 
-    /** Records what the daemon answered THIS client. */
+    /** Records what the daemon answered THIS client. A COW list, not a synchronizedList: the registry
+     *  keeps emitting on [Dispatchers.Default] while an assertion iterates, and a synchronizedList only
+     *  locks the writes — [last]'s iteration raced them into a ConcurrentModificationException (CI flake).
+     *  COW iteration walks a snapshot, so a late frame can never break an assertion mid-walk. */
     private class Recorder : OutboundSink {
-        val frames: MutableList<Frame> = Collections.synchronizedList(mutableListOf())
+        val frames: MutableList<Frame> = java.util.concurrent.CopyOnWriteArrayList()
         override suspend fun emit(f: Frame) { frames += f }
         inline fun <reified T : Frame> last(): T? = frames.filterIsInstance<T>().lastOrNull()
     }
