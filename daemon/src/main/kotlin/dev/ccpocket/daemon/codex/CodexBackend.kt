@@ -342,6 +342,22 @@ class CodexBackend(
 
     private suspend fun handleNotification(method: String, params: JsonObject?): List<AgentEvent> {
         params ?: return emptyList()
+        if (isForeignThread(params)) {
+            // Codex multiplexes spawned sub-agent threads onto the app-server connection that owns the
+            // parent. Their turn/started and turn/completed notifications are NOT boundaries of the
+            // thread cc-pocket explicitly opened: treating them as such overwrites currentTurnId, makes
+            // interrupt target the child, and closes this one-shot process before the parent consumes the
+            // child's final response (#331). Keep only the file preview needed if that child asks the user
+            // to approve a patch; the JSON-RPC approval itself is still handled by request id below.
+            if (method == "item/started") {
+                params.obj("item")?.takeIf { it.str("type") == "fileChange" }?.let(::captureFileChange)
+            }
+            log.debug(
+                "ignoring $method for foreign Codex thread ${params.str("threadId")?.take(8)}… " +
+                    "(attached=${threadId?.take(8)}…)",
+            )
+            return emptyList()
+        }
         return when (method) {
             "thread/started" -> { // backup path: usually the thread/start RESULT lands first
                 if (threadId == null) onThreadReady(buildJsonObject { params.obj("thread")?.let { put("thread", it) } }) else emptyList()
@@ -396,6 +412,15 @@ class CodexBackend(
         }
     }
 
+    /** app-server v2 requires threadId on every turn/item/error/usage notification. Missing ids are kept
+     * for compatibility with older builds and synthetic tests; an explicit different id is always a
+     * spawned/foreign thread and must never mutate this backend's parent lifecycle. */
+    private fun isForeignThread(params: JsonObject): Boolean {
+        val eventThreadId = params.str("threadId") ?: return false
+        val attachedThreadId = threadId ?: return false
+        return eventThreadId != attachedThreadId
+    }
+
     private fun onItemStarted(item: JsonObject?): List<AgentEvent> {
         item ?: return emptyList()
         val id = item.str("id")
@@ -417,19 +442,28 @@ class CodexBackend(
                 }),
             )
             "fileChange" -> {
-                val changes = item.arr("changes")
-                val path = changes?.firstNotNullOfOrNull { (it as? JsonObject)?.str("path") }
-                val diff = changes?.mapNotNull { (it as? JsonObject)?.str("diff") }?.joinToString("\n")?.takeIf { it.isNotBlank() }
-                if (id != null) {
-                    path?.let { fileChangePaths[id] = it }
-                    diff?.let { fileChangeDiffs[id] = it.take(MAX_DIFF_CHARS) } // cap so the approval frame stays under the relay limit
-                }
+                val path = captureFileChange(item)
                 listOf(AgentEvent.AssistantToolUse(id, "Edit", buildJsonObject { path?.let { put("file_path", it) } }))
             }
             "mcpToolCall" -> listOf(AgentEvent.AssistantToolUse(id, item.str("toolName") ?: "tool", null))
             "webSearch" -> listOf(AgentEvent.AssistantToolUse(id, "WebSearch", null))
             else -> emptyList() // agentMessage/reasoning flow through deltas; other item kinds are not surfaced
         }
+    }
+
+    /** Cache the preview before item/.../requestApproval references it by itemId. This also runs for a
+     * foreign child thread: its raw edit stays out of the parent chat, but its human approval card still
+     * carries the real target and typed diff instead of becoming an unscoped, context-free request. */
+    private fun captureFileChange(item: JsonObject): String? {
+        val id = item.str("id")
+        val changes = item.arr("changes")
+        val path = changes?.firstNotNullOfOrNull { (it as? JsonObject)?.str("path") }
+        val diff = changes?.mapNotNull { (it as? JsonObject)?.str("diff") }?.joinToString("\n")?.takeIf { it.isNotBlank() }
+        if (id != null) {
+            path?.let { fileChangePaths[id] = it }
+            diff?.let { fileChangeDiffs[id] = it.take(MAX_DIFF_CHARS) } // cap so the approval frame stays under the relay limit
+        }
+        return path
     }
 
     private fun onItemCompleted(item: JsonObject?): List<AgentEvent> {

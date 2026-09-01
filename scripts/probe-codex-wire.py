@@ -2,8 +2,12 @@
 """codex app-server 行为回归探针 —— 升级 codex CLI 后跑一次，防依赖漂移。
 
 `codex app-server` 是**官方标注 experimental** 的 JSON-RPC 接口，版本间会漂移。daemon 的
-CodexBackend（daemon/src/main/kotlin/dev/ccpocket/daemon/codex/CodexBackend.kt）押了六条未写进
+CodexBackend（daemon/src/main/kotlin/dev/ccpocket/daemon/codex/CodexBackend.kt）押了七条未写进
 正式契约的行为，任一条漂移都会让 App 静默变坏：
+
+  thread_scope turn/item/error/usage 通知的 v2 schema 必须把 threadId 列为必填。app-server 会把
+               spawn_agent 子线程复用到父线程连接；CodexBackend 靠这个字段隔离父子生命周期，
+               否则子回合完成会被误判为父回合完成并提前释放 one-shot writer（issue #331）
 
   handshake   initialize 应答 → `initialized` 通知 → thread/start，响应 result.thread.id 非空。
               这条是所有 Codex 会话的地基：onThreadReady 拿不到 id，buffered 的第一条 prompt
@@ -37,7 +41,7 @@ CodexBackend（daemon/src/main/kotlin/dev/ccpocket/daemon/codex/CodexBackend.kt�
 说的是 CodexBackend 那套方言：裸 {id, method, params}，**不带 `jsonrpc` 字段**（与
 probe-codex-concurrent.py 一致）。
 
-用法：python3 scripts/probe-codex-wire.py [handshake|steer_stale|fork|handoff|unknown|all]（默认 all）
+用法：python3 scripts/probe-codex-wire.py [thread_scope|handshake|steer_stale|fork|handoff|unknown|all]（默认 all）
       CC_POCKET_CODEX_BIN=/path/to/codex 可覆盖二进制。
 退出码：0 全绿 / 1 有 FAIL（行为漂移）/ 2 缺依赖（找不到 codex）。
 探针在临时目录起真实 codex app-server（approvalPolicy=never + sandbox=read-only，只碰自己新建的
@@ -74,6 +78,58 @@ def excerpt(obj, limit=360):
 
 def show(tag, obj):
     print("        %s %s" % (tag, excerpt(obj)))
+
+
+THREAD_SCOPED_NOTIFICATIONS = (
+    "TurnStartedNotification",
+    "TurnCompletedNotification",
+    "ItemStartedNotification",
+    "ItemCompletedNotification",
+    "AgentMessageDeltaNotification",
+    "ReasoningTextDeltaNotification",
+    "ReasoningSummaryTextDeltaNotification",
+    "ThreadTokenUsageUpdatedNotification",
+    "ErrorNotification",
+)
+
+
+def check_thread_scope_schema(cwd):
+    """⓪ every notification that can mutate a turn is explicitly routable to its owning thread."""
+    print("── thread_scope：父子线程通知的 threadId 为 v2 必填字段 ──")
+    schema_dir = os.path.join(cwd, "app-server-schema")
+    try:
+        proc = subprocess.run(
+            [CODEX, "app-server", "generate-json-schema", "--experimental", "--out", schema_dir],
+            capture_output=True, text=True, timeout=RPC_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return check("状态通知可按 threadId 隔离", False, "schema 生成失败：%s" % exc)
+    if proc.returncode != 0:
+        return check("状态通知可按 threadId 隔离", False,
+                     "schema exit=%d stderr=%s" % (proc.returncode, excerpt(proc.stderr.strip(), 240)))
+
+    missing_files = []
+    missing_required = []
+    for name in THREAD_SCOPED_NOTIFICATIONS:
+        path = os.path.join(schema_dir, "v2", name + ".json")
+        if not os.path.isfile(path):
+            missing_files.append(name)
+            continue
+        with open(path, encoding="utf-8") as fh:
+            schema = json.load(fh)
+        if "threadId" not in (schema.get("required") or []):
+            missing_required.append(name)
+
+    detail = []
+    if missing_files:
+        detail.append("schema 缺失=" + ",".join(missing_files))
+    if missing_required:
+        detail.append("threadId 非必填=" + ",".join(missing_required))
+    return check(
+        "状态通知可按 threadId 隔离",
+        not detail,
+        "%d 类通知均必填 threadId" % len(THREAD_SCOPED_NOTIFICATIONS) if not detail else "；".join(detail),
+    )
 
 
 class Server:
@@ -409,8 +465,8 @@ def check_unknown(srv):
 def main():
     global CODEX
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
-    if which not in ("all", "handshake", "steer_stale", "fork", "handoff", "unknown"):
-        print("用法：python3 scripts/probe-codex-wire.py [handshake|steer_stale|fork|handoff|unknown|all]",
+    if which not in ("all", "thread_scope", "handshake", "steer_stale", "fork", "handoff", "unknown"):
+        print("用法：python3 scripts/probe-codex-wire.py [thread_scope|handshake|steer_stale|fork|handoff|unknown|all]",
               file=sys.stderr)
         return 2
     resolved = shutil.which(CODEX) if CODEX else None
@@ -429,27 +485,33 @@ def main():
     print("workdir : %s" % cwd)
     print("wire log: %s\n" % log_path)
 
-    srv = Server(cwd, log)
+    srv = None
     try:
-        thread_id = check_handshake(srv, cwd)
-        if which in ("all", "handshake") and thread_id:
+        if which in ("all", "thread_scope"):
+            check_thread_scope_schema(cwd)
             print()
-        # steer_stale / handoff / fork 都要一份真实落盘的 rollout；thread/start 本身只创建内存
-        # thread，第一轮 turn 才落盘。单跑后两项也复用 steer_stale 的唯一真实 turn 建前置。
-        if which in ("all", "steer_stale", "handoff", "fork"):
-            check_steer_stale(srv, thread_id, cwd)
-            print()
-        if which in ("all", "fork"):
-            check_fork(srv, thread_id)
-            print()
-        if which in ("all", "unknown"):
-            check_unknown(srv)
-            print()
-        # Handoff exits the primary process, so it is deliberately LAST in `all`.
-        if which in ("all", "handoff"):
-            check_handoff(srv, thread_id, cwd)
+        if which != "thread_scope":
+            srv = Server(cwd, log)
+            thread_id = check_handshake(srv, cwd)
+            if which in ("all", "handshake") and thread_id:
+                print()
+            # steer_stale / handoff / fork 都要一份真实落盘的 rollout；thread/start 本身只创建内存
+            # thread，第一轮 turn 才落盘。单跑后两项也复用 steer_stale 的唯一真实 turn 建前置。
+            if which in ("all", "steer_stale", "handoff", "fork"):
+                check_steer_stale(srv, thread_id, cwd)
+                print()
+            if which in ("all", "fork"):
+                check_fork(srv, thread_id)
+                print()
+            if which in ("all", "unknown"):
+                check_unknown(srv)
+                print()
+            # Handoff exits the primary process, so it is deliberately LAST in `all`.
+            if which in ("all", "handoff"):
+                check_handoff(srv, thread_id, cwd)
     finally:
-        srv.kill()
+        if srv is not None:
+            srv.kill()
         log.close()
 
     print("\n" + "=" * 78)
@@ -466,7 +528,7 @@ def main():
         print("完整 wire：%s" % log_path)
         return 1
     if which == "all":
-        print("codex app-server wire 契约完好 —— CodexBackend 依赖的六条行为全部成立。")
+        print("codex app-server wire 契约完好 —— CodexBackend 依赖的七条行为全部成立。")
     else:
         print("codex app-server wire 契约完好 —— 本次请求的行为及其前置检查全部成立。")
     print("完整 wire：%s" % log_path)
