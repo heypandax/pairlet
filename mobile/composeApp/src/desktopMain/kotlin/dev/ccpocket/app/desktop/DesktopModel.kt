@@ -388,6 +388,10 @@ interface DesktopModel {
      *  conversation and killed the turn the user was watching one column over. */
     fun stopSideTurn(pane: SidePane) {}
 
+    /** Switch a pane's OWN model — the composer chip in a column. Pane-keyed like every side verb, so
+     *  the popover's pick can never land on the focused conversation. */
+    fun switchSideModel(pane: SidePane, name: String) {}
+
     /** Decide a pane's approval. Keyed by the ASK the column is holding — not by whatever the focused
      *  conversation happens to be blocked on, and not by an inbox row that may not be there. */
     fun resolvePaneApproval(ask: PermissionAsk, allow: Boolean, remember: Boolean = false) {}
