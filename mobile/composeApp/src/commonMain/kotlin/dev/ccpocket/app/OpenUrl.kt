@@ -30,6 +30,10 @@ const val SETUP_GUIDE_URL = "https://heypandax.github.io/cc-pocket/"
 const val RELEASES_URL = "https://github.com/heypandax/cc-pocket/releases/latest"
 const val APP_STORE_URL = "https://apps.apple.com/app/id6778773969"
 
+// Linked from the first-run data-disclosure gate and from Settings — guideline 5.1.1(i) requires the
+// policy to be reachable from inside the app, not only from the store listing.
+const val PRIVACY_POLICY_URL = "https://heypandax.github.io/cc-pocket/privacy.html"
+
 /**
  * Small, user-visible environment snapshot that lets public support tailor button/location guidance.
  * It deliberately excludes session/conversation ids, titles, project names, paths, prompts, file
