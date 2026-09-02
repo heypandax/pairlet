@@ -843,10 +843,77 @@ class RepoDesktopModel(
 
     override fun selectSession(s: DkSession) { selectSessionReporting(s) }
 
+    /**
+     * Make [dir]'s project the LIVE-LISTED one when a session navigation lands outside it — the
+     * [PocketRepository.switchToSession] convention (repoint sessionsDir + fresh list), extended to the
+     * sidebar's session paths. Without it, `g.current` — and with it the #158/#202/#119 right-click
+     * verbs — only ever followed PROJECT clicks and the ⌘K switcher; a session click, a pin jump or a
+     * ⌘[/⌘] history step into another project left the previous dir "current" and the one the user is
+     * demonstrably in reduced to its non-current menu (just "Open in split").
+     * The OLD group is snapshotted first, so falling back from live rows keeps rows (an unsnapshotted
+     * group would render empty and the sidebar hides empty non-current groups).
+     */
+    private fun focusListedDir(dir: String) {
+        val cur = repo.sessionsDir.value
+        if (cur != null && sameDir(cur, dir)) return
+        snapshotCurrent()
+        repo.sessionsDir.value = dir
+        repo.listSessions(dir)
+    }
+
+    // ── session navigation history (the title bar's ‹ ›) ─────────────────────────────────────────
+    // Recorded off the sessionKey echo rather than the click handlers: every way a session opens —
+    // rows, pins, the palette, a brand-new ⌘N session — lands here through one seam, id in hand.
+    // The cursor-entry guard doubles as the back/forward re-record suppressor: [openNavEntry] moves
+    // the cursor BEFORE opening, so the landing echo matches the cursor entry and is not a new visit.
+    // In-memory on purpose — history is a within-run trail, not state worth resurrecting on launch.
+    private data class NavEntry(val accountId: String, val sessionId: String, val cwd: String, val title: String?, val agent: AgentKind)
+    private val navStack = mutableStateListOf<NavEntry>()
+    private var navCursor by mutableStateOf(-1)
+
+    init {
+        scope.launch {
+            // the PAIR, not the key alone: an open pins sessionKey before SessionLive brings workdir, so
+            // the very first session of a run would slip through a key-only flow (wd still null at pin time)
+            snapshotFlow { repo.sessionKey.value to repo.workdir.value }.collect { (id, wd) ->
+                val acct = repo.paired.value?.accountId ?: return@collect
+                if (id == null || wd == null || navStack.getOrNull(navCursor)?.sessionId == id) return@collect
+                while (navStack.size > navCursor + 1) navStack.removeAt(navStack.size - 1) // truncate the forward branch
+                navStack += NavEntry(acct, id, wd, repo.chatTitle.value, repo.sessionAgent.value ?: AgentKind.CLAUDE)
+                if (navStack.size > MAX_NAV_HISTORY) navStack.removeAt(0)
+                navCursor = navStack.size - 1
+            }
+        }
+    }
+
+    override val canGoBack: Boolean get() = navCursor > 0
+    override val canGoForward: Boolean get() = navCursor < navStack.size - 1
+    override fun goBack() { if (canGoBack) openNavEntry(navCursor - 1) }
+    override fun goForward() { if (canGoForward) openNavEntry(navCursor + 1) }
+
+    /** Reopen [navStack]'s [i]th entry — [openPin]'s open path (same or cross machine), minus recording. */
+    private fun openNavEntry(i: Int) {
+        val e = navStack[i]
+        navCursor = i // before the open — the landing echo must read this entry (see the recorder above)
+        navGen++ // user navigation — stop an in-flight RECENT refill from repointing the list (#102)
+        if (e.accountId == repo.paired.value?.accountId) {
+            focusDir(e.cwd)
+            focusListedDir(e.cwd) // a history step into another project brings its listing (and menus) along
+            optimisticSelectedId = e.sessionId
+            repo.openSession(wd = e.cwd, resumeId = e.sessionId, title = e.title, agent = e.agent)
+            return
+        }
+        optimisticSelectedId = null // another machine's session — nothing in the current list to pre-light
+        val target = repo.pairedList.firstOrNull { it.accountId == e.accountId } ?: return
+        switchMachine(target)
+        repo.requestOpenSession(e.cwd, e.sessionId, title = e.title, agent = e.agent)
+    }
+
     /** [selectSession] with [PocketRepository.openSession]'s verdict kept — promotion needs it. */
     private fun selectSessionReporting(s: DkSession): Boolean {
         navGen++ // user navigation — stop an in-flight RECENT refill from repointing the list (#102)
         focusDir(s.cwd) // clicking a session focuses its project too, so a following ⌘N lands there
+        focusListedDir(s.cwd) // …and makes it the listed one, so its right-click verbs come along
         optimisticSelectedId = s.sessionId // light the clicked row NOW, don't wait out the open (#82)
         return repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
     }
@@ -926,6 +993,7 @@ class RepoDesktopModel(
         navGen++ // user navigation — stop an in-flight RECENT refill from repointing the list (#102)
         if (p.accountId == repo.paired.value?.accountId) {
             focusDir(p.cwd) // jumping to a pin focuses its project, so a following ⌘N lands there
+            focusListedDir(p.cwd) // …and lists it, so the landing project's right-click verbs work
             optimisticSelectedId = p.sessionId // same as selectSession: light the target row through the open (#82)
             repo.openSession(wd = p.cwd, resumeId = p.sessionId, title = p.title, agent = p.agent)
             return
@@ -1454,7 +1522,11 @@ class RepoDesktopModel(
         const val K_TERMINAL_EMBED = "desktop_terminal_embed" // "1"/absent = embedded default, "0" = external (#153)
         const val K_TERMINAL_HEIGHT = "desktop_terminal_height" // dock height as a ChatPane fraction (#153)
         const val K_MENUBAR = "desktop_menubar_enabled" // menu-bar presence opt-out (issue #151); absent = on
+        // the sidebar's hidden-to-the-edge state (issue #62). Unchanged key/values: DesktopApp wrote exactly
+        // this before the chrome-v2 redesign lifted the state onto the model, so nobody's sidebar flips back.
+        const val K_SIDEBAR_COLLAPSED = "desktop_sidebar_collapsed"
         const val MAX_RECENT = 6 // RECENT groups kept per machine — enough context, never a wall
+        const val MAX_NAV_HISTORY = 50 // back/forward entries kept — a within-run trail, oldest dropped first
         const val DRAFT_DEBOUNCE_MS = 400L // composer draft persist debounce — matches the mobile composer (#88)
         const val REFILL_ECHO_TIMEOUT_MS = 4_000L // per-dir wait for the restored-RECENT sweep's listing echo (#102)
         const val REFILL_POLL_MS = 50L // echo poll cadence — snapshot notifications may not be pumping yet (#102)

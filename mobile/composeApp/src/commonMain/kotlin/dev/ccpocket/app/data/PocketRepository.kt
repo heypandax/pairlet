@@ -3157,6 +3157,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
                 f.sessionId?.let { sessionKey.value = it }
+                // The LISTED project follows the conversation: whatever path opened this session — a row
+                // click, a pin, ⌘[ history, a push tap, a launch restore — its project becomes the listed
+                // one, so everything scoped to "the current project" (the sidebar's right-click verbs, ⌘N)
+                // means the project the user is demonstrably in. This is the one seam every open funnels
+                // through; per-path repoints (switchToSession's, the desktop's) remain as optimistic
+                // fast-paths and converge here. Skips: an already-matching dir (the common case — also
+                // keeps browse-another-project-while-chatting intact, since browsing lists AFTER the open),
+                // and observe views (watching a session must not hijack what the sidebar lists).
+                if (!f.observing && sessionsDir.value?.let { sameDirPath(it, f.workdir) } != true) {
+                    sessionsDir.value = f.workdir
+                    listSessions(f.workdir)
+                }
                 // The opener's title is only an optimistic seed: push/deep-link routes know no title at
                 // all, and a project row can be stale while Codex renames its thread. A new daemon sends
                 // transcript/index truth here; null from an older daemon deliberately keeps the seed.

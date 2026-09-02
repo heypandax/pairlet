@@ -465,6 +465,27 @@ interface DesktopModel {
     fun openProject(p: DkProject)
     fun selectSession(s: DkSession)
 
+    // ── window chrome: the sidebar's collapsed state ──────────────────────────────────────────────
+    // Lifted out of DesktopApp's local state by the desktop-chrome-v2 redesign: with no window-wide title
+    // bar left, the four top controls live in the SIDEBAR's own control row while it is open and re-home
+    // into the leftmost chat sub-header once it is collapsed. That second surface is rendered from a
+    // SidePaneModel in a split column, so "is the sidebar collapsed" has to be a MODEL fact rather than a
+    // value only the shell composable can see. Inert default: seed/preview models always render expanded.
+    val sidebarCollapsed: Boolean get() = false
+    /** Hide/show the sidebar — the control row's panel-left button, ⌘\, and the divider's collapse drag. */
+    fun setSidebarCollapsed(v: Boolean) {}
+
+    // ── session navigation history: the sidebar control row's ‹ › and ⌘[ / ⌘] ────────────────────
+    // Browser semantics over sessions that actually OPENED (recorded at the SessionLive echo, so every
+    // entry point counts — sidebar rows, pins, the palette, brand-new sessions). Inert defaults keep
+    // the seed/preview/test models untouched.
+    val canGoBack: Boolean get() = false
+    val canGoForward: Boolean get() = false
+    /** Reopen the previously visited session; no-op when the history has nothing behind the cursor. */
+    fun goBack() {}
+    /** Reopen the next session after a [goBack]; a fresh navigation truncates this branch. */
+    fun goForward() {}
+
     /** Remove a session row from the RECENT list — the row's hover ✕ (issue #62). Non-destructive: the
      *  transcript stays on the host and reopening its project resurfaces it. No-op for seed/preview models. */
     fun hideSession(s: DkSession) {}

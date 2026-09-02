@@ -281,6 +281,15 @@ private fun ApplicationScope.PocketShell() {
                 // the one it has. While the SHELL owns the keyboard AWT keeps the keystroke — the
                 // engine's own dispatcher forwards it, so the toggle works from either side.
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.J && connected -> { model.toggleEmbeddedTerminal(); true }
+                // ⌘[ / ⌘] step the session history — the control row's ‹ › (browser back/forward semantics)
+                e.type == KeyEventType.KeyDown && mod && e.key == Key.LeftBracket && connected -> { model.goBack(); true }
+                e.type == KeyEventType.KeyDown && mod && e.key == Key.RightBracket && connected -> { model.goForward(); true }
+                // ⌘\ hides/shows the sidebar. With the title bar gone (desktop chrome v2) the collapsed
+                // sidebar leaves NO chrome behind — this and the sub-header's own toggle are the way back,
+                // so the shortcut is deliberately not gated on `connected`: the ConnectPanel has no toggle.
+                e.type == KeyEventType.KeyDown && mod && e.key == Key.Backslash -> {
+                    model.setSidebarCollapsed(!model.sidebarCollapsed); true
+                }
                 // ⌘⇧R (the Review Center) must be tested BEFORE plain ⌘R: the refresh branch below
                 // matches Key.R whatever the modifiers, so the shifted case has to claim it first.
                 e.type == KeyEventType.KeyDown && mod && e.isShiftPressed && e.key == Key.R && connected -> {
