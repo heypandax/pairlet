@@ -115,14 +115,15 @@ fun statusLetter(op: String): String = when (op) {
 }
 
 fun statusColor(op: String): Color = when (op) {
-    "write" -> Tok.ok; "delete" -> Tok.danger; "notebook" -> Tok.tx2; else -> Tok.info
+    // M = warn（琥珀）：git 惯例的 modified 色；info 蓝保留给链接/plan 语义（设计稿 Files Browser v1 定案）
+    "write" -> Tok.ok; "delete" -> Tok.danger; "notebook" -> Tok.tx2; else -> Tok.warn
 }
 
 private fun statusBg(op: String): Color = when (op) {
     "write" -> Tok.ok.copy(alpha = 0.15f)
     "delete" -> Tok.danger.copy(alpha = 0.15f)
     "notebook" -> Tok.muted.copy(alpha = 0.20f)
-    else -> Tok.info.copy(alpha = 0.15f)
+    else -> Tok.warn.copy(alpha = 0.15f)
 }
 
 /** The daemon-shared contract ([dev.ccpocket.protocol.IMAGE_FILE_EXTENSIONS]): what it serves as
