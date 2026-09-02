@@ -118,6 +118,7 @@ import dev.ccpocket.app.resources.open_folder
 import dev.ccpocket.app.resources.running
 import dev.ccpocket.app.resources.session_rename
 import dev.ccpocket.app.resources.split_open
+import dev.ccpocket.app.resources.unpin_session
 import dev.ccpocket.app.resources.session_rename_hint
 import dev.ccpocket.app.resources.settings_title
 import dev.ccpocket.app.resources.support_title
@@ -371,6 +372,65 @@ private fun PinRow(
     val pending = live?.pending ?: 0
     val dim = !remote && model.activeComputer?.online == false
     val shape = RoundedCornerShape(8.dp)
+    // live wins the label: a rename (from this row's menu or anywhere else) lands here immediately,
+    // instead of the stored pin-time snapshot going stale until the session is re-pinned
+    val title = live?.title ?: p.title
+    // Right-click parity with the RECENT rows (the #119/#158/#202/#311 verbs), scoped the same way:
+    // rename / groups / archive only when the pin's session is in the LIVE-LISTED project — liveSession
+    // is the same "current machine's loaded list" fact RECENT's g.current encodes — and split stays a
+    // this-machine gesture. RECENT's "Remove from recents" maps to this row's own removal verb: Unpin.
+    var renaming by remember(p.sessionId) { mutableStateOf(false) }
+    val renameError = model.renameError(p.sessionId)
+    if (renaming || renameError != null) {
+        Column {
+            GroupNameInput(
+                initial = title,
+                hint = stringResource(Res.string.session_rename_hint),
+                onCommit = { model.renameSession(p.sessionId, it, p.cwd); renaming = false },
+                onCancel = { renaming = false; model.dismissRenameError() },
+            )
+            if (renameError != null) {
+                Text(
+                    renameError, color = Tok.danger, fontFamily = Dk.ui, fontSize = 10.sp, lineHeight = 13.sp,
+                    modifier = Modifier.padding(start = 22.dp, end = 12.dp, top = 2.dp, bottom = 3.dp),
+                )
+            }
+        }
+        return
+    }
+    val asSession = live ?: DkSession(p.sessionId, p.cwd, title, agent = p.agent)
+    val splittable = !remote && splittableNow(model, asSession)
+    // rename/archive carry the pin's OWN cwd, so they work whatever the listing points at (same lift as
+    // the RECENT rows). Groups stay current-list only — the daemon lists groups per listed directory.
+    val inCurrentList = !remote && model.sessions.any { it.sessionId == p.sessionId }
+    val canRename = !remote && model.canRenameSessions && asSession.agent == AgentKind.CLAUDE
+    val menuGroups = if (inCurrentList && model.canEditGroups) model.customGroups else emptyList()
+    val canArchive = !remote && model.canArchiveSessions
+    val openInSplit = stringResource(Res.string.split_open)
+    val rename = stringResource(Res.string.session_rename)
+    val moveTo = stringResource(Res.string.group_move_to)
+    val moveOut = stringResource(Res.string.group_move_out)
+    val archive = stringResource(Res.string.archive_session)
+    val unpinLabel = stringResource(Res.string.unpin_session)
+    ContextMenuArea(
+        items = {
+            // same families as SessionRow: navigate → edit → file → remove, so the two menus read as one
+            joinMenuFamilies(
+                buildList { if (splittable) add(PocketMenuItem(openInSplit) { model.openInSplit(asSession) }) },
+                buildList { if (canRename) add(PocketMenuItem(rename) { renaming = true }) },
+                buildList {
+                    menuGroups.filter { it.id != live?.group }.forEach { grp ->
+                        add(PocketMenuItem(grp.name, mutedPrefix = "$moveTo ·") { model.assignGroup(p.sessionId, grp.id) })
+                    }
+                    if (live?.group != null) add(PocketMenuItem(moveOut) { model.assignGroup(p.sessionId, null) })
+                },
+                buildList {
+                    if (canArchive) add(PocketMenuItem(archive) { model.archiveSession(asSession) })
+                    add(PocketMenuItem(unpinLabel, removal = true) { model.unpin(p) })
+                },
+            )
+        },
+    ) {
     Row(
         Modifier.fillMaxWidth().height(32.dp)
             .then(
@@ -406,7 +466,7 @@ private fun PinRow(
             else -> Spacer(Modifier.width(5.dp))
         }
         Text(
-            p.title, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            title, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
         if (remote && computer != null) {
@@ -425,6 +485,7 @@ private fun PinRow(
             )
             Key("⌘${index + 1}") // keycap on hover only — at rest the row is just title + state
         }
+    }
     }
 }
 
@@ -649,14 +710,15 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                     // sessions the current project can be moved between (owner + has groups) — drives the row
                     // right-click "move to group" menu; empty everywhere else so no menu appears.
                     val menuGroups = if (g.current && model.canEditGroups) custom else emptyList()
-                    // right-click "Rename session" (issue #158): the live-listed project's rows on an owner +
-                    // rename-capable daemon — same scoping as the group menu (a RECENT snapshot's dir isn't
-                    // the one the daemon would resolve the rename against).
-                    val renameable = g.current && model.canRenameSessions
-                    // #202: only the CURRENT project's rows. A non-current RECENT snapshot row would answer
-                    // with Sessions(thatProject), repointing the client's listed directory; those rows keep
-                    // the local hover-✕ instead.
-                    val canArchive = g.current && model.canArchiveSessions
+                    // right-click "Rename session" (issue #158) — EVERY group's rows now: the row hands its
+                    // own dir to the rename, so the frame resolves against the right project wherever the
+                    // listing points (the old current-only gate existed because the UI defaulted the dir).
+                    // A guest's shared project stays out — its rename would be refused daemon-side anyway.
+                    val renameable = model.canRenameSessions && g.sharedBy == null
+                    // Archive too (#202's gate lifted): the verb always carried the row's own cwd, and its
+                    // Sessions(thatProject) echo repointing the listing now MATCHES the convention that the
+                    // listed project follows wherever the user acts, instead of contradicting it.
+                    val canArchive = model.canArchiveSessions
                     // "+ New group" sits at the TOP of the project's sessions (matches mobile) — a bottom
                     // entry forces scrolling past a long session list to create a group. Current + group-aware
                     // + owner only (canEditGroups folds in groupsSupported), so it also creates the FIRST group
@@ -1088,7 +1150,7 @@ private fun SessionRow(
             GroupNameInput(
                 initial = s.title,
                 hint = stringResource(Res.string.session_rename_hint),
-                onCommit = { model.renameSession(s.sessionId, it); renaming = false },
+                onCommit = { model.renameSession(s.sessionId, it, s.cwd); renaming = false },
                 onCancel = { renaming = false; model.dismissRenameError() },
             )
             if (renameError != null) {
@@ -1114,23 +1176,28 @@ private fun SessionRow(
     val removeRecents = stringResource(Res.string.archive_remove_from_recents)
     ContextMenuArea(
         items = {
-            // order: edit → file → hide (the design's "编辑 → 归位 → 隐藏"). Archive sits directly ABOVE
-            // "Remove from recents" on purpose: the two are the pair users most need to tell apart, and
-            // reading them adjacently is what teaches the difference (persistent+shared vs local+temporary).
-            buildList {
+            // verb families in the fixed navigate → edit → file → remove order ("Context Menu v1"), a
+            // separator at each boundary. Archive sits directly ABOVE "Remove from recents" on purpose:
+            // the two are the pair users most need to tell apart, and reading them adjacently is what
+            // teaches the difference (persistent+shared vs local+temporary).
+            joinMenuFamilies(
                 // #311: the sidebar is where a session is picked, so it is also where one is sent to its
-                // own column. First in the list — it navigates, and navigation outranks editing.
-                if (splittable) add(ContextMenuItem(openInSplit) { model.openInSplit(s) })
-                if (canRename) add(ContextMenuItem(rename) { renaming = true })
-                menuGroups.filter { it.id != s.group }.forEach { grp ->
-                    add(ContextMenuItem("$moveTo · ${grp.name}") { model.assignGroup(s.sessionId, grp.id) })
-                }
-                if (s.group != null) add(ContextMenuItem(moveOut) { model.assignGroup(s.sessionId, null) })
-                if (canArchive) {
-                    add(ContextMenuItem(archive) { model.archiveSession(s) })
-                    add(ContextMenuItem(removeRecents) { model.hideSession(s) })
-                }
-            }
+                // own column. First — it navigates, and navigation outranks editing.
+                buildList { if (splittable) add(PocketMenuItem(openInSplit) { model.openInSplit(s) }) },
+                buildList { if (canRename) add(PocketMenuItem(rename) { renaming = true }) },
+                buildList {
+                    menuGroups.filter { it.id != s.group }.forEach { grp ->
+                        add(PocketMenuItem(grp.name, mutedPrefix = "$moveTo ·") { model.assignGroup(s.sessionId, grp.id) })
+                    }
+                    if (s.group != null) add(PocketMenuItem(moveOut) { model.assignGroup(s.sessionId, null) })
+                },
+                buildList {
+                    if (canArchive) {
+                        add(PocketMenuItem(archive) { model.archiveSession(s) })
+                        add(PocketMenuItem(removeRecents, removal = true) { model.hideSession(s) })
+                    }
+                },
+            )
         },
         content = { SessionRowBody(model, s, selected, indented, onClick) },
     )

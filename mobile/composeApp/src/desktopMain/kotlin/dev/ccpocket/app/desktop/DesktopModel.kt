@@ -542,7 +542,10 @@ interface DesktopModel {
     val canRenameSessions: Boolean get() = false
     /** Rename [sessionId]'s title — lands claude's own `custom-title` record on the daemon, which
      *  re-pushes Sessions to refresh the row (no optimistic local edit). */
-    fun renameSession(sessionId: String, title: String) {}
+    /** [wd] = the ROW's own project dir — the RenameSession frame resolves against a directory, and
+     *  defaulting it to the live-listed one mis-targets a rename issued from another project's row
+     *  (which is why the verb used to be gated to the current group). Null keeps the old default. */
+    fun renameSession(sessionId: String, title: String, wd: String? = null) {}
     /** The daemon's refusal of the last rename, iff it targeted [sessionId] (else null) — the sidebar
      *  row re-enters its edit state and shows this inline. Session-scoped feedback because the failure
      *  frame is session-independent: it must land on the row that ASKED, not in whatever chat happens

@@ -807,7 +807,7 @@ class RepoDesktopModel(
             val dir = repo.sessionsDir.value ?: return false
             return repo.directories.none { sameDir(it.path, dir) && it.sharedBy != null }
         }
-    override fun renameSession(sessionId: String, title: String) { repo.renameSession(sessionId, title) }
+    override fun renameSession(sessionId: String, title: String, wd: String?) { repo.renameSession(sessionId, title, wd) }
     override fun renameError(sessionId: String): String? =
         repo.renameError.value?.takeIf { it.sessionId == sessionId }?.message
     override fun dismissRenameError() { repo.dismissRenameError() }
