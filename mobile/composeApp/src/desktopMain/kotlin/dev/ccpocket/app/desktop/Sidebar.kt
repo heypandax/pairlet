@@ -118,7 +118,6 @@ import dev.ccpocket.app.resources.open_folder
 import dev.ccpocket.app.resources.running
 import dev.ccpocket.app.resources.session_rename
 import dev.ccpocket.app.resources.split_open
-import dev.ccpocket.app.resources.unpin_session
 import dev.ccpocket.app.resources.session_rename_hint
 import dev.ccpocket.app.resources.settings_title
 import dev.ccpocket.app.resources.support_title
@@ -404,21 +403,23 @@ private fun PinRow(
     }
     val asSession = live ?: DkSession(p.sessionId, p.cwd, title, agent = p.agent)
     val splittable = !remote && splittableNow(model, asSession)
-    // rename/archive carry the pin's OWN cwd, so they work whatever the listing points at (same lift as
-    // the RECENT rows). Groups stay current-list only — the daemon lists groups per listed directory.
-    val inCurrentList = !remote && model.sessions.any { it.sessionId == p.sessionId }
-    val canRename = !remote && model.canRenameSessions && asSession.agent == AgentKind.CLAUDE
-    val menuGroups = if (inCurrentList && model.canEditGroups) model.customGroups else emptyList()
-    val canArchive = !remote && model.canArchiveSessions
     val openInSplit = stringResource(Res.string.split_open)
     val rename = stringResource(Res.string.session_rename)
     val moveTo = stringResource(Res.string.group_move_to)
     val moveOut = stringResource(Res.string.group_move_out)
     val archive = stringResource(Res.string.archive_session)
-    val unpinLabel = stringResource(Res.string.unpin_session)
+    val unpinLabel = stringResource(Res.string.unpin_project)
     ContextMenuArea(
         items = {
-            // same families as SessionRow: navigate → edit → file → remove, so the two menus read as one
+            // same families as SessionRow: navigate → edit → file → remove, so the two menus read as
+            // one. Capability reads live INSIDE this lambda — it runs when the menu opens, so N pin
+            // rows don't each rescan model.sessions on every Sessions push for a menu opened rarely.
+            // rename/archive carry the pin's OWN cwd (same lift as the RECENT rows); groups stay
+            // current-list only — the daemon lists groups per listed directory.
+            val inCurrentList = !remote && model.sessions.any { it.sessionId == p.sessionId }
+            val canRename = !remote && model.canRenameSessions && asSession.agent == AgentKind.CLAUDE
+            val menuGroups = if (inCurrentList && model.canEditGroups) model.customGroups else emptyList()
+            val canArchive = !remote && model.canArchiveSessions
             joinMenuFamilies(
                 buildList { if (splittable) add(PocketMenuItem(openInSplit) { model.openInSplit(asSession) }) },
                 buildList { if (canRename) add(PocketMenuItem(rename) { renaming = true }) },
@@ -471,12 +472,14 @@ private fun PinRow(
         }
         Text(
             title, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            style = tightCenter(13.sp),
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
         if (remote && computer != null) {
             Icon(osIcon(computer.os), null, tint = Tok.muted, modifier = Modifier.size(11.dp))
             Text(
                 computer.name, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp,
+                style = tightCenter(10.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 72.dp),
             )
         }
@@ -1143,13 +1146,18 @@ private fun SessionRow(
     // Claude only: rename lands a record in the session's transcript FILE — codex rollouts are
     // self-managed and opencode sessions live in SQLite (no file), so the daemon's rename path
     // fails for both; don't offer an entry that can only end in rename_failed.
-    val canRename = renameable && (s.agent == null || s.agent == AgentKind.CLAUDE)
+    // (agent is non-null on DkSession — the same predicate PinRow uses, kept identical on purpose)
+    val canRename = renameable && s.agent == AgentKind.CLAUDE
     // inline rename swaps the row for a prefilled title field (the group header's rename pattern);
     // committing sends the rename — the daemon re-pushes Sessions, which refreshes the row title.
     // A REFUSED rename (rename_failed) re-opens the editor with the daemon's reason inline: the ask
     // came from THIS row, so the feedback lands here — the chat transcript is the wrong surface (the
     // common refusal, a terminal-held session, is renamed with no chat open at all). Esc dismisses.
     var renaming by remember(s.sessionId) { mutableStateOf(false) }
+    // The refusal shows here UNCONDITIONALLY (the #158 contract, pinned by DesktopUiTest): the error is
+    // a daemon push that can land after this row recomposed or scrolled back in, so a "did *I* ask"
+    // gate would drop it. When the same session is also PINNED, the pin row's gated copy stays closed —
+    // this row is the one surface the refusal is guaranteed to reach.
     val renameError = model.renameError(s.sessionId)
     if (renaming || renameError != null) {
         Column {

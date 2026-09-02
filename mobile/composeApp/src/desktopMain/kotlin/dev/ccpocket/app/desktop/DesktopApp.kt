@@ -129,27 +129,7 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
             // with it the hairline that used to stand in for the missing sidebar. The way back is the
             // toggle in the leftmost sub-header's control cluster, or ⌘\ — both always available.
             //
-            // The hide/show SLIDES: the box's width animates while the sidebar inside keeps its full
-            // width and clips, so rows never reflow mid-flight and the control cluster stays put until
-            // the edge sweeps past it (an instant swap read as the top-left corner jumping). First
-            // composition starts at the target, so launching collapsed doesn't play the slide.
-            val animW by animateFloatAsState(
-                targetValue = if (collapsed) 0f else sidebarW,
-                animationSpec = tween(SIDEBAR_ANIM_MS, easing = FastOutSlowInEasing),
-                label = "sidebar-width",
-            )
-            if (animW > 0.5f) {
-                Box(Modifier.width(animW.dp).fillMaxHeight().clipToBounds()) {
-                    // unbounded + Start: the sidebar must MEASURE at its full width whatever the box
-                    // animates through — a plain width() child gets clamped by the box's constraints and
-                    // the whole column re-lays-out at every frame of the slide (rows wrapping to 40px was
-                    // the "severe jitter"). This way the layout is computed once and the edge just wipes.
-                    Sidebar(
-                        model, width = sidebarW.dp,
-                        modifier = Modifier.wrapContentWidth(align = Alignment.Start, unbounded = true),
-                    )
-                }
-            }
+            AnimatedSidebar(model, collapsed, sidebarW)
             if (!collapsed) {
                 SidebarResizeHandle(
                     onDrag = { dxPx ->
@@ -447,6 +427,32 @@ private fun SplitDropOverlay(drag: SplitDragState, model: DesktopModel) {
 // the sidebar hidden rather than stopping at the floor.
 /** Long enough that the launch-time check never competes with connect + first paint (issue #200). */
 private const val STARTUP_UPDATE_CHECK_DELAY_MS = 8_000L
+/**
+ * The sliding sidebar. The hide/show animates the BOX's width while the sidebar inside keeps its full
+ * width and clips — rows never reflow mid-flight (a plain width() child gets clamped by the box's
+ * constraints and re-lays-out at every frame: the "severe jitter"), and the control cluster stays put
+ * until the edge sweeps past it. First composition starts at the target, so launching collapsed plays
+ * no slide. Its own composable ON PURPOSE: the animated float is read here and nowhere else, so the
+ * ~12 frames of a toggle invalidate this box alone — read one scope up, they re-ran every sibling chat
+ * column's body per frame (DesktopModel is unstable, nothing in that row is skippable).
+ */
+@Composable
+private fun AnimatedSidebar(model: DesktopModel, collapsed: Boolean, sidebarW: Float) {
+    val animW by animateFloatAsState(
+        targetValue = if (collapsed) 0f else sidebarW,
+        animationSpec = tween(SIDEBAR_ANIM_MS, easing = FastOutSlowInEasing),
+        label = "sidebar-width",
+    )
+    if (animW > 0.5f) {
+        Box(Modifier.width(animW.dp).fillMaxHeight().clipToBounds()) {
+            Sidebar(
+                model, width = sidebarW.dp,
+                modifier = Modifier.wrapContentWidth(align = Alignment.Start, unbounded = true),
+            )
+        }
+    }
+}
+
 /** One clock for the sidebar slide and everything choreographed against it (the sub-header's cluster
  *  hand-off, its padding ease) — shared so the pieces cannot drift apart. */
 internal const val SIDEBAR_ANIM_MS = 200

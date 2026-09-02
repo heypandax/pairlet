@@ -1082,7 +1082,7 @@ internal fun ChatNotice(
  * undraggable — and, collapsed, with no way to reopen the sidebar.
  */
 @Composable
-private fun EmptyChatChromeRow(model: DesktopModel) {
+internal fun EmptyChatChromeRow(model: DesktopModel) {
     val chrome = LocalWindowChrome.current
     val edge = LocalPaneEdge.current
     Row(
@@ -1092,30 +1092,54 @@ private fun EmptyChatChromeRow(model: DesktopModel) {
     ) {
         // same choreography as [ChatSubHeader]'s cluster — and this row already sits at the sidebar
         // row's exact geometry (start 12, 38dp tall), so the late fade is a swap in place
-        AnimatedVisibility(
-            visible = model.sidebarCollapsed && edge.leftmost,
-            enter = expandHorizontally(tween(SIDEBAR_ANIM_MS)) +
-                fadeIn(tween(100, delayMillis = SIDEBAR_ANIM_MS - 80)),
-            exit = shrinkHorizontally(tween(SIDEBAR_ANIM_MS)) + fadeOut(tween(80)),
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (chrome.mac && !chrome.fullscreen) TrafficLights(chrome.onClose, chrome.onMinimize, chrome.onToggleFullscreen)
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SidebarToggleButton(model)
-                    SessionNavButtons(model)
-                }
-            }
-        }
+        CollapsedChromeCluster(model, chrome, visible = model.sidebarCollapsed && edge.leftmost)
         Box(Modifier.weight(1f).height(38.dp).then(chrome.dragAndZoomModifier))
-        if (edge.rightmost) {
-            Box(
-                Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).hoverFill(RoundedCornerShape(6.dp))
-                    .clickable { model.showTray = !model.showTray },
-                contentAlignment = Alignment.Center,
-            ) { PulseDot(Tok.ok, 7.dp) }
-            if (!chrome.mac && !chrome.fullscreen) WinControls(chrome.onMinimize, chrome.onToggleMax, chrome.onClose)
+        if (edge.rightmost) TrailingWindowControls(model, chrome)
+    }
+}
+
+// The hand-off choreography, defined ONCE for both cluster hosts (the sub-header and the empty row):
+// the SPACE expands in step with the sidebar's slide — one continuous motion for whatever sits after
+// it — while the CONTROLS fade in late, after the sidebar's own copy has been wiped past, so the swap
+// reads as one cluster changing owners rather than two coexisting. Retuning is a one-place edit.
+private val CLUSTER_ENTER = expandHorizontally(tween(SIDEBAR_ANIM_MS)) +
+    fadeIn(tween(100, delayMillis = SIDEBAR_ANIM_MS - 80))
+private val CLUSTER_EXIT = shrinkHorizontally(tween(SIDEBAR_ANIM_MS)) + fadeOut(tween(80))
+
+/** The collapsed sidebar's controls, re-homed (mock frames 2 / 4b) — leftmost column only: the cluster
+ *  describes the window, and one window has one of it. One definition for both hosts, so they cannot
+ *  drift out of pixel alignment (the hand-off depends on it). */
+@Composable
+private fun CollapsedChromeCluster(
+    model: DesktopModel,
+    chrome: DesktopWindowChrome,
+    visible: Boolean,
+    divider: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    AnimatedVisibility(visible = visible, enter = CLUSTER_ENTER, exit = CLUSTER_EXIT) {
+        Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (chrome.mac && !chrome.fullscreen) TrafficLights(chrome.onClose, chrome.onMinimize, chrome.onToggleFullscreen)
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                SidebarToggleButton(model)
+                SessionNavButtons(model)
+            }
+            // the rule that keeps a sub-header reading title-first despite the cluster (mock:211)
+            if (divider) ChromeDivider()
         }
     }
+}
+
+/** The rightmost column's window-level tail: the connection dot (opens the tray) and, on Win/Linux,
+ *  min · max · close. One definition — the dot must read identical wherever it lands. */
+@Composable
+private fun TrailingWindowControls(model: DesktopModel, chrome: DesktopWindowChrome) {
+    Box(
+        Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).hoverFill(RoundedCornerShape(6.dp))
+            .clickable { model.showTray = !model.showTray },
+        contentAlignment = Alignment.Center,
+    ) { PulseDot(Tok.ok, 7.dp) }
+    if (!chrome.mac && !chrome.fullscreen) WinControls(chrome.onMinimize, chrome.onToggleMax, chrome.onClose)
 }
 
 /**
@@ -1145,35 +1169,15 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // the collapsed sidebar's controls, re-homed (mock frames 2 / 4b). Leftmost column only: the
-            // cluster describes the window, and one window has one of it. The SPACE expands in step with
-            // the sidebar's slide (one continuous motion for the title — no reserve-then-push lurch);
-            // the CONTROLS fade in late, once the sidebar's own copy has been wiped past, so the
-            // hand-off reads as one cluster changing owners rather than two coexisting.
-            AnimatedVisibility(
-                visible = clusterHere,
-                enter = expandHorizontally(tween(SIDEBAR_ANIM_MS)) +
-                    fadeIn(tween(100, delayMillis = SIDEBAR_ANIM_MS - 80)),
-                exit = shrinkHorizontally(tween(SIDEBAR_ANIM_MS)) + fadeOut(tween(80)),
-            ) {
-                Row(
-                    // −5dp: center the 28dp controls at y19 — the sidebar control row's centerline
-                    // (38dp tall) — inside this row's 28+20dp geometry, without touching its height
-                    Modifier.offset(y = (-5).dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (chrome.mac && !chrome.fullscreen) TrafficLights(chrome.onClose, chrome.onMinimize, chrome.onToggleFullscreen)
-                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        SidebarToggleButton(model)
-                        SessionNavButtons(model)
-                    }
-                    // the rule that keeps the sub-header reading title-first despite the cluster (mock:211)
-                    ChromeDivider()
-                }
-            }
+            CollapsedChromeCluster(
+                model, chrome, visible = clusterHere, divider = true,
+                // −5dp: center the 28dp controls at y19 — the sidebar control row's centerline
+                // (38dp tall) — inside this row's 28+20dp geometry, without touching its height
+                modifier = Modifier.offset(y = (-5).dp),
+            )
             Text(
                 model.chatTitle, color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(15.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 // the title region is the window's drag handle, exactly as the title bar's label region
                 // was — and for the same reason it is the ONLY thing wearing it: this row's own buttons
@@ -1223,16 +1227,7 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
             }
             // ONCE per window, at the right end of the RIGHTMOST column (design frame 4): the link is a
             // window-level fact, and a dot per column would read as a per-conversation one. Opens the tray.
-            if (edge.rightmost) {
-                Box(
-                    Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).hoverFill(RoundedCornerShape(6.dp))
-                        .clickable { model.showTray = !model.showTray },
-                    contentAlignment = Alignment.Center,
-                ) { PulseDot(Tok.ok, 7.dp) }
-                // Windows/Linux min · max · close land here too — macOS keeps its traffic lights on the
-                // leading edge, and in fullscreen neither platform draws window buttons at all (#94).
-                if (!chrome.mac && !chrome.fullscreen) WinControls(chrome.onMinimize, chrome.onToggleMax, chrome.onClose)
-            }
+            if (edge.rightmost) TrailingWindowControls(model, chrome)
         }
         val branch = model.chatBranch?.let { "  ·  ⑂ $it" } ?: ""
         // machine-first line: which computer this session lives on leads the mono meta (fleet language)
