@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; background: #08090A; }
+  a { color: #D97757; text-decoration: none; }
+  a:hover { color: #E89072; }
+</style>
+</helmet>
+
+<section style="padding:40px 44px 72px;font-family:'Inter',system-ui,sans-serif;color:#F3F3F4">
+  <div style="display:flex;align-items:baseline;gap:12px">
+    <span style="min-width:30px;height:22px;padding:0 8px;border-radius:6px;background:#D97757;color:#160C07;font:600 12px/22px 'JetBrains Mono',monospace;text-align:center">4a</span>
+    <span style="font:600 19px/1.2 'Inter',sans-serif;letter-spacing:-.015em">Files — one surface, two view filters (变更 / 全部)</span>
+  </div>
+  <p style="margin:10px 0 0;max-width:900px;font:400 13.5px/1.6 'Inter',sans-serif;color:#8C8D95;text-wrap:pretty">The changed-files surface absorbs full workdir browsing instead of gaining a sibling entry. 变更 stays the default and unchanged; 全部 adds the tree (desktop) and a drill-down list (mobile). The two views are stitched by status: files touched this session keep their M/A/D mark everywhere, folders carry a subtree change count, and every row opens the same viewer.</p>
+
+  <div data-screen-label="Files · desktop + mobile" style="width:1760px;height:1080px;margin-top:28px;border-radius:12px;overflow:hidden;border:1px solid #2A2E33;background:#0E0F11;display:flex;gap:24px;padding:24px;box-sizing:border-box;box-shadow:0 40px 90px -40px rgba(0,0,0,.8)">
+
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:18px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.18em;color:#6E6E76">DESKTOP</span>
+        <span style="flex:1;height:1px;background:#1B1D21"></span>
+      </div>
+
+      <div style="display:flex;align-items:flex-start;gap:26px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">(a) HAS CHANGES</span>
+          <div style="width:300px;height:38px;border-radius:9px;background:#16181B;border:1px solid #2A2E33;display:flex;align-items:center;gap:8px;padding:0 10px">
+            <span style="flex:1;min-width:0;font:500 11.5px/1 'Inter',sans-serif;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">cc-pocket · fix webpack chunk split</span>
+            <span style="flex:none;height:20px;padding:0 8px;border-radius:5px;background:#D97757;color:#160C07;font:600 11px/20px 'JetBrains Mono',monospace">± 3</span>
+            <span style="flex:none;width:26px;height:20px;border-radius:5px;background:#1E2125;border:1px solid #2A2E33;font:500 10.5px/18px 'JetBrains Mono',monospace;color:#8C8D95;text-align:center">&gt;_</span>
+          </div>
+          <span style="font:400 9.5px/1.5 'JetBrains Mono',monospace;color:#5C6066">↑ pill h20 · r5 · pad 0/8 · mono 11/600</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">(b) ZERO CHANGES</span>
+          <div style="width:300px;height:38px;border-radius:9px;background:#16181B;border:1px solid #2A2E33;display:flex;align-items:center;gap:8px;padding:0 10px">
+            <span style="flex:1;min-width:0;font:500 11.5px/1 'Inter',sans-serif;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">cc-pocket · rate limiter backoff</span>
+            <span style="flex:none;width:26px;height:20px;border-radius:5px;background:#1E2125;border:1px solid #2A2E33;display:flex;align-items:center;justify-content:center">
+              <span aria-hidden="true" style="width:9px;height:11px;border:1px solid #8C8D95;border-radius:1.5px;border-top-right-radius:0;box-shadow:inset -3px 3px 0 -2px #8C8D95"></span>
+            </span>
+            <span style="flex:none;width:26px;height:20px;border-radius:5px;background:#1E2125;border:1px solid #2A2E33;font:500 10.5px/18px 'JetBrains Mono',monospace;color:#8C8D95;text-align:center">&gt;_</span>
+          </div>
+          <span style="font:400 9.5px/1.5 'JetBrains Mono',monospace;color:#5C6066">↑ same 26×20 geometry as &gt;_ chip — entry never disappears</span>
+        </div>
+      </div>
+
+      <div style="position:relative;display:flex;flex-direction:column;gap:8px">
+        <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">CENTERED OVERLAY · 全部 VIEW <span style="color:#4A4E55">(shown 860w of max 1040)</span></span>
+        <div style="width:860px;height:520px;border-radius:12px;overflow:hidden;background:#131518;border:1px solid #2A2E33;display:flex;box-shadow:0 30px 70px -30px rgba(0,0,0,.85)">
+
+          <div style="width:280px;flex:none;background:#16181B;border-right:1px solid #2A2E33;display:flex;flex-direction:column">
+            <div style="flex:none;padding:12px 12px 10px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid #1F2226">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="flex:1;font:600 12.5px/1 'Inter',sans-serif;color:#F3F3F4">文件</span>
+                <span style="font:400 10px/1 'JetBrains Mono',monospace;color:#6E6E76">~/proj/cc-pocket</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="flex:1;height:24px;border-radius:6px;background:#101215;border:1px solid #2A2E33;display:flex;padding:2px;box-sizing:border-box;gap:2px">
+                  <div style="flex:1;border-radius:4px;display:flex;align-items:center;justify-content:center;gap:5px;font:500 11.5px/1 'Inter',sans-serif;color:#8C8D95">
+                    <span>变更</span><span style="font:600 10px/1 'JetBrains Mono',monospace;color:#D97757">3</span>
+                  </div>
+                  <div style="flex:1;border-radius:4px;background:#2A2E33;display:flex;align-items:center;justify-content:center;font:500 11.5px/1 'Inter',sans-serif;color:#F3F3F4">全部</div>
+                </div>
+                <span style="flex:none;width:24px;height:24px;border-radius:6px;background:#1E2125;border:1px solid #2A2E33;display:flex;align-items:center;justify-content:center">
+                  <span aria-hidden="true" style="width:12px;height:7px;border:1px solid #6B7177;border-radius:7px 7px 7px 7px / 7px 7px 7px 7px"></span>
+                </span>
+              </div>
+            </div>
+
+            <div style="flex:1;min-height:0;padding:6px 0;overflow:hidden">
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px 0 10px">
+                <span aria-hidden="true" style="flex:none;width:8px;font:400 8px/1 'JetBrains Mono',monospace;color:#8C8D95">▾</span>
+                <span aria-hidden="true" style="flex:none;width:11px;height:9px;border:1px solid #7E838A;border-radius:1.5px;border-top-left-radius:0"></span>
+                <span style="flex:1;font:500 12.5px/1 'Inter',sans-serif;color:#E6E6E9">src</span>
+                <span style="flex:none;min-width:15px;height:15px;padding:0 4px;border-radius:4px;background:rgba(217,119,87,.16);color:#D97757;font:600 9.5px/15px 'JetBrains Mono',monospace;text-align:center">5</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px 0 24px">
+                <span aria-hidden="true" style="flex:none;width:8px;font:400 8px/1 'JetBrains Mono',monospace;color:#8C8D95">▾</span>
+                <span aria-hidden="true" style="flex:none;width:11px;height:9px;border:1px solid #7E838A;border-radius:1.5px;border-top-left-radius:0"></span>
+                <span style="flex:1;font:500 12.5px/1 'Inter',sans-serif;color:#E6E6E9">ui</span>
+                <span style="flex:none;min-width:15px;height:15px;padding:0 4px;border-radius:4px;background:rgba(217,119,87,.16);color:#D97757;font:600 9.5px/15px 'JetBrains Mono',monospace;text-align:center">3</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px 0 38px;background:#1E2125;box-shadow:inset 0 0 0 1px #3A3F46">
+                <span aria-hidden="true" style="flex:none;width:8px"></span>
+                <span style="flex:1;min-width:0;font:400 12px/1 'JetBrains Mono',monospace;color:#F3F3F4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">FilesSheet.kt</span>
+                <span style="flex:none;width:14px;height:14px;border-radius:7px;background:rgba(111,181,138,.16);color:#6FB58A;font:600 9px/14px 'JetBrains Mono',monospace;text-align:center">A</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px 0 38px">
+                <span aria-hidden="true" style="flex:none;width:8px"></span>
+                <span style="flex:1;min-width:0;font:400 12px/1 'JetBrains Mono',monospace;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Composer.kt</span>
+                <span style="flex:none;width:14px;height:14px;border-radius:7px;background:rgba(224,164,88,.16);color:#E0A458;font:600 9px/14px 'JetBrains Mono',monospace;text-align:center">M</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px 0 38px">
+                <span aria-hidden="true" style="flex:none;width:8px"></span>
+                <span style="flex:1;min-width:0;font:400 12px/1 'JetBrains Mono',monospace;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">SheetScrim.kt</span>
+                <span style="flex:none;width:14px;height:14px;border-radius:7px;background:rgba(229,96,77,.16);color:#E5604D;font:600 9px/14px 'JetBrains Mono',monospace;text-align:center">D</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px 0 38px">
+                <span aria-hidden="true" style="flex:none;width:8px"></span>
+                <span style="flex:1;min-width:0;font:400 12px/1 'JetBrains Mono',monospace;color:#8C8D95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Theme.kt</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px 0 24px">
+                <span aria-hidden="true" style="flex:none;width:8px;font:400 8px/1 'JetBrains Mono',monospace;color:#8C8D95">▸</span>
+                <span aria-hidden="true" style="flex:none;width:11px;height:9px;border:1px solid #7E838A;border-radius:1.5px;border-top-left-radius:0"></span>
+                <span style="flex:1;font:500 12.5px/1 'Inter',sans-serif;color:#E6E6E9">net</span>
+                <span style="flex:none;min-width:15px;height:15px;padding:0 4px;border-radius:4px;background:rgba(217,119,87,.16);color:#D97757;font:600 9.5px/15px 'JetBrains Mono',monospace;text-align:center">2</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px 0 24px">
+                <span aria-hidden="true" style="flex:none;width:8px"></span>
+                <span style="flex:1;min-width:0;font:400 12px/1 'JetBrains Mono',monospace;color:#8C8D95">Main.kt</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px">
+                <span aria-hidden="true" style="flex:none;width:8px;font:400 8px/1 'JetBrains Mono',monospace;color:#8C8D95">▸</span>
+                <span aria-hidden="true" style="flex:none;width:11px;height:9px;border:1px solid #7E838A;border-radius:1.5px;border-top-left-radius:0"></span>
+                <span style="flex:1;font:500 12.5px/1 'Inter',sans-serif;color:#E6E6E9">gradle</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px">
+                <span aria-hidden="true" style="flex:none;width:8px;font:400 8px/1 'JetBrains Mono',monospace;color:#8C8D95">▾</span>
+                <span aria-hidden="true" style="flex:none;width:11px;height:9px;border:1px solid #7E838A;border-radius:1.5px;border-top-left-radius:0"></span>
+                <span style="flex:1;font:500 12.5px/1 'Inter',sans-serif;color:#E6E6E9">node_modules</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px 0 24px">
+                <span aria-hidden="true" style="flex:none;width:8px"></span>
+                <span style="flex:1;min-width:0;font:400 12px/1 'JetBrains Mono',monospace;color:#8C8D95">.package-lock.json</span>
+              </div>
+              <div style="height:24px;display:flex;align-items:center;gap:6px;padding:0 10px 0 24px">
+                <span style="flex:1;font:400 10px/1 'JetBrains Mono',monospace;color:#6B7177">已显示前 2000 项，其余已折叠</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px">
+                <span aria-hidden="true" style="flex:none;width:8px"></span>
+                <span aria-hidden="true" style="flex:none;width:11px"></span>
+                <span style="flex:1;min-width:0;font:400 12px/1 'JetBrains Mono',monospace;color:#B4B5BC">build.gradle.kts</span>
+                <span style="flex:none;width:14px;height:14px;border-radius:7px;background:rgba(224,164,88,.16);color:#E0A458;font:600 9px/14px 'JetBrains Mono',monospace;text-align:center">M</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:6px;padding:0 10px">
+                <span aria-hidden="true" style="flex:none;width:8px"></span>
+                <span aria-hidden="true" style="flex:none;width:11px"></span>
+                <span style="flex:1;min-width:0;font:400 12px/1 'JetBrains Mono',monospace;color:#8C8D95">README.md</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+            <div style="flex:none;height:40px;border-bottom:1px solid #1F2226;display:flex;align-items:center;gap:10px;padding:0 14px">
+              <span style="font:400 11.5px/1 'JetBrains Mono',monospace;color:#F3F3F4">src/ui/FilesSheet.kt</span>
+              <span style="height:15px;padding:0 5px;border-radius:4px;background:rgba(111,181,138,.16);color:#6FB58A;font:600 9.5px/15px 'JetBrains Mono',monospace">A</span>
+              <span style="flex:1"></span>
+              <span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#6FB58A">+184</span>
+              <span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#6E6E76">−0</span>
+            </div>
+            <div style="flex:1;min-height:0;padding:10px 0;font:400 11.5px/19px 'JetBrains Mono',monospace;overflow:hidden">
+              <sc-for list="{{ diff }}" as="l" hint-placeholder-count="20">
+                <div style="display:flex;gap:12px;padding:0 14px;background:{{ l.bg }}">
+                  <span style="flex:none;width:26px;text-align:right;color:#4A4E55">{{ l.n }}</span>
+                  <span style="flex:1;min-width:0;color:{{ l.c }};white-space:pre">{{ l.t }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:22px;font:400 9.5px/1.5 'JetBrains Mono',monospace;color:#5C6066">
+          <span>tree row h26 · indent step 14</span>
+          <span>status dot 14×14 r7 · bg tint 16%</span>
+          <span>folder badge h15 r4 · min-w15</span>
+          <span>segmented h24 r6 · pad 2 · pill r4</span>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:flex-start;gap:20px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">INSET · 变更 VIEW (unchanged)</span>
+          <div style="width:280px;border-radius:10px;overflow:hidden;background:#16181B;border:1px solid #2A2E33">
+            <div style="padding:10px 12px;border-bottom:1px solid #1F2226;display:flex;align-items:center;gap:8px">
+              <div style="flex:1;height:24px;border-radius:6px;background:#101215;border:1px solid #2A2E33;display:flex;padding:2px;box-sizing:border-box;gap:2px">
+                <div style="flex:1;border-radius:4px;background:#2A2E33;display:flex;align-items:center;justify-content:center;gap:5px;font:500 11.5px/1 'Inter',sans-serif;color:#F3F3F4">
+                  <span>变更</span><span style="font:600 10px/1 'JetBrains Mono',monospace;color:#D97757">3</span>
+                </div>
+                <div style="flex:1;border-radius:4px;display:flex;align-items:center;justify-content:center;font:500 11.5px/1 'Inter',sans-serif;color:#8C8D95">全部</div>
+              </div>
+              <span style="flex:none;width:24px;height:24px;border-radius:6px;background:#1E2125;border:1px solid #2A2E33"></span>
+            </div>
+            <sc-for list="{{ changed }}" as="f" hint-placeholder-count="3">
+              <div style="height:38px;display:flex;align-items:center;gap:8px;padding:0 12px">
+                <div style="flex:1;min-width:0">
+                  <div style="font:400 12px/1.25 'JetBrains Mono',monospace;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ f.name }}</div>
+                  <div style="font:400 9.5px/1.4 'Inter',sans-serif;color:#6E6E76">{{ f.dir }}</div>
+                </div>
+                <span style="flex:none;font:400 10px/1 'JetBrains Mono',monospace;color:#6FB58A">{{ f.add }}</span>
+                <span style="flex:none;font:400 10px/1 'JetBrains Mono',monospace;color:#E5604D">{{ f.del }}</span>
+                <span style="flex:none;width:14px;height:14px;border-radius:7px;background:{{ f.sbg }};color:{{ f.sc }};font:600 9px/14px 'JetBrains Mono',monospace;text-align:center">{{ f.s }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="flex:1;padding-top:26px;font:400 11px/1.7 'Inter',sans-serif;color:#7E838A;text-wrap:pretty">
+          Switching views keeps the selected file and the right pane. Untouched file → right pane shows full text, no diff stat in the header. Hidden-file eye toggle applies to both views and persists per workdir.
+        </div>
+      </div>
+    </div>
+
+    <div style="width:800px;flex:none;display:flex;flex-direction:column;gap:18px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.18em;color:#6E6E76">MOBILE · 390pt</span>
+        <span style="flex:1;height:1px;background:#1B1D21"></span>
+      </div>
+
+      <div style="display:flex;gap:20px">
+        <div style="width:390px;flex:none;display:flex;flex-direction:column;gap:8px">
+          <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">FILES SHEET · 全部 (DRILL-DOWN)</span>
+          <div style="width:390px;height:540px;border-radius:20px;overflow:hidden;border:1px solid #2A2E33;background:#0B0C0D;display:flex;flex-direction:column;justify-content:flex-end;position:relative">
+            <div style="position:absolute;inset:0;background:rgba(8,9,10,.72)"></div>
+            <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 18px 8px;font:500 11px/1 'JetBrains Mono',monospace;color:#4A4E55">
+              <span>9:41</span><span>cc-pocket</span>
+            </div>
+            <div style="position:relative;background:#16181B;border-top:1px solid #2A2E33;border-radius:16px 16px 0 0;padding-bottom:16px">
+              <div style="height:20px;display:flex;align-items:center;justify-content:center">
+                <span style="width:36px;height:4px;border-radius:2px;background:#3A3F46"></span>
+              </div>
+              <div style="height:34px;display:flex;align-items:center;gap:10px;padding:0 16px">
+                <span style="flex:1;font:600 15px/1 'Inter',sans-serif;color:#F3F3F4">文件</span>
+                <span style="flex:none;width:30px;height:30px;border-radius:8px;background:#1E2125;border:1px solid #2A2E33;display:flex;align-items:center;justify-content:center">
+                  <span aria-hidden="true" style="width:15px;height:9px;border:1px solid #6B7177;border-radius:9px"></span>
+                </span>
+              </div>
+              <div style="padding:10px 16px 8px">
+                <div style="height:30px;border-radius:8px;background:#101215;border:1px solid #2A2E33;display:flex;padding:2px;box-sizing:border-box;gap:2px">
+                  <div style="flex:1;border-radius:6px;display:flex;align-items:center;justify-content:center;gap:6px;font:500 13px/1 'Inter',sans-serif;color:#8C8D95">
+                    <span>变更</span><span style="font:600 11px/1 'JetBrains Mono',monospace;color:#D97757">3</span>
+                  </div>
+                  <div style="flex:1;border-radius:6px;background:#2A2E33;display:flex;align-items:center;justify-content:center;font:500 13px/1 'Inter',sans-serif;color:#F3F3F4">全部</div>
+                </div>
+              </div>
+              <div style="height:32px;display:flex;align-items:center;gap:6px;padding:0 16px;border-bottom:1px solid #1F2226;font:400 12px/1 'JetBrains Mono',monospace">
+                <span style="color:#8C8D95">root</span>
+                <span style="color:#4A4E55">›</span>
+                <span style="color:#8C8D95">src</span>
+                <span style="color:#4A4E55">›</span>
+                <span style="color:#F3F3F4">ui</span>
+              </div>
+              <div style="height:44px;display:flex;align-items:center;gap:10px;padding:0 16px">
+                <span aria-hidden="true" style="flex:none;width:16px;height:13px;border:1px solid #7E838A;border-radius:2px;border-top-left-radius:0"></span>
+                <span style="flex:1;font:400 14px/1 'Inter',sans-serif;color:#E6E6E9">components</span>
+                <span style="flex:none;min-width:17px;height:17px;padding:0 5px;border-radius:5px;background:rgba(217,119,87,.16);color:#D97757;font:600 10.5px/17px 'JetBrains Mono',monospace;text-align:center">2</span>
+                <span aria-hidden="true" style="flex:none;font:400 12px/1 'JetBrains Mono',monospace;color:#4A4E55">›</span>
+              </div>
+              <div style="height:44px;display:flex;align-items:center;gap:10px;padding:0 16px">
+                <span aria-hidden="true" style="flex:none;width:16px;height:13px;border:1px solid #7E838A;border-radius:2px;border-top-left-radius:0"></span>
+                <span style="flex:1;font:400 14px/1 'Inter',sans-serif;color:#E6E6E9">theme</span>
+                <span aria-hidden="true" style="flex:none;font:400 12px/1 'JetBrains Mono',monospace;color:#4A4E55">›</span>
+              </div>
+              <div style="height:1px;background:#1F2226;margin:4px 16px"></div>
+              <div style="height:44px;display:flex;align-items:center;gap:10px;padding:0 16px">
+                <span aria-hidden="true" style="flex:none;width:13px;height:15px;border:1px solid #6B7177;border-radius:2px"></span>
+                <span style="flex:1;min-width:0;font:400 13px/1 'JetBrains Mono',monospace;color:#F3F3F4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">FilesSheet.kt</span>
+                <span style="flex:none;width:18px;height:18px;border-radius:9px;background:rgba(111,181,138,.16);color:#6FB58A;font:600 10.5px/18px 'JetBrains Mono',monospace;text-align:center">A</span>
+              </div>
+              <div style="height:44px;display:flex;align-items:center;gap:10px;padding:0 16px">
+                <span aria-hidden="true" style="flex:none;width:13px;height:15px;border:1px solid #6B7177;border-radius:2px"></span>
+                <span style="flex:1;min-width:0;font:400 13px/1 'JetBrains Mono',monospace;color:#F3F3F4">Composer.kt</span>
+                <span style="flex:none;width:18px;height:18px;border-radius:9px;background:rgba(224,164,88,.16);color:#E0A458;font:600 10.5px/18px 'JetBrains Mono',monospace;text-align:center">M</span>
+              </div>
+              <div style="height:44px;display:flex;align-items:center;gap:10px;padding:0 16px">
+                <span aria-hidden="true" style="flex:none;width:13px;height:15px;border:1px solid #6B7177;border-radius:2px"></span>
+                <span style="flex:1;min-width:0;font:400 13px/1 'JetBrains Mono',monospace;color:#B4B5BC">Theme.kt</span>
+              </div>
+              <div style="height:44px;display:flex;align-items:center;gap:10px;padding:0 16px">
+                <span aria-hidden="true" style="flex:none;width:13px;height:15px;border:1px solid #6B7177;border-radius:2px"></span>
+                <span style="flex:1;min-width:0;font:400 13px/1 'JetBrains Mono',monospace;color:#B4B5BC">Tokens.kt</span>
+              </div>
+              <div style="height:34px;display:flex;align-items:center;padding:0 16px;font:400 11.5px/1 'Inter',sans-serif;color:#6B7177">已显示前 2000 项，其余已折叠</div>
+            </div>
+          </div>
+          <span style="font:400 9.5px/1.5 'JetBrains Mono',monospace;color:#5C6066">↑ row h44 · breadcrumb h32 · segmented h30 r8 · badge h17 r5 · dot 18×18</span>
+        </div>
+
+        <div style="width:390px;flex:none;display:flex;flex-direction:column;gap:8px">
+          <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">FILES SHEET · 变更 (DEFAULT)</span>
+          <div style="width:390px;height:540px;border-radius:20px;overflow:hidden;border:1px solid #2A2E33;background:#0B0C0D;display:flex;flex-direction:column;justify-content:flex-end;position:relative">
+            <div style="position:absolute;inset:0;background:rgba(8,9,10,.72)"></div>
+            <div style="position:absolute;top:0;left:0;right:0;padding:44px 16px 0;display:flex;flex-direction:column;gap:8px">
+              <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#4A4E55">⋯ TOOLS SHEET ROW (SOURCE ENTRY)</span>
+              <div style="border-radius:12px;background:#16181B;border:1px solid #2A2E33;overflow:hidden">
+                <div style="height:48px;display:flex;align-items:center;gap:12px;padding:0 14px">
+                  <span aria-hidden="true" style="flex:none;width:15px;height:17px;border:1px solid #8C8D95;border-radius:2px"></span>
+                  <span style="flex:1;font:400 15px/1 'Inter',sans-serif;color:#F3F3F4">文件</span>
+                  <span style="flex:none;font:400 12.5px/1 'Inter',sans-serif;color:#8C8D95">3 处改动</span>
+                  <span aria-hidden="true" style="flex:none;font:400 12px/1 'JetBrains Mono',monospace;color:#4A4E55">›</span>
+                </div>
+                <div style="height:1px;background:#1F2226;margin:0 14px"></div>
+                <div style="height:48px;display:flex;align-items:center;gap:12px;padding:0 14px">
+                  <span aria-hidden="true" style="flex:none;width:15px;font:500 12px/1 'JetBrains Mono',monospace;color:#8C8D95">&gt;_</span>
+                  <span style="flex:1;font:400 15px/1 'Inter',sans-serif;color:#F3F3F4">终端</span>
+                  <span aria-hidden="true" style="flex:none;font:400 12px/1 'JetBrains Mono',monospace;color:#4A4E55">›</span>
+                </div>
+              </div>
+            </div>
+            <div style="position:relative;background:#16181B;border-top:1px solid #2A2E33;border-radius:16px 16px 0 0;padding-bottom:16px">
+              <div style="height:20px;display:flex;align-items:center;justify-content:center">
+                <span style="width:36px;height:4px;border-radius:2px;background:#3A3F46"></span>
+              </div>
+              <div style="height:34px;display:flex;align-items:center;gap:10px;padding:0 16px">
+                <span style="flex:1;font:600 15px/1 'Inter',sans-serif;color:#F3F3F4">文件</span>
+                <span style="flex:none;width:30px;height:30px;border-radius:8px;background:#1E2125;border:1px solid #2A2E33;display:flex;align-items:center;justify-content:center">
+                  <span aria-hidden="true" style="width:15px;height:9px;border:1px solid #6B7177;border-radius:9px"></span>
+                </span>
+              </div>
+              <div style="padding:10px 16px 8px">
+                <div style="height:30px;border-radius:8px;background:#101215;border:1px solid #2A2E33;display:flex;padding:2px;box-sizing:border-box;gap:2px">
+                  <div style="flex:1;border-radius:6px;background:#2A2E33;display:flex;align-items:center;justify-content:center;gap:6px;font:500 13px/1 'Inter',sans-serif;color:#F3F3F4">
+                    <span>变更</span><span style="font:600 11px/1 'JetBrains Mono',monospace;color:#D97757">3</span>
+                  </div>
+                  <div style="flex:1;border-radius:6px;display:flex;align-items:center;justify-content:center;font:500 13px/1 'Inter',sans-serif;color:#8C8D95">全部</div>
+                </div>
+              </div>
+              <sc-for list="{{ changed }}" as="f" hint-placeholder-count="3">
+                <div style="height:56px;display:flex;align-items:center;gap:10px;padding:0 16px;border-top:1px solid #1F2226">
+                  <div style="flex:1;min-width:0">
+                    <div style="font:400 13px/1.3 'JetBrains Mono',monospace;color:#F3F3F4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ f.name }}</div>
+                    <div style="font:400 11px/1.4 'Inter',sans-serif;color:#6E6E76">{{ f.dir }}</div>
+                  </div>
+                  <span style="flex:none;font:400 11.5px/1 'JetBrains Mono',monospace;color:#6FB58A">{{ f.add }}</span>
+                  <span style="flex:none;font:400 11.5px/1 'JetBrains Mono',monospace;color:#E5604D">{{ f.del }}</span>
+                  <span style="flex:none;width:18px;height:18px;border-radius:9px;background:{{ f.sbg }};color:{{ f.sc }};font:600 10.5px/18px 'JetBrains Mono',monospace;text-align:center">{{ f.s }}</span>
+                  <span aria-hidden="true" style="flex:none;font:400 12px/1 'JetBrains Mono',monospace;color:#4A4E55">›</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <span style="font:400 9.5px/1.5 'JetBrains Mono',monospace;color:#5C6066">↑ changed row h56 (two-line) · tools row h48 · grabber 36×4</span>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:20px">
+        <div style="width:390px;flex:none;display:flex;flex-direction:column;gap:8px">
+          <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">VIEWER · CHANGED FILE</span>
+          <div style="border-radius:14px;overflow:hidden;background:#16181B;border:1px solid #2A2E33">
+            <div style="height:44px;display:flex;align-items:center;gap:10px;padding:0 14px">
+              <span style="flex:none;font:400 13px/1 'JetBrains Mono',monospace;color:#8C8D95">‹</span>
+              <span style="flex:1;min-width:0;font:400 13px/1 'JetBrains Mono',monospace;color:#F3F3F4">Composer.kt</span>
+              <span style="flex:none;width:18px;height:18px;border-radius:9px;background:rgba(224,164,88,.16);color:#E0A458;font:600 10.5px/18px 'JetBrains Mono',monospace;text-align:center">M</span>
+            </div>
+            <div style="padding:0 14px 12px;display:flex;gap:18px;border-bottom:1px solid #1F2226">
+              <span style="padding-bottom:8px;box-shadow:inset 0 -2px 0 #D97757;font:500 13.5px/1 'Inter',sans-serif;color:#F3F3F4">Diff</span>
+              <span style="padding-bottom:8px;font:500 13.5px/1 'Inter',sans-serif;color:#8C8D95">全文</span>
+            </div>
+            <div style="padding:10px 14px 14px;font:400 11.5px/19px 'JetBrains Mono',monospace">
+              <div style="color:#6FB58A;background:rgba(111,181,138,.08);padding:0 4px">+  onFilesClick = { open(FilesTab.CHANGES) }</div>
+              <div style="color:#E5604D;background:rgba(229,96,77,.08);padding:0 4px">−  onFilesClick = { openDiffModal() }</div>
+            </div>
+          </div>
+          <span style="font:400 9.5px/1.5 'JetBrains Mono',monospace;color:#5C6066">↑ lands on Diff · tab underline 2px #D97757</span>
+        </div>
+        <div style="width:390px;flex:none;display:flex;flex-direction:column;gap:8px">
+          <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">VIEWER · UNTOUCHED FILE</span>
+          <div style="border-radius:14px;overflow:hidden;background:#16181B;border:1px solid #2A2E33">
+            <div style="height:44px;display:flex;align-items:center;gap:10px;padding:0 14px">
+              <span style="flex:none;font:400 13px/1 'JetBrains Mono',monospace;color:#8C8D95">‹</span>
+              <span style="flex:1;min-width:0;font:400 13px/1 'JetBrains Mono',monospace;color:#F3F3F4">Theme.kt</span>
+            </div>
+            <div style="padding:0 14px 12px;display:flex;gap:18px;border-bottom:1px solid #1F2226">
+              <span style="padding-bottom:8px;font:500 13.5px/1 'Inter',sans-serif;color:#4A4E55">Diff</span>
+              <span style="padding-bottom:8px;box-shadow:inset 0 -2px 0 #D97757;font:500 13.5px/1 'Inter',sans-serif;color:#F3F3F4">全文</span>
+            </div>
+            <div style="padding:10px 14px 14px;font:400 11.5px/19px 'JetBrains Mono',monospace;color:#B4B5BC">
+              <div>internal object Tokens {</div>
+              <div>  val Surface = Color(0xFF1E2125)</div>
+            </div>
+          </div>
+          <span style="font:400 9.5px/1.5 'JetBrains Mono',monospace;color:#5C6066">↑ Diff tab disabled #4A4E55 · 全文 active</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const mk = (n, t, k) => ({
+      n: String(n),
+      t,
+      c: k === '+' ? '#6FB58A' : k === '-' ? '#E5604D' : '#8C8D95',
+      bg: k === '+' ? 'rgba(111,181,138,.07)' : k === '-' ? 'rgba(229,96,77,.07)' : 'transparent'
+    });
+    return {
+      diff: [
+        mk(1, '@@ new file src/ui/FilesSheet.kt', ''),
+        mk(2, '+ package pocket.ui', '+'),
+        mk(3, '+', '+'),
+        mk(4, '+ enum class FilesTab { CHANGES, ALL }', '+'),
+        mk(5, '+', '+'),
+        mk(6, '+ @Composable', '+'),
+        mk(7, '+ fun FilesSheet(', '+'),
+        mk(8, '+     state: FilesState,', '+'),
+        mk(9, '+     onOpen: (FileNode) -> Unit,', '+'),
+        mk(10, '+ ) {', '+'),
+        mk(11, '+     var tab by remember { mutableStateOf(FilesTab.CHANGES) }', '+'),
+        mk(12, '+     var showHidden by remember { mutableStateOf(false) }', '+'),
+        mk(13, '+', '+'),
+        mk(14, '+     Column(Modifier.fillMaxWidth()) {', '+'),
+        mk(15, '+         SheetHeader(title = "文件") {', '+'),
+        mk(16, '+             Segmented(tab, state.changedCount) { tab = it }', '+'),
+        mk(17, '+             EyeToggle(showHidden) { showHidden = !showHidden }', '+'),
+        mk(18, '+         }', '+'),
+        mk(19, '+         when (tab) {', '+'),
+        mk(20, '+             CHANGES -> ChangedList(state.changed, onOpen)', '+'),
+        mk(21, '+             ALL -> WorkdirTree(state.root, showHidden, onOpen)', '+')
+      ],
+      changed: [
+        { name: 'FilesSheet.kt', dir: 'src/ui', add: '+184', del: '−0', s: 'A', sc: '#6FB58A', sbg: 'rgba(111,181,138,.16)' },
+        { name: 'Composer.kt', dir: 'src/ui', add: '+31', del: '−12', s: 'M', sc: '#E0A458', sbg: 'rgba(224,164,88,.16)' },
+        { name: 'SheetScrim.kt', dir: 'src/ui', add: '+0', del: '−46', s: 'D', sc: '#E5604D', sbg: 'rgba(229,96,77,.16)' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
