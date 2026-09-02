@@ -99,6 +99,34 @@ class DesktopCrashGuardTest {
     }
 
     @Test
+    fun jdkTrayNpeIsBenignButNothingBroaderIs() {
+        // the JDK's own TrayIcon-click NPE (LightweightDispatcher dereferences a Component a TrayIcon
+        // event never carries) — matched by its exact shape, so it stops quitting the app…
+        val jdkShape = NullPointerException("Cannot invoke \"java.awt.Component.isShowing()\"").apply {
+            stackTrace = arrayOf(
+                StackTraceElement("java.awt.LightweightDispatcher", "eventDispatched", null, -1),
+                StackTraceElement("java.awt.Toolkit\$SelectiveAWTEventListener", "eventDispatched", null, -1),
+                StackTraceElement("java.awt.TrayIcon", "dispatchEvent", null, -1),
+            )
+        }
+        assertTrue(DesktopCrashGuard.isBenignJdkTrayNpe(jdkShape))
+        // …while an NPE of OURS raised during tray handling keeps its fatal path: same dispatcher
+        // frame but no TrayIcon on the stack, or app frames on top, must not slip through the pardon
+        val sameTopNoTray = NullPointerException("x").apply {
+            stackTrace = arrayOf(StackTraceElement("java.awt.LightweightDispatcher", "eventDispatched", null, -1))
+        }
+        assertFalse(DesktopCrashGuard.isBenignJdkTrayNpe(sameTopNoTray))
+        val appOnTop = NullPointerException("x").apply {
+            stackTrace = arrayOf(
+                StackTraceElement("dev.ccpocket.app.desktop.MenuBarExtraKt", "onClick", null, -1),
+                StackTraceElement("java.awt.TrayIcon", "dispatchEvent", null, -1),
+            )
+        }
+        assertFalse(DesktopCrashGuard.isBenignJdkTrayNpe(appOnTop))
+        assertFalse(DesktopCrashGuard.isBenignJdkTrayNpe(IllegalStateException("not an NPE at all")))
+    }
+
+    @Test
     fun noteAppendsWithoutThrowingAndKeepsEarlierEntries() {
         val before = DesktopCrashGuard.logFile.takeIf { it.exists() }?.readText().orEmpty()
         DesktopCrashGuard.note("CCP-QR-01", RuntimeException("first note"))

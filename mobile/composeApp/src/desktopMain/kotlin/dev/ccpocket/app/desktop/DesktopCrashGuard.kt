@@ -78,10 +78,26 @@ object DesktopCrashGuard {
         runCatching {
             Thread.setDefaultUncaughtExceptionHandler { thread, t ->
                 val where = "thread=${thread.name}"
-                if (isUiThread(thread.name)) fatal(ERR_UNCAUGHT, t, where) else note(ERR_UNCAUGHT, t, where)
+                if (isUiThread(thread.name) && !isBenignJdkTrayNpe(t)) fatal(ERR_UNCAUGHT, t, where)
+                else note(ERR_UNCAUGHT, t, where)
             }
         }
     }
+
+    /**
+     * The one EDT escape that must NOT take the app down: clicking the tray icon while AWT's
+     * [java.awt.LightweightDispatcher] happens to have its global drag listener registered NPEs inside
+     * the JDK itself — a TrayIcon mouse event carries no Component, and the listener dereferences it
+     * (observed as `Cannot invoke Component.isShowing() because <local6> is null`, the whole stack JDK
+     * frames). Nothing of ours is involved and the event queue is healthy afterwards, so treating it as
+     * fatal turned a JDK bug into "clicking the menu-bar icon sometimes quits the app". Matched
+     * NARROWLY — this exact dispatcher frame plus a TrayIcon frame — so no real fault can hide in it.
+     */
+    internal fun isBenignJdkTrayNpe(t: Throwable): Boolean =
+        t is NullPointerException &&
+            t.stackTrace.firstOrNull()?.className == "java.awt.LightweightDispatcher" &&
+            t.stackTrace.firstOrNull()?.methodName == "eventDispatched" &&
+            t.stackTrace.any { it.className == "java.awt.TrayIcon" }
 
     /**
      * Which threads' deaths must take the process with them.
