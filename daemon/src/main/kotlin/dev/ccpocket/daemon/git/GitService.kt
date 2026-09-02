@@ -1,6 +1,5 @@
 package dev.ccpocket.daemon.git
 
-import dev.ccpocket.daemon.agent.ExecutableResolver
 import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.ActiveSession
@@ -675,26 +674,7 @@ class GitService(
 
     internal data class Exec(val code: Int, val out: String, val err: String, val timedOut: Boolean = false, val failure: String? = null)
 
-    @Volatile private var cachedBin: Path? = null
-
-    private fun gitBin(): Path? = cachedBin ?: runCatching {
-        ExecutableResolver.resolve(
-            explicitGitBin, System.getenv("CC_POCKET_GIT_BIN"),
-            if (isWindows) listOf("git.exe", "git.cmd", "git") else listOf("git"),
-            fallbackDirs, "git executable not found",
-        )
-    }.getOrNull()?.also { cachedBin = it }
-
-    private val fallbackDirs: List<String> = buildList {
-        if (isWindows) {
-            add("C:\\Program Files\\Git\\cmd")
-            add("C:\\Program Files\\Git\\bin")
-            add("C:\\Program Files (x86)\\Git\\cmd")
-        } else {
-            add("/opt/homebrew/bin"); add("/usr/local/bin"); add("/usr/bin"); add("/bin")
-            add("/Library/Developer/CommandLineTools/usr/bin")
-        }
-    }
+    private fun gitBin(): Path? = GitBin.resolve(explicitGitBin)
 
     /**
      * Start one git process with an explicit argv — the ONLY place in this file that spawns anything.

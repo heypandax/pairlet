@@ -374,14 +374,32 @@ data class ExportFile(
     val agent: AgentKind = AgentKind.CLAUDE,
 ) : ToDaemon
 
+/** [ListPathEntries.filter]'s one non-default value: the file BROWSER's view of a directory — dot-prefixed
+ *  entries and anything `.gitignore` excludes are dropped. A NAMED policy rather than a pair of booleans,
+ *  for the same reason [GIT_OPS] holds names: the daemon matches it exactly and treats every other value
+ *  (including a future one) as "no filter", so a newer app can never have a policy it asked for silently
+ *  reinterpreted as a different one. */
+const val PATH_FILTER_SMART = "smart"
+
 /**
  * phone -> daemon: list the immediate children (files + subdirs) of [subPath] under [workdir], for the
- * composer's `@`-file completion (issue #75). [subPath] is a path RELATIVE to the session's cwd
- * ([workdir]) using the daemon host's separator (empty = the cwd itself); the daemon resolves it inside
- * [workdir] and refuses anything that escapes the tree. Names only — no contents — so it is a strictly
- * smaller read surface than [ReadFile], scoped to the session's own project directory. The reply is one
- * [PathEntries], capped at [limit] entries. A daemon that predates this drops it (the completer just
- * shows nothing).
+ * composer's `@`-file completion (issue #75) and the working-directory file browser. [subPath] is a path
+ * RELATIVE to the session's cwd ([workdir]) using the daemon host's separator (empty = the cwd itself);
+ * the daemon resolves it inside [workdir] and refuses anything that escapes the tree. Names only — no
+ * contents — so it is a strictly smaller read surface than [ReadFile], scoped to the session's own project
+ * directory. The reply is one [PathEntries], capped at [limit] entries. A daemon that predates this drops
+ * it (the completer just shows nothing).
+ *
+ * [filter] (trailing optional) picks the visibility policy:
+ *  - null / absent — every child, the behaviour every shipped client already depends on. `@`-completion
+ *    and the folder picker both MUST see dot-directories, so this stays the default forever.
+ *  - [PATH_FILTER_SMART] — the browser's view. The daemon drops the hidden/ignored children BEFORE [limit]
+ *    applies, which is the whole point: filtering afterwards would still let one `node_modules` spend the
+ *    entire page on entries nobody wanted.
+ *
+ * Both mixed-version directions are harmless. An old app never sends the key, so a new daemon runs the
+ * unfiltered path it always ran. A new app's key is dropped by an old daemon (ignoreUnknownKeys) and the
+ * browser simply shows the noise it would have hidden — degraded, never broken, and never a wrong answer.
  */
 @Serializable
 @SerialName("pocket/path.list")
@@ -389,6 +407,7 @@ data class ListPathEntries(
     val workdir: String,
     val subPath: String = "",
     val limit: Int = 500,
+    val filter: String? = null,
 ) : ToDaemon
 
 /**

@@ -3,6 +3,7 @@ package dev.ccpocket.daemon.disk
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
+import dev.ccpocket.protocol.PATH_FILTER_SMART
 import dev.ccpocket.protocol.PathEntry
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -309,13 +310,23 @@ class DirectoryService(
 
     /**
      * List the immediate children of [subPath] (relative to [workdir]) for the composer's `@`-file
-     * completion (issue #75). Directories first, then case-insensitive by name; names only, capped at
-     * [limit] with a truncated flag. The target is `toRealPath()`-canonicalized and MUST stay inside the
-     * (also canonical) workdir — a `..` or symlink escape returns null — so the feature can reference the
-     * session's own project files and nothing wider. Returns null when the workdir isn't a readable dir
-     * or the resolved child dir escapes / doesn't exist / isn't readable.
+     * completion (issue #75) and the working-directory file browser. Directories first, then
+     * case-insensitive by name; names only, capped at [limit] with a truncated flag. The target is
+     * `toRealPath()`-canonicalized and MUST stay inside the (also canonical) workdir — a `..` or symlink
+     * escape returns null — so the feature can reference the session's own project files and nothing
+     * wider. Returns null when the workdir isn't a readable dir or the resolved child dir escapes /
+     * doesn't exist / isn't readable.
+     *
+     * [filter] == [PATH_FILTER_SMART] hides what a BROWSER should not open with — see [smartVisible].
+     * Any other value, null included, lists everything: that is what `@`-completion and the folder picker
+     * have always received, and neither may lose sight of dot-directories.
      */
-    fun listPathEntries(workdir: String, subPath: String, limit: Int): Pair<List<PathEntry>, Boolean>? {
+    suspend fun listPathEntries(
+        workdir: String,
+        subPath: String,
+        limit: Int,
+        filter: String? = null,
+    ): Pair<List<PathEntry>, Boolean>? {
         val root = validateWorkdir(workdir) ?: return null
         // resolve against the canonical root, then re-canonicalize: toRealPath() collapses `..` and follows
         // symlinks, and startsWith(root) rejects anything that lands outside the project subtree.
@@ -323,11 +334,30 @@ class DirectoryService(
         if (!target.startsWith(root)) return null
         if (!target.isDirectory() || !target.isReadable()) return null
         val children = runCatching { Files.newDirectoryStream(target).use { it.toList() } }.getOrNull() ?: return null
-        val sorted = children
-            .mapNotNull { p -> p.fileName?.toString()?.let { name -> PathEntry(name, p.isDirectory()) } }
-            .sortedWith(compareByDescending<PathEntry> { it.isDir }.thenBy { it.name.lowercase() })
+        val all = children.mapNotNull { p -> p.fileName?.toString()?.let { name -> PathEntry(name, p.isDirectory()) } }
+        // BEFORE the cap, never after: one `node_modules` holds more names than [limit] allows, so a
+        // filter applied to the truncated page would hand the browser 500 rows of exactly the noise it
+        // asked to be spared and none of the project's own files.
+        val visible = if (filter == PATH_FILTER_SMART) smartVisible(target, all) else all
+        val sorted = visible.sortedWith(compareByDescending<PathEntry> { it.isDir }.thenBy { it.name.lowercase() })
         val cap = limit.coerceIn(1, 2_000)
         return sorted.take(cap) to (sorted.size > cap)
+    }
+
+    /**
+     * The browser's view of one directory: no dot-prefixed entries, and nothing `.gitignore` excludes.
+     *
+     * The two rules are deliberately unequal. The dot rule is local and total — it needs no process and
+     * therefore always applies, which is what makes `.git` (and every editor's state directory) invisible
+     * even on a machine with no git at all. The gitignore rule is best-effort: [GitIgnoreProbe] answers
+     * null for a non-repository, a missing git, or a probe that took too long, and null means "show
+     * them" — a listing must never fail or stall over a nicety. Dots are dropped FIRST so the probe is
+     * handed the smaller batch (and never `.git` itself, which no `.gitignore` mentions).
+     */
+    private suspend fun smartVisible(dir: Path, all: List<PathEntry>): List<PathEntry> {
+        val visible = all.filterNot { it.name.startsWith(".") }
+        val ignored = dev.ccpocket.daemon.git.GitIgnoreProbe.ignored(dir, visible.map { it.name }) ?: return visible
+        return visible.filterNot { it.name in ignored }
     }
 
     /**

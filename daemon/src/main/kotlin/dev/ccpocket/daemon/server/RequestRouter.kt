@@ -594,9 +594,10 @@ class RequestRouter(
                 else sink.emit(git.removeWorktree(frame, wd))
             }
 
-            // composer @-file completion (issue #75): a directory scan → off the inbound pump like the others
+            // composer @-file completion (issue #75) and the file browser: a directory scan — and, under
+            // the smart filter, one bounded `git check-ignore` — so it stays off the inbound pump like the others
             is ListPathEntries -> scope.launch {
-                val res = dirs.listPathEntries(frame.workdir, frame.subPath, frame.limit)
+                val res = dirs.listPathEntries(frame.workdir, frame.subPath, frame.limit, frame.filter)
                 // filesystem roots (#176) ride ONLY the owner's "~" home-anchor reply (the folder browser's
                 // opening request — a real session's workdir is never the bare "~"): a guest must not learn
                 // the disk layout (GuestGuard already denies its "~" anchor outright; this gate is defence in
