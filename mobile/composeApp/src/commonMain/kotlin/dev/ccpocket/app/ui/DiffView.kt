@@ -81,6 +81,7 @@ import dev.ccpocket.app.share.exportIsSaveDialog
 import dev.ccpocket.app.share.previewFile
 import dev.ccpocket.app.share.shareFile
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.FileContent
 import dev.ccpocket.protocol.FileDiff
@@ -144,21 +145,26 @@ fun StatusChip(op: String) {
         Modifier.size(20.dp).clip(RoundedCornerShape(6.dp)).background(statusBg(op)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(statusLetter(op), color = statusColor(op), fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text(
+            statusLetter(op), color = statusColor(op), fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp, fontWeight = FontWeight.Bold, style = tightCenter(11.sp),
+        )
     }
 }
 
-/** The mono "+N −M" stat: green adds, red dels, zero sides omitted; null stats render as "—". */
+/** The mono "+N −M" stat: green adds, red dels, zero sides omitted; null stats render as "—".
+ *  tightCenter throughout: this sits shoulder-to-shoulder with status chips/dots and badges on every
+ *  surface that shows it, and a font-metric-driven line box is exactly what knocks those out of line. */
 @Composable
 fun DiffStatText(adds: Int?, dels: Int?, fontSize: androidx.compose.ui.unit.TextUnit = 11.sp) {
     if (adds == null && dels == null) {
-        Text("—", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = fontSize)
+        Text("—", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = fontSize, style = tightCenter(fontSize))
         return
     }
-    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        if ((adds ?: 0) > 0) Text("+$adds", color = Tok.ok, fontFamily = FontFamily.Monospace, fontSize = fontSize)
-        if ((dels ?: 0) > 0) Text("−$dels", color = Tok.danger, fontFamily = FontFamily.Monospace, fontSize = fontSize)
-        if ((adds ?: 0) == 0 && (dels ?: 0) == 0) Text("±0", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = fontSize)
+    Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+        if ((adds ?: 0) > 0) Text("+$adds", color = Tok.ok, fontFamily = FontFamily.Monospace, fontSize = fontSize, style = tightCenter(fontSize))
+        if ((dels ?: 0) > 0) Text("−$dels", color = Tok.danger, fontFamily = FontFamily.Monospace, fontSize = fontSize, style = tightCenter(fontSize))
+        if ((adds ?: 0) == 0 && (dels ?: 0) == 0) Text("±0", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = fontSize, style = tightCenter(fontSize))
     }
 }
 
@@ -167,7 +173,7 @@ fun DiffStatText(adds: Int?, dels: Int?, fontSize: androidx.compose.ui.unit.Text
 fun FilesSummaryText(files: List<ChangedFile>, fontSize: androidx.compose.ui.unit.TextUnit = 12.sp) {
     val hasStats = files.any { it.adds != null || it.dels != null }
     Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("${files.size} files ·", color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = fontSize)
+        Text("${files.size} files ·", color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = fontSize, style = tightCenter(fontSize))
         DiffStatText(
             files.sumOf { it.adds ?: 0 }.takeIf { hasStats },
             files.sumOf { it.dels ?: 0 }.takeIf { hasStats },
@@ -186,9 +192,12 @@ fun DiffFileToggle(
     diffSelected: Boolean,
     isImage: Boolean,
     deleted: Boolean,
+    /** 这个文件根本没有 diff 可看（本会话没改过它——「全部」视角点开的未改文件走的就是这条）。
+     *  [rememberDiffTab] 早就会自动落到全文，这里把 Diff 段一起置灰，别让它看着还能点。 */
+    noDiff: Boolean = false,
     onPick: (diff: Boolean) -> Unit,
 ) {
-    val diffEnabled = !isImage
+    val diffEnabled = !isImage && !noDiff
     val fileEnabled = !deleted
     val caption = when {
         isImage -> stringResource(Res.string.diff_binary)
@@ -489,6 +498,10 @@ fun rememberDiffTab(path: String, isImage: Boolean, deleted: Boolean, diff: File
     }
     return tab
 }
+
+/** 回复已到、但这个文件没有逐行改动可看（≠「还在加载」，也≠「daemon 太旧」）。「全部」视角点开
+ *  一个本会话没改过的文件，走的就是这条——查看器落到全文、Diff 段置灰。 */
+fun diffUnavailable(diff: FileDiff?): Boolean = diff != null && !diff.ok && !diff.staleDaemon
 
 /** Header stats: the loaded diff's exact counts when available, else the list row's transcript totals. */
 fun shownStats(file: ChangedFile?, diff: FileDiff?): Pair<Int?, Int?> =

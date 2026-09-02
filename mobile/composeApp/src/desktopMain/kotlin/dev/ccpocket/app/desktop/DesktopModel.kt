@@ -781,7 +781,21 @@ interface DesktopModel {
     val selectedContentProgress: Pair<Long, Long>? get() = null
     fun selectChangedFile(path: String) {}
     /** Open the browser: flip the flag and refresh both the list and the remembered selection. */
-    fun openChanges() { showChanges = true; fetchChangedFiles() }
+    fun openChanges() { showChanges = true; fetchChangedFiles(); loadFilesShowHidden() }
+
+    // ── 文件浏览「全部」视角（files-browser-dual-view）───────────────────────────────────────────
+    // 同一个 Changes overlay 的第二个视角，不是第二个实体：逐层缓存住在 repo（['fileTree']），
+    // 这里只是把它投过来。inert 默认值保持 seed/preview 模型零改动——它们的树永远是空的。
+    /** '/'-keyed subPath → 那一层的清单（"" = workdir 本身）。 */
+    val fileTree: Map<String, dev.ccpocket.protocol.PathEntries> get() = emptyMap()
+    /** 请求某一层；已缓存 / 在途则 no-op。 */
+    fun browseFileTree(subPath: String) {}
+    /** 丢弃逐层缓存（overlay 关闭）——下次打开重新读到最新磁盘状态。 */
+    fun clearFileTree() {}
+    /** 显示 `.` 开头的隐藏项；按 workdir 持久化。 */
+    val filesShowHidden: Boolean get() = false
+    fun toggleFilesShowHidden() {}
+    fun loadFilesShowHidden() {}
 
     // ── Git panel (issue #280) + worktrees (issue #281) ──────────────────────────────────────────
     // Same shape as `changes` above: inert defaults so seed/preview models compile untouched, live

@@ -365,6 +365,9 @@ fun QuickActionsSheet(
 ) {
     var sub by remember { mutableStateOf(QaSub.MAIN) }
     var clearArmed by remember { mutableStateOf(false) }
+    // 「文件」行的尾注要说得出「N 处改动」，就得先有 N：桌面端由 ChangesPill 常驻刷新，手机上这里
+    // 是唯一入口，所以打开 ⋯ 顺手拉一次（无 workdir / 无 sessionId 时 fetchChangedFiles 自己会 no-op）
+    LaunchedEffect(Unit) { repo.fetchChangedFiles() }
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp, top = 4.dp)) {
             when (sub) {
@@ -414,7 +417,13 @@ fun QuickActionsSheet(
                             }
                             QaGroup(stringResource(Res.string.qa_group_tools)) {
                                 ActionRow(stringResource(Res.string.terminal_open)) { onTerminal(); onDismiss() }
-                                ActionRow(stringResource(Res.string.qa_files)) { onFiles(); onDismiss() }
+                                // 「文件」而不是「改动文件」：这一行现在通向双视角文件面（变更 / 全部），
+                                // 尾注只在真有改动时出现——0 处改动写出来是噪音，入口本身已经在了
+                                ActionRow(
+                                    stringResource(Res.string.qa_files),
+                                    value = repo.changedFiles.size.takeIf { it > 0 }
+                                        ?.let { stringResource(Res.string.files_changes_note, it) },
+                                ) { onFiles(); onDismiss() }
                                 ActionRow(stringResource(Res.string.git_tab)) { onGit(); onDismiss() }
                                 // "Hand off to a colleague" is an ordinary peer of Terminal / Changed files:
                                 // available is not recommended, and conditional is not new (no badge, no accent,

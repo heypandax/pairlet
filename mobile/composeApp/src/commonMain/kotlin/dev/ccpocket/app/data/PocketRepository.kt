@@ -1197,6 +1197,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val worktreesUnavailable = mutableStateOf(false)          // no reply — the daemon predates pocket/worktree.*
     val pathListing = mutableStateOf<PathEntries?>(null)     // latest @-file completion listing (issue #75); match its subPath before use
     val browseListing = mutableStateOf<PathEntries?>(null)   // latest anchored folder-browse listing (issue #152); match its (workdir, subPath) before use
+    // ── 文件浏览「全部」视角的逐层缓存（文件浏览双视角）────────────────────────────────────────────
+    // @ 补全用的是「最新一条回复」这种单槽语义（[pathListing]），树/下钻要的是「每层各留一份」，
+    // 两者形状不同，所以给树一个独立的槽：key = '/'-keyed subPath（"" = workdir 本身），value = 那层
+    // 的原始 [PathEntries]（entries + truncated 都要，截断提示按层显示）。同一层不重复请求，返回上层
+    // / 切视角都直接命中缓存；面关闭时 [clearFileTree] 清空（下次打开重新读到最新磁盘状态）。
+    val fileTree = mutableStateMapOf<String, PathEntries>()
+    private val fileTreePending = mutableSetOf<String>()      // 已发出、还没回来的层——回复只在这里登记过才落进 [fileTree]
+    // 手机上打开查看器会把文件 sheet 整个移出 composition（App 的全屏路由早于 sheet 就 return 了），
+    // 所以「当前视角 + 当前所在层」不能用 sheet 内部的 remember——从查看器返回会掉回变更视角的根目录。
+    // 放在这里跟着会话走：查看器来回一趟原地不动，换会话则复位。
+    val filesAllView = mutableStateOf(false)                 // true = 全部视角（默认 false = 变更）
+    val fileTreeSubPath = mutableStateOf("")                 // 全部视角当前所在层（'/'-keyed）
     val browseRoots = mutableStateOf<List<String>>(emptyList()) // #176: fs roots latched from the "~" home-anchor reply (owner-only; empty on old daemon / guest → root switcher hidden)
     private var lastBrowseAnchor: String = BROWSE_HOME       // #176: anchor of the LATEST browseDirs request — a real fs root ("/", "C:\") routes its reply by matching this
     private var lastBrowseSub: String? = null                // subPath of the LATEST browseDirs request — only its reply may land in browseListing (#152 复核: stale out-of-order replies dropped)
@@ -2615,6 +2627,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         closeFileViewer()
         clearGitState() // the Git panel is per-session too (#280/#281)
         pathListing.value = null
+        resetFileBrowser() // …and the 全部 视角 (cache + view + level) belongs to the workdir we're leaving
         allowRules.clear()
         slashCommands.clear()
         clearBackgroundJobs()
@@ -3615,7 +3628,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     browseListing.value = foldBrowseReply(browseListing.value, f, lastBrowseSub)
                     if (f.roots.isNotEmpty()) browseRoots.value = f.roots
                 }
-                f.workdir == workdir.value -> pathListing.value = f
+                // 文件浏览「全部」视角与 @ 补全共用同一个 workdir，帧上分不开，所以两边都收下：
+                // [pathListing] 保持原样（单槽、最新回复），树额外把自己请求过的那层折进 [fileTree]。
+                // 树只读自己的缓存、永不读 pathListing，所以互不干扰；反向的干扰窗口只有「面开着时
+                // 补全弹层也活着」这一种，而两端的文件面都是盖在输入框之上的模态，实际不会同时活跃。
+                f.workdir == workdir.value -> {
+                    pathListing.value = f
+                    if (fileTreePending.remove(f.subPath)) fileTree[f.subPath] = f
+                }
                 f.workdir == lastBrowseAnchor -> browseListing.value = foldBrowseReply(browseListing.value, f, lastBrowseSub)
             }
             // ── folder-share (issue #115): owner control-plane replies ──
@@ -5220,6 +5240,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         composerEpoch.value++ // a REAL context switch — composers re-init from the target's draft (#29/#88); identity flips don't
         terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
         changedFiles.clear(); changedFilesLoading.value = false; closeFileViewer() // changed-files view is per-session too
+        resetFileBrowser() // …as is the 全部 视角 (another workdir = another tree)
         clearGitState() // …and so is the Git panel (#280/#281)
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
         turnStartMark = null // …nor stamp its send time onto this session's TurnEnded duration / stop-refill window
@@ -5926,6 +5947,55 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun browseFiles(subPath: String) {
         val wd = workdir.value ?: return
         scope.launch { send(ListPathEntries(wd, subPath)) }
+    }
+
+    // ── 文件浏览「全部」视角（文件浏览双视角）────────────────────────────────────────────────────
+    // 与 @ 补全同一条 [ListPathEntries] 线，但按层缓存、'/'-keyed subPath（daemon 的 NIO resolve 在
+    // Windows 上也吃 '/'——#152 的文件夹浏览器早就靠这一点跨平台），limit 顶到 daemon 的上限 2000，
+    // 与设计稿「已显示前 2000 项，其余已折叠」对齐（超出由 [PathEntries.truncated] 报给那一层）。
+
+    /** 请求 [subPath]（'/'-keyed，"" = workdir 本身）这一层的目录内容；已缓存或已在途则不重复发。
+     *  没人应答（daemon 老到连 [ListPathEntries] 都没有）时，8 秒后把这一层落成一条失败清单——
+     *  UI 于是显示「读不到这个文件夹」，而不是一个永远转下去的圈。 */
+    fun browseFileTree(subPath: String) {
+        val wd = workdir.value ?: return
+        if (fileTree.containsKey(subPath) || !fileTreePending.add(subPath)) return
+        scope.launch { send(ListPathEntries(wd, subPath, limit = FILE_TREE_LIMIT)) }
+        scope.launch {
+            delay(8_000)
+            if (fileTreePending.remove(subPath)) {
+                fileTree[subPath] = PathEntries(wd, subPath, ok = false, error = "no reply from the computer")
+            }
+        }
+    }
+
+    /** 丢弃逐层缓存——文件面关闭 / 换会话时调用，下次打开重新读到最新的磁盘状态。
+     *  只清缓存，不动视角与所在层：同一个会话里再打开，落回你上次看的地方。 */
+    fun clearFileTree() {
+        fileTree.clear()
+        fileTreePending.clear()
+    }
+
+    /** 换会话时把文件面整个复位：缓存、视角、所在层——另一个 workdir 就是另一棵树。 */
+    fun resetFileBrowser() {
+        clearFileTree()
+        filesAllView.value = false
+        fileTreeSubPath.value = ""
+    }
+
+    /** 「显示隐藏项」开关，按 workdir 持久化（同一台电脑上每个项目各自记忆）。面打开时 [loadFilesShowHidden]
+     *  读回，[toggleFilesShowHidden] 翻转并落盘。daemon 侧的 gitignore 智能过滤是另一条线，这里的
+     *  客户端 `.` 前缀过滤是兜底，两路合并后仍然保留。 */
+    val filesShowHidden = mutableStateOf(false)
+
+    fun loadFilesShowHidden() {
+        filesShowHidden.value = SecureStore.getString(K_FILES_HIDDEN_PREFIX + (workdir.value ?: "")) == "1"
+    }
+
+    fun toggleFilesShowHidden() {
+        val on = !filesShowHidden.value
+        filesShowHidden.value = on
+        workdir.value?.let { SecureStore.putString(K_FILES_HIDDEN_PREFIX + it, if (on) "1" else "") }
     }
 
     /** Ask the daemon for the children under [anchor] + [subPath] ('/'-joined, "" = the anchor itself) for
@@ -6803,6 +6873,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_ACCENT_THEME = "appearance_accent_theme"  // SecureStore: AccentTheme name (POCKET/CODEX; issue #204)
         const val K_VOICE_ENGINE = "voice_engine"             // SecureStore: "whisper" = transcribe on the computer; "" = native dictation when available
         const val K_SHARE_ENDED_PREFIX = "share_ended:"        // SecureStore: "share_ended:<accountId>" → "reason\townerLabel" — the guest's ShareEnded notice (#115 follow-up)
+        const val K_FILES_HIDDEN_PREFIX = "files_show_hidden:" // SecureStore: "files_show_hidden:<workdir>" → "1" = 文件浏览显示 . 开头的隐藏项
+        const val FILE_TREE_LIMIT = 2_000                      // 文件浏览每层的条目上限（= daemon listPathEntries 的硬上限）
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)
         const val FONT_SCALE_MAX = 1.4f                        // largest chat text scale (eye-comfort upper bound)
         // auto-continue fires this long AFTER the parsed limit reset (issue #137) — absorbs clock skew

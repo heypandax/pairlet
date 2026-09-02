@@ -546,9 +546,17 @@
     <string name="terminal_timed_out">timed out</string>
 
     <!-- ── changed files (issue #36) ─────────────────────────────── -->
-    <string name="qa_files">Changed files</string>
-    <string name="files_title">Changed files</string>
+    <string name="qa_files">Files</string>
+    <string name="files_title">Files</string>
     <string name="files_empty">This session hasn\'t changed any files yet.</string>
+    <!-- ── files browser: 变更 / 全部 dual view ──────────────────── -->
+    <string name="files_changes_note">%1$d changed</string>
+    <string name="files_view_changes">Changed</string>
+    <string name="files_view_all">All</string>
+    <string name="files_show_hidden">Show hidden files</string>
+    <string name="files_truncated">Showing the first %1$d entries; the rest are collapsed.</string>
+    <string name="files_dir_empty">This folder is empty.</string>
+    <string name="files_dir_error">Couldn\'t read this folder.</string>
     <string name="files_unavailable">No reply from the computer — update the daemon there and try again.</string>
     <string name="file_truncated">Preview truncated — first %1$d KB of %2$d KB</string>
     <string name="file_undecodable">Couldn\'t display this image</string>

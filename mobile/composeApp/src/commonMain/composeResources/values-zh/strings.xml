@@ -546,9 +546,17 @@
     <string name="terminal_timed_out">已超时</string>
 
     <!-- ── 改动文件（issue #36）──────────────────────────────────── -->
-    <string name="qa_files">改动文件</string>
-    <string name="files_title">改动文件</string>
+    <string name="qa_files">文件</string>
+    <string name="files_title">文件</string>
     <string name="files_empty">本会话还没有改动过文件。</string>
+    <!-- ── 文件浏览：变更 / 全部 双视角 ──────────────────────────── -->
+    <string name="files_changes_note">%1$d 处改动</string>
+    <string name="files_view_changes">变更</string>
+    <string name="files_view_all">全部</string>
+    <string name="files_show_hidden">显示隐藏文件</string>
+    <string name="files_truncated">已显示前 %1$d 项，其余已折叠</string>
+    <string name="files_dir_empty">这个文件夹是空的。</string>
+    <string name="files_dir_error">读不到这个文件夹。</string>
     <string name="files_unavailable">电脑没有响应——请更新电脑上的 daemon 后重试。</string>
     <string name="file_truncated">预览已截断——前 %1$d KB / 共 %2$d KB</string>
     <string name="file_undecodable">无法显示这张图片</string>
