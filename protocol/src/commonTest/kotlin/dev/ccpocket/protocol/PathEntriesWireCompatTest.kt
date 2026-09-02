@@ -101,6 +101,14 @@ class PathEntriesWireCompatTest {
         val newJson = PocketJson.encodeToString(
             Envelope(id = "2", ts = 0, body = ListPathEntries("/home/p", filter = PATH_FILTER_SMART)),
         )
+        // pin that the key really reaches the wire and round-trips on a same-version peer — without
+        // these, a stray @Transient or serial-name drift keeps every test here green while the browser
+        // silently loses its filter in both directions
+        assertTrue("\"filter\":\"smart\"" in newJson, newJson)
+        assertEquals(
+            PATH_FILTER_SMART,
+            (PocketJson.decodeFromString<Envelope>(newJson).body as ListPathEntries).filter,
+        )
         val oldSide = PocketJson.decodeFromString<OldListPathEntries>(
             newJson.substringAfter("\"body\":").removeSuffix("}"),
         )
