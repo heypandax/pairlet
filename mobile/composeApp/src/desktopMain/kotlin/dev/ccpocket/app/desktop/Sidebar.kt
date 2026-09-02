@@ -380,14 +380,18 @@ private fun PinRow(
     // is the same "current machine's loaded list" fact RECENT's g.current encodes — and split stays a
     // this-machine gesture. RECENT's "Remove from recents" maps to this row's own removal verb: Unpin.
     var renaming by remember(p.sessionId) { mutableStateOf(false) }
-    val renameError = model.renameError(p.sessionId)
+    // renameError is keyed by sessionId alone, and a pinned session usually ALSO has a RECENT row: on a
+    // refused rename both surfaces would swap into edit state at once. Only the row that actually sent
+    // the rename shows the error editor — that's what this flag records.
+    var renamedHere by remember(p.sessionId) { mutableStateOf(false) }
+    val renameError = model.renameError(p.sessionId).takeIf { renamedHere }
     if (renaming || renameError != null) {
         Column {
             GroupNameInput(
                 initial = title,
                 hint = stringResource(Res.string.session_rename_hint),
-                onCommit = { model.renameSession(p.sessionId, it, p.cwd); renaming = false },
-                onCancel = { renaming = false; model.dismissRenameError() },
+                onCommit = { model.renameSession(p.sessionId, it, p.cwd); renaming = false; renamedHere = true },
+                onCancel = { renaming = false; renamedHere = false; model.dismissRenameError() },
             )
             if (renameError != null) {
                 Text(
@@ -718,7 +722,9 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                     // Archive too (#202's gate lifted): the verb always carried the row's own cwd, and its
                     // Sessions(thatProject) echo repointing the listing now MATCHES the convention that the
                     // listed project follows wherever the user acts, instead of contradicting it.
-                    val canArchive = model.canArchiveSessions
+                    // guest-shared rows keep archive off too (same asymmetry rename already closed): a
+                    // guest's SetSessionArchived is a silent daemon-side no-op with no error surface.
+                    val canArchive = model.canArchiveSessions && g.sharedBy == null
                     // "+ New group" sits at the TOP of the project's sessions (matches mobile) — a bottom
                     // entry forces scrolling past a long session list to create a group. Current + group-aware
                     // + owner only (canEditGroups folds in groupsSupported), so it also creates the FIRST group

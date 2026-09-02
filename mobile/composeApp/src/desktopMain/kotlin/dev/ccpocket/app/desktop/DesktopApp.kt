@@ -103,23 +103,23 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
     // move without adding a node, so the band costs nothing and the pointer crossing x≤8dp on its way
     // to the edge is what triggers.
     var pointerAtLeftEdge by remember { mutableStateOf(false) }
-    val edgePx = with(density) { HOVER_REVEAL_EDGE.dp.toPx() }
+    val edgePx = remember(density) { with(density) { HOVER_REVEAL_EDGE.dp.toPx() } }
+    // The Move observer is on the whole window's hit path, so it only rides while the feature it feeds
+    // can do anything — expanded (the default state) pays nothing for it. An Exit through the LEFT
+    // border keeps the band armed (the pointer went into the AWT resize band, where Compose gets no
+    // events — clearing there made the peek retract the instant it reached the edge it was invited to
+    // rest on); the parked-outside-the-window case is what the reveal block's MouseInfo watchdog is for.
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-    Box(
-        Modifier.fillMaxSize().background(Tok.base)
-            .onPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Move) { e ->
-                val near = (e.changes.lastOrNull()?.position?.x ?: Float.MAX_VALUE) <= edgePx
-                if (near != pointerAtLeftEdge) pointerAtLeftEdge = near // write only on change — this runs on every move
-            }
-            .onPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Exit) { e ->
-                // Leaving THROUGH the left border — into the AWT resize band, where Compose gets no
-                // events at all — still counts as hugging the edge: clearing unconditionally here made
-                // the peek retract the instant the pointer reached the very edge it was invited to rest
-                // on. Only an exit through any OTHER border ends the band.
-                val stillLeft = (e.changes.lastOrNull()?.position?.x ?: Float.MAX_VALUE) <= edgePx
-                if (pointerAtLeftEdge != stillLeft) pointerAtLeftEdge = stillLeft
-            },
-    ) {
+    val edgeWatch = if (!collapsed) Modifier else Modifier
+        .onPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Move) { e ->
+            val near = (e.changes.lastOrNull()?.position?.x ?: Float.MAX_VALUE) <= edgePx
+            if (near != pointerAtLeftEdge) pointerAtLeftEdge = near // write only on change — this runs on every move
+        }
+        .onPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Exit) { e ->
+            val stillLeft = (e.changes.lastOrNull()?.position?.x ?: Float.MAX_VALUE) <= edgePx
+            if (pointerAtLeftEdge != stillLeft) pointerAtLeftEdge = stillLeft
+        }
+    Box(Modifier.fillMaxSize().background(Tok.base).then(edgeWatch)) {
         // drag-to-split: the one gesture state shared between the sidebar (where a drag starts) and the
         // chat columns (where it lands). Provided here so every row below can reach the same instance.
         val drag = remember { SplitDragState() }
@@ -235,6 +235,23 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 } else if (revealed) {
                     delay(HOVER_REVEAL_GRACE_MS)
                     revealed = false
+                }
+            }
+            // The parked-outside watchdog: an exit through the LEFT border keeps the band armed (see the
+            // Move/Exit observers), which is right for the resize band but wrong once the pointer leaves
+            // the window entirely — Compose then delivers nothing, and the peek would sit painted over
+            // the chat until the pointer happened to come back. AWT still knows where the pointer is, so
+            // while revealed (and not held by an open surface) poll it: gone from the window = disarm.
+            val chrome = LocalWindowChrome.current
+            LaunchedEffect(revealed, heldOpen) {
+                val win = chrome.window ?: return@LaunchedEffect
+                while (revealed && !heldOpen) {
+                    delay(HOVER_REVEAL_WATCHDOG_MS)
+                    val at = runCatching { java.awt.MouseInfo.getPointerInfo()?.location }.getOrNull() ?: continue
+                    if (!win.bounds.contains(at)) {
+                        pointerAtLeftEdge = false
+                        break // the reveal effect above owns the grace + hide from here
+                    }
                 }
             }
             androidx.compose.animation.AnimatedVisibility(
@@ -437,12 +454,12 @@ internal const val SIDEBAR_ANIM_MS = 200
 private const val HOVER_REVEAL_EDGE = 8 // dp — the left-edge band that peeks the hidden sidebar (must
 // clear AWT's undecorated-window resize border, whose outer pixels never reach Compose)
 private const val HOVER_REVEAL_GRACE_MS = 250L // pointer-out grace before the peek tucks away
+private const val HOVER_REVEAL_WATCHDOG_MS = 400L // parked-outside poll cadence while the peek is up
 
 private const val SIDEBAR_MIN = 220f
 private const val SIDEBAR_MAX = 460f
 private const val SIDEBAR_COLLAPSE_AT = 170f
 private const val K_SIDEBAR_WIDTH = "desktop_sidebar_width"
-private const val K_SIDEBAR_COLLAPSED = "desktop_sidebar_collapsed"
 
 private val resizeCursor = PointerIcon(java.awt.Cursor(java.awt.Cursor.E_RESIZE_CURSOR))
 

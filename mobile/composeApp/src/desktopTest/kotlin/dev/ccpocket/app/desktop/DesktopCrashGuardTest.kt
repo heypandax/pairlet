@@ -124,6 +124,12 @@ class DesktopCrashGuardTest {
         }
         assertFalse(DesktopCrashGuard.isBenignJdkTrayNpe(appOnTop))
         assertFalse(DesktopCrashGuard.isBenignJdkTrayNpe(IllegalStateException("not an NPE at all")))
+        // …and HotSpot's fast-throw variant of the same bug (OmitStackTraceInFastThrow strips the stack
+        // after enough recurrences) inherits the pardon — a real EDT NPE dies fully-stacked on throw #1
+        val fastThrow = NullPointerException().apply { stackTrace = emptyArray() }
+        assertTrue(DesktopCrashGuard.isBenignJdkTrayNpe(fastThrow))
+        // a stackless non-NPE stays fatal
+        assertFalse(DesktopCrashGuard.isBenignJdkTrayNpe(IllegalStateException("x").apply { stackTrace = emptyArray() }))
     }
 
     @Test

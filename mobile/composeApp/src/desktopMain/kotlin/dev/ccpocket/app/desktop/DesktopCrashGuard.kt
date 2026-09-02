@@ -93,11 +93,20 @@ object DesktopCrashGuard {
      * fatal turned a JDK bug into "clicking the menu-bar icon sometimes quits the app". Matched
      * NARROWLY — this exact dispatcher frame plus a TrayIcon frame — so no real fault can hide in it.
      */
-    internal fun isBenignJdkTrayNpe(t: Throwable): Boolean =
-        t is NullPointerException &&
-            t.stackTrace.firstOrNull()?.className == "java.awt.LightweightDispatcher" &&
-            t.stackTrace.firstOrNull()?.methodName == "eventDispatched" &&
+    internal fun isBenignJdkTrayNpe(t: Throwable): Boolean {
+        if (t !is NullPointerException) return false
+        val top = t.stackTrace.firstOrNull()
+        // A recurring benign NPE eventually loses its stack to HotSpot's OmitStackTraceInFastThrow (C2
+        // pre-allocates a stackless instance after enough throws at one site). An EDT NPE that made it
+        // this far repeatedly WITHOUT killing the process can only be one the full-stack matcher below
+        // already pardoned — a real app NPE would have been fatal on its first, fully-stacked throw —
+        // so the stackless recurrence inherits the pardon rather than reverting to "the menu-bar icon
+        // sometimes quits the app, but only on aged processes".
+        if (t.stackTrace.isEmpty()) return true
+        return top?.className == "java.awt.LightweightDispatcher" &&
+            top.methodName == "eventDispatched" &&
             t.stackTrace.any { it.className == "java.awt.TrayIcon" }
+    }
 
     /**
      * Which threads' deaths must take the process with them.

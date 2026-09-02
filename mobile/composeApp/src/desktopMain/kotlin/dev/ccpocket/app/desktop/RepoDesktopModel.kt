@@ -807,7 +807,14 @@ class RepoDesktopModel(
             val dir = repo.sessionsDir.value ?: return false
             return repo.directories.none { sameDir(it.path, dir) && it.sharedBy != null }
         }
-    override fun renameSession(sessionId: String, title: String, wd: String?) { repo.renameSession(sessionId, title, wd) }
+    override fun renameSession(sessionId: String, title: String, wd: String?) {
+        // acting on another project's row makes that project the listed one FIRST (the navigation
+        // convention) — the daemon answers these verbs with Sessions(thatDir), which repoints the
+        // listing anyway; going through focusListedDir means the outgoing group gets its snapshot
+        // instead of being left empty and hidden (#102's "empty non-current groups are hidden").
+        wd?.let { focusListedDir(it) }
+        repo.renameSession(sessionId, title, wd)
+    }
     override fun renameError(sessionId: String): String? =
         repo.renameError.value?.takeIf { it.sessionId == sessionId }?.message
     override fun dismissRenameError() { repo.dismissRenameError() }
@@ -863,6 +870,20 @@ class RepoDesktopModel(
         repo.listSessions(dir)
     }
 
+    // The backstop for the paths that never touch a sidebar verb: a push tap, a deep link, a launch
+    // restore. workdir only CHANGES when a conversation actually moves project (a reattach or a
+    // mid-chat re-announce re-sets the same value, which snapshotFlow dedups), so this cannot hijack
+    // a list the user browsed to while chatting — the failure that sank the commonMain SessionLive
+    // version of this rule (and phone routing derives screens from sessionsDir, so the rule must not
+    // live in shared code at all). Observe views excluded: watching must not repoint the listing.
+    init {
+        scope.launch {
+            snapshotFlow { repo.workdir.value }.collect { wd ->
+                if (wd != null && !repo.observing.value) focusListedDir(wd)
+            }
+        }
+    }
+
     // ── session navigation history (the title bar's ‹ ›) ─────────────────────────────────────────
     // Recorded off the sessionKey echo rather than the click handlers: every way a session opens —
     // rows, pins, the palette, a brand-new ⌘N session — lands here through one seam, id in hand.
@@ -879,7 +900,18 @@ class RepoDesktopModel(
             // the very first session of a run would slip through a key-only flow (wd still null at pin time)
             snapshotFlow { repo.sessionKey.value to repo.workdir.value }.collect { (id, wd) ->
                 val acct = repo.paired.value?.accountId ?: return@collect
-                if (id == null || wd == null || navStack.getOrNull(navCursor)?.sessionId == id) return@collect
+                if (id == null || wd == null) return@collect
+                val cur = navStack.getOrNull(navCursor)
+                if (cur?.sessionId == id) {
+                    // Not a new visit — but a cross-project open pins sessionKey a full RTT before
+                    // SessionLive moves workdir, so the entry recorded at pin time carries the PREVIOUS
+                    // project's dir. The settled pair lands here: correct the entry in place (title too,
+                    // same reason), or a later ⌘[ would resume this session against the wrong dirKey.
+                    if (cur.cwd != wd || cur.title != repo.chatTitle.value) {
+                        navStack[navCursor] = cur.copy(cwd = wd, title = repo.chatTitle.value ?: cur.title)
+                    }
+                    return@collect
+                }
                 while (navStack.size > navCursor + 1) navStack.removeAt(navStack.size - 1) // truncate the forward branch
                 navStack += NavEntry(acct, id, wd, repo.chatTitle.value, repo.sessionAgent.value ?: AgentKind.CLAUDE)
                 if (navStack.size > MAX_NAV_HISTORY) navStack.removeAt(0)
@@ -896,17 +928,22 @@ class RepoDesktopModel(
     /** Reopen [navStack]'s [i]th entry — [openPin]'s open path (same or cross machine), minus recording. */
     private fun openNavEntry(i: Int) {
         val e = navStack[i]
+        val from = navCursor
         navCursor = i // before the open — the landing echo must read this entry (see the recorder above)
         navGen++ // user navigation — stop an in-flight RECENT refill from repointing the list (#102)
         if (e.accountId == repo.paired.value?.accountId) {
             focusDir(e.cwd)
             focusListedDir(e.cwd) // a history step into another project brings its listing (and menus) along
             optimisticSelectedId = e.sessionId
-            repo.openSession(wd = e.cwd, resumeId = e.sessionId, title = e.title, agent = e.agent)
+            // A synchronously refused open (unsupported agent, duplicate target) moved nothing on
+            // screen — the cursor must not stay on a position the user isn't at, or the arrows lie
+            // and the NEXT navigation truncates live forward entries at the phantom spot.
+            if (!repo.openSession(wd = e.cwd, resumeId = e.sessionId, title = e.title, agent = e.agent)) navCursor = from
             return
         }
         optimisticSelectedId = null // another machine's session — nothing in the current list to pre-light
-        val target = repo.pairedList.firstOrNull { it.accountId == e.accountId } ?: return
+        val target = repo.pairedList.firstOrNull { it.accountId == e.accountId }
+        if (target == null) { navCursor = from; return } // machine unpaired since — same rollback rule
         switchMachine(target)
         repo.requestOpenSession(e.cwd, e.sessionId, title = e.title, agent = e.agent)
     }
@@ -1441,6 +1478,7 @@ class RepoDesktopModel(
         }
 
     override fun archiveSession(s: DkSession) {
+        focusListedDir(s.cwd) // same rule as renameSession — snapshot the outgoing group before the echo repoints
         repo.setSessionArchived(s.cwd, s.sessionId, archived = true, title = s.title, running = s.running)
     }
 

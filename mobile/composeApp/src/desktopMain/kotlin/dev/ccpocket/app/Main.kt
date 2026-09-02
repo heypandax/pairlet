@@ -484,6 +484,7 @@ private fun ApplicationScope.PocketShell() {
                 onToggleMax = toggleZoom,
                 onToggleFullscreen = toggleFullscreen,
                 dragAndZoomModifier = windowDragAndZoom(window, toggleZoom),
+                window = window,
             )
         }
         PocketTheme(mode = repo.themeMode.value, accent = repo.accentTheme.value) {
@@ -519,6 +520,10 @@ private fun ApplicationScope.PocketShell() {
                     }
                     // "Add computer" pairs a new daemon in a modal over the live shell (no disconnect)
                     if (model.showAddComputer) AddComputerModal(repo) { model.showAddComputer = false }
+                    // With an overlay up, the in-content chrome sits UNDER its scrim — the old title bar
+                    // sat above the overlays by construction, so restore that: a transparent drag band
+                    // (plus Win/Linux window buttons) over everything while any overlay is open.
+                    if (connected && model.anyOverlayOpen) dev.ccpocket.app.desktop.OverlayChromeStrip()
                 }
             }
             }

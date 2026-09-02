@@ -84,6 +84,9 @@ class DesktopWindowChrome(
      *  only — never a whole row, or the controls inside it stop receiving clicks (the old title bar's
      *  lesson: its buttons sat deliberately outside the drag handle). */
     val dragAndZoomModifier: Modifier = Modifier,
+    /** The AWT window, for the few places that must consult GLOBAL pointer state (the hover-peek's
+     *  parked-outside watchdog) — Compose stops delivering events once the pointer leaves the scene. */
+    val window: java.awt.Window? = null,
 )
 
 /** The chrome for the surface being composed. [dev.ccpocket.app.PocketShell] provides the live one around
@@ -315,6 +318,27 @@ fun ConnectChromeRow() {
         if (chrome.mac && !chrome.fullscreen) TrafficLights(chrome.onClose, chrome.onMinimize, chrome.onToggleFullscreen)
         Box(Modifier.weight(1f).height(38.dp).then(chrome.dragAndZoomModifier)) // drag / double-click zoom
         if (!chrome.mac && !chrome.fullscreen) WinControls(chrome.onMinimize, chrome.onToggleMax, chrome.onClose)
+    }
+}
+
+/**
+ * The chrome that must survive a MODAL: composed above the overlay host while one is open, restoring
+ * what the old title bar gave by construction (it sat above the overlays in [dev.ccpocket.app.main]'s
+ * Column). Without it, an undecorated window cannot be moved or — on Win/Linux — closed while
+ * Settings / the palette / a permission modal is up. Deliberately minimal: a transparent drag band and
+ * the Win/Linux window buttons. No traffic lights — macOS closes via ⌘W/menu, and doubling the lights
+ * over a scrim-dimmed copy read as a glitch.
+ */
+@Composable
+fun OverlayChromeStrip() {
+    val chrome = LocalWindowChrome.current
+    if (chrome.fullscreen) return
+    Row(
+        Modifier.fillMaxWidth().height(38.dp).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f).height(38.dp).then(chrome.dragAndZoomModifier))
+        if (!chrome.mac) WinControls(chrome.onMinimize, chrome.onToggleMax, chrome.onClose)
     }
 }
 
