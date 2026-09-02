@@ -223,6 +223,14 @@ class RepoDesktopModel(
     override val selectedContentProgress: Pair<Long, Long>? get() = repo.viewedFileProgress.value
     override fun selectChangedFile(path: String) = repo.openChangedFile(path)
 
+    // 「全部」视角：逐层缓存 + 隐藏项开关也都住在 repo，这里同样只是投影
+    override val fileTree: Map<String, dev.ccpocket.protocol.PathEntries> get() = repo.fileTree
+    override fun browseFileTree(subPath: String) = repo.browseFileTree(subPath)
+    override fun clearFileTree() = repo.clearFileTree()
+    override val filesShowHidden: Boolean get() = repo.filesShowHidden.value
+    override fun toggleFilesShowHidden() = repo.toggleFilesShowHidden()
+    override fun loadFilesShowHidden() = repo.loadFilesShowHidden()
+
     // ── Git panel (#280) / worktrees (#281): straight repo pass-throughs. The repo already scopes
     // every reply to (convoId, workdir) and arms the 8s stale-daemon deadline on every request.
     override val gitStatus: dev.ccpocket.protocol.GitStatus? get() = repo.gitStatus.value

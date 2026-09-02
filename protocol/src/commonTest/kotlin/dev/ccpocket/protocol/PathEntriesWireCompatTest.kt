@@ -17,12 +17,24 @@ private data class OldPathEntries(
     val error: String? = null,
 )
 
+/** The pre-browser `pocket/path.list` shape — proves an OLD daemon skips [ListPathEntries.filter]. */
+@kotlinx.serialization.Serializable
+private data class OldListPathEntries(
+    val workdir: String,
+    val subPath: String = "",
+    val limit: Int = 500,
+)
+
 /**
  * Wire compatibility for the filesystem-roots tail on [PathEntries] (issue #176): the round-trip, plus
  * the two mixed-version directions — an old daemon's reply (no `roots` key) decodes on a new app with
  * the harmless empty default (switcher hidden), and a new daemon's reply (extra `roots` key) still
  * decodes on an old app (ignoreUnknownKeys). Browsing a chosen root needs NO new frame at all: it is
  * the existing [ListPathEntries] with the root as its workdir, which every shipped daemon serves.
+ *
+ * The file browser's [ListPathEntries.filter] rides the same request frame on the same terms, and the
+ * bottom three tests hold it to them: absent unless asked for (so no shipped daemon sees a single new
+ * byte), null when a pre-browser app omits it, and skippable by a pre-browser daemon.
  */
 class PathEntriesWireCompatTest {
 
@@ -62,5 +74,45 @@ class PathEntriesWireCompatTest {
         )
         assertEquals("~", oldSide.workdir)
         assertTrue(oldSide.ok)
+    }
+
+    @Test
+    fun a_request_without_a_filter_encodes_byte_for_byte_as_it_always_did() {
+        // explicitNulls=false keeps the absent filter OFF the wire, so @-completion and the folder
+        // picker send a shipped daemon exactly the bytes it has always parsed — the whole basis for
+        // calling this trailing field additive.
+        val body = PocketJson.encodeToString(Envelope(id = "1", ts = 7, body = ListPathEntries("~", "src", 200)))
+            .substringAfter("\"body\":").removeSuffix("}")
+        assertEquals("""{"t":"pocket/path.list","workdir":"~","subPath":"src","limit":200}""", body)
+        assertTrue("filter" !in body)
+    }
+
+    @Test
+    fun an_old_apps_request_without_the_filter_key_decodes_to_no_filter() {
+        val old = """{"id":"1","ts":7,"body":{"t":"pocket/path.list","workdir":"/home/p","subPath":"","limit":500}}"""
+        val decoded = PocketJson.decodeFromString<Envelope>(old).body as ListPathEntries
+        assertEquals(null, decoded.filter, "absent must mean the unfiltered listing, never a browser view")
+    }
+
+    @Test
+    fun an_old_daemon_skips_the_new_filter_key() {
+        // a NEW app asking for the browser view, parsed by the OLD daemon's shape: ignoreUnknownKeys
+        // drops `filter` and it answers the full listing — degraded (the noise is back), never wrong
+        val newJson = PocketJson.encodeToString(
+            Envelope(id = "2", ts = 0, body = ListPathEntries("/home/p", filter = PATH_FILTER_SMART)),
+        )
+        // pin that the key really reaches the wire and round-trips on a same-version peer — without
+        // these, a stray @Transient or serial-name drift keeps every test here green while the browser
+        // silently loses its filter in both directions
+        assertTrue("\"filter\":\"smart\"" in newJson, newJson)
+        assertEquals(
+            PATH_FILTER_SMART,
+            (PocketJson.decodeFromString<Envelope>(newJson).body as ListPathEntries).filter,
+        )
+        val oldSide = PocketJson.decodeFromString<OldListPathEntries>(
+            newJson.substringAfter("\"body\":").removeSuffix("}"),
+        )
+        assertEquals("/home/p", oldSide.workdir)
+        assertEquals(500, oldSide.limit)
     }
 }

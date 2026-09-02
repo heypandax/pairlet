@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,7 @@ import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.share.exportBytesOf
 import dev.ccpocket.app.share.shareFile
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.FileContent
 import org.jetbrains.compose.resources.stringResource
@@ -55,49 +57,84 @@ import org.jetbrains.compose.resources.stringResource
 //  DiffView.kt, shared with the desktop Changes browser.
 // ════════════════════════════════════════════════════════════════════
 
-/** Bottom sheet listing the files this session created/edited; tapping one opens the full-screen viewer. */
+/**
+ * 文件面（文件浏览双视角）：一个入口、两个视角过滤。
+ *
+ * 变更（默认）= 本会话创建/改过的文件，形态与行为不变；全部 = workdir 的逐层下钻，被改过的文件
+ * 带同一套状态点、含改动的目录带 terracotta 子树计数。任何行点开都进同一个 [FileViewerScreen]
+ * （改过的落 Diff、没改过的落全文）。视角与所在层由这里持有，来回切不丢位置。
+ */
 @Composable
 fun ChangedFilesSheet(repo: PocketRepository, onOpen: (String) -> Unit, onDismiss: () -> Unit) {
-    PocketSheet(onDismiss) {
+    // 视角与所在层住在 repo：打开查看器时这张 sheet 会被整个移出 composition（App 的全屏路由早于它
+    // 就 return 了），内部 remember 撑不到返回——那样每看一个文件都会掉回变更视角的根目录。
+    val view = if (repo.filesAllView.value) FilesView.ALL else FilesView.CHANGES
+    // 每次打开都按当前 workdir 读回隐藏项开关；缓存在真正关闭（而不是被查看器盖住）时才丢
+    LaunchedEffect(Unit) { repo.loadFilesShowHidden() }
+    val dismiss = { repo.clearFileTree(); onDismiss() }
+    PocketSheet(dismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp, top = 4.dp)) {
-            Row(verticalAlignment = Alignment.Bottom) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(Res.string.files_title), color = Tok.tx, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                 Box(Modifier.weight(1f))
-                if (repo.changedFiles.isNotEmpty()) FilesSummaryText(repo.changedFiles, fontSize = 12.sp)
+                if (view == FilesView.CHANGES && repo.changedFiles.isNotEmpty()) {
+                    FilesSummaryText(repo.changedFiles, fontSize = 12.sp)
+                    Box(Modifier.size(10.dp))
+                }
+                HiddenFilesToggle(repo.filesShowHidden.value) { repo.toggleFilesShowHidden() }
             }
-            when {
-                repo.changedFilesLoading.value -> Box(Modifier.fillMaxWidth().padding(vertical = 28.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(Modifier.padding(4.dp), color = Tok.tx2, strokeWidth = 2.dp)
-                }
-                repo.changedFilesUnavailable.value -> Text(
-                    stringResource(Res.string.files_unavailable), color = Tok.muted, fontSize = 13.sp,
-                    textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
+            Box(Modifier.padding(top = 10.dp, bottom = 2.dp)) {
+                FilesViewSegmented(view, repo.changedFiles.size) { repo.filesAllView.value = it == FilesView.ALL }
+            }
+            when (view) {
+                FilesView.CHANGES -> ChangedFilesBody(repo, onOpen)
+                FilesView.ALL -> AllFilesList(
+                    repo,
+                    repo.fileTreeSubPath.value,
+                    onSubPath = { repo.fileTreeSubPath.value = it },
+                    onOpen = onOpen,
                 )
-                repo.changedFiles.isEmpty() -> Text(
-                    stringResource(Res.string.files_empty), color = Tok.muted, fontSize = 13.sp,
-                    textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
-                )
-                else -> {
-                    // rows without stats across the board = the daemon predates line-level diffs
-                    val noStats = repo.changedFiles.none { it.adds != null || it.dels != null }
-                    LazyColumn(
-                        Modifier.padding(top = 10.dp).heightIn(max = 420.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        if (noStats) item(key = "__stale") { StaleDaemonBanner() }
-                        items(repo.changedFiles, key = { it.path }) { f ->
-                            // Deliberately NOT dismissing: the viewer replaces the whole screen while it's up,
-                            // and keeping the sheet's state alive means the viewer's back lands here again —
-                            // browse the next file without re-digging through ⋯ → changed files (issue #53).
-                            ChangedFileRow(f) { onOpen(f.path) }
-                        }
-                    }
-                }
             }
             // files the session only GENERATED (Bash/scripts — issue #79) aren't in this list. Offer the
             // approval-gated export lane (issue #67 v2): type a project path; the viewer takes it from
             // there (the refusal it shows carries the "request export" entry).
-            if (!repo.changedFilesLoading.value && !repo.changedFilesUnavailable.value) ExportOtherFileRow(onOpen)
+            if (view == FilesView.CHANGES && !repo.changedFilesLoading.value && !repo.changedFilesUnavailable.value) {
+                ExportOtherFileRow(onOpen)
+            }
+        }
+    }
+}
+
+/** 变更视角的列表体（原 [ChangedFilesSheet] 的主体，逐字搬过来 + 行升级为两行式）。 */
+@Composable
+private fun ChangedFilesBody(repo: PocketRepository, onOpen: (String) -> Unit) {
+    when {
+        repo.changedFilesLoading.value -> Box(Modifier.fillMaxWidth().padding(vertical = 28.dp), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(Modifier.padding(4.dp), color = Tok.tx2, strokeWidth = 2.dp)
+        }
+        repo.changedFilesUnavailable.value -> Text(
+            stringResource(Res.string.files_unavailable), color = Tok.muted, fontSize = 13.sp,
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
+        )
+        repo.changedFiles.isEmpty() -> Text(
+            stringResource(Res.string.files_empty), color = Tok.muted, fontSize = 13.sp,
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
+        )
+        else -> {
+            // rows without stats across the board = the daemon predates line-level diffs
+            val noStats = repo.changedFiles.none { it.adds != null || it.dels != null }
+            LazyColumn(
+                Modifier.padding(top = 6.dp).heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (noStats) item(key = "__stale") { StaleDaemonBanner() }
+                items(repo.changedFiles, key = { it.path }) { f ->
+                    // Deliberately NOT dismissing: the viewer replaces the whole screen while it's up,
+                    // and keeping the sheet's state alive means the viewer's back lands here again —
+                    // browse the next file without re-digging through ⋯ → changed files (issue #53).
+                    ChangedFileRow(f) { onOpen(f.path) }
+                }
+            }
         }
     }
 }
@@ -151,28 +188,37 @@ private fun StaleDaemonBanner() {
     }
 }
 
+/** 变更视角的一行（设计稿 changed row h56 两行式）：mono 文件名 + 目录尾巴 / 增删数 / 状态点 / ›。
+ *  状态点与「全部」视角里的那一颗是同一个 [StatusDot]——两个视角靠它贯通。 */
 @Composable
 private fun ChangedFileRow(f: ChangedFile, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 11.dp),
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(11.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        StatusChip(f.op)
-        Column(Modifier.weight(1f)) {
-            Text(fileNameOf(f.path), color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val dir = parentDirOf(f.path)
-            if (dir.isNotEmpty()) TailPathText(dir, fontSize = 11.sp, color = Tok.muted)
-        }
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            if (isImagePath(f.path)) {
-                Text("img", color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-            } else {
-                DiffStatText(f.adds, f.dels, fontSize = 11.sp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                fileNameOf(f.path), color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val dir = parentDirOf(f.path)
+                if (dir.isNotEmpty()) Box(Modifier.weight(1f, fill = false)) { TailPathText(dir, fontSize = 11.sp, color = Tok.muted) }
+                // 同排异字号 → 两边都要 tightCenter（铁律：只加一个照样错位）
+                if (f.edits > 1) Text(
+                    "×${f.edits}", color = Tok.muted, fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp, style = tightCenter(10.sp),
+                )
             }
-            if (f.edits > 1) Text("×${f.edits}", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp)
         }
+        if (isImagePath(f.path)) {
+            Text("img", color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
+        } else {
+            DiffStatText(f.adds, f.dels, fontSize = 11.5.sp)
+        }
+        StatusDot(f.op, size = 18.dp, fontSize = 10.5.sp)
+        Text("›", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, style = tightCenter(12.sp))
     }
 }
 
@@ -227,6 +273,8 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
                     diffSelected = diffTab,
                     isImage = isImage,
                     deleted = deleted,
+                    // 「全部」视角点开的未改文件：daemon 答了「没有 diff」，Diff 段随之置灰
+                    noDiff = diffUnavailable(diff),
                     onPick = { diffTab = it },
                 )
                 if (wrapApplies(diffTab, diff, repo.viewedFile.value, ext, isImage)) {

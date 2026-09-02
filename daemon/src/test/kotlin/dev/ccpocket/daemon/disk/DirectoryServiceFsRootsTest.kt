@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.disk
 
+import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -34,7 +35,7 @@ class DirectoryServiceFsRootsTest {
         // must accept it as-is (this is what makes old daemons serve root browsing too)
         val roots = svc.listFsRoots()
         assertTrue(
-            roots.any { svc.listPathEntries(it, "", 50) != null },
+            runBlocking { roots.any { svc.listPathEntries(it, "", 50) != null } },
             "at least one enumerated root must be listable via the ordinary workdir path ($roots)",
         )
     }
