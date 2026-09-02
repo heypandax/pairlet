@@ -70,7 +70,7 @@ open class SeedDesktopModel : DesktopModel {
     override fun assignGroup(sessionId: String, groupId: String?) { groupOverride[sessionId] = groupId }
     // session rename (issue #158) — local override so the seed exercises the sidebar entry
     override val canRenameSessions = true
-    override fun renameSession(sessionId: String, title: String) { titleOverride[sessionId] = title.trim() }
+    override fun renameSession(sessionId: String, title: String, wd: String?) { titleOverride[sessionId] = title.trim() }
     private val groupCollapse = mutableStateListOf<String>()
     override fun groupCollapsed(projectPath: String, groupId: String) = "$projectPath\u0000$groupId" in groupCollapse
     override fun setGroupCollapsed(projectPath: String, groupId: String, collapsed: Boolean) {

@@ -53,14 +53,18 @@ class SidePaneModelDelegationGuardTest {
         // session's, or drew the focused burst's "2 / 3" over a single card of its own.
         "askTimedOut", "askQueuePosition", "answerQuestions", "skipQuestions",
         "paneScoped", "focusThisPane", "closeThisPane",
+        // the column's own model: SidePane.model (its SessionLive) + the pane-keyed switch verb + a
+        // pane-local popover flag. Inert, the chip read "默认" and its click no-opped; DELEGATED, the
+        // popover opened on the focused composer and a pick landed on the focused session.
+        "chatModel", "chatModelId", "switchModel", "showModelPopover",
     )
 
     /** Deliberately inert. Each one is a control ChatPane renders (or a value it renders FROM) whose
      *  delegated answer would have come from — or landed on — the focused conversation instead. */
     private val PANE_INERT = setOf(
-        // conversation identity a column does not track (it is the focused pane that owns model/mode
-        // switching, so a column claiming a model would be claiming someone else's)
-        "chatBranch", "chatModel", "chatModelId", "chatMode",
+        // conversation identity a column does not track (mode/effort/tier switching stays with the
+        // focused pane; the MODEL graduated to pane-scoped above once SidePane learned to carry it)
+        "chatBranch", "chatMode",
         "chatPermissionMode", "chatEffort", "chatServiceTier",
         "sessionDegraded", "contextUsed", "contextWindow", "observing", "takeOver",
         // transcript paging + delivery watchdogs: a column has neither, and the focused pane's answers
@@ -74,10 +78,10 @@ class SidePaneModelDelegationGuardTest {
         "activeHandoff", "handoffIsRecipient",
         // header/composer surfaces that belong to the focused conversation
         "changedFiles", "gitStatus", "slashCommands", "pathListing", "browsePath",
-        "switchMode", "switchModel", "switchEffort", "switchServiceTier",
+        "switchMode", "switchEffort", "switchServiceTier",
         "compactConversation", "clearConversation",
         "workflowRunFor", "openWorkspaceFile", "tightenAutoRun",
-        "showQuickActions", "showChanges", "showGit", "showModelPopover",
+        "showQuickActions", "showChanges", "showGit",
         // attachments are the focused pane's by construction (SidePane's KDoc); uploadsBusy() even gated
         // this column's send button on the OTHER session's uploads
         "pendingImages", "attachImages", "removePendingImage", "hasReadyImages",
@@ -92,6 +96,13 @@ class SidePaneModelDelegationGuardTest {
     /** The window, the machine, the app. None of these is reachable holding a [SidePaneModel] — see the
      *  class doc's litmus — and every one of them means the same thing in a column as anywhere else. */
     private val WINDOW_DELEGATED = setOf(
+        // window chrome (desktop chrome v2): whether the sidebar is collapsed, and the session back/forward
+        // history behind ⌘[ / ⌘]. Both describe the WINDOW — one trail per window, not per column — and both
+        // are read by the chrome cluster the leftmost column's sub-header adopts while the sidebar is hidden.
+        // They are the exception to "PANE_SCOPED + PANE_INERT == SidePaneModel's overrides": the class
+        // re-delegates them EXPLICITLY because they are the only members here with an interface default,
+        // i.e. the one shape where a silent `by` hand-off could answer with the inert default instead.
+        "sidebarCollapsed", "canGoBack", "canGoForward", "goBack", "goForward",
         // connection + computer switcher
         "connected", "connGen", "activeComputer", "computers", "selectComputer", "addComputer",
         "renameComputer", "removeComputer", "activeIsThisMachine",
@@ -132,7 +143,7 @@ class SidePaneModelDelegationGuardTest {
         // split-pane plumbing itself: these take the pane as an argument, so they are already explicit
         // (splitFocusedSlot is window layout — WHERE the focused chat renders — not conversation state)
         "sidePanes", "canSplit", "splitFocusedSlot", "openInSplit", "closeSplit", "promoteSplit", "retrySplitOpen",
-        "sendSidePrompt", "stopSideTurn", "resolvePaneApproval", "resolvePaneTaskGrant", "retryPaneSafer",
+        "sendSidePrompt", "stopSideTurn", "switchSideModel", "resolvePaneApproval", "resolvePaneTaskGrant", "retryPaneSafer",
         "answerPaneQuestions", "skipPaneQuestions", "dismissPaneAsk",
         // workflow orchestration panel (docked at window level)
         "workflowRuns", "dockedWorkflowRunId", "openWorkflowPanel", "closeWorkflowPanel",

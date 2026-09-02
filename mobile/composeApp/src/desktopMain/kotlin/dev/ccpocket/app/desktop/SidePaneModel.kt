@@ -16,8 +16,9 @@ import dev.ccpocket.protocol.PermissionMode
  * machines, settings, overlays) falls through to [base], because it describes the window, not the chat.
  *
  * What is deliberately inert here, rather than delegated: the verbs that would act on the FOCUSED
- * conversation while the user is looking at this one. Changing the model, compacting, rewinding or
- * opening Changes from a side column must not quietly reach into another session, and silently doing
+ * conversation while the user is looking at this one. Compacting, rewinding or opening Changes from a
+ * side column must not quietly reach into another session (the MODEL chip earned a pane-scoped path —
+ * [SidePane.model] + the pane-keyed switch — instead of staying inert), and silently doing
  * the right thing for the wrong conversation is the one failure a split view must not have. They become
  * available the moment the pane is promoted (a click), which is also when they start meaning this
  * conversation. `PANE_INERT` marks every one of them.
@@ -48,7 +49,10 @@ class SidePaneModel(
     override val chatAgent: AgentKind get() = pane.agent
     override val chatWorkdir: String get() = pane.workdir
     override val chatBranch: String? get() = null
-    override val chatModel: String get() = ""
+    // the pane's OWN model (its SessionLive fills SidePane.model) — the chip used to answer "" here and
+    // read as "默认" while the session demonstrably ran something; switching routes through the
+    // pane-keyed verb, so a pick can never land on the focused conversation.
+    override val chatModel: String get() = pane.model.value ?: ""
     override val chatMode: PermissionMode get() = PermissionMode.DEFAULT
     override val messages: List<ChatItem> get() = pane.messages
     override val streaming: Boolean get() = pane.streaming.value
@@ -130,6 +134,21 @@ class SidePaneModel(
     override fun focusThisPane() = base.promoteSplit(pane)
     override fun closeThisPane() = base.closeSplit(pane.paneId)
 
+    // ── window chrome, delegated EXPLICITLY (desktop chrome v2) ───────────────────────────────────
+    // These six are window-level in meaning (see the guard test's WINDOW_DELEGATED), but they are also the
+    // ONE family on this interface that ships a non-abstract default. `by base` is only guaranteed to
+    // forward what the interface leaves abstract, so a member with a body is exactly where a delegate can
+    // silently answer with the interface's inert default instead of the real model — and here that would
+    // mean the leftmost split column's re-homed chrome cluster never appearing (sidebarCollapsed stuck
+    // false) and its ‹ › arrows permanently greyed out (canGoBack/canGoForward stuck false). Spelled out
+    // so the answer cannot depend on that subtlety.
+    override val sidebarCollapsed: Boolean get() = base.sidebarCollapsed
+    override fun setSidebarCollapsed(v: Boolean) = base.setSidebarCollapsed(v)
+    override val canGoBack: Boolean get() = base.canGoBack
+    override val canGoForward: Boolean get() = base.canGoForward
+    override fun goBack() = base.goBack()
+    override fun goForward() = base.goForward()
+
     // ── PANE_INERT: focused-conversation verbs, deliberately no-ops here (see the class doc) ─────────
     override val historyHasMore: Boolean get() = false
     override val historyLoadingOlder: Boolean get() = false
@@ -177,7 +196,7 @@ class SidePaneModel(
     override fun askHeartbeat() {}
     override fun askHeartbeatRelease() {}
     override fun canRewind(item: ChatItem.User): Boolean = false
-    override val chatModelId: String get() = ""
+    override val chatModelId: String get() = pane.model.value ?: ""
     override val chatPermissionMode: String? get() = null
     override val chatEffort: String? get() = null
     override val chatServiceTier: String? get() = null
@@ -188,7 +207,7 @@ class SidePaneModel(
     override fun browsePath(sub: String) {}
     override fun switchMode(m: PermissionMode) {}
     override fun switchMode(m: PermissionMode, permissionMode: String?) {}
-    override fun switchModel(name: String) {}
+    override fun switchModel(name: String) = base.switchSideModel(pane, name)
     override fun switchEffort(level: String?) {}
     override fun switchServiceTier(tier: String?) {}
     override fun compactConversation() {}
@@ -207,7 +226,10 @@ class SidePaneModel(
     override var showGit: Boolean
         get() = false
         set(_) {}
+    // pane-local popover state (like [composerState]): delegated, opening the chip in a column raised
+    // the FOCUSED composer's popover — visibly attached to the wrong column
+    private val showModelPopoverState = androidx.compose.runtime.mutableStateOf(false)
     override var showModelPopover: Boolean
-        get() = false
-        set(_) {}
+        get() = showModelPopoverState.value
+        set(v) { showModelPopoverState.value = v }
 }

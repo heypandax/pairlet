@@ -1,32 +1,35 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.KeyboardArrowRight
-import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,6 +46,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -50,7 +54,6 @@ import kotlin.math.roundToInt
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.dir_picker_choose_here
 import dev.ccpocket.app.resources.dir_picker_remote_title
-import dev.ccpocket.app.resources.show_sidebar
 import dev.ccpocket.app.resources.your_computer
 import dev.ccpocket.app.data.paneIndexForSlot
 import dev.ccpocket.protocol.AgentKind
@@ -66,9 +69,11 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
     // sidebar sizing (issue #62): drag the divider to resize; drag it past the minimum (or double-click)
-    // to snap-hide it to the edge, where a slim strip brings it back. Persisted across relaunches. This is
-    // desktop-shell-local state — the seed/screenshot model keeps the default width and never collapses.
-    var collapsed by remember { mutableStateOf(SecureStore.getString(K_SIDEBAR_COLLAPSED) == "1") }
+    // to snap-hide it. The WIDTH stays desktop-shell-local state — the seed/screenshot model keeps the
+    // default. The COLLAPSED flag does not: the four top controls re-home into the leftmost chat
+    // sub-header when the sidebar goes away (desktop chrome v2), and that surface may be rendering over a
+    // SidePaneModel, so the fact has to live on the model. Same persistence key as before.
+    val collapsed = model.sidebarCollapsed
     var sidebarW by remember {
         mutableStateOf(
             (SecureStore.getString(K_SIDEBAR_WIDTH)?.toFloatOrNull() ?: Dk.sidebarWidth.value)
@@ -76,7 +81,6 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
         )
     }
     val density = LocalDensity.current
-    val setCollapsed = { v: Boolean -> collapsed = v; SecureStore.putString(K_SIDEBAR_COLLAPSED, if (v) "1" else "0") }
     // One silent update check per launch (issue #200), extending the existing #87 checker rather than
     // adding a channel: it only ever moves updateState, never downloads — applying stays a click in
     // Settings ▸ About. Delayed so it can't compete with connect/first paint, and guarded on Idle so a
@@ -91,26 +95,51 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
     LaunchedEffect(model.chatAgent) {
         if (!model.chatAgent.canInitiateSessionHandoff()) model.showHandoff = false
     }
-    Box(Modifier.fillMaxSize().background(Tok.base)) {
+    // Whether the pointer sits in the left-edge band that peeks a hidden sidebar. Observed on the ROOT
+    // container's pointer moves rather than a hit-test Box at the edge: the outermost pixels of an
+    // undecorated window belong to AWT's resize border (events there never reach Compose — the first
+    // cut's 4dp hover strip triggered nothing but the resize cursor), and a strip wide enough to clear
+    // that band would steal clicks from whatever sits under it. A parent on the hit path sees every
+    // move without adding a node, so the band costs nothing and the pointer crossing x≤8dp on its way
+    // to the edge is what triggers.
+    var pointerAtLeftEdge by remember { mutableStateOf(false) }
+    val edgePx = remember(density) { with(density) { HOVER_REVEAL_EDGE.dp.toPx() } }
+    // The Move observer is on the whole window's hit path, so it only rides while the feature it feeds
+    // can do anything — expanded (the default state) pays nothing for it. An Exit through the LEFT
+    // border keeps the band armed (the pointer went into the AWT resize band, where Compose gets no
+    // events — clearing there made the peek retract the instant it reached the edge it was invited to
+    // rest on); the parked-outside-the-window case is what the reveal block's MouseInfo watchdog is for.
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    val edgeWatch = if (!collapsed) Modifier else Modifier
+        .onPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Move) { e ->
+            val near = (e.changes.lastOrNull()?.position?.x ?: Float.MAX_VALUE) <= edgePx
+            if (near != pointerAtLeftEdge) pointerAtLeftEdge = near // write only on change — this runs on every move
+        }
+        .onPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Exit) { e ->
+            val stillLeft = (e.changes.lastOrNull()?.position?.x ?: Float.MAX_VALUE) <= edgePx
+            if (pointerAtLeftEdge != stillLeft) pointerAtLeftEdge = stillLeft
+        }
+    Box(Modifier.fillMaxSize().background(Tok.base).then(edgeWatch)) {
         // drag-to-split: the one gesture state shared between the sidebar (where a drag starts) and the
         // chat columns (where it lands). Provided here so every row below can reach the same instance.
         val drag = remember { SplitDragState() }
         CompositionLocalProvider(LocalSplitDrag provides drag) {
         Row(Modifier.fillMaxSize()) {
-            if (collapsed) {
-                SidebarRevealStrip { setCollapsed(false) }
-                Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair)) // pane splitter
-            } else {
-                Sidebar(model, width = sidebarW.dp)
+            // Collapsed = ZERO chrome on this edge (desktop chrome v2): the old reveal strip is gone, and
+            // with it the hairline that used to stand in for the missing sidebar. The way back is the
+            // toggle in the leftmost sub-header's control cluster, or ⌘\ — both always available.
+            //
+            AnimatedSidebar(model, collapsed, sidebarW)
+            if (!collapsed) {
                 SidebarResizeHandle(
                     onDrag = { dxPx ->
                         val next = sidebarW + with(density) { dxPx.toDp().value }
-                        if (next < SIDEBAR_COLLAPSE_AT) setCollapsed(true)
+                        if (next < SIDEBAR_COLLAPSE_AT) model.setSidebarCollapsed(true)
                         else sidebarW = next.coerceIn(SIDEBAR_MIN, SIDEBAR_MAX)
                     },
                     // persist once per gesture, not per drag tick — putString rewrites a whole file
-                    onDragEnd = { if (!collapsed) SecureStore.putString(K_SIDEBAR_WIDTH, sidebarW.toString()) },
-                    onCollapse = { setCollapsed(true) },
+                    onDragEnd = { if (!model.sidebarCollapsed) SecureStore.putString(K_SIDEBAR_WIDTH, sidebarW.toString()) },
+                    onCollapse = { model.setSidebarCollapsed(true) },
                 )
             }
             val watch = model.watch
@@ -136,11 +165,19 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                     val focusedAt = model.splitFocusedSlot.coerceIn(0, split.size)
                     for (slot in 0..split.size) {
                         if (slot > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
-                        if (slot == focusedAt) {
-                            SplitDropColumn(drag, slot, Modifier.weight(1f)) { ChatPane(model, Modifier.fillMaxSize(), focused = split.isNotEmpty()) }
-                        } else {
-                            val pane = split[paneIndexForSlot(slot, focusedAt)]
-                            SplitDropColumn(drag, slot, Modifier.weight(1f)) { SplitPane(model, pane, Modifier.fillMaxSize()) }
+                        // which column owns the window's chrome (desktop chrome v2): the re-homed control
+                        // cluster goes to the LEFTMOST sub-header, the connection dot and the Win/Linux
+                        // window buttons to the RIGHTMOST one — the dot appears once per window, because
+                        // that is what it describes. Provided per column so neither is a count of panes.
+                        val edge = PaneEdge(leftmost = slot == 0, rightmost = slot == split.size)
+                        SplitDropColumn(drag, slot, Modifier.weight(1f)) {
+                            CompositionLocalProvider(LocalPaneEdge provides edge) {
+                                if (slot == focusedAt) {
+                                    ChatPane(model, Modifier.fillMaxSize(), focused = split.isNotEmpty())
+                                } else {
+                                    SplitPane(model, split[paneIndexForSlot(slot, focusedAt)], Modifier.fillMaxSize())
+                                }
+                            }
                         }
                     }
                 }
@@ -159,14 +196,64 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
             }
         }
         }
+        // Hover-reveal (desktop chrome v2 follow-up): while the sidebar is HIDDEN, resting the pointer
+        // on the window's left edge peeks the full sidebar OVER the chat — no reflow, the columns stay
+        // put — and leaving both the edge and the panel tucks it away after a short grace (diagonal
+        // travel must not flicker it). Held open while anything it spawned is up — the machine
+        // switcher, the bell, the new-session popover, a row's context menu (a sibling POPUP: the
+        // pointer moving into it reads as "left the panel"), or a drag-to-split in flight — so the
+        // surface can't slide away under an interaction that started inside it.
+        if (collapsed) {
+            val panelSrc = remember { MutableInteractionSource() }
+            val panelHovered by panelSrc.collectIsHoveredAsState()
+            var revealed by remember { mutableStateOf(false) }
+            val heldOpen = model.switcherOpen || model.showAttention || model.showNewSession ||
+                PocketContextMenuRepresentation.anyMenuOpen || drag.session != null
+            LaunchedEffect(pointerAtLeftEdge, panelHovered, heldOpen) {
+                if (pointerAtLeftEdge || panelHovered || heldOpen) {
+                    revealed = true
+                } else if (revealed) {
+                    delay(HOVER_REVEAL_GRACE_MS)
+                    revealed = false
+                }
+            }
+            // The parked-outside watchdog: an exit through the LEFT border keeps the band armed (see the
+            // Move/Exit observers), which is right for the resize band but wrong once the pointer leaves
+            // the window entirely — Compose then delivers nothing, and the peek would sit painted over
+            // the chat until the pointer happened to come back. AWT still knows where the pointer is, so
+            // while revealed (and not held by an open surface) poll it: gone from the window = disarm.
+            val chrome = LocalWindowChrome.current
+            LaunchedEffect(revealed, heldOpen) {
+                val win = chrome.window ?: return@LaunchedEffect
+                while (revealed && !heldOpen) {
+                    delay(HOVER_REVEAL_WATCHDOG_MS)
+                    val at = runCatching { java.awt.MouseInfo.getPointerInfo()?.location }.getOrNull() ?: continue
+                    if (!win.bounds.contains(at)) {
+                        pointerAtLeftEdge = false
+                        break // the reveal effect above owns the grace + hide from here
+                    }
+                }
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = revealed,
+                enter = androidx.compose.animation.slideInHorizontally(tween(SIDEBAR_ANIM_MS)) { -it },
+                exit = androidx.compose.animation.slideOutHorizontally(tween(SIDEBAR_ANIM_MS)) { -it },
+                modifier = Modifier.align(Alignment.TopStart),
+            ) {
+                Row(Modifier.fillMaxHeight().hoverable(panelSrc)) {
+                    Sidebar(model, width = sidebarW.dp)
+                    Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
+                }
+            }
+        }
         // drag-to-split feedback: composed right after the columns, so it paints above them and BELOW
         // every modal/popover that follows — and both it and the drop itself stand down entirely while
         // any overlay is open, so a popover can neither hide the highlight nor be dropped through
         SplitDropOverlay(drag, model)
         if (model.showNewSession) {
             LaunchedEffect(Unit) { model.fetchModels(AgentKind.CLAUDE) }
-            // anchored under the sidebar's New-session row (header 48 + row 32)
-            Overlay(onDismiss = { model.showNewSession = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 14.dp, top = 84.dp)) {
+            // anchored under the sidebar's New-session row (control row 38 + device line 27 + row 32)
+            Overlay(onDismiss = { model.showNewSession = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 14.dp, top = 100.dp)) {
                 NewSessionPopover(
                     model.newSessionSeed ?: "~/",
                     model.defaultAgent,
@@ -208,14 +295,15 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
             }
         }
         if (model.switcherOpen) {
-            // anchored under the sidebar header — the fleet lives here now, not in the sidebar body
-            Overlay(onDismiss = { model.switcherOpen = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 10.dp, top = 52.dp)) {
+            // anchored under the sidebar's device line — the fleet lives here now, not in the sidebar body
+            // (control row 38 + device line 26 + hairline; +16 since the chrome-v2 row landed above it)
+            Overlay(onDismiss = { model.switcherOpen = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 10.dp, top = 68.dp)) {
                 MachineSwitcher(model)
             }
         }
         if (model.showAttention) {
             // anchored under the sidebar bell — cross-machine approvals without leaving the session
-            Overlay(onDismiss = { model.showAttention = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 14.dp, top = 52.dp)) {
+            Overlay(onDismiss = { model.showAttention = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 14.dp, top = 68.dp)) {
                 AttentionPopover(model)
             }
         }
@@ -287,6 +375,18 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
     }
 }
 
+/**
+ * Where a chat column sits in the row (desktop chrome v2) — which one carries the window's chrome.
+ *
+ * The default is BOTH: a single chat column is the leftmost and the rightmost one, which is also what the
+ * watch split wants (its [WatchPane] half is a read-only mirror and grows no chrome) and what every test
+ * and screenshot that composes a [ChatPane] directly should see. Only [DesktopApp]'s split loop narrows it.
+ */
+@Immutable
+data class PaneEdge(val leftmost: Boolean = true, val rightmost: Boolean = true)
+
+val LocalPaneEdge = staticCompositionLocalOf { PaneEdge() }
+
 /** A chat column that reports where it laid out, so the drag-to-split zones can hover over it. */
 @Composable
 private fun SplitDropColumn(drag: SplitDragState, index: Int, modifier: Modifier, content: @Composable () -> Unit) {
@@ -327,11 +427,45 @@ private fun SplitDropOverlay(drag: SplitDragState, model: DesktopModel) {
 // the sidebar hidden rather than stopping at the floor.
 /** Long enough that the launch-time check never competes with connect + first paint (issue #200). */
 private const val STARTUP_UPDATE_CHECK_DELAY_MS = 8_000L
+/**
+ * The sliding sidebar. The hide/show animates the BOX's width while the sidebar inside keeps its full
+ * width and clips — rows never reflow mid-flight (a plain width() child gets clamped by the box's
+ * constraints and re-lays-out at every frame: the "severe jitter"), and the control cluster stays put
+ * until the edge sweeps past it. First composition starts at the target, so launching collapsed plays
+ * no slide. Its own composable ON PURPOSE: the animated float is read here and nowhere else, so the
+ * ~12 frames of a toggle invalidate this box alone — read one scope up, they re-ran every sibling chat
+ * column's body per frame (DesktopModel is unstable, nothing in that row is skippable).
+ */
+@Composable
+private fun AnimatedSidebar(model: DesktopModel, collapsed: Boolean, sidebarW: Float) {
+    val animW by animateFloatAsState(
+        targetValue = if (collapsed) 0f else sidebarW,
+        animationSpec = tween(SIDEBAR_ANIM_MS, easing = FastOutSlowInEasing),
+        label = "sidebar-width",
+    )
+    if (animW > 0.5f) {
+        Box(Modifier.width(animW.dp).fillMaxHeight().clipToBounds()) {
+            Sidebar(
+                model, width = sidebarW.dp,
+                modifier = Modifier.wrapContentWidth(align = Alignment.Start, unbounded = true),
+            )
+        }
+    }
+}
+
+/** One clock for the sidebar slide and everything choreographed against it (the sub-header's cluster
+ *  hand-off, its padding ease) — shared so the pieces cannot drift apart. */
+internal const val SIDEBAR_ANIM_MS = 200
+
+private const val HOVER_REVEAL_EDGE = 8 // dp — the left-edge band that peeks the hidden sidebar (must
+// clear AWT's undecorated-window resize border, whose outer pixels never reach Compose)
+private const val HOVER_REVEAL_GRACE_MS = 250L // pointer-out grace before the peek tucks away
+private const val HOVER_REVEAL_WATCHDOG_MS = 400L // parked-outside poll cadence while the peek is up
+
 private const val SIDEBAR_MIN = 220f
 private const val SIDEBAR_MAX = 460f
 private const val SIDEBAR_COLLAPSE_AT = 170f
 private const val K_SIDEBAR_WIDTH = "desktop_sidebar_width"
-private const val K_SIDEBAR_COLLAPSED = "desktop_sidebar_collapsed"
 
 private val resizeCursor = PointerIcon(java.awt.Cursor(java.awt.Cursor.E_RESIZE_CURSOR))
 
@@ -347,18 +481,6 @@ private fun SidebarResizeHandle(onDrag: (Float) -> Unit, onDragEnd: () -> Unit, 
         contentAlignment = Alignment.Center,
     ) {
         Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
-    }
-}
-
-/** When the sidebar is hidden to the edge (issue #62), a slim strip that brings it back — click anywhere. */
-@Composable
-private fun SidebarRevealStrip(onExpand: () -> Unit) {
-    Column(
-        Modifier.width(16.dp).fillMaxHeight().background(Tok.surface).clickable(onClick = onExpand),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(Modifier.height(12.dp))
-        Icon(Icons.Rounded.KeyboardArrowRight, stringResource(Res.string.show_sidebar), tint = Tok.muted, modifier = Modifier.width(15.dp).height(15.dp))
     }
 }
 

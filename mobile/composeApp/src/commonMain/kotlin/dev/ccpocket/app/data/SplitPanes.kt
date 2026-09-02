@@ -20,6 +20,7 @@ import dev.ccpocket.protocol.SessionGone
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.ToolEvent
 import dev.ccpocket.protocol.TurnDone
+import dev.ccpocket.protocol.isModelCompatibleWithAgent
 import dev.ccpocket.protocol.isQuestion
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -62,6 +63,9 @@ class SidePane(
     /** Filled by this pane's own SessionLive. Null while the open is still in flight. */
     val convoId = mutableStateOf<String?>(null)
     val title = mutableStateOf(initialTitle)
+    /** The daemon's actual model for THIS pane's session (its own SessionLive), the focused path's
+     *  `repo.model` one column over — what the column's composer chip shows and switches. */
+    val model = mutableStateOf<String?>(null)
     val transcript = ChatTranscript()
     val messages get() = transcript.messages
     val streaming get() = transcript.streaming
@@ -499,6 +503,21 @@ class SidePanes(
         scope.launch { send(CancelTurn(convo)) }
     }
 
+    /**
+     * Switch [pane]'s OWN model — the focused path's `switchModel`, one column over: the same `/model`
+     * command interception, the same agent-compatibility gate, the same optimistic set (this pane's next
+     * `SessionLive` corrects it to the resolved id — see [bind]). What it deliberately does NOT mirror is
+     * the effort/service-tier follow-up: a column tracks neither, so there is nothing stale to clear.
+     */
+    fun switchModel(pane: SidePane, name: String) {
+        val convo = pane.convoId.value ?: return
+        val target = name.trim()
+        if (target.isEmpty() || target == pane.model.value) return
+        if (!isModelCompatibleWithAgent(pane.agent, target)) return
+        pane.model.value = target
+        scope.launch { send(SendPrompt(convo, "/model $target")) }
+    }
+
     private fun byConvo(convoId: String): SidePane? = panes.firstOrNull { it.convoId.value == convoId }
 
     private fun bind(f: SessionLive) {
@@ -519,6 +538,7 @@ class SidePanes(
         pane.opening.value = false
         pane.openFailed.value = false
         pane.gone.value = false
+        f.model?.let { pane.model.value = it } // daemon truth corrects the optimistic switchModel guess too
         // daemon truth beats the local guess, exactly as the focused path takes it — the stamp included:
         // a turn killed MID-THINKING has no TurnDone coming to close its block, so a reattach that reports
         // idle is the only chance to stamp it. Without this the column keeps an eternal "Thinking…" row

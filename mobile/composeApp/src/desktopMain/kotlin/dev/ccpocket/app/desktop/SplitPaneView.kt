@@ -1,6 +1,9 @@
 package dev.ccpocket.app.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -41,10 +44,16 @@ fun SplitPane(base: DesktopModel, pane: SidePane, modifier: Modifier = Modifier)
  */
 @Composable
 private fun EndedPane(model: DesktopModel, modifier: Modifier = Modifier) {
-    ChatNotice(
-        title = stringResource(Res.string.split_session_ended),
-        modifier = modifier.background(Tok.base), // a column is not opaque on its own
-        actionLabel = stringResource(Res.string.split_pane_close),
-        onAction = { model.closeThisPane() },
-    )
+    Column(modifier.fillMaxSize().background(Tok.base)) { // a column is not opaque on its own
+        // a gone column still owns its edge's window duties (desktop chrome v2): without this, a
+        // rightmost column dying took the Win/Linux window buttons and the connection dot with it,
+        // and a leftmost one under a collapsed sidebar took the toggle/nav cluster
+        EmptyChatChromeRow(model)
+        ChatNotice(
+            title = stringResource(Res.string.split_session_ended),
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            actionLabel = stringResource(Res.string.split_pane_close),
+            onAction = { model.closeThisPane() },
+        )
+    }
 }
