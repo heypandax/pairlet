@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; background: #08090A; }
+  a { color: #D97757; text-decoration: none; }
+  a:hover { color: #E89072; }
+</style>
+</helmet>
+
+<section style="padding:40px 44px 72px;font-family:'Inter',system-ui,sans-serif;color:#F3F3F4">
+  <div style="display:flex;align-items:baseline;gap:12px">
+    <span style="min-width:30px;height:22px;padding:0 8px;border-radius:6px;background:#D97757;color:#160C07;font:600 12px/22px 'JetBrains Mono',monospace;text-align:center">2a</span>
+    <span style="font:600 19px/1.2 'Inter',sans-serif;letter-spacing:-.015em">Desktop chrome v2 — no title bar, columns run to the window top</span>
+  </div>
+  <p style="margin:10px 0 0;max-width:840px;font:400 13.5px/1.6 'Inter',sans-serif;color:#8C8D95;text-wrap:pretty">Nothing spans the window width. The sidebar owns its own 38px control row (traffic lights, toggle, back/forward, search) and the chat sub-header is the chat column's first element, doubling as drag area and carrying the connection dot. Search collapses into that same control row, taking the width left over beside the four buttons, so the session list begins at 136px, down from 232px in the shipping build.</p>
+
+  <div style="display:flex;flex-direction:column;gap:44px;margin-top:32px">
+
+    <div>
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#6E6E76;margin-bottom:12px">1 · Default — sidebar expanded, back enabled / forward disabled</div>
+      <div data-screen-label="Desktop v2 · default" style="width:1280px;height:800px;border-radius:11px;overflow:hidden;border:1px solid #2A2E33;background:#0E0F11;display:flex;box-shadow:0 40px 90px -40px rgba(0,0,0,.8)">
+
+        <div style="width:260px;flex:none;display:flex;flex-direction:column;background:#16181B;border-right:1px solid #2A2E33">
+
+          <div style="height:38px;flex:none;display:flex;align-items:center;gap:2px;padding:0 10px 0 12px">
+            <span style="display:flex;gap:8px;align-items:center;flex:none;margin-right:10px">
+              <span style="width:12px;height:12px;border-radius:50%;background:#FF5F57"></span>
+              <span style="width:12px;height:12px;border-radius:50%;background:#FEBC2E"></span>
+              <span style="width:12px;height:12px;border-radius:50%;background:#28C840"></span>
+            </span>
+            <button type="button" aria-label="Toggle sidebar" style="appearance:none;border:0;background:none;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none" style-hover="background:#1E2125">
+              <span aria-hidden="true" style="position:relative;width:15px;height:13px;display:block">
+                <span style="position:absolute;inset:0;border:1.5px solid #B4B5BC;border-radius:2.5px;box-sizing:border-box"></span>
+                <span style="position:absolute;left:5px;top:0;bottom:0;width:1.5px;background:#B4B5BC"></span>
+              </span>
+            </button>
+            <button type="button" aria-label="Previous session" style="appearance:none;border:0;background:none;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none" style-hover="background:#1E2125">
+              <span aria-hidden="true" style="width:6px;height:6px;border-left:1.5px solid #B4B5BC;border-bottom:1.5px solid #B4B5BC;transform:rotate(45deg) translate(1px,-1px)"></span>
+            </button>
+            <button type="button" aria-label="Next session" disabled="disabled" style="appearance:none;border:0;background:none;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:default;flex:none">
+              <span aria-hidden="true" style="width:6px;height:6px;border-right:1.5px solid #4A4E55;border-top:1.5px solid #4A4E55;transform:rotate(45deg) translate(-1px,1px)"></span>
+            </button>
+            <div style="flex:1;min-width:0;margin-left:6px;height:26px;border:1px solid #2A2E33;border-radius:7px;background:#0E0F11;display:flex;align-items:center;gap:6px;padding:0 8px;cursor:text" style-hover="border-color:#3A3F46">
+              <span aria-hidden="true" style="position:relative;width:12px;height:12px;flex:none;display:block">
+                <span style="position:absolute;left:0;top:0;width:9px;height:9px;border:1.5px solid #8C8D95;border-radius:50%;box-sizing:border-box"></span>
+                <span style="position:absolute;left:7.5px;top:8px;width:5px;height:1.5px;background:#8C8D95;border-radius:1px;transform:rotate(45deg);transform-origin:left center"></span>
+              </span>
+              <span style="flex:1;min-width:0;font:400 12px/1 'Inter',sans-serif;color:#6E6E76;white-space:nowrap;overflow:hidden">Search</span>
+            </div>
+          </div>
+
+          <button type="button" aria-haspopup="menu" style="appearance:none;border:0;background:none;flex:none;height:26px;display:flex;align-items:center;gap:7px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:#1E2125">
+            <span style="flex:none;width:5px;height:5px;border-radius:50%;background:#7ECBA0"></span>
+            <span style="min-width:0;font:500 11px/1 'JetBrains Mono',monospace;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">mbp-m3</span>
+            <span aria-hidden="true" style="flex:none;width:4.5px;height:4.5px;border-right:1.4px solid #6E6E76;border-bottom:1.4px solid #6E6E76;transform:rotate(45deg) translateY(-1.5px)"></span>
+            <span style="flex:1"></span>
+            <span aria-label="Attention" style="position:relative;width:12px;height:12px;flex:none;color:#8C8D95;display:block">
+              <span style="position:absolute;left:2px;top:1px;width:8px;height:7px;border:1.4px solid currentColor;border-bottom:0;border-radius:4.5px 4.5px 0 0;box-sizing:border-box"></span>
+              <span style="position:absolute;left:0;top:8px;width:12px;height:1.4px;background:currentColor;border-radius:1px"></span>
+              <span style="position:absolute;left:5px;top:10px;width:2px;height:1.5px;background:currentColor;border-radius:0 0 2px 2px"></span>
+            </span>
+          </button>
+
+          <div style="height:1px;flex:none;background:#2A2E33;margin:5px 0 4px"></div>
+
+          <button type="button" style="appearance:none;border:0;background:none;flex:none;height:28px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:rgba(217,119,87,.09)">
+            <span aria-hidden="true" style="position:relative;width:12px;height:12px;flex:none;display:block">
+              <span style="position:absolute;left:0;top:5.25px;width:12px;height:1.5px;background:#D97757;border-radius:1px"></span>
+              <span style="position:absolute;top:0;left:5.25px;height:12px;width:1.5px;background:#D97757;border-radius:1px"></span>
+            </span>
+            <span style="font:500 12.5px/1 'Inter',sans-serif;color:#D97757">New session</span>
+            <span style="flex:1"></span>
+            <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">⌘N</span>
+          </button>
+          <button type="button" style="appearance:none;border:0;background:none;flex:none;height:28px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:#1E2125">
+            <span aria-hidden="true" style="position:relative;width:12px;height:11px;flex:none;display:block">
+              <span style="position:absolute;left:0;top:2.5px;width:12px;height:8px;border:1.5px solid #8C8D95;border-radius:2px;box-sizing:border-box"></span>
+              <span style="position:absolute;left:1px;top:.5px;width:5px;height:3px;border:1.5px solid #8C8D95;border-bottom:0;border-radius:2px 2px 0 0;box-sizing:border-box"></span>
+            </span>
+            <span style="font:400 12.5px/1 'Inter',sans-serif;color:#B4B5BC">Open folder…</span>
+          </button>
+
+          <div style="height:1px;flex:none;background:#2A2E33;margin:4px 0 0"></div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column">
+            <div style="padding:10px 12px 4px;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">PINNED</div>
+            <sc-for list="{{ pinned }}" as="s" hint-placeholder-count="2">
+              <button type="button" style="appearance:none;border:0;background:none;flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:#1E2125">
+                <span aria-hidden="true" style="flex:none;width:4px;height:4px;border-radius:1px;background:#4A4E55;transform:rotate(45deg)"></span>
+                <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.t }}</span>
+                <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">{{ s.m }}</span>
+              </button>
+            </sc-for>
+
+            <div style="padding:12px 12px 4px;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">RUNNING</div>
+            <button type="button" style="appearance:none;border:0;flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px 0 10px;cursor:pointer;text-align:left;background:#1E2125;box-shadow:inset 2px 0 0 #D97757">
+              <span style="flex:none;width:5px;height:5px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 2.5px rgba(126,203,160,.14)"></span>
+              <span style="flex:1;min-width:0;font:500 12.5px/1 'Inter',sans-serif;color:#F3F3F4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">fix flaky auth test</span>
+              <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#8C8D95">2m</span>
+            </button>
+            <sc-for list="{{ running }}" as="s" hint-placeholder-count="2">
+              <button type="button" style="appearance:none;border:0;background:none;flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:#1E2125">
+                <span style="flex:none;width:5px;height:5px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 2.5px rgba(126,203,160,.14)"></span>
+                <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.t }}</span>
+                <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">{{ s.m }}</span>
+              </button>
+            </sc-for>
+
+            <div style="padding:12px 12px 4px;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">RECENT</div>
+            <sc-for list="{{ recent }}" as="s" hint-placeholder-count="9">
+              <button type="button" style="appearance:none;border:0;background:none;flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:#1E2125">
+                <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.t }}</span>
+                <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">{{ s.m }}</span>
+              </button>
+            </sc-for>
+            <div style="flex:1"></div>
+          </div>
+
+          <div style="height:1px;flex:none;background:#2A2E33"></div>
+          <div style="flex:none;height:30px;display:flex;align-items:center;gap:8px;padding:0 12px">
+            <span style="font:400 11.5px/1 'Inter',sans-serif;color:#8C8D95">Help &amp; support</span>
+            <span style="flex:1"></span>
+            <span style="font:400 10px/1 'JetBrains Mono',monospace;color:#6E6E76">v1.9.1</span>
+            <span aria-label="Settings" style="font:400 12px/1 'Inter',sans-serif;color:#8C8D95">⚙︎</span>
+          </div>
+        </div>
+
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#0E0F11">
+          <div style="height:38px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px 0 16px;border-bottom:1px solid #2A2E33">
+            <span style="font:600 13px/1 'Inter',sans-serif;letter-spacing:-.005em;color:#F3F3F4">fix flaky auth test</span>
+            <span style="flex:none;display:flex;align-items:center;height:20px;padding:0 7px;border-radius:5px;border:1px solid #2A2E33;background:#16181B;font:500 10px/1 'JetBrains Mono',monospace;color:#B4B5BC">⎇ fix/auth-retry</span>
+            <span style="flex:none;font:400 11px/1 'JetBrains Mono',monospace;color:#6E6E76">~/dev/api-gateway</span>
+            <span style="flex:1"></span>
+            <span style="flex:none;font:400 11px/1 'JetBrains Mono',monospace;color:#6E6E76">claude-sonnet-4.5</span>
+            <button type="button" aria-label="Connection status" style="appearance:none;border:0;background:none;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none" style-hover="background:#1E2125">
+              <span style="width:7px;height:7px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 3px rgba(126,203,160,.14)"></span>
+            </button>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;padding:22px 28px;display:flex;flex-direction:column;gap:18px">
+            <div style="display:flex;gap:11px">
+              <span style="flex:none;width:22px;height:22px;border-radius:6px;border:1px solid #2A2E33;background:#16181B;display:flex;align-items:center;justify-content:center;font:500 10px/1 'JetBrains Mono',monospace;color:#8C8D95">R</span>
+              <div style="flex:1;min-width:0;font:400 13px/1.6 'Inter',sans-serif;color:#E6E6E9;max-width:640px;text-wrap:pretty">The auth test fails about one run in six on CI. Can you find the race and fix it without adding sleeps?</div>
+            </div>
+            <div style="display:flex;gap:11px">
+              <span style="flex:none;width:22px;height:22px;border-radius:6px;background:#D97757;display:flex;align-items:center;justify-content:center;font:600 10px/1 'JetBrains Mono',monospace;color:#160C07">C</span>
+              <div style="flex:1;min-width:0;max-width:700px;display:flex;flex-direction:column;gap:12px">
+                <div style="font:400 13px/1.6 'Inter',sans-serif;color:#E6E6E9;text-wrap:pretty">The token refresh in <span style="font:400 12px/1 'JetBrains Mono',monospace;color:#D9A57C">setupAuth()</span> is not awaited, so the first request can go out with the stale token. Reading the two call sites now.</div>
+                <div style="border:1px solid #2A2E33;border-radius:8px;background:#16181B;overflow:hidden">
+                  <div style="height:28px;display:flex;align-items:center;gap:8px;padding:0 11px;border-bottom:1px solid #2A2E33">
+                    <span style="width:5px;height:5px;border-radius:50%;background:#7ECBA0"></span>
+                    <span style="font:500 10.5px/1 'JetBrains Mono',monospace;color:#B4B5BC">Read</span>
+                    <span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#6E6E76">tests/auth/setup.ts</span>
+                    <span style="flex:1"></span>
+                    <span style="font:400 10px/1 'JetBrains Mono',monospace;color:#6E6E76">142 lines</span>
+                  </div>
+                  <div style="padding:10px 11px;font:400 11.5px/1.7 'JetBrains Mono',monospace;color:#8C8D95;white-space:pre">  38  const t = refreshToken(ctx)
+  39  client.use(bearer(t))
+  40  return client</div>
+                </div>
+                <div style="font:400 13px/1.6 'Inter',sans-serif;color:#E6E6E9;text-wrap:pretty">Line 38 returns a promise that is dropped. I will await it and thread the token through explicitly.</div>
+              </div>
+            </div>
+            <div style="flex:1"></div>
+            <div style="flex:none;border:1px solid #2A2E33;border-radius:10px;background:#16181B;padding:11px 13px;display:flex;align-items:center;gap:10px">
+              <span style="flex:1;font:400 13px/1 'Inter',sans-serif;color:#6E6E76">Reply to Claude…</span>
+              <span style="flex:none;font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">⏎</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#6E6E76;margin-bottom:12px">2 · Sidebar collapsed — controls move into the chat sub-header, single row</div>
+      <div data-screen-label="Desktop v2 · sidebar collapsed" style="width:1280px;height:800px;border-radius:11px;overflow:hidden;border:1px solid #2A2E33;background:#0E0F11;display:flex;flex-direction:column;box-shadow:0 40px 90px -40px rgba(0,0,0,.8)">
+
+        <div style="height:38px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid #2A2E33">
+          <span style="display:flex;gap:8px;align-items:center;flex:none;margin-right:2px">
+            <span style="width:12px;height:12px;border-radius:50%;background:#FF5F57"></span>
+            <span style="width:12px;height:12px;border-radius:50%;background:#FEBC2E"></span>
+            <span style="width:12px;height:12px;border-radius:50%;background:#28C840"></span>
+          </span>
+          <span style="display:flex;align-items:center;gap:2px;flex:none">
+            <button type="button" aria-label="Toggle sidebar" style="appearance:none;border:0;background:#1E2125;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none">
+              <span aria-hidden="true" style="position:relative;width:15px;height:13px;display:block">
+                <span style="position:absolute;inset:0;border:1.5px solid #E6E6E9;border-radius:2.5px;box-sizing:border-box"></span>
+                <span style="position:absolute;left:5px;top:0;bottom:0;width:1.5px;background:#E6E6E9"></span>
+                <span style="position:absolute;left:0;top:0;bottom:0;width:5px;background:rgba(230,230,233,.22)"></span>
+              </span>
+            </button>
+            <button type="button" aria-label="Previous session" style="appearance:none;border:0;background:none;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none" style-hover="background:#1E2125">
+              <span aria-hidden="true" style="width:6px;height:6px;border-left:1.5px solid #B4B5BC;border-bottom:1.5px solid #B4B5BC;transform:rotate(45deg) translate(1px,-1px)"></span>
+            </button>
+            <button type="button" aria-label="Next session" style="appearance:none;border:0;background:none;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none" style-hover="background:#1E2125">
+              <span aria-hidden="true" style="width:6px;height:6px;border-right:1.5px solid #B4B5BC;border-top:1.5px solid #B4B5BC;transform:rotate(45deg) translate(-1px,1px)"></span>
+            </button>
+          </span>
+          <span style="flex:none;width:1px;height:16px;background:#2A2E33;margin:0 2px"></span>
+          <span style="font:600 13px/1 'Inter',sans-serif;letter-spacing:-.005em;color:#F3F3F4">fix flaky auth test</span>
+          <span style="flex:none;display:flex;align-items:center;height:20px;padding:0 7px;border-radius:5px;border:1px solid #2A2E33;background:#16181B;font:500 10px/1 'JetBrains Mono',monospace;color:#B4B5BC">⎇ fix/auth-retry</span>
+          <span style="flex:none;font:400 11px/1 'JetBrains Mono',monospace;color:#6E6E76">~/dev/api-gateway</span>
+          <span style="flex:1"></span>
+          <span style="flex:none;font:400 11px/1 'JetBrains Mono',monospace;color:#6E6E76">claude-sonnet-4.5</span>
+          <button type="button" aria-label="Connection status" style="appearance:none;border:0;background:none;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none" style-hover="background:#1E2125">
+            <span style="width:7px;height:7px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 3px rgba(126,203,160,.14)"></span>
+          </button>
+        </div>
+
+        <div style="flex:1;min-height:0;overflow:hidden;padding:26px 0;display:flex;flex-direction:column;align-items:center">
+          <div style="width:780px;display:flex;flex-direction:column;gap:18px;flex:1;min-height:0">
+            <div style="display:flex;gap:11px">
+              <span style="flex:none;width:22px;height:22px;border-radius:6px;border:1px solid #2A2E33;background:#16181B;display:flex;align-items:center;justify-content:center;font:500 10px/1 'JetBrains Mono',monospace;color:#8C8D95">R</span>
+              <div style="flex:1;min-width:0;font:400 13px/1.6 'Inter',sans-serif;color:#E6E6E9;text-wrap:pretty">The auth test fails about one run in six on CI. Can you find the race and fix it without adding sleeps?</div>
+            </div>
+            <div style="display:flex;gap:11px">
+              <span style="flex:none;width:22px;height:22px;border-radius:6px;background:#D97757;display:flex;align-items:center;justify-content:center;font:600 10px/1 'JetBrains Mono',monospace;color:#160C07">C</span>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:12px">
+                <div style="font:400 13px/1.6 'Inter',sans-serif;color:#E6E6E9;text-wrap:pretty">The token refresh in <span style="font:400 12px/1 'JetBrains Mono',monospace;color:#D9A57C">setupAuth()</span> is not awaited, so the first request can go out with the stale token. Reading the two call sites now.</div>
+                <div style="border:1px solid #2A2E33;border-radius:8px;background:#16181B;overflow:hidden">
+                  <div style="height:28px;display:flex;align-items:center;gap:8px;padding:0 11px;border-bottom:1px solid #2A2E33">
+                    <span style="width:5px;height:5px;border-radius:50%;background:#7ECBA0"></span>
+                    <span style="font:500 10.5px/1 'JetBrains Mono',monospace;color:#B4B5BC">Read</span>
+                    <span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#6E6E76">tests/auth/setup.ts</span>
+                    <span style="flex:1"></span>
+                    <span style="font:400 10px/1 'JetBrains Mono',monospace;color:#6E6E76">142 lines</span>
+                  </div>
+                  <div style="padding:10px 11px;font:400 11.5px/1.7 'JetBrains Mono',monospace;color:#8C8D95;white-space:pre">  38  const t = refreshToken(ctx)
+  39  client.use(bearer(t))
+  40  return client</div>
+                </div>
+              </div>
+            </div>
+            <div style="flex:1"></div>
+            <div style="flex:none;border:1px solid #2A2E33;border-radius:10px;background:#16181B;padding:11px 13px;display:flex;align-items:center;gap:10px">
+              <span style="flex:1;font:400 13px/1 'Inter',sans-serif;color:#6E6E76">Reply to Claude…</span>
+              <span style="flex:none;font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">⏎</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="width:1280px;font:400 12.5px/1.6 'Inter',sans-serif;color:#8C8D95;margin-top:12px;text-wrap:pretty">The leading cluster (lights, toggle, ‹ ›) is separated from the session title by a 16px hairline rule, so the sub-header still reads title-first. No band is added: the row stays 38px.</div>
+    </div>
+
+    <div>
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#6E6E76;margin-bottom:12px">3 · Detail — hover, tooltips, disabled forward (2× scale)</div>
+      <div data-screen-label="Desktop v2 · chrome detail" style="width:1280px;border-radius:11px;border:1px solid #2A2E33;background:#0E0F11;padding:34px 0 44px;overflow:hidden">
+        <div style="width:1280px;height:500px;overflow:hidden">
+          <div style="transform:scale(2);transform-origin:top left;width:640px;height:250px">
+            <div style="width:640px;background:#0E0F11;display:flex">
+
+              <div style="width:260px;flex:none;background:#16181B;border-right:1px solid #2A2E33;height:250px;display:flex;flex-direction:column;position:relative">
+                <div style="height:38px;flex:none;display:flex;align-items:center;gap:2px;padding:0 10px 0 12px">
+                  <span style="display:flex;gap:8px;align-items:center;flex:none;margin-right:10px">
+                    <span style="width:12px;height:12px;border-radius:50%;background:#FF5F57"></span>
+                    <span style="width:12px;height:12px;border-radius:50%;background:#FEBC2E"></span>
+                    <span style="width:12px;height:12px;border-radius:50%;background:#28C840"></span>
+                  </span>
+                  <span style="width:28px;height:28px;border-radius:6px;background:#1E2125;display:flex;align-items:center;justify-content:center;flex:none">
+                    <span aria-hidden="true" style="position:relative;width:15px;height:13px;display:block">
+                      <span style="position:absolute;inset:0;border:1.5px solid #E6E6E9;border-radius:2.5px;box-sizing:border-box"></span>
+                      <span style="position:absolute;left:5px;top:0;bottom:0;width:1.5px;background:#E6E6E9"></span>
+                    </span>
+                  </span>
+                  <span style="width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex:none">
+                    <span aria-hidden="true" style="width:6px;height:6px;border-left:1.5px solid #B4B5BC;border-bottom:1.5px solid #B4B5BC;transform:rotate(45deg) translate(1px,-1px)"></span>
+                  </span>
+                  <span style="width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex:none">
+                    <span aria-hidden="true" style="width:6px;height:6px;border-right:1.5px solid #4A4E55;border-top:1.5px solid #4A4E55;transform:rotate(45deg) translate(-1px,1px)"></span>
+                  </span>
+                  <div style="flex:1;min-width:0;margin-left:6px;height:26px;border:1px solid #2A2E33;border-radius:7px;background:#0E0F11;display:flex;align-items:center;gap:6px;padding:0 8px">
+                    <span aria-hidden="true" style="position:relative;width:12px;height:12px;flex:none;display:block">
+                      <span style="position:absolute;left:0;top:0;width:9px;height:9px;border:1.5px solid #8C8D95;border-radius:50%;box-sizing:border-box"></span>
+                      <span style="position:absolute;left:7.5px;top:8px;width:5px;height:1.5px;background:#8C8D95;border-radius:1px;transform:rotate(45deg);transform-origin:left center"></span>
+                    </span>
+                    <span style="flex:1;min-width:0;font:400 12px/1 'Inter',sans-serif;color:#6E6E76;white-space:nowrap;overflow:hidden">Search</span>
+                  </div>
+                </div>
+
+                <div style="height:56px;flex:none"></div>
+
+                <div style="flex:none;height:26px;display:flex;align-items:center;gap:7px;padding:0 12px">
+                  <span style="flex:none;width:5px;height:5px;border-radius:50%;background:#7ECBA0"></span>
+                  <span style="font:500 11px/1 'JetBrains Mono',monospace;color:#B4B5BC">mbp-m3</span>
+                  <span aria-hidden="true" style="flex:none;width:4.5px;height:4.5px;border-right:1.4px solid #6E6E76;border-bottom:1.4px solid #6E6E76;transform:rotate(45deg) translateY(-1.5px)"></span>
+                  <span style="flex:1"></span>
+                  <span style="position:relative;width:12px;height:12px;flex:none;color:#8C8D95;display:block">
+                    <span style="position:absolute;left:2px;top:1px;width:8px;height:7px;border:1.4px solid currentColor;border-bottom:0;border-radius:4.5px 4.5px 0 0;box-sizing:border-box"></span>
+                    <span style="position:absolute;left:0;top:8px;width:12px;height:1.4px;background:currentColor;border-radius:1px"></span>
+                    <span style="position:absolute;left:5px;top:10px;width:2px;height:1.5px;background:currentColor;border-radius:0 0 2px 2px"></span>
+                  </span>
+                </div>
+                <div style="height:1px;flex:none;background:#2A2E33;margin:5px 0 4px"></div>
+                <div style="flex:none;height:28px;display:flex;align-items:center;gap:8px;padding:0 12px;background:rgba(217,119,87,.09)">
+                  <span aria-hidden="true" style="position:relative;width:12px;height:12px;flex:none;display:block">
+                    <span style="position:absolute;left:0;top:5.25px;width:12px;height:1.5px;background:#D97757;border-radius:1px"></span>
+                    <span style="position:absolute;top:0;left:5.25px;height:12px;width:1.5px;background:#D97757;border-radius:1px"></span>
+                  </span>
+                  <span style="font:500 12.5px/1 'Inter',sans-serif;color:#D97757">New session</span>
+                  <span style="flex:1"></span>
+                  <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">⌘N</span>
+                </div>
+                <div style="flex:none;height:28px;display:flex;align-items:center;gap:8px;padding:0 12px">
+                  <span aria-hidden="true" style="position:relative;width:12px;height:11px;flex:none;display:block">
+                    <span style="position:absolute;left:0;top:2.5px;width:12px;height:8px;border:1.5px solid #8C8D95;border-radius:2px;box-sizing:border-box"></span>
+                    <span style="position:absolute;left:1px;top:.5px;width:5px;height:3px;border:1.5px solid #8C8D95;border-bottom:0;border-radius:2px 2px 0 0;box-sizing:border-box"></span>
+                  </span>
+                  <span style="font:400 12.5px/1 'Inter',sans-serif;color:#B4B5BC">Open folder…</span>
+                </div>
+
+                <span style="position:absolute;left:52px;top:42px;display:flex;align-items:center;gap:6px;height:21px;padding:0 7px;border-radius:5px;border:1px solid #2A2E33;background:#1E2125;box-shadow:0 6px 16px -6px rgba(0,0,0,.7);white-space:nowrap">
+                  <span style="font:400 10.5px/1 'Inter',sans-serif;color:#E6E6E9">Toggle sidebar</span>
+                  <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#8C8D95">⌘\</span>
+                </span>
+                <span style="position:absolute;left:132px;top:68px;display:flex;align-items:center;gap:6px;height:21px;padding:0 7px;border-radius:5px;border:1px solid #2A2E33;background:#1E2125;box-shadow:0 6px 16px -6px rgba(0,0,0,.7);white-space:nowrap;opacity:.45">
+                  <span style="font:400 10.5px/1 'Inter',sans-serif;color:#E6E6E9">Next session</span>
+                  <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#8C8D95">⌘]</span>
+                </span>
+              </div>
+
+              <div style="flex:1;height:250px;background:#0E0F11">
+                <div style="height:38px;display:flex;align-items:center;gap:10px;padding:0 12px 0 16px;border-bottom:1px solid #2A2E33">
+                  <span style="font:600 13px/1 'Inter',sans-serif;color:#F3F3F4">fix flaky auth test</span>
+                  <span style="flex:none;display:flex;align-items:center;height:20px;padding:0 7px;border-radius:5px;border:1px solid #2A2E33;background:#16181B;font:500 10px/1 'JetBrains Mono',monospace;color:#B4B5BC">⎇ fix/auth-retry</span>
+                  <span style="flex:1"></span>
+                  <span style="width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex:none">
+                    <span style="width:7px;height:7px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 3px rgba(126,203,160,.14)"></span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="width:1280px;font:400 12.5px/1.6 'Inter',sans-serif;color:#8C8D95;margin-top:12px;text-wrap:pretty">Hover raises a rounded-6 #1E2125 plate under the 28px hit target; the disabled forward chevron drops to #4A4E55 and takes no hover or tooltip (faded here only to place it). At 260px the row leaves 78px for the search field, which fits the magnifier and placeholder but not the ⌘K hint — the hint is dropped rather than the field shrunk. The 56px gap under the control row exists only in this detail frame, to clear the tooltips.</div>
+    </div>
+
+    <div>
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#6E6E76;margin-bottom:12px">4 · Split panes — two conversation columns, left focused</div>
+      <div data-screen-label="Desktop v2 · split panes" style="width:1280px;height:800px;border-radius:11px;overflow:hidden;border:1px solid #2A2E33;background:#0E0F11;display:flex;box-shadow:0 40px 90px -40px rgba(0,0,0,.8)">
+
+        <div style="width:260px;flex:none;display:flex;flex-direction:column;background:#16181B;border-right:1px solid #2A2E33">
+          <div style="height:38px;flex:none;display:flex;align-items:center;gap:2px;padding:0 10px 0 12px">
+            <span style="display:flex;gap:8px;align-items:center;flex:none;margin-right:10px">
+              <span style="width:12px;height:12px;border-radius:50%;background:#FF5F57"></span>
+              <span style="width:12px;height:12px;border-radius:50%;background:#FEBC2E"></span>
+              <span style="width:12px;height:12px;border-radius:50%;background:#28C840"></span>
+            </span>
+            <button type="button" aria-label="Toggle sidebar" style="appearance:none;border:0;background:none;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none" style-hover="background:#1E2125">
+              <span aria-hidden="true" style="position:relative;width:15px;height:13px;display:block">
+                <span style="position:absolute;inset:0;border:1.5px solid #B4B5BC;border-radius:2.5px;box-sizing:border-box"></span>
+                <span style="position:absolute;left:5px;top:0;bottom:0;width:1.5px;background:#B4B5BC"></span>
+              </span>
+            </button>
+            <button type="button" aria-label="Previous session" style="appearance:none;border:0;background:none;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none" style-hover="background:#1E2125">
+              <span aria-hidden="true" style="width:6px;height:6px;border-left:1.5px solid #B4B5BC;border-bottom:1.5px solid #B4B5BC;transform:rotate(45deg) translate(1px,-1px)"></span>
+            </button>
+            <button type="button" aria-label="Next session" disabled="disabled" style="appearance:none;border:0;background:none;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:default;flex:none">
+              <span aria-hidden="true" style="width:6px;height:6px;border-right:1.5px solid #4A4E55;border-top:1.5px solid #4A4E55;transform:rotate(45deg) translate(-1px,1px)"></span>
+            </button>
+            <div style="flex:1;min-width:0;margin-left:6px;height:26px;border:1px solid #2A2E33;border-radius:7px;background:#0E0F11;display:flex;align-items:center;gap:6px;padding:0 8px;cursor:text" style-hover="border-color:#3A3F46">
+              <span aria-hidden="true" style="position:relative;width:12px;height:12px;flex:none;display:block">
+                <span style="position:absolute;left:0;top:0;width:9px;height:9px;border:1.5px solid #8C8D95;border-radius:50%;box-sizing:border-box"></span>
+                <span style="position:absolute;left:7.5px;top:8px;width:5px;height:1.5px;background:#8C8D95;border-radius:1px;transform:rotate(45deg);transform-origin:left center"></span>
+              </span>
+              <span style="flex:1;min-width:0;font:400 12px/1 'Inter',sans-serif;color:#6E6E76;white-space:nowrap;overflow:hidden">Search</span>
+            </div>
+          </div>
+
+          <button type="button" aria-haspopup="menu" style="appearance:none;border:0;background:none;flex:none;height:26px;display:flex;align-items:center;gap:7px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:#1E2125">
+            <span style="flex:none;width:5px;height:5px;border-radius:50%;background:#7ECBA0"></span>
+            <span style="min-width:0;font:500 11px/1 'JetBrains Mono',monospace;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">mbp-m3</span>
+            <span aria-hidden="true" style="flex:none;width:4.5px;height:4.5px;border-right:1.4px solid #6E6E76;border-bottom:1.4px solid #6E6E76;transform:rotate(45deg) translateY(-1.5px)"></span>
+            <span style="flex:1"></span>
+            <span aria-label="Attention" style="position:relative;width:12px;height:12px;flex:none;color:#8C8D95;display:block">
+              <span style="position:absolute;left:2px;top:1px;width:8px;height:7px;border:1.4px solid currentColor;border-bottom:0;border-radius:4.5px 4.5px 0 0;box-sizing:border-box"></span>
+              <span style="position:absolute;left:0;top:8px;width:12px;height:1.4px;background:currentColor;border-radius:1px"></span>
+              <span style="position:absolute;left:5px;top:10px;width:2px;height:1.5px;background:currentColor;border-radius:0 0 2px 2px"></span>
+            </span>
+          </button>
+
+          <div style="height:1px;flex:none;background:#2A2E33;margin:5px 0 4px"></div>
+
+          <button type="button" style="appearance:none;border:0;background:none;flex:none;height:28px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:rgba(217,119,87,.09)">
+            <span aria-hidden="true" style="position:relative;width:12px;height:12px;flex:none;display:block">
+              <span style="position:absolute;left:0;top:5.25px;width:12px;height:1.5px;background:#D97757;border-radius:1px"></span>
+              <span style="position:absolute;top:0;left:5.25px;height:12px;width:1.5px;background:#D97757;border-radius:1px"></span>
+            </span>
+            <span style="font:500 12.5px/1 'Inter',sans-serif;color:#D97757">New session</span>
+            <span style="flex:1"></span>
+            <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">⌘N</span>
+          </button>
+          <button type="button" style="appearance:none;border:0;background:none;flex:none;height:28px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:#1E2125">
+            <span aria-hidden="true" style="position:relative;width:12px;height:11px;flex:none;display:block">
+              <span style="position:absolute;left:0;top:2.5px;width:12px;height:8px;border:1.5px solid #8C8D95;border-radius:2px;box-sizing:border-box"></span>
+              <span style="position:absolute;left:1px;top:.5px;width:5px;height:3px;border:1.5px solid #8C8D95;border-bottom:0;border-radius:2px 2px 0 0;box-sizing:border-box"></span>
+            </span>
+            <span style="font:400 12.5px/1 'Inter',sans-serif;color:#B4B5BC">Open folder…</span>
+          </button>
+
+          <div style="height:1px;flex:none;background:#2A2E33;margin:4px 0 0"></div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column">
+            <div style="padding:10px 12px 4px;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">PINNED</div>
+            <sc-for list="{{ pinned }}" as="s" hint-placeholder-count="2">
+              <button type="button" style="appearance:none;border:0;background:none;flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:#1E2125">
+                <span aria-hidden="true" style="flex:none;width:4px;height:4px;border-radius:1px;background:#4A4E55;transform:rotate(45deg)"></span>
+                <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.t }}</span>
+                <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">{{ s.m }}</span>
+              </button>
+            </sc-for>
+
+            <div style="padding:12px 12px 4px;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">RUNNING</div>
+            <button type="button" style="appearance:none;border:0;flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px 0 10px;cursor:pointer;text-align:left;background:#1E2125;box-shadow:inset 2px 0 0 #D97757">
+              <span style="flex:none;width:5px;height:5px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 2.5px rgba(126,203,160,.14)"></span>
+              <span style="flex:1;min-width:0;font:500 12.5px/1 'Inter',sans-serif;color:#F3F3F4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">fix flaky auth test</span>
+              <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#8C8D95">2m</span>
+            </button>
+            <button type="button" style="appearance:none;border:0;flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px 0 10px;cursor:pointer;text-align:left;background:#1A1C20;box-shadow:inset 2px 0 0 #4A4E55">
+              <span style="flex:none;width:5px;height:5px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 2.5px rgba(126,203,160,.14)"></span>
+              <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">migrate billing schema</span>
+              <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">14m</span>
+            </button>
+            <button type="button" style="appearance:none;border:0;background:none;flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:#1E2125">
+              <span style="flex:none;width:5px;height:5px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 2.5px rgba(126,203,160,.14)"></span>
+              <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">docs: rewrite quickstart</span>
+              <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">31m</span>
+            </button>
+
+            <div style="padding:12px 12px 4px;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">RECENT</div>
+            <sc-for list="{{ recent }}" as="s" hint-placeholder-count="9">
+              <button type="button" style="appearance:none;border:0;background:none;flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px;cursor:pointer;text-align:left" style-hover="background:#1E2125">
+                <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.t }}</span>
+                <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">{{ s.m }}</span>
+              </button>
+            </sc-for>
+            <div style="flex:1"></div>
+          </div>
+
+          <div style="height:1px;flex:none;background:#2A2E33"></div>
+          <div style="flex:none;height:30px;display:flex;align-items:center;gap:8px;padding:0 12px">
+            <span style="font:400 11.5px/1 'Inter',sans-serif;color:#8C8D95">Help &amp; support</span>
+            <span style="flex:1"></span>
+            <span style="font:400 10px/1 'JetBrains Mono',monospace;color:#6E6E76">v1.9.1</span>
+            <span aria-label="Settings" style="font:400 12px/1 'Inter',sans-serif;color:#8C8D95">⚙︎</span>
+          </div>
+        </div>
+
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#0E0F11;border-right:1px solid #2A2E33">
+          <div style="height:38px;flex:none;display:flex;align-items:center;gap:9px;padding:0 12px 0 14px;border-bottom:1px solid #2A2E33;box-shadow:inset 0 2px 0 #D97757">
+            <span style="font:600 13px/1 'Inter',sans-serif;letter-spacing:-.005em;color:#F3F3F4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">fix flaky auth test</span>
+            <span style="flex:none;display:flex;align-items:center;height:20px;padding:0 7px;border-radius:5px;border:1px solid #2A2E33;background:#16181B;font:500 10px/1 'JetBrains Mono',monospace;color:#B4B5BC">⎇ fix/auth-retry</span>
+            <span style="flex:1;min-width:0;font:400 11px/1 'JetBrains Mono',monospace;color:#6E6E76;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">~/dev/api-gateway</span>
+            <button type="button" aria-label="Close pane" style="appearance:none;border:0;background:none;width:22px;height:22px;border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none;font:400 12px/1 'Inter',sans-serif;color:#8C8D95" style-hover="background:#1E2125">✕</button>
+          </div>
+          <div style="flex:1;min-height:0;overflow:hidden;padding:20px 18px;display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;gap:10px">
+              <span style="flex:none;width:20px;height:20px;border-radius:6px;border:1px solid #2A2E33;background:#16181B;display:flex;align-items:center;justify-content:center;font:500 9.5px/1 'JetBrains Mono',monospace;color:#8C8D95">R</span>
+              <div style="flex:1;min-width:0;font:400 12.5px/1.6 'Inter',sans-serif;color:#E6E6E9;text-wrap:pretty">The auth test fails about one run in six on CI. Can you find the race and fix it without adding sleeps?</div>
+            </div>
+            <div style="display:flex;gap:10px">
+              <span style="flex:none;width:20px;height:20px;border-radius:6px;background:#D97757;display:flex;align-items:center;justify-content:center;font:600 9.5px/1 'JetBrains Mono',monospace;color:#160C07">C</span>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:11px">
+                <div style="font:400 12.5px/1.6 'Inter',sans-serif;color:#E6E6E9;text-wrap:pretty">The token refresh in <span style="font:400 11.5px/1 'JetBrains Mono',monospace;color:#D9A57C">setupAuth()</span> is not awaited, so the first request can go out with the stale token.</div>
+                <div style="border:1px solid #2A2E33;border-radius:8px;background:#16181B;overflow:hidden">
+                  <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 10px;border-bottom:1px solid #2A2E33">
+                    <span style="width:5px;height:5px;border-radius:50%;background:#7ECBA0"></span>
+                    <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#B4B5BC">Read</span>
+                    <span style="flex:1;min-width:0;font:400 10px/1 'JetBrains Mono',monospace;color:#6E6E76;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">tests/auth/setup.ts</span>
+                  </div>
+                  <div style="padding:9px 10px;font:400 11px/1.7 'JetBrains Mono',monospace;color:#8C8D95;white-space:pre">  38  const t = refreshToken(ctx)
+  39  client.use(bearer(t))</div>
+                </div>
+              </div>
+            </div>
+            <div style="flex:1"></div>
+            <div style="flex:none;border:1px solid #3A3F46;border-radius:10px;background:#16181B;padding:10px 12px;display:flex;align-items:center;gap:10px">
+              <span style="flex:1;font:400 12.5px/1 'Inter',sans-serif;color:#6E6E76">Reply to Claude…</span>
+              <span style="flex:none;font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">⏎</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#0E0F11">
+          <div style="height:38px;flex:none;display:flex;align-items:center;gap:9px;padding:0 12px 0 14px;border-bottom:1px solid #2A2E33">
+            <span style="font:600 13px/1 'Inter',sans-serif;letter-spacing:-.005em;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">migrate billing schema</span>
+            <span style="flex:none;display:flex;align-items:center;height:20px;padding:0 7px;border-radius:5px;border:1px solid #2A2E33;background:#16181B;font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">⎇ db/billing-v2</span>
+            <span style="flex:1;min-width:0;font:400 11px/1 'JetBrains Mono',monospace;color:#4A4E55;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">~/dev/ledger</span>
+            <button type="button" aria-label="Close pane" style="appearance:none;border:0;background:none;width:22px;height:22px;border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none;font:400 12px/1 'Inter',sans-serif;color:#4A4E55" style-hover="background:#1E2125">✕</button>
+            <button type="button" aria-label="Connection status" style="appearance:none;border:0;background:none;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none" style-hover="background:#1E2125">
+              <span style="width:7px;height:7px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 3px rgba(126,203,160,.14)"></span>
+            </button>
+          </div>
+          <div style="flex:1;min-height:0;overflow:hidden;padding:20px 18px;display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;gap:10px">
+              <span style="flex:none;width:20px;height:20px;border-radius:6px;border:1px solid #2A2E33;background:#16181B;display:flex;align-items:center;justify-content:center;font:500 9.5px/1 'JetBrains Mono',monospace;color:#8C8D95">R</span>
+              <div style="flex:1;min-width:0;font:400 12.5px/1.6 'Inter',sans-serif;color:#B4B5BC;text-wrap:pretty">Write the migration for the new invoice_lines table and backfill from the legacy column.</div>
+            </div>
+            <div style="display:flex;gap:10px">
+              <span style="flex:none;width:20px;height:20px;border-radius:6px;background:rgba(217,119,87,.35);display:flex;align-items:center;justify-content:center;font:600 9.5px/1 'JetBrains Mono',monospace;color:#160C07">C</span>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:11px">
+                <div style="font:400 12.5px/1.6 'Inter',sans-serif;color:#B4B5BC;text-wrap:pretty">Backfill runs in batches of 5,000 so the table is never locked for more than a second. Writing the up and down steps now.</div>
+                <div style="border:1px solid #2A2E33;border-radius:8px;background:#16181B;overflow:hidden">
+                  <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 10px;border-bottom:1px solid #2A2E33">
+                    <span style="width:5px;height:5px;border-radius:50%;background:#7ECBA0"></span>
+                    <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#8C8D95">Write</span>
+                    <span style="flex:1;min-width:0;font:400 10px/1 'JetBrains Mono',monospace;color:#6E6E76;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">migrations/0042_invoice_lines.sql</span>
+                  </div>
+                  <div style="padding:9px 10px;font:400 11px/1.7 'JetBrains Mono',monospace;color:#6E6E76;white-space:pre">  create table invoice_lines (
+    id bigserial primary key,</div>
+                </div>
+              </div>
+            </div>
+            <div style="flex:1"></div>
+            <div style="flex:none;border:1px solid #2A2E33;border-radius:10px;background:#141619;padding:10px 12px;display:flex;align-items:center;gap:10px">
+              <span style="flex:1;font:400 12.5px/1 'Inter',sans-serif;color:#4A4E55">Reply to Claude…</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="width:1280px;margin-top:16px">
+        <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#6E6E76;margin-bottom:10px">4b · Split + sidebar collapsed — top edge only</div>
+        <div style="width:1280px;border-radius:10px;border:1px solid #2A2E33;background:#0E0F11;overflow:hidden;display:flex">
+          <div style="flex:1;min-width:0;border-right:1px solid #2A2E33">
+            <div style="height:38px;display:flex;align-items:center;gap:9px;padding:0 12px;border-bottom:1px solid #2A2E33;box-shadow:inset 0 2px 0 #D97757">
+              <span style="display:flex;gap:8px;align-items:center;flex:none;margin-right:2px">
+                <span style="width:12px;height:12px;border-radius:50%;background:#FF5F57"></span>
+                <span style="width:12px;height:12px;border-radius:50%;background:#FEBC2E"></span>
+                <span style="width:12px;height:12px;border-radius:50%;background:#28C840"></span>
+              </span>
+              <span style="display:flex;align-items:center;gap:2px;flex:none">
+                <span style="width:28px;height:28px;border-radius:6px;background:#1E2125;display:flex;align-items:center;justify-content:center">
+                  <span aria-hidden="true" style="position:relative;width:15px;height:13px;display:block">
+                    <span style="position:absolute;inset:0;border:1.5px solid #E6E6E9;border-radius:2.5px;box-sizing:border-box"></span>
+                    <span style="position:absolute;left:5px;top:0;bottom:0;width:1.5px;background:#E6E6E9"></span>
+                    <span style="position:absolute;left:0;top:0;bottom:0;width:5px;background:rgba(230,230,233,.22)"></span>
+                  </span>
+                </span>
+                <span style="width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center">
+                  <span aria-hidden="true" style="width:6px;height:6px;border-left:1.5px solid #B4B5BC;border-bottom:1.5px solid #B4B5BC;transform:rotate(45deg) translate(1px,-1px)"></span>
+                </span>
+                <span style="width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center">
+                  <span aria-hidden="true" style="width:6px;height:6px;border-right:1.5px solid #4A4E55;border-top:1.5px solid #4A4E55;transform:rotate(45deg) translate(-1px,1px)"></span>
+                </span>
+              </span>
+              <span style="flex:none;width:1px;height:16px;background:#2A2E33;margin:0 1px"></span>
+              <span style="font:600 13px/1 'Inter',sans-serif;color:#F3F3F4;white-space:nowrap">fix flaky auth test</span>
+              <span style="flex:none;display:flex;align-items:center;height:20px;padding:0 7px;border-radius:5px;border:1px solid #2A2E33;background:#16181B;font:500 10px/1 'JetBrains Mono',monospace;color:#B4B5BC">⎇ fix/auth-retry</span>
+              <span style="flex:1;min-width:0"></span>
+              <span style="width:22px;height:22px;display:flex;align-items:center;justify-content:center;flex:none;font:400 12px/1 'Inter',sans-serif;color:#8C8D95">✕</span>
+            </div>
+            <div style="height:52px;background:#0E0F11"></div>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="height:38px;display:flex;align-items:center;gap:9px;padding:0 12px 0 14px;border-bottom:1px solid #2A2E33">
+              <span style="font:600 13px/1 'Inter',sans-serif;color:#B4B5BC;white-space:nowrap">migrate billing schema</span>
+              <span style="flex:none;display:flex;align-items:center;height:20px;padding:0 7px;border-radius:5px;border:1px solid #2A2E33;background:#16181B;font:500 10px/1 'JetBrains Mono',monospace;color:#6E6E76">⎇ db/billing-v2</span>
+              <span style="flex:1;min-width:0"></span>
+              <span style="width:22px;height:22px;display:flex;align-items:center;justify-content:center;flex:none;font:400 12px/1 'Inter',sans-serif;color:#4A4E55">✕</span>
+              <span style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;flex:none">
+                <span style="width:7px;height:7px;border-radius:50%;background:#7ECBA0;box-shadow:0 0 0 3px rgba(126,203,160,.14)"></span>
+              </span>
+            </div>
+            <div style="height:52px;background:#0E0F11"></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="width:1280px;font:400 12.5px/1.6 'Inter',sans-serif;color:#8C8D95;margin-top:12px;text-wrap:pretty">Focus is carried by a 2px terracotta inset on the focused sub-header plus full-strength title, path and composer border; the unfocused column mutes its title to #B4B5BC, its path to #4A4E55 and drops its composer to a flat #141619. The connection dot appears once, at the right end of the rightmost sub-header, so it always reads as a window-level fact rather than a per-pane one. Collapsed, the window controls join the leftmost sub-header behind the same hairline rule used in frame 2.</div>
+    </div>
+
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1400,&quot;height&quot;:1100}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      pinned: [
+        { t: "api-gateway · main", m: "" },
+        { t: "design-system audit", m: "1h" }
+      ],
+      running: [
+        { t: "migrate billing schema", m: "14m" },
+        { t: "docs: rewrite quickstart", m: "31m" }
+      ],
+      recent: [
+        { t: "rate limiter backoff", m: "2h" },
+        { t: "fix webpack chunk split", m: "5h" },
+        { t: "add pairing QR fallback", m: "Yd" },
+        { t: "prune stale sessions job", m: "Yd" },
+        { t: "voice input latency", m: "2d" },
+        { t: "relay reconnect storm", m: "3d" },
+        { t: "sqlite wal checkpointing", m: "4d" },
+        { t: "telemetry opt-out copy", m: "5d" },
+        { t: "menu bar icon states", m: "6d" }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; background: #08090A; }
+  a { color: #D97757; text-decoration: none; }
+  a:hover { color: #E89072; }
+</style>
+</helmet>
+
+<section style="padding:40px 44px 72px;font-family:'Inter',system-ui,sans-serif;color:#F3F3F4">
+  <div style="display:flex;align-items:baseline;gap:12px">
+    <span style="min-width:30px;height:22px;padding:0 8px;border-radius:6px;background:#D97757;color:#160C07;font:600 12px/22px 'JetBrains Mono',monospace;text-align:center">3a</span>
+    <span style="font:600 19px/1.2 'Inter',sans-serif;letter-spacing:-.015em">Context menu — surface, item states, separator metrics</span>
+  </div>
+  <p style="margin:10px 0 0;max-width:840px;font:400 13.5px/1.6 'Inter',sans-serif;color:#8C8D95;text-wrap:pretty">One generic surface: a vertical list of labelled rows with optional boundary marks, so the same component serves session rows and text-field cut/copy/paste. The removal verb stays #E6E6E9 at rest and only turns #E5604D under a tinted hover, so nothing pulls the eye to the bottom of the menu before the pointer gets there.</p>
+
+  <div data-screen-label="Context menu · spec" style="width:900px;height:620px;margin-top:28px;border-radius:11px;overflow:hidden;border:1px solid #2A2E33;background:#0E0F11;display:flex;box-shadow:0 40px 90px -40px rgba(0,0,0,.8)">
+
+    <div style="width:260px;flex:none;background:#16181B;border-right:1px solid #2A2E33;display:flex;flex-direction:column;position:relative">
+      <div style="padding:14px 12px 4px;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">PINNED</div>
+      <sc-for list="{{ pinned }}" as="s" hint-placeholder-count="2">
+        <div style="flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px">
+          <span aria-hidden="true" style="flex:none;width:4px;height:4px;border-radius:1px;background:#4A4E55;transform:rotate(45deg)"></span>
+          <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.t }}</span>
+          <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">{{ s.m }}</span>
+        </div>
+      </sc-for>
+
+      <div style="padding:12px 12px 4px;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">RECENT</div>
+      <div style="flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px">
+        <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">rate limiter backoff</span>
+        <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">2h</span>
+      </div>
+      <div style="flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px;background:#1E2125;box-shadow:inset 0 0 0 1px #3A3F46;border-radius:0">
+        <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">fix webpack chunk split</span>
+        <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#8C8D95">5h</span>
+      </div>
+      <sc-for list="{{ recent }}" as="s" hint-placeholder-count="6">
+        <div style="flex:none;height:29px;display:flex;align-items:center;gap:8px;padding:0 12px">
+          <span style="flex:1;min-width:0;font:400 12.5px/1 'Inter',sans-serif;color:#B4B5BC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.t }}</span>
+          <span style="flex:none;font:400 9.5px/1 'JetBrains Mono',monospace;color:#6E6E76">{{ s.m }}</span>
+        </div>
+      </sc-for>
+      <div style="flex:1"></div>
+    </div>
+
+    <div style="flex:1;min-width:0;position:relative;display:flex;flex-direction:column">
+
+      <div style="position:absolute;left:-42px;top:172px;width:216px;background:#1E2125;border:1px solid #2A2E33;border-radius:10px;padding:5px 0;box-shadow:0 8px 24px -8px #000;z-index:3">
+        <div style="height:28px;display:flex;align-items:center;padding:0 10px;margin:0 4px;border-radius:6px;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;cursor:default" style-hover="background:#2A2E33">Open in split</div>
+        <div style="height:1px;background:#2A2E33;margin:4px 8px"></div>
+        <div style="height:28px;display:flex;align-items:center;padding:0 10px;margin:0 4px;border-radius:6px;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;cursor:default" style-hover="background:#2A2E33">Rename session</div>
+        <div style="height:1px;background:#2A2E33;margin:4px 8px"></div>
+        <div style="height:28px;display:flex;align-items:center;gap:4px;padding:0 10px;margin:0 4px;border-radius:6px;font:400 12.5px/1 'Inter',sans-serif;cursor:default;background:#2A2E33">
+          <span style="flex:none;color:#9BA1A6">Move to group ·</span>
+          <span style="flex:1;min-width:0;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Infra</span>
+        </div>
+        <div style="height:28px;display:flex;align-items:center;gap:4px;padding:0 10px;margin:0 4px;border-radius:6px;font:400 12.5px/1 'Inter',sans-serif;cursor:default" style-hover="background:#2A2E33">
+          <span style="flex:none;color:#9BA1A6">Move to group ·</span>
+          <span style="flex:1;min-width:0;color:#E6E6E9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Billing platform</span>
+        </div>
+        <div style="height:28px;display:flex;align-items:center;padding:0 10px;margin:0 4px;border-radius:6px;font:400 12.5px/1 'Inter',sans-serif;color:#6B7177;cursor:default">Remove from group</div>
+        <div style="height:1px;background:#2A2E33;margin:4px 8px"></div>
+        <div style="height:28px;display:flex;align-items:center;padding:0 10px;margin:0 4px;border-radius:6px;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;cursor:default" style-hover="background:#2A2E33">Archive session</div>
+        <div style="height:28px;display:flex;align-items:center;padding:0 10px;margin:0 4px;border-radius:6px;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9;cursor:default" style-hover="background:rgba(229,96,77,.12);color:#E5604D">Remove from recents</div>
+      </div>
+
+      <div style="flex:1;min-height:0;padding:22px 24px 22px 214px;display:flex;flex-direction:column;gap:0">
+        <div style="font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.15em;color:#6E6E76">STATES</div>
+
+        <div style="margin-top:14px;display:flex;flex-direction:column;gap:11px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:216px;flex:none;background:#1E2125;border:1px solid #2A2E33;border-radius:10px;padding:5px 0">
+              <div style="height:28px;display:flex;align-items:center;padding:0 10px;margin:0 4px;border-radius:6px;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9">Rename session</div>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font:500 11.5px/1.4 'Inter',sans-serif;color:#E6E6E9">Rest</div>
+              <div style="font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#6E6E76">h 28 · pad 10 · Inter 12.5 · #E6E6E9</div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:216px;flex:none;background:#1E2125;border:1px solid #2A2E33;border-radius:10px;padding:5px 0">
+              <div style="height:28px;display:flex;align-items:center;padding:0 10px;margin:0 4px;border-radius:6px;background:#2A2E33;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9">Rename session</div>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font:500 11.5px/1.4 'Inter',sans-serif;color:#E6E6E9">Hover — inner pill</div>
+              <div style="font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#6E6E76">fill #2A2E33 · r6 · inset 4 · pressed #33383E</div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:216px;flex:none;background:#1E2125;border:1px solid #2A2E33;border-radius:10px;padding:5px 0">
+              <div style="height:28px;display:flex;align-items:center;padding:0 10px;margin:0 4px;border-radius:6px;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9">Remove from recents</div>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font:500 11.5px/1.4 'Inter',sans-serif;color:#E6E6E9">Removal verb — rest</div>
+              <div style="font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#6E6E76">#E6E6E9 · no red until hover</div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:216px;flex:none;background:#1E2125;border:1px solid #2A2E33;border-radius:10px;padding:5px 0">
+              <div style="height:28px;display:flex;align-items:center;padding:0 10px;margin:0 4px;border-radius:6px;background:rgba(229,96,77,.12);font:400 12.5px/1 'Inter',sans-serif;color:#E5604D">Remove from recents</div>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font:500 11.5px/1.4 'Inter',sans-serif;color:#E5604D">Removal verb — hover</div>
+              <div style="font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#6E6E76">fill rgba(229,96,77,.12) · text #E5604D</div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:216px;flex:none;background:#1E2125;border:1px solid #2A2E33;border-radius:10px;padding:5px 0">
+              <div style="height:28px;display:flex;align-items:center;padding:0 10px;margin:0 4px;border-radius:6px;font:400 12.5px/1 'Inter',sans-serif;color:#6B7177">Remove from group</div>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font:500 11.5px/1.4 'Inter',sans-serif;color:#8C8D95">Disabled</div>
+              <div style="font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#6E6E76">#6B7177 · no hover, no press</div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:216px;flex:none;background:#1E2125;border:1px solid #2A2E33;border-radius:10px;padding:5px 0">
+              <div style="height:28px;display:flex;align-items:center;padding:0 10px;margin:0 4px;border-radius:6px;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9">Rename session</div>
+              <div style="height:1px;background:#2A2E33;margin:4px 8px"></div>
+              <div style="height:28px;display:flex;align-items:center;padding:0 10px;margin:0 4px;border-radius:6px;font:400 12.5px/1 'Inter',sans-serif;color:#E6E6E9">Archive session</div>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font:500 11.5px/1.4 'Inter',sans-serif;color:#E6E6E9">Separator</div>
+              <div style="font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#6E6E76">1px #2A2E33 · inset 8 · margin 4 / 4</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex:1"></div>
+        <div style="font:400 11.5px/1.6 'Inter',sans-serif;color:#8C8D95;text-wrap:pretty;max-width:400px">Surface: #1E2125 on 1px #2A2E33, r10, pad 5 / 0, shadow 0 8px 24px -8px #000, min 180 / max 260 with the group name ellipsizing.</div>
+      </div>
+    </div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1000,&quot;height&quot;:760}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      pinned: [
+        { t: "api-gateway · main", m: "" },
+        { t: "design-system audit", m: "1h" }
+      ],
+      recent: [
+        { t: "add pairing QR fallback", m: "Yd" },
+        { t: "prune stale sessions job", m: "Yd" },
+        { t: "voice input latency", m: "2d" },
+        { t: "relay reconnect storm", m: "3d" },
+        { t: "sqlite wal checkpointing", m: "4d" },
+        { t: "telemetry opt-out copy", m: "5d" }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
