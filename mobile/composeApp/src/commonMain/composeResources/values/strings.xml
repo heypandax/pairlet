@@ -1965,6 +1965,10 @@
     <string name="privacy_gate_voice_title">Voice dictation</string>
     <string name="privacy_gate_voice_body">Transcribed by Apple\'s speech service by default, or optionally on your own computer — never by any cloud AI service of ours.</string>
     <string name="privacy_gate_demo">Demo mode runs entirely on this device with sample data.</string>
+    <string name="privacy_gate_diagram_e2e">end-to-end encrypted</string>
+    <string name="privacy_gate_diagram_phone">phone</string>
+    <string name="privacy_gate_diagram_relay">relay forwards ciphertext</string>
+    <string name="privacy_gate_diagram_computer">your computer</string>
     <string name="privacy_gate_policy">Privacy policy</string>
     <string name="privacy_gate_agree">Agree and continue</string>
     <string name="settings_privacy_title">Privacy policy</string>

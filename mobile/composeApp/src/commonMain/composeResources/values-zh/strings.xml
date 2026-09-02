@@ -1960,6 +1960,10 @@
     <string name="privacy_gate_voice_title">语音口述</string>
     <string name="privacy_gate_voice_body">默认由 Apple 语音服务转写，或可选发往你自己的电脑转写——绝不经由我们的任何云端 AI 服务。</string>
     <string name="privacy_gate_demo">演示模式完全在本机运行，使用示例数据。</string>
+    <string name="privacy_gate_diagram_e2e">端到端加密</string>
+    <string name="privacy_gate_diagram_phone">手机</string>
+    <string name="privacy_gate_diagram_relay">中继只转发密文</string>
+    <string name="privacy_gate_diagram_computer">你的电脑</string>
     <string name="privacy_gate_policy">隐私政策</string>
     <string name="privacy_gate_agree">同意并继续</string>
     <string name="settings_privacy_title">隐私政策</string>
