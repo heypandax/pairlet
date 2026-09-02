@@ -130,6 +130,21 @@ class SidePaneModel(
     override fun focusThisPane() = base.promoteSplit(pane)
     override fun closeThisPane() = base.closeSplit(pane.paneId)
 
+    // ── window chrome, delegated EXPLICITLY (desktop chrome v2) ───────────────────────────────────
+    // These six are window-level in meaning (see the guard test's WINDOW_DELEGATED), but they are also the
+    // ONE family on this interface that ships a non-abstract default. `by base` is only guaranteed to
+    // forward what the interface leaves abstract, so a member with a body is exactly where a delegate can
+    // silently answer with the interface's inert default instead of the real model — and here that would
+    // mean the leftmost split column's re-homed chrome cluster never appearing (sidebarCollapsed stuck
+    // false) and its ‹ › arrows permanently greyed out (canGoBack/canGoForward stuck false). Spelled out
+    // so the answer cannot depend on that subtlety.
+    override val sidebarCollapsed: Boolean get() = base.sidebarCollapsed
+    override fun setSidebarCollapsed(v: Boolean) = base.setSidebarCollapsed(v)
+    override val canGoBack: Boolean get() = base.canGoBack
+    override val canGoForward: Boolean get() = base.canGoForward
+    override fun goBack() = base.goBack()
+    override fun goForward() = base.goForward()
+
     // ── PANE_INERT: focused-conversation verbs, deliberately no-ops here (see the class doc) ─────────
     override val historyHasMore: Boolean get() = false
     override val historyLoadingOlder: Boolean get() = false

@@ -36,13 +36,16 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.desktop.AddComputerModal
+import dev.ccpocket.app.desktop.ConnectChromeRow
 import dev.ccpocket.app.desktop.ConnectPanel
 import dev.ccpocket.app.desktop.DesktopApp
 import dev.ccpocket.app.desktop.DesktopCrashGuard
 import dev.ccpocket.app.desktop.openFolderAction
 import dev.ccpocket.app.desktop.DesktopNotify
-import dev.ccpocket.app.desktop.DkTitleBar
+import dev.ccpocket.app.desktop.DesktopWindowChrome
 import dev.ccpocket.app.desktop.FullscreenExitStrip
+import dev.ccpocket.app.desktop.LocalWindowChrome
+import dev.ccpocket.app.desktop.windowDragAndZoom
 import dev.ccpocket.app.desktop.JediTermEngine
 import dev.ccpocket.app.desktop.MacWindow
 import dev.ccpocket.app.desktop.PaletteScope
@@ -322,6 +325,16 @@ private fun ApplicationScope.PocketShell() {
         // undecorated windows on macOS. Non-null == currently zoomed, holding the bounds to restore.
         // (The green traffic light no longer zooms — it toggles native fullscreen, issue #94.)
         var zoomRestore by remember { mutableStateOf<Rectangle?>(null) }
+        val toggleZoom: () -> Unit = {
+            val restore = zoomRestore
+            if (restore != null) {
+                window.bounds = restore
+                zoomRestore = null
+            } else {
+                zoomRestore = window.bounds
+                window.bounds = usableScreenBounds(window)
+            }
+        }
         LaunchedEffect(Unit) {
             // record the window bounds (debounced) so the next launch reopens exactly here. While zoomed,
             // persist the PRE-zoom bounds plus a zoomed flag: the next launch re-zooms itself (below) and
@@ -453,41 +466,57 @@ private fun ApplicationScope.PocketShell() {
         }
         // appearance (issue #63): PocketTheme resolves the persisted mode against the OS, so a SYSTEM pick
         // tracks a live OS light/dark flip and Settings' setThemeMode() re-themes the whole shell.
+        // Window chrome, handed to the surfaces that now own it (desktop chrome v2): the sidebar's control
+        // row while it is open, the leftmost/rightmost chat sub-header otherwise.
+        //
+        // REMEMBERED, keyed only on what can actually change it. LocalWindowChrome is a STATIC composition
+        // local, so a new instance recomposes the entire shell below — and this scope also holds
+        // `windowFocused` / `unseenDone`, which move on every focus flip and every finished turn. A fresh
+        // instance per composition would have turned each of those into a whole-window recomposition.
+        // Capturing one generation of the callbacks is safe: every one of them closes over a MutableState
+        // or the AWT window, never over a snapshot value read at construction time.
+        val chrome = remember(mac, fullscreen, window) {
+            DesktopWindowChrome(
+                mac = mac,
+                fullscreen = fullscreen,
+                onClose = closeMainWindow,
+                onMinimize = { windowState.isMinimized = true },
+                onToggleMax = toggleZoom,
+                onToggleFullscreen = toggleFullscreen,
+                dragAndZoomModifier = windowDragAndZoom(window, toggleZoom),
+            )
+        }
         PocketTheme(mode = repo.themeMode.value, accent = repo.accentTheme.value) {
             androidx.compose.runtime.CompositionLocalProvider(
                 dev.ccpocket.app.ui.LocalPathOpener provides dev.ccpocket.app.desktop.DesktopPathOpener(),
+                LocalWindowChrome provides chrome,
+                // one menu for the whole shell (design "Context Menu v1"): the sidebar's session menus and
+                // every text field's cut/copy/paste stop rendering the stock Swing-grey dropdown
+                androidx.compose.foundation.LocalContextMenuRepresentation provides dev.ccpocket.app.desktop.PocketContextMenuRepresentation,
             ) {
             Column(Modifier.fillMaxSize().background(Tok.base)) {
-                // In fullscreen the self-drawn title bar collapses (issue #94): macOS already provides its
-                // own auto-hiding menu on top-hover, so drawing our bar too would double up. Win/Linux
-                // borderless fullscreen has no such menu, so they get a slim hover-reveal exit strip instead.
-                if (!fullscreen) {
-                    DkTitleBar(
-                        mac = mac,
-                        onClose = closeMainWindow,
-                        onMinimize = { windowState.isMinimized = true },
-                        onToggleMax = {
-                            val restore = zoomRestore
-                            if (restore != null) {
-                                window.bounds = restore
-                                zoomRestore = null
-                            } else {
-                                zoomRestore = window.bounds
-                                window.bounds = usableScreenBounds(window)
-                            }
-                        },
-                        onToggleFullscreen = toggleFullscreen,
-                        onTray = { model.showTray = !model.showTray },
-                        onSearch = { model.palette = PaletteScope.ALL },
-                    )
-                } else if (!mac) {
+                // Nothing spans the window width any more (desktop chrome v2) — the columns below run to
+                // the window's top edge and carry the chrome themselves. What survives here is the
+                // Win/Linux fullscreen affordance (issue #94): macOS auto-reveals its own menu bar on
+                // top-hover, borderless Win/Linux fullscreen has nothing, so it keeps the hover strip.
+                if (fullscreen && !mac) {
                     FullscreenExitStrip(onExit = toggleFullscreen)
                 }
                 Box(Modifier.fillMaxWidth().weight(1f)) {
                     // the tray's "Open cc-pocket" / row-jump raise the window (issue #111): un-minimize, then
                     // bring the AWT window to front and focus it — a real menu-bar action once the tray leaves
                     // the title bar, and harmless (already-frontmost) while it lives there.
-                    if (connected) DesktopApp(model, onActivateWindow = activateMainWindow) else ConnectPanel(repo)
+                    // The shell carries its own chrome (sidebar control row / chat sub-header). The connect
+                    // screen has neither, and this window is undecorated — so it keeps a bare bar of its
+                    // own, or a user who hasn't paired yet cannot move, zoom or close the app at all.
+                    if (connected) {
+                        DesktopApp(model, onActivateWindow = activateMainWindow)
+                    } else {
+                        Column(Modifier.fillMaxSize()) {
+                            if (!fullscreen) ConnectChromeRow()
+                            Box(Modifier.fillMaxWidth().weight(1f)) { ConnectPanel(repo) }
+                        }
+                    }
                     // "Add computer" pairs a new daemon in a modal over the live shell (no disconnect)
                     if (model.showAddComputer) AddComputerModal(repo) { model.showAddComputer = false }
                 }

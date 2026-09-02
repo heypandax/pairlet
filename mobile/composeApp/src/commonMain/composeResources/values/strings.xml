@@ -1283,6 +1283,10 @@
     <!-- window chrome & misc -->
     <string name="exit_fullscreen">Exit Full Screen</string>
     <string name="show_sidebar">Show sidebar</string>
+    <!-- desktop chrome v2: the sidebar control row's tooltips -->
+    <string name="tooltip_toggle_sidebar">Toggle sidebar</string>
+    <string name="tooltip_prev_session">Previous session</string>
+    <string name="tooltip_next_session">Next session</string>
     <!-- split panes (issue #311) -->
     <string name="split_pane_focus">Focus</string>
     <string name="split_pane_close">Close column</string>

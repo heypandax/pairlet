@@ -168,6 +168,7 @@ internal fun osIcon(os: DkOs): ImageVector = when (os) {
 @Composable
 fun Sidebar(model: DesktopModel, width: Dp = Dk.sidebarWidth, modifier: Modifier = Modifier) {
     Column(modifier.width(width).fillMaxHeight().background(Tok.surface)) {
+        SidebarControlRow(model)
         SwitcherHeader(model)
         NewSessionRow { model.openNewSession() }
         // issue #163: the sibling entry for "I don't remember the path" — browse to it instead
@@ -190,53 +191,104 @@ fun Sidebar(model: DesktopModel, width: Dp = Dk.sidebarWidth, modifier: Modifier
     }
 }
 
+// ── zone 0: the window's control row (desktop chrome v2) ────────────────────────────────────────
+
+/**
+ * The sidebar's own 38dp top row — the surface that replaced the window-wide title bar.
+ *
+ * Exactly four operations, in the order the design fixed: traffic lights (macOS, windowed) · hide the
+ * sidebar · ‹ back · › forward · search, which takes whatever width the four buttons leave and stops at
+ * the sidebar's right edge. It carries no bottom hairline on purpose: the row and the device line under
+ * it are one block of chrome sitting on the sidebar's own fill, and a rule between them would read as a
+ * title bar again.
+ *
+ * The cluster's buttons are the SAME composables the leftmost chat sub-header adopts once the sidebar is
+ * collapsed (see [SidebarToggleButton] / [SessionNavButtons]) — they move, they are not duplicated.
+ */
+@Composable
+private fun SidebarControlRow(model: DesktopModel) {
+    val chrome = LocalWindowChrome.current
+    Row(
+        Modifier.fillMaxWidth().height(38.dp).padding(start = 12.dp, end = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        // fullscreen hides them: macOS moves the real ones into its auto-revealing menu bar, and a second
+        // set painted here would be a decoration that no longer matches the window (issue #94)
+        if (chrome.mac && !chrome.fullscreen) {
+            TrafficLights(chrome.onClose, chrome.onMinimize, chrome.onToggleFullscreen)
+            Spacer(Modifier.width(10.dp))
+        }
+        SidebarToggleButton(model)
+        SessionNavButtons(model)
+        Spacer(Modifier.width(4.dp)) // the mock's 6dp gap, minus the row's own 2dp spacing
+        ChromeSearchField(onClick = { model.palette = PaletteScope.ALL }, modifier = Modifier.weight(1f))
+    }
+}
+
 // ── zone 1: machine switcher header ─────────────────────────────────────────────────────────────
 
-/** Current machine + status, click (or ⌘0) opens the fleet dropdown; the attention bell rides right. */
+/**
+ * Current machine + status, click (or ⌘0) opens the fleet dropdown; the attention bell rides right.
+ *
+ * A 26dp THIN LINE since the chrome-v2 redesign: search moved up into [SidebarControlRow], so what is
+ * left here is one fact ("which computer am I driving") and one affordance (the bell). Shrinking it is
+ * what buys the session list its ~96dp — the list now starts at 136dp instead of 232dp. The ⌘0 keycap
+ * came off with the height; the shortcut itself is unchanged.
+ */
 @Composable
 private fun SwitcherHeader(model: DesktopModel) {
     val c = model.activeComputer
     Column(Modifier.fillMaxWidth()) {
         Row(
-            Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 12.dp),
+            Modifier.fillMaxWidth().height(26.dp).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Row(
-                Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).hoverFill(RoundedCornerShape(8.dp))
+                Modifier.weight(1f).clip(RoundedCornerShape(7.dp)).hoverFill(RoundedCornerShape(7.dp))
                     .clickable { model.switcherOpen = !model.switcherOpen }
-                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 if (c != null) {
-                    Icon(osIcon(c.os), null, tint = Tok.tx2, modifier = Modifier.size(14.dp))
+                    Icon(osIcon(c.os), null, tint = Tok.tx2, modifier = Modifier.size(12.dp))
+                    // tightCenter: this row is now nothing BUT a text sharing a centre line with an icon,
+                    // a dot and a chevron — the exact case where font-driven line boxes drift (#293)
                     Text(
-                        c.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.5.sp, lineHeight = 12.5.sp,
+                        c.name, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp),
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (c.online) PulseDot(Tok.ok, 6.dp)
+                    if (c.online) PulseDot(Tok.ok, 5.dp)
                     else {
-                        Dot(Tok.muted, 6.dp)
-                        Text(stringResource(Res.string.status_reconnecting), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
+                        Dot(Tok.muted, 5.dp)
+                        Text(
+                            stringResource(Res.string.status_reconnecting), color = Tok.muted,
+                            fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 } else {
-                    Text(stringResource(Res.string.sidebar_no_computer), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f, fill = false))
+                    Text(
+                        stringResource(Res.string.sidebar_no_computer), color = Tok.muted, fontFamily = Dk.ui,
+                        fontSize = 11.sp, style = tightCenter(11.sp), modifier = Modifier.weight(1f, fill = false),
+                    )
                 }
-                Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
+                Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted, modifier = Modifier.size(11.dp))
             }
-            Key("⌘0")
             val waiting = model.attention.size
             // Badge rides INLINE, not as a corner overlay: the hover pill's own clip() truncated an
-            // offset badge, and a TopEnd anchor sits above the row's centre line so it never lined
-            // up with the ⌘0 keycap beside it. Same shape the pinned/session rows already use.
+            // offset badge, and a TopEnd anchor sits above the row's centre line. Same shape the
+            // pinned/session rows already use.
             Row(
-                Modifier.clip(RoundedCornerShape(7.dp)).hoverFill(RoundedCornerShape(7.dp))
-                    .clickable { model.showAttention = !model.showAttention }.padding(4.dp),
+                Modifier.clip(RoundedCornerShape(6.dp)).hoverFill(RoundedCornerShape(6.dp))
+                    .clickable { model.showAttention = !model.showAttention }.padding(3.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Icon(Icons.Outlined.Notifications, null, tint = if (waiting > 0) Tok.tx else Tok.tx2, modifier = Modifier.size(16.dp))
+                Icon(Icons.Outlined.Notifications, null, tint = if (waiting > 0) Tok.tx else Tok.tx2, modifier = Modifier.size(13.dp))
                 if (waiting > 0) AttentionBadge(waiting)
             }
         }

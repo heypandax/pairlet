@@ -1280,6 +1280,10 @@
     <!-- 窗口边框及杂项 -->
     <string name="exit_fullscreen">退出全屏</string>
     <string name="show_sidebar">显示侧栏</string>
+    <!-- desktop chrome v2: the sidebar control row's tooltips -->
+    <string name="tooltip_toggle_sidebar">显示/隐藏侧栏</string>
+    <string name="tooltip_prev_session">上一个会话</string>
+    <string name="tooltip_next_session">下一个会话</string>
     <!-- split panes (issue #311) -->
     <string name="split_pane_focus">聚焦</string>
     <string name="split_pane_close">关闭此栏</string>

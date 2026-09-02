@@ -1,6 +1,12 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -23,6 +29,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
@@ -267,6 +274,10 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         // EmptyChat flash in between. And when the open never lands at all, say THAT (issue #235) instead
         // of falling back to the same empty state a user who clicked nothing would see.
         Column(modifier.fillMaxSize().background(Tok.base)) {
+            // These branches skip [ChatSubHeader] — and with the title bar gone, that used to leave the
+            // window with NO drag surface at all (and, sidebar collapsed, no way to bring it back). The
+            // sub-header's chrome duties therefore ride this slim row, minus its session content.
+            EmptyChatChromeRow(model)
             when {
                 model.opening -> OpeningChat(model.chatTitle)
                 // the open that never landed (issue #235) — named by the session the user actually asked for
@@ -1062,17 +1073,112 @@ internal fun ChatNotice(
     }
 }
 
+/**
+ * The window chrome for a chat column with NOTHING open ([DesktopModel.hasChat] false): the empty state,
+ * an open in flight, a failed open. [ChatSubHeader] isn't composed on those paths, so this row carries
+ * its chrome duties — the whole width drags (there are no session controls to protect), the collapsed
+ * sidebar's cluster keeps its home on the leftmost column, and the rightmost edge keeps the connection
+ * dot + the Windows/Linux window buttons. Without it, launching into "no session open" left the window
+ * undraggable — and, collapsed, with no way to reopen the sidebar.
+ */
+@Composable
+private fun EmptyChatChromeRow(model: DesktopModel) {
+    val chrome = LocalWindowChrome.current
+    val edge = LocalPaneEdge.current
+    Row(
+        Modifier.fillMaxWidth().height(38.dp).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        // same choreography as [ChatSubHeader]'s cluster — and this row already sits at the sidebar
+        // row's exact geometry (start 12, 38dp tall), so the late fade is a swap in place
+        AnimatedVisibility(
+            visible = model.sidebarCollapsed && edge.leftmost,
+            enter = expandHorizontally(tween(SIDEBAR_ANIM_MS)) +
+                fadeIn(tween(100, delayMillis = SIDEBAR_ANIM_MS - 80)),
+            exit = shrinkHorizontally(tween(SIDEBAR_ANIM_MS)) + fadeOut(tween(80)),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (chrome.mac && !chrome.fullscreen) TrafficLights(chrome.onClose, chrome.onMinimize, chrome.onToggleFullscreen)
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SidebarToggleButton(model)
+                    SessionNavButtons(model)
+                }
+            }
+        }
+        Box(Modifier.weight(1f).height(38.dp).then(chrome.dragAndZoomModifier))
+        if (edge.rightmost) {
+            Box(
+                Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).hoverFill(RoundedCornerShape(6.dp))
+                    .clickable { model.showTray = !model.showTray },
+                contentAlignment = Alignment.Center,
+            ) { PulseDot(Tok.ok, 7.dp) }
+            if (!chrome.mac && !chrome.fullscreen) WinControls(chrome.onMinimize, chrome.onToggleMax, chrome.onClose)
+        }
+    }
+}
+
+/**
+ * The chat column's own header — and, since the desktop chrome v2 redesign, the window's top edge.
+ *
+ * With the title bar gone there is nothing above this row, so it takes over what the bar used to do:
+ * it is the drag handle (double-click zooms), the LEFTMOST column adopts the sidebar's control cluster
+ * whenever the sidebar is collapsed, and the RIGHTMOST one carries the connection dot plus the
+ * Windows/Linux window buttons. Everything that was already here — title, agent badge, terminal chip,
+ * Changes/Git/⋯, the mono meta line, the lineage banner — is untouched; the chrome is strictly added
+ * around it.
+ */
 @Composable
 private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) {
+    val chrome = LocalWindowChrome.current
+    val edge = LocalPaneEdge.current
+    val clusterHere = model.sidebarCollapsed && edge.leftmost
+    // Start 12 while the cluster is home (the sidebar row's own inset) so the lights land at the same x
+    // they left. The row's HEIGHT deliberately never changes — an earlier cut animated the vertical
+    // padding too and the whole header (title, meta line and all) bounced 10dp on every toggle; the
+    // remaining 5dp y-difference is closed by drawing the cluster into the top padding instead (offset,
+    // a draw-time shift, so the layout stays put).
+    val padStart by animateDpAsState(if (clusterHere) 12.dp else 18.dp, tween(SIDEBAR_ANIM_MS), label = "subheader-pad-s")
     Column(Modifier.fillMaxWidth()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().padding(start = padStart, end = 18.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            // the collapsed sidebar's controls, re-homed (mock frames 2 / 4b). Leftmost column only: the
+            // cluster describes the window, and one window has one of it. The SPACE expands in step with
+            // the sidebar's slide (one continuous motion for the title — no reserve-then-push lurch);
+            // the CONTROLS fade in late, once the sidebar's own copy has been wiped past, so the
+            // hand-off reads as one cluster changing owners rather than two coexisting.
+            AnimatedVisibility(
+                visible = clusterHere,
+                enter = expandHorizontally(tween(SIDEBAR_ANIM_MS)) +
+                    fadeIn(tween(100, delayMillis = SIDEBAR_ANIM_MS - 80)),
+                exit = shrinkHorizontally(tween(SIDEBAR_ANIM_MS)) + fadeOut(tween(80)),
+            ) {
+                Row(
+                    // −5dp: center the 28dp controls at y19 — the sidebar control row's centerline
+                    // (38dp tall) — inside this row's 28+20dp geometry, without touching its height
+                    Modifier.offset(y = (-5).dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (chrome.mac && !chrome.fullscreen) TrafficLights(chrome.onClose, chrome.onMinimize, chrome.onToggleFullscreen)
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SidebarToggleButton(model)
+                        SessionNavButtons(model)
+                    }
+                    // the rule that keeps the sub-header reading title-first despite the cluster (mock:211)
+                    ChromeDivider()
+                }
+            }
             Text(
                 model.chatTitle, color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                // the title region is the window's drag handle, exactly as the title bar's label region
+                // was — and for the same reason it is the ONLY thing wearing it: this row's own buttons
+                // must keep their clicks, so the gesture goes on the flexible, non-interactive middle.
+                modifier = Modifier.weight(1f).then(chrome.dragAndZoomModifier),
             )
             AgentBadge(model.chatAgent)
             // quick terminal at the session's cwd — only when that directory exists on THIS machine, so a
@@ -1114,6 +1220,18 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
                     modifier = Modifier.size(26.dp).clip(RoundedCornerShape(999.dp))
                         .clickable { model.showQuickActions = true }.padding(4.dp),
                 )
+            }
+            // ONCE per window, at the right end of the RIGHTMOST column (design frame 4): the link is a
+            // window-level fact, and a dot per column would read as a per-conversation one. Opens the tray.
+            if (edge.rightmost) {
+                Box(
+                    Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).hoverFill(RoundedCornerShape(6.dp))
+                        .clickable { model.showTray = !model.showTray },
+                    contentAlignment = Alignment.Center,
+                ) { PulseDot(Tok.ok, 7.dp) }
+                // Windows/Linux min · max · close land here too — macOS keeps its traffic lights on the
+                // leading edge, and in fullscreen neither platform draws window buttons at all (#94).
+                if (!chrome.mac && !chrome.fullscreen) WinControls(chrome.onMinimize, chrome.onToggleMax, chrome.onClose)
             }
         }
         val branch = model.chatBranch?.let { "  ·  ⑂ $it" } ?: ""

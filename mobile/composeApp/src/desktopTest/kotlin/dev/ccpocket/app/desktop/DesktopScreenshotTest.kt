@@ -1,33 +1,14 @@
 package dev.ccpocket.app.desktop
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.pairing.encode
@@ -75,34 +56,20 @@ class DesktopScreenshotTest {
         }
     }
 
-    /** The full window look: a static title bar (real DkTitleBar needs a window) over the live two-pane shell. */
+    /**
+     * The full window look. There is no title bar to replicate any more (desktop chrome v2): the sidebar
+     * runs to the window top and carries its own control row, and the chat column's sub-header is its own
+     * first element. So the shell simply fills the frame — what used to be a hand-built static bar here is
+     * now the REAL [SidebarControlRow] and [ChatSubHeader], which is one less replica to drift.
+     *
+     * A macOS chrome is provided because that is the platform the design was drawn for and the one whose
+     * traffic lights the shots are meant to show; the [DesktopWindowChrome] default (no window, no
+     * gestures) keeps everything else inert, so nothing here needs an AWT window to compose.
+     */
     @Composable
     private fun WindowFrame(model: DesktopModel) {
-        Column(Modifier.fillMaxSize()) {
-            Row(
-                Modifier.fillMaxWidth().height(38.dp).background(Tok.base).padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.size(12.dp).clip(RoundedCornerShape(999.dp)).background(Color(0xFFED6A5E)))
-                    Box(Modifier.size(12.dp).clip(RoundedCornerShape(999.dp)).background(Color(0xFFF4BE4F)))
-                    Box(Modifier.size(12.dp).clip(RoundedCornerShape(999.dp)).background(Color(0xFF61C554)))
-                }
-                Text("cc-pocket", color = Tok.muted, fontWeight = FontWeight.Medium, fontSize = 12.5.sp, modifier = Modifier.padding(start = 2.dp))
-                Spacer(Modifier.weight(1f))
-                Row(
-                    Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, Tok.hair, RoundedCornerShape(7.dp)).padding(horizontal = 9.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(Icons.Rounded.Search, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
-                    Text("Search", color = Tok.muted, fontSize = 11.5.sp)
-                    Key("⌘K")
-                }
-                Dot(Tok.ok, 7.dp)
-            }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-            Box(Modifier.fillMaxWidth().weight(1f)) { DesktopApp(model) }
+        CompositionLocalProvider(LocalWindowChrome provides DesktopWindowChrome(mac = true)) {
+            Box(Modifier.fillMaxSize()) { DesktopApp(model) }
         }
     }
 

@@ -1395,6 +1395,15 @@ class RepoDesktopModel(
         saveHeight = { store.putString(K_TERMINAL_HEIGHT, it.toString()) },
     )
 
+    // sidebar collapsed (desktop chrome v2) — desktop-only pref, persisted beside the pins under the SAME
+    // key DesktopApp used while it owned the state, so the setting survives the move. Absent = expanded.
+    private var sidebarCollapsedState by mutableStateOf(store.getString(K_SIDEBAR_COLLAPSED) == "1")
+    override val sidebarCollapsed: Boolean get() = sidebarCollapsedState
+    override fun setSidebarCollapsed(v: Boolean) {
+        sidebarCollapsedState = v
+        store.putString(K_SIDEBAR_COLLAPSED, if (v) "1" else "0")
+    }
+
     // menu-bar presence (issue #151) — desktop-only pref, persisted beside the pins. Absent = ON (the
     // environment layer defaults on; only an explicit "0" opts out, so upgrades gain the glyph).
     private var menuBarEnabledState by mutableStateOf(store.getString(K_MENUBAR) != "0")
