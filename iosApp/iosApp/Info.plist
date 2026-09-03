@@ -60,7 +60,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>cc-pocket uses the mic to dictate prompts. Audio is transcribed for this message only — nothing is recorded or stored.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>cc-pocket transcribes your dictation on-device so you can speak prompts instead of typing them.</string>
+	<string>cc-pocket uses Apple speech recognition to transcribe your dictation so you can speak prompts instead of typing them.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UISupportedInterfaceOrientations</key>

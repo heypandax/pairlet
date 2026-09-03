@@ -74,7 +74,7 @@ fun agentAbbrev(agent: AgentKind): String = when (agent) {
     AgentKind.CLAUDE -> "CC"
 }
 fun agentTagline(agent: AgentKind): String = when (agent) {
-    AgentKind.CODEX -> "Codex · OpenAI"
+    AgentKind.CODEX -> "Codex"
     AgentKind.OPENCODE -> "OpenCode · Open Source"
     AgentKind.KIMI -> "Kimi Code · Moonshot"
     AgentKind.ZCODE -> "ZCode · Z.ai"

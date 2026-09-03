@@ -62,6 +62,7 @@ import androidx.compose.ui.text.AnnotatedString
 import dev.ccpocket.app.APP_STORE_URL
 import dev.ccpocket.app.AppUpdateRoute
 import dev.ccpocket.app.RELEASES_URL
+import dev.ccpocket.app.PRIVACY_POLICY_URL
 import dev.ccpocket.app.USER_MANUAL_TROUBLESHOOTING_URL
 import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.appUpdateRoute
@@ -785,6 +786,12 @@ private fun SupportPage(repo: PocketRepository, onHelp: () -> Unit, onExit: () -
             title = stringResource(Res.string.settings_troubleshooting),
             sub = stringResource(Res.string.settings_troubleshooting_sub),
         ) { openWebUrl(USER_MANUAL_TROUBLESHOOTING_URL) }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+        // guideline 5.1.1(i): the privacy policy must be reachable from inside the app
+        ManualLinkRow(
+            title = stringResource(Res.string.settings_privacy_title),
+            sub = stringResource(Res.string.settings_privacy_sub),
+        ) { openWebUrl(PRIVACY_POLICY_URL) }
     }
 
     VersionsGroup(repo.versionStatus.value)

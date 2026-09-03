@@ -368,6 +368,13 @@ fun App(scope: CoroutineScope) {
     // live system flip while the app is foregrounded and LIGHT/DARK force it.
     PocketTheme(mode = repo.themeMode.value, accent = repo.accentTheme.value, fontScale = repo.fontScale.value) {
       Box(Modifier.fillMaxSize()) {
+        // App Review 5.1.2(i): nothing renders — pairing, Demo mode, chat — until the one-time data
+        // disclosure is accepted, so no personal data can leave the device before consent. Demo sits
+        // behind the same gate deliberately: it is the path App Review actually walks.
+        if (!repo.privacyConsented.value) {
+            PrivacyConsentScreen(onAgree = repo::acceptPrivacyConsent)
+            return@Box
+        }
         val approvalAsk = repo.pendingAsk.value?.takeIf { !it.isQuestion }
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
             // Secure Approval is pointer-modal by itself. Clearing the covered tree here also makes it

@@ -631,6 +631,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Task-complete push toggle (persisted, default on); the single source of truth the Settings switch binds to. */
     val notificationsOn = mutableStateOf(SecureStore.getString(K_NOTIFY) != "0")
 
+    /** One-time data-disclosure acceptance (App Review 5.1.2(i)); false gates the ENTIRE UI behind
+     *  [dev.ccpocket.app.ui.PrivacyConsentScreen]. Existing installs see the gate once after updating. */
+    val privacyConsented = mutableStateOf(SecureStore.getString(K_PRIVACY_CONSENT) == "1")
+    fun acceptPrivacyConsent() {
+        SecureStore.putString(K_PRIVACY_CONSENT, "1")
+        privacyConsented.value = true
+    }
+
     /** Persisted default execution mode (Settings binds to it; the new-session picker pre-selects it).
      *  Applies to new sessions AND resumes (issue #50) — a resumed session no longer revives its old mode. */
     val defaultMode = mutableStateOf(
@@ -6905,6 +6913,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         fun fileChunkParts(total: Int): Int = ((total + FILE_CHUNK_RAW - 1) / FILE_CHUNK_RAW).coerceAtLeast(1)
 
         const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
+        const val K_PRIVACY_CONSENT = "privacy_disclosure_accepted" // SecureStore flag: "1" = the 5.1.2(i) data disclosure was accepted
         // the platform tag ("apns"/"apns_sandbox"/"fcm") of the last token registered — kept so a later
         // "notifications off" can still send the clearing register on a launch that never got a token
         const val K_PUSH_PLATFORM = "push_platform_last"
