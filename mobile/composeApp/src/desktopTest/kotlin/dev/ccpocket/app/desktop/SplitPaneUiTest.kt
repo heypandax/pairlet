@@ -11,6 +11,8 @@ import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.SidePane
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.msg_no_response_click
+import dev.ccpocket.app.resources.msg_undelivered_reconnecting
 import dev.ccpocket.app.resources.split_pane_close
 import dev.ccpocket.app.resources.split_pane_focus
 import dev.ccpocket.app.resources.split_session_ended
@@ -37,6 +39,7 @@ class SplitPaneUiTest {
     private class SplitSeed(private val extra: List<SidePane>) : SeedDesktopModel() {
         var promoted: SidePane? = null
         var closed: Long? = null
+        var resent: SidePane? = null
         // the seed ships the fleet WATCH pane for screenshots; the live model's watch is always null
         // (RepoDesktopModel), and that is the shell state a split renders under — match it here
         override val watch: DkWatch? get() = null
@@ -45,6 +48,7 @@ class SplitPaneUiTest {
         override fun promoteSplit(pane: SidePane) { promoted = pane }
         override fun closeSplit(paneId: Long) { closed = paneId }
         override fun sendSidePrompt(pane: SidePane, text: String): Boolean = true
+        override fun resendSideStalled(pane: SidePane) { resent = pane }
     }
 
     private fun pane(id: Long, title: String, line: String, agent: AgentKind = AgentKind.CLAUDE) =
@@ -124,5 +128,33 @@ class SplitPaneUiTest {
         waitForIdle()
         onAllNodes(hasText(str(Res.string.split_pane_close))).onFirst().performClick()
         assertEquals(1L, model.closed)
+    }
+
+    /** issue #329: a column whose delivered prompt never started a turn shows the SAME clickable resend cue
+     *  the focused chat does (ChatPane is shared), and the click re-drives THIS column's prompt — not the
+     *  focused conversation's, which the inert delegating no-op it replaced would have done (nothing). */
+    @Test
+    fun aStalledColumnShowsTheResendCueAndClickingItResendsThatColumn() = runComposeUiTest {
+        val p = pane(1, "Tidy CI workflow", "CI is green").apply { turnStalled.value = true }
+        val model = SplitSeed(listOf(p))
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent(str(Res.string.msg_no_response_click))
+        onAllNodes(hasText(str(Res.string.msg_no_response_click))).onFirst().performClick()
+        assertEquals("sid-1", model.resent?.sessionId, "the resend re-drives THIS column, not the focused chat")
+    }
+
+    /** issue #329: an unconfirmed prompt in a column reads "delivery not confirmed" under its own bubble,
+     *  driven by the column's OWN sendStalled — the same under-bubble cue the focused chat renders. */
+    @Test
+    fun aColumnWithAnUndeliveredPromptSaysSoUnderItsBubble() = runComposeUiTest {
+        val p = pane(1, "Tidy CI workflow", "CI is green").apply {
+            transcript.messages.add(ChatItem.User("ship it", pending = true, promptId = "px"))
+            sendStalled.value = true
+        }
+        val model = SplitSeed(listOf(p))
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent(str(Res.string.msg_undelivered_reconnecting))
     }
 }

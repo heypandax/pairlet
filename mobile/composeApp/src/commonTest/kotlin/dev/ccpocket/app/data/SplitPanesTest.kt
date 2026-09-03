@@ -14,6 +14,7 @@ import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
+import dev.ccpocket.protocol.PromptAck
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionGone
 import dev.ccpocket.protocol.SessionLive
@@ -29,6 +30,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -634,5 +636,256 @@ class SplitPanesTest {
         p.clear()
         assertTrue(p.panes.isEmpty())
         assertTrue(sent.isEmpty()) // a link that died cannot be told anything anyway
+    }
+
+    // ── issue #329: per-pane delivery receipt + stall detection ──────────────────────────────────────
+    // The focused conversation's two-stage watchdog (receipt #78 → ack-but-no-turn #104), replicated per
+    // column, plus the reclaim of a wedged column and the id-race guards. Uses the receiptTimeoutMs /
+    // turnTimeoutMs test seams so every deadline runs in virtual time.
+
+    /** THIS pane's last locally-composed prompt id, for feeding a matching (or deliberately stale) ack. */
+    private fun lastPromptId(pane: SidePane) = pane.messages.filterIsInstance<ChatItem.User>().last().promptId!!
+
+    @Test
+    fun aSendWithNoReceiptStallsThatColumn() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        p.receiptTimeoutMs = 50
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(p.sendPrompt(pane, "run the tests"))
+        assertFalse(pane.sendStalled.value) // the deadline hasn't elapsed — no premature cue
+
+        advanceTimeBy(60)
+        assertTrue(pane.sendStalled.value, "no ack + no evidence within the deadline is a stall")
+        assertTrue(pane.messages.filterIsInstance<ChatItem.User>().single().pending, "still honestly pending")
+    }
+
+    @Test
+    fun aPromptAckClearsTheStallMarksDeliveredAndArmsTheTurnWatchdog() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        p.receiptTimeoutMs = 50
+        p.turnTimeoutMs = 80
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(p.sendPrompt(pane, "run the tests"))
+        p.route(PromptAck("convo-a", lastPromptId(pane)))
+
+        val bubble = pane.messages.filterIsInstance<ChatItem.User>().single()
+        assertFalse(bubble.pending, "the ack flips the bubble off pending")
+        assertTrue(bubble.delivered, "…and marks it delivered — the computer has it")
+        assertTrue(pane.awaitingTurn, "a non-recovery daemon arms the ack→turn watchdog")
+
+        advanceTimeBy(60) // past the receipt deadline, before the turn one
+        assertFalse(pane.sendStalled.value, "the receipt cancelled the delivery watchdog — it cannot cry stall")
+    }
+
+    @Test
+    fun anAckWithNoFollowingTurnSurfacesTheResendCue() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        p.receiptTimeoutMs = 50
+        p.turnTimeoutMs = 80
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(p.sendPrompt(pane, "do the thing"))
+        p.route(PromptAck("convo-a", lastPromptId(pane)))
+
+        advanceTimeBy(90) // ack delivered, but no chunk/tool/turn-end inside the turn deadline
+        assertTrue(pane.turnStalled.value, "delivered-but-no-turn is the resend cue")
+        assertFalse(pane.turnQueued.value, "an idle-session send is the strict flavor, never queued")
+        assertFalse(pane.sendStalled.value)
+        assertTrue(pane.streaming.value, "the cue is an overlay — the turn was never declared over")
+    }
+
+    @Test
+    fun aSendQueuedBehindARunningTurnShowsTheQueuedStatusNotTheResendCue() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        p.receiptTimeoutMs = 50
+        p.turnTimeoutMs = 80
+        val pane = open(p)
+        // a turn is already running (the daemon says executing) — the next send is QUEUED by the CLI
+        p.route(SessionLive(convoId = "convo-a", workdir = "/w", sessionId = "sid-a", executing = true))
+        assertTrue(pane.streaming.value)
+        assertTrue(p.sendPrompt(pane, "and then this"))
+        p.route(PromptAck("convo-a", lastPromptId(pane)))
+
+        advanceTimeBy(90)
+        assertTrue(pane.turnQueued.value, "a mid-turn send that stays silent is the calm queued status")
+        assertFalse(pane.turnStalled.value, "…never the resend cue — the original still sits in the CLI queue")
+    }
+
+    @Test
+    fun aRecoveryOwningDaemonNeverArmsTheTurnWatchdog() = runTest {
+        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        // supportsPromptRecovery daemon: it re-delivers acked prompts from its ledger, so a quiet first-token
+        // window is normal (large-context turns exceed the deadline) and arming would only misreport.
+        val p = SidePanes(scope, send = { sent += it }, newPromptId = { "p${++promptSeq}" }, daemonOwnsPromptRecovery = { true })
+        p.receiptTimeoutMs = 50
+        p.turnTimeoutMs = 80
+        val pane = p.open("/w", "sid-a", "T", AgentKind.CLAUDE, PermissionMode.DEFAULT)!!
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(p.sendPrompt(pane, "big context turn"))
+        p.route(PromptAck("convo-a", lastPromptId(pane)))
+        assertFalse(pane.awaitingTurn, "recovery daemon: no ack→turn watchdog is armed")
+
+        advanceTimeBy(200) // well past BOTH deadlines
+        assertFalse(pane.turnStalled.value, "turnStalled must never light for a recovery-owning daemon")
+        assertFalse(pane.turnQueued.value)
+    }
+
+    @Test
+    fun aRealFrameRetractsTheStallCue() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        p.receiptTimeoutMs = 50
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(p.sendPrompt(pane, "run"))
+        advanceTimeBy(60)
+        assertTrue(pane.sendStalled.value)
+
+        p.route(text("convo-a", "on it")) // first real evidence
+        assertFalse(pane.sendStalled.value, "any real turn frame retires the stall")
+    }
+
+    @Test
+    fun aReplayThatResolvesThePendingBubbleSettlesTheWatchdog() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        p.receiptTimeoutMs = 50
+        p.turnTimeoutMs = 80
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(p.sendPrompt(pane, "run the tests"))
+        assertTrue(pane.messages.filterIsInstance<ChatItem.User>().single().pending)
+
+        // a reconnect replay comes back carrying the prompt as a resolved (non-pending) transcript row
+        p.route(
+            ConvoHistory(
+                "convo-a",
+                listOf(HistoryMessage(ChatRole.USER, "run the tests"), HistoryMessage(ChatRole.ASSISTANT, "all green")),
+                lastSeq = 9,
+            ),
+        )
+        assertFalse(pane.messages.filterIsInstance<ChatItem.User>().single().pending, "the replay resolved the bubble")
+
+        advanceTimeBy(200) // the reconciliation retired BOTH watchdogs — neither may fire spuriously now
+        assertFalse(pane.sendStalled.value, "a cancelled receipt watchdog cannot cry stall after the replay settled it")
+        assertFalse(pane.turnStalled.value)
+    }
+
+    @Test
+    fun closingAStalledStreamingColumnReclaimsItsSession() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        p.receiptTimeoutMs = 50
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(p.sendPrompt(pane, "run"))
+        advanceTimeBy(60)
+        assertTrue(pane.sendStalled.value)
+        assertTrue(pane.streaming.value) // wedged: "streaming" but demonstrably not working
+        sent.clear()
+
+        p.close(pane.paneId)
+        assertEquals(
+            "convo-a",
+            sent.filterIsInstance<CloseSession>().single().convoId,
+            "a stalled column must be reclaimed, not leaked on the daemon (the #329 bug)",
+        )
+    }
+
+    @Test
+    fun closingAGenuinelyRunningColumnWithNoStallStillLeavesItAlive() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(p.sendPrompt(pane, "long job"))
+        assertTrue(pane.streaming.value)
+        assertFalse(pane.sendStalled.value)
+        assertFalse(pane.turnStalled.value)
+        sent.clear()
+
+        p.close(pane.paneId)
+        assertTrue(
+            sent.filterIsInstance<CloseSession>().isEmpty(),
+            "a running turn with no stall is the agent's — closing the column must not kill it",
+        )
+    }
+
+    @Test
+    fun aStalePromptAckCannotMoveANewerPromptsWatchdog() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        p.receiptTimeoutMs = 50
+        p.turnTimeoutMs = 80
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(p.sendPrompt(pane, "prompt A"))
+        val idA = lastPromptId(pane)
+        assertTrue(p.sendPrompt(pane, "prompt B")) // supersedes A under a fresh id
+        val idB = lastPromptId(pane)
+        assertNotEquals(idA, idB)
+
+        p.route(PromptAck("convo-a", idA)) // A's receipt lands LATE, after B took over
+        assertFalse(pane.awaitingTurn, "a stale ack must not arm B's turn watchdog")
+        assertTrue(
+            pane.messages.filterIsInstance<ChatItem.User>().none { it.delivered },
+            "the stale ack flips no bubble — not A's (superseded), and above all not B's",
+        )
+        advanceTimeBy(120) // past the turn deadline: no turn watchdog was ever armed by the stale ack
+        assertFalse(pane.turnStalled.value)
+    }
+
+    @Test
+    fun aStallInOneColumnStaysInThatColumnAndTriggersNoReconnect() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        p.receiptTimeoutMs = 50
+        val one = open(p, "sid-a")
+        val two = p.open("/w2", "sid-b", "B", AgentKind.CLAUDE, PermissionMode.DEFAULT)!!
+        p.route(live("convo-a", "sid-a"))
+        p.route(live("convo-b", "sid-b"))
+        assertTrue(p.sendPrompt(one, "run")) // only column one sends
+        sent.clear() // anything on the wire after this point is a stall side effect
+
+        advanceTimeBy(60)
+        assertTrue(one.sendStalled.value)
+        assertFalse(two.sendStalled.value, "column two never sent — its bubble is not stalled")
+        assertTrue(
+            sent.isEmpty(),
+            "the KEY divergence from the focused path: a column stall NEVER forces a reconnect (no reopenAll storm)",
+        )
+    }
+
+    @Test
+    fun resendingAStalledTurnReDrivesUnderAFreshIdWithNoSecondBubble() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        p.receiptTimeoutMs = 50
+        p.turnTimeoutMs = 80
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(p.sendPrompt(pane, "run the tests"))
+        val firstId = lastPromptId(pane)
+        p.route(PromptAck("convo-a", firstId))
+        advanceTimeBy(90)
+        assertTrue(pane.turnStalled.value)
+        val userBubbles = pane.messages.count { it is ChatItem.User }
+        sent.clear()
+
+        p.resendStalled(pane)
+        assertFalse(pane.turnStalled.value)
+        assertEquals(userBubbles, pane.messages.count { it is ChatItem.User }, "no duplicate You bubble — the #329 symptom")
+        val resent = sent.filterIsInstance<SendPrompt>().single()
+        assertEquals("run the tests", resent.text)
+        assertNotEquals(firstId, resent.promptId, "a fresh id — the daemon deduped the original")
+        assertTrue(pane.streaming.value)
+    }
+
+    @Test
+    fun closingAColumnCancelsItsPendingWatchdogSoItNeverFires() = runTest {
+        val p = panes(CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+        p.receiptTimeoutMs = 50
+        val pane = open(p)
+        p.route(live("convo-a", "sid-a"))
+        assertTrue(p.sendPrompt(pane, "run"))
+
+        p.close(pane.paneId) // removes the column AND cancels its receipt watchdog
+        advanceTimeBy(200)
+        assertFalse(pane.sendStalled.value, "a cancelled watchdog must not fire onto a removed pane")
     }
 }

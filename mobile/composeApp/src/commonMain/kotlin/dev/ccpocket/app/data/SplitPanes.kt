@@ -23,6 +23,7 @@ import dev.ccpocket.protocol.TurnDone
 import dev.ccpocket.protocol.isModelCompatibleWithAgent
 import dev.ccpocket.protocol.isQuestion
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.TimeSource
@@ -122,6 +123,43 @@ class SidePane(
 
     /** Ties an open's timeout to THAT open — a retry must not be failed by its predecessor's deadline. */
     internal var openGen = 0
+
+    // ── delivery receipt + stall detection (issue #329) ─────────────────────────────────────────────
+    // The focused conversation grew a two-stage watchdog for lost prompts — a receipt deadline (#78) and,
+    // after a PromptAck lands, an ack→turn deadline (#104). A column had NEITHER: a prompt the daemon never
+    // received left the bubble "sending…" and the column streaming forever, and [close]'s running guard then
+    // skipped the reclaim, leaking the session on the daemon until a full reconnect. These fields mirror the
+    // focused path's machinery PER PANE (its `sendStalled`/`turnStalled`/`turnQueued` and the two watchdogs),
+    // keyed off the existing [promptOutstanding]. The one deliberate divergence — a column NEVER forces a
+    // reconnect on a stall — lives in [SidePanes.armReceiptWatchdog].
+
+    /** No receipt and no stream evidence within the receipt deadline (the focused path's `sendStalled`, #78):
+     *  an E2E-deaf link can look healthy while nothing comes back, so a bounded wait is the only honest cue.
+     *  Drives the column's "not delivered" marker; a per-pane resend is the recovery. */
+    val sendStalled = mutableStateOf(false)
+
+    /** A [PromptAck] landed but no turn frame followed within the turn deadline (the focused path's
+     *  `turnStalled`, #104): the agent swallowed the write. Actionable — the column offers a resend. */
+    val turnStalled = mutableStateOf(false)
+
+    /** The calm queued flavor of the same deadline: a prompt sent mid-turn is parked by the CLI, so post-ack
+     *  silence is expected there, not a swallow (the focused path's `turnQueued`). Informational, never a
+     *  resend cue — a fresh-id resend would run the instruction twice once the turn yields. */
+    val turnQueued = mutableStateOf(false)
+
+    /** The newest prompt whose receipt/turn state may still move THIS pane's watchdogs. A [PromptAck] can
+     *  race behind the first [dev.ccpocket.protocol.AssistantChunk] (the daemon's stdout pump is concurrent
+     *  with its stdin write) and an older send's receipt must not touch a newer prompt — only an exact id
+     *  match advances the machine (the focused path's `activePromptId`). */
+    internal var activePromptId: String? = null
+    internal var promptWatchdog: Job? = null // receipt deadline (#78)
+    internal var turnWatchdog: Job? = null // ack→first-turn-frame deadline (#104)
+    internal var awaitingTurn = false // between a PromptAck (delivered) and the first turn frame
+    internal var promptQueued = false // the in-flight prompt was sent mid-turn — snapshot of [streaming] at send
+
+    /** The last prompt's text, kept for a per-pane resend (the focused path's `promptRetry`, minus images —
+     *  a column's [SidePanes.sendPrompt] carries none, so there is nothing else to replay). */
+    internal var promptRetryText: String? = null
 }
 
 /**
@@ -142,9 +180,22 @@ class SidePanes(
     private val scope: CoroutineScope,
     private val send: suspend (Frame) -> Unit,
     private val newPromptId: () -> String,
+    /** Whether the connected daemon owns prompt redelivery (#122). A `supportsPromptRecovery` daemon keeps
+     *  every acked prompt in an unconsumed ledger and re-delivers it after a process swap, so a quiet
+     *  first-token window is normal there (large-context turns routinely exceed the deadline) and arming the
+     *  ack→turn watchdog would only misreport a slow turn. Read LIVE — it flips on the DaemonInfo handshake —
+     *  exactly as the focused path consults its own `daemonOwnsPromptRecovery`. Defaulted so the phone and the
+     *  existing tests (which open no columns, or drive the deadline explicitly) construct unchanged. */
+    private val daemonOwnsPromptRecovery: () -> Boolean = { false },
 ) {
     val panes = mutableStateListOf<SidePane>()
     private var paneSeq = 0L
+
+    /** Per-pane receipt / turn deadlines — the focused path's `promptReceiptTimeoutMs` / `promptTurnTimeoutMs`,
+     *  one column over. Production keeps the same 10s / 45s; a test seam shrinks them to drive the watchdogs
+     *  in virtual time. */
+    internal var receiptTimeoutMs = 10_000L
+    internal var turnTimeoutMs = 45_000L
 
     /**
      * Which visual SLOT the focused chat occupies among the columns, 0-based over `panes.size + 1`
@@ -251,6 +302,10 @@ class SidePanes(
         if (openCount == 0) return
         for (pane in panes.toList()) {
             if (pane.gone.value) continue
+            // #329: cancel the in-flight watchdog JOBS (not their state) — a receipt deadline must not fire
+            // "not delivered" while the column shows "opening…". The outstanding-prompt state is deliberately
+            // KEPT so the reconnect replay's [reconcilePromptReceipt] can still settle the bubble.
+            cancelWatchdogs(pane)
             pane.convoId.value = null
             pane.opening.value = true
             pane.openFailed.value = false
@@ -285,13 +340,19 @@ class SidePanes(
      */
     fun close(paneId: Long) {
         val pane = removePane(paneId) ?: return
+        cancelWatchdogs(pane) // the column is gone — no deadline may fire onto a pane no longer in the list
         // Closed before the open landed: there is no conversation to reclaim YET, but one is on its way.
         // Record the session as disowned so the answer is recognised when it arrives — see [disowned].
         // A pane whose session is already gone has no answer coming and needs no record.
         if (pane.convoId.value == null && !pane.gone.value) disowned += pane.sessionId
         recount()
         val convo = pane.convoId.value ?: return
-        if (pane.streaming.value) return
+        // The idle-reclaim rule (the focused pane's), with the issue #329 correction: a column showing
+        // [streaming] is normally left running so closing it doesn't kill the agent's turn — BUT a STALLED
+        // column is not working, it is wedged. Skipping its reclaim (the old behavior) leaked the session on
+        // the daemon, curable only by a full reconnect. A stalled-yet-"streaming" column is reclaimed too.
+        val stalled = pane.sendStalled.value || pane.turnStalled.value
+        if (pane.streaming.value && !stalled) return
         scope.launch { send(CloseSession(convo)) }
     }
 
@@ -302,7 +363,8 @@ class SidePanes(
      * already shows must go away without a [CloseSession] that would hit the live conversation.
      */
     fun detach(paneId: Long) {
-        removePane(paneId) ?: return
+        val pane = removePane(paneId) ?: return
+        cancelWatchdogs(pane) // #329: a removed pane keeps no live deadline
         recount()
     }
 
@@ -327,6 +389,7 @@ class SidePanes(
     fun releaseToFocus(sessionId: String) {
         disowned.remove(sessionId)
         paneFor(sessionId)?.let { pane ->
+            cancelWatchdogs(pane) // #329: the focused pane takes over its own delivery tracking from here
             // The focus moves INTO this column's place (issue #336): promoting a left column must not
             // teleport its conversation to wherever the focused chat happened to sit. Removing pane
             // index p and putting the focus at slot p is exactly "the chat walks over to that column".
@@ -343,6 +406,7 @@ class SidePanes(
 
     /** Drop every column without touching the sessions behind them (disconnect, machine switch, sign-out). */
     fun clear() {
+        for (pane in panes) cancelWatchdogs(pane) // #329: no orphaned deadline may outlive the column list
         panes.clear()
         disowned.clear()
         focusedSlot.value = 0
@@ -367,10 +431,14 @@ class SidePanes(
         when (f) {
             is SessionLive -> bind(f)
             is ConvoHistory -> byConvo(f.convoId)?.let { replay(it, f) }
-            is AssistantChunk -> byConvo(f.convoId)?.transcript?.appendChunk(f)
-            is ToolEvent -> byConvo(f.convoId)?.transcript?.onToolEvent(f)
-            is TurnDone -> byConvo(f.convoId)?.let { endTurn(it, f) }
-            is PromptAck -> byConvo(f.convoId)?.let { it.error.value = null }
+            // real turn evidence first (issue #329): any of these retires this pane's stall watchdogs before
+            // the frame is applied, exactly as the focused path calls promptEvidence() ahead of its handling.
+            is AssistantChunk -> byConvo(f.convoId)?.let { promptEvidence(it); it.transcript.appendChunk(f) }
+            is ToolEvent -> byConvo(f.convoId)?.let { promptEvidence(it); it.transcript.onToolEvent(f) }
+            is TurnDone -> byConvo(f.convoId)?.let { promptEvidence(it); endTurn(it, f) }
+            // delivery receipt (issue #329): clear any transport error AND record the daemon has the prompt —
+            // flips the bubble to "delivered" and, on a legacy daemon, hands off to the ack→turn watchdog.
+            is PromptAck -> byConvo(f.convoId)?.let { it.error.value = null; promptDelivered(it, f.promptId) }
             // Questions route here too. Filtering them out left AskUserQuestion in a column with NO surface
             // at all — the bell inbox excludes questions by design, and the focused question card is gated
             // on the focused conversation — so the column streamed until the daemon timed the ask out and
@@ -381,6 +449,15 @@ class SidePanes(
             is SessionGone -> byConvo(f.convoId)?.let {
                 it.gone.value = true
                 it.streaming.value = false
+                // the session is gone, so a stall is meaningless — retire both watchdogs and their cues, or a
+                // deadline would fire "not delivered" / "no response" onto a column that has no session left to
+                // deliver to (issue #329). The prompt-layer fresh-resend a SessionGone triggers on the focused
+                // path is deliberately NOT mirrored: reopenAll() already re-opens columns on the link's return.
+                cancelWatchdogs(it)
+                it.sendStalled.value = false
+                it.turnStalled.value = false
+                it.turnQueued.value = false
+                it.awaitingTurn = false
                 // no verdict can be delivered to a conversation that no longer exists, so nothing may keep
                 // offering one — a card left behind here answers into the void and reads as "it worked"
                 clearAsks(it)
@@ -480,12 +557,151 @@ class SidePanes(
         val convo = pane.convoId.value ?: return false
         if (text.isBlank()) return false
         val promptId = newPromptId()
+        // A receipt/turn deadline from the previous prompt may still be pending (or already fired while this
+        // column sat in the background): cancel it and clear its cues so the fresh bubble starts its own epoch.
+        cancelWatchdogs(pane)
+        pane.sendStalled.value = false
+        pane.turnStalled.value = false
+        pane.turnQueued.value = false
         pane.messages.add(ChatItem.User(text, pending = true, promptId = promptId))
         pane.promptOutstanding = true // there is now a bubble for the next turn boundary to settle
+        pane.activePromptId = promptId
+        pane.promptRetryText = text // #329 resend payload — text only (a column's send carries no images)
         pane.turnStartMark = TimeSource.Monotonic.markNow()
+        pane.promptQueued = pane.streaming.value // a send into a running turn is QUEUED by the CLI (snapshot first)
         pane.streaming.value = true
         scope.launch { send(SendPrompt(convo, text, promptId = promptId)) }
+        armReceiptWatchdog(pane, promptId)
         return true
+    }
+
+    /**
+     * Bound the wait for [pane]'s delivery receipt (the focused path's `armPromptWatchdog`, #78): outboxes
+     * buffer across reconnects, so a prompt sent into a link that quietly stopped answering would otherwise
+     * stay "sending…" forever. On the deadline — and only while THIS prompt is still the outstanding one —
+     * surface the column's "not delivered" cue.
+     *
+     * KEY DIVERGENCE from the focused path (implemented on purpose): a column NEVER forces a reconnect here.
+     * The focused watchdog fires `launchTransport(reconnect = true)`; a background column doing that would
+     * `reopenAll()` and drag EVERY other column and the focused chat through a reopen because one un-watched
+     * column timed out. Reconnect stays the global / focused mechanism — a column only marks itself stalled
+     * and offers a per-pane resend ([resendStalled]).
+     */
+    private fun armReceiptWatchdog(pane: SidePane, promptId: String) {
+        pane.promptWatchdog?.cancel()
+        pane.promptWatchdog = scope.launch {
+            delay(receiptTimeoutMs)
+            if (pane.promptOutstanding && pane.activePromptId == promptId) pane.sendStalled.value = true
+        }
+    }
+
+    /**
+     * [pane]'s delivery receipt landed (PromptAck, #66/#104): the daemon wrote the prompt to the agent's
+     * stdin — delivered, but not yet a started turn. Mirrors the focused path's `promptDelivered`.
+     *
+     * Guarded on an exact id AND on the bubble still being outstanding: a PromptAck can race BEHIND the first
+     * [dev.ccpocket.protocol.AssistantChunk] (which already retired [activePromptId] via [promptEvidence]),
+     * and a receipt for an older queued send must never move the newest prompt's watchdog.
+     */
+    private fun promptDelivered(pane: SidePane, promptId: String) {
+        if (pane.activePromptId != promptId || !pane.promptOutstanding) return
+        pane.promptWatchdog?.cancel(); pane.promptWatchdog = null // receipt arrived — the delivery deadline is moot
+        pane.sendStalled.value = false
+        // flip THIS bubble's marker (ChatItem.User carries `delivered`, exactly as the focused path sets it).
+        // promptOutstanding is deliberately left set: the id-agnostic bubble settle in [endTurn] is the backstop
+        // that closes a bubble whose id a later resend replaced, so it must stay armed until the turn ends.
+        val i = pane.messages.indexOfLast { it is ChatItem.User && it.promptId == promptId }
+        (pane.messages.getOrNull(i) as? ChatItem.User)?.let { pane.messages[i] = it.copy(pending = false, delivered = true) }
+        when {
+            // a ledger-capable daemon owns redelivery; a quiet first-token window is normal, so no turn watchdog
+            daemonOwnsPromptRecovery() -> Unit
+            pane.promptQueued && pane.streaming.value -> { pane.awaitingTurn = true; armTurnWatchdog(pane, promptId, queued = true) }
+            pane.streaming.value -> { pane.awaitingTurn = true; armTurnWatchdog(pane, promptId, queued = false) }
+        }
+    }
+
+    /**
+     * Second-stage watchdog for [pane] (the focused path's `armTurnWatchdog`, #104): a delivered prompt that
+     * produces no turn frame within the deadline was swallowed by a wedged / mid-relaunch agent. Self-guarded
+     * at fire time — a real frame ([awaitingTurn] cleared), a newer send ([activePromptId] moved), a session
+     * change ([convoId] moved off the one captured here) or a turn that already ended ([streaming] false) all
+     * no-op it. [queued] gets the calm [turnQueued]; otherwise the actionable [turnStalled].
+     */
+    private fun armTurnWatchdog(pane: SidePane, promptId: String, queued: Boolean) {
+        val c = pane.convoId.value
+        pane.turnWatchdog?.cancel()
+        pane.turnWatchdog = scope.launch {
+            delay(turnTimeoutMs)
+            if (!pane.awaitingTurn || pane.activePromptId != promptId || pane.convoId.value != c || !pane.streaming.value) return@launch
+            if (queued) pane.turnQueued.value = true else pane.turnStalled.value = true
+        }
+    }
+
+    /**
+     * Real turn evidence for [pane] (chunk / tool / turn-end): the agent is actually producing. Retires both
+     * watchdogs, clears every stall cue, and drops the resend payload — the focused path's `promptEvidence`.
+     *
+     * DELIBERATE SIMPLIFICATION: a column does NOT do the focused path's `exactPrompt` old-vs-new-turn frame
+     * distinction. For a mid-turn queued send, ANY real frame (even one from the still-running old turn) clears
+     * the watchdog here; the only cost is the "queued" status showing for a little less time — no correctness
+     * loss, because the bubble itself is settled by [endTurn] on the queued prompt's OWN TurnDone. The bubble
+     * is intentionally NOT flipped here (unlike the focused path): [endTurn] and [promptDelivered] own that.
+     */
+    private fun promptEvidence(pane: SidePane) {
+        cancelWatchdogs(pane)
+        pane.awaitingTurn = false
+        pane.sendStalled.value = false
+        pane.turnStalled.value = false
+        pane.turnQueued.value = false
+        pane.activePromptId = null
+        pane.promptRetryText = null
+    }
+
+    /**
+     * A reconnect replay resolved [pane]'s pending bubble (the matching USER row came back no longer pending):
+     * stronger evidence than link liveness, so retire the receipt/turn machinery too. Mirrors the focused
+     * path's `reconcilePromptReceiptFromHistory`, fed the before/after lists by [ChatTranscript.mergeHistory].
+     */
+    private fun reconcilePromptReceipt(pane: SidePane, before: List<ChatItem>, after: List<ChatItem>) {
+        if (!pane.promptOutstanding) return
+        val promptId = pane.activePromptId ?: return
+        val wasPending = before.any { it is ChatItem.User && it.promptId == promptId && it.pending }
+        val remainsPending = after.any { it is ChatItem.User && it.promptId == promptId && it.pending }
+        if (wasPending && !remainsPending) promptEvidence(pane)
+    }
+
+    /**
+     * The user tapped [pane]'s "no response — resend" cue, or its "not delivered" one (the focused path's
+     * `resendStalledPrompt`, #104). Re-drive under a FRESH id — the live daemon Conversation already recorded
+     * the original id, so a same-id resend would be deduped (#66) into a bare re-ack that never runs. NO second
+     * User bubble is added (that duplicate "You" is the very symptom #329 is about): the existing bubble settles
+     * through [endTurn]'s id-agnostic tail scan when the re-driven turn ends. Guarded on a live stall cue, which
+     * a real frame retracts first, so a resend can't land on top of a turn that actually started.
+     */
+    fun resendStalled(pane: SidePane) {
+        if (!pane.sendStalled.value && !pane.turnStalled.value) return
+        val convo = pane.convoId.value ?: return
+        val text = pane.promptRetryText ?: return
+        cancelWatchdogs(pane)
+        pane.sendStalled.value = false
+        pane.turnStalled.value = false
+        pane.turnQueued.value = false
+        val freshId = newPromptId()
+        pane.activePromptId = freshId
+        pane.promptRetryText = text
+        pane.promptQueued = false // the stalled turn never started — the re-driven copy expects the strict deadline
+        pane.promptOutstanding = true
+        pane.streaming.value = true
+        scope.launch { send(SendPrompt(convo, text, promptId = freshId)) }
+        armReceiptWatchdog(pane, freshId)
+    }
+
+    /** Cancel [pane]'s two watchdog jobs, so a pending deadline can neither fire onto a removed pane nor
+     *  survive a re-attach. State (the cues, [activePromptId], [promptOutstanding]) is left to the caller —
+     *  a reconnect keeps it for [reconcilePromptReceipt]; a removal doesn't care. */
+    private fun cancelWatchdogs(pane: SidePane) {
+        pane.promptWatchdog?.cancel(); pane.promptWatchdog = null
+        pane.turnWatchdog?.cancel(); pane.turnWatchdog = null
     }
 
     /**
@@ -555,14 +771,18 @@ class SidePanes(
      *  (issue #147 full/delta, issue #107 echo). Only the cursor is the pane's own — it keeps a bare one,
      *  where the repository keys its cursor by session. */
     private fun replay(pane: SidePane, f: ConvoHistory) {
-        pane.transcript.mergeHistory(f)?.let { pane.historySeq = it }
+        // the receipt reconciliation (issue #329) rides the same before/after seam the focused path uses:
+        // if the replay resolved this pane's pending bubble, that is delivery evidence — settle the watchdogs.
+        pane.transcript.mergeHistory(f) { before, after -> reconcilePromptReceipt(pane, before, after) }
+            ?.let { pane.historySeq = it }
     }
 
     private fun endTurn(pane: SidePane, f: TurnDone) {
-        // the turn is over, so no bubble is still "sending" — the pane has no delivery watchdog of its
-        // own, and a bubble stuck at pending would misreport a prompt the agent demonstrably answered.
-        // Gated and tail-scanned exactly like the focused path's promptEvidence: a TurnDone with nothing
-        // outstanding (a reattached turn, work started at the computer) settles nothing at all.
+        // the turn is over, so no bubble is still "sending"; a bubble stuck at pending would misreport a
+        // prompt the agent demonstrably answered. Gated and tail-scanned exactly like the focused path's
+        // promptEvidence: a TurnDone with nothing outstanding (a reattached turn, work started at the
+        // computer) settles nothing. This id-AGNOSTIC scan is also the #329 backstop that closes a bubble
+        // whose id a [resendStalled] replaced — which is why [promptDelivered] never clears promptOutstanding.
         if (pane.promptOutstanding) {
             pane.promptOutstanding = false
             val i = pane.messages.indexOfLast { it is ChatItem.User && it.pending }
