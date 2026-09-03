@@ -840,7 +840,17 @@ class Conversation(
         // first turn. So announce the session as live now (we own convoId + workdir), and replay the resumed
         // transcript up front; once the first prompt spawns the agent, the pump re-emits SessionLive with the real
         // sessionId.
+        val openedAtMs = System.currentTimeMillis()
         scope.launch {
+            // FIRST, before any disk read (issue #340). The phone's open watchdog only waits for this frame,
+            // so every seed read below used to sit INSIDE its deadline: on a slow disk, a large transcript, a
+            // loaded daemon or a jittery relay the whole round trip overran 8s and the user was told "the
+            // computer didn't respond" for a session that was in fact opening fine. This announce is
+            // deliberately SPARSE — title/model/window are still null here — and the seeded re-announce below
+            // backfills them, exactly like the pump's post-first-turn re-announce already does. Zero wire
+            // change: the phone reconciles every SessionLive field-by-field.
+            sink.emit(live(resumeId))
+            log.info("$convoId SessionLive early (resume=${resumeId?.take(8) ?: "-"}) +${System.currentTimeMillis() - openedAtMs}ms")
             // Assign only a real read, and only while nothing better arrived: this launch races the first
             // prompt's seeding (sendPrompt), and an unconditional write here re-nulled a just-seeded title
             // after a slow multi-MB transcript parse (PR #296 review) — every later SessionLive (including
@@ -893,7 +903,13 @@ class Conversation(
             if (resumeId != null) {
                 failedTurnStreak = runCatching { backend.resumeFailedTurnStreak(workdir.toString(), resumeId) }.getOrDefault(0)
             }
+            // The SEEDED re-announce: same frame, now carrying everything the reads above recovered
+            // (title/model/window/effort/usage/degraded). The phone already left its spinner on the early
+            // one, so this is pure backfill — and the pair of log lines is the open path's only honest
+            // latency measurement (the registry's `open → convo` line is stamped at registration, which is
+            // why it always read "instant" while a phone was timing out — issue #340).
             sink.emit(live(resumeId))
+            log.info("$convoId SessionLive seeded (resume=${resumeId?.take(8) ?: "-"}) +${System.currentTimeMillis() - openedAtMs}ms")
             if (resumeId != null) {
                 // incremental reattach (issue #147): a client that still holds the transcript sends its
                 // cursor and gets only the delta; anything un-honorable falls back to the full window

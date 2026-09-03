@@ -51,6 +51,7 @@
     <string name="session_degraded_banner">This session looks over its context limit — recent replies were API failures. Start a new session or send /clear.</string>
     <string name="context_critical_caption">Context full — oldest turns will start dropping</string>
     <string name="open_session_timeout">Couldn\'t open the session — the computer didn\'t respond</string>
+    <string name="open_session_timeout_link">Couldn\'t open the session — not connected to the computer</string>
     <string name="turn_done_marker">done</string>
     <string name="dir_empty_title">No projects yet</string>
     <string name="dir_empty_body">This computer has no projects to open yet. Pick a folder to start your first session here.</string>
@@ -1096,6 +1097,7 @@
     <string name="chat_open_failed">Couldn\'t open the session</string>
     <string name="chat_open_failed_named">Couldn\'t open %1$s</string>
     <string name="chat_open_failed_hint">The computer didn\'t respond.</string>
+    <string name="chat_open_failed_hint_link">Not connected to the computer.</string>
     <string name="chat_you">You</string>
     <string name="msg_no_response_click">no response yet — click to resend</string>
     <string name="msg_undelivered_reconnecting">delivery not confirmed — reconnecting…</string>

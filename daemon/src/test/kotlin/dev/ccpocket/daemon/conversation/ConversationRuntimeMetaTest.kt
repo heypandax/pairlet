@@ -170,14 +170,14 @@ class ConversationRuntimeMetaTest {
     ) {
         fun lives(): List<SessionLive> = synchronized(raw) { raw.filterIsInstance<SessionLive>() }
 
-        /** The newest announce satisfying [pred], waited for rather than sampled: every emit here is a
-         *  coroutine hop behind the call that caused it. */
-        suspend fun awaitLive(what: String, pred: (SessionLive) -> Boolean): SessionLive =
+        /** The announce [pick] selects, waited for rather than sampled: every emit here is a coroutine
+         *  hop behind the call that caused it. */
+        private suspend fun await(what: String, pick: (List<SessionLive>) -> SessionLive?): SessionLive =
             try {
                 withTimeout(10_000) {
                     var hit: SessionLive? = null
                     while (hit == null) {
-                        hit = lives().lastOrNull(pred)
+                        hit = pick(lives())
                         if (hit == null) delay(20)
                     }
                     hit
@@ -185,6 +185,22 @@ class ConversationRuntimeMetaTest {
             } catch (_: TimeoutCancellationException) {
                 throw AssertionError("timed out waiting for $what; announces so far: ${lives()}")
             }
+
+        /** The newest announce satisfying [pred]. */
+        suspend fun awaitLive(what: String, pred: (SessionLive) -> Boolean): SessionLive =
+            await(what) { it.lastOrNull(pred) }
+
+        /**
+         * The SECOND announce satisfying [pred] — which for a resume is the seeded one.
+         *
+         * Since issue #340 `open()` announces TWICE: a SPARSE frame emitted before any transcript read
+         * (so the phone's 8s open deadline never contains a disk access), then the SEEDED re-announce
+         * carrying what those reads recovered. Every assertion below about what a RESUMED session
+         * announces means the second frame; [awaitLive]'s newest-match would settle on the sparse one
+         * whenever it samples while the reads are still running — which under a gated read is always.
+         */
+        suspend fun awaitSeededOpen(what: String, pred: (SessionLive) -> Boolean): SessionLive =
+            await(what) { it.filter(pred).getOrNull(1) }
 
         suspend fun shutdown() {
             convo.close()
@@ -219,7 +235,7 @@ class ConversationRuntimeMetaTest {
             val fx = resumed(MetaBackend.Disk(model = MODEL, window = 1_000_000, effort = "high"))
             try {
                 fx.convo.open(resumeId = RESUMED, model = null)
-                val live = fx.awaitLive("the resume announce") { it.sessionId == RESUMED }
+                val live = fx.awaitSeededOpen("the seeded resume announce") { it.sessionId == RESUMED }
                 assertEquals(MODEL, live.model)
                 assertEquals(1_000_000L, live.contextWindow)
                 assertEquals("high", live.effort)
@@ -238,7 +254,7 @@ class ConversationRuntimeMetaTest {
             val fx = resumed(MetaBackend.Disk(), script = listOf("init", "meta"))
             try {
                 fx.convo.open(resumeId = RESUMED, model = null)
-                val opened = fx.awaitLive("the resume announce") { it.sessionId == RESUMED }
+                val opened = fx.awaitSeededOpen("the seeded resume announce") { it.sessionId == RESUMED }
                 assertNull(opened.model, "nothing on disk said which model — inventing one is worse than blank")
                 assertNull(opened.contextWindow)
                 assertNull(opened.effort)
@@ -277,7 +293,7 @@ class ConversationRuntimeMetaTest {
                 fx.awaitLive("the live metadata") { it.contextWindow == 1_000_000L }
                 // …and only then does the transcript parse come back with its older answer
                 gate.countDown()
-                val announced = fx.awaitLive("the post-backfill announce") { it.sessionId == RESUMED }
+                val announced = fx.awaitSeededOpen("the post-backfill announce") { it.sessionId == RESUMED }
                 assertEquals(1_000_000L, announced.contextWindow, "the live window must survive the backfill")
                 assertEquals("high", announced.effort)
                 assertEquals(MODEL, announced.model)

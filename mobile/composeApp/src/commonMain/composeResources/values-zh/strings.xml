@@ -51,6 +51,7 @@
     <string name="session_degraded_banner">会话疑似已超上下文上限——最近的回复均为 API 失败。建议开新会话或发送 /clear。</string>
     <string name="context_critical_caption">上下文即将写满——最早的几轮会开始被丢弃</string>
     <string name="open_session_timeout">会话没有打开——电脑未响应</string>
+    <string name="open_session_timeout_link">会话没有打开——还没连上电脑</string>
     <string name="turn_done_marker">已完成</string>
     <string name="dir_empty_title">还没有项目</string>
     <string name="dir_empty_body">这台电脑还没有可打开的项目。挑一个文件夹，就能在这里开第一个会话。</string>
@@ -1093,6 +1094,7 @@
     <string name="chat_open_failed">没能打开会话</string>
     <string name="chat_open_failed_named">没能打开 %1$s</string>
     <string name="chat_open_failed_hint">电脑未响应。</string>
+    <string name="chat_open_failed_hint_link">还没连上电脑。</string>
     <string name="chat_you">你</string>
     <string name="msg_no_response_click">还没有响应——点击重发</string>
     <string name="msg_undelivered_reconnecting">未确认送达——正在重连…</string>

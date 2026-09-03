@@ -1,6 +1,7 @@
 package dev.ccpocket.app.desktop
 
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.data.OpenFailure
 import dev.ccpocket.app.data.SidePane
 import dev.ccpocket.app.ui.ComposerState
 import dev.ccpocket.protocol.AgentKind
@@ -45,6 +46,11 @@ class SidePaneModel(
     override val hasChat: Boolean get() = !pane.opening.value || pane.messages.isNotEmpty()
     override val opening: Boolean get() = pane.opening.value
     override val openFailed: Boolean get() = pane.openFailed.value
+    // #340: INERT on purpose. A column's open deadline is still the blind one in SplitPanes, so this
+    // column has no link-state opinion to report — and delegating would hand it the FOCUSED chat's last
+    // failure reason, i.e. another conversation's diagnosis under this column's title. The neutral value
+    // keeps today's wording for columns; wiring the variant here belongs with the column's own deadline.
+    override val openFailedReason: OpenFailure get() = OpenFailure.COMPUTER
     override val chatTitle: String get() = pane.title.value
     override val chatAgent: AgentKind get() = pane.agent
     override val chatWorkdir: String get() = pane.workdir

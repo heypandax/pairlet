@@ -23,6 +23,11 @@ enum class TelEvent(val id: String) {
     ConnPhase("conn_phase"),
     ConnFailed("conn_failed"),
     SessionOpened("session_opened"),
+    // issue #340: an open that never got its SessionLive. The old banner blamed the computer whatever the
+    // real cause was, and nothing was recorded — so the only evidence this path ever produced was a user's
+    // screenshot. [TelKey.Link] splits "the link was never up" from "a Ready link went unanswered", and
+    // [TelKey.Retried] says whether the silent auto-resend had already been spent on it.
+    SessionOpenTimeout("session_open_timeout"),
     PromptSent("prompt_sent"),
     // delivery/turn diagnostics (issue #104): PromptTurnStalled fires when the daemon ACKED a prompt
     // (wrote it to the agent's stdin) but no turn frame followed within the deadline — the agent swallowed
@@ -57,6 +62,8 @@ enum class TelKey(val id: String) {
     // the exception's message is never transmitted, since a redeem failure carries the relay's response body.
     Reason("reason"),
     Attempt("attempt"),     // reconnect attempt counter at the time of failure
+    Link("link"),           // ready | down — the connection phase an open gave up under (issue #340)
+    Retried("retried"),     // 0 | 1 — whether that open had already spent its silent auto-resend (#340)
     Version("version"),
     EntryPoint("entry_point"), // projects | sessions | chat | settings
     HelpTask("help_task"),     // one of the fixed HelpTaskId values

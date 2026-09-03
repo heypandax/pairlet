@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.data.OpenFailure
 import dev.ccpocket.app.data.SidePane
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.theme.ThemeMode
@@ -674,6 +675,14 @@ interface DesktopModel {
      *  consumer at all, so a timed-out open dropped straight back to the blank "No session open" state,
      *  which reads as "your click never happened". Distinct from [opening] and from an ordinary empty pane. */
     val openFailed: Boolean get() = false
+
+    /** WHICH failure [openFailed] is reporting (issue #340). The pane used to say "the computer didn't
+     *  respond" however the open died — including when the link was never up, which blames a computer that
+     *  is very probably fine and sends the user retrying instead of checking the connection.
+     *
+     *  Defaults to [OpenFailure.COMPUTER]: a surface that has no link-state opinion keeps today's wording.
+     *  That is deliberately true of the split columns, whose own open deadline is still the blind one. */
+    val openFailedReason: OpenFailure get() = OpenFailure.COMPUTER
 
     /** Re-send the open that failed — the failure pane's retry. Replays the same request (same workdir,
      *  session, agent/mode/model), so a retry can't land under different flags than the click that failed. */
