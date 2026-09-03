@@ -47,6 +47,18 @@ object TranscriptScanner {
         var version: String? = null
         var aiTitle: String? = null
         var customTitle: String? = null // the user's rename, persisted by Claude as a `custom-title` record (issue #14)
+        // A session whose OPENING turn is a slash command (`/record-issue …`) never gets a real `type:"user"`
+        // record written — Claude stores that text only in a `last-prompt` record. Without this fallback such a
+        // session carries no prompt and no title, so it's dropped from the list entirely (issue #341). First
+        // record wins = the opening prompt; only ever used when no real user turn exists.
+        var lastPrompt: String? = null
+        // The same sessions lose their workdir too: cwd/gitBranch/version are captured off the first real user
+        // turn, so without one the summary says cwd="" — and opening such a row makes the app focus directory
+        // "", a nameless synthetic project group in the sidebar (issue #341's second face). Every tool_result
+        // and assistant record carries the same envelope, so the first record naming a cwd is the fallback.
+        var fbCwd: String? = null
+        var fbGitBranch: String? = null
+        var fbVersion: String? = null
         var model: String? = null       // last assistant turn's model — same rules as [lastModel], captured in this pass
         var userCount = 0
 
@@ -55,6 +67,11 @@ object TranscriptScanner {
                 val line = raw.trim()
                 if (line.isEmpty()) continue
                 val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                if (fbCwd == null) obj.str("cwd")?.let {
+                    fbCwd = it
+                    fbGitBranch = obj.str("gitBranch")
+                    fbVersion = obj.str("version")
+                }
                 when (obj.str("type")) {
                     "user" -> if (isRealUserTurn(obj)) {
                         userCount++
@@ -69,13 +86,14 @@ object TranscriptScanner {
                     "ai-title" -> aiTitle = obj.str("aiTitle")
                     // the user's explicit rename — rewritten through the session, last wins (issue #14)
                     "custom-title" -> customTitle = obj.str("customTitle")
+                    "last-prompt" -> if (lastPrompt == null) lastPrompt = obj.str("lastPrompt")
                 }
             }
         }
 
-        if (firstPrompt == null && aiTitle == null && customTitle == null) return null
+        if (firstPrompt == null && aiTitle == null && customTitle == null && lastPrompt == null) return null
         val mtime = file.getLastModifiedTime().toMillis()
-        val fp = firstPrompt ?: ""
+        val fp = firstPrompt ?: lastPrompt ?: ""
         // the user's rename beats the AI's guess beats the first prompt (issue #14)
         val title = customTitle?.takeIf { it.isNotBlank() }
             ?: aiTitle?.takeIf { it.isNotBlank() }
@@ -86,10 +104,10 @@ object TranscriptScanner {
             title = title,
             firstPrompt = fp,
             messageCount = userCount,
-            cwd = cwd ?: "",
+            cwd = cwd ?: fbCwd ?: "",
             lastModified = mtime,
-            gitBranch = gitBranch,
-            version = version,
+            gitBranch = gitBranch ?: fbGitBranch,
+            version = version ?: fbVersion,
             live = System.currentTimeMillis() - mtime < LIVE_WINDOW_MS,
             model = model,
         )
@@ -98,8 +116,9 @@ object TranscriptScanner {
     /**
      * Everything a COLD RESUME needs from a transcript, in the shapes the three single-purpose readers
      * below produce: [title] as [summarize] computes it (null exactly when summarize returns null, i.e. the
-     * file carries no prompt and no title record), [gitBranch] from the first real user turn, [model] as
-     * [lastModel], [contextTokens] as [lastContextTokens].
+     * file carries no prompt and no title record), [gitBranch] from the first real user turn (falling back to
+     * the first cwd-bearing record, as summarize does — issue #341), [model] as [lastModel], [contextTokens]
+     * as [lastContextTokens].
      */
     data class ResumeSeed(
         val title: String? = null,
@@ -134,6 +153,9 @@ object TranscriptScanner {
         var gitBranch: String? = null
         var aiTitle: String? = null
         var customTitle: String? = null
+        var lastPrompt: String? = null // slash-command-opened sessions carry their prompt only here (issue #341)
+        var fbCwd: String? = null // envelope fallback, same cwd-keyed rule as summarize (issue #341)
+        var fbGitBranch: String? = null
         var model: String? = null
         var contextTokens: Long? = null
 
@@ -142,6 +164,10 @@ object TranscriptScanner {
                 val line = raw.trim()
                 if (line.isEmpty()) continue
                 val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                if (fbCwd == null) obj.str("cwd")?.let {
+                    fbCwd = it
+                    fbGitBranch = obj.str("gitBranch")
+                }
                 when (obj.str("type")) {
                     "user" -> if (isRealUserTurn(obj) && firstPrompt == null) {
                         firstPrompt = extractUserText(obj)
@@ -153,18 +179,26 @@ object TranscriptScanner {
                     }
                     "ai-title" -> aiTitle = obj.str("aiTitle")
                     "custom-title" -> customTitle = obj.str("customTitle")
+                    "last-prompt" -> if (lastPrompt == null) lastPrompt = obj.str("lastPrompt")
                 }
             }
         }
 
-        // summarize's guard: without any of the three, that reader answers null and there is no title to seed
-        val title = if (firstPrompt == null && aiTitle == null && customTitle == null) null else {
+        // summarize's guard: without any of the four, that reader answers null and there is no title to seed
+        val title = if (firstPrompt == null && aiTitle == null && customTitle == null && lastPrompt == null) null else {
             customTitle?.takeIf { it.isNotBlank() }
                 ?: aiTitle?.takeIf { it.isNotBlank() }
-                ?: firstPrompt.orEmpty().lineSequence().firstOrNull()?.take(60)?.takeIf { it.isNotBlank() }
+                ?: (firstPrompt ?: lastPrompt).orEmpty().lineSequence().firstOrNull()?.take(60)?.takeIf { it.isNotBlank() }
                 ?: sessionId
         }
-        return ResumeSeed(title = title, gitBranch = gitBranch, model = model, contextTokens = contextTokens)
+        // the fallback branch only exists where summarize produces a summary at all (title != null) —
+        // ResumeSeedParityTest pins seed.gitBranch to summary?.gitBranch, which is null when summarize bails
+        return ResumeSeed(
+            title = title,
+            gitBranch = gitBranch ?: fbGitBranch?.takeIf { title != null },
+            model = model,
+            contextTokens = contextTokens,
+        )
     }
 
     private val seedCache = MtimeMemo<ResumeSeed>(SEED_MEMO_MAX)

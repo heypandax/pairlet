@@ -65,6 +65,33 @@ class TranscriptScannerTest {
     }
 
     @Test
+    fun slash_command_opened_session_surfaces_via_last_prompt() {
+        // A session whose ONLY user input is a slash command (`/record-issue …`) never gets a real
+        // `type:"user"` record; Claude stores the text only in a `last-prompt` record. Before issue #341 the
+        // scanner ignored that record, so summarize returned null and every such session (all issues recorded
+        // through the skill) was invisible in the list. The opening last-prompt now seeds title + firstPrompt.
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-slash.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"attachment","attachment":{"type":"skill_listing","content":"…"}}""",
+                """{"type":"last-prompt","lastPrompt":"/record-issue 打开会话偶发失败"}""",
+                """{"type":"assistant","message":{"model":"claude-opus-4-8","content":[]},"cwd":"/repo/proj","gitBranch":"main","version":"2.1.165"}""",
+                """{"type":"user","toolUseResult":{"x":1},"message":{"role":"user","content":[{"type":"tool_result","content":"r"}]},"cwd":"/repo/other"}""",
+                """{"type":"last-prompt","lastPrompt":"/record-issue a later one"}""",
+            ).joinToString("\n"),
+        )
+        val s = assertNotNull(TranscriptScanner.summarize(f))
+        assertEquals("/record-issue 打开会话偶发失败", s.title) // the OPENING prompt, not the later one
+        assertEquals(0, s.messageCount) // no real user turn was written — count stays honest
+        // …and the workdir must not be lost with the user turn: a cwd="" row makes the app focus directory
+        // "" on open — the sidebar grows a nameless "current" project group. First cwd-bearing record wins.
+        assertEquals("/repo/proj", s.cwd)
+        assertEquals("main", s.gitBranch)
+        assertEquals("2.1.165", s.version)
+    }
+
+    @Test
     fun last_model_returns_the_newest_assistant_model() {
         // a cold resume reads the session's real model from the last assistant turn (issue #27)
         val dir = Files.createTempDirectory("ccp-scan")

@@ -89,6 +89,18 @@ class ResumeSeedParityTest {
             ),
         )
         assertParity(
+            "sess-slash-only", // opened by a slash command: no real user turn, prompt lives only in last-prompt (issue #341)
+            listOf(
+                """{"type":"attachment","attachment":{"type":"skill_listing","content":"…"}}""",
+                """{"type":"last-prompt","lastPrompt":"/record-issue 打开会话偶发失败"}""",
+                // the envelope fallback: with no real user turn, gitBranch comes off the first cwd-bearing record
+                """{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":9,"output_tokens":3},"content":[]},"cwd":"/repo/proj","gitBranch":"main"}""",
+                """{"type":"user","toolUseResult":{"x":1},"message":{"role":"user","content":[{"type":"tool_result","content":"r"}]},"cwd":"/repo/other","gitBranch":"other"}""",
+                // a second, later slash command must NOT override the opening one as the title
+                """{"type":"last-prompt","lastPrompt":"/record-issue something else later"}""",
+            ),
+        )
+        assertParity(
             "sess-blank", // blank prompt, no titles ⇒ the sessionId itself
             listOf("""{"type":"user","message":{"role":"user","content":""}}"""),
         )
@@ -115,8 +127,10 @@ class ResumeSeedParityTest {
     fun a_transcript_with_no_title_at_all_still_seeds_model_and_tokens() {
         // summarize answers null here (no prompt, no title record) — the seed must mirror that in `title`
         // WITHOUT losing the two fields that come from assistant lines, or a resume would show no model.
+        // The record deliberately carries cwd+gitBranch: the #341 envelope fallback must stay gated behind
+        // "summarize produced a summary", or seed.gitBranch would drift from summary?.gitBranch (null) here.
         val f = Files.createTempDirectory("ccp-seed").resolve("sess-headless.jsonl")
-        f.writeText("""{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":7,"output_tokens":3},"content":[]}}""")
+        f.writeText("""{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":7,"output_tokens":3},"content":[]},"cwd":"/repo","gitBranch":"main"}""")
         assertNull(TranscriptScanner.summarize(f))
         val seed = assertNotNull(TranscriptScanner.resumeSeed(f))
         assertNull(seed.title)

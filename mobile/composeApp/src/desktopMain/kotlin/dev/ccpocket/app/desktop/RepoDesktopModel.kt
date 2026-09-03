@@ -613,7 +613,9 @@ class RepoDesktopModel(
                 val seen = HashMap<String, Int>() // per-account cap — the same MAX_RECENT openProject enforces
                 storeJson.decodeFromString<List<VisitRec>>(s).forEach { r ->
                     val n = seen.getOrElse(r.accountId) { 0 }
-                    if (n < MAX_RECENT) { add(Visit(r.accountId, r.path)); seen[r.accountId] = n + 1 }
+                    // blank-path self-heal: a pre-#341-fix daemon reported slash-opened sessions with cwd="",
+                    // and opening one persisted a Visit(path="") — a nameless RECENT group. Drop it on load.
+                    if (r.path.isNotBlank() && n < MAX_RECENT) { add(Visit(r.accountId, r.path)); seen[r.accountId] = n + 1 }
                 }
             }
         }
@@ -641,7 +643,8 @@ class RepoDesktopModel(
      *  maybe-tilde request), so a tilde reseed and a later absolute directory entry don't split (issue #58). */
     private fun snapshotCurrent() {
         val acct = repo.paired.value?.accountId ?: return
-        val dir = repo.sessionsDir.value ?: return
+        // isNotBlank: dir "" (a cwd-less session row from an older daemon) must never become a RECENT visit
+        val dir = repo.sessionsDir.value?.takeIf { it.isNotBlank() } ?: return
         val key = repo.workdir.value?.takeIf { repo.convoId.value != null && sameDir(it, dir) } ?: dir
         val i = visits.indexOfFirst { it.accountId == acct && sameDir(it.path, key) }
         if (i >= 0) {
@@ -722,7 +725,7 @@ class RepoDesktopModel(
         val keys = visits.filter { it.accountId == acct }.toMutableList()
         // a list opened outside openProject shows before its first snapshotCurrent lands it in visits.
         // normCwd match so a live tilde dir (~/P) folds into its absolute visit (/Users/x/P) — no twin (#58)
-        if (liveDir != null && keys.none { normCwd(it.path) == normLive }) keys.add(0, Visit(acct, liveDir))
+        if (!liveDir.isNullOrBlank() && keys.none { normCwd(it.path) == normLive }) keys.add(0, Visit(acct, liveDir))
         // sessions the user removed from RECENT via the row ✕ (issue #62) — filtered out of every group
         val hidden = hiddenState.filter { it.accountId == acct }.mapTo(HashSet()) { it.sessionId }
         // guest share provenance (issue #115): visits carry only account+path, so the "Shared" pill's
@@ -959,8 +962,10 @@ class RepoDesktopModel(
     /** [selectSession] with [PocketRepository.openSession]'s verdict kept — promotion needs it. */
     private fun selectSessionReporting(s: DkSession): Boolean {
         navGen++ // user navigation — stop an in-flight RECENT refill from repointing the list (#102)
-        focusDir(s.cwd) // clicking a session focuses its project too, so a following ⌘N lands there
-        focusListedDir(s.cwd) // …and makes it the listed one, so its right-click verbs come along
+        if (s.cwd.isNotBlank()) { // an older daemon reports slash-opened rows with cwd="" — never list dir ""
+            focusDir(s.cwd) // clicking a session focuses its project too, so a following ⌘N lands there
+            focusListedDir(s.cwd) // …and makes it the listed one, so its right-click verbs come along
+        }
         optimisticSelectedId = s.sessionId // light the clicked row NOW, don't wait out the open (#82)
         return repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
     }
