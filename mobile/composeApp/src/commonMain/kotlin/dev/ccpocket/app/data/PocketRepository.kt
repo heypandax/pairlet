@@ -1119,7 +1119,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Conversations the desktop keeps live BESIDE this one (issue #311). Empty everywhere else — the
      *  phone opens no panes — which is what makes [SidePanes.route] below a no-op on mobile. */
-    val sidePanes = SidePanes(scope, ::send, ::newPromptId)
+    // the 4th arg reads the live #122 capability (issue #329): a supportsPromptRecovery daemon owns prompt
+    // redelivery, so a column must not arm its ack→turn watchdog and misreport a slow large-context turn.
+    val sidePanes = SidePanes(scope, ::send, ::newPromptId, daemonOwnsPromptRecovery = { daemonOwnsPromptRecovery })
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
     val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
     private var fileUploadJob: Job? = null                 // the chunk-send loop of the ONE Uploading file
