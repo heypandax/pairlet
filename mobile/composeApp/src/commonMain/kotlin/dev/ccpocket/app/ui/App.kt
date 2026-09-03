@@ -1367,6 +1367,29 @@ private fun ConnectScreen(repo: PocketRepository) = ComputersSurface(
     onAdd = { repo.beginAddDevice() },
 )
 
+/** The two bottom clearances [DirectoryScreen]'s overlays sit on — see [bottomLifts]. */
+internal data class BottomLifts(val scrim: Dp, val controls: Dp)
+
+/**
+ * Where the project list's two bottom overlays stop, given the docked [QuotaStrip]'s measured height and
+ * the nav-bar/home-indicator inset. They are NOT the same number, and issue #339 is what happens when
+ * they are.
+ *
+ * The FAB stack is a CONTROL: it may never sit under the home indicator, so it clears whichever band is
+ * taller — the strip's when there is a snapshot, the bare inset when there is not (that clearance was the
+ * root's whole-tree systemBars padding before the bottom went edge-to-edge).
+ *
+ * The scrim is a FADE INTO whatever owns the bottom edge, so it must REACH that owner: the strip's top
+ * when one is docked, the physical edge when the strip is absent. Lifting it by the bare inset in the
+ * strip-less state left its opaque end hanging a home-indicator's height above the edge — a hard-edged
+ * empty black band with list rows still scrolling visibly underneath it, which is exactly the "empty
+ * black bar where the allowance strip should be" of #339. A strip that IS docked always measures at
+ * least its own inset (the inset lives inside its 48dp minimum), so with a snapshot in hand both lifts
+ * are the strip's height and nothing about the docked form moves.
+ */
+internal fun bottomLifts(stripHeight: Dp, navInset: Dp) =
+    BottomLifts(scrim = stripHeight, controls = maxOf(stripHeight, navInset))
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted by EntryFlowUiTest (demo mode)
@@ -1456,13 +1479,9 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     // bug: skeleton showed it, the landed list "swallowed" it). 0 when the strip is absent, so the
     // no-snapshot layout stays pixel-identical.
     var quotaStripPx by remember { mutableStateOf(0) }
-    // The strip now carries the nav-bar/home-indicator inset INSIDE its measured height (it owns the
-    // bottom edge). When it is ABSENT — no snapshot, non-Claude machine, demo — the bottom overlays
-    // (scrim / FAB stack / toast) must still clear that band on their own, hence the max(), which was
-    // previously the root's whole-tree systemBars padding.
-    val quotaStripLift = maxOf(
-        with(LocalDensity.current) { quotaStripPx.toDp() },
-        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+    val lifts = bottomLifts(
+        stripHeight = with(LocalDensity.current) { quotaStripPx.toDp() },
+        navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
     )
 
     // typing in the filter then scrolling the list dismisses the keyboard (fires once per scroll gesture)
@@ -1660,12 +1679,12 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
             // on the 92dp clearance read as a dead band of wasted space.
             val scrimAlpha by animateFloatAsState(if (listState.canScrollForward) 1f else 0f, label = "fabScrim")
             if (scrimAlpha > 0f) Box(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = quotaStripLift).fillMaxWidth().height(96.dp)
+                Modifier.align(Alignment.BottomCenter).padding(bottom = lifts.scrim).fillMaxWidth().height(96.dp)
                     .graphicsLayer { alpha = scrimAlpha }
                     .background(Brush.verticalGradient(0f to Color.Transparent, 0.62f to Tok.base, 1f to Tok.base)),
             )
             Column(
-                Modifier.align(Alignment.BottomEnd).padding(end = Metric.gutter, bottom = Metric.gutter + quotaStripLift),
+                Modifier.align(Alignment.BottomEnd).padding(end = Metric.gutter, bottom = Metric.gutter + lifts.controls),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(Metric.gap),
             ) {
