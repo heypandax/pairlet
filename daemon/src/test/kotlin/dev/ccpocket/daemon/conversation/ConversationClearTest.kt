@@ -82,9 +82,13 @@ class ConversationClearTest {
                     withTimeout(10_000) { while (!cond(snapshot())) delay(20) }
 
                 convo.open(resumeId = "resumed-sid", model = null) // lazy open — announces, spawns nothing
-                await { fs -> fs.any { it is SessionLive } }
+                // #340: an open announces TWICE — a SPARSE frame before any transcript read (so the phone's
+                // open deadline never contains a disk access), then the SEEDED one carrying what those reads
+                // recovered. Occupancy is a read, so it rides the second. Waiting for BOTH also keeps the
+                // post-wipe assertion below honest: a seed still in flight could otherwise land after /clear.
+                await { fs -> fs.filterIsInstance<SessionLive>().size >= 2 }
                 // sanity: the resume announce DOES seed the prior occupancy (the value /clear must drop)
-                assertEquals(80_000L, (snapshot().first { it is SessionLive } as SessionLive).contextUsed)
+                assertEquals(80_000L, snapshot().filterIsInstance<SessionLive>()[1].contextUsed)
 
                 convo.sendPrompt("/clear")
                 await { fs -> fs.any { it is ConvoHistory && it.messages.isEmpty() } }
@@ -118,11 +122,13 @@ class ConversationClearTest {
             )
             try {
                 convo.open(resumeId = "resumed-sid", model = null)
+                // #340: the title comes off the transcript, so it rides the SEEDED announce — the sparse
+                // frame that opens the session ahead of that read carries none by construction.
                 withTimeout(10_000) {
-                    while (synchronized(frames) { frames.none { it is SessionLive } }) delay(20)
+                    while (synchronized(frames) { frames.filterIsInstance<SessionLive>().size < 2 }) delay(20)
                 }
 
-                val live = synchronized(frames) { frames.filterIsInstance<SessionLive>().first() }
+                val live = synchronized(frames) { frames.filterIsInstance<SessionLive>()[1] }
                 assertEquals("Transcript title", live.title)
             } finally {
                 convo.close()
