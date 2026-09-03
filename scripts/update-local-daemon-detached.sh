@@ -20,18 +20,33 @@ export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17}"
 
 driven=0
 pid=$$
+lineage=""
 for _ in 1 2 3 4 5 6 7 8; do
   pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
   { [ -z "$pid" ] || [ "$pid" -le 1 ]; } && break
+  lineage="$lineage $pid"
   if ps -o command= -p "$pid" | grep -q "cc-pocket-daemon/lib"; then driven=1; break; fi
 done
+
+# ── 会话检查（用户规则，2026-09-03）：daemon 还驱动着别的会话时不许静默点火 ──
+# 必须在点火前、会话内做——脱离后 update-local-daemon.sh 里的同一道门只会 abort 进日志，用户看不到。
+# 自己这条会话（谱系内）除外：会话内更新自身断开属预期。通过后延迟点火带 FORCE=1（已检查过）。
+if [ "$driven" = "1" ] && [ "${FORCE:-0}" != "1" ]; then
+  LIVE="$(bash scripts/daemon-live-sessions.sh $lineage)"
+  if [ -n "$LIVE" ]; then
+    echo "⛔ daemon 还有其他正在进行的会话（更新会中断它们）："
+    echo "$LIVE" | sed 's/^/   /'
+    echo "   请先和用户确认；确认后 FORCE=1 bash scripts/update-local-daemon-detached.sh 重跑。"
+    exit 1
+  fi
+fi
 
 echo "── 预热构建（installDist）──"
 ./gradlew :daemon:installDist -q
 
 if [ "$driven" = "0" ]; then
   echo "── 非 daemon 驱动（普通终端）→ 直接前台更新 ──"
-  exec bash scripts/update-local-daemon.sh
+  exec bash scripts/update-local-daemon.sh   # 会话门由它自己交互式把关（FORCE 环境变量原样透传）
 fi
 
 echo "── 本会话由 daemon 驱动 → ${DELAY}s 后脱离式更新（日志 ${LOG}）──"
@@ -50,6 +65,7 @@ for fd in (0, 1, 2):
 time.sleep(delay)
 env = dict(os.environ)
 env.setdefault("JAVA_HOME", "/opt/homebrew/opt/openjdk@17")
+env["FORCE"] = "1"  # 会话门已在点火前做过；脱离进程里再拦只会 abort 进日志没人看见
 with open(log_path, "ab") as log:
     log.write(b"\n===== detached update start =====\n"); log.flush()
     subprocess.run(["bash", "scripts/update-local-daemon.sh"], stdout=log, stderr=log, cwd=repo, env=env)

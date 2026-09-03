@@ -9,6 +9,7 @@
 #  - service-install 自带单实例逻辑（removeSiblingAgents）→ 复用它写 plist + 加载。
 #
 # 用法：JAVA_HOME 可选（默认 openjdk@17）；直接 bash scripts/update-local-daemon.sh
+#       FORCE=1 跳过「正在进行的会话」确认门（仅限已经和用户确认过）。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -18,6 +19,30 @@ DEST="$HOME/Library/Application Support/cc-pocket/cc-pocket-daemon"
 DIST="daemon/build/install/cc-pocket-daemon"
 BIN="$DEST/bin/cc-pocket-daemon"
 UID_N="$(id -u)"
+
+# ── 0/6 会话检查：daemon 有正在进行的会话时不许静默点火（用户规则，2026-09-03）──
+# 重启 daemon 会中断它驱动的所有会话；有活会话必须先经用户确认（FORCE=1 表示已确认）。
+# 自身谱系要排除 —— 会话内跑更新时「自己这条会话」断开属预期，不构成拦截理由。
+if [ "${FORCE:-0}" != "1" ]; then
+  self_line=""; p=$$
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')"
+    { [ -z "$p" ] || [ "$p" -le 1 ]; } && break
+    self_line="$self_line $p"
+  done
+  LIVE="$(bash scripts/daemon-live-sessions.sh $self_line)"
+  if [ -n "$LIVE" ]; then
+    echo "⛔ daemon 还有正在进行的会话（重启会中断它们）："
+    echo "$LIVE" | sed 's/^/   /'
+    if [ -t 0 ]; then
+      read -r -p "   仍要继续更新并中断以上会话？[y/N] " ans
+      [ "$ans" = "y" ] || [ "$ans" = "Y" ] || { echo "   已取消。"; exit 1; }
+    else
+      echo "   请先和用户确认；确认后 FORCE=1 bash scripts/update-local-daemon.sh 重跑。"
+      exit 1
+    fi
+  fi
+fi
 
 echo "── 1/6 构建 daemon（installDist）──"
 ./gradlew :daemon:installDist -q

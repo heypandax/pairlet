@@ -15,6 +15,8 @@ bash scripts/update-local-daemon.sh
 
 它幂等地：构建 `installDist` → 装到可执行位置 `~/Library/Application Support/cc-pocket/` → **杀干净所有现存 daemon + 清 8799** → `service-install` 注册单实例 → 校验「进程数=1 且 relay-socket≥1」，不达标就报错退出。
 
+**更新前的会话确认门（用户规则）**：两个 update 脚本都会先查 daemon 是否还驱动着**其他**正在进行的会话（daemon 的直接子进程，自身谱系除外；探测器 `scripts/daemon-live-sessions.sh`）。有活会话时脚本会带清单 exit 1——此时**必须把清单报给用户、经确认后**再 `FORCE=1` 重跑，不许自作主张点火。
+
 **在 cc-pocket 驱动的 claude 会话里（手机/桌面 App 开的会话）不要直接跑上面这条**——bootout 会连坐杀掉会话本身（exit 137）。改用：
 
 ```bash
