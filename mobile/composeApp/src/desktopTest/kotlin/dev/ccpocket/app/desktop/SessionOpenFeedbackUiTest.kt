@@ -8,11 +8,13 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.runComposeUiTest
 import dev.ccpocket.app.assertPresent
+import dev.ccpocket.app.data.OpenFailure
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.action_retry
 import dev.ccpocket.app.resources.chat_no_session
 import dev.ccpocket.app.resources.chat_open_failed_hint
+import dev.ccpocket.app.resources.chat_open_failed_hint_link
 import dev.ccpocket.app.resources.chat_open_failed_named
 import dev.ccpocket.app.resources.chat_opening_named
 import dev.ccpocket.app.str
@@ -38,6 +40,7 @@ class SessionOpenFeedbackUiTest {
     private class NoChatModel(
         override val opening: Boolean = false,
         override val openFailed: Boolean = false,
+        override val openFailedReason: OpenFailure = OpenFailure.COMPUTER,
     ) : SeedDesktopModel() {
         override val hasChat = false
         var retries = 0
@@ -89,10 +92,38 @@ class SessionOpenFeedbackUiTest {
         assertPresent(str(Res.string.chat_open_failed_named, model.chatTitle)) // which session failed
         assertPresent(str(Res.string.chat_open_failed_hint))                   // why nothing happened
         assertFalse(present(str(Res.string.chat_no_session)), "a failed open must not read as 'nothing was asked'")
+        assertFalse(
+            present(str(Res.string.chat_open_failed_hint_link)),
+            "a Ready link that went unanswered really is the computer — the two hints are exclusive",
+        )
 
         onAllNodes(hasText(str(Res.string.action_retry))).onFirst().performClick()
         waitForIdle()
         assertEquals(1, model.retries, "retry must re-issue the open")
+    }
+
+    /**
+     * Issue #340 — THIS is the pane the report was screenshotted from ("没能打开 <会话名>" / "电脑未响应。" /
+     * "重试"). It said the computer didn't respond however the open died, including when the link was never
+     * up: it blames a machine that is very probably fine, and points the user at Retry rather than at the
+     * connection. The title and the retry are unchanged — only the reason is now honest.
+     */
+    @Test
+    fun anOpenThatDiedOnADownLinkBlamesTheLinkNotTheComputer() = runComposeUiTest {
+        val model = NoChatModel(openFailed = true, openFailedReason = OpenFailure.LINK)
+        setContent { PocketTheme { ChatPane(model) } }
+        waitForIdle()
+
+        assertPresent(str(Res.string.chat_open_failed_named, model.chatTitle)) // still names the session
+        assertPresent(str(Res.string.chat_open_failed_hint_link))
+        assertFalse(
+            present(str(Res.string.chat_open_failed_hint)),
+            "a link that was never up must not be reported as the computer not responding",
+        )
+
+        onAllNodes(hasText(str(Res.string.action_retry))).onFirst().performClick()
+        waitForIdle()
+        assertEquals(1, model.retries, "the retry affordance is unchanged by the variant")
     }
 
     /** The ordinary case is untouched: nothing open, nothing pending → the real empty state. */

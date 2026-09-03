@@ -62,6 +62,10 @@ class SidePaneModelDelegationGuardTest {
     /** Deliberately inert. Each one is a control ChatPane renders (or a value it renders FROM) whose
      *  delegated answer would have come from — or landed on — the focused conversation instead. */
     private val PANE_INERT = setOf(
+        // #340: WHY an open failed. `openFailed` itself is pane-scoped, but a column's deadline is still
+        // the blind one in SplitPanes, so it has no link-state opinion — delegated, this column's failure
+        // pane would explain itself with the FOCUSED chat's last diagnosis.
+        "openFailedReason",
         // conversation identity a column does not track (mode/effort/tier switching stays with the
         // focused pane; the MODEL graduated to pane-scoped above once SidePane learned to carry it)
         "chatBranch", "chatMode",

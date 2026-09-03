@@ -113,6 +113,7 @@ import dev.ccpocket.app.ui.chat.LineageBanner
 import dev.ccpocket.app.ui.chat.RewindErrorBar
 import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.ImgState
+import dev.ccpocket.app.data.OpenFailure
 import dev.ccpocket.app.data.PendingFile
 import dev.ccpocket.app.data.SentFile
 import dev.ccpocket.app.resources.Res
@@ -138,6 +139,7 @@ import dev.ccpocket.app.resources.chat_no_session
 import dev.ccpocket.app.resources.chat_no_session_hint
 import dev.ccpocket.app.resources.chat_open_failed
 import dev.ccpocket.app.resources.chat_open_failed_hint
+import dev.ccpocket.app.resources.chat_open_failed_hint_link
 import dev.ccpocket.app.resources.chat_open_failed_named
 import dev.ccpocket.app.resources.chat_opening
 import dev.ccpocket.app.resources.chat_opening_named
@@ -285,7 +287,16 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                     title = model.chatTitle.takeIf { it.isNotBlank() }
                         ?.let { stringResource(Res.string.chat_open_failed_named, it) }
                         ?: stringResource(Res.string.chat_open_failed),
-                    hint = stringResource(Res.string.chat_open_failed_hint),
+                    // #340: name the world the open actually died in. "The computer didn't respond" was
+                    // said even when the link was never up — blaming a computer that is very probably fine
+                    // and pointing the user at Retry instead of at the connection.
+                    hint = stringResource(
+                        if (model.openFailedReason == OpenFailure.LINK) {
+                            Res.string.chat_open_failed_hint_link
+                        } else {
+                            Res.string.chat_open_failed_hint
+                        },
+                    ),
                     actionLabel = stringResource(Res.string.action_retry),
                     onAction = { model.retryOpen() },
                 )

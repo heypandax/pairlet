@@ -1086,6 +1086,7 @@
     <string name="chat_open_failed">没能打开会话</string>
     <string name="chat_open_failed_named">没能打开 %1$s</string>
     <string name="chat_open_failed_hint">电脑未响应。</string>
+    <string name="chat_open_failed_hint_link">还没连上电脑。</string>
     <string name="chat_you">你</string>
     <string name="msg_no_response_click">还没有响应——点击重发</string>
     <string name="msg_undelivered_reconnecting">未确认送达——正在重连…</string>

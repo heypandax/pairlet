@@ -1089,6 +1089,7 @@
     <string name="chat_open_failed">Couldn\'t open the session</string>
     <string name="chat_open_failed_named">Couldn\'t open %1$s</string>
     <string name="chat_open_failed_hint">The computer didn\'t respond.</string>
+    <string name="chat_open_failed_hint_link">Not connected to the computer.</string>
     <string name="chat_you">You</string>
     <string name="msg_no_response_click">no response yet — click to resend</string>
     <string name="msg_undelivered_reconnecting">delivery not confirmed — reconnecting…</string>

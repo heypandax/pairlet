@@ -11,6 +11,7 @@ import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.FleetCoordinator
 import dev.ccpocket.app.data.FleetRuntime
+import dev.ccpocket.app.data.OpenFailure
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.SidePane
 import dev.ccpocket.app.pairing.PairedDaemon
@@ -1176,6 +1177,8 @@ class RepoDesktopModel(
     // pane's content, and fading it out would put the user back on the blank empty state the report is about.
     // It clears when the next open is asked for (openSession) or lands (SessionLive).
     override val openFailed: Boolean get() = repo.openTimedOut.value
+    // #340: only meaningful while openFailed — the repo writes it immediately before raising that flag
+    override val openFailedReason: OpenFailure get() = repo.openTimedOutReason.value
     override fun retryOpen() { repo.retryOpen() }
     override val chatTitle: String get() = repo.chatTitle.value ?: "Chat"
     override val chatAgent: AgentKind get() = repo.sessionAgent.value ?: AgentKind.CLAUDE
