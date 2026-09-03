@@ -51,6 +51,7 @@
     <string name="session_degraded_banner">This session looks over its context limit — recent replies were API failures. Start a new session or send /clear.</string>
     <string name="context_critical_caption">Context full — oldest turns will start dropping</string>
     <string name="open_session_timeout">Couldn\'t open the session — the computer didn\'t respond</string>
+    <string name="open_session_timeout_link">Couldn\'t open the session — not connected to the computer</string>
     <string name="turn_done_marker">done</string>
     <string name="dir_empty_title">No projects yet</string>
     <string name="dir_empty_body">This computer has no projects to open yet. Pick a folder to start your first session here.</string>

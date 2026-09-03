@@ -357,6 +357,22 @@ internal const val ASK_QUESTION_TOOL = "AskUserQuestion"
  *  actually keep. Tuning it now moves both, which is the only honest meaning of "matches". */
 internal const val SESSION_OPEN_TIMEOUT_MS = 8_000L
 
+/** The SECOND budget an open gets, after the silent auto-resend (issue #340). Deliberately shorter than
+ *  the first: by the time it is armed the link has claimed Ready for a full window AND the request has
+ *  been replayed, so this is only about not making a genuinely wedged open cost 16s of spinner before it
+ *  admits it. */
+internal const val SESSION_OPEN_RETRY_TIMEOUT_MS = 4_000L
+
+/**
+ * Why an open gave up (issue #340) — the two worlds one blind 8s deadline could not tell apart.
+ *
+ * [LINK]: the connection was not [ConnPhase.Ready], so nothing we sent could have arrived and nothing we
+ * resend would either. The computer is very probably fine; the honest thing to name is the link.
+ * [COMPUTER]: the link claimed Ready and the request still went unanswered — for a resume, even after
+ * being replayed once. This is the only case that has ever deserved "the computer didn't respond".
+ */
+enum class OpenFailure { LINK, COMPUTER }
+
 sealed interface ChatItem {
     /** [pending] = sent from this device but the daemon hasn't echoed any evidence back yet (stream
      *  chunk / tool event / turn end). Stays true while the link is down so the UI can say so —
@@ -1278,6 +1294,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // switcher visibly bounced you out to a list for a beat before landing. Cleared wherever [opening] is.
     val switchingSession = mutableStateOf(false)
     val openTimedOut = mutableStateOf(false)                 // the daemon never answered an OpenSession within 8s — slim banner, auto-dismissed (issue #41)
+    /** Which failure the [openTimedOut] banner is reporting (issue #340). Only meaningful WHILE that flag
+     *  is true: it is written immediately before the flag is raised, and deliberately not cleared with it,
+     *  so none of the five paths that lower the flag has to remember a second field to reset. */
+    val openTimedOutReason = mutableStateOf(OpenFailure.COMPUTER)
     private var openGen = 0                                  // generation counter matching each openSession call to its own safety-net timer
     private var openDispatchedGen = 0                        // current generation has reached its OpenSession send (#235 identity handoff)
     private var openJob: Job? = null                         // owns both the state-switch worker and its 8s deadline
@@ -5285,30 +5305,73 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // declares this client delta-capable so an observe view tails with deltas (issue #147)
         if (gen != openGen) return
         openDispatchedGen = gen // the matching SessionLive may own the view from here
-        send(
-            OpenSession(
-                wd,
-                resumeId,
-                model = openModel,
-                mode = openMode,
-                effort = openEffort,
-                agent = openAgent,
-                lastEventSeq = lastEventSeqFor(resumeId),
-                permissionMode = openPermissionMode,
-                serviceTier = openServiceTier,
-            ),
+        // Built ONCE and held: the auto-resend below replays these exact bytes. Re-deriving the request
+        // down there could land it under different flags than the one that went unanswered — including a
+        // different lastEventSeq, which is what decides full replay vs delta.
+        val request = OpenSession(
+            wd,
+            resumeId,
+            model = openModel,
+            mode = openMode,
+            effort = openEffort,
+            agent = openAgent,
+            lastEventSeq = lastEventSeqFor(resumeId),
+            permissionMode = openPermissionMode,
+            serviceTier = openServiceTier,
         )
+        send(request)
         delay(SESSION_OPEN_TIMEOUT_MS) // safety: clear if the daemon never answers (matches `switching`)
-        if (gen == openGen && opening.value) {
-            openJob = null
-            opening.value = false
-            // …and release the router too (issue #165): a switch that never landed must fall back to the
-            // session list rather than strand the user on a chat that will never fill
-            switchingSession.value = false
-            openTimedOut.value = true // surfaced as a slim banner instead of the old silent spinner reset (issue #41)
-            pendingNewOpenWd = null // #219: the open is dead — a later background announce must not claim it
-            openInFlight = null // #235: …and the claim dies with it, so the same row can be clicked again
-        }
+        // Answered, superseded or abandoned — the terminal path that did it already released everything.
+        // (A landing SessionLive cancels openJob outright, so this is belt-and-braces.)
+        if (gen != openGen || !opening.value) return
+        // #340: the deadline stops being a blind verdict here. Saying "the computer didn't respond" in
+        // BOTH of the worlds below is what made the field report unfixable from a screenshot.
+        //
+        // (1) The link is not Ready: nothing we sent could have arrived, and nothing we resend will
+        //     either. Fail now and name the LINK — the phase machinery already owns retry/backoff.
+        if (phase.value != ConnPhase.Ready) return failOpen(OpenFailure.LINK, retried = false)
+        // (2) The link claims Ready, so the open may merely have been slow — a big transcript on the far
+        //     side, a loaded daemon, a relay hiccup that ate one frame. Replay the SAME request once,
+        //     SILENTLY: `opening` stays raised and nothing on screen moves, so the user never learns a
+        //     retry happened unless it too fails.
+        //
+        //     RESUMES ONLY. A brand-new open is NOT idempotent on the daemon: SessionRegistry live-matches
+        //     an incoming open on its resumeId, so a second `resumeId == null` request skips that block
+        //     entirely and falls through to the cold path, which mints a fresh UUID and a SECOND
+        //     Conversation. The phone then binds whichever announce lands first and the identity guard
+        //     silently drops the other — one session on screen, two agents on the computer. That is the
+        //     historic "redundant session / fork" failure class (a variant of it was fixed in v1.2.0), and
+        //     a silent auto-resend would rebuild it by hand. #340's own boundary is "opening an EXISTING
+        //     session" anyway, so a new open fails straight through with retried=0.
+        if (resumeId == null) return failOpen(OpenFailure.COMPUTER, retried = false)
+        send(request)
+        delay(SESSION_OPEN_RETRY_TIMEOUT_MS)
+        if (gen != openGen || !opening.value) return
+        failOpen(OpenFailure.COMPUTER, retried = true)
+    }
+
+    /** One open's terminal failure: release every claim it held, raise the banner for [reason], and file
+     *  the single telemetry event (issue #340). Callers re-check generation/`opening` first, so this only
+     *  ever runs for an open that nothing answered. */
+    private fun failOpen(reason: OpenFailure, retried: Boolean) {
+        openJob = null
+        opening.value = false
+        // …and release the router too (issue #165): a switch that never landed must fall back to the
+        // session list rather than strand the user on a chat that will never fill
+        switchingSession.value = false
+        openTimedOutReason.value = reason // written BEFORE the flag the UI reads it under
+        openTimedOut.value = true // surfaced as a slim banner instead of the old silent spinner reset (issue #41)
+        pendingNewOpenWd = null // #219: the open is dead — a later background announce must not claim it
+        openInFlight = null // #235: …and the claim dies with it, so the same row can be clicked again
+        // Fired exactly where the banner floats up — so the count is banners the user SAW, not deadlines
+        // armed. Until now this whole path was unattributable: every failure looked the same in Firebase.
+        Telemetry.track(
+            TelEvent.SessionOpenTimeout,
+            mapOf(
+                TelKey.Link to if (reason == OpenFailure.LINK) "down" else "ready",
+                TelKey.Retried to if (retried) 1 else 0,
+            ) + demoTag(),
+        )
     }
 
     fun hasReadyImages() = pendingImages.any { it.state == ImgState.Ready }

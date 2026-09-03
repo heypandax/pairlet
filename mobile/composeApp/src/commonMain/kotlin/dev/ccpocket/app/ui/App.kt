@@ -167,6 +167,7 @@ import dev.ccpocket.app.supportPlatformLabel
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.FileUpState
+import dev.ccpocket.app.data.OpenFailure
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.StatusMsg
 import dev.ccpocket.app.data.VoiceState
@@ -391,7 +392,19 @@ fun App(scope: CoroutineScope) {
                 // entering a chat before the first link-up used to look identical to "connected" — say so (issue #41)
                 if (repo.sessionActive.value && repo.phase.value == ConnPhase.Connecting && repo.convoId.value != null) StatusBanner(Tok.warn, stringResource(Res.string.conn_connecting_banner))
                 if (repo.openTimedOut.value) {
-                    StatusBanner(Tok.warn, stringResource(Res.string.open_session_timeout))
+                    // #340: the same deadline used to blame the computer even when the link was never up.
+                    // Name the world the open actually died in — a down link needs the user to look at the
+                    // connection, not to sit retrying against a computer that is very probably fine.
+                    StatusBanner(
+                        Tok.warn,
+                        stringResource(
+                            if (repo.openTimedOutReason.value == OpenFailure.LINK) {
+                                Res.string.open_session_timeout_link
+                            } else {
+                                Res.string.open_session_timeout
+                            },
+                        ),
+                    )
                     LaunchedEffect(Unit) { delay(6000); repo.openTimedOut.value = false } // transient; leaves composition → effect cancels
                 }
                 Box(Modifier.weight(1f)) {
