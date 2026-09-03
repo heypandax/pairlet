@@ -392,6 +392,11 @@ interface DesktopModel {
      *  the popover's pick can never land on the focused conversation. */
     fun switchSideModel(pane: SidePane, name: String) {}
 
+    /** Re-drive a column's OWN stalled prompt under a fresh id (issue #329) — the ChatPane resend cue, one
+     *  column over. Pane-keyed like every side verb, so a resend can never re-run the focused conversation's
+     *  prompt (the delegating no-op it used to inherit did exactly that). */
+    fun resendSideStalled(pane: SidePane) {}
+
     /** Decide a pane's approval. Keyed by the ASK the column is holding — not by whatever the focused
      *  conversation happens to be blocked on, and not by an inbox row that may not be there. */
     fun resolvePaneApproval(ask: PermissionAsk, allow: Boolean, remember: Boolean = false) {}

@@ -56,6 +56,14 @@ class SidePaneModel(
     override val chatMode: PermissionMode get() = PermissionMode.DEFAULT
     override val messages: List<ChatItem> get() = pane.messages
     override val streaming: Boolean get() = pane.streaming.value
+    // this column's OWN delivery-receipt + stall cues (issue #329), read straight off SidePane like
+    // openFailed above — NOT delegated: a stalled prompt in ONE column must not light the cue in another.
+    // ChatPane renders these verbatim, so a column now shows "not delivered" / "no response — resend" /
+    // "queued" exactly as the focused chat, and resendStalled re-drives THIS pane's prompt, not the focused one.
+    override val sendUndelivered: Boolean get() = pane.sendStalled.value
+    override val turnStalled: Boolean get() = pane.turnStalled.value
+    override val turnQueued: Boolean get() = pane.turnQueued.value
+    override fun resendStalled() = base.resendSideStalled(pane)
     override val sessionDegraded: Boolean get() = false
     override val contextUsed: Long? get() = null
     override val contextWindow: Long? get() = null
@@ -155,10 +163,7 @@ class SidePaneModel(
     override val historyPrependGen: Int get() = 0
     override val lastHistoryPrependCount: Int get() = 0
     override fun loadOlderHistory() {}
-    override val sendUndelivered: Boolean get() = false
-    override val turnStalled: Boolean get() = false
-    override val turnQueued: Boolean get() = false
-    override fun resendStalled() {}
+    // (sendUndelivered / turnStalled / turnQueued / resendStalled are now pane-scoped — see above, issue #329)
     // rewind/fork is a focused-pane affordance ([canRewind] false already hides the menu); these are its
     // BANNERS, which delegation would have filled with the focused conversation's lineage and refusals —
     // a "branched from …" line over a column that was never branched.

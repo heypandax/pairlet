@@ -45,6 +45,11 @@ class SidePaneModelDelegationGuardTest {
         "hasChat", "opening", "openFailed", "retryOpen",
         "chatTitle", "chatAgent", "chatWorkdir",
         "messages", "streaming", "selectedSessionId",
+        // this column's OWN delivery receipt + stall cues and its per-pane resend (issue #329): read off
+        // SidePane's own watchdog, not the focused conversation's. Inert, a lost prompt in one column would
+        // have stayed silently "sending" while the focused pane's cue lit; DELEGATED, a resend re-ran the
+        // focused conversation's prompt.
+        "sendUndelivered", "turnStalled", "turnQueued", "resendStalled",
         "composerState", "composer", "send", "stopTurn",
         "ask", "resolve", "resolveTaskGrant", "retrySafer", "dismissAsk",
         // W3: the column's ask has a full life cycle of its own — its queue position, its issue-#100
@@ -67,10 +72,11 @@ class SidePaneModelDelegationGuardTest {
         "chatBranch", "chatMode",
         "chatPermissionMode", "chatEffort", "chatServiceTier",
         "sessionDegraded", "contextUsed", "contextWindow", "observing", "takeOver",
-        // transcript paging + delivery watchdogs: a column has neither, and the focused pane's answers
-        // would put another session's loader/warning/resend cue over this stream
+        // transcript paging: a column keeps no scrollback loader, so the focused pane's answer would put
+        // another session's "load older" over this stream. (Delivery-receipt / stall cues graduated to
+        // PANE_SCOPED once SidePane grew its own per-column watchdog — issue #329.)
         "historyHasMore", "historyLoadingOlder", "historyPrependGen", "lastHistoryPrependCount",
-        "loadOlderHistory", "sendUndelivered", "turnStalled", "turnQueued", "resendStalled",
+        "loadOlderHistory",
         // rewind/fork: the menu is already hidden by canRewind=false; these are its BANNERS
         "canRewind", "rewindBlockedByTurn", "startRewind", "rewindError", "dismissRewindError",
         "sessionLineage",
@@ -143,7 +149,7 @@ class SidePaneModelDelegationGuardTest {
         // split-pane plumbing itself: these take the pane as an argument, so they are already explicit
         // (splitFocusedSlot is window layout — WHERE the focused chat renders — not conversation state)
         "sidePanes", "canSplit", "splitFocusedSlot", "openInSplit", "closeSplit", "promoteSplit", "retrySplitOpen",
-        "sendSidePrompt", "stopSideTurn", "switchSideModel", "resolvePaneApproval", "resolvePaneTaskGrant", "retryPaneSafer",
+        "sendSidePrompt", "stopSideTurn", "switchSideModel", "resendSideStalled", "resolvePaneApproval", "resolvePaneTaskGrant", "retryPaneSafer",
         "answerPaneQuestions", "skipPaneQuestions", "dismissPaneAsk",
         // workflow orchestration panel (docked at window level)
         "workflowRuns", "dockedWorkflowRunId", "openWorkflowPanel", "closeWorkflowPanel",

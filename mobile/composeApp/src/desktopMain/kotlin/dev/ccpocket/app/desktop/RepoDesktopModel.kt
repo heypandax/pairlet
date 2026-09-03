@@ -449,6 +449,8 @@ class RepoDesktopModel(
 
     override fun switchSideModel(pane: SidePane, name: String) = repo.sidePanes.switchModel(pane, name)
 
+    override fun resendSideStalled(pane: SidePane) = repo.sidePanes.resendStalled(pane)
+
     // The three verdict verbs all ride [PocketRepository.resolveAskDirect]: the ask the COLUMN is showing
     // decides, and the verdict goes out whether or not the machine-wide inbox still carries a row for it
     // (it legitimately may not — see that function's doc). The verdict fields mirror the focused path's
