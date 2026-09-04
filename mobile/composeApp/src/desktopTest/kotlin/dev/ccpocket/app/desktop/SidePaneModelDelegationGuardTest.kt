@@ -75,6 +75,9 @@ class SidePaneModelDelegationGuardTest {
         // focused pane; the MODEL graduated to pane-scoped above once SidePane learned to carry it)
         "chatBranch", "chatMode",
         "chatPermissionMode", "chatEffort", "chatServiceTier",
+        // #345: the thinking tri-state rides with effort — a column shows no toggle and a pick
+        // would land on the FOCUSED session's next launch
+        "chatThinking", "supportsThinkingToggle", "switchThinking",
         "sessionDegraded", "contextUsed", "contextWindow", "observing", "takeOver",
         // transcript paging: a column keeps no scrollback loader, so the focused pane's answer would put
         // another session's "load older" over this stream. (Delivery-receipt / stall cues graduated to

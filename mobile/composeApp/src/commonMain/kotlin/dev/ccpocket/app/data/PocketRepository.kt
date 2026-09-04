@@ -1243,6 +1243,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
     val sessionAgent = mutableStateOf<AgentKind?>(null)      // backend driving this session (Claude/Codex) — header badge
     val effort = mutableStateOf<String?>(null)               // reasoning effort: low|medium|high|xhigh|max (null = default)
+    // extended thinking, INDEPENDENT of effort (issue #345): null = CLI default (incl. the user's global
+    // alwaysThinkingEnabled), true/false = --thinking enabled/disabled baked at the next launch. Gateway
+    // machines need it: models that reject thinking content fail high-effort turns otherwise.
+    val thinking = mutableStateOf<Boolean?>(null)
     val serviceTier = mutableStateOf<String?>(null)          // Codex `priority` = Fast (independent from effort)
     val sessionOrigin = mutableStateOf<String?>(null)        // external trigger source, e.g. "feishu-bot" → header "via …" chip (issue #91)
     val contextWindow = mutableStateOf<Long?>(null)          // context capacity in tokens (derived from model if daemon omits it)
@@ -1607,6 +1611,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val agent: AgentKind = AgentKind.CLAUDE,
         val permissionMode: String? = null,
         val serviceTier: String? = null,
+        val thinking: Boolean? = null,
     )
     private val sessionParams = mutableMapOf<String, SessionParams>()
 
@@ -1621,6 +1626,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     AgentKind.valueOf(t[4]),
                     t.getOrNull(5)?.ifEmpty { null },
                     t.getOrNull(6)?.ifEmpty { null },
+                    // issue #345: appended column — "" (old rows) = null/default, else "0"/"1"
+                    t.getOrNull(7)?.let { s -> when (s) { "0" -> false; "1" -> true; else -> null } },
                 )
             }
         }
@@ -1633,6 +1640,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 listOf(
                     sid, p.mode.name, p.model ?: "", p.effort ?: "", p.agent.name,
                     p.permissionMode ?: "", p.serviceTier ?: "",
+                    when (p.thinking) { true -> "1"; false -> "0"; null -> "" },
                 ).joinToString("\t")
             }
         SecureStore.putString(K_SESSION_PARAMS, lines)
@@ -2662,7 +2670,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         slashCommands.clear()
         clearBackgroundJobs()
         sessionDegraded.value = false; degradedSendArmed = false
-        model.value = null; effort.value = null; sessionAgent.value = null
+        model.value = null; effort.value = null; sessionAgent.value = null; thinking.value = null
         contextUsed.value = null; contextWindow.value = null
         refreshing.value = false; sessionsRefreshing.value = false
         abandonVoice()
@@ -3207,6 +3215,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 f.mode?.let { mode.value = it } // daemon is the source of truth — corrects the optimistic badge
                 permissionMode.value = f.permissionMode // unconditional: a normal mode clears a prior `auto`
                 effort.value = f.effort // unconditional: `/effort default` must clear an optimistic explicit level
+                thinking.value = f.thinking // #345: same unconditional reconcile — `/thinking default` clears the optimistic value
                 serviceTier.value = f.serviceTier // unconditional: null restores account/default tier
                 f.agent?.let { sessionAgent.value = it } // daemon truth for the backend badge
                 val liveAgent = f.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
@@ -3246,6 +3255,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                         sessionAgent.value ?: AgentKind.CLAUDE,
                         permissionMode.value,
                         serviceTier.value,
+                        thinking.value,
                     )
                 }
                 persistSessionParams() // survive app restarts too — reopening tomorrow restores mode/effort/agent
@@ -5324,8 +5334,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             openAgent == AgentKind.CODEX &&
                 (candidate == null || knownCapabilities == null || knownCapabilities.serviceTiers.any { it.id == candidate })
         }
+        // #345: the thinking toggle restores per-session, exactly like effort — a gateway user who turned
+        // thinking off for this session must not get it silently re-enabled by a reopen. No cross-agent
+        // migration and no default ladder: only a persisted choice rides, and only at a daemon that
+        // advertised the toggle (an old daemon would drop the field and show a lie).
+        val openThinking = saved?.thinking?.takeIf { agentModels[openAgent]?.supportsThinkingToggle == true }
         mode.value = openMode; permissionMode.value = openPermissionMode; allowRules.clear()
         model.value = openModel; effort.value = openEffort; serviceTier.value = openServiceTier; contextUsed.value = null // reconciled by SessionLive
+        thinking.value = openThinking
         sessionAgent.value = openAgent // optimistic; SessionLive corrects from daemon truth
         // Pre-fetch OpenCode model list so the picker has it ready when the user opens it,
         // rather than only fetching on picker-open (SessionSheets.kt ModelPicker LaunchedEffect).
@@ -5349,6 +5365,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             lastEventSeq = lastEventSeqFor(resumeId),
             permissionMode = openPermissionMode,
             serviceTier = openServiceTier,
+            thinking = openThinking,
         )
         send(request)
         delay(SESSION_OPEN_TIMEOUT_MS) // safety: clear if the daemon never answers (matches `switching`)
@@ -6628,6 +6645,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         switchViaCommand("/effort ${target ?: "default"}")
     }
 
+    /** Switch extended thinking (issue #345) — routed through the daemon's `/thinking` interception with
+     *  the same next-turn semantics as effort. The UI gates on [supportsThinkingToggle] so this only ever
+     *  fires at a daemon that advertised the command. */
+    fun switchThinking(enabled: Boolean?) {
+        if (convoId.value == null || enabled == thinking.value) return
+        thinking.value = enabled // optimistic; the daemon's next SessionLive corrects it
+        switchViaCommand("/thinking ${when (enabled) { true -> "on"; false -> "off"; null -> "default" }}")
+    }
+
+    /** Whether the daemon's model list for [agent] advertised a thinking toggle (issue #345). The switch
+     *  hides itself when false — an old daemon would silently drop the OpenSession field and show a lie. */
+    fun supportsThinkingToggle(agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE): Boolean =
+        agentModels[agent]?.supportsThinkingToggle == true
+
     fun switchServiceTier(tier: String?) {
         val c = convoId.value ?: return
         val target = tier?.trim()?.takeIf { it.isNotEmpty() }
@@ -6783,6 +6814,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             mode.value = defaultMode.value
             permissionMode.value = defaultPermissionMode.value.takeIf { agent == AgentKind.CLAUDE }
             serviceTier.value = (saved?.serviceTier ?: defaultServiceTier.value).takeIf { agent == AgentKind.CODEX }
+            // #345: same per-session restore as openSession — a takeover must not silently re-enable thinking
+            val takeoverThinking = saved?.thinking?.takeIf { agentModels[agent]?.supportsThinkingToggle == true }
+            thinking.value = takeoverThinking
             send(
                 OpenSession(
                     wd,
@@ -6797,6 +6831,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     lastEventSeq = lastEventSeqFor(sid),
                     permissionMode = permissionMode.value,
                     serviceTier = serviceTier.value,
+                    thinking = takeoverThinking,
                 ),
             )
         }

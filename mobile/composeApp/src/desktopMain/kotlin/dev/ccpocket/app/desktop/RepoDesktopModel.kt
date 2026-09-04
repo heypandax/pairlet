@@ -1205,6 +1205,9 @@ class RepoDesktopModel(
     override val chatPermissionMode: String? get() = repo.permissionMode.value
     override val chatEffort: String? get() = repo.effort.value
     override val chatServiceTier: String? get() = repo.serviceTier.value
+    // #345 tri-state — same state the mobile sheet reads/writes
+    override val chatThinking: Boolean? get() = repo.thinking.value
+    override val supportsThinkingToggle: Boolean get() = repo.supportsThinkingToggle()
     override val gatewayBaseUrl: String? get() = repo.gatewayBaseUrl.value // issue #139: DaemonInfo's gateway hint
     // issue #167 ②: the gateway's own model list, same source the mobile picker reads
     override val gatewayModels: List<String>
@@ -1229,6 +1232,7 @@ class RepoDesktopModel(
     override fun switchModel(name: String) = repo.switchModel(name)
     override fun switchEffort(level: String?) = repo.switchEffort(level)
     override fun switchServiceTier(tier: String?) = repo.switchServiceTier(tier)
+    override fun switchThinking(enabled: Boolean?) = repo.switchThinking(enabled)
     override fun effortOptions(): List<String> = repo.effortOptions()
     override fun serviceTierOptions() = repo.serviceTierOptions()
     override fun effortOptionsFor(agent: AgentKind, model: String?): List<String> = repo.effortOptions(agent, model)

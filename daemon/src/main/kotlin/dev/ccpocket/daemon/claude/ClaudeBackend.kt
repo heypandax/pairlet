@@ -208,6 +208,11 @@ class ClaudeBackend(
     override fun supportedEfforts(model: String?): Set<String> = CLAUDE_EFFORTS
     override fun normalizeEffort(model: String?, effort: String?): String? = effort?.takeIf { it in CLAUDE_EFFORTS }
 
+    // --thinking is baked at launch exactly like --effort (issue #345); the flag exists on the CLI since
+    // 2.1.x with enabled|adaptive|disabled — scripts/probe-claude-wire.py scenario `thinkingflag` pins it.
+    override val supportsThinkingToggle: Boolean = true
+    override fun applyThinking(thinking: Boolean?): Boolean = true
+
     // claude marks `-p` transcripts entrypoint:"sdk-cli" and the desktop --resume picker hides those; once
     // the process is dead the file is safe to rewrite so this session shows up there.
     override suspend fun onProcessEnded(sessionId: String?) {

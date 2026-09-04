@@ -222,6 +222,11 @@ class Conversation(
     @Volatile
     private var effort: String? = null
 
+    // mutable: a phone can switch extended thinking mid-session via `/thinking on|off|default`
+    // (issue #345). Orthogonal to effort on purpose — see AgentSpec.thinking. Null = CLI default.
+    @Volatile
+    private var thinking: Boolean? = null
+
     // Backend-native launch knobs that are deliberately additive strings on the wire: growing the legacy
     // PermissionMode enum would make already-shipped peers drop the whole SessionLive frame.
     @Volatile
@@ -670,9 +675,10 @@ class Conversation(
         val effort: String?,
         val permissionMode: String?,
         val serviceTier: String?,
+        val thinking: Boolean? = null,
     )
 
-    fun launchKnobs(): LaunchKnobs = LaunchKnobs(mode, model, effort, permissionMode, serviceTier)
+    fun launchKnobs(): LaunchKnobs = LaunchKnobs(mode, model, effort, permissionMode, serviceTier, thinking)
 
     /** One-shot queue drain: the oldest queued prompt leaves the ledger to become the next spawn's
      *  argv message — launchProcess re-records it (initialSend) under the fresh generation, so the
@@ -756,6 +762,8 @@ class Conversation(
             permissionMode = permissionMode,
             serviceTier = serviceTier,
             title = sessionTitle,
+            // issue #345: the baked-in thinking toggle, re-announced on every relaunch like mode/model/effort
+            thinking = thinking,
         )
 
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
@@ -795,6 +803,10 @@ class Conversation(
         sinceSeq: Long? = null,
         permissionMode: String? = null,
         serviceTier: String? = null,
+        // issue #345: the extended-thinking toggle the client chose for this open (null = CLI default).
+        // Stored as-is — no normalization hook exists because there is nothing to normalize: a tri-state
+        // Boolean cannot go stale the way a persisted effort level can against a retired model.
+        thinking: Boolean? = null,
         // issue #282: open this conversation as a TRUNCATED branch of [resumeId] rather than a plain
         // resume. Set only by SessionRegistry.rewind, which has already validated the anchor against the
         // file on disk; null keeps every other open byte-for-byte as it was.
@@ -803,6 +815,7 @@ class Conversation(
         this.rewindLaunch = rewind
         this.model = model
         this.effort = backend.normalizeEffort(model, effort) // drop stale persisted levels a known model cannot run
+        this.thinking = thinking
         this.permissionMode = normalizePermissionMode(permissionMode)
         this.serviceTier = normalizeServiceTier(serviceTier)
         this.openedResumeId = resumeId
@@ -829,7 +842,7 @@ class Conversation(
             // launchProcess defers to the first sendPrompt, which anchors on sessionId ?: openedResumeId).
             launchProcess(
                 AgentSpec(
-                    workdir, resumeId, model, mode, effort = this.effort,
+                    workdir, resumeId, model, mode, effort = this.effort, thinking = this.thinking,
                     permissionMode = this.permissionMode, serviceTier = this.serviceTier, forkSession = fork,
                 ),
             )
@@ -1198,7 +1211,7 @@ class Conversation(
         val fork = if (sessionId == null) openedWithFork else resumeId != sessionId
         launchProcess(
             AgentSpec(
-                workdir, resumeId = resumeId, model = model, mode = mode, effort = effort,
+                workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, thinking = thinking,
                 permissionMode = permissionMode, serviceTier = serviceTier,
                 forkSession = fork, initialPrompt = initialSend?.text,
             ),
@@ -1334,6 +1347,23 @@ class Conversation(
         recordPendingSettings(mode = null, model = null, effort = null, effortChanged = true)
     }
 
+    /** Switch extended thinking — next-turn semantics (issue #345), same deferral as the other launch knobs.
+     *  Refused (announce-only, state unchanged) for backends that never advertised the toggle — the App
+     *  hides the switch, but the daemon must hold the line for any hand-rolled `/thinking` prompt. */
+    suspend fun switchThinking(newThinking: Boolean?) {
+        if (!backend.supportsThinkingToggle) {
+            log.info("$convoId refusing /thinking for backend ${backend.kind} (toggle not supported)")
+            sink.emit(live(sessionId))
+            return
+        }
+        if (newThinking == thinking) { // no-op, but re-announce so an out-of-sync client corrects itself
+            sink.emit(live(sessionId))
+            return
+        }
+        thinking = newThinking
+        recordPendingSettings(mode = null, model = null, effort = null, thinkingChanged = true)
+    }
+
     /** Switch Codex's service tier independently from reasoning effort (`priority` is the Fast tier). */
     suspend fun switchServiceTier(newServiceTier: String?) {
         val normalized = normalizeServiceTier(newServiceTier)
@@ -1369,13 +1399,17 @@ class Conversation(
         effortChanged: Boolean = false,
         permissionModeChanged: Boolean = false,
         serviceTierChanged: Boolean = false,
+        thinkingChanged: Boolean = false,
     ) {
         if (recordedPreFirstTurn()) return
         val relaunchForSettings = backend.applySettings(mode = mode, model = model, effort = effort)
         val relaunchForEffort = effortChanged && backend.applyEffort(this.effort)
         val relaunchForPermissionMode = permissionModeChanged && backend.applyPermissionMode(permissionMode)
         val relaunchForServiceTier = serviceTierChanged && backend.applyServiceTier(serviceTier)
-        if (relaunchForSettings || relaunchForEffort || relaunchForPermissionMode || relaunchForServiceTier) pendingRelaunch = true
+        val relaunchForThinking = thinkingChanged && backend.applyThinking(this.thinking)
+        if (relaunchForSettings || relaunchForEffort || relaunchForPermissionMode || relaunchForServiceTier || relaunchForThinking) {
+            pendingRelaunch = true
+        }
         sink.emit(live(sessionId))
     }
 
@@ -1999,7 +2033,7 @@ class Conversation(
                         runCatching {
                             launchProcess(
                                 AgentSpec(
-                                    workdir, sessionId ?: openedResumeId, model, mode, effort = effort,
+                                    workdir, sessionId ?: openedResumeId, model, mode, effort = effort, thinking = thinking,
                                     permissionMode = permissionMode, serviceTier = serviceTier, initialPrompt = next.text,
                                 ),
                                 armExecuting = true,
@@ -2022,7 +2056,7 @@ class Conversation(
                     runCatching {
                         launchProcess(
                             AgentSpec(
-                                workdir, sessionId ?: openedResumeId, model, mode, effort = effort,
+                                workdir, sessionId ?: openedResumeId, model, mode, effort = effort, thinking = thinking,
                                 permissionMode = permissionMode, serviceTier = serviceTier,
                             ),
                             armExecuting = true,
@@ -2113,7 +2147,7 @@ class Conversation(
             if (hasUnconsumedPrompts()) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FORK_NOTICE)))
             launchProcess(
                 AgentSpec(
-                    workdir, resumeId = anchor, model = model, mode = mode, effort = effort,
+                    workdir, resumeId = anchor, model = model, mode = mode, effort = effort, thinking = thinking,
                     permissionMode = permissionMode, serviceTier = serviceTier, forkSession = true,
                 ),
             )
@@ -2373,7 +2407,7 @@ class Conversation(
             val launched = runCatching {
                 launchProcess(
                     AgentSpec(
-                        workdir, anchor, model, mode, effort = effort,
+                        workdir, anchor, model, mode, effort = effort, thinking = thinking,
                         permissionMode = permissionMode, serviceTier = serviceTier,
                         forkSession = fork, initialPrompt = outgoing,
                     ),
@@ -2426,6 +2460,9 @@ class Conversation(
         val handler: suspend () -> Unit = when (trimmed.substringBefore(' ').substringBefore('\n')) {
             "/model" -> ({ handleModelCommand(trimmed) })
             "/effort" -> ({ handleEffortCommand(trimmed) })
+            // capability-gated like /compact: a backend without the toggle keeps the passthrough (the CLI
+            // would reject the unknown command anyway — intercepting only to refuse is worse than passing)
+            "/thinking" -> if (backend.supportsThinkingToggle) ({ handleThinkingCommand(trimmed) }) else return false
             // capability-routed, not kind-gated (issue #301): a backend that answers false keeps today's
             // passthrough (Claude's /compact is a prompt-backed builtin the CLI itself runs)
             "/compact" -> if (backend.supportsNativeCompact) ({ handleNativeCompactCommand() }) else return false
@@ -2524,6 +2561,40 @@ class Conversation(
     }
 
     /**
+     * Handle the phone's `/thinking on|off|default` (issue #345) — the agent `-p` ignores slash commands, so
+     * the daemon honors it. Mirrors handleEffortCommand: "default" clears back to the CLI's own default
+     * (incl. the user's global `alwaysThinkingEnabled`), "off"/"on" bake `--thinking disabled|enabled` on
+     * the next launch. Note thinking is orthogonal to effort on purpose — "off" plus a high effort is the
+     * supported combination gateway users need (models that reject thinking content fail otherwise).
+     */
+    private suspend fun handleThinkingCommand(text: String) {
+        val arg = text.removePrefix("/thinking").trim().lowercase()
+        if (arg.isEmpty()) {
+            reply("Current thinking: ${thinkingLabel()}.\nUsage: /thinking on|off|default.")
+            return
+        }
+        if (arg !in setOf("on", "off", "default")) {
+            reply("Unsupported thinking \"$arg\". Choose one of: on, off, default.")
+            return
+        }
+        val wasExecuting = isExecuting()
+        switchThinking(
+            when (arg) {
+                "on" -> true
+                "off" -> false
+                else -> null
+            },
+        )
+        if (!wasExecuting) reply("✓ Thinking set to ${thinkingLabel()} for this session. Your next message will use it.")
+    }
+
+    private fun thinkingLabel(): String = when (thinking) {
+        true -> "on"
+        false -> "off"
+        null -> "default"
+    }
+
+    /**
      * Handle the phone's `/clear` — there is no stream-json "clear", so the daemon starts a fresh session in
      * the same cwd (no resume), keeping the chosen model/effort/mode. The phone's transcript is wiped via an
      * empty history; the next turn lands on a brand-new sessionId.
@@ -2549,7 +2620,7 @@ class Conversation(
         runtimeContextWindow = null
         launchProcess(
             AgentSpec(
-                workdir, resumeId = null, model = model, mode = mode, effort = effort,
+                workdir, resumeId = null, model = model, mode = mode, effort = effort, thinking = thinking,
                 permissionMode = permissionMode, serviceTier = serviceTier,
             ),
         )
@@ -2635,7 +2706,7 @@ class Conversation(
         lastSyntheticText = null
         launchProcess(
             AgentSpec(
-                workdir, resumeId = null, model = null, mode = mode, effort = effort,
+                workdir, resumeId = null, model = null, mode = mode, effort = effort, thinking = thinking,
                 permissionMode = permissionMode, serviceTier = serviceTier,
             ),
         )

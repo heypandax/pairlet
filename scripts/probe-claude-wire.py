@@ -64,7 +64,7 @@ lock 为 07-10 增，workflow/fgtask/bgcontinue 为 07-11 增、在 2.1.206 上�
           副本」的备选路线（已实证可行：CLI 按文件名认会话，行内 sessionId 改不改都接受）。
 
 用法：python3 scripts/probe-claude-wire.py [steer|queue|ask|ask_plan|task|workflow|lock|fgtask|bgcontinue|
-      skill|scope|scope_acceptedits|settingsources|cleanroom|entrypoint|rewind|all]（默认 all）
+      skill|scope|scope_acceptedits|settingsources|cleanroom|entrypoint|rewind|thinkingflag|all]（默认 all）
       CLAUDE_BIN=/path/to/claude 可覆盖二进制。失败退出码非 0。
 探针在 /tmp/ccprobe 下起真实 claude 进程（bypassPermissions / default / acceptEdits），会消耗少量用量。
 """
@@ -1060,6 +1060,46 @@ def scenario_entrypoint() -> bool:
     return ok
 
 
+def scenario_thinkingflag() -> bool:
+    print("── thinkingflag：--thinking 三态 flag 仍在（#345 thinking 开关烧进 launch 参数的地基）──")
+    # daemon 的 thinking 开关把 tri-state 烧进 launch 参数（ClaudeLauncher：--thinking enabled|disabled，
+    # 与 --effort 正交），押的是两条 CLI 行为：
+    #   ① --thinking 只吃 enabled|adaptive|disabled，别的值在参数解析期即退出 —— flag 被改名/移除或
+    #      取值集合漂移时，App 上的「关」会变成一个永远起不来的会话（CLI 直接退，stream 无 init），
+    #      且 daemon 无法从报错里区分「值不对」和「flag 没了」；
+    #   ② --thinking disabled 下轮次照常完成、整轮零 thinking 块 —— 这是网关不吃 thinking 时的止血
+    #      开关：上游不再收到带 signature 的 thinking 块，"Content block is not a thinking block" 从
+    #      请求侧消失。漂移＝开关失明，会话照旧间歇性炸。
+    env = dict(os.environ)
+    env.pop("CLAUDECODE", None)
+    env.pop("CLAUDE_CODE_ENTRYPOINT", None)
+    os.makedirs(WORKDIR, exist_ok=True)  # 单场景直跑时 Probe 还没机会建它
+    ok = True
+    # ① bogus 值启动即拒，且报错点名全部三个合法值
+    r = subprocess.run(
+        [CLAUDE, "-p", "Say ok", "--thinking", "bogus"],
+        capture_output=True, text=True, timeout=60, env=env, cwd=WORKDIR,
+    )
+    ok &= check("--thinking bogus → 参数解析期即拒", r.returncode != 0, f"exit={r.returncode}")
+    missing = [v for v in ("enabled", "adaptive", "disabled") if v not in r.stderr]
+    ok &= check("报错点名三个合法值（flag 存在且集合未漂移）", not missing,
+                "stderr 含 enabled/adaptive/disabled" if not missing else f"missing: {missing}")
+    # ② disabled 烧死后轮次照常完成，且整轮零 thinking 块
+    p = Probe(["--permission-mode", "bypassPermissions", "--thinking", "disabled"])
+    try:
+        p.send("Do not use any tools. Reply with exactly: ok")
+        ok &= check("disabled 轮次照常完成", p.wait_for("result"), "result arrived")
+        thinking_blocks = [
+            c for j in p.raw if j.get("type") == "assistant"
+            for c in j.get("message", {}).get("content", []) if c.get("type") == "thinking"
+        ]
+        ok &= check("disabled 整轮零 thinking 块", thinking_blocks == [],
+                    f"{len(thinking_blocks)} thinking block(s)")
+    finally:
+        p.kill()
+    return ok
+
+
 def main():
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
     version = subprocess.run([CLAUDE, "--version"], capture_output=True, text=True).stdout.strip()
@@ -1071,12 +1111,13 @@ def main():
         "scope": scenario_scope, "scope_acceptedits": scenario_scope_acceptedits,
         "settingsources": scenario_settingsources, "cleanroom": scenario_cleanroom,
         "entrypoint": scenario_entrypoint, "rewind": scenario_rewind,
+        "thinkingflag": scenario_thinkingflag,
     }
     run = scenarios.values() if which == "all" else [scenarios[which]]
     results = [fn() for fn in run]
     print()
     if all(results):
-        print("✅ wire behavior unchanged — App 依赖的九条 CLI 行为全部成立")
+        print("✅ wire behavior unchanged — App 依赖的 CLI 行为全部成立")
         sys.exit(0)
     print("❌ CLI 行为漂移！排查 daemon 的 StreamParser/PermissionBridge/AskQuestions 是否需要适配")
     sys.exit(1)

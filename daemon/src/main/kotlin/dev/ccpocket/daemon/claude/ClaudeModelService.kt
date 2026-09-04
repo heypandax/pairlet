@@ -53,6 +53,11 @@ class ClaudeModelService(
             // mode; `ultra` is not an accepted Claude effort and must never be advertised here.
             supportedEfforts = CLAUDE_EFFORTS,
             permissionModes = listOf(CLAUDE_PERMISSION_MODE_AUTO),
+            // The CLI's `--thinking enabled|adaptive|disabled` (issue #345) — a gateway machine's
+            // models may reject thinking content while the user still wants a high effort, so the
+            // phone gets a separate switch. Gating on this field keeps the switch hidden against an
+            // older daemon, which would silently drop the OpenSession field and show a lie.
+            supportsThinkingToggle = true,
             gatewayModelsSource = when {
                 authoritative.isNotEmpty() -> "gateway"
                 gateway.isNotEmpty() -> "history"

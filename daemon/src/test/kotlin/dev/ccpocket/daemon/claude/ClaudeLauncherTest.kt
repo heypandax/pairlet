@@ -49,6 +49,25 @@ class ClaudeLauncherTest {
         assertEquals("max", args[args.indexOf("--effort") + 1])
     }
 
+    /**
+     * Issue #345: thinking is a SEPARATE flag from effort — the two ride side by side, and a high effort
+     * with thinking off is the exact combination gateway users need (models that reject thinking content
+     * fail "Content block is not a thinking block" otherwise).
+     */
+    @Test
+    fun thinking_flag_maps_the_tri_state_and_null_emits_nothing() {
+        val off = ClaudeLauncher.buildArgs(AgentSpec(Path.of("/x"), effort = "max", thinking = false))
+        assertEquals("disabled", off[off.indexOf("--thinking") + 1], "off must reach the CLI as --thinking disabled")
+        assertEquals("max", off[off.indexOf("--effort") + 1], "effort stays untouched alongside a thinking switch")
+
+        val on = ClaudeLauncher.buildArgs(AgentSpec(Path.of("/x"), thinking = true))
+        assertEquals("enabled", on[on.indexOf("--thinking") + 1])
+
+        // null = the CLI's own default (incl. the user's global alwaysThinkingEnabled) — emit NO flag
+        val unset = ClaudeLauncher.buildArgs(AgentSpec(Path.of("/x")))
+        assertFalse("--thinking" in unset)
+    }
+
     @Test
     fun fork_session_added_only_when_forking_a_resume() {
         val forked = ClaudeLauncher.buildArgs(

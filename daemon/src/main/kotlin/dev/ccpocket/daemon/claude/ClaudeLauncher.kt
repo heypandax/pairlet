@@ -107,6 +107,12 @@ object ClaudeLauncher {
         }
         spec.model?.let { add("--model"); add(it) }
         spec.effort?.let { add("--effort"); add(it) }
+        // Thinking is a SEPARATE CLI control from effort (issue #345): effort sets the reasoning budget,
+        // --thinking gates extended thinking entirely. A gateway whose models reject thinking content
+        // fails high-effort turns with "Content block is not a thinking block"; thinking off + effort max
+        // works — the same two controls the VS Code extension exposes. Null = emit nothing and let the
+        // CLI's own default (incl. the user's global alwaysThinkingEnabled) decide.
+        spec.thinking?.let { add("--thinking"); add(if (it) "enabled" else "disabled") }
         val appendPrompt = if (spec.cleanRoom && spec.mode == PermissionMode.PLAN) {
             listOfNotNull(CLEAN_ROOM_PLAN_PROMPT, spec.appendSystemPrompt).joinToString("\n\n")
         } else {
