@@ -70,16 +70,22 @@ class GatewayModelProbeTest {
 
     // ── every way it can fail, and the fallback each time ────────────────────
 
-    /** Plaintext http is only acceptable to a gateway on this machine; anywhere else the credential
-     *  would cross a wire in the clear. (A local relay on 127.0.0.1 is a supported setup.) */
+    /**
+     * Plaintext http to a REMOTE gateway is probed, not refused. Every layer `resolvePaired` reads is a
+     * layer the claude CLI consumes too, so an `http://` base URL is one the user's own claude already
+     * sends this same credential to on every session turn — refusing the probe protected nothing while
+     * hiding the model list from exactly those users (first real case: a corporate plaintext gateway,
+     * whose picker fell back to stale history ids). The PAIRED resolution is what keeps credentials
+     * off hosts they don't belong to.
+     */
     @Test
-    fun plaintextOnlyToLoopback() {
-        var remoteCalled = false
-        assertNull(GatewayModelProbe.fetch(gw("http://gw.remote", "tok")) { remoteCalled = true; res(200, "{}") })
-        assertTrue(!remoteCalled, "no credential over plaintext to a remote host")
-
-        val local = GatewayModelProbe.fetch(gw("http://127.0.0.1:3456", "tok")) { res(200, """{"data":[{"id":"a"}]}""") }
-        assertEquals(listOf("a"), local, "a machine-local gateway over http is fine")
+    fun plaintextHttpToRemoteGatewayProbes() {
+        var seen: HttpRequest? = null
+        val got = GatewayModelProbe.fetch(gw("http://gw.corp.example:40000", "tok")) { req ->
+            seen = req; res(200, """{"data":[{"id":"metis-coder"}]}""", uri = req.uri().toString())
+        }
+        assertEquals("http://gw.corp.example:40000/v1/models", seen?.uri().toString())
+        assertEquals(listOf("metis-coder"), got, "a remote plaintext gateway answers like any other")
     }
 
     /** Failure is memoized too: a gateway that hangs must not cost a fresh timeout per picker-open. */
