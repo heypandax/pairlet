@@ -70,16 +70,25 @@ class GatewayModelProbeTest {
 
     // ── every way it can fail, and the fallback each time ────────────────────
 
-    /** Plaintext http is only acceptable to a gateway on this machine; anywhere else the credential
-     *  would cross a wire in the clear. (A local relay on 127.0.0.1 is a supported setup.) */
+    /**
+     * A configured remote plaintext gateway is treated as an explicit transport choice. The probe may
+     * run before the first Claude turn and therefore is an additional credential-bearing request; the
+     * accepted boundary is that it targets only the configured gateway and uses only the header implied
+     * by the credential from that same configuration layer. Pairing prevents a wrong-host credential
+     * leak, while the user-selected http scheme deliberately accepts plaintext transport.
+     */
     @Test
-    fun plaintextOnlyToLoopback() {
-        var remoteCalled = false
-        assertNull(GatewayModelProbe.fetch(gw("http://gw.remote", "tok")) { remoteCalled = true; res(200, "{}") })
-        assertTrue(!remoteCalled, "no credential over plaintext to a remote host")
-
-        val local = GatewayModelProbe.fetch(gw("http://127.0.0.1:3456", "tok")) { res(200, """{"data":[{"id":"a"}]}""") }
-        assertEquals(listOf("a"), local, "a machine-local gateway over http is fine")
+    fun plaintextHttpToRemoteGatewayProbes() {
+        var seen: HttpRequest? = null
+        val got = GatewayModelProbe.fetch(gw("http://gw.corp.example:40000", "tok")) { req ->
+            seen = req
+            res(200, """{"data":[{"id":"gw-model-a"}]}""", uri = req.uri().toString())
+        }
+        assertEquals("http://gw.corp.example:40000/v1/models", seen?.uri().toString())
+        assertEquals("GET", seen?.method())
+        assertEquals("Bearer tok", seen?.headers()?.firstValue("authorization")?.orElse(null))
+        assertTrue(seen?.headers()?.firstValue("x-api-key")?.isPresent == false, "must send one credential header")
+        assertEquals(listOf("gw-model-a"), got, "a configured remote plaintext gateway answers like any other")
     }
 
     /** Failure is memoized too: a gateway that hangs must not cost a fresh timeout per picker-open. */
