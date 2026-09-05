@@ -71,21 +71,24 @@ class GatewayModelProbeTest {
     // ── every way it can fail, and the fallback each time ────────────────────
 
     /**
-     * Plaintext http to a REMOTE gateway is probed, not refused. Every layer `resolvePaired` reads is a
-     * layer the claude CLI consumes too, so an `http://` base URL is one the user's own claude already
-     * sends this same credential to on every session turn — refusing the probe protected nothing while
-     * hiding the model list from exactly those users (first real case: a corporate plaintext gateway,
-     * whose picker fell back to stale history ids). The PAIRED resolution is what keeps credentials
-     * off hosts they don't belong to.
+     * A configured remote plaintext gateway is treated as an explicit transport choice. The probe may
+     * run before the first Claude turn and therefore is an additional credential-bearing request; the
+     * accepted boundary is that it targets only the configured gateway and uses only the header implied
+     * by the credential from that same configuration layer. Pairing prevents a wrong-host credential
+     * leak, while the user-selected http scheme deliberately accepts plaintext transport.
      */
     @Test
     fun plaintextHttpToRemoteGatewayProbes() {
         var seen: HttpRequest? = null
         val got = GatewayModelProbe.fetch(gw("http://gw.corp.example:40000", "tok")) { req ->
-            seen = req; res(200, """{"data":[{"id":"metis-coder"}]}""", uri = req.uri().toString())
+            seen = req
+            res(200, """{"data":[{"id":"gw-model-a"}]}""", uri = req.uri().toString())
         }
         assertEquals("http://gw.corp.example:40000/v1/models", seen?.uri().toString())
-        assertEquals(listOf("metis-coder"), got, "a remote plaintext gateway answers like any other")
+        assertEquals("GET", seen?.method())
+        assertEquals("Bearer tok", seen?.headers()?.firstValue("authorization")?.orElse(null))
+        assertTrue(seen?.headers()?.firstValue("x-api-key")?.isPresent == false, "must send one credential header")
+        assertEquals(listOf("gw-model-a"), got, "a configured remote plaintext gateway answers like any other")
     }
 
     /** Failure is memoized too: a gateway that hangs must not cost a fresh timeout per picker-open. */
