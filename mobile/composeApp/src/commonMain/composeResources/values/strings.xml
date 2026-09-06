@@ -621,6 +621,9 @@
     <string name="session_info_title">Session</string>
     <string name="label_model">Model</string>
     <string name="label_effort">Thinking depth</string>
+    <!-- issue #345: separate from effort — the CLI's own orthogonal toggle. Models on gateways may
+         reject thinking content entirely; this switch turns extended thinking off for them. -->
+    <string name="label_thinking">Extended thinking</string>
     <string name="fast_mode">Fast</string>
     <string name="fast_mode_detail">Codex priority service tier · faster responses with increased usage</string>
     <string name="value_on">On</string>

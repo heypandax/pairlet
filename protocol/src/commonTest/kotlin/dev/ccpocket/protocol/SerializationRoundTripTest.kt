@@ -58,11 +58,13 @@ class SerializationRoundTripTest {
             effort = "ultra",
             permissionMode = CLAUDE_PERMISSION_MODE_AUTO,
             serviceTier = "priority",
+            thinking = false,
         )
         val openJson = PocketJson.encodeToString(open)
         assertTrue("\"mode\":\"default\"" in openJson, openJson) // old daemon keeps its safe fallback
         assertTrue("\"permissionMode\":\"auto\"" in openJson, openJson)
         assertTrue("\"serviceTier\":\"priority\"" in openJson, openJson)
+        assertTrue("\"thinking\":false" in openJson, openJson) // #345: rides alongside, effort untouched
         assertEquals(open, PocketJson.decodeFromString<OpenSession>(openJson))
 
         val live = SessionLive(
@@ -74,9 +76,11 @@ class SerializationRoundTripTest {
             effort = "max",
             permissionMode = CLAUDE_PERMISSION_MODE_AUTO,
             serviceTier = "priority",
+            thinking = false,
         )
         val liveJson = PocketJson.encodeToString(live)
         assertTrue("\"title\":\"Authoritative session title\"" in liveJson, liveJson)
+        assertTrue("\"thinking\":false" in liveJson, liveJson)
         assertEquals(live, PocketJson.decodeFromString<SessionLive>(liveJson))
 
         // Frames sent before #183 omit both native fields and continue to decode to null.
@@ -180,6 +184,32 @@ class SerializationRoundTripTest {
         // an already-shipped phone's concrete serializer skips the populated rows entirely
         assertEquals(
             OldModelsList(agent = AgentKind.CODEX, models = listOf("gpt-5.6-sol")),
+            PocketJson.decodeFromString<OldModelsList>(PocketJson.encodeToString(advertised)),
+        )
+    }
+
+    @Test
+    fun thinking_toggle_is_additive_and_legacy_safe() {
+        // #345: the daemon advertises; absent field on an old daemon decodes to false = "don't show the switch"
+        val advertised = ModelsList(agent = AgentKind.CLAUDE, models = listOf("opus"), supportsThinkingToggle = true)
+        assertTrue(
+            "\"supportsThinkingToggle\":true" in PocketJson.encodeToString(advertised),
+            "a new daemon must announce the toggle explicitly",
+        )
+        // encodeDefaults emits the false default explicitly (same wire shape as gatewayModels:[]) —
+        // what matters is that it reads back as not-advertised, never as a claim
+        assertTrue(
+            "\"supportsThinkingToggle\":false" in PocketJson.encodeToString(ModelsList(agent = AgentKind.CLAUDE, models = listOf("opus"))),
+            "an unadvertised backend encodes the explicit false default",
+        )
+        assertEquals(
+            false,
+            PocketJson.decodeFromString<ModelsList>("""{"agent":"claude","models":["opus"]}""").supportsThinkingToggle,
+            "an old daemon's frame (no field) reads as not-advertised",
+        )
+        // and an already-shipped phone skips the unknown key without failing the frame
+        assertEquals(
+            OldModelsList(agent = AgentKind.CLAUDE, models = listOf("opus")),
             PocketJson.decodeFromString<OldModelsList>(PocketJson.encodeToString(advertised)),
         )
     }

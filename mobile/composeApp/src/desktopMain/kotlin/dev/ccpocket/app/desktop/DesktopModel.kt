@@ -704,6 +704,11 @@ interface DesktopModel {
     val chatPermissionMode: String? get() = null
     val chatEffort: String? get() = null
     val chatServiceTier: String? get() = null
+    /** #345 tri-state: null = CLI default, true = enabled, false = disabled. Default null keeps
+     *  Seed/test fakes compiling — and keeps the row hidden via [supportsThinkingToggle]. */
+    val chatThinking: Boolean? get() = null
+    /** Whether the daemon advertises the thinking toggle; gates the ⋯ row/page visibility. */
+    val supportsThinkingToggle: Boolean get() = false
     /** The daemon's third-party ANTHROPIC_BASE_URL (issue #139) — non-null puts the gateway model
      *  presets first in the ⋯ model picker. Default null keeps Seed/test fakes compiling. */
     val gatewayBaseUrl: String? get() = null
@@ -756,6 +761,8 @@ interface DesktopModel {
     fun switchModel(name: String) {}
     fun switchEffort(level: String?) {}
     fun switchServiceTier(tier: String?) {}
+    /** #345: tri-state — null restores the CLI default. Inert unless the daemon advertises the toggle. */
+    fun switchThinking(enabled: Boolean?) {}
     fun effortOptions(): List<String> = emptyList()
     fun serviceTierOptions(): List<dev.ccpocket.protocol.ModelServiceTier> = emptyList()
     fun effortOptionsFor(agent: AgentKind, model: String?): List<String> = emptyList()

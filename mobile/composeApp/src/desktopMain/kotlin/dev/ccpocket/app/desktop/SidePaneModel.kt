@@ -221,6 +221,11 @@ class SidePaneModel(
     override fun switchModel(name: String) = base.switchSideModel(pane, name)
     override fun switchEffort(level: String?) {}
     override fun switchServiceTier(tier: String?) {}
+    // #345: the thinking tri-state rides with effort — inert in a column (no ⋯ popover here, and a
+    // pick would land on the focused session's next launch)
+    override val chatThinking: Boolean? get() = null
+    override val supportsThinkingToggle: Boolean get() = false
+    override fun switchThinking(enabled: Boolean?) {}
     override fun compactConversation() {}
     override fun clearConversation() {}
     override fun retryOpen() = base.retrySplitOpen(pane)

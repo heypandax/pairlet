@@ -143,6 +143,15 @@ data class OpenSession(
     val permissionMode: String? = null,
     /** Backend-native service tier. Codex `"priority"` is the Fast toggle; null follows CLI/account default. */
     val serviceTier: String? = null,
+    /**
+     * Extended-thinking toggle (Claude): null (the default) = don't touch it — the CLI's own default
+     * (incl. the user's global `alwaysThinkingEnabled`) decides; true → `--thinking enabled`;
+     * false → `--thinking disabled`. Orthogonal to [effort] on purpose (issue #345: a gateway whose
+     * models reject thinking content fails a high-effort session with "Content block is not a thinking
+     * block", while effort=max + thinking off works — the same two controls the VS Code extension
+     * exposes). Trailing optional so old daemons drop it (back to CLI default) and old Apps never send it.
+     */
+    val thinking: Boolean? = null,
 ) : ToDaemon
 
 /** Restart the live conversation's claude process under a new cwd. */
@@ -875,6 +884,13 @@ data class SessionLive(
     val serviceTier: String? = null,
     /** Daemon-authoritative display title. Additive so older peers ignore it and older daemons decode as null. */
     val title: String? = null,
+    /**
+     * The session's extended-thinking toggle as the daemon has it baked into the running launch (null =
+     * CLI default, true = `--thinking enabled`, false = `--thinking disabled`; issue #345). Re-announced
+     * on every relaunch together with mode/model/effort. Additive: older peers ignore it, older daemons
+     * decode it as null.
+     */
+    val thinking: Boolean? = null,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
@@ -2050,6 +2066,15 @@ data class ModelsList(
      * ignores it. Empty means "not advertised" (→ fallback), never "this backend has no modes".
      */
     val modePresets: List<AgentModePreset> = emptyList(),
+    /**
+     * Whether this backend accepts a session-level extended-thinking toggle (Claude's `--thinking
+     * enabled|disabled`, issue #345). The App shows its Thinking switch only when true — sending
+     * [OpenSession.thinking] to a daemon that never advertised support would be silently dropped
+     * (the field wouldn't exist there), showing "off" while the CLI still thinks. Trailing + defaulted
+     * both ways, like [gatewayModels]: an older daemon never sends it (no switch shown), an older App
+     * ignores it. False means "not advertised", never "thinking is impossible".
+     */
+    val supportsThinkingToggle: Boolean = false,
 ) : ToPhone
 
 /**

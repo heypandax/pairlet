@@ -10,8 +10,9 @@ APP_DST="/Applications/CC Pocket.app"
 LEGACY_DST="/Applications/cc-pocket.app"   # 改名前（≤1.2.2 dev）的安装位置，避免留下两个 App
 
 echo "── 1/4 构建桌面 App（createDistributable）──"
-# 本机只有 Homebrew JDK：跳过 compose 的 vendor 检查（仅本地 dev 安装，不做分发签名）
-JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :mobile:composeApp:createDistributable \
+# 本机只有 Homebrew JDK：跳过 compose 的 vendor 检查（仅本地 dev 安装，不做分发签名）。
+# JAVA_HOME 已设置时尊重现值（Intel 机上 JDK 不在 /opt/homebrew）——与 check-all.sh 同款兜底。
+JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17}" ./gradlew :mobile:composeApp:createDistributable \
   -Pcompose.desktop.packaging.checkJdkVendor=false --quiet
 [ -d "$APP_SRC" ] || { echo "构建产物不存在：$APP_SRC"; exit 1; }
 

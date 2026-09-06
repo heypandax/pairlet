@@ -212,6 +212,19 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit, onHandoff: (
                 )
                 Hairline()
                 AboutRow(stringResource(Res.string.label_effort), repo.effort.value ?: stringResource(Res.string.value_default))
+                if (repo.supportsThinkingToggle()) {
+                    Hairline()
+                    AboutRow(
+                        stringResource(Res.string.label_thinking),
+                        stringResource(
+                            when (repo.thinking.value) {
+                                true -> Res.string.value_on
+                                false -> Res.string.value_off
+                                null -> Res.string.value_default
+                            },
+                        ),
+                    )
+                }
                 if (repo.serviceTier.value == "priority") {
                     Hairline()
                     AboutRow(stringResource(Res.string.fast_mode), stringResource(Res.string.value_on))
@@ -350,7 +363,7 @@ private fun Hairline() = Box(Modifier.fillMaxWidth().height(1.dp).background(Tok
 // ════════════════════════════════════════════════════════════════════
 //  Quick actions: switch model / effort, compact, clear, simplify
 // ════════════════════════════════════════════════════════════════════
-private enum class QaSub { MAIN, MODEL, EFFORT }
+private enum class QaSub { MAIN, MODEL, EFFORT, THINKING }
 
 @Composable
 fun QuickActionsSheet(
@@ -395,6 +408,22 @@ fun QuickActionsSheet(
                                 ) { sub = QaSub.MODEL }
                                 if (repo.effortOptions().isNotEmpty()) {
                                     ActionRow(stringResource(Res.string.label_effort), value = repo.effort.value ?: stringResource(Res.string.value_default), chevron = true) { sub = QaSub.EFFORT }
+                                }
+                                // #345: the thinking tri-state is a peer of effort — shown only when the daemon
+                                // advertises the toggle, because an old daemon silently ignores /thinking and the
+                                // row would then claim "off" while the CLI keeps thinking for itself.
+                                if (repo.supportsThinkingToggle()) {
+                                    ActionRow(
+                                        stringResource(Res.string.label_thinking),
+                                        value = stringResource(
+                                            when (repo.thinking.value) {
+                                                true -> Res.string.value_on
+                                                false -> Res.string.value_off
+                                                null -> Res.string.value_default
+                                            },
+                                        ),
+                                        chevron = true,
+                                    ) { sub = QaSub.THINKING }
                                 }
                                 if (repo.serviceTierOptions().any { it.id == "priority" }) {
                                     ActionRow(
@@ -459,6 +488,29 @@ fun QuickActionsSheet(
                     selected = repo.effort.value ?: "default",
                     onBack = { sub = QaSub.MAIN },
                 ) { repo.switchEffort(it.takeUnless { value -> value == "default" }); onDismiss() }
+                // Labels stay positional against [states] so the pick maps back by index — never by
+                // comparing localized strings.
+                QaSub.THINKING -> {
+                    val states = listOf<Boolean?>(null, true, false)
+                    val labels = states.map {
+                        stringResource(
+                            when (it) {
+                                true -> Res.string.value_on
+                                false -> Res.string.value_off
+                                null -> Res.string.value_default
+                            },
+                        )
+                    }
+                    OptionPicker(
+                        title = stringResource(Res.string.label_thinking),
+                        options = labels,
+                        selected = labels.getOrNull(states.indexOf(repo.thinking.value)),
+                        onBack = { sub = QaSub.MAIN },
+                    ) { pick ->
+                        repo.switchThinking(states.getOrNull(labels.indexOf(pick)))
+                        onDismiss()
+                    }
+                }
             }
         }
     }

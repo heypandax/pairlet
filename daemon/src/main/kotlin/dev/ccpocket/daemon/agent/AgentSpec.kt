@@ -15,6 +15,13 @@ data class AgentSpec(
     val mode: PermissionMode = PermissionMode.DEFAULT,
     val appendSystemPrompt: String? = null,
     val effort: String? = null, // reasoning effort: low|medium|high|xhigh|max
+    // Extended-thinking toggle (Claude only, issue #345): orthogonal to effort on purpose. null = don't
+    // touch it (the CLI's own default incl. the user's global `alwaysThinkingEnabled` setting decides);
+    // true/false = --thinking enabled/disabled. Exists because a gateway whose models reject thinking
+    // content fails a high-effort session with "Content block is not a thinking block" while
+    // effort=max + thinking off works — the same two controls the VS Code extension exposes. Other
+    // backends ignore it (they don't advertise the toggle, so no client ever sets it on them).
+    val thinking: Boolean? = null,
     /** Backend-native permission-mode id not representable by the legacy protocol enum (Claude `auto`). */
     val permissionMode: String? = null,
     /** Backend-native service tier (Codex `priority` = Fast); null follows the CLI/account default. */

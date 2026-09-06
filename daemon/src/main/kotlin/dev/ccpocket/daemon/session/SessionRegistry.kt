@@ -558,6 +558,7 @@ class SessionRegistry(
                 sinceSeq = open.lastEventSeq,
                 permissionMode = open.permissionMode,
                 serviceTier = open.serviceTier,
+                thinking = open.thinking,
             )
         }
         if (started.isFailure) {
@@ -705,6 +706,7 @@ class SessionRegistry(
                 sid, knobs.model, knobs.effort,
                 permissionMode = knobs.permissionMode,
                 serviceTier = knobs.serviceTier,
+                thinking = knobs.thinking,
                 // LAZY, like every plain open. Nothing is forked until the person actually sends the
                 // first turn — back out here and no transcript, no session row and no ledger entry were
                 // created, which is the strongest possible reading of "a fork is never implicit". It is

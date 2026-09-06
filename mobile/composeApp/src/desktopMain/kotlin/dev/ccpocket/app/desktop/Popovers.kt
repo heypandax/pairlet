@@ -63,6 +63,7 @@ import dev.ccpocket.app.resources.ho_menu_row
 import dev.ccpocket.app.resources.label_agent
 import dev.ccpocket.app.resources.label_effort
 import dev.ccpocket.app.resources.label_mode
+import dev.ccpocket.app.resources.label_thinking
 import dev.ccpocket.app.resources.label_model
 import dev.ccpocket.app.resources.value_model_default
 import dev.ccpocket.app.resources.mode_accept_short
@@ -332,7 +333,7 @@ private fun NewSessionModelRow(choices: List<ModelChoice>, chosen: String?, fall
 // Mirrors mobile's QuickActionsSheet so the two shells stay in sync (mobile moved the mode
 // switch here off the top bar); drives the same repo verbs via DesktopModel. Model is no longer
 // a page here — the row shortcuts to the composer chip's anchored popover (issue #157).
-private enum class QaPage { MAIN, EFFORT, MODE }
+private enum class QaPage { MAIN, EFFORT, MODE, THINKING }
 
 @Composable
 fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
@@ -354,6 +355,22 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 }
                 if (model.effortOptions().isNotEmpty()) {
                     QaRow(stringResource(Res.string.label_effort), value = model.chatEffort ?: stringResource(Res.string.value_default), chevron = true) { page = QaPage.EFFORT }
+                }
+                // #345: the thinking tri-state, a peer of effort — only while the daemon advertises the
+                // toggle (an old daemon silently ignores /thinking, and the row would claim "off" while
+                // the CLI keeps thinking for itself).
+                if (model.supportsThinkingToggle) {
+                    QaRow(
+                        stringResource(Res.string.label_thinking),
+                        value = stringResource(
+                            when (model.chatThinking) {
+                                true -> Res.string.value_on
+                                false -> Res.string.value_off
+                                null -> Res.string.value_default
+                            },
+                        ),
+                        chevron = true,
+                    ) { page = QaPage.THINKING }
                 }
                 if (model.serviceTierOptions().any { it.id == "priority" }) {
                     QaRow(
@@ -397,6 +414,12 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 model.effortOptions().forEach { opt ->
                     QaOption(opt, opt.equals(model.chatEffort, true)) { model.switchEffort(opt); onDismiss() }
                 }
+            }
+            QaPage.THINKING -> {
+                QaBack(stringResource(Res.string.label_thinking)) { page = QaPage.MAIN }
+                QaOption(stringResource(Res.string.value_default), model.chatThinking == null) { model.switchThinking(null); onDismiss() }
+                QaOption(stringResource(Res.string.value_on), model.chatThinking == true) { model.switchThinking(true); onDismiss() }
+                QaOption(stringResource(Res.string.value_off), model.chatThinking == false) { model.switchThinking(false); onDismiss() }
             }
             QaPage.MODE -> {
                 QaBack(stringResource(Res.string.label_mode)) { page = QaPage.MAIN }

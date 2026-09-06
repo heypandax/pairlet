@@ -95,6 +95,15 @@ interface AgentBackend {
     /** Apply a backend-native service tier. Default false means unsupported/ignored. */
     fun applyServiceTier(serviceTier: String?): Boolean = false
 
+    /** Whether this backend accepts a session-level extended-thinking toggle (issue #345). Drives BOTH the
+     *  daemon's `/thinking` command gate and the App's switch visibility (the client checks the
+     *  ModelsList advertisement, which a backend sets only when this is true). */
+    val supportsThinkingToggle: Boolean get() = false
+
+    /** Apply an extended-thinking change (null = back to CLI default). True = a relaunch is required for
+     *  it to take effect (Claude bakes `--thinking` at launch); default false = unsupported/ignored. */
+    fun applyThinking(thinking: Boolean?): Boolean = false
+
     /** Capability validation hooks. Null capability means unknown/custom, so the setting passes through;
      *  a known model can explicitly reject a stale persisted value. */
     fun normalizeEffort(model: String?, effort: String?): String? = effort

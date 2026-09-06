@@ -621,6 +621,9 @@
     <string name="session_info_title">会话</string>
     <string name="label_model">模型</string>
     <string name="label_effort">思考深度</string>
+    <!-- issue #345：与「思考深度」独立——CLI 自己的正交开关。网关模型可能完全不吃 thinking 内容，
+         这个开关为它们关掉扩展思考。 -->
+    <string name="label_thinking">扩展思考</string>
     <string name="fast_mode">快速模式</string>
     <string name="fast_mode_detail">Codex priority 服务档位 · 响应更快，但用量更高</string>
     <string name="value_on">开</string>
