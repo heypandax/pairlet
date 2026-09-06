@@ -212,6 +212,7 @@ private class RunCmd : CliktCommand(name = "run") {
             openCodeModels = dev.ccpocket.daemon.opencode.OpenCodeModelService(opencodeBin),
             kimiModels = dev.ccpocket.daemon.kimi.KimiModelService(kimiBin),
             zcodeModels = dev.ccpocket.daemon.zcode.ZCodeModelService(),
+            dshModels = dev.ccpocket.daemon.dsh.DshModelService(dshBin),
             reviews = dev.ccpocket.daemon.review.ReviewService(),
             peerInboxFactory = { dev.ccpocket.daemon.review.PeerInboxService(it) },
         )

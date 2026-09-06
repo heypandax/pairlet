@@ -12,3 +12,5 @@ internal fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive
 internal fun JsonObject.long(key: String): Long? = (this[key] as? JsonPrimitive)?.longOrNull
 internal fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
 internal fun JsonObject.arr(key: String): JsonArray? = this[key] as? JsonArray
+internal fun JsonObject.bool(key: String): Boolean? =
+    (this[key] as? JsonPrimitive)?.let { if (it.isString) null else it.content.toBooleanStrictOrNull() }

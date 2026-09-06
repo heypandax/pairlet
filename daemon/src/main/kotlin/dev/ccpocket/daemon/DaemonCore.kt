@@ -47,6 +47,7 @@ class DaemonCore(
     kimiModels: dev.ccpocket.daemon.kimi.KimiModelService = dev.ccpocket.daemon.kimi.KimiModelService(),
     zcodeModels: dev.ccpocket.daemon.zcode.ZCodeModelService = dev.ccpocket.daemon.zcode.ZCodeModelService(),
     codexModels: CodexModelService = CodexModelService(),
+    dshModels: dev.ccpocket.daemon.dsh.DshModelService = dev.ccpocket.daemon.dsh.DshModelService(),
     /** Session Handoff (SESSION-HANDOFF.md): registry + guard + fan-out, shared by both transports.
      *  Installed onto [SessionRegistry.handoffs] below so the router's drive gate, the §4.1 create
      *  checks, the graceful-recall turn control and the idle-reaper protection all read one truth.
@@ -212,6 +213,7 @@ class DaemonCore(
         kimiModels = kimiModels,
         zcodeModels = zcodeModels,
         codexModels = codexModels,
+        dshModels = dshModels,
         claudeModels = ClaudeModelService(claudeConfigDir, presetEnv = { runCatching { presetStore.activeEnv() }.getOrNull() }),
         approvals = approvals,
         grants = grants,

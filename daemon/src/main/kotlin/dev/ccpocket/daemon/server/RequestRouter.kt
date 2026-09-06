@@ -182,6 +182,7 @@ class RequestRouter(
     private val zcodeModels: dev.ccpocket.daemon.zcode.ZCodeModelService = dev.ccpocket.daemon.zcode.ZCodeModelService(),
     private val codexModels: CodexModelService = CodexModelService(),
     private val claudeModels: ClaudeModelService = ClaudeModelService(),
+    private val dshModels: dev.ccpocket.daemon.dsh.DshModelService = dev.ccpocket.daemon.dsh.DshModelService(),
     // the daemon-wide pending-approval ledger (approval design M1): the single verdict routing point;
     // defaulted so router tests that never touch approvals need no wiring
     private val approvals: dev.ccpocket.daemon.approval.ApprovalCoordinator =
@@ -870,13 +871,11 @@ class RequestRouter(
                     AgentKind.ZCODE -> zcodeModels.fetch()
                     AgentKind.CODEX -> codexModels.fetch()
                     AgentKind.CLAUDE -> claudeModels.fetch(frame.workdir)
-                    // issue #255: model SWITCHING is deliberately out of v1 scope — dsh resolves its own
-                    // model from the user's environment and the daemon never passes one. Answer the frame
-                    // (silence would hang the picker) with an explicit empty list + reason.
-                    AgentKind.DSH -> ModelsList(
-                        agent = AgentKind.DSH,
-                        error = "DeepSeek Harness model selection is not supported yet — dsh uses its own configured model.",
-                    )
+                    // issue #333 lifted the #255 scope-out: dsh's own `llm.models` + `agentPreset.list`
+                    // answer without a session, so the picker gets real rows (and the agent-preset row)
+                    // instead of the "not supported yet" placeholder. Failures still come back as an
+                    // explicit ModelsList.error — never silence, which would hang the picker.
+                    AgentKind.DSH -> dshModels.fetch()
                 })
             }
 

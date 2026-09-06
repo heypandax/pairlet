@@ -31,6 +31,12 @@ sealed interface AgentEvent {
         val model: String? = null,
         val effort: String? = null,
         val contextWindow: Long? = null,
+        /** issue #333: the backend-native AGENT preset the session is really running under (DeepSeek
+         *  Harness `session.create` / `agentPreset.select` / the session index), as opposed to the one the
+         *  client asked for. Only the read-back travels here — a request the backend refused
+         *  (`agent-preset-locked` on a session that already produced output) must never be announced as
+         *  though it had taken effect. */
+        val agentPreset: String? = null,
     ) : AgentEvent
 
     /** [parentId] on the assistant/tool events = the enclosing sub-agent's Task/Agent tool_use id

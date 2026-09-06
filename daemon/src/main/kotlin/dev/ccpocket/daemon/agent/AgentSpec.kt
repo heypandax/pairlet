@@ -22,6 +22,17 @@ data class AgentSpec(
     // effort=max + thinking off works — the same two controls the VS Code extension exposes. Other
     // backends ignore it (they don't advertise the toggle, so no client ever sets it on them).
     val thinking: Boolean? = null,
+    /**
+     * Backend-native AGENT preset for a NEW session (issue #333; DeepSeek Harness standard / code / minimal
+     * / cordis / a user-authored one). A different axis from [mode]/[permissionMode] (sandbox + approval)
+     * and from [model]: it is the persona + toolset the backend boots with.
+     *
+     * NEW SESSIONS ONLY, enforced by the backend rather than here: dsh locks the preset the instant a
+     * session produces output (`agent-preset-locked`), so on a relaunch — which resumes — the field is
+     * carried but has no effect, and the announced value comes from the session's own header instead.
+     * Backends that advertise no presets ignore it.
+     */
+    val agentPreset: String? = null,
     /** Backend-native permission-mode id not representable by the legacy protocol enum (Claude `auto`). */
     val permissionMode: String? = null,
     /** Backend-native service tier (Codex `priority` = Fast); null follows the CLI/account default. */

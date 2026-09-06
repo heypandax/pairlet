@@ -559,6 +559,9 @@ class SessionRegistry(
                 permissionMode = open.permissionMode,
                 serviceTier = open.serviceTier,
                 thinking = open.thinking,
+                // issue #333: NEW sessions only — the backend drops it on a resume (the preset is locked
+                // once a session has produced output), so no filtering is needed here.
+                agentPreset = open.agentPreset,
             )
         }
         if (started.isFailure) {
@@ -707,6 +710,7 @@ class SessionRegistry(
                 permissionMode = knobs.permissionMode,
                 serviceTier = knobs.serviceTier,
                 thinking = knobs.thinking,
+                agentPreset = knobs.agentPreset,
                 // LAZY, like every plain open. Nothing is forked until the person actually sends the
                 // first turn — back out here and no transcript, no session row and no ledger entry were
                 // created, which is the strongest possible reading of "a fork is never implicit". It is

@@ -446,6 +446,18 @@ class Conversation(
     @Volatile
     private var runtimeContextWindow: Long? = null
 
+    // The AGENT PRESET the user asked this session to be created with (issue #333; dsh standard / minimal /
+    // …). Launch input only — it is passed to the backend and NEVER announced, because a preset dsh
+    // refused (`agent-preset-locked`) would then be displayed as though it had taken effect.
+    @Volatile
+    private var agentPreset: String? = null
+
+    // …and the preset the BACKEND read back — the only value [live] announces. Same live-beats-disk
+    // discipline as [runtimeEffort]: absent until dsh has said something about itself, so the phone shows
+    // no preset row rather than a guessed one.
+    @Volatile
+    private var runtimeAgentPreset: String? = null
+
     // LIVE BEATS DISK, ALWAYS (issue #320). The open-time backfill below reads these same facts off the
     // resumed transcript, on a coroutine that can take a multi-MB parse — long enough for the first live
     // `request/context` / `request/header` to land first. Without a barrier that is a check-then-act window
@@ -676,9 +688,12 @@ class Conversation(
         val permissionMode: String?,
         val serviceTier: String?,
         val thinking: Boolean? = null,
+        /** issue #333: carried so a rewind/rebuild recreates the session on the SAME agent preset. */
+        val agentPreset: String? = null,
     )
 
-    fun launchKnobs(): LaunchKnobs = LaunchKnobs(mode, model, effort, permissionMode, serviceTier, thinking)
+    fun launchKnobs(): LaunchKnobs =
+        LaunchKnobs(mode, model, effort, permissionMode, serviceTier, thinking, agentPreset)
 
     /** One-shot queue drain: the oldest queued prompt leaves the ledger to become the next spawn's
      *  argv message — launchProcess re-records it (initialSend) under the fresh generation, so the
@@ -764,6 +779,11 @@ class Conversation(
             title = sessionTitle,
             // issue #345: the baked-in thinking toggle, re-announced on every relaunch like mode/model/effort
             thinking = thinking,
+            // issue #333: the EFFECTIVE agent preset only — whatever the backend read back off its own
+            // session (dsh `session.create` / `agentPreset.select` / the session index). Deliberately not
+            // `?: agentPreset`: announcing the REQUEST would tell the user a locked/refused preset is in
+            // force, which is the one thing this row must never do.
+            agentPreset = runtimeAgentPreset,
         )
 
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
@@ -807,6 +827,11 @@ class Conversation(
         // Stored as-is — no normalization hook exists because there is nothing to normalize: a tri-state
         // Boolean cannot go stale the way a persisted effort level can against a retired model.
         thinking: Boolean? = null,
+        // issue #333: the backend-native agent preset for a NEW session (dsh). Ignored by the backend on a
+        // resume — the preset is locked once the session has produced output — so it is stored, passed and
+        // then simply not honoured there, rather than being filtered here on the daemon's guess of what a
+        // resume is.
+        agentPreset: String? = null,
         // issue #282: open this conversation as a TRUNCATED branch of [resumeId] rather than a plain
         // resume. Set only by SessionRegistry.rewind, which has already validated the anchor against the
         // file on disk; null keeps every other open byte-for-byte as it was.
@@ -816,6 +841,7 @@ class Conversation(
         this.model = model
         this.effort = backend.normalizeEffort(model, effort) // drop stale persisted levels a known model cannot run
         this.thinking = thinking
+        this.agentPreset = agentPreset
         this.permissionMode = normalizePermissionMode(permissionMode)
         this.serviceTier = normalizeServiceTier(serviceTier)
         this.openedResumeId = resumeId
@@ -842,7 +868,7 @@ class Conversation(
             // launchProcess defers to the first sendPrompt, which anchors on sessionId ?: openedResumeId).
             launchProcess(
                 AgentSpec(
-                    workdir, resumeId, model, mode, effort = this.effort, thinking = this.thinking,
+                    workdir, resumeId, model, mode, effort = this.effort, thinking = this.thinking, agentPreset = this.agentPreset,
                     permissionMode = this.permissionMode, serviceTier = this.serviceTier, forkSession = fork,
                 ),
             )
@@ -1211,7 +1237,7 @@ class Conversation(
         val fork = if (sessionId == null) openedWithFork else resumeId != sessionId
         launchProcess(
             AgentSpec(
-                workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, thinking = thinking,
+                workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
                 permissionMode = permissionMode, serviceTier = serviceTier,
                 forkSession = fork, initialPrompt = initialSend?.text,
             ),
@@ -1885,6 +1911,9 @@ class Conversation(
                             ev.effort?.takeIf { it.isNotBlank() && it != runtimeEffort }?.let { runtimeEffort = it; changed = true }
                             // > 0 only: a zero window would divide the phone's usage % by nothing.
                             ev.contextWindow?.takeIf { it > 0 && it != runtimeContextWindow }?.let { runtimeContextWindow = it; changed = true }
+                            // issue #333. Same read-back-only rule as the three above: this is what the
+                            // backend says the session IS, never what the client asked for.
+                            ev.agentPreset?.takeIf { it.isNotBlank() && it != runtimeAgentPreset }?.let { runtimeAgentPreset = it; changed = true }
                         }
                         // Re-announce only on a REAL change. dsh restates the model on every
                         // assistant/message, so an unconditional emit would push one SessionLive per step
@@ -2033,7 +2062,7 @@ class Conversation(
                         runCatching {
                             launchProcess(
                                 AgentSpec(
-                                    workdir, sessionId ?: openedResumeId, model, mode, effort = effort, thinking = thinking,
+                                    workdir, sessionId ?: openedResumeId, model, mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
                                     permissionMode = permissionMode, serviceTier = serviceTier, initialPrompt = next.text,
                                 ),
                                 armExecuting = true,
@@ -2056,7 +2085,7 @@ class Conversation(
                     runCatching {
                         launchProcess(
                             AgentSpec(
-                                workdir, sessionId ?: openedResumeId, model, mode, effort = effort, thinking = thinking,
+                                workdir, sessionId ?: openedResumeId, model, mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
                                 permissionMode = permissionMode, serviceTier = serviceTier,
                             ),
                             armExecuting = true,
@@ -2147,7 +2176,7 @@ class Conversation(
             if (hasUnconsumedPrompts()) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FORK_NOTICE)))
             launchProcess(
                 AgentSpec(
-                    workdir, resumeId = anchor, model = model, mode = mode, effort = effort, thinking = thinking,
+                    workdir, resumeId = anchor, model = model, mode = mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
                     permissionMode = permissionMode, serviceTier = serviceTier, forkSession = true,
                 ),
             )
@@ -2407,7 +2436,7 @@ class Conversation(
             val launched = runCatching {
                 launchProcess(
                     AgentSpec(
-                        workdir, anchor, model, mode, effort = effort, thinking = thinking,
+                        workdir, anchor, model, mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
                         permissionMode = permissionMode, serviceTier = serviceTier,
                         forkSession = fork, initialPrompt = outgoing,
                     ),
@@ -2618,9 +2647,10 @@ class Conversation(
         // would state as fact what the fresh process has not said yet
         runtimeEffort = null
         runtimeContextWindow = null
+        runtimeAgentPreset = null
         launchProcess(
             AgentSpec(
-                workdir, resumeId = null, model = model, mode = mode, effort = effort, thinking = thinking,
+                workdir, resumeId = null, model = model, mode = mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
                 permissionMode = permissionMode, serviceTier = serviceTier,
             ),
         )
@@ -2706,7 +2736,7 @@ class Conversation(
         lastSyntheticText = null
         launchProcess(
             AgentSpec(
-                workdir, resumeId = null, model = null, mode = mode, effort = effort, thinking = thinking,
+                workdir, resumeId = null, model = null, mode = mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
                 permissionMode = permissionMode, serviceTier = serviceTier,
             ),
         )
