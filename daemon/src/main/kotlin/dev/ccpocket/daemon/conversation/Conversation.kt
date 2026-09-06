@@ -831,6 +831,10 @@ class Conversation(
                 AgentSpec(
                     workdir, resumeId, model, mode, effort = this.effort,
                     permissionMode = this.permissionMode, serviceTier = this.serviceTier, forkSession = fork,
+                    // ONLY here: this is the one launch the user asked for by tapping "Continue here".
+                    // Codex names the branch it forks for this take-over after it (issue #347); a later
+                    // relaunch resumes the branch in place and must not rename anything again.
+                    takeOver = true,
                 ),
             )
         }
