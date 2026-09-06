@@ -112,7 +112,13 @@ import dev.ccpocket.protocol.PresetEnv
 import dev.ccpocket.protocol.PresetSummary
 import dev.ccpocket.protocol.PresetsState
 
-private enum class SettingsTab(val label: StringResource, val icon: ImageVector) {
+/**
+ * The preferences sections. PUBLIC (issue #350) only so an entry point can NAME the pane it wants: the
+ * macOS menu's "About CC Pocket" and "Keyboard Shortcuts" rows have to land on About / Shortcuts, and
+ * routing them through a tab id keeps that a deep link into the ONE settings modal rather than a second
+ * settings surface. The label/icon stay internal — nothing outside this file renders a tab.
+ */
+enum class SettingsTab(internal val label: StringResource, internal val icon: ImageVector) {
     GENERAL(Res.string.settings_tab_general, Icons.Outlined.Tune),
     ACCOUNT(Res.string.settings_tab_account, Icons.Rounded.Person),
     // right after Account on purpose: both token spend and the subscription allowance are properties of
@@ -134,8 +140,11 @@ private enum class SettingsTab(val label: StringResource, val icon: ImageVector)
  * window). Wired live: General sets the repo defaults, Computers renames/revokes paired daemons.
  */
 @Composable
-fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
-    var tab by remember { mutableStateOf(SettingsTab.GENERAL) }
+fun SettingsModal(model: DesktopModel, initialTab: SettingsTab = SettingsTab.GENERAL, onDismiss: () -> Unit) {
+    // KEYED on the requested pane so a second opening from a DIFFERENT entry point actually lands there
+    // (menu ▸ About right after menu ▸ Keyboard Shortcuts), while the rail's own clicks keep working
+    // normally inside one opening. Existing callers pass nothing and stay on General exactly as before.
+    var tab by remember(initialTab) { mutableStateOf(initialTab) }
     Column(
         Modifier.width(700.dp).height(500.dp).shadow(30.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp)).background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(16.dp)),
     ) {

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -36,6 +37,13 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.desktop.AddComputerModal
+import dev.ccpocket.app.desktop.AppMenuAction
+import dev.ccpocket.app.desktop.InstallMacAppMenuHandlers
+import dev.ccpocket.app.desktop.MacAppMenuBar
+import dev.ccpocket.app.desktop.Overlay
+import dev.ccpocket.app.desktop.SettingsModal
+import dev.ccpocket.app.desktop.SettingsTab
+import dev.ccpocket.app.desktop.dispatchEditAction
 import dev.ccpocket.app.desktop.ConnectChromeRow
 import dev.ccpocket.app.desktop.ConnectPanel
 import dev.ccpocket.app.desktop.DesktopApp
@@ -106,6 +114,13 @@ fun main(args: Array<String>) {
     // window was gone but the non-daemon SystemTray thread kept the process alive as an unquittable
     // zombie. Installed outside application{} so a failure during Compose start-up is covered too.
     DesktopCrashGuard.install()
+    // macOS application menu (issue #350). MUST be set before AWT initializes — the first Window created
+    // decides whether its JMenuBar is drawn in the system bar at the top of the screen or inside the
+    // window, and an in-window menu bar under an undecorated window is exactly the "把 Mac 菜单样式绘制到
+    // 窗口内容中" the design forbids. No-op on every other platform.
+    if (System.getProperty("os.name").lowercase().contains("mac")) {
+        System.setProperty("apple.laf.useScreenMenuBar", "true")
+    }
     application { PocketApplication() }
 }
 
@@ -207,6 +222,10 @@ private fun ApplicationScope.PocketShell() {
     // (menu-bar green button, Mission Control, ⌃⌘F) stay in sync. This is DISTINCT from double-click "zoom"
     // (maximize), which keeps its own onToggleMax path.
     var fullscreen by remember { mutableStateOf(false) }
+    // Which settings pane the NEXT opening lands on (issue #350). The menu's About / Keyboard Shortcuts /
+    // Check for Updates rows are deep links into the ONE settings modal — they set this, then flip
+    // showSettings. Every pre-existing entry point leaves it at General.
+    var settingsTab by remember { mutableStateOf(SettingsTab.GENERAL) }
     var mainWindowVisible by remember { mutableStateOf(true) }
     var trayReady by remember { mutableStateOf(false) }
     var awtWindow by remember { mutableStateOf<java.awt.Window?>(null) }
@@ -228,6 +247,14 @@ private fun ApplicationScope.PocketShell() {
         } else {
             exitApplication()
         }
+    }
+    // Settings from the menu (issue #350) — the ONE settings modal, opened on a named pane. Raising the
+    // window first matters because the request can arrive from the native app menu while the window is
+    // hidden behind another app; opening a modal nobody can see would look like nothing happened.
+    val openSettings: (SettingsTab) -> Unit = { tab ->
+        settingsTab = tab
+        model.showSettings = true
+        activateMainWindow()
     }
     val toggleFullscreen: () -> Unit = tf@{
         val w = awtWindow ?: return@tf
@@ -333,6 +360,83 @@ private fun ApplicationScope.PocketShell() {
             } else {
                 zoomRestore = window.bounds
                 window.bounds = usableScreenBounds(window)
+            }
+        }
+        // ── macOS application menu (issue #350; docs/design/macos-app-menu-bar.md) ──────────────────
+        // macOS ONLY: Windows and Linux mount nothing, so their menus and key handling are unchanged.
+        // The menu invents no command — every row routes back into the SAME lambda the window's key
+        // handler or an in-window button already calls, and every greyed row comes from the pure
+        // [appMenuSections] fold (asserted in AppMenuModelTest) rather than from checks written here.
+        if (mac) {
+            // About / Settings / Quit belong to the menu AppKit already draws; handlers replace what those
+            // native entries do instead of drawing a second "CC Pocket" menu beside it.
+            InstallMacAppMenuHandlers(
+                onAbout = { openSettings(SettingsTab.ABOUT) },
+                onSettings = { openSettings(SettingsTab.GENERAL) },
+                onQuit = { exitApplication() },
+            )
+            MacAppMenuBar(model, fullscreen) { action, index ->
+                // Re-resolve the target HERE, at click time — the design's "打开菜单期间状态变化：执行前重验
+                // 目标 ID". The menu may have been open while a switch or a finished turn moved the world.
+                val session = model.selectedSessionId?.let { model.liveSession(it) }
+                when (action) {
+                    AppMenuAction.ABOUT -> openSettings(SettingsTab.ABOUT)
+                    AppMenuAction.SETTINGS -> openSettings(SettingsTab.GENERAL)
+                    AppMenuAction.QUIT -> exitApplication()
+
+                    AppMenuAction.NEW_SESSION -> model.openNewSession()
+                    AppMenuAction.OPEN_FOLDER -> openFolderAction(scope, model)
+                    AppMenuAction.ALL_PROJECTS -> model.browseProjects()
+                    AppMenuAction.ARCHIVED_SESSIONS -> model.browseArchived()
+
+                    // Focus-scoped: handed straight back to whichever text component owns the keyboard.
+                    AppMenuAction.EDIT_UNDO, AppMenuAction.EDIT_REDO, AppMenuAction.EDIT_CUT,
+                    AppMenuAction.EDIT_COPY, AppMenuAction.EDIT_PASTE, AppMenuAction.EDIT_SELECT_ALL,
+                    -> dispatchEditAction(
+                        action,
+                        java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner,
+                    )
+
+                    AppMenuAction.QUICK_OPEN -> model.palette = PaletteScope.ALL
+                    AppMenuAction.GO_BACK -> model.goBack()
+                    AppMenuAction.GO_FORWARD -> model.goForward()
+                    AppMenuAction.TOGGLE_SIDEBAR -> model.setSidebarCollapsed(!model.sidebarCollapsed)
+                    AppMenuAction.TOGGLE_TERMINAL -> model.toggleEmbeddedTerminal()
+                    AppMenuAction.SHOW_FILES -> model.openChanges()
+                    AppMenuAction.SHOW_GIT -> model.openGit()
+                    AppMenuAction.TOGGLE_FULLSCREEN -> toggleFullscreen()
+
+                    AppMenuAction.SESSION_CONTEXT -> {} // an inert header naming the target; never clickable
+                    AppMenuAction.SESSION_TOGGLE_PIN -> session?.let { s ->
+                        val pin = model.pins.firstOrNull { it.sessionId == s.sessionId }
+                        if (pin != null) model.unpin(pin) else model.pin(s)
+                    }
+                    AppMenuAction.SESSION_COPY_WORKDIR -> model.chatWorkdir.takeIf { it.isNotBlank() }?.let { dir ->
+                        runCatching {
+                            Toolkit.getDefaultToolkit().systemClipboard
+                                .setContents(java.awt.datatransfer.StringSelection(dir), null)
+                        }
+                    }
+                    AppMenuAction.SESSION_STOP_TURN -> model.stopTurn()
+                    AppMenuAction.SESSION_ARCHIVE -> session?.let { model.archiveSession(it) }
+                    AppMenuAction.JUMP_PIN -> if (index >= 0) model.jumpPin(index)
+
+                    AppMenuAction.SWITCH_COMPUTER -> model.switcherOpen = !model.switcherOpen
+                    AppMenuAction.SELECT_COMPUTER -> if (index >= 0) model.jumpMachine(index)
+                    AppMenuAction.ADD_COMPUTER -> model.addComputer()
+                    AppMenuAction.REFRESH -> model.refresh()
+
+                    AppMenuAction.WINDOW_MINIMIZE -> windowState.isMinimized = true
+                    AppMenuAction.WINDOW_ZOOM -> toggleZoom()
+                    AppMenuAction.WINDOW_SHOW_MAIN -> activateMainWindow()
+
+                    AppMenuAction.HELP_MANUAL -> openWebUrl(USER_MANUAL_URL)
+                    AppMenuAction.HELP_SHORTCUTS -> openSettings(SettingsTab.SHORTCUTS)
+                    // checks only — applying an update stays the explicit click in Settings ▸ About,
+                    // which is also where the result of this check shows up
+                    AppMenuAction.CHECK_UPDATES -> { model.checkForUpdates(); openSettings(SettingsTab.ABOUT) }
+                    AppMenuAction.REPORT_ISSUE -> openWebUrl(ISSUES_URL)
+                }
             }
         }
         LaunchedEffect(Unit) {
@@ -511,12 +615,27 @@ private fun ApplicationScope.PocketShell() {
                     // screen has neither, and this window is undecorated — so it keeps a bare bar of its
                     // own, or a user who hasn't paired yet cannot move, zoom or close the app at all.
                     if (connected) {
-                        DesktopApp(model, onActivateWindow = activateMainWindow)
+                        DesktopApp(model, onActivateWindow = activateMainWindow, settingsTab = settingsTab)
                     } else {
                         Column(Modifier.fillMaxSize()) {
                             if (!fullscreen) ConnectChromeRow()
                             Box(Modifier.fillMaxWidth().weight(1f)) { ConnectPanel(repo) }
                         }
+                    }
+                    // Settings while DISCONNECTED (issue #350). The shell that normally hosts this modal
+                    // mounts only after a connection, so Settings / About / Shortcuts used to be
+                    // unreachable in exactly the state where a user most needs them — which is why the
+                    // menu's rows for them are ungated. Same modal, same panes: the local ones (About,
+                    // Shortcuts, Help, General) render fine, while the panes that need the daemon keep
+                    // showing their own "can't reach your computer" state. Guarded on !connected so the
+                    // shell keeps owning it once there IS a shell — two mounts would double the modal.
+                    if (!connected && model.showSettings) {
+                        Overlay(
+                            onDismiss = { model.showSettings = false },
+                            alignment = Alignment.Center,
+                            padding = PaddingValues(0.dp),
+                            scrim = true,
+                        ) { SettingsModal(model, settingsTab) { model.showSettings = false } }
                     }
                     // "Add computer" pairs a new daemon in a modal over the live shell (no disconnect)
                     if (model.showAddComputer) AddComputerModal(repo) { model.showAddComputer = false }

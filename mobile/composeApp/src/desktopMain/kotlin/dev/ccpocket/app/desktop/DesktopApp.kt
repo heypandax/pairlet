@@ -67,7 +67,14 @@ import org.jetbrains.compose.resources.stringResource
  *  [onActivateWindow] raises/focuses the OS window — the tray's "Open cc-pocket" / row-jump hooks (issue #111);
  *  [Main] wires it to the AWT window, seed/preview callers leave it a no-op. */
 @Composable
-fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
+fun DesktopApp(
+    model: DesktopModel,
+    onActivateWindow: () -> Unit = {},
+    /** Which pane the NEXT settings opening lands on — the macOS menu's About / Keyboard Shortcuts deep
+     *  links (issue #350). The default keeps every existing entry point (sidebar footer, tray, ⌘,) on
+     *  General, exactly as before. */
+    settingsTab: SettingsTab = SettingsTab.GENERAL,
+) {
     // sidebar sizing (issue #62): drag the divider to resize; drag it past the minimum (or double-click)
     // to snap-hide it. The WIDTH stays desktop-shell-local state — the seed/screenshot model keeps the
     // default. The COLLAPSED flag does not: the four top controls re-home into the leftmost chat
@@ -344,7 +351,7 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
         }
         if (model.showSettings) {
             Overlay(onDismiss = { model.showSettings = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
-                SettingsModal(model) { model.showSettings = false }
+                SettingsModal(model, settingsTab) { model.showSettings = false }
             }
         }
         if (model.showHandoff && model.handoffInvite == null && model.chatAgent.canInitiateSessionHandoff()) {
@@ -489,7 +496,7 @@ private fun SidebarResizeHandle(onDrag: (Float) -> Unit, onDragEnd: () -> Unit, 
  *  than the window is clamped rather than spilling its bottom (the create button / About page) off-screen, so
  *  its own inner scroll keeps that content reachable. A short/wrap-content overlay is unaffected. */
 @Composable
-private fun Overlay(
+internal fun Overlay(
     onDismiss: () -> Unit,
     alignment: Alignment,
     padding: PaddingValues,
