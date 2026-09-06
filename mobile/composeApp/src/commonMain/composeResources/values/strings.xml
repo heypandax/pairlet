@@ -1793,6 +1793,12 @@
     <string name="cfg_model_follow">Follow the computer\'s default</string>
     <string name="cfg_model_none">this computer reported no model list</string>
     <string name="cfg_permission">Permission</string>
+    <!-- ── agent preset (issue #333; dsh standard / minimal / PTC / user-authored) ── -->
+    <string name="label_agent_preset">Preset</string>
+    <string name="cfg_preset">Preset · the toolset this session boots with</string>
+    <string name="cfg_preset_follow">Follow the computer\'s default</string>
+    <string name="cfg_preset_custom">yours</string>
+    <string name="cfg_preset_note">Chosen when the session starts. It cannot be changed once the session has replied.</string>
     <string name="cfg_start">Start session</string>
     <string name="cfg_start_caption">%1$s · %2$s · %3$s</string>
     <string name="cfg_mode_automatic">automatic</string>

@@ -440,7 +440,11 @@ class EntryFlowUiTest {
         agent: AgentKind = AgentKind.CLAUDE,
         fontScale: Float = 1f,
         codexPresets: List<AgentModePreset> = emptyList(),
-        onPicked: (PermissionMode, AgentKind, String?, String?) -> Unit = { _, _, _, _ -> },
+        // #333: the daemon's advertised agent presets, per agent. Empty (the default) must render NO
+        // preset row at all — that is the degradation contract, not a styling default.
+        agentPresets: List<dev.ccpocket.protocol.AgentPresetInfo> = emptyList(),
+        presetAgent: AgentKind = AgentKind.DSH,
+        onPicked: (PermissionMode, AgentKind, String?, String?, String?) -> Unit = { _, _, _, _, _ -> },
         assertions: SkikoComposeUiTest.() -> Unit,
     ) = runDesktopComposeUiTest(W, H) {
         setContent {
@@ -449,6 +453,7 @@ class EntryFlowUiTest {
                     ConfigureSessionSheet(
                         workdir = dir, agent = agent, computer = "alex-macbook",
                         modePresetsFor = { a -> if (a == AgentKind.CODEX) codexPresets else emptyList() },
+                        agentPresetsFor = { a -> if (a == presetAgent) agentPresets else emptyList() },
                         onPick = onPicked, onDismiss = {},
                     )
                 }
@@ -461,7 +466,7 @@ class EntryFlowUiTest {
     @Test
     fun selectingAnOrdinaryModeSelectsAndDoesNotStart() {
         var picks = 0
-        configure(onPicked = { _, _, _, _ -> picks++ }) {
+        configure(onPicked = { _, _, _, _, _ -> picks++ }) {
             onAllNodes(hasText(str(Res.string.cfg_mode_plan))).onFirst()
                 .performSemanticsAction(SemanticsActions.OnClick)
             waitForIdle()
@@ -477,7 +482,7 @@ class EntryFlowUiTest {
     @Test
     fun switchingAgentResetsModelAndMode() {
         var picked: Triple<PermissionMode, AgentKind, String?>? = null
-        configure(onPicked = { m, a, native, model -> picked = Triple(m, a, model); }) {
+        configure(onPicked = { m, a, native, model, _ -> picked = Triple(m, a, model) }) {
             // choose a non-default Claude rung, then switch backends
             onAllNodes(hasText(str(Res.string.cfg_mode_plan))).onFirst()
                 .performSemanticsAction(SemanticsActions.OnClick)
@@ -549,7 +554,7 @@ class EntryFlowUiTest {
             AgentModePreset(PermissionMode.DEFAULT, "balanced", "Balanced", recommended = true),
             AgentModePreset(PermissionMode.BYPASS_PERMISSIONS, "full", "Full access"), // no danger flag
         )
-        configure(agent = AgentKind.CODEX, codexPresets = advertised, onPicked = { _, _, _, _ -> picks++ }) {
+        configure(agent = AgentKind.CODEX, codexPresets = advertised, onPicked = { _, _, _, _, _ -> picks++ }) {
             onAllNodes(hasText(str(Res.string.cfg_mode_full))).onFirst()
                 .performSemanticsAction(SemanticsActions.OnClick)
             waitForIdle()
@@ -578,7 +583,7 @@ class EntryFlowUiTest {
     @Test
     fun fullAccessConfirmsFirstAndCancelStartsNothing() {
         var picks = 0
-        configure(onPicked = { _, _, _, _ -> picks++ }) {
+        configure(onPicked = { _, _, _, _, _ -> picks++ }) {
             onAllNodes(hasText(str(Res.string.cfg_mode_full))).onFirst()
                 .performSemanticsAction(SemanticsActions.OnClick)
             waitForIdle()

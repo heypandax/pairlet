@@ -1096,15 +1096,29 @@ class RepoDesktopModel(
     override val activeIsThisMachine: Boolean
         get() = machines.firstOrNull { it.active }?.thisMachine == true
 
-    override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?, model: String?) {
-        startSession(dir, agent, mode, permissionMode, model)
+    override fun newSession(
+        dir: String,
+        agent: AgentKind,
+        mode: PermissionMode,
+        permissionMode: String?,
+        model: String?,
+        agentPreset: String?,
+    ) {
+        startSession(dir, agent, mode, permissionMode, model, agentPreset)
     }
 
     /** [newSession]'s body, plus the one fact the empty-state starter (#256) needs and the popover doesn't:
      *  whether the open actually went out. A refusal is decided SYNCHRONOUSLY inside [PocketRepository.openSession]
      *  (unsupported agent, duplicate target), so a queued first prompt can fail fast instead of waiting out its
      *  whole window for a session nobody is opening. */
-    private fun startSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?, model: String?): Boolean {
+    private fun startSession(
+        dir: String,
+        agent: AgentKind,
+        mode: PermissionMode,
+        permissionMode: String?,
+        model: String?,
+        agentPreset: String? = null,
+    ): Boolean {
         // "~" ships raw, exactly like mobile's NewPathSheet: the daemon owns the expansion
         // (DirectoryService.expandTilde) — only it knows the remote machine's home
         val typed = trimTrailingSep(dir.trim())
@@ -1119,7 +1133,10 @@ class RepoDesktopModel(
         // the project enters RECENT (visit + live listing) exactly as if it had been clicked — without
         // this the group never appeared for a dir typed straight into the popover (#42)
         openProject(DkProject(path = target, name = folderName(target)))
-        return repo.openSession(wd = target, startMode = mode, agent = agent, startPermissionMode = permissionMode, startModel = model)
+        return repo.openSession(
+            wd = target, startMode = mode, agent = agent, startPermissionMode = permissionMode,
+            startModel = model, startAgentPreset = agentPreset,
+        )
     }
 
     // ── empty-state session starter (issue #256) ─────────────────────────────────────────────────────
@@ -1240,6 +1257,8 @@ class RepoDesktopModel(
     override fun permissionModeAvailable(id: String): Boolean = repo.supportsPermissionMode(id)
     override fun compactConversation() { repo.sendPrompt("/compact") }
     override fun modelsForAgent(agent: AgentKind): List<String> = repo.agentModels[agent]?.models ?: emptyList()
+
+    override fun agentPresetsForAgent(agent: AgentKind) = repo.agentPresetsFor(agent)
     override fun fetchModels(agent: AgentKind) = repo.fetchModels(agent)
     override fun clearConversation() = repo.clearConversation()
 

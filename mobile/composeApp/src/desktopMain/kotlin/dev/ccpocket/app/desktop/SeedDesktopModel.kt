@@ -344,7 +344,9 @@ open class SeedDesktopModel : DesktopModel {
         AgentKind.CODEX -> "gpt-5.1-codex"
         AgentKind.OPENCODE -> "auto"
         AgentKind.ZCODE -> "zai/glm-5"
-        AgentKind.DSH -> "" // issue #255: no model switching, so the seed shows no model chip for dsh
+        // #333 lifted #255's scope-out: dsh names its model on the wire and the chip is switchable, so the
+        // seed shows a real id like every other backend.
+        AgentKind.DSH -> "deepseek-v4-flash"
         AgentKind.CLAUDE, AgentKind.KIMI -> "sonnet"
     }
     override val chatMode = PermissionMode.DEFAULT
@@ -383,7 +385,27 @@ open class SeedDesktopModel : DesktopModel {
     // starter (#256) has to be able to preview and test, and a narrowed override can't express it
     override val newSessionDir: String? = "~/code/cc-pocket"
     override var newSessionSeed: String? by mutableStateOf(null)
-    override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?, model: String?) { showNewSession = false }
+    /** #333: a canned dsh catalogue so the new-session popover's preset row renders without a daemon —
+     *  the same three shipped rows plus one user-authored one the real `agentPreset.list` returns. */
+    override fun agentPresetsForAgent(agent: AgentKind): List<dev.ccpocket.protocol.AgentPresetInfo> =
+        if (agent != AgentKind.DSH) emptyList() else listOf(
+            dev.ccpocket.protocol.AgentPresetInfo("standard", "Standard", "Full coding agent.", recommended = true),
+            dev.ccpocket.protocol.AgentPresetInfo("code", "PTC", "Tools as one TypeScript program."),
+            dev.ccpocket.protocol.AgentPresetInfo("minimal", "Minimal", "bash + str_replace_editor only."),
+            dev.ccpocket.protocol.AgentPresetInfo("mine", "My preset", "Authored locally.", custom = true),
+        )
+
+    override fun modelsForAgent(agent: AgentKind): List<String> =
+        if (agent == AgentKind.DSH) listOf("deepseek-v4-flash", "deepseek-v4-pro") else emptyList()
+
+    override fun newSession(
+        dir: String,
+        agent: AgentKind,
+        mode: PermissionMode,
+        permissionMode: String?,
+        model: String?,
+        agentPreset: String?,
+    ) { showNewSession = false }
     // issue #256: the empty state's field is real here (it is a text field the previewer/screenshots and UI
     // tests type into); the START is inert — a seed model has no session to open.
     override var newSessionPrompt: String by mutableStateOf("")

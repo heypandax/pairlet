@@ -87,6 +87,14 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
     @Volatile private var resumeId: String? = null
     @Volatile private var mode: PermissionMode = PermissionMode.DEFAULT
 
+    /** issue #333: the launch knobs the client chose. [launchPreset] is honoured ONLY on a fresh
+     *  `session.create` — dsh locks the agent preset the moment a session produces output
+     *  (`agent-preset-locked`), so a resume can never move it and must not pretend to. [launchModel] /
+     *  [launchEffort] ARE live-switchable and are re-applied on every [applySettings]. */
+    @Volatile private var launchPreset: String? = null
+    @Volatile private var launchModel: String? = null
+    @Volatile private var launchEffort: String? = null
+
     @Volatile private var api: DshApiClient? = null
     @Volatile private var port: Int = 0
     @Volatile private var sessionId: String? = null
@@ -142,6 +150,9 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         this.workdir = spec.workdir.toString()
         this.resumeId = spec.resumeId
         this.mode = spec.mode
+        this.launchPreset = spec.agentPreset
+        this.launchModel = spec.model
+        this.launchEffort = spec.effort
         // reset per-process state (attach runs on EVERY relaunch)
         teardownClient()
         port = 0
@@ -199,6 +210,9 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
             },
         )
         api = client
+        // issue #333: the model/preset catalogue is HOST-level, so a picker opened while this session
+        // lives should ask THIS dsh rather than boot a second one against the same $DSH_HOME.
+        DshHosts.register(client)
         client.start()
         scope.launch { openSession(client) }
     }
@@ -213,6 +227,7 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
     }
 
     private fun teardownClient() {
+        api?.let { DshHosts.unregister(it) }
         runCatching { api?.close() }
         api = null
         runCatching { clientScope?.cancel() }
@@ -236,7 +251,11 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         val ready = awaitConnected(client)
         if (!ready) return
         val existing = resumeId
+        var preset: String?
         val sid = if (existing != null) {
+            // A resume adopts whatever preset the session was CREATED with — dsh will not move it, so the
+            // only honest thing to announce is what the store says (issue #333).
+            preset = readSessionPreset(client, existing)
             existing
         } else {
             val result = client.rpc("session.create", buildJsonObject { put("cwd", workdir) })
@@ -247,15 +266,158 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
                 io?.inject?.invoke(syntheticError("could not start a DeepSeek Harness session: $why"))
                 return
             }
+            // `session.create` already answers with the preset it defaulted to; a select below may move it.
+            preset = value.str("agentPreset")
+            launchPreset?.let { wanted -> preset = selectPreset(client, created, wanted) ?: preset }
             created
         }
+        // Model/effort AFTER the preset and BEFORE the prompt gate opens: dsh accepts selectModel at any
+        // point in a session's life, but running the opening turn on the previous model and correcting it
+        // afterwards would bill the user for the model they did not pick.
+        val current = selectModel(client, sid, launchModel, launchEffort, announceFailure = false)
         val flush = bootstrap.withLock {
             sessionId = sid
             pendingPrompts.toList().also { pendingPrompts.clear() }
         }
         io?.inject?.invoke(syntheticInit(sid))
+        // Seeds the header before the first turn. Pre-#333 the model chip stayed blank until dsh happened
+        // to emit a `request/*` frame, i.e. until the session had already answered once.
+        syntheticMeta(preset, current?.model, current?.effort)?.let { io?.inject?.invoke(it) }
         flush.forEach { writePrompt(sid, it) }
     }
+
+    /** The preset a RESUMED session was created with, off dsh's own session index. Null when the host
+     *  cannot say — the phone then shows no preset row rather than a guessed one. */
+    private suspend fun readSessionPreset(client: DshApiClient, sid: String): String? {
+        val result = client.rpc("session.list", buildJsonObject { }) ?: return null
+        if (result["ok"]?.toString() != "true") return null
+        return result.obj("value")?.arr("items").orEmpty()
+            .mapNotNull { it as? JsonObject }
+            .firstOrNull { it.str("sessionId") == sid }
+            ?.str("agentPreset")
+    }
+
+    /**
+     * `agentPreset.select` on a still-BLANK session. Returns the preset dsh confirms, or null when it
+     * refused (the caller then keeps the create-time default).
+     *
+     * `agent-preset-locked` is tolerated on purpose: it means the session already produced output, so the
+     * preset the user picked is simply not available any more. Failing the open over it would take a
+     * perfectly good session down for a preference.
+     */
+    private suspend fun selectPreset(client: DshApiClient, sid: String, wanted: String): String? {
+        val result = client.rpc(
+            "agentPreset.select",
+            buildJsonObject { put("sessionId", sid); put("agentPreset", wanted) },
+        )
+        if (result != null && result["ok"]?.toString() == "true") {
+            return result.obj("value")?.str("agentPreset") ?: wanted
+        }
+        val error = result?.obj("error")
+        log.warn(
+            "dsh agentPreset.select($wanted) refused: " +
+                "${error?.str("code") ?: "unreachable"} ${error?.str("message").orEmpty()}",
+        )
+        return null
+    }
+
+    /** What a model selection settled on — both fields are dsh's read-back, never our request. */
+    private data class SelectedModel(val model: String?, val effort: String?)
+
+    /**
+     * Point the session at [model] / [effort] and report what dsh actually settled on.
+     *
+     * Three details this has to get right:
+     *  - **provider is a SEPARATE argument.** dsh's `session.selectModel` takes `{provider, model}`, so the
+     *    provider is joined here out of the session's own `groups` (falling back to the current selection's
+     *    provider) rather than smuggled into the model id — the id is what the phone shows the user.
+     *  - **effort is per-model.** dsh rc.6 offers off/high/max; cc-pocket's persisted ladder also has
+     *    low/medium/xhigh. A level this model does not have is retried ONCE without it, so a stale
+     *    preference degrades to "the model's default effort" instead of failing the whole switch.
+     *  - **the read-back is the answer.** With nothing to change this still returns the CURRENT selection,
+     *    which is what seeds the header on a fresh session.
+     */
+    private suspend fun selectModel(
+        client: DshApiClient,
+        sid: String,
+        model: String?,
+        effort: String?,
+        announceFailure: Boolean,
+    ): SelectedModel? {
+        val listed = client.rpc("session.models", buildJsonObject { put("sessionId", sid) })
+            ?.takeIf { it["ok"]?.toString() == "true" }?.obj("value") ?: return null
+        val current = listed.obj("current")
+        val currentSelection = SelectedModel(current?.str("model"), current?.str("reasoningEffort"))
+        val wanted = model?.takeIf { it.isNotBlank() }
+        if (wanted == null) {
+            // Nothing to change → the read-back IS the answer (this is what seeds a fresh session's header).
+            if (effort == null) return currentSelection
+            return switchEffortOnly(client, sid, listed, effort, announceFailure) ?: currentSelection
+        }
+        val provider = providerFor(listed, wanted)
+            ?: current?.str("provider")
+            ?: run {
+                log.warn("dsh has no provider routing model $wanted — leaving the session's own selection")
+                return currentSelection
+            }
+        return applySelection(client, sid, provider, wanted, effort, announceFailure) ?: currentSelection
+    }
+
+    /** An effort change with no model change still needs a full `{provider, model}` — reuse the current one. */
+    private suspend fun switchEffortOnly(
+        client: DshApiClient,
+        sid: String,
+        listed: JsonObject,
+        effort: String?,
+        announceFailure: Boolean,
+    ): SelectedModel? {
+        val current = listed.obj("current") ?: return null
+        val model = current.str("model") ?: return null
+        val provider = current.str("provider") ?: providerFor(listed, model) ?: return null
+        return applySelection(client, sid, provider, model, effort, announceFailure)
+    }
+
+    private suspend fun applySelection(
+        client: DshApiClient,
+        sid: String,
+        provider: String,
+        model: String,
+        effort: String?,
+        announceFailure: Boolean,
+    ): SelectedModel? {
+        suspend fun attempt(level: String?): JsonObject? = client.rpc(
+            "session.selectModel",
+            buildJsonObject {
+                put("sessionId", sid)
+                put("provider", provider)
+                put("model", model)
+                level?.takeIf { it.isNotBlank() }?.let { put("reasoningEffort", it) }
+            },
+        )
+
+        var result = attempt(effort)
+        if (effort != null && result != null && result["ok"]?.toString() != "true") {
+            // Almost always a level this model does not offer. Keep the MODEL switch, drop the level.
+            log.info("dsh rejected reasoningEffort=$effort on $model; retrying without it")
+            result = attempt(null)
+        }
+        if (result != null && result["ok"]?.toString() == "true") {
+            val selected = result.obj("value")?.obj("selected")
+            return SelectedModel(selected?.str("model") ?: model, selected?.str("reasoningEffort"))
+        }
+        val why = result?.obj("error")?.str("message") ?: "the dsh local API did not answer"
+        log.warn("dsh session.selectModel($provider/$model) failed: $why")
+        // Only a USER-driven switch says so out loud: at launch the session has produced nothing yet and a
+        // message appearing before the first turn reads as output the agent never wrote.
+        if (announceFailure) io?.inject?.invoke(syntheticNotice("⚠️ could not switch the model: $why"))
+        return null
+    }
+
+    /** The provider that routes [model], out of a `session.models` / `llm.models` group listing. */
+    private fun providerFor(listed: JsonObject, model: String): String? =
+        listed.arr("groups").orEmpty().mapNotNull { it as? JsonObject }.firstOrNull { group ->
+            group.arr("models").orEmpty().any { (it as? JsonObject)?.str("id") == model }
+        }?.str("id")
 
     // ---- inbound: MuxFrame translation ----
 
@@ -275,6 +437,15 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
             )
             // A message with no verdict about the turn — the turn is still running (issue #291).
             SYNTHETIC_NOTICE -> return listOf(AgentEvent.AssistantText(root.str("message").orEmpty()))
+            // issue #333: preset/model facts read off an RPC. Same event the `request/*` frames produce, so
+            // the Conversation reconciles it through exactly one path.
+            SYNTHETIC_META -> return listOfNotNull(
+                runtimeMeta(
+                    model = root.str("model"),
+                    effort = root.str("effort"),
+                    agentPreset = root.str("agentPreset"),
+                ),
+            )
         }
         val method = root.str("method") ?: return emptyList()
         // issue #291: the envelope's rpcId is the ONLY correlation token an ask carries — the payload has
@@ -376,11 +547,13 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         model: String? = null,
         effort: String? = null,
         contextWindow: Long? = null,
+        agentPreset: String? = null,
     ): AgentEvent.RuntimeMeta? {
         val m = model?.takeIf { it.isNotBlank() }
         val e = effort?.takeIf { it.isNotBlank() }
         val w = contextWindow?.takeIf { it > 0 }
-        return if (m == null && e == null && w == null) null else AgentEvent.RuntimeMeta(m, e, w)
+        val p = agentPreset?.takeIf { it.isNotBlank() }
+        return if (m == null && e == null && w == null && p == null) null else AgentEvent.RuntimeMeta(m, e, w, p)
     }
 
     /**
@@ -494,13 +667,36 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         }
     }
 
-    /** dsh bakes the sandbox mode into the process environment at launch, so a mode change needs a
-     *  relaunch. Model switching is out of v1 scope and never forces one. */
+    /**
+     * dsh bakes the sandbox mode into the process environment at launch, so a MODE change needs a relaunch.
+     *
+     * A MODEL/EFFORT change does not (issue #333): `session.selectModel` is accepted at any point in a
+     * session's life, so the switch is pushed live and the next turn simply runs on the new model. Sending
+     * the session through a relaunch for it would drop the dsh host, re-resume the transcript and cost the
+     * user their live context for a preference change — the exact behaviour the Claude/Codex backends avoid.
+     *
+     * The RPC is fired on the client scope rather than awaited: this method is called from the Conversation's
+     * command path, which must not block on a network round trip, and its Boolean answers only the relaunch
+     * question. The read-back rides back as a [AgentEvent.RuntimeMeta] so the header follows the truth
+     * rather than the request.
+     */
     override fun applySettings(mode: PermissionMode?, model: String?, effort: String?): Boolean {
         var relaunch = false
         mode?.let {
             if (permissionModeFor(it) != permissionModeFor(this.mode)) relaunch = true
             this.mode = it
+        }
+        model?.let { launchModel = it }
+        effort?.let { launchEffort = it }
+        if (model == null && effort == null) return relaunch
+        val client = api
+        val sid = sessionId
+        // No live host yet (a lazy open that has not spawned dsh): the values are already stored above and
+        // the launch path applies them at `session.create` time.
+        if (client == null || sid == null) return relaunch
+        clientScope?.launch {
+            val settled = selectModel(client, sid, model, effort, announceFailure = true)
+            syntheticMeta(null, settled?.model, settled?.effort)?.let { io?.inject?.invoke(it) }
         }
         return relaunch
     }
@@ -584,6 +780,27 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
     private fun syntheticError(message: String): String =
         buildJsonObject { put("type", SYNTHETIC_ERROR); put("message", message) }.toString()
 
+    /**
+     * The session facts we learned from an RPC rather than from an event (issue #333): the effective agent
+     * preset and the model/effort `session.models` reports. Null when there is nothing to say — an empty
+     * meta frame would travel the whole pump to change nothing.
+     *
+     * It rides the SAME injection path as every dsh event on purpose: the Conversation's single pump keeps
+     * ordering, so this can never overtake the `SessionInit` it is stamped alongside.
+     */
+    private fun syntheticMeta(agentPreset: String?, model: String?, effort: String?): String? {
+        val p = agentPreset?.takeIf { it.isNotBlank() }
+        val m = model?.takeIf { it.isNotBlank() }
+        val e = effort?.takeIf { it.isNotBlank() }
+        if (p == null && m == null && e == null) return null
+        return buildJsonObject {
+            put("type", SYNTHETIC_META)
+            p?.let { put("agentPreset", it) }
+            m?.let { put("model", it) }
+            e?.let { put("effort", it) }
+        }.toString()
+    }
+
     /** Like [syntheticError] but WITHOUT a TurnResult: says something went wrong while leaving the turn's
      *  state alone (issue #291 — a refused `/api/respond` leaves the dsh turn genuinely still running). */
     private fun syntheticNotice(message: String): String =
@@ -594,6 +811,7 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         const val SYNTHETIC_INIT = "cc-pocket/dsh-init"
         const val SYNTHETIC_ERROR = "cc-pocket/dsh-error"
         const val SYNTHETIC_NOTICE = "cc-pocket/dsh-notice"
+        const val SYNTHETIC_META = "cc-pocket/dsh-meta"
 
         /** Readiness window for the mux socket: comfortably longer than the client's own retry budget,
          *  so this never gives up while that is still trying. */

@@ -65,6 +65,8 @@ import dev.ccpocket.app.resources.label_effort
 import dev.ccpocket.app.resources.label_mode
 import dev.ccpocket.app.resources.label_thinking
 import dev.ccpocket.app.resources.label_model
+import dev.ccpocket.app.resources.cfg_preset_custom
+import dev.ccpocket.app.resources.label_agent_preset
 import dev.ccpocket.app.resources.value_model_default
 import dev.ccpocket.app.resources.mode_accept_short
 import dev.ccpocket.app.resources.mode_auto_short
@@ -109,6 +111,7 @@ import dev.ccpocket.app.ui.gatewayHostLabel
 import dev.ccpocket.app.ui.matchesGatewayHost
 import dev.ccpocket.app.ui.ModelChoice
 import dev.ccpocket.app.ui.modelChipLabel
+import dev.ccpocket.app.ui.supportsCustomModelId
 import dev.ccpocket.app.ui.recommendedGatewayPresets
 import dev.ccpocket.app.ui.agentColor
 import dev.ccpocket.app.ui.agentName
@@ -116,6 +119,7 @@ import dev.ccpocket.app.ui.agentTintBorder
 import dev.ccpocket.app.ui.agentTintFill
 import dev.ccpocket.app.ui.handoff.canInitiateSessionHandoff
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AgentPresetInfo
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.PermissionMode
 
@@ -140,7 +144,12 @@ internal val CLAUDE_AUTO_MODE =
 /** Desktop's rendering model for the shared permission contract. */
 internal fun desktopModeChoices(agent: AgentKind, autoAvailable: Boolean = false): List<DkMode> = when (agent) {
     AgentKind.CLAUDE -> CLAUDE_MODES + if (autoAvailable) listOf(CLAUDE_AUTO_MODE) else emptyList()
-    AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH -> CLAUDE_MODES
+    // #333: Kimi and dsh drop Accept edits — neither backend has an equivalent, and the shared
+    // agentModeChoices ladder has said so since #255. The desktop listing all four rungs was a
+    // divergence, not a design: picking "Accept edits" here started the session on plain DEFAULT and the
+    // label lied about it for the session's whole life.
+    AgentKind.KIMI, AgentKind.DSH -> CLAUDE_MODES.filterNot { it.mode == PermissionMode.ACCEPT_EDITS }
+    AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.ZCODE -> CLAUDE_MODES
 }
 
 internal fun desktopDefaultModeIndex(
@@ -174,8 +183,11 @@ fun NewSessionPopover(
     autoAvailable: Boolean = false,
     modelsFor: (AgentKind) -> List<ModelChoice> = { emptyList() },
     defaultModelFor: (AgentKind) -> String? = { null },
+    /** issue #333 — the daemon's advertised agent presets for the agent picked INSIDE the popover.
+     *  Empty = no preset row: a daemon that never advertised them never reads the choice back either. */
+    agentPresetsFor: (AgentKind) -> List<AgentPresetInfo> = { emptyList() },
     onAgentPicked: (AgentKind) -> Unit = {},
-    onStart: (String, AgentKind, PermissionMode, String?, String?) -> Unit,
+    onStart: (String, AgentKind, PermissionMode, String?, String?, String?) -> Unit,
 ) {
     val selectableAgents = availableAgents.ifEmpty { listOf(AgentKind.CLAUDE) }
     var agent by remember { mutableStateOf(defaultAgent.takeIf { it in selectableAgents } ?: selectableAgents.first()) }
@@ -185,6 +197,9 @@ fun NewSessionPopover(
     }
     // null = follow the per-agent default. Reset per agent: a Claude alias isn't a model Codex can run.
     var chosenModel by remember(agent) { mutableStateOf<String?>(null) }
+    // #333: reset per agent, same as the model — a dsh preset id means nothing to Claude.
+    val agentPresets = agentPresetsFor(agent)
+    var chosenPreset by remember(agent) { mutableStateOf<String?>(null) }
     LaunchedEffect(agent) { onAgentPicked(agent) }
     var path by remember(initialPath) { mutableStateOf(TextFieldValue(initialPath, selection = TextRange(initialPath.length))) }
     val trimmed = path.text.trim()
@@ -207,6 +222,7 @@ fun NewSessionPopover(
                         if (agent == AgentKind.OPENCODE) PermissionMode.BYPASS_PERMISSIONS else selected.mode,
                         selected.nativeMode.takeIf { agent == AgentKind.CLAUDE },
                         chosenModel,
+                        chosenPreset?.takeIf { agentPresets.isNotEmpty() },
                     )
                     true
                 } else false
@@ -275,6 +291,10 @@ fun NewSessionPopover(
                     Text(m.token, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
                 }
             }
+            // #333: mobile parity — the preset sits under the mode ladder, and only when advertised.
+            if (agentPresets.isNotEmpty()) {
+                NewSessionPresetRow(agentPresets, chosenPreset) { chosenPreset = it }
+            }
             Text(
                 stringResource(Res.string.new_path_start), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp).alpha(if (looksAbsolute) 1f else 0.45f)
@@ -287,6 +307,7 @@ fun NewSessionPopover(
                             if (agent == AgentKind.OPENCODE) PermissionMode.BYPASS_PERMISSIONS else selected.mode,
                             selected.nativeMode.takeIf { agent == AgentKind.CLAUDE },
                             chosenModel,
+                            chosenPreset?.takeIf { agentPresets.isNotEmpty() },
                         )
                     }.padding(vertical = 10.dp),
             )
@@ -324,6 +345,48 @@ private fun NewSessionModelRow(choices: List<ModelChoice>, chosen: String?, fall
             QaOption(defaultLabel, chosen == null, token = fallback?.takeIf { it.isNotBlank() }?.let { modelChipLabel(it) }) { onChoose(null); open = false }
             choices.forEach { c ->
                 QaOption(c.name, chosen.equals(c.pick, ignoreCase = true), token = c.ctx.takeIf { it.isNotEmpty() }) { onChoose(c.pick); open = false }
+            }
+        }
+    }
+}
+
+/**
+ * The new-session AGENT PRESET row (issue #333) — the disclosure shape of [NewSessionModelRow], because it
+ * answers the same kind of question and is opened even less often.
+ *
+ * Copy is the backend's own ([AgentPresetInfo.label] / [AgentPresetInfo.detail]), so a preset this build
+ * has never heard of still reads properly. "Default" leads and is the initial selection: the backend
+ * already has one (marked [AgentPresetInfo.recommended], shown as this row's summary token), and
+ * pre-selecting a named preset would send an explicit choice the user never made.
+ */
+@Composable
+private fun NewSessionPresetRow(presets: List<AgentPresetInfo>, chosen: String?, onChoose: (String?) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val defaultLabel = stringResource(Res.string.value_model_default)
+    val customTag = stringResource(Res.string.cfg_preset_custom)
+    val recommended = presets.firstOrNull { it.recommended }
+    val summary = chosen?.let { id -> presets.firstOrNull { it.id == id }?.label ?: id } ?: defaultLabel
+    PopoverLabel(stringResource(Res.string.label_agent_preset))
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = if (open) 6.dp else 14.dp).clip(RoundedCornerShape(8.dp))
+            .border(1.dp, Tok.hair, RoundedCornerShape(8.dp))
+            .clickable { open = !open }.padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(summary, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
+        if (chosen == null) Text(
+            recommended?.label ?: defaultLabel,
+            color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp, maxLines = 1,
+            // tightCenter: sits geometrically beside the 12.5sp summary above (project rule).
+            style = tightCenter(10.sp),
+        )
+        Text(if (open) "⌃" else "›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp)
+    }
+    if (open) {
+        Column(Modifier.padding(bottom = 8.dp)) {
+            QaOption(defaultLabel, chosen == null, token = recommended?.label) { onChoose(null); open = false }
+            presets.forEach { p ->
+                QaOption(p.label, chosen == p.id, token = customTag.takeIf { p.custom }) { onChoose(p.id); open = false }
             }
         }
     }
@@ -471,9 +534,10 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
             AgentKind.KIMI -> model.modelsForAgent(AgentKind.KIMI).map { it to it }
             // ZCode (issue #228): daemon-reported ids only, the same contract as Kimi.
             AgentKind.ZCODE -> model.modelsForAgent(AgentKind.ZCODE).map { it to it }
-            // DSH (issue #255): no model switching in v1 — dsh picks its own model and the daemon has no
-            // switch path, so an empty picker is the truth rather than rows that would never take effect.
-            AgentKind.DSH -> emptyList()
+            // DSH (issue #333, lifting #255): daemon-reported ids from dsh's own `llm.models`, the same
+            // contract as Kimi/ZCode. The switch is applied LIVE by the daemon (`session.selectModel`) —
+            // there is no relaunch behind these rows.
+            AgentKind.DSH -> model.modelsForAgent(AgentKind.DSH).map { it to it }
             // Claude keeps its static alias rows (labels + the 1M/200K semantics live in the shared
             // table) — the daemon's list for Claude is config-default + the same aliases anyway.
             // claudeRowPick: on a gateway the Opus row degrades to the bare alias (#167/#168).
@@ -530,32 +594,39 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
         // custom id (issue #54): third-party gateways route ids the preset list can't know;
         // `--model` takes any string, so pass it through. Enter submits. Prefilled when the
         // session already runs a non-preset id.
+        //
+        // #333 GATE: only for backends that take an arbitrary id. dsh routes a model through a
+        // {provider, model} pair joined out of its OWN catalogue, so an id that is not in the rows above
+        // has no provider and the daemon leaves the session on its current model — a field that accepts
+        // anything and silently does nothing. The rows are the whole vocabulary there.
         val presetActive = options.any { (_, pick) -> isActive(pick) }
-        var custom by remember {
-            mutableStateOf(if (!presetActive) model.chatModelId.ifBlank { model.chatModel } else "")
-        }
-        PopoverLabel(stringResource(Res.string.model_custom_label))
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            BasicTextField(
-                custom, { custom = it }, singleLine = true,
-                textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp),
-                cursorBrush = SolidColor(Tok.accent),
-                modifier = Modifier.weight(1f).onPreviewKeyEvent { e ->
-                    if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter) && custom.isNotBlank()) {
-                        model.switchModel(custom.trim()); onDismiss(); true
-                    } else false
-                },
-            )
-            if (custom.isNotBlank()) Text(
-                "→", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                style = tightCenter(13.sp),
-                modifier = Modifier.clip(RoundedCornerShape(6.dp))
-                    .clickable { model.switchModel(custom.trim()); onDismiss() }.padding(horizontal = 4.dp),
-            )
+        if (supportsCustomModelId(model.chatAgent)) {
+            var custom by remember {
+                mutableStateOf(if (!presetActive) model.chatModelId.ifBlank { model.chatModel } else "")
+            }
+            PopoverLabel(stringResource(Res.string.model_custom_label))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                BasicTextField(
+                    custom, { custom = it }, singleLine = true,
+                    textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp),
+                    cursorBrush = SolidColor(Tok.accent),
+                    modifier = Modifier.weight(1f).onPreviewKeyEvent { e ->
+                        if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter) && custom.isNotBlank()) {
+                            model.switchModel(custom.trim()); onDismiss(); true
+                        } else false
+                    },
+                )
+                if (custom.isNotBlank()) Text(
+                    "→", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    style = tightCenter(13.sp),
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                        .clickable { model.switchModel(custom.trim()); onDismiss() }.padding(horizontal = 4.dp),
+                )
+            }
         }
         // mid-turn (issue #157): the running turn keeps its model — say the pick lands on the NEXT turn
         if (model.streaming) Text(

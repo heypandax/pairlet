@@ -163,7 +163,10 @@ class SidePaneModelDelegationGuardTest {
         "workflowAgentDetails", "fetchWorkflowAgentDetail",
         // capability tables — machine/daemon facts, not conversation state
         "effortOptions", "serviceTierOptions", "effortOptionsFor", "serviceTierOptionsFor",
-        "permissionModeAvailable", "modelsForAgent", "fetchModels", "pathSep",
+        // #333: agentPresetsForAgent sits with modelsForAgent for the same reason — it is a property of the
+        // user's dsh INSTALL, identical for every column, and it is only ever read by the new-session
+        // popover, which is window-level.
+        "permissionModeAvailable", "modelsForAgent", "agentPresetsForAgent", "fetchModels", "pathSep",
         "gatewayBaseUrl", "gatewayModels", "availableAgents",
         // Changes browser / Git panel / worktrees: overlays, raised from the focused header only
         "changedFilesLoading", "changedFilesStale", "fetchChangedFiles", "selectedChangedPath",

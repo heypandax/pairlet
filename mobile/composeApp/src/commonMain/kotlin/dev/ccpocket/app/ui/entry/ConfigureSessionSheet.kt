@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.cfg_claude_note
 import dev.ccpocket.app.resources.cfg_codex_autonomous_body
@@ -64,6 +67,10 @@ import dev.ccpocket.app.resources.cfg_opencode_body2
 import dev.ccpocket.app.resources.cfg_opencode_note
 import dev.ccpocket.app.resources.cfg_opencode_title
 import dev.ccpocket.app.resources.cfg_permission
+import dev.ccpocket.app.resources.cfg_preset
+import dev.ccpocket.app.resources.cfg_preset_custom
+import dev.ccpocket.app.resources.cfg_preset_follow
+import dev.ccpocket.app.resources.cfg_preset_note
 import dev.ccpocket.app.resources.cfg_start
 import dev.ccpocket.app.resources.cfg_start_caption
 import dev.ccpocket.app.resources.cfm_body
@@ -86,6 +93,7 @@ import dev.ccpocket.app.resources.new_session_title
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.CtxPill
 import dev.ccpocket.app.ui.ModelChoice
 import dev.ccpocket.app.ui.PocketSheet
@@ -97,6 +105,7 @@ import dev.ccpocket.app.ui.session.Hairline
 import dev.ccpocket.app.ui.session.PathWithCopy
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AgentModePreset
+import dev.ccpocket.protocol.AgentPresetInfo
 import dev.ccpocket.protocol.PermissionMode
 import org.jetbrains.compose.resources.stringResource
 
@@ -134,8 +143,17 @@ fun ConfigureSessionSheet(
     modelsFor: (AgentKind) -> List<ModelChoice> = { emptyList() },
     defaultModelFor: (AgentKind) -> String? = { null },
     modePresetsFor: (AgentKind) -> List<AgentModePreset> = { emptyList() },
+    /**
+     * The connected daemon's advertised AGENT presets, per agent (issue #333; dsh only today). A lambda for
+     * the same reason as [modePresetsFor] — the agent chips switch backends in place.
+     *
+     * EMPTY MEANS NO ROW AT ALL, and that is the degradation contract, not a styling choice: a daemon that
+     * never advertised presets also never reads [OpenSession.agentPreset], so a picker shown against one
+     * would let the user choose something that is silently dropped on the wire and never takes effect.
+     */
+    agentPresetsFor: (AgentKind) -> List<AgentPresetInfo> = { emptyList() },
     onAgentPicked: (AgentKind) -> Unit = {},
-    onPick: (PermissionMode, AgentKind, String?, String?) -> Unit,
+    onPick: (PermissionMode, AgentKind, String?, String?, String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val selectableAgents = availableAgents.ifEmpty { listOf(AgentKind.CLAUDE) }
@@ -148,6 +166,10 @@ fun ConfigureSessionSheet(
     // null = "follow the default" (Settings / the CLI's own). Reset per agent: a Claude alias is not a model
     // Codex can run, and compatibleModelForAgent would drop it silently anyway.
     var chosenModel by remember(chosenAgent) { mutableStateOf<String?>(null) }
+    // #333. Reset per agent like the model above: a dsh preset id means nothing to Claude. Null = "follow
+    // the backend's own default", which is also what an un-answered catalogue leaves it at.
+    val agentPresets = agentPresetsFor(chosenAgent)
+    var chosenPreset by remember(chosenAgent) { mutableStateOf<String?>(null) }
     var chosenMode by remember(chosenAgent) {
         mutableStateOf(seedModeChoice(chosenAgent, openedAgent, selected, selectedNativeMode, autoAvailable, modePresets))
     }
@@ -167,7 +189,12 @@ fun ConfigureSessionSheet(
     val start = {
         if (!started) {
             started = true
-            onPick(chosenMode.mode, chosenAgent, chosenMode.nativeMode, chosenModel)
+            // The preset only travels when this agent really advertised one — otherwise a value left over
+            // from a build that did would ride out to a daemon that ignores it.
+            onPick(
+                chosenMode.mode, chosenAgent, chosenMode.nativeMode, chosenModel,
+                chosenPreset?.takeIf { agentPresets.isNotEmpty() },
+            )
         }
     }
 
@@ -225,6 +252,15 @@ fun ConfigureSessionSheet(
                             EntryNote(it, Modifier.padding(top = Metric.gap))
                         }
                     }
+                }
+
+                // #333: a THIRD axis, under the mode ladder because it is the least often changed of the
+                // three and reads as a refinement of "how should this session behave". Shown only when the
+                // daemon advertised presets for this agent.
+                if (agentPresets.isNotEmpty()) {
+                    EntryLabel(stringResource(Res.string.cfg_preset), Modifier.padding(top = 22.dp, bottom = Metric.gapS))
+                    PresetSection(agentPresets, chosenPreset) { chosenPreset = it }
+                    EntryNote(stringResource(Res.string.cfg_preset_note), Modifier.padding(top = Metric.gap))
                 }
             }
             Hairline()
@@ -323,6 +359,76 @@ private fun ModelSection(choices: List<ModelChoice>, chosen: String?, fallback: 
             "", false, chosen == null,
         ) { onChoose(null) }
         Hairline()
+    }
+}
+
+/**
+ * The agent-preset section — the same list-row shape as [ModelSection], deliberately.
+ *
+ * Copy is the BACKEND's, verbatim ([AgentPresetInfo.label] / [AgentPresetInfo.detail]), so a preset this
+ * App build has never heard of — including one the user wrote themselves — still shows up readable
+ * instead of as a bare id. A user-authored preset is tagged, because "mine" versus "shipped" is the one
+ * distinction the backend makes that the label alone does not carry.
+ *
+ * "Follow the computer's default" leads and is the initial selection: the backend already HAS a default
+ * (marked [AgentPresetInfo.recommended]) and pre-selecting a named row would send an explicit choice the
+ * user never made. The recommended row is still marked so the default is visible, not merely implied.
+ */
+@Composable
+private fun PresetSection(presets: List<AgentPresetInfo>, chosen: String?, onChoose: (String?) -> Unit) {
+    val recommended = presets.firstOrNull { it.recommended }
+    Column(Modifier.fillMaxWidth()) {
+        PresetRow(
+            name = stringResource(Res.string.cfg_preset_follow),
+            detail = recommended?.label,
+            custom = false,
+            selected = chosen == null,
+        ) { onChoose(null) }
+        presets.forEach { preset ->
+            PresetRow(
+                name = preset.label,
+                detail = preset.detail,
+                custom = preset.custom,
+                selected = chosen == preset.id,
+            ) { onChoose(preset.id) }
+        }
+        Hairline()
+    }
+}
+
+@Composable
+private fun PresetRow(name: String, detail: String?, custom: Boolean, selected: Boolean, onClick: () -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Hairline()
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = Metric.touch)
+                .clickable(role = Role.RadioButton, onClick = onClick).padding(vertical = Metric.gap),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            EntryCheckMark(selected)
+            Column(Modifier.weight(1f).padding(start = Metric.gapS)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(name, color = Tok.tx, style = TypeRole.action, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (custom) {
+                        Spacer(Modifier.width(Metric.gapXs))
+                        Text(
+                            stringResource(Res.string.cfg_preset_custom),
+                            color = Tok.tx2,
+                            // tightCenter: this sits geometrically beside a LARGER text on the same row —
+                            // a bare fontSize would centre the line box, not the glyphs (project rule).
+                            style = tightCenter(11.sp),
+                        )
+                    }
+                }
+                detail?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        it, color = Tok.tx2, style = TypeRole.caption,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+        }
     }
 }
 

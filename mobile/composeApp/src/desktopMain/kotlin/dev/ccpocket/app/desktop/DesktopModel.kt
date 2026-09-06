@@ -606,7 +606,16 @@ interface DesktopModel {
     }
     /** Start a session at [dir] (display form; "~" is expanded against the daemon host's home).
      *  [model] is the popover's per-creation pick (issue #199); null = the usual default ladder. */
-    fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String? = null, model: String? = null)
+    fun newSession(
+        dir: String,
+        agent: AgentKind,
+        mode: PermissionMode,
+        permissionMode: String? = null,
+        model: String? = null,
+        // issue #333: the popover's agent-preset pick, for THIS creation only. Null = the backend's own
+        // default. NEW sessions only — the repo drops it on a resume, where the backend has already locked it.
+        agentPreset: String? = null,
+    )
 
     // ── empty-state session starter (issue #256) ─────────────────────────────────────────────────
     // The main pane's "no session open" state used to be a dead end: it named the situation and offered
@@ -770,6 +779,11 @@ interface DesktopModel {
     fun permissionModeAvailable(id: String): Boolean = false
     /** Agent model lists from the daemon — fetched by [fetchModels]. */
     fun modelsForAgent(agent: AgentKind): List<String> = emptyList()
+
+    /** The daemon's advertised AGENT presets for [agent] (issue #333) — same [fetchModels] answer as the
+     *  model list. Empty = not advertised, and the new-session popover then shows no preset row at all:
+     *  a daemon that never sends them also never reads the choice back. */
+    fun agentPresetsForAgent(agent: AgentKind): List<dev.ccpocket.protocol.AgentPresetInfo> = emptyList()
     fun fetchModels(agent: AgentKind) {}
     fun compactConversation() {}
     fun clearConversation() {}

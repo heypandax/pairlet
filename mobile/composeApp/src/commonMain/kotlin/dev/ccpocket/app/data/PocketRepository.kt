@@ -1256,6 +1256,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // machines need it: models that reject thinking content fail high-effort turns otherwise.
     val thinking = mutableStateOf<Boolean?>(null)
     val serviceTier = mutableStateOf<String?>(null)          // Codex `priority` = Fast (independent from effort)
+
+    /** The backend-native AGENT preset this session runs under (issue #333; dsh standard / minimal / …).
+     *  READ-ONLY: it is chosen at session start and the backend locks it once the session produces output,
+     *  so nothing in the App may offer to change it mid-session. Null = the backend's default, not
+     *  applicable, or a daemon too old to say — all three render as "no preset row". */
+    val sessionAgentPreset = mutableStateOf<String?>(null)
     val sessionOrigin = mutableStateOf<String?>(null)        // external trigger source, e.g. "feishu-bot" → header "via …" chip (issue #91)
     val contextWindow = mutableStateOf<Long?>(null)          // context capacity in tokens (derived from model if daemon omits it)
     val contextUsed = mutableStateOf<Long?>(null)            // ~tokens occupying the window (from the last turn's usage)
@@ -1371,6 +1377,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val agent: AgentKind?,
         val startPermissionMode: String?,
         val startModel: String?,
+        /** issue #333 — NEW sessions only; see [openSession]. */
+        val startAgentPreset: String? = null,
     )
 
     /** The open currently in flight, claimed SYNCHRONOUSLY by [openSession] before it launches (issue #235).
@@ -3300,6 +3308,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 effort.value = f.effort // unconditional: `/effort default` must clear an optimistic explicit level
                 thinking.value = f.thinking // #345: same unconditional reconcile — `/thinking default` clears the optimistic value
                 serviceTier.value = f.serviceTier // unconditional: null restores account/default tier
+                // #333: unconditional too — this is a read-back of what the backend says the session IS,
+                // so a session that has none must clear a value left over from the previous one.
+                sessionAgentPreset.value = f.agentPreset
                 f.agent?.let { sessionAgent.value = it } // daemon truth for the backend badge
                 val liveAgent = f.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
                 // daemon truth verbatim: filtering the REPORTED model through the compat guard nulled
@@ -4190,6 +4201,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  never "this backend has no modes": the caller falls back to the App's built-in table. */
     fun modePresetsFor(agent: AgentKind): List<dev.ccpocket.protocol.AgentModePreset> =
         agentModels[agent]?.modePresets.orEmpty()
+
+    /** The AGENT presets [agent]'s daemon advertises (issue #333; dsh's `agentPreset.list`). Empty means
+     *  "not advertised" — an older daemon, a backend that has none, or no [ModelsList] for this agent yet.
+     *  The new-session sheet shows its preset row ONLY when this is non-empty, which is the whole
+     *  degradation contract: against a daemon that never sends the field the user cannot pick a preset
+     *  that would then be silently dropped on the wire. */
+    fun agentPresetsFor(agent: AgentKind): List<dev.ccpocket.protocol.AgentPresetInfo> =
+        agentModels[agent]?.agentPresets.orEmpty()
 
     fun fetchModels(agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE) {
         scope.launch { runCatching { send(FetchModels(agent = agent, workdir = workdir.value)) } }
@@ -5355,6 +5374,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // default). Deliberately not persisted anywhere: the pick is part of creating one session, not a
         // new default.
         startModel: String? = null,
+        // issue #333: the backend-native agent preset chosen in the new-session step (dsh). NEW SESSIONS
+        // ONLY — it is dropped below when [resumeId] is set, because the backend locks a session's preset
+        // the moment it produces output and sending it on a resume would be a request that can only be
+        // refused. Like [startModel] it is deliberately not persisted: it belongs to creating ONE session.
+        startAgentPreset: String? = null,
     ): Boolean {
         // Gate the EFFECTIVE agent (the same ladder openAgent resolves below: explicit row value, then the
         // remembered backend, then the default) rather than only the caller's seed. This is synchronous like
@@ -5365,7 +5389,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // supportsAgent refusal below is for EXPLICIT asks the daemon can't serve, not for the fallback.
         val targetAgent = agent ?: resumeId?.let { sessionParams[it]?.agent } ?: sessionDefaultAgent
         if (!supportsAgent(targetAgent)) return false
-        val attempt = OpenAttempt(wd, resumeId, startMode, title, agent, startPermissionMode, startModel)
+        val attempt = OpenAttempt(wd, resumeId, startMode, title, agent, startPermissionMode, startModel, startAgentPreset)
         // #235: the two refusals, both decided SYNCHRONOUSLY — the defect they fix is two clicks landing in
         // the same frame, so any check that only ran inside the coroutine below was already too late.
         //  (a) the same target is in flight: a second OpenSession restarts the very session the first is
@@ -5400,14 +5424,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  SAME request, so a retry can never land under different flags than the click that failed. */
     fun retryOpen(): Boolean {
         val a = lastOpenAttempt ?: return false
-        return openSession(a.wd, a.resumeId, a.startMode, a.title, a.agent, a.startPermissionMode, a.startModel)
+        return openSession(
+            a.wd, a.resumeId, a.startMode, a.title, a.agent, a.startPermissionMode, a.startModel, a.startAgentPreset,
+        )
     }
 
     /** The state switch + send of one accepted [openSession]. Split out only so the claim above stays
      *  synchronous; everything here runs on [scope] exactly as it always did. */
     private suspend fun runOpen(attempt: OpenAttempt, gen: Int) {
         if (gen != openGen) return // disconnect/demote/back may win before this queued worker gets CPU
-        val (wd, resumeId, startMode, title, agent, startPermissionMode, startModel) = attempt
+        val (wd, resumeId, startMode, title, agent, startPermissionMode, startModel, startAgentPreset) = attempt
         clearPromptLifecycleState() // every prompt marker/deadline belongs to the previous conversation
         sessionDegraded.value = false; degradedSendArmed = false // per-session — SessionLive re-announces the truth
         abandonVoice() // #266: a capture in flight belongs to the session we're leaving — never carry it into the next
@@ -5517,6 +5543,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             permissionMode = openPermissionMode,
             serviceTier = openServiceTier,
             thinking = openThinking,
+            // #333, NEW sessions only: a resume's preset is already fixed on the backend, and asking to
+            // change it is a request that can only be refused. Gating it HERE (rather than at the picker)
+            // means every caller — deep link, push tap, retry replay — inherits the same rule.
+            agentPreset = startAgentPreset?.takeIf { resumeId == null },
         )
         send(request)
         delay(SESSION_OPEN_TIMEOUT_MS) // safety: clear if the daemon never answers (matches `switching`)

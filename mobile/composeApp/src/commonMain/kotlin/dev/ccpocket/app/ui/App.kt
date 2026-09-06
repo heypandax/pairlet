@@ -1765,11 +1765,15 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                 modelsFor = { a -> repo.newSessionModelChoices(a) },
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
                 modePresetsFor = { a -> repo.modePresetsFor(a) },
+                agentPresetsFor = { a -> repo.agentPresetsFor(a) },
                 onAgentPicked = { a -> repo.fetchModels(a) },
-                onPick = { m, a, native, model ->
+                onPick = { m, a, native, model, preset ->
                     newPathTarget = null
                     repo.setDefaultAgent(a)
-                    repo.openSession(path, startMode = m, agent = a, startPermissionMode = native, startModel = model)
+                    repo.openSession(
+                        path, startMode = m, agent = a, startPermissionMode = native,
+                        startModel = model, startAgentPreset = preset,
+                    )
                 },
                 onDismiss = { newPathTarget = null },
             )
@@ -2556,11 +2560,15 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 modelsFor = { a -> repo.newSessionModelChoices(a) },
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
                 modePresetsFor = { a -> repo.modePresetsFor(a) },
+                agentPresetsFor = { a -> repo.agentPresetsFor(a) },
                 onAgentPicked = { a -> repo.fetchModels(a) },
-                onPick = { m, a, native, model ->
+                onPick = { m, a, native, model, preset ->
                     pickMode = false
                     repo.setDefaultAgent(a)
-                    repo.openSession(dir, startMode = m, agent = a, startPermissionMode = native, startModel = model)
+                    repo.openSession(
+                        dir, startMode = m, agent = a, startPermissionMode = native,
+                        startModel = model, startAgentPreset = preset,
+                    )
                 },
                 onDismiss = { pickMode = false },
             )

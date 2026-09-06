@@ -300,7 +300,7 @@ class ShowcaseRender {
                 key(backendAgent.value) { // 选中 agent 是 sheet 内部 remember——换 key 重建即切换选中态
                     StartSessionModeSheet(
                         workdir = DemoData.LIVE_DIR, agent = backendAgent.value,
-                        onPick = { _, _, _, _ -> }, onDismiss = {},
+                        onPick = { _, _, _, _, _ -> }, onDismiss = {},
                     )
                 }
             }
@@ -716,21 +716,21 @@ class ShowcaseRender {
             EntryFrame("configure-claude") {
                 ConfigureSessionSheet(
                     workdir = dir, agent = AgentKind.CLAUDE, computer = "alex-macbook",
-                    onPick = { _, _, _, _ -> }, onDismiss = {},
+                    onPick = { _, _, _, _, _ -> }, onDismiss = {},
                 )
             },
             // 07 · Configure · OpenCode: a statement where a ladder would be, not a disabled one
             EntryFrame("configure-opencode") {
                 ConfigureSessionSheet(
                     workdir = dir, agent = AgentKind.OPENCODE, computer = "alex-macbook",
-                    onPick = { _, _, _, _ -> }, onDismiss = {},
+                    onPick = { _, _, _, _, _ -> }, onDismiss = {},
                 )
             },
             // 08 · Dynamic Type: context pinned, body scrolling, the final decision still reachable
             EntryFrame("configure-type200", fontScale = 2f) {
                 ConfigureSessionSheet(
                     workdir = dir, agent = AgentKind.CLAUDE, computer = "alex-macbook",
-                    onPick = { _, _, _, _ -> }, onDismiss = {},
+                    onPick = { _, _, _, _, _ -> }, onDismiss = {},
                 )
             },
         )

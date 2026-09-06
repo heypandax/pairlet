@@ -52,6 +52,33 @@ never triggers one. It therefore costs nothing and can run in CI.
           tool/result pair of the `ask_user_question` tool, the result text being the answers JSON.
           Any read-only replay of questions must read that pair, not look for a question event.
 
+--probe-catalogue (opt-in, issue #333)
+    Regresses the two HOST-level RPCs the daemon's DshModelService reads its model + agent-preset
+    catalogue from, plus the two session-level calls that act on the choice. All free, no key.
+
+      llm.models          {groups:[{id:<provider>, name, models:[{id, name,
+                          reasoning:{efforts:[{id,name}], defaultEffort}}]}], failures:[]}
+                          — NO SESSION NEEDED. This is what lets the picker show rows before the user
+                          has opened anything. (`llm.discoverModels` is deliberately NOT used: it
+                          demands a `settingsNs` and re-probes the provider's remote endpoint.)
+      agentPreset.list    {presets:[{id, trust:"system"|"user", isDefault, name, description}],
+                          authorable, hasDocument}
+                          — `trust` is the ONLY marker separating a user-authored preset from a shipped
+                          one, and `isDefault` the only one naming the backend's own default. The daemon
+                          maps them to AgentPresetInfo.custom / .recommended; if either spelling drifts
+                          the picker keeps working but silently mislabels every row.
+      session.create      answers {sessionId, agentPreset} — the preset is stated AT CREATION, which is
+                          what SessionLive.agentPreset echoes for a brand-new session.
+      agentPreset.select  {sessionId, agentPreset} -> {agentPreset}. ONLY on a blank session: once the
+                          session has produced output dsh refuses with `agent-preset-locked`. The daemon
+                          therefore issues it strictly between session.create and the first
+                          session.prompt — a drift that widened or moved that window would make the
+                          user's preset choice a silent no-op.
+      session.selectModel {sessionId, provider, model, reasoningEffort?} -> {selected:{...}}. Works at
+                          ANY time in a session's life, which is why a dsh model switch is live rather
+                          than a relaunch. PROVIDER IS A SEPARATE ARGUMENT — there is no "provider/model"
+                          id form, and session.models.current is the read-back the header trusts.
+
     Not asserted live: approvals. They share this exact carrier (POST /api/respond, echoed rpcId) but
     ride method:"approval/requested" with payload {sessionId, approvalId, toolName, callId?, reason?}
     and are answered with {sessionId, approvalId, outcome:"allowed-once"|"rejected"} — a two-value
@@ -64,7 +91,7 @@ never triggers one. It therefore costs nothing and can run in CI.
     ask blocks its turn indefinitely and is withdrawn only by session.cancel or host teardown.
 
 Usage:
-    python3 scripts/probe-dsh-api.py [workdir] [--probe-ask]
+    python3 scripts/probe-dsh-api.py [workdir] [--probe-ask] [--probe-catalogue]
 
 Everything runs against a THROWAWAY DSH_HOME so your real ~/.dsh is never touched.
 """
@@ -234,6 +261,21 @@ def receipt(port, rpc_id, value, ok=True):
                 {"type": "client-response", "rpcId": rpc_id, "result": result})
 
 
+def value_of(body):
+    """The `result.value` of a server-response, or None when the call failed at either layer.
+
+    Business errors ride a 200 with ok:false, so a caller that reads `body["result"]["value"]` directly
+    reads None out of a failure and treats it as an empty answer — the exact confusion this probe exists
+    to prevent.
+    """
+    if not isinstance(body, dict):
+        return None
+    result = body.get("result")
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        return None
+    return result.get("value")
+
+
 def zstd_frame_count(path):
     """Count zstd frames by walking magic numbers — proves the file is CONCATENATED frames, not one."""
     blob = open(path, "rb").read()
@@ -249,6 +291,7 @@ def main():
 
     argv = sys.argv[1:]
     probe_ask = "--probe-ask" in argv
+    probe_catalogue = "--probe-catalogue" in argv
     positional = [a for a in argv if not a.startswith("--")]
     workdir = os.path.abspath(positional[0]) if positional else tempfile.mkdtemp(prefix="dsh-probe-cwd-")
     os.makedirs(workdir, exist_ok=True)
@@ -394,6 +437,100 @@ def main():
               header.get("type") == "session" and header.get("version") == 0, first[:200])
         check("the header carries the cwd VERBATIM (never derived from the dir name)",
               header.get("cwd") == workdir, (header.get("cwd"), workdir))
+
+        # ---- model + agent-preset catalogue (--probe-catalogue, issue #333) ----
+        if probe_catalogue:
+            print()
+            print("---- model + agent-preset catalogue (--probe-catalogue) ----")
+
+            st, body = rpc(port, "llm.models", {})
+            models_value = value_of(body)
+            groups = (models_value or {}).get("groups") or []
+            check("llm.models answers WITHOUT a session (the picker's pre-session source)",
+                  st == 200 and models_value is not None, body)
+            flat = [(g.get("id"), m) for g in groups for m in (g.get("models") or [])]
+            check("groups[].id is the PROVIDER and groups[].models[].id the model name",
+                  bool(flat) and all(p and m.get("id") for p, m in flat),
+                  [(p, m.get("id")) for p, m in flat] or groups)
+            reasoning = [m.get("reasoning") or {} for _p, m in flat]
+            check("each model declares reasoning.efforts[].id + reasoning.defaultEffort",
+                  bool(reasoning) and all(
+                      r.get("defaultEffort") and [e.get("id") for e in (r.get("efforts") or [])]
+                      for r in reasoning),
+                  reasoning[:2])
+
+            st, body = rpc(port, "llm.discoverModels", {})
+            check("llm.discoverModels still demands settingsNs (so it is NOT the listing call)",
+                  isinstance(body, dict) and body.get("result", {}).get("ok") is False, body)
+
+            st, body = rpc(port, "agentPreset.list", {})
+            presets_value = value_of(body)
+            presets = (presets_value or {}).get("presets") or []
+            check("agentPreset.list answers without a session and returns presets[]",
+                  st == 200 and bool(presets), body)
+            check("every preset carries id + name + trust + isDefault",
+                  all(p.get("id") and p.get("name") and p.get("trust") is not None
+                      and p.get("isDefault") is not None for p in presets),
+                  presets[:2])
+            trusts = {p.get("trust") for p in presets}
+            check("trust is the shipped/user-authored marker ('system' is present)",
+                  "system" in trusts, sorted(str(t) for t in trusts))
+            check("exactly one preset is isDefault (AgentPresetInfo.recommended)",
+                  sum(1 for p in presets if p.get("isDefault")) == 1,
+                  [p.get("id") for p in presets if p.get("isDefault")])
+
+            # --- session-level: the preset window and the live model switch ---
+            st, body = rpc(port, "session.create", {"cwd": workdir})
+            cat_value = value_of(body) or {}
+            cat_sid = cat_value.get("sessionId")
+            if not check("session.create states the session's agentPreset in its own answer",
+                         bool(cat_sid) and bool(cat_value.get("agentPreset")), body):
+                return 1
+            print("  preset :", cat_value.get("agentPreset"))
+
+            other = next((p.get("id") for p in presets if p.get("id") != cat_value.get("agentPreset")), None)
+            st, body = rpc(port, "agentPreset.select",
+                           {"sessionId": cat_sid, "agentPreset": other})
+            selected = value_of(body) or {}
+            check("agentPreset.select on a BLANK session succeeds and echoes the new preset",
+                  selected.get("agentPreset") == other, body)
+
+            st, body = rpc(port, "agentPreset.select",
+                           {"sessionId": cat_sid, "agentPreset": "no-such-preset-anywhere"})
+            check("an unknown preset id is a business error, not a silent no-op",
+                  isinstance(body, dict) and body.get("result", {}).get("ok") is False, body)
+
+            st, body = rpc(port, "session.models", {"sessionId": cat_sid})
+            sm = value_of(body) or {}
+            check("session.models carries current{provider,model} + the same groups shape",
+                  bool((sm.get("current") or {}).get("model")) and bool(sm.get("groups")), body)
+
+            target = next((m.get("id") for _p, m in flat if m.get("id") != (sm.get("current") or {}).get("model")),
+                          (sm.get("current") or {}).get("model"))
+            provider = next((p for p, m in flat if m.get("id") == target), None)
+            st, body = rpc(port, "session.selectModel",
+                           {"sessionId": cat_sid, "provider": provider, "model": target,
+                            "reasoningEffort": "max"})
+            picked = (value_of(body) or {}).get("selected") or {}
+            check("session.selectModel takes provider+model SEPARATELY and echoes what it selected",
+                  picked.get("model") == target and picked.get("provider") == provider, body)
+
+            st, body = rpc(port, "session.selectModel",
+                           {"sessionId": cat_sid, "provider": provider, "model": target,
+                            "reasoningEffort": "definitely-not-a-level"})
+            check("an unsupported reasoningEffort is refused (the daemon retries without it)",
+                  isinstance(body, dict) and body.get("result", {}).get("ok") is False, body)
+
+            st, body = rpc(port, "session.models", {"sessionId": cat_sid})
+            after = (value_of(body) or {}).get("current") or {}
+            check("session.models.current is the read-back the session header trusts",
+                  after.get("model") == target, after)
+
+            st, body = rpc(port, "session.list", {})
+            items = (value_of(body) or {}).get("items") or []
+            ours = next((i for i in items if i.get("sessionId") == cat_sid), None)
+            check("session.list items carry agentPreset (the RESUME path's only source)",
+                  bool(ours) and ours.get("agentPreset") is not None, ours)
 
         # ---- ask/approval carrier (--probe-ask) ----
         if probe_ask:
