@@ -55,8 +55,20 @@ sealed interface AgentEvent {
     ) : AgentEvent
 
     /** a tool/command result — carries the originating tool_use id + (text) content.
-     *  [parentId] set = this result belongs to a tool INSIDE a sub-agent, not the main chain. */
-    data class ToolResult(val toolUseId: String?, val content: String?, val isError: Boolean, val parentId: String? = null) : AgentEvent
+     *  [parentId] set = this result belongs to a tool INSIDE a sub-agent, not the main chain.
+     *
+     *  [images] are the picture blocks the result returned alongside (or instead of) its text — a
+     *  Playwright `browser_take_screenshot`, a `Read` of a PNG (issue #332). RAW, exactly as the
+     *  backend wrote them: the Conversation downscales them to wire-safe thumbnails at the moment it
+     *  decides to emit, so nothing pays a JPEG encode for a result nobody renders. Backends that
+     *  cannot return pictures simply never set it. */
+    data class ToolResult(
+        val toolUseId: String?,
+        val content: String?,
+        val isError: Boolean,
+        val parentId: String? = null,
+        val images: List<dev.ccpocket.protocol.ImageData> = emptyList(),
+    ) : AgentEvent
 
     /** a background task (e.g. a backgrounded shell) began; links task_id to its tool_use. */
     data class BackgroundTaskStarted(val taskId: String, val toolUseId: String?, val description: String?, val taskType: String?, val workflowName: String? = null) : AgentEvent

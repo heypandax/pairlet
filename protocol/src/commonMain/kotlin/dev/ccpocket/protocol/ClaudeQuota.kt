@@ -74,7 +74,16 @@ const val CLAUDE_QUOTA_KIND_WEEKLY_SCOPED = "weekly_scoped" // a 7-day window sc
  */
 @Serializable
 @SerialName("pocket/claude.quota.get")
-data class ClaudeQuotaGet(val forceRefresh: Boolean = false) : ToDaemon
+data class ClaudeQuotaGet(
+    val forceRefresh: Boolean = false,
+    /**
+     * Which backend's allowance to read (issue #348). The wire name stays `claude.quota.*` for
+     * compatibility; the default keeps every older client on Claude. A client may send a non-Claude
+     * value ONLY when [DaemonInfo.quotaAgents] lists it — an older daemon drops the unknown key and
+     * answers with the Claude allowance, which the client must not attribute to the requested agent.
+     */
+    val agent: AgentKind = AgentKind.CLAUDE,
+) : ToDaemon
 
 /**
  * daemon -> phone/desktop: the answer to one [ClaudeQuotaGet].
@@ -93,6 +102,12 @@ data class ClaudeQuota(
     val fetchedAt: Long = 0,
     val status: String = CLAUDE_QUOTA_OK,
     val error: String? = null,
+    /** The backend this reading belongs to (issue #348). Trailing optional: an older daemon omits it and
+     *  the reading decodes as Claude's — which is the only allowance an older daemon can read. */
+    val agent: AgentKind = AgentKind.CLAUDE,
+    /** The account's plan as the backend reports it (Codex `planType`: "pro" / "plus" / …; null when the
+     *  backend does not say). Display-only, tolerant String — the vocabulary is the vendor's. */
+    val planType: String? = null,
 ) : ToPhone
 
 /**

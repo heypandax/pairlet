@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.disk
 
+import dev.ccpocket.daemon.media.ImageThumbnail
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
@@ -87,6 +88,7 @@ object TranscriptReplay {
         val out = ArrayList<MutableRow>()
         val taskIdx = HashMap<String, Int>() // sub-agent tool_use id -> its card's index in `out` (issue #77)
         val questionIdx = HashMap<String, Int>() // AskUserQuestion tool_use id -> its row's index (issue #110)
+        val toolIdx = HashMap<String, Int>() // ordinary tool_use id -> its row's index, for images (issue #332)
         var lineNo = 0L
         runCatching {
             file.bufferedReader().useLines { lines ->
@@ -104,6 +106,7 @@ object TranscriptReplay {
                         "user" -> {
                             attachSubagentResults(obj, out, taskIdx, lineNo)
                             attachQuestionAnswers(obj, out, questionIdx, lineNo)
+                            attachToolImages(obj, out, toolIdx, lineNo)
                             if (isRealUserTurn(obj)) userContent(obj)
                                 // an IMAGE-ONLY prompt has no text at all (issue #254) — keeping the row
                                 // on its attachments is why this is no longer a bare isNotBlank() gate
@@ -123,7 +126,17 @@ object TranscriptReplay {
                         // the id keys the AskUserQuestion row (issue #110) or the sub-agent card (issue #77);
                         // the tool name says which map so its later tool_result patches the right one
                         "assistant" -> assistantBlocks(obj).forEach { (msg, id) ->
-                            id?.let { (if (msg.tool == ASK_TOOL) questionIdx else taskIdx)[it] = out.size }
+                            // three destinations now (issue #332). The first two patch an OUTCOME onto
+                            // the row; `toolIdx` only ever patches pictures, so an ordinary tool row is
+                            // still outcome-free exactly as before.
+                            id?.let {
+                                val tool = msg.tool ?: ""
+                                when {
+                                    tool == ASK_TOOL -> questionIdx[it] = out.size
+                                    isSubagentTool(tool) || isWorkflowTool(tool) -> taskIdx[it] = out.size
+                                    else -> toolIdx[it] = out.size
+                                }
+                            }
                             // seq only: a rewind anchor is always a user message, so a non-USER row's uuid
                             // would be an attractive nuisance on the wire (issue #282)
                             out += MutableRow(msg.copy(seq = lineNo), lineNo, obj.str("parentUuid"))
@@ -177,11 +190,15 @@ object TranscriptReplay {
                             val label = questions.joinToString("\n").ifBlank { "Question" }
                             items += HistoryMessage(ChatRole.TOOL, label.take(MAX_TOOL_TEXT), tool = name) to block.str("id")
                         }
+                        // An ORDINARY tool row now carries its tool_use id too (issue #332) — not to be
+                        // patched with an outcome (it never was, and adding one would turn every
+                        // replayed row into a ✓/✗ the live stream never showed), but so a result that
+                        // returned a SCREENSHOT can find this row and hang its thumbnails on it.
                         else -> items += HistoryMessage(
                             ChatRole.TOOL,
                             text = input?.toString()?.take(MAX_TOOL_TEXT) ?: "", // full-ish input; the app shows it on tap-to-expand
                             tool = name,
-                        ) to null
+                        ) to block.str("id")
                     }
                 }
             }
@@ -208,6 +225,41 @@ object TranscriptReplay {
                 output = subagentReport(toolResultText(block["content"])),
                 workflowRunId = workflowRunId ?: row.msg.workflowRunId,
             )
+            row.patchLine = lineNo
+        }
+    }
+
+    /**
+     * Patch an ordinary TOOL row with the pictures its result returned (issue #332) — a Playwright
+     * `browser_take_screenshot`, or a `Read` of a PNG, which is the shape that actually occurs in this
+     * machine's own transcripts. The CLI persists these inline as base64 in the tool_result content, so
+     * a replay can show exactly what the live stream showed.
+     *
+     * Deliberately narrower than its two siblings: it patches ONLY [HistoryMessage.images] /
+     * [HistoryMessage.imagesTruncated] and never `ok`/`output`. An ordinary replayed tool row has never
+     * carried an outcome, and quietly starting to stamp one here would light up a ✓ on every historical
+     * Bash call the moment this shipped.
+     *
+     * Thumbnailed through the same [ImageThumbnail] the live path uses — the raw blocks are up to
+     * ~620 KB of base64 apiece (measured), which the replay budget would simply shed.
+     */
+    private fun attachToolImages(obj: JsonObject, out: ArrayList<MutableRow>, toolIdx: HashMap<String, Int>, lineNo: Long) {
+        if (toolIdx.isEmpty()) return
+        val content = (obj["message"] as? JsonObject)?.get("content") as? JsonArray ?: return
+        for (el in content) {
+            val block = el as? JsonObject ?: continue
+            if (block.str("type") != "tool_result") continue
+            // Resolve the row index BEFORE looking for images so the entry is consumed either way — a
+            // text-only result must not leave its id in the map to be matched by some later result.
+            val idx = block.str("tool_use_id")?.let(toolIdx::remove) ?: continue
+            val raw = (block["content"] as? JsonArray)
+                ?.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "image" }?.let(::imageBlock) }
+                .orEmpty()
+            if (raw.isEmpty()) continue
+            val row = out.getOrNull(idx) ?: continue
+            val thumbs = ImageThumbnail.thumbnails(raw)
+            if (thumbs.isEmpty()) continue // all undecodable: say nothing rather than claim a lost picture
+            row.msg = row.msg.copy(images = thumbs, imagesTruncated = thumbs.size < raw.size)
             row.patchLine = lineNo
         }
     }

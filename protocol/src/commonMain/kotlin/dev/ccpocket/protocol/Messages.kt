@@ -152,6 +152,15 @@ data class OpenSession(
      * exposes). Trailing optional so old daemons drop it (back to CLI default) and old Apps never send it.
      */
     val thinking: Boolean? = null,
+    /**
+     * Backend-native AGENT preset id for a NEW session (issue #333; DeepSeek Harness `agentPreset.select`
+     * — standard / minimal / a user-authored preset). A different axis from [mode]/[permissionMode]
+     * (sandbox+approval) and from [model]: it is the persona/toolset the backend boots the session with,
+     * selectable only before the first output. Null (the default) = the backend's own default; ignored on
+     * a resume ([resumeId] != null) because the session already has one. Trailing optional: an old
+     * daemon drops the key (backend default, exactly today), an old App never sends it.
+     */
+    val agentPreset: String? = null,
 ) : ToDaemon
 
 /** Restart the live conversation's claude process under a new cwd. */
@@ -891,6 +900,11 @@ data class SessionLive(
      * decode it as null.
      */
     val thinking: Boolean? = null,
+    /**
+     * The backend-native agent preset the session runs under (issue #333, DeepSeek Harness), for the
+     * session-info surface. Null = backend default / not applicable / older daemon. Additive both ways.
+     */
+    val agentPreset: String? = null,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
@@ -920,6 +934,17 @@ data class ToolEvent(
     val toolUseId: String? = null,
     val parentToolUseId: String? = null,
     val output: String? = null,
+    /**
+     * Images the tool RESULT carried (issue #332: a Playwright/MCP screenshot returned as an
+     * `{"type":"image"}` block). Rides the RESULT phase only — and a RESULT is emitted for a non-sub-agent
+     * tool ONLY when it carried at least one image, so the pre-#332 stream (START-only for ordinary
+     * tools) is otherwise unchanged. The daemon downscales each image to a wire-safe thumbnail before
+     * sending (bounded edge, bounded bytes, bounded count per result) — the full-resolution file, when the
+     * tool also wrote one inside the workdir, stays reachable through [ReadFile]. Same [ImageData] shape as
+     * the uplink. Trailing optional both ways: an old daemon never sends it (today's card), an old client
+     * ignores it.
+     */
+    val images: List<ImageData> = emptyList(),
 ) : ToPhone
 
 /** The tool names the Claude CLI uses for a sub-agent call — "Task" through 2.1.x, "Agent" on
@@ -1254,6 +1279,14 @@ data class DaemonInfo(
     val supportedAgents: List<String> = emptyList(),
     val supportsUsageAgentFilter: Boolean = false,
     val supportsPromptRecovery: Boolean = false,
+    /**
+     * Capability advertisement (issue #348): the backends whose SUBSCRIPTION allowance this daemon can
+     * read via [ClaudeQuotaGet.agent] — [AgentKind] wire names, e.g. `["claude","codex"]`. A client
+     * sends a non-Claude quota request ONLY for a name listed here: an older daemon ignores the unknown
+     * `agent` key and would answer a Codex request with the CLAUDE allowance, mis-attributed. ABSENT
+     * (older daemon) decodes to empty = "Claude only, legacy behaviour"; it never means "no quota".
+     */
+    val quotaAgents: List<String> = emptyList(),
 ) : ToPhone
 
 @Serializable
@@ -1292,7 +1325,9 @@ data class HistoryMessage(
      *  [WorkflowRun] pushed separately via [WorkflowUpdate]. Trailing optional both ways:
      *  old daemons omit it (the card renders as a plain tool row), old clients ignore it. */
     val workflowRunId: String? = null,
-    /** Images the prompt carried, on a USER row only (issue #254). The transcript stores them inline as
+    /** Images the row carried. On a USER row (issue #254): the prompt's attachments. On a TOOL row
+     *  (issue #332): the images the tool's RESULT returned (a browser screenshot), downscaled by the
+     *  daemon exactly like the live [ToolEvent.images]. The transcript stores them inline as
      *  base64 (`{"type":"image","source":{"type":"base64",…}}`) — whether they were pasted at the
      *  computer or uplinked by this daemon — so the phone can render the same turn the computer sees
      *  instead of a text-only (or entirely empty) bubble. Same [ImageData] shape the uplink
@@ -2075,7 +2110,32 @@ data class ModelsList(
      * ignores it. False means "not advertised", never "thinking is impossible".
      */
     val supportsThinkingToggle: Boolean = false,
+    /**
+     * The backend's AGENT presets (issue #333; DeepSeek Harness `agentPreset.list`: standard / minimal /
+     * PTC / creative / user-authored) — a THIRD axis next to [modePresets] (sandbox+approval) and
+     * [models], chosen at session start via [OpenSession.agentPreset]. Same degradation contract as
+     * [modePresets]: trailing + defaulted, an older daemon never sends it (the App shows no preset row),
+     * an older App ignores it. Empty means "not advertised", never "this backend has no presets".
+     */
+    val agentPresets: List<AgentPresetInfo> = emptyList(),
 ) : ToPhone
+
+/**
+ * One advertised agent-preset row (issue #333). [id] is the backend's own stable key (the exact value
+ * [OpenSession.agentPreset] sends back); [label]/[detail] are display copy the daemon takes from the
+ * backend verbatim — the App renders them as-is, so a preset it has never heard of still shows up
+ * readable. [custom] marks a user-authored preset (found in the backend's own preset directory) as
+ * opposed to a shipped one; [recommended] marks the backend's default. All fields but [id] default, so
+ * a future field is a trailing optional and a sparse row still decodes.
+ */
+@Serializable
+data class AgentPresetInfo(
+    val id: String,
+    val label: String = id,
+    val detail: String? = null,
+    val custom: Boolean = false,
+    val recommended: Boolean = false,
+)
 
 /**
  * One advertised permission-mode preset row. [mode] deliberately stays within the existing

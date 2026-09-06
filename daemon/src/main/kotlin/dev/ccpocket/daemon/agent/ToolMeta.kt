@@ -74,7 +74,10 @@ object ToolMetadata {
                 neverRemember = true,
             )
             else -> {
-                val p = listOf("command", "file_path", "path", "pattern", "url", "description", "content")
+                // "filename" is Playwright MCP's key for a screenshot's output path (issue #332) — without
+                // it a browser_take_screenshot degraded to the bare tool name, the least informative
+                // preview of the one call whose whole product is a named file.
+                val p = listOf("command", "file_path", "path", "filename", "pattern", "url", "description", "content")
                     .firstNotNullOfOrNull { str(it)?.takeIf(String::isNotBlank) } ?: tool
                 ToolMeta(tool, p.take(280), tool, false, null)
             }

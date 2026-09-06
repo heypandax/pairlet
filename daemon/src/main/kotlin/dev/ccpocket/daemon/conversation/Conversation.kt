@@ -34,6 +34,8 @@ import dev.ccpocket.protocol.PromptAck
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.TokenUsage
+import dev.ccpocket.daemon.media.ImageThumbnail
+import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.ToolEvent
 import dev.ccpocket.protocol.ToolPhase
 import dev.ccpocket.protocol.TurnDone
@@ -330,6 +332,12 @@ class Conversation(
     // Only touched from the single stdout pump (like `jobs`), so no locking. Bounded by MAX_SUBAGENTS.
     private data class SubagentRun(val tool: String, val background: Boolean)
     private val subagentRuns = LinkedHashMap<String, SubagentRun>()
+
+    // tool_use id -> tool NAME, for the one RESULT an ordinary tool can emit (issue #332: it returned a
+    // screenshot). AgentEvent.ToolResult carries no name, and ToolEvent needs one — an old App that
+    // can't read `images` still renders this frame as a tool row, so it must say which tool. Same
+    // pump-thread-only, LinkedHashMap-as-FIFO discipline as `subagentRuns`; bounded by MAX_TOOL_NAMES.
+    private val toolNames = LinkedHashMap<String, String>()
 
     // UNPROMPTED-CONTINUATION grace (issue #105 residual). Two probed CLI behaviors (2.1.206) start a
     // new turn with no sendPrompt to arm `executing`: plan mode keeps working after its premature
@@ -1814,6 +1822,9 @@ class Conversation(
                             else -> ev.input?.toString()?.take(280)
                         }
                         if (subagent && ev.id != null) rememberSubagent(ev.id, ev.name, ev.input.boolField("run_in_background"))
+                        // remember the name for a possible image-bearing RESULT (issue #332) — cheap
+                        // enough to do for every tool, and only a screenshot ever reads it back
+                        if (!subagent && ev.id != null) rememberToolName(ev.id, ev.name)
                         sink.emit(
                             ToolEvent(
                                 convoId, seq.getAndIncrement(), ToolPhase.START, ev.name, preview,
@@ -1826,7 +1837,11 @@ class Conversation(
                         }
                     }
                     is AgentEvent.ToolResult -> {
+                        val wasSubagent = ev.parentId == null && ev.toolUseId?.let(subagentRuns::containsKey) == true
                         if (ev.parentId == null) finishSubagentFromResult(ev)
+                        // an ordinary tool that returned a PICTURE gets the one RESULT frame it would
+                        // otherwise never get (issue #332) — see [emitToolResultImages]
+                        if (!wasSubagent) emitToolResultImages(ev)
                         if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) {
                             syncBackgroundWork()
                             emitJobs()
@@ -2782,6 +2797,56 @@ class Conversation(
         while (subagentRuns.size > MAX_SUBAGENTS) subagentRuns.remove(subagentRuns.keys.first())
     }
 
+    /** Same FIFO discipline as [rememberSubagent] — most entries are never read back (issue #332). */
+    private fun rememberToolName(id: String, tool: String) {
+        toolNames[id] = tool
+        while (toolNames.size > MAX_TOOL_NAMES) toolNames.remove(toolNames.keys.first())
+    }
+
+    /**
+     * Emit the RESULT phase for a NON-sub-agent tool — but ONLY when its result actually carried an
+     * image (issue #332).
+     *
+     * Ordinary tools are START-only on this wire and stay that way: a RESULT for every Bash call would
+     * double the tool traffic of a busy turn and change what every already-shipped client renders (the
+     * App's own RESULT handler stamps `ok` onto the card, turning today's neutral rows into a wall of
+     * ✓). The picture is the whole reason to break that silence, so no picture means no frame.
+     *
+     * [ToolEvent.ok] is a REAL boolean here, never left null: an old App that cannot read `images` still
+     * decodes this frame and renders it as the card's status chip, so "unknown" would show up as a
+     * missing outcome on a call whose outcome we know perfectly well.
+     *
+     * A result INSIDE a sub-agent ([AgentEvent.ToolResult.parentId] set) is skipped: those fold into the
+     * parent's card as a child count and have no row of their own to hang a thumbnail on.
+     */
+    private suspend fun emitToolResultImages(ev: AgentEvent.ToolResult) {
+        if (ev.images.isEmpty()) return
+        if (ev.parentId != null) return
+        val id = ev.toolUseId ?: return
+        val thumbs = ImageThumbnail.thumbnails(ev.images)
+        if (thumbs.isEmpty()) return // every image was undecodable / over budget — nothing to show
+        val frame = ToolEvent(
+            convoId, seq.getAndIncrement(), ToolPhase.RESULT,
+            toolNames[id] ?: "tool",
+            ok = !ev.isError,
+            toolUseId = id,
+            output = ev.content?.trim()?.take(SUBAGENT_OUTPUT_MAX)?.ifBlank { null },
+            images = thumbs,
+        )
+        // Byte-level backstop. Unlike a replayed ConvoHistory, a live ToolEvent passes through NO
+        // budget on its way to the relay — and the relay kills the whole connection on a frame over
+        // MAX_FRAME rather than dropping it. ImageThumbnail's caps already put this ~1 MB under that,
+        // so this measures the thing that actually ships (JSON escaping and all) and drops the pictures
+        // rather than the card if the arithmetic is ever wrong.
+        val sized = if (PocketJson.encodeToString<ToolEvent>(frame).length <= MAX_LIVE_TOOL_FRAME_BYTES) {
+            frame
+        } else {
+            log.warn("tool result images too big for a live frame (tool=${frame.tool}) — sending the card without them")
+            frame.copy(images = emptyList())
+        }
+        sink.emit(sized)
+    }
+
     /** Main-chain tool_result for a tracked sub-agent: a foreground run's result IS its report — emit the
      *  card's RESULT. A background run's success result is only the launch ack (task_notification finishes
      *  it); its ERROR result means the launch itself failed, so settle now. */
@@ -2910,6 +2975,16 @@ class Conversation(
 
         // in-flight sub-agent cards tracked at once (issue #77) — parallel fan-outs stay well under this
         const val MAX_SUBAGENTS = 16
+
+        // tool_use id -> name entries kept for a possible image-bearing RESULT (issue #332). Larger than
+        // MAX_SUBAGENTS because EVERY ordinary tool registers one and a screenshot's result can land
+        // several tool calls later; still trivially bounded memory (a short id + a short name).
+        const val MAX_TOOL_NAMES = 128
+
+        /** Ceiling on the serialized bytes of ONE live [ToolEvent] carrying thumbnails (issue #332).
+         *  Well under the relay's 4 MiB `MAX_FRAME` — which it must be, because a frame over that cap
+         *  does not get dropped, it kills the connection ([FrameTooBigException]). */
+        const val MAX_LIVE_TOOL_FRAME_BYTES = 1_500_000
 
         // cap on a sub-agent report crossing the wire in a ToolEvent/HistoryMessage (4 MiB frame budget)
         const val SUBAGENT_OUTPUT_MAX = 4000

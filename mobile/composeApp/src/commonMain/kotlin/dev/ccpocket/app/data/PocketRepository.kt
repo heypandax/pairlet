@@ -424,6 +424,14 @@ sealed interface ChatItem {
         /** A replayed Workflow card's run id (issue #106) — binds it to [PocketRepository.workflowRuns].
          *  Live cards bind via [taskId] == the run's originating tool_use id instead. */
         val workflowRunId: String? = null,
+        /** Decoded thumbnails the tool's RESULT returned (issue #332) — a browser screenshot, a `Read`
+         *  of a PNG. Empty for the overwhelming majority of tools, which return only text. Populated
+         *  live by the RESULT event that lands on this same [taskId], and on replay from the row's own
+         *  `HistoryMessage.images`; both are already downscaled by the daemon. */
+        val images: List<ByteArray> = emptyList(),
+        /** The daemon's replay budget shed some of the result's pictures — rendered even with an empty
+         *  [images], so "there was a screenshot you can't see" never reads as "there was no screenshot". */
+        val imagesTruncated: Boolean = false,
     ) : ChatItem
     data class Sys(val text: String) : ChatItem
     data class RuleChip(val rule: String) : ChatItem // "Always allowing X this session" confirmation
