@@ -348,6 +348,9 @@ class DeviceSessions(
                 supportedAgents = DAEMON_SUPPORTED_AGENT_WIRES,
                 supportsUsageAgentFilter = true, // issue #258: this build honors FetchUsage.agent
                 supportsPromptRecovery = true, // #122: acked prompts stay ledgered until agent consumption
+                // #348: the backends whose subscription allowance this daemon can read. Same source as the
+                // LAN transport's copy (WsConnection) — the router owns the readers, so it owns the answer.
+                quotaAgents = core.router.quotaAgentWires(),
             ),
         )
 

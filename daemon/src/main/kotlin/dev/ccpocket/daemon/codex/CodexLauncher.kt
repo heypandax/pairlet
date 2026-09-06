@@ -37,7 +37,15 @@ object CodexLauncher {
     /** argv for the persistent JSON-RPC server. cwd / model / approval / sandbox are set per thread+turn, not here. */
     fun buildArgs(): List<String> = listOf("app-server")
 
-    fun processBuilder(exe: Path, spec: AgentSpec): ProcessBuilder {
+    fun processBuilder(exe: Path, spec: AgentSpec): ProcessBuilder = processBuilder(exe, spec.workdir.toFile())
+
+    /**
+     * The cwd-only form, for callers that drive an app-server without a session (issue #348's
+     * [CodexQuotaService]: a short-lived control-plane read has no workdir of its own). Kept as the ONE
+     * place the argv is assembled — a second copy would be the copy that forgets the `.cmd`/`.bat`
+     * shell wrapper Windows needs.
+     */
+    fun processBuilder(exe: Path, cwd: File): ProcessBuilder {
         val exeStr = exe.toString()
         val needsShell = isWindows && exeStr.lowercase().let { it.endsWith(".cmd") || it.endsWith(".bat") }
         val argv = buildList {
@@ -46,7 +54,7 @@ object CodexLauncher {
             addAll(buildArgs())
         }
         return ProcessBuilder(argv).apply {
-            directory(spec.workdir.toFile())
+            directory(cwd)
             redirectErrorStream(false) // keep stderr off the stdout JSON-RPC stream
         }
     }

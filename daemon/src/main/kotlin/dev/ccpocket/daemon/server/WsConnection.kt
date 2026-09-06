@@ -179,6 +179,10 @@ class WsConnection(
                                 supportedAgents = DAEMON_SUPPORTED_AGENT_WIRES,
                                 supportsUsageAgentFilter = true, // issue #258: this build honors FetchUsage.agent
                                 supportsPromptRecovery = true, // #122: acked prompts stay ledgered until agent consumption
+                                // #348: which backends' SUBSCRIPTION allowance this daemon can read. The
+                                // router owns the answer because it owns the readers; absent (an older
+                                // daemon) decodes to empty = "Claude only, legacy behaviour".
+                                quotaAgents = router.quotaAgentWires(),
                             ),
                         ),
                     )

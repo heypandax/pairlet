@@ -41,6 +41,10 @@ class DaemonCore(
     claudeConfigDir: java.nio.file.Path? = null,
     /** The owner's --claude-bin override — must reach every auxiliary claude process (see [claudeRuntime]). */
     claudeBin: String? = null,
+    /** The owner's --codex-bin override (issue #348). The quota reader spawns its own short-lived
+     *  `codex app-server`, so it must resolve the SAME binary [CodexBackend] does — a reader that fell
+     *  back to PATH would report a different account's allowance on a machine with two Codex installs. */
+    codexBin: String? = null,
     presetStore: PresetStore = PresetStore.load(),
     scheduleStore: ScheduleStore = ScheduleStore.load(),
     openCodeModels: OpenCodeModelService = OpenCodeModelService(),
@@ -219,6 +223,7 @@ class DaemonCore(
         reviews = reviews,
         reviewOwner = reviewOwner,
         git = git,
+        codexQuota = dev.ccpocket.daemon.codex.CodexQuotaService(codexBin),
     )
 
     /**

@@ -40,6 +40,8 @@ import dev.ccpocket.protocol.AGENT_WIRE_KIMI
 import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
 import dev.ccpocket.protocol.AGENT_WIRE_ZCODE
 import dev.ccpocket.protocol.ScheduleState
+import dev.ccpocket.protocol.CLAUDE_QUOTA_NO_TOKEN
+import dev.ccpocket.protocol.ClaudeQuota
 import dev.ccpocket.protocol.ClaudeQuotaGet
 import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.AudioCancel
@@ -198,6 +200,11 @@ class RequestRouter(
     // like [git] so a router test that never asks for quota needs no wiring; it holds only a short result
     // cache, so one instance per router is fine and a second one would just fetch twice.
     private val quota: dev.ccpocket.daemon.claude.ClaudeQuotaService = dev.ccpocket.daemon.claude.ClaudeQuotaService(),
+    // the CODEX subscription-allowance reader (issue #348), the twin of [quota]. Separate instance rather
+    // than a branch inside one service: the two have different transports, different failure vocabularies
+    // and independent caches, and a shared cache slot would let one backend's 60s TTL hide the other's
+    // fresh numbers. Defaulted like [quota] so a router test that never asks for Codex quota needs no wiring.
+    private val codexQuota: dev.ccpocket.daemon.codex.CodexQuotaService = dev.ccpocket.daemon.codex.CodexQuotaService(),
     // the session-archive store's backing file (issue #202). Injectable like prefs/presets/schedules so a
     // test never reads or rewrites the developer's real ~/.cc-pocket/session-archive.json.
     private val archiveFile: java.io.File = SessionArchive.defaultFile(),
@@ -211,6 +218,22 @@ class RequestRouter(
      *  Null = not wired: the owner frames answer `review_unavailable` rather than half-working. */
     private val reviewOwner: dev.ccpocket.daemon.review.ReviewOwnerService? = null,
 ) {
+    /**
+     * The backends whose SUBSCRIPTION allowance this daemon can actually read, as
+     * [dev.ccpocket.protocol.AgentKind] wire names — the payload of
+     * [dev.ccpocket.protocol.DaemonInfo.quotaAgents] (issue #348).
+     *
+     * Claude is unconditional: its reader needs no local binary (it talks to Anthropic over HTTPS and
+     * reports NO_TOKEN when the machine is signed out), so listing it is honest even on a Claude-less
+     * machine — and every pre-#348 client assumes exactly that anyway. Codex is listed only when its CLI
+     * is resolvable, because the whole read IS that CLI: advertising it on a machine without codex would
+     * invite a request whose only possible answer is "no".
+     */
+    fun quotaAgentWires(): List<String> = buildList {
+        add("claude")
+        if (codexQuota.available()) add("codex")
+    }
+
     /** One connection's declared wire vocabulary (see [ClientCaps] in Messages.kt). Mutable: the
      *  declaration frame lands after connect and upgrades the SAME holder the ingress created for
      *  the connection. Default (no declaration, or a legacy ingress passing null) = filter — an
@@ -513,11 +536,30 @@ class RequestRouter(
             is ClaudeQuotaGet ->
                 if (gitOwnerOnly(origin, guestScope, collabScope)) {
                     scope.launch {
-                        val reply = quota.get(frame.forceRefresh)
+                        // Dispatch by the REQUESTED backend (issue #348). The frame name stays
+                        // `claude.quota.get` for wire compatibility; `agent` is the selector.
+                        val reply = when (frame.agent) {
+                            AgentKind.CLAUDE -> quota.get(frame.forceRefresh)
+                            AgentKind.CODEX -> codexQuota.get(frame.forceRefresh)
+                            // a backend whose allowance nothing here can read. NO_TOKEN, not an error:
+                            // "there is no subscription number for this one" is the state the client
+                            // hides, and an http_error would draw an alarm for a missing feature.
+                            else -> ClaudeQuota(
+                                status = CLAUDE_QUOTA_NO_TOKEN,
+                                error = "no subscription allowance is readable for this backend",
+                            )
+                        }
+                        // ECHO the DECODED request value, never a hard-coded constant. `agent` is a
+                        // coerced enum: an unknown wire name from a newer client decodes to CLAUDE here,
+                        // is therefore answered with the CLAUDE allowance above, and must be LABELLED
+                        // claude so that client sees the mismatch against what it asked for and drops the
+                        // reading. Stamping the service's own idea of its agent would instead hand that
+                        // client a Claude number wearing the label it hoped for.
+                        val tagged = reply.copy(agent = frame.agent)
                         // status + row count only — never the payload (it is billing state, and error
                         // strings must stay token-free by ClaudeQuotaService's contract anyway)
-                        quotaLog.info("quota → ${sinkKey(sink)} status=${reply.status} limits=${reply.limits.size}")
-                        sink.emit(reply)
+                        quotaLog.info("quota → ${sinkKey(sink)} agent=${frame.agent} status=${tagged.status} limits=${tagged.limits.size}")
+                        sink.emit(tagged)
                     }
                 } else {
                     quotaLog.info("quota REFUSED origin=$origin guest=${guestScope != null} collab=${collabScope != null}")
