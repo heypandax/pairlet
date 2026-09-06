@@ -1337,6 +1337,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      * otherwise-unbound view; every real browse action raises it before any late frame can arrive.
      */
     private var sessionNavigationFenced = false
+
+    /**
+     * Issue #349 — the same fence, one route up: the workdir of the latest explicit "enter this project".
+     * Set by [listSessions], the ONE entry point every user-initiated browse funnels through (phone project
+     * rows, the desktop sidebar/RepoDesktopModel, FleetCoordinator's browse/focus, [switchToSession]), and
+     * dropped whenever the user leaves the list ([backToDirectories], a push tap that jumps straight into a
+     * chat, [disconnect], [demoteToSatellite]). Read only by [acceptsSessions].
+     */
+    private var browseIntentDir: String? = null
     /** The workdir of an in-flight BRAND-NEW OpenSession (resumeId == null), armed by [openSession] and
      *  disarmed when its SessionLive answer lands (or the open fails / times out). A brand-new session has
      *  no sessionId to recognize its announce by, so the #219 identity guard in the SessionLive handler
@@ -1864,6 +1873,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         pendingOpen = null
         if (convoId.value != null && currentSessionId == t.sessionId) return // already in this session — don't churn it
         sessionsDir.value = null // drop any half-open session list so the chat is what shows
+        browseIntentDir = null // …and its #349 intent with it, or that half-open list's reply reinstates it
         openSession(t.workdir, t.sessionId, title = t.title, agent = t.agent)
     }
 
@@ -2506,6 +2516,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         skillCatalog.value = null; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
         convoId.value = null
         sessionsDir.value = null
+        browseIntentDir = null // #349: a browse intent belongs to the link/machine that accepted the tap
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
         clearAskQueue()
         pendingApprovals.clear()
@@ -2652,7 +2663,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         clearPromptLifecycleState()
         convoId.value = null; currentSessionId = null; sessionKey.value = null
         workdir.value = null // same reason as disconnect(): a stale path must not leak into a later ⌘N (issue #56)
-        sessionsDir.value = null; sessions.clear()
+        sessionsDir.value = null; sessions.clear(); browseIntentDir = null // #349: same rule as disconnect()
         chatTitle.value = null; observing.value = false; streaming.value = false
         opening.value = false; openTimedOut.value = false; switching.value = false; switchingSession.value = false
         openInFlight = null; lastOpenAttempt = null // #235: the claim + its retry target belong to the machine we're leaving
@@ -2971,6 +2982,33 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             (!opening.value && convoId.value == null && sessionKey.value == null)
     }
 
+    /**
+     * Issue #349 — may this `Sessions([workdir])` reply WRITE the browse route? The phone's screen is derived
+     * state (`sessionsDir != null` ⇒ SessionsScreen), so the handler's unconditional `sessionsDir = f.workdir`
+     * made every late reply a navigation event: press BACK and any reply still in flight dragged the user
+     * straight back into the list. That is exactly #226's defect class one route up — BACK is an
+     * authoritative navigation decision, and what lands after it is background state.
+     *
+     * Late replies are plentiful and all legitimate: the project row's own fire-and-forget list (a double
+     * tap sends two), [backToBrowse]'s re-list, the completion-edge refresh driven by the 12s silent
+     * directory poll, [restoreAfterReconnect], pull-to-refresh, and every group/rename/archive mutation —
+     * the daemon answers those by re-pushing `Sessions` rather than a dedicated frame. So the rule is not
+     * "drop late frames" but "accept only what the user still wants":
+     *  - [browseIntentDir] — the latest explicit "enter this project"; the reply it asked for;
+     *  - the directory ALREADY on screen — an in-place refresh of the list being looked at, which is what
+     *    keeps group ops, archive/rename, pull-to-refresh, the completion edge and reconnect restore working;
+     *  - a fully unbound client that has not backed out of anything (no intent, no listed dir, [#226's
+     *    fence][sessionNavigationFenced] down) — the cold-start/bootstrap seam, the same catch-all shape
+     *    [acceptsSessionLive] keeps for the chat route.
+     *
+     * Anything else is dropped WHOLE: neither [sessionsDir] nor [sessions] is touched, so a reply for a
+     * project the user has left (or never asked about) cannot repoint the route or swap the rows underneath.
+     */
+    private fun acceptsSessions(workdir: String): Boolean =
+        workdir == browseIntentDir ||
+            workdir == sessionsDir.value ||
+            (!sessionNavigationFenced && browseIntentDir == null && sessionsDir.value == null)
+
     // control-plane counterpart: Attached/PeerPresence/AuthError flow through handleControl, not handle.
     // Lets a test drive a (re)attach edge without a live transport — e.g. that Attached bumps connGen so
     // the Account pane's fetch re-keys on reconnect.
@@ -3010,15 +3048,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 recomputePhase()
             }
             is Sessions -> {
-                // distinctBy: one row per session id NO MATTER what the daemon sent. A codex resume-rollout
-                // (two files, one id) once reached the phone's LazyColumn as two rows with one key — that is
-                // an instant native crash, not a cosmetic glitch. The daemon dedupes too; this edge survives
-                // an older daemon. First occurrence wins = newest (the list arrives sorted by recency).
-                sessionsDir.value = f.workdir; replace(sessions, f.items.distinctBy { it.sessionId })
-                replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
-                groupsSupported.value = f.groups != null // groups=[] (owner, none yet) still enables management
-                renameSupported.value = f.renameSupported // #158: false from an older daemon / a guest
-                archiveSupported.value = f.archiveSupported // #202: same contract as renameSupported
+                if (acceptsSessions(f.workdir)) {
+                    // distinctBy: one row per session id NO MATTER what the daemon sent. A codex resume-rollout
+                    // (two files, one id) once reached the phone's LazyColumn as two rows with one key — that is
+                    // an instant native crash, not a cosmetic glitch. The daemon dedupes too; this edge survives
+                    // an older daemon. First occurrence wins = newest (the list arrives sorted by recency).
+                    sessionsDir.value = f.workdir; replace(sessions, f.items.distinctBy { it.sessionId })
+                    replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
+                    groupsSupported.value = f.groups != null // groups=[] (owner, none yet) still enables management
+                    renameSupported.value = f.renameSupported // #158: false from an older daemon / a guest
+                    archiveSupported.value = f.archiveSupported // #202: same contract as renameSupported
+                }
+                // Even a DROPPED reply ends the spinner that may have asked for it — a stranded
+                // sessionsRefreshing would greet the user with a dead indicator on the next visit.
                 sessionsRefreshing.value = false
             }
             is ArchivedSessions -> { // #202: the cross-project archive view's rows
@@ -5062,7 +5104,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         return link
     }
 
-    fun listSessions(wd: String) = scope.launch { send(ListSessions(wd)) }
+    /** Enter a project's session list. THE entry point for every user-initiated browse — phone project rows,
+     *  the desktop sidebar, FleetCoordinator, [switchToSession] — because it is where #349's browse intent is
+     *  recorded, and [acceptsSessions] admits the reply only on that intent. */
+    fun listSessions(wd: String): Job {
+        // #349: recorded SYNCHRONOUSLY, like the #235 open claim — the tap is the navigation decision, and a
+        // fence armed only inside the coroutine below would already have lost the race against the send.
+        browseIntentDir = wd
+        return scope.launch { send(ListSessions(wd)) }
+    }
 
     /** Fetch the cross-project archive (issue #202) — a multi-project scan on the daemon, so only ever on
      *  an explicit open/refresh, never on a timer. */
@@ -5095,6 +5145,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Re-scan a project's sessions with the pull-to-refresh spinner ([wd] defaults to the open list's dir). */
     fun refreshSessions(wd: String? = null) {
         val dir = wd ?: sessionsDir.value ?: return
+        // #349: an EXPLICIT [wd] is the desktop sidebar refreshing a NON-current group, which deliberately
+        // repoints the live listing to it (RepoDesktopModel.refresh snapshots the outgoing group first) —
+        // a browse intent exactly like a project click. A null [wd] is the phone's pull-to-refresh on the
+        // list already on screen, where recording it changes nothing the accept rule wasn't allowing.
+        browseIntentDir = dir
         refreshWithSpinner(sessionsRefreshing, ListSessions(dir))
     }
 
@@ -6741,6 +6796,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         fenceSessionNavigation()
         val c = convoId.value
         val dir = sessionsDir.value // non-null = we land on the session list: re-pull it so the rows reflect this session's run
+        // #349: landing on that list IS a browse intent, so its re-list answer is wanted. (dir == sessionsDir
+        // would admit it anyway; keeping the two in lockstep is what makes a follow-up backToDirectories —
+        // which clears both — drop the reply instead of bouncing the user back into the list.)
+        browseIntentDir = dir
         // observing or idle -> reclaim; still executing -> leave it running in the background.
         // One coroutine for both sends: the re-list must see the close, not race it.
         val closeConvo = c?.takeIf { observing.value || !streaming.value }
@@ -6870,6 +6929,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // the user backs all the way out and reopens. Delegate the chat teardown, then drop to directories.
         if (convoId.value != null) backToBrowse()
         fenceSessionNavigation()
+        browseIntentDir = null // #349: BACK retires the browse intent, so a reply still in flight can't re-enter the list
         sessionsDir.value = null
         sessions.clear()
     }
