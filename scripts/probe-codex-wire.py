@@ -34,6 +34,12 @@ CodexBackend（daemon/src/main/kotlin/dev/ccpocket/daemon/codex/CodexBackend.kt�
               新版 Codex 的 thread/unsubscribe 仍可能保留 active writer，daemon 因此以进程退出作为
               跨 App 交接边界；若 EOF 不退出或退出后仍占用，ChatGPT App 会继续提示「已在另一个应用中打开」
 
+  ratelimits  account/rateLimits/read 存在，且 result.rateLimits.primary 里 usedPercent /
+              windowDurationMins / resetsAt 三个字段齐备。daemon 的 CodexQuotaService（issue #348）
+              按 windowDurationMins 判 5h/7d 窗、把 resetsAt 当**epoch 秒**乘 1000 上线。
+              字段改名 → 额度条整条消失；resetsAt 改成毫秒或 ISO → 每个窗口都显示「已重置」。
+              ⚠️ secondary 允许为 null（本机 pro 账号就只有周窗），断言只压 primary
+
   unknown     未知方法必须回**带 id 的 error response**，而不是断连或静默。handleErrorResponse 的
               全部关联逻辑（pendingSteers / pendingStarts / pendingControls / threadOpenId /
               initializeId 五张表）都建立在「错误按 id 回到发起方」这个前提上
@@ -41,7 +47,7 @@ CodexBackend（daemon/src/main/kotlin/dev/ccpocket/daemon/codex/CodexBackend.kt�
 说的是 CodexBackend 那套方言：裸 {id, method, params}，**不带 `jsonrpc` 字段**（与
 probe-codex-concurrent.py 一致）。
 
-用法：python3 scripts/probe-codex-wire.py [thread_scope|handshake|steer_stale|fork|handoff|unknown|all]（默认 all）
+用法：python3 scripts/probe-codex-wire.py [thread_scope|handshake|steer_stale|fork|handoff|ratelimits|unknown|all]（默认 all）
       CC_POCKET_CODEX_BIN=/path/to/codex 可覆盖二进制。
 退出码：0 全绿 / 1 有 FAIL（行为漂移）/ 2 缺依赖（找不到 codex）。
 探针在临时目录起真实 codex app-server（approvalPolicy=never + sandbox=read-only，只碰自己新建的
@@ -441,6 +447,44 @@ def check_handoff(srv, thread_id, cwd):
     return ok
 
 
+def check_ratelimits(srv):
+    """⑤ account/rateLimits/read → 额度快照，primary 三字段齐备（issue #348）。"""
+    print("── ratelimits：account/rateLimits/read → 额度快照形状 ──")
+    rid, env = srv.request("account/rateLimits/read", {})
+    if env is None:
+        return check("account/rateLimits/read 有应答", False,
+                     "静默：%.0fs 内无应答（进程存活=%s）—— 额度条会永远空着" % (RPC_TIMEOUT, srv.alive()))
+    show("rateLimits <<<", env)
+    if "error" in env:
+        # 未登录的机器上这里就是 error，不是漂移 —— 但方法本身必须存在
+        msg = (env.get("error") or {}).get("message") or ""
+        return check("account/rateLimits/read 方法存在", "method" not in msg.lower(),
+                     "error: %s（若是未登录，属预期；若是 method not found，就是漂移）" % excerpt(msg, 160))
+    res = env.get("result") or {}
+    top = res.get("rateLimits")
+    ok = check("result 带 rateLimits 对象", isinstance(top, dict),
+               "rateLimits=%s" % excerpt(top, 160))
+    primary = (top or {}).get("primary") if isinstance(top, dict) else None
+    ok &= check("rateLimits.primary 是对象", isinstance(primary, dict),
+                "primary=%s" % excerpt(primary, 160))
+    for field, kind in (("usedPercent", (int, float)), ("windowDurationMins", (int, float)), ("resetsAt", (int, float))):
+        ok &= check("primary.%s 是数字" % field,
+                    isinstance((primary or {}).get(field), kind) and not isinstance((primary or {}).get(field), bool),
+                    "%s=%r" % (field, (primary or {}).get(field)))
+    # 秒 vs 毫秒：2001-09-09 之后的秒级时间戳 < 1e11，毫秒级 > 1e12。搞反 = 每个窗口都显示已重置
+    resets = (primary or {}).get("resetsAt")
+    ok &= check("primary.resetsAt 仍是 epoch 秒（不是毫秒）",
+                isinstance(resets, (int, float)) and not isinstance(resets, bool) and 1e9 < resets < 1e11,
+                "resetsAt=%r —— CodexQuotaService 按秒 ×1000 上线" % resets)
+    # 分窗口的 per-limit 表：daemon 把 codex 以外的每一项映射成 scoped 行
+    by_id = res.get("rateLimitsByLimitId")
+    ok &= check("result 带 rateLimitsByLimitId 映射", isinstance(by_id, dict),
+                "keys=%s" % excerpt(list(by_id.keys()) if isinstance(by_id, dict) else by_id, 160))
+    ok &= check("连接没断（同一进程还能继续说话）", srv.alive(), "app-server pid %d 存活=%s"
+                % (srv.proc.pid, srv.alive()))
+    return ok
+
+
 def check_unknown(srv):
     """⑤ 未知方法 → 带 id 的 error response，连接不断、不静默。"""
     print("── unknown：未知方法 → 带 id 的 error response ──")
@@ -465,8 +509,8 @@ def check_unknown(srv):
 def main():
     global CODEX
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
-    if which not in ("all", "thread_scope", "handshake", "steer_stale", "fork", "handoff", "unknown"):
-        print("用法：python3 scripts/probe-codex-wire.py [thread_scope|handshake|steer_stale|fork|handoff|unknown|all]",
+    if which not in ("all", "thread_scope", "handshake", "steer_stale", "fork", "handoff", "ratelimits", "unknown"):
+        print("用法：python3 scripts/probe-codex-wire.py [thread_scope|handshake|steer_stale|fork|handoff|ratelimits|unknown|all]",
               file=sys.stderr)
         return 2
     resolved = shutil.which(CODEX) if CODEX else None
@@ -502,6 +546,10 @@ def main():
                 print()
             if which in ("all", "fork"):
                 check_fork(srv, thread_id)
+                print()
+            # 额度读是控制面，不碰 thread —— 放在真实 turn 之前之后都行，这里跟 unknown 作伴
+            if which in ("all", "ratelimits"):
+                check_ratelimits(srv)
                 print()
             if which in ("all", "unknown"):
                 check_unknown(srv)
