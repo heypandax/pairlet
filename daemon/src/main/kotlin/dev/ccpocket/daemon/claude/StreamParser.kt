@@ -133,6 +133,10 @@ object StreamParser {
                 content = toolResultText(block["content"]),
                 isError = (block["is_error"] as? JsonPrimitive)?.booleanOrNull == true,
                 parentId = parentId, // set = a result INSIDE a sub-agent, not the main chain
+                // a screenshot the tool handed back (issue #332) — flattening the content to text
+                // used to drop these on the floor, so the phone saw a bare "Read"/"browser_take_
+                // screenshot" row for a call whose entire product was a picture
+                images = toolResultImages(block["content"]),
             )
         }
         // a Workflow tool's async-launch ack: the run id ONLY reaches the live stream via this
@@ -163,6 +167,30 @@ object StreamParser {
         is JsonPrimitive -> el.contentOrNull
         is JsonArray -> el.mapNotNull { (it as? JsonObject)?.str("text") }.joinToString("\n").ifBlank { null }
         else -> null
+    }
+
+    /**
+     * The `{"type":"image","source":{"type":"base64","media_type":…,"data":…}}` blocks a tool_result
+     * carried (issue #332), in wire order. Only a base64 source is taken: a `url` source carries no
+     * bytes this daemon can put on the wire, and an un-renderable tile is worse than no tile.
+     *
+     * Deliberately NOT deduplicated or capped here — this is the parser's faithful read of the line.
+     * The count/byte ceilings belong to the emitter ([dev.ccpocket.daemon.media.ImageThumbnail]), which
+     * is also where the cost of enforcing them (a decode) is paid.
+     */
+    private fun toolResultImages(el: JsonElement?): List<dev.ccpocket.protocol.ImageData> {
+        val arr = el as? JsonArray ?: return emptyList()
+        return arr.mapNotNull { item ->
+            val block = item as? JsonObject ?: return@mapNotNull null
+            if (block.str("type") != "image") return@mapNotNull null
+            val src = block["source"] as? JsonObject ?: return@mapNotNull null
+            if (src.str("type") != "base64") return@mapNotNull null
+            val data = src.str("data")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            dev.ccpocket.protocol.ImageData(
+                mediaType = src.str("media_type")?.takeIf { it.isNotBlank() } ?: "image/png",
+                base64 = data,
+            )
+        }
     }
 
     private fun parseResult(root: JsonObject): AgentEvent {
