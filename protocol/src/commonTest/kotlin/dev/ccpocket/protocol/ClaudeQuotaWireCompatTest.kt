@@ -53,6 +53,49 @@ class ClaudeQuotaWireCompatTest {
         assertEquals(resp, PocketJson.decodeFromString<Envelope>(respJson))
     }
 
+    /** The request/reply shapes a client shipped BEFORE #348 (no agent field) emit/expect. */
+    @Serializable
+    private data class OldClaudeQuotaGet(val forceRefresh: Boolean = false)
+
+    @Serializable
+    private data class OldClaudeQuota(
+        val limits: List<OldClaudeQuotaLimit> = emptyList(),
+        val fetchedAt: Long = 0,
+        val status: String = CLAUDE_QUOTA_OK,
+        val error: String? = null,
+    )
+
+    @Test
+    fun agent_rides_as_a_trailing_optional_defaulting_to_claude_both_ways() {
+        // issue #348: a Codex reading keeps the same frame names; only the agent tag differs
+        val req = ClaudeQuotaGet(agent = AgentKind.CODEX)
+        val reqJson = PocketJson.encodeToString(req)
+        assertTrue("\"agent\":\"codex\"" in reqJson, reqJson)
+        assertEquals(req, PocketJson.decodeFromString<ClaudeQuotaGet>(reqJson))
+        // an old client's request (no key) is a Claude request; an old daemon reading a new request
+        // sees only forceRefresh — the client-side quotaAgents gate is what keeps that from mis-attributing
+        assertEquals(AgentKind.CLAUDE, PocketJson.decodeFromString<ClaudeQuotaGet>("""{"forceRefresh":true}""").agent)
+        assertEquals(OldClaudeQuotaGet(false), PocketJson.decodeFromString<OldClaudeQuotaGet>(reqJson))
+
+        val reply = ClaudeQuota(
+            limits = listOf(ClaudeQuotaLimit(CLAUDE_QUOTA_KIND_WEEKLY_ALL, "weekly", 48, resetsAt = 1_789_179_749_000L)),
+            fetchedAt = 1_700_000_000_000L,
+            agent = AgentKind.CODEX,
+            planType = "pro",
+        )
+        val replyJson = PocketJson.encodeToString(reply)
+        assertEquals(reply, PocketJson.decodeFromString<ClaudeQuota>(replyJson))
+        // an old daemon's reply (no key) is Claude's; an old client skips the new keys entirely
+        assertEquals(AgentKind.CLAUDE, PocketJson.decodeFromString<ClaudeQuota>("""{"status":"ok"}""").agent)
+        assertNull(PocketJson.decodeFromString<ClaudeQuota>("""{"status":"ok"}""").planType)
+        assertEquals(
+            OldClaudeQuota(limits = listOf(OldClaudeQuotaLimit(CLAUDE_QUOTA_KIND_WEEKLY_ALL, "weekly", 48)), fetchedAt = 1_700_000_000_000L),
+            PocketJson.decodeFromString<OldClaudeQuota>(replyJson),
+        )
+        // a future agent name coerces to the declared default (coerceInputValues) instead of failing the frame
+        assertEquals(AgentKind.CLAUDE, PocketJson.decodeFromString<ClaudeQuota>("""{"agent":"some-future-agent"}""").agent)
+    }
+
     @Test
     fun an_unknown_status_or_kind_survives_verbatim_instead_of_degrading_to_ok() {
         // the whole reason these are Strings: a future daemon's new vocabulary must not read as success

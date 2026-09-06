@@ -38,6 +38,20 @@ private data class OldModelsList(
     val gatewayModels: List<String> = emptyList(),
 )
 
+/** The pre-#332 tool-event shape — proves an already-shipped client skips the new images array. */
+@Serializable
+private data class OldToolEvent(
+    val convoId: String,
+    val seq: Long,
+    val phase: ToolPhase,
+    val tool: String,
+    val inputPreview: String? = null,
+    val ok: Boolean? = null,
+    val toolUseId: String? = null,
+    val parentToolUseId: String? = null,
+    val output: String? = null,
+)
+
 class SerializationRoundTripTest {
 
     @Test
@@ -150,6 +164,82 @@ class SerializationRoundTripTest {
             OldModelsList(agent = AgentKind.CODEX, models = listOf("gpt-5.6-sol")),
             PocketJson.decodeFromString<OldModelsList>(PocketJson.encodeToString(models)),
         )
+    }
+
+    @Test
+    fun agentPresets_are_additive_and_legacy_safe() {
+        // issue #333: a third axis next to modePresets/models — DeepSeek Harness agent presets
+        val advertised = ModelsList(
+            agent = AgentKind.DSH,
+            models = listOf("deepseek-v4-flash", "deepseek-v4-pro"),
+            agentPresets = listOf(
+                AgentPresetInfo("standard", "Standard", recommended = true),
+                AgentPresetInfo("minimal", "Minimal", "Fewer tools, terse replies"),
+                AgentPresetInfo("my-reviewer", "My reviewer", custom = true),
+            ),
+        )
+        assertEquals(advertised, PocketJson.decodeFromString<ModelsList>(PocketJson.encodeToString(advertised)))
+
+        // an old daemon's frame (no field) decodes to empty = "not advertised"
+        assertEquals(
+            emptyList<AgentPresetInfo>(),
+            PocketJson.decodeFromString<ModelsList>("""{"agent":"dsh","models":["deepseek-v4-flash"]}""").agentPresets,
+        )
+        // a sparse row (future daemon sending only the id) still decodes, label falls back to the id
+        assertEquals(
+            AgentPresetInfo("ptc"),
+            PocketJson.decodeFromString<AgentPresetInfo>("""{"id":"ptc"}"""),
+        )
+        // an already-shipped phone's concrete serializer skips the populated rows entirely
+        assertEquals(
+            OldModelsList(agent = AgentKind.DSH, models = listOf("deepseek-v4-flash", "deepseek-v4-pro")),
+            PocketJson.decodeFromString<OldModelsList>(PocketJson.encodeToString(advertised)),
+        )
+
+        // the chosen preset rides OpenSession/SessionLive as trailing optionals, omitted when null
+        val open = OpenSession(workdir = "/x", agent = AgentKind.DSH, agentPreset = "minimal")
+        val openJson = PocketJson.encodeToString(open)
+        assertTrue("\"agentPreset\":\"minimal\"" in openJson, openJson)
+        assertEquals(open, PocketJson.decodeFromString<OpenSession>(openJson))
+        assertFalse("agentPreset" in PocketJson.encodeToString(OpenSession(workdir = "/x")))
+        assertEquals(
+            OpenSession(workdir = "/x", agent = AgentKind.DSH),
+            PocketJson.decodeFromString<OpenSession>("""{"workdir":"/x","agent":"dsh"}"""),
+        )
+        val live = SessionLive(convoId = "c", workdir = "/x", agent = AgentKind.DSH, agentPreset = "minimal")
+        assertEquals(live, PocketJson.decodeFromString<SessionLive>(PocketJson.encodeToString(live)))
+        assertNull(PocketJson.decodeFromString<SessionLive>("""{"convoId":"c","workdir":"/x"}""").agentPreset)
+    }
+
+    @Test
+    fun toolEvent_images_are_additive_and_legacy_safe() {
+        // issue #332: a RESULT-phase tool event carrying a downscaled screenshot
+        val ev = ToolEvent(
+            convoId = "c", seq = 9, phase = ToolPhase.RESULT, tool = "mcp__playwright__browser_take_screenshot",
+            ok = true, toolUseId = "tu1", output = "Took the viewport screenshot",
+            images = listOf(ImageData("image/jpeg", "aGVsbG8=")),
+        )
+        assertEquals(ev, PocketJson.decodeFromString<ToolEvent>(PocketJson.encodeToString(ev)))
+        // an old daemon's frame (no key) decodes to empty — the pre-#332 card
+        assertEquals(
+            emptyList<ImageData>(),
+            PocketJson.decodeFromString<ToolEvent>("""{"convoId":"c","seq":1,"phase":"result","tool":"Agent","output":"done"}""").images,
+        )
+        // an old client's concrete serializer skips the populated array
+        assertEquals(
+            OldToolEvent("c", 9, ToolPhase.RESULT, "mcp__playwright__browser_take_screenshot", ok = true, toolUseId = "tu1", output = "Took the viewport screenshot"),
+            PocketJson.decodeFromString<OldToolEvent>(PocketJson.encodeToString(ev)),
+        )
+        // a TOOL history row may now carry images too — same field, same shape as the USER row
+        val row = HistoryMessage(role = ChatRole.TOOL, text = "", tool = "Bash", images = listOf(ImageData("image/png", "AA==")))
+        assertEquals(row, PocketJson.decodeFromString<HistoryMessage>(PocketJson.encodeToString(row)))
+    }
+
+    @Test
+    fun daemonInfo_quotaAgents_is_additive_and_absent_means_legacy_claude_only() {
+        val info = DaemonInfo(daemonVersion = "1.9.7", quotaAgents = listOf("claude", "codex"))
+        assertEquals(info, PocketJson.decodeFromString<DaemonInfo>(PocketJson.encodeToString(info)))
+        assertEquals(emptyList<String>(), PocketJson.decodeFromString<DaemonInfo>("""{"daemonVersion":"1.9.6"}""").quotaAgents)
     }
 
     @Test
