@@ -152,6 +152,36 @@ internal fun desktopModeChoices(agent: AgentKind, autoAvailable: Boolean = false
     AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.ZCODE -> CLAUDE_MODES
 }
 
+/**
+ * The rung the popover should show for [agent], given whatever the user had selected for the PREVIOUS
+ * agent (issue #333 review).
+ *
+ * WHY THIS IS NOT AN INDEX. The popover used to remember a positional `modeIdx` that was never re-keyed
+ * on the agent, while [desktopModeChoices] returns ladders of DIFFERENT lengths and orders. Picking
+ * "Plan" under Claude (index 2 of 4) and switching to dsh — whose ladder is default/plan/bypass — left
+ * index 2 pointing at **Full access**, silently arming the dangerous rung under a label the user never
+ * chose. With Claude's native Auto row present the index could also run off the end of the shorter
+ * ladder, where `getOrElse` quietly substituted plain Default.
+ *
+ * Carrying the MEANING (mode + native mode) instead is both safe and what the user means: a rung the new
+ * backend also has is kept, and one it does not have falls back to that backend's own default rather than
+ * to whatever happens to sit at the same offset.
+ */
+internal fun carryModeAcrossAgents(
+    previous: DkMode?,
+    agent: AgentKind,
+    defaultMode: PermissionMode,
+    defaultPermissionMode: String?,
+    autoAvailable: Boolean = false,
+): DkMode {
+    val ladder = desktopModeChoices(agent, autoAvailable)
+    previous?.let { prev ->
+        ladder.firstOrNull { it.mode == prev.mode && it.nativeMode == prev.nativeMode }?.let { return it }
+    }
+    val index = desktopDefaultModeIndex(agent, defaultMode, defaultPermissionMode, autoAvailable)
+    return ladder.getOrElse(index) { ladder.first() }
+}
+
 internal fun desktopDefaultModeIndex(
     agent: AgentKind,
     defaultMode: PermissionMode,
@@ -192,8 +222,14 @@ fun NewSessionPopover(
     val selectableAgents = availableAgents.ifEmpty { listOf(AgentKind.CLAUDE) }
     var agent by remember { mutableStateOf(defaultAgent.takeIf { it in selectableAgents } ?: selectableAgents.first()) }
     val availableModes = desktopModeChoices(agent, autoAvailable)
-    var modeIdx by remember {
-        mutableStateOf(desktopDefaultModeIndex(agent, defaultMode, defaultPermissionMode, autoAvailable))
+    // The RUNG, never its offset — see [carryModeAcrossAgents] for the mis-selection that was.
+    var selectedMode by remember {
+        mutableStateOf(carryModeAcrossAgents(null, agent, defaultMode, defaultPermissionMode, autoAvailable))
+    }
+    // Re-resolve whenever the ladder itself can change: switching agent, or Claude's native Auto row
+    // arriving a beat after the popover opened.
+    LaunchedEffect(agent, autoAvailable) {
+        selectedMode = carryModeAcrossAgents(selectedMode, agent, defaultMode, defaultPermissionMode, autoAvailable)
     }
     // null = follow the per-agent default. Reset per agent: a Claude alias isn't a model Codex can run.
     var chosenModel by remember(agent) { mutableStateOf<String?>(null) }
@@ -215,7 +251,7 @@ fun NewSessionPopover(
             // Enter anywhere in the popover = the Start button (the path field holds focus)
             .onPreviewKeyEvent { e ->
                 if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter) && looksAbsolute) {
-                    val selected = availableModes.getOrElse(modeIdx) { CLAUDE_MODES.first() }
+                    val selected = selectedMode
                     onStart(
                         trimmed,
                         agent,
@@ -276,12 +312,13 @@ fun NewSessionPopover(
                         color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 4.dp),
                     )
                 }
-            } else availableModes.forEachIndexed { i, m ->
+            } else availableModes.forEach { m ->
+                val picked = m.mode == selectedMode.mode && m.nativeMode == selectedMode.nativeMode
                 Row(
                     Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(8.dp))
-                        .background(if (i == modeIdx) Tok.surface else Color.Transparent)
-                        .border(1.dp, if (i == modeIdx) Tok.accent else Tok.hair, RoundedCornerShape(8.dp))
-                        .clickable { modeIdx = i }.padding(horizontal = 10.dp, vertical = 8.dp),
+                        .background(if (picked) Tok.surface else Color.Transparent)
+                        .border(1.dp, if (picked) Tok.accent else Tok.hair, RoundedCornerShape(8.dp))
+                        .clickable { selectedMode = m }.padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Dot(m.dot, 7.dp)
@@ -300,7 +337,7 @@ fun NewSessionPopover(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp).alpha(if (looksAbsolute) 1f else 0.45f)
                     .clip(RoundedCornerShape(10.dp)).background(Tok.accent)
                     .clickable(enabled = looksAbsolute) {
-                        val selected = availableModes.getOrElse(modeIdx) { CLAUDE_MODES.first() }
+                        val selected = selectedMode
                         onStart(
                             trimmed,
                             agent,
@@ -373,14 +410,20 @@ private fun NewSessionPresetRow(presets: List<AgentPresetInfo>, chosen: String?,
             .clickable { open = !open }.padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(summary, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
+        // CLAUDE.md 铁律：同排三个不同字号的 Text（12.5 / 10 / 13sp），三个都要 tightCenter；
+        // 只给其中一个，另外两个照旧按字体自带度量落点，肉眼就是没对齐。
+        Text(
+            summary, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp),
+            maxLines = 1, modifier = Modifier.weight(1f),
+        )
         if (chosen == null) Text(
             recommended?.label ?: defaultLabel,
-            color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp, maxLines = 1,
-            // tightCenter: sits geometrically beside the 12.5sp summary above (project rule).
-            style = tightCenter(10.sp),
+            color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp, maxLines = 1, style = tightCenter(10.sp),
         )
-        Text(if (open) "⌃" else "›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp)
+        Text(
+            if (open) "⌃" else "›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
+            style = tightCenter(13.sp),
+        )
     }
     if (open) {
         Column(Modifier.padding(bottom = 8.dp)) {

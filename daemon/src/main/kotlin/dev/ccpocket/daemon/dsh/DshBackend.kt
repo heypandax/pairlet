@@ -311,7 +311,10 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
             buildJsonObject { put("sessionId", sid); put("agentPreset", wanted) },
         )
         if (result != null && result["ok"]?.toString() == "true") {
-            return result.obj("value")?.str("agentPreset") ?: wanted
+            // Only the ECHO counts. Returning `wanted` on a bare ok:true would announce the REQUESTED
+            // preset as effective on no evidence — the one thing this path exists to prevent. No echo ⇒
+            // null ⇒ the caller keeps what `session.create` reported, which is itself a read-back.
+            return result.obj("value")?.str("agentPreset")?.takeIf { it.isNotBlank() }
         }
         val error = result?.obj("error")
         log.warn(

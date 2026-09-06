@@ -2750,6 +2750,10 @@ class Conversation(
         openedWithFork = false
         backfilledModel = null
         sessionTitle = null
+        // #333: same rule as the /clear path — the preset belongs to the session that just died. The new
+        // one gets its own from `session.create`, and carrying the old value over would label the fresh
+        // session with a persona it was never created under.
+        runtimeAgentPreset = null
         failedTurnStreak = 0 // fresh session in a new cwd — degraded state died with the old transcript
         sawSyntheticThisTurn = false
         lastSyntheticText = null

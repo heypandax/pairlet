@@ -109,6 +109,73 @@ class DesktopAgentChoicesTest {
         }
     }
 
+    /**
+     * Issue #333 review (HIGH): the popover remembered a positional mode INDEX that was never re-keyed on
+     * the agent, while the ladders differ in length and order. "Plan" is index 2 of Claude's four rungs;
+     * dsh's ladder is default/plan/bypass, so the same index landed on **Full access** — the dangerous
+     * rung, silently armed under a label the user never picked. [carryModeAcrossAgents] carries the
+     * MEANING instead, so this asserts the rung, not an offset.
+     */
+    @Test
+    fun switchingAgentKeepsTheChosenRungAndNeverSlidesOntoFullAccess() {
+        val plan = CLAUDE_MODES.first { it.mode == dev.ccpocket.protocol.PermissionMode.PLAN }
+        for (target in listOf(AgentKind.DSH, AgentKind.KIMI)) {
+            val carried = carryModeAcrossAgents(
+                previous = plan, agent = target,
+                defaultMode = dev.ccpocket.protocol.PermissionMode.DEFAULT, defaultPermissionMode = null,
+            )
+            assertEquals(dev.ccpocket.protocol.PermissionMode.PLAN, carried.mode, "$target lost the chosen rung")
+            assertTrue(
+                carried.mode != dev.ccpocket.protocol.PermissionMode.BYPASS_PERMISSIONS,
+                "$target slid the selection onto the dangerous rung",
+            )
+        }
+    }
+
+    /** A rung the new backend does NOT have falls back to that backend's default, never to an offset. */
+    @Test
+    fun aRungTheNewAgentLacksFallsBackToItsOwnDefault() {
+        val acceptEdits = CLAUDE_MODES.first { it.mode == dev.ccpocket.protocol.PermissionMode.ACCEPT_EDITS }
+        val carried = carryModeAcrossAgents(
+            previous = acceptEdits, agent = AgentKind.DSH,
+            defaultMode = dev.ccpocket.protocol.PermissionMode.DEFAULT, defaultPermissionMode = null,
+        )
+        assertEquals(dev.ccpocket.protocol.PermissionMode.DEFAULT, carried.mode)
+    }
+
+    /**
+     * Claude's native Auto row appears only when the CLI advertises it, which makes Claude's ladder FIVE
+     * long — one past the end of dsh's three. The old `getOrElse` swallowed that into a silent plain
+     * Default; nothing may now run off the end at all.
+     */
+    @Test
+    fun theAutoRowCannotRunOffTheEndOfAShorterLadder() {
+        val auto = CLAUDE_AUTO_MODE
+        val carried = carryModeAcrossAgents(
+            previous = auto, agent = AgentKind.DSH,
+            defaultMode = dev.ccpocket.protocol.PermissionMode.PLAN, defaultPermissionMode = null,
+            autoAvailable = true,
+        )
+        assertTrue(carried in desktopModeChoices(AgentKind.DSH, autoAvailable = true), "resolved off-ladder")
+        // dsh has no native Auto, so it falls back to the caller's stated default — Plan here, proving the
+        // fallback is the DEFAULT and not merely "index 0".
+        assertEquals(dev.ccpocket.protocol.PermissionMode.PLAN, carried.mode)
+        assertEquals(null, carried.nativeMode)
+    }
+
+    /** Same rung, same agent: carrying must be a no-op rather than a reset to the default. */
+    @Test
+    fun carryingWithinOneAgentKeepsTheExactRung() {
+        val bypass = CLAUDE_MODES.first { it.mode == dev.ccpocket.protocol.PermissionMode.BYPASS_PERMISSIONS }
+        assertEquals(
+            bypass,
+            carryModeAcrossAgents(
+                previous = bypass, agent = AgentKind.CLAUDE,
+                defaultMode = dev.ccpocket.protocol.PermissionMode.DEFAULT, defaultPermissionMode = null,
+            ),
+        )
+    }
+
     /** The specific rung that was wrong, named so a regression reads as itself rather than as a diff. */
     @Test
     fun dshAndKimiHaveNoAcceptEditsRungOnDesktop() {
