@@ -1994,4 +1994,5 @@
     <string name="privacy_gate_agree">同意并继续</string>
     <string name="settings_privacy_title">隐私政策</string>
     <string name="settings_privacy_sub">数据如何被处理</string>
+    <string name="wide_pick_session">选择一个会话</string>
 </resources>

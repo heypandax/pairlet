@@ -355,6 +355,13 @@ fun App(scope: CoroutineScope) {
     // Android system back walks the in-app stack (chat → sessions → directories) instead of leaving
     // the app; at the root it stays disabled so the system default (exit) applies. An open sheet
     // registers its own handler later in composition, which wins while it is showing (LIFO).
+    //
+    // #334: this ladder is width-independent ON PURPOSE — the routing it drives is derived state, and
+    // the two-pane layout renders the SAME state in two columns. On a tablet the first back nulls
+    // convoId, which empties the right pane back to the placeholder and leaves the left pane exactly
+    // where it was; the second back nulls sessionsDir, which returns the left pane to Projects. So
+    // "back closes the pane you are in" falls out of the existing calls rather than needing a wide
+    // branch that could drift from the on-screen Back buttons.
     dev.ccpocket.app.SystemBackHandler(
         enabled = repo.sessionActive.value && (repo.convoId.value != null || repo.sessionsDir.value != null),
     ) {
@@ -367,13 +374,16 @@ fun App(scope: CoroutineScope) {
     // appearance (issue #63): PocketTheme resolves the persisted mode against the OS, so a SYSTEM pick tracks a
     // live system flip while the app is foregrounded and LIGHT/DARK force it.
     PocketTheme(mode = repo.themeMode.value, accent = repo.accentTheme.value, fontScale = repo.fontScale.value) {
-      Box(Modifier.fillMaxSize()) {
+      // #334: the window width is measured ONCE, here, and published as LocalWideLayout. Everything
+      // downstream — the two-pane router, the transcript's readable measure, the sheet caps — reads
+      // that one answer, so an iPad and a phone can never disagree about which layout they are in.
+      WideLayoutScope(Modifier.fillMaxSize()) {
         // App Review 5.1.2(i): nothing renders — pairing, Demo mode, chat — until the one-time data
         // disclosure is accepted, so no personal data can leave the device before consent. Demo sits
         // behind the same gate deliberately: it is the path App Review actually walks.
         if (!repo.privacyConsented.value) {
             PrivacyConsentScreen(onAgree = repo::acceptPrivacyConsent)
-            return@Box
+            return@WideLayoutScope
         }
         val approvalAsk = repo.pendingAsk.value?.takeIf { !it.isQuestion }
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
@@ -438,17 +448,13 @@ fun App(scope: CoroutineScope) {
                                 repo,
                                 onOpenComputers = { fleetOpen = true },
                             ) {
-                                when {
-                                    // switchingSession keeps the chat mounted across a chat→chat switch:
-                                    // openSession nulls convoId while it waits for the daemon, and without
-                                    // this the switcher bounced you out to a session list for a beat (#165)
-                                    repo.convoId.value != null || repo.switchingSession.value ->
-                                        ChatScreen(repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true })
-                                    repo.sessionsDir.value != null -> SessionsScreen(repo, onOpenInbox = { inboxOpen = true })
-                                    else -> DirectoryScreen(
-                                        repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true },
-                                    )
-                                }
+                                // one router, two shapes (#334): narrow keeps the single derived branch,
+                                // wide runs the list branch and the chat branch side by side
+                                ContentRouter(
+                                    repo,
+                                    onOpenFleet = { fleetOpen = true },
+                                    onOpenInbox = { inboxOpen = true },
+                                )
                             }
                             // fleet overlays ride ABOVE the gate: the fleet view is exactly where you
                             // want to be while this machine is reconnecting or another one has news
@@ -3009,6 +3015,10 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     Modifier.fillMaxSize().padding(16.dp).graphicsLayer { alpha = if (landed) 1f else 0f }
                         .pointerInput(Unit) { detectTapGestures { focus.clearFocus() } },
                     state = listState, verticalArrangement = Arrangement.spacedBy(10.dp),
+                    // #334: on a tablet the turns are capped at a readable measure and this centres
+                    // them; on a phone the alignment is Start and every row is fillMaxWidth, so the
+                    // property is inert there
+                    horizontalAlignment = wideColumnAlignment,
                     contentPadding = PaddingValues(bottom = bottomGutter),
                 ) {
                     // scroll-to-top loader (issue #147). The REQUEST no longer rides this row's composition
@@ -3029,7 +3039,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         // say so under the bubble instead of letting it look sent (issue #41 — frames queue
                         // silently offline)
                         val undelivered = m is ChatItem.User && m.pending && (repo.phase.value != ConnPhase.Ready || repo.sendStalled.value)
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(Modifier.readableMeasure(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             // seam (0714 handoff B3): for a beat after a page of older history lands,
                             // mark where the old window began so the reader keeps their place
                             if (mi == historySeamAt) EarlierMessagesSeam(repo.historyPrependGen.value)
@@ -3213,7 +3223,12 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 // the composer surface owns the bottom edge: its fill runs to the physical edge and the
                 // inset pads INSIDE it. With the keyboard up the root's imePadding has already consumed
                 // the bottom, so this collapses to zero and the field sits flush on the IME as before.
-                Column(Modifier.fillMaxWidth().background(Tok.surface).windowInsetsPadding(WindowInsets.navigationBars)) {
+                Column(
+                    Modifier.fillMaxWidth().background(Tok.surface).windowInsetsPadding(WindowInsets.navigationBars),
+                    // #334: the BAR keeps the full bleed (it owns the bottom edge); only its capped
+                    // children — the two-layer composer — are centred inside it on a tablet
+                    horizontalAlignment = wideColumnAlignment,
+                ) {
                     LimitResetBanner(repo) // usage-limit hit → one-tap "auto-continue after reset" (issue #137)
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
                     val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
@@ -3274,7 +3289,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         // Two-layer composer (issue #157 follow-up, design: mobile-composer.jsx): the field
                         // owns the full width on top; attach + model chip + the action slot live on an
                         // accessory row below — the chip no longer squeezes what you type on narrow phones.
-                        Column(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 8.dp)) {
+                        Column(Modifier.readableMeasure().fillMaxWidth().padding(top = 10.dp, bottom = 8.dp)) {
                             // all that survives of the old full-width amber strip: one slim line, and only
                             // once turns are actually about to drop (design: context-occupancy.jsx)
                             val ctxUsed = repo.contextUsed.value

@@ -65,6 +65,7 @@ import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
 import dev.ccpocket.app.ui.MarkdownText
 import dev.ccpocket.app.ui.RiskBadge
+import dev.ccpocket.app.ui.sheetMeasure
 import dev.ccpocket.app.ui.relativeTime
 import dev.ccpocket.app.ui.tilde
 import kotlinx.coroutines.delay
@@ -128,7 +129,9 @@ fun SecureApprovalSheet(
         // consumes the tap so nothing behind reacts — and answers nothing itself
         Box(Modifier.fillMaxSize().background(SCRIM).pointerInput(Unit) { detectTapGestures { } })
         Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(APPROVAL_SHEET_HEIGHT_FRACTION)
+            // #334: capped and centred on a tablet — a decision surface is a modal, not a wall.
+            // sheetMeasure() is the identity below the wide threshold, so the phone shell is unchanged.
+            Modifier.align(Alignment.BottomCenter).sheetMeasure().fillMaxWidth().fillMaxHeight(APPROVAL_SHEET_HEIGHT_FRACTION)
                 .clip(RoundedCornerShape(topStart = Metric.radiusSheet, topEnd = Metric.radiusSheet))
                 .background(Tok.raised)
                 .pointerInput(Unit) { detectTapGestures { } } // taps on the sheet never reach the scrim
