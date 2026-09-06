@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -106,6 +107,89 @@ class ThinkingToggleTest {
             assertNull(sent2.filterIsInstance<OpenSession>().single().thinking, "a never-advertising daemon must not receive the toggle")
         } finally {
             scope2.cancel()
+        }
+    }
+    @Test
+    fun cold_reopen_keeps_off_before_the_models_reply() {
+        val sid = "thinking-cold-reopen"
+        seedOff(sid)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val sent = mutableListOf<Frame>()
+        val repo = repo(scope, sent)
+        try {
+            assertFalse(repo.supportsThinkingToggle(), "UNKNOWN must not expose the switch")
+            assertTrue(repo.openSession("/x", sid, agent = AgentKind.CLAUDE))
+            assertEquals(false, sent.filterIsInstance<OpenSession>().single().thinking)
+            advertised(repo, true) // the real response can arrive AFTER OpenSession
+            repo.receiveForTest(SessionLive("cold", "/x", sid, agent = AgentKind.CLAUDE, thinking = false))
+            assertEquals(false, repo.thinking.value)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun recovery_opens_restore_off_but_do_not_override_an_explicit_value() = runBlocking {
+        val sid = "thinking-recovery-open"
+        seedOff(sid)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val sent = mutableListOf<Frame>()
+        val repo = repo(scope, sent)
+        try {
+            // Reconnect, SessionGone and split-pane opens omit the field and all use this send seam.
+            repo.sendForTest(OpenSession("/x", sid, lastEventSeq = 42))
+            assertEquals(OpenSession("/x", sid, lastEventSeq = 42, thinking = false), sent.last())
+            repo.sendForTest(OpenSession("/x", sid, thinking = true))
+            assertEquals(true, (sent.last() as OpenSession).thinking)
+            advertised(repo, false)
+            repo.sendForTest(OpenSession("/x", sid))
+            assertNull((sent.last() as OpenSession).thinking, "known unsupported is distinct from unknown")
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun recovery_does_not_copy_thinking_to_a_new_session_or_another_agent() = runBlocking {
+        val sid = "thinking-agent-boundary"
+        seedOff(sid)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val sent = mutableListOf<Frame>()
+        val repo = repo(scope, sent)
+        try {
+            repo.sendForTest(OpenSession("/x"))
+            assertNull((sent.last() as OpenSession).thinking)
+            repo.sendForTest(OpenSession("/x", sid, agent = AgentKind.CODEX))
+            assertNull((sent.last() as OpenSession).thinking)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun default_acknowledgement_clears_the_choice_used_by_recovery() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val sent = mutableListOf<Frame>()
+        val repo = repo(scope, sent)
+        try {
+            advertised(repo, true)
+            repo.receiveForTest(SessionLive("default", "/x", "thinking-default", agent = AgentKind.CLAUDE, thinking = false))
+            repo.receiveForTest(SessionLive("default", "/x", "thinking-default", agent = AgentKind.CLAUDE, thinking = null))
+            repo.sendForTest(OpenSession("/x", "thinking-default"))
+            assertNull((sent.last() as OpenSession).thinking)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    private fun seedOff(sid: String) {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val seed = repo(scope, mutableListOf())
+            advertised(seed, true)
+            seed.receiveForTest(SessionLive("seed-$sid", "/x", sid, agent = AgentKind.CLAUDE, thinking = false))
+        } finally {
+            scope.cancel()
         }
     }
 }

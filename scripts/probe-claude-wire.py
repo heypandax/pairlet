@@ -1088,7 +1088,18 @@ def scenario_thinkingflag() -> bool:
     p = Probe(["--permission-mode", "bypassPermissions", "--thinking", "disabled"])
     try:
         p.send("Do not use any tools. Reply with exactly: ok")
-        ok &= check("disabled 轮次照常完成", p.wait_for("result"), "result arrived")
+        arrived = p.wait_for("result")
+        results = [j for j in p.raw if j.get("type") == "result"]
+        result = results[-1] if results else {}
+        succeeded = arrived and result.get("subtype") == "success" and result.get("is_error") is False
+        ok &= check("disabled 轮次成功完成", succeeded,
+                    f"result arrived={arrived}, subtype={result.get('subtype')}, is_error={result.get('is_error')}")
+        assistants = [j.get("message", {}) for j in p.raw if j.get("type") == "assistant"]
+        synthetic = any(m.get("model") == "<synthetic>" for m in assistants)
+        reply = "".join(c.get("text", "") for m in assistants
+                        for c in m.get("content", []) if c.get("type") == "text").strip()
+        ok &= check("disabled 收到真实 ok 回复", not synthetic and reply == "ok",
+                    f"synthetic={synthetic}, reply_matches={reply == 'ok'}")
         thinking_blocks = [
             c for j in p.raw if j.get("type") == "assistant"
             for c in j.get("message", {}).get("content", []) if c.get("type") == "thinking"

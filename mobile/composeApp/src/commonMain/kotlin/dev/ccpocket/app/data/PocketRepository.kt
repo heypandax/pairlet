@@ -2726,7 +2726,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     /** All outbound frames funnel here; a throw means the link is dead — trigger the reconnect path. */
-    private suspend fun send(frame: Frame) {
+    private suspend fun send(request: Frame) {
+        // Reconnect, SessionGone recovery and split panes also resume through this seam. Restore the
+        // session's choice here so none of those OpenSession paths silently falls back to CLI default.
+        val frame = if (request is OpenSession && request.thinking == null) {
+            request.copy(thinking = thinkingForSession(request.resumeId, request.agent))
+        } else request
         // Reverse capability guard (#275/#276): an old daemon coerces the unknown `zcode` enum to the Claude
         // default, so never fire an agent-carrying frame at a daemon that lacks
         // that backend — but ONLY once the daemon has actually told us, THIS connection, what it supports.
@@ -5334,11 +5339,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             openAgent == AgentKind.CODEX &&
                 (candidate == null || knownCapabilities == null || knownCapabilities.serviceTiers.any { it.id == candidate })
         }
-        // #345: the thinking toggle restores per-session, exactly like effort — a gateway user who turned
-        // thinking off for this session must not get it silently re-enabled by a reopen. No cross-agent
-        // migration and no default ladder: only a persisted choice rides, and only at a daemon that
-        // advertised the toggle (an old daemon would drop the field and show a lie).
-        val openThinking = saved?.thinking?.takeIf { agentModels[openAgent]?.supportsThinkingToggle == true }
+        // UNKNOWN is not UNSUPPORTED: a cold open can precede the first ModelsList reply. The optional
+        // field is safe for old peers to ignore; the UI still requires an explicit advertisement and
+        // SessionLive remains authoritative about what the daemon actually applied.
+        val openThinking = thinkingForSession(resumeId, openAgent)
         mode.value = openMode; permissionMode.value = openPermissionMode; allowRules.clear()
         model.value = openModel; effort.value = openEffort; serviceTier.value = openServiceTier; contextUsed.value = null // reconciled by SessionLive
         thinking.value = openThinking
@@ -6659,6 +6663,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun supportsThinkingToggle(agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE): Boolean =
         agentModels[agent]?.supportsThinkingToggle == true
 
+    private fun thinkingForSession(sessionId: String?, agent: AgentKind): Boolean? =
+        sessionParams[sessionId]?.takeIf { it.agent == agent }?.thinking?.takeIf {
+            agent == AgentKind.CLAUDE && agentModels[agent]?.supportsThinkingToggle != false
+        }
+
     fun switchServiceTier(tier: String?) {
         val c = convoId.value ?: return
         val target = tier?.trim()?.takeIf { it.isNotEmpty() }
@@ -6815,7 +6824,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             permissionMode.value = defaultPermissionMode.value.takeIf { agent == AgentKind.CLAUDE }
             serviceTier.value = (saved?.serviceTier ?: defaultServiceTier.value).takeIf { agent == AgentKind.CODEX }
             // #345: same per-session restore as openSession — a takeover must not silently re-enable thinking
-            val takeoverThinking = saved?.thinking?.takeIf { agentModels[agent]?.supportsThinkingToggle == true }
+            val takeoverThinking = thinkingForSession(sid, agent)
             thinking.value = takeoverThinking
             send(
                 OpenSession(
