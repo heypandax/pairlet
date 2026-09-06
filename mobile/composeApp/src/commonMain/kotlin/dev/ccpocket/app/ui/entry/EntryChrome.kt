@@ -210,6 +210,9 @@ fun EntryStateBlock(
  * [fill] exists for the one case where this sits INSIDE another surface (the pairing failure card embeds the
  * command that fixes it): on the base fill it still reads as a layer under the card instead of dissolving
  * into it, and the hairline drops away because the fill contrast is already doing that work.
+ *
+ * [onCopy] fires AFTER the copy, never instead of it — a caller that wants to know the command was taken
+ * (the first-run guide records which install route it came from) must not be able to break the copy itself.
  */
 @Composable
 fun CopyableCommand(
@@ -217,6 +220,7 @@ fun CopyableCommand(
     modifier: Modifier = Modifier,
     fill: Color = Tok.surface,
     bordered: Boolean = true,
+    onCopy: () -> Unit = {},
 ) {
     val clipboard = LocalClipboardManager.current
     val label = stringResource(Res.string.copy_path)
@@ -237,7 +241,7 @@ fun CopyableCommand(
         Box(
             Modifier.size(Metric.touch).clip(shape)
                 .clickable(role = Role.Button, onClickLabel = label) {
-                    clipboard.setText(AnnotatedString(command)); copied = true
+                    clipboard.setText(AnnotatedString(command)); copied = true; onCopy()
                 },
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Rounded.ContentCopy, label, tint = Tok.tx2, modifier = Modifier.size(16.dp)) }

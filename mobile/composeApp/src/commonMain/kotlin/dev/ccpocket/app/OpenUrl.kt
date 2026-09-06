@@ -34,6 +34,10 @@ const val APP_STORE_URL = "https://apps.apple.com/app/id6778773969"
 // policy to be reachable from inside the app, not only from the store listing.
 const val PRIVACY_POLICY_URL = "https://heypandax.github.io/cc-pocket/privacy.html"
 
+// The source itself. "Open source" is a claim; a link the user can open on the spot is the proof, and the
+// first-run trust block makes it before asking anyone to run an install command (issue #342).
+const val GITHUB_REPO_URL = "https://github.com/heypandax/cc-pocket"
+
 /**
  * Small, user-visible environment snapshot that lets public support tailor button/location guidance.
  * It deliberately excludes session/conversation ids, titles, project names, paths, prompts, file

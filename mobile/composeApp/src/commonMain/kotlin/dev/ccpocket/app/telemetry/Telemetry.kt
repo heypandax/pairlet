@@ -12,6 +12,16 @@ enum class TelEvent(val id: String) {
     // every pairing ATTEMPT before any network action, which is what separates "tried and failed" from "never
     // tried"; PairFailed now carries WHY (TelKey.Reason), including the two rejects that never reach the relay.
     OnboardingShown("onboarding_shown"),
+    // issue #342: OnboardingShown only proves the guide was RENDERED. Every control on it — the install
+    // one-liner, the OS switch, the trust links, the three exits — was silent, so a screen people opened
+    // and left looked identical to one they read. OnboardingCta names WHICH control was used
+    // ([TelKey.Target]); it is deliberately one event with a target rather than a dozen event ids, so a new
+    // control on that screen costs a value, not a schema change.
+    OnboardingCta("onboarding_cta"),
+    // The demo is an activation branch of its own: it needs no computer, so a user can reach a working
+    // session without ever pairing. Everything downstream of it already carries [TelKey.Demo]; this marks
+    // the entry itself, which nothing did.
+    DemoEntered("demo_entered"),
     PairStarted("pair_started"),
     Paired("paired"),
     PairFailed("pair_failed"),
@@ -61,7 +71,10 @@ enum class TelKey(val id: String) {
     // pair_failed cause: parse (rejected before any network) | code | redeem | <exception name>. A CLASS only —
     // the exception's message is never transmitted, since a redeem failure carries the relay's response body.
     Reason("reason"),
-    Attempt("attempt"),     // reconnect attempt counter at the time of failure
+    // reconnect attempt counter at the time of a conn_failed; on the pairing events it is instead which
+    // pairing ATTEMPT of this app run the event belongs to, so a first-try success and a fourth-try success
+    // stop reading the same.
+    Attempt("attempt"),
     Link("link"),           // ready | down — the connection phase an open gave up under (issue #340)
     Retried("retried"),     // 0 | 1 — whether that open had already spent its silent auto-resend (#340)
     Version("version"),
@@ -71,6 +84,12 @@ enum class TelKey(val id: String) {
     // real state machine, so connected/session_opened/prompt_sent fire either way — without this split, demo
     // browsing counted as activation (issue #278). The demo's own behaviour is untouched.
     Demo("demo"),
+    // which control on a screen was used — a fixed snake_case name from that screen's own set, never a
+    // label, URL or anything the user typed (issue #342).
+    Target("target"),
+    // the one categorical qualifier a Target sometimes needs (the OS a segment selected, the install
+    // method a copy came from). Same rule: a fixed vocabulary, never free text.
+    Value("value"),
 }
 
 /** The single seam over Firebase Analytics + Crashlytics. Default-on, opt-out via [setEnabled]. */

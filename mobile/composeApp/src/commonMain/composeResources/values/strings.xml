@@ -454,6 +454,13 @@
     <string name="fr_cta">I\'m ready — pair now</string>
     <string name="fr_enter_code">Already installed? Enter code directly</string>
     <string name="fr_demo_sub">No computer needed</string>
+    <string name="fr_install_script">Script</string>
+    <string name="fr_install_pkg">Package manager</string>
+    <string name="fr_trust_title">HOW IT STAYS PRIVATE</string>
+    <string name="fr_trust_open">Open source — the app and the daemon are both public code you can read.</string>
+    <string name="fr_trust_github">View on GitHub</string>
+    <string name="fr_trust_e2e">End-to-end encrypted to your own paired computer. The relay only forwards ciphertext and cannot read it.</string>
+    <string name="fr_trust_policy">What is sent, where it goes, and who processes it.</string>
     <string name="ob_step_install">Install</string>
     <string name="ob_step_run">Run on login</string>
     <string name="ob_step_bucket">Add the bucket</string>
@@ -462,7 +469,6 @@
     <string name="ob_note_mac_run">One command: installs (signed &amp; notarized) and registers the background service — runs on login, auto-reconnects.</string>
     <string name="ob_note_win">One command: installs, registers the background service, and opens pairing. Needs the Claude Code CLI installed.</string>
     <string name="ob_note_linux">Registers a systemd --user service; re-run to upgrade.</string>
-    <string name="ob_secure">Your pairing code never leaves your devices — the relay only ever sees ciphertext.</string>
     <string name="ob_pair_now">Pair now</string>
     <string name="ob_guide">Full setup guide</string>
     <string name="model_switch_hint">Switching restarts the session — your history is kept.</string>
