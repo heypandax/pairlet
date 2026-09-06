@@ -297,8 +297,10 @@ fun StartSessionModeSheet(
     modelsFor: (AgentKind) -> List<ModelChoice> = { emptyList() },
     defaultModelFor: (AgentKind) -> String? = { null },
     modePresetsFor: (AgentKind) -> List<AgentModePreset> = { emptyList() },
+    /** issue #333 — the daemon's advertised agent presets per agent; empty = no preset row (see the sheet). */
+    agentPresetsFor: (AgentKind) -> List<dev.ccpocket.protocol.AgentPresetInfo> = { emptyList() },
     onAgentPicked: (AgentKind) -> Unit = {},
-    onPick: (PermissionMode, AgentKind, String?, String?) -> Unit,
+    onPick: (PermissionMode, AgentKind, String?, String?, String?) -> Unit,
     onDismiss: () -> Unit,
 ) = dev.ccpocket.app.ui.entry.ConfigureSessionSheet(
     workdir = workdir,
@@ -311,6 +313,7 @@ fun StartSessionModeSheet(
     modelsFor = modelsFor,
     defaultModelFor = defaultModelFor,
     modePresetsFor = modePresetsFor,
+    agentPresetsFor = agentPresetsFor,
     onAgentPicked = onAgentPicked,
     onPick = onPick,
     onDismiss = onDismiss,

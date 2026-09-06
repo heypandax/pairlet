@@ -1781,6 +1781,12 @@
     <string name="cfg_model_reported">模型 · 这台电脑报上来的</string>
     <string name="cfg_model_follow">跟随这台电脑的默认设置</string>
     <string name="cfg_model_none">这台电脑没有报模型列表</string>
+    <!-- ── agent preset（#333；dsh 标准 / 极简 / PTC / 用户自建）── -->
+    <string name="label_agent_preset">预设</string>
+    <string name="cfg_preset">预设 · 这个会话启动时带的工具集</string>
+    <string name="cfg_preset_follow">跟随这台电脑的默认设置</string>
+    <string name="cfg_preset_custom">自建</string>
+    <string name="cfg_preset_note">在会话开始时选定。会话一旦回过话就不能再改了。</string>
     <string name="cfg_permission">权限</string>
     <string name="cfg_start">开始会话</string>
     <string name="cfg_start_caption">%1$s · %2$s · %3$s</string>

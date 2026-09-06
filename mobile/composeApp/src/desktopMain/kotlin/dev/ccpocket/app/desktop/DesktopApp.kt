@@ -266,8 +266,12 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                         dev.ccpocket.app.ui.modelChoicesFor(a, model.modelsForAgent(a), if (a == AgentKind.CLAUDE) model.gatewayBaseUrl else null)
                     },
                     defaultModelFor = { a -> model.defaultModelFor(a) },
+                    // #333: the same daemon answer the model rows come from — empty means no preset row
+                    agentPresetsFor = { a -> model.agentPresetsForAgent(a) },
                     onAgentPicked = { a -> model.fetchModels(a) },
-                ) { dir, agent, mode, native, pickedModel -> model.newSession(dir, agent, mode, native, pickedModel) }
+                ) { dir, agent, mode, native, pickedModel, preset ->
+                    model.newSession(dir, agent, mode, native, pickedModel, preset)
+                }
             }
         }
         if (model.showFolderPicker) {

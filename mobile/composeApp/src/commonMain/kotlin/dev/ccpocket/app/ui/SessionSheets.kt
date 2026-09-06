@@ -111,12 +111,41 @@ internal fun modelPickerGatewayUrl(agent: AgentKind, gatewayUrl: String?): Strin
  * arrived yet; a completed empty reply is [EMPTY], not a perpetual pretend-loading state. */
 internal enum class ModelCatalogNotice { LOADING, EMPTY, ERROR }
 
+/** The backends whose model list exists ONLY as a daemon answer — no static table can stand in, so the
+ *  picker must say which of the three states it is in rather than render a bare empty column. ZCode
+ *  (#228) and dsh (#333) both read their catalogue off the live backend; Claude/Codex have fallbacks and
+ *  OpenCode keeps its own older surface below. */
+private val DYNAMIC_MODEL_CATALOG_AGENTS = setOf(AgentKind.ZCODE, AgentKind.DSH)
+
+/**
+ * Whether typing an arbitrary model id can actually switch [agent] (issue #54's field, gated by #333).
+ *
+ * FALSE for dsh, and the reason is structural rather than a policy: dsh routes a model as a
+ * `{provider, model}` PAIR that the daemon joins out of dsh's own catalogue. An id absent from that
+ * catalogue has no provider, so `session.selectModel` is never sent and the session quietly stays on the
+ * model it had. A text field that accepts anything and does nothing is worse than no field — the listed
+ * rows are the entire vocabulary there.
+ */
+internal fun supportsCustomModelId(agent: AgentKind): Boolean = agent != AgentKind.DSH
+
 internal fun modelCatalogNotice(agent: AgentKind, result: ModelsList?, hasSelectableModels: Boolean): ModelCatalogNotice? {
-    if (agent != AgentKind.ZCODE) return null
+    if (agent !in DYNAMIC_MODEL_CATALOG_AGENTS) return null
     if (result == null) return ModelCatalogNotice.LOADING
     if (result.error != null) return ModelCatalogNotice.ERROR
     return ModelCatalogNotice.EMPTY.takeUnless { hasSelectableModels }
 }
+
+/**
+ * Display copy for an agent-preset id (issue #333).
+ *
+ * The daemon forwards the backend's own `label` verbatim, so a preset this App build has never heard of
+ * still reads properly. When the catalogue has not arrived (or no longer lists it — a preset the user
+ * deleted after starting the session) the RAW ID is shown rather than a placeholder: the id is what the
+ * backend is actually running, and "default" would be a claim this surface cannot make.
+ */
+internal fun agentPresetLabel(repo: PocketRepository, id: String): String =
+    repo.agentPresetsFor(repo.sessionAgent.value ?: AgentKind.CLAUDE)
+        .firstOrNull { it.id == id }?.label?.takeIf { it.isNotBlank() } ?: id
 
 /** Short header alias for a model id: "claude-opus-4-8[1m]" -> "opus". */
 fun modelAlias(model: String?): String {
@@ -224,6 +253,14 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit, onHandoff: (
                             },
                         ),
                     )
+                }
+                // #333: read-only on purpose. The preset is fixed when the session is created and the
+                // backend locks it once output starts, so this row states a fact — it is never a control.
+                // Absent (older daemon / a backend with no presets) shows nothing rather than "default":
+                // this surface has no way to know what that backend's default would be.
+                repo.sessionAgentPreset.value?.takeIf { it.isNotBlank() }?.let { preset ->
+                    Hairline()
+                    AboutRow(stringResource(Res.string.label_agent_preset), agentPresetLabel(repo, preset))
                 }
                 if (repo.serviceTier.value == "priority") {
                     Hairline()
@@ -685,10 +722,12 @@ internal fun modelChoicesFor(agent: AgentKind, daemonModels: List<String>?, gate
     AgentKind.ZCODE -> (daemonModels ?: emptyList())
         .filter { isModelCompatibleWithAgent(AgentKind.ZCODE, it) }
         .map { ModelChoice(it, it, it, "", false) }
-    // DSH (issue #255): model selection is out of v1 scope — dsh picks its own model and the daemon has
-    // no switch path for it. An empty list is the honest surface; offering rows would spin forever on a
-    // command that is never sent.
-    AgentKind.DSH -> emptyList()
+    // DSH (issue #333, lifting #255's scope-out): daemon-fed ids from dsh's own `llm.models`. Same shape
+    // as ZCode/Kimi — no static fallback, because a catalogue invented here would offer models the user's
+    // dsh providers cannot route, and the switch would fail after the row was already tapped.
+    AgentKind.DSH -> (daemonModels ?: emptyList())
+        .filter { isModelCompatibleWithAgent(AgentKind.DSH, it) }
+        .map { ModelChoice(it, it, it, "", false) }
     // window pill derives from the protocol table, so registering a new alias THERE is the only edit
     AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { (name, alias) ->
         val pick = claudeRowPick(alias, gatewayUrl)
@@ -858,34 +897,38 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
     // the session already runs an id outside the presets, with the same ✓/spinner the preset rows use.
     val presetActive = choices.any { it.pick.equals(selected, ignoreCase = true) || it.pick.equals(repo.model.value, ignoreCase = true) }
     val customActive = !presetActive && !repo.model.value.isNullOrBlank()
-    // NOT keyed on the live model: an external switch (another device's /model, SessionLive echo)
-    // must never wipe an id the user is mid-typing here
-    var custom by remember { mutableStateOf(if (customActive) repo.model.value.orEmpty() else "") }
-    Column(Modifier.padding(top = 12.dp)) {
-        Text(stringResource(Res.string.model_custom_label), color = Tok.muted, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
-        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                custom, { custom = it },
-                placeholder = { Text(stringResource(Res.string.model_custom_hint), color = Tok.muted, fontSize = 12.5.sp) },
-                singleLine = true, enabled = switchingTo == null,
-                textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Tok.tx),
-                modifier = Modifier.weight(1f),
-            )
-            Box(Modifier.width(40.dp), contentAlignment = Alignment.Center) {
-                val t = custom.trim()
-                val isSwitchingCustom = switchingTo != null && switchingTo.equals(t, ignoreCase = true) && !presetActive
-                // the arrow appears only for ids the backend can take at all (opencode: provider/model;
-                // codex: not a Claude alias) — the ONE surface where the compat guard gates a user action
-                val canSwitchCustom = t.isNotEmpty() && isModelCompatibleWithAgent(agent, t)
-                when {
-                    isSwitchingCustom -> CircularProgressIndicator(Modifier.size(17.dp), color = Tok.accent, strokeWidth = 2.dp)
-                    customActive && t.equals(repo.model.value, ignoreCase = true) && switchingTo == null ->
-                        Text("✓", color = Tok.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    canSwitchCustom && switchingTo == null -> Text(
-                        "→", color = Tok.accent, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp))
-                            .clickable { switchingTo = t; repo.switchModel(t) }.padding(6.dp),
-                    )
+    // #333: dsh has no arbitrary-id path — see [supportsCustomModelId]. Hidden rather than disabled: a
+    // greyed-out field invites the user to wonder what would unlock it.
+    if (supportsCustomModelId(agent)) {
+        // NOT keyed on the live model: an external switch (another device's /model, SessionLive echo)
+        // must never wipe an id the user is mid-typing here
+        var custom by remember { mutableStateOf(if (customActive) repo.model.value.orEmpty() else "") }
+        Column(Modifier.padding(top = 12.dp)) {
+            Text(stringResource(Res.string.model_custom_label), color = Tok.muted, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    custom, { custom = it },
+                    placeholder = { Text(stringResource(Res.string.model_custom_hint), color = Tok.muted, fontSize = 12.5.sp) },
+                    singleLine = true, enabled = switchingTo == null,
+                    textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Tok.tx),
+                    modifier = Modifier.weight(1f),
+                )
+                Box(Modifier.width(40.dp), contentAlignment = Alignment.Center) {
+                    val t = custom.trim()
+                    val isSwitchingCustom = switchingTo != null && switchingTo.equals(t, ignoreCase = true) && !presetActive
+                    // the arrow appears only for ids the backend can take at all (opencode: provider/model;
+                    // codex: not a Claude alias) — the ONE surface where the compat guard gates a user action
+                    val canSwitchCustom = t.isNotEmpty() && isModelCompatibleWithAgent(agent, t)
+                    when {
+                        isSwitchingCustom -> CircularProgressIndicator(Modifier.size(17.dp), color = Tok.accent, strokeWidth = 2.dp)
+                        customActive && t.equals(repo.model.value, ignoreCase = true) && switchingTo == null ->
+                            Text("✓", color = Tok.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        canSwitchCustom && switchingTo == null -> Text(
+                            "→", color = Tok.accent, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                .clickable { switchingTo = t; repo.switchModel(t) }.padding(6.dp),
+                        )
+                    }
                 }
             }
         }
