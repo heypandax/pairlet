@@ -40,6 +40,9 @@ import java.util.concurrent.atomic.AtomicLong
 class CodexBackend(
     private val codexBin: String?,
     private val modelService: CodexModelService = CodexModelService(),
+    // id → Codex thread title, as persisted in session_index.jsonl. Injected so the take-over naming path
+    // (issue #347) is testable without a real $CODEX_HOME on disk.
+    private val threadTitles: () -> Map<String, String> = { CodexTranscriptScanner.threadNames() },
 ) : AgentBackend {
     private val log = logger("CodexBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -51,6 +54,7 @@ class CodexBackend(
     @Volatile private var workdir: String = ""
     @Volatile private var resumeId: String? = null
     @Volatile private var forkSession: Boolean = false
+    @Volatile private var takeOver: Boolean = false
     @Volatile private var mode: PermissionMode = PermissionMode.DEFAULT
     @Volatile private var model: String? = null
     @Volatile private var effort: String? = null
@@ -75,6 +79,13 @@ class CodexBackend(
     private val pendingSteers = ConcurrentHashMap<Long, SteerAttempt>() // turn/steer id → what rode it
     private val pendingStarts = ConcurrentHashMap<Long, Prompt>() // turn/start id → prompt (for rejection receipt)
     private val pendingControls = ConcurrentHashMap<Long, String>() // compact/review id → op label
+    // thread/name/set is BEST EFFORT and deliberately kept out of [pendingControls] (issue #347): a name is
+    // cosmetic, so its response must never gate the writer hand-back that map drives, and its failure must
+    // never reach the chat as an error card. Tracked only so the outcome can be logged and the map drained.
+    private val pendingNames = ConcurrentHashMap<Long, String>() // thread/name/set id → name we asked for
+    // Threads this PROCESS GENERATION has already named — [attach] clears it, so one fork is named once even
+    // if thread/started arrives after the thread/fork response and re-enters onThreadReady.
+    private val namedThreads = ConcurrentHashMap.newKeySet<String>()
     // Prompts that arrived mid-turn but can't ride turn/steer (it has no image transport — Tier C):
     // parked until the turn boundary instead of silently dropping their images (PR #296 re-review).
     private val queuedStarts = ArrayDeque<Prompt>() // guarded by [bootstrap]
@@ -118,6 +129,7 @@ class CodexBackend(
         this.workdir = spec.workdir.toString()
         this.resumeId = spec.resumeId
         this.forkSession = spec.forkSession
+        this.takeOver = spec.takeOver
         this.mode = spec.mode
         this.model = spec.model
         this.effort = normalizeEffort(spec.model, spec.effort)
@@ -133,6 +145,7 @@ class CodexBackend(
         lastAgentText = null; lastErrorText = null; lastUsage = Usage(); usageSeen = false
         deltaSeen.clear(); fileChangePaths.clear(); fileChangeDiffs.clear(); pendingApprovals.clear()
         pendingSteers.clear(); pendingStarts.clear(); pendingControls.clear()
+        pendingNames.clear(); namedThreads.clear()
         bootstrap.withLock { queuedStarts.clear() }
         // kick off the handshake — initialized + thread open happen when the response lands (see handleResponse)
         initializeId = rpcRequest("initialize", buildJsonObject {
@@ -166,6 +179,9 @@ class CodexBackend(
         val completedSteer = if (id != null) pendingSteers.remove(id) else null
         val completedStart = if (id != null) pendingStarts.remove(id) else null
         val completedControl = if (id != null) pendingControls.remove(id) else null
+        // Drained, logged, and deliberately NOT fed to maybeRequestProcessExit: a cosmetic rename never
+        // held the writer, so its success cannot be what releases it either (issue #347).
+        if (id != null) pendingNames.remove(id)?.let { log.info("codex thread named \"$it\"") }
         val events = when (id) {
             initializeId -> {
                 rpcNotify("initialized", null)
@@ -200,6 +216,14 @@ class CodexBackend(
             // JSON-RPC's mandated reply to an unparseable/invalid request is `"id":null` — nothing of ours
             // to correlate, and the maps below reject null keys (ConcurrentHashMap NPEs on them).
             log.warn("codex error (no id): $error")
+            return emptyList()
+        }
+        pendingNames.remove(id)?.let { name ->
+            // A rejected rename (old app-server without thread/name/set, a thread it won't rename) is a
+            // cosmetic loss, not a session failure: the branch keeps the inherited name and everything else
+            // — first prompt, writer hand-back, session open — proceeds untouched (issue #347). Logged, not
+            // surfaced: an error card here would make a naming nicety look like a broken take-over.
+            log.info("codex thread/name/set (\"$name\") rejected: ${msg.take(160)}")
             return emptyList()
         }
         pendingSteers.remove(id)?.let { attempt ->
@@ -297,6 +321,7 @@ class CodexBackend(
         val thread = result?.obj("thread") ?: return emptyList()
         val tid = thread.str("id") ?: return emptyList()
         result.str("model")?.let { model = it }
+        nameTakeoverBranch(tid, thread)
         val flush = bootstrap.withLock {
             threadId = tid
             phase = ProcessPhase.READY
@@ -310,6 +335,46 @@ class CodexBackend(
         if (flush.second) requestCompact(tid)
         flush.third?.let { requestReview(tid, it) }
         return listOf(AgentEvent.SessionInit(sessionId = tid, cwd = workdir, model = result.str("model")))
+    }
+
+    /**
+     * Give the branch a take-over minted its own native name (issue #347).
+     *
+     * A protective `thread/fork` COPIES the parent's name, so ChatGPT's sidebar ends up with two rows the
+     * user cannot tell apart — the one their desktop still holds and the one their phone now writes to.
+     * `thread/name/set` (params `{threadId, name}`, empty result; verified against this codex build's own
+     * `app-server generate-json-schema`) is Codex's native rename and updates `session_index.jsonl`, so the
+     * existing title path ([CodexTranscriptScanner.threadNames]) picks the new name up with no extra wiring.
+     *
+     * Fires ONLY for a real take-over branch: the user asked to continue here ([takeOver]), the registry
+     * decided a protective fork ([forkSession] / `thread/fork`), and the server actually minted a DIFFERENT
+     * id. An in-place resume, a re-open, a later relaunch of the branch and a user's own rename all keep
+     * their names — the first three never reach this condition, the last is never overwritten because a
+     * given fork is named exactly once, at the moment it is created.
+     *
+     * BEST EFFORT BY CONSTRUCTION: one fire-and-forget write, no response awaited anywhere (least of all
+     * inside the parse callback that must handle that response), nothing registered in the maps that gate
+     * [maybeRequestProcessExit]. A rejection or a response that never comes costs the name and nothing
+     * else — the first prompt still flushes below, the writer hand-back still happens on its own schedule,
+     * and the session still opens.
+     */
+    private suspend fun nameTakeoverBranch(tid: String, thread: JsonObject) {
+        val parentId = resumeId ?: return
+        if (!takeOver || !forkSession || threadOpenOperation != "fork") return
+        if (tid == parentId) return // fork resolved in place — same row, nothing to disambiguate
+        if (!namedThreads.add(tid)) return // already named in this process generation
+        val titles = runCatching { threadTitles() }.getOrDefault(emptyMap())
+        val name = CodexTakeoverLineage.nameFor(
+            parentId = parentId,
+            parentName = thread.str("name"), // fork response carries the inherited parent name
+            indexTitle = titles[parentId],
+            taken = titles.values,
+        )
+        CodexTakeoverLineage.note(parentId, tid, name)
+        runCatching { rpcRequest("thread/name/set", register = { pendingNames[it] = name }, params = buildJsonObject {
+            put("threadId", tid)
+            put("name", name)
+        }) }.onFailure { log.warn("codex thread/name/set write failed: ${it.message}") }
     }
 
     /** Newer app-server builds retain the rollout's exclusive writer after thread/unsubscribe. A clean

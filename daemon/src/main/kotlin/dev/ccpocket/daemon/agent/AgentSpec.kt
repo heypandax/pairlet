@@ -30,6 +30,12 @@ data class AgentSpec(
     // the phone takes over a session another writer may hold: Claude maps this to --fork-session; Codex
     // maps it to the app-server's native thread/fork request.
     val forkSession: Boolean = false,
+    // This launch is the phone's explicit "Continue here" TAKE-OVER (OpenSession.takeOver), not an ordinary
+    // resume or a relaunch. Only the eager open() launch sets it — every later relaunch of the same
+    // conversation is a plain continuation. Codex uses it (with [forkSession]) to tell a protective
+    // take-over branch apart from every other fork and give it its own native name (issue #347); a backend
+    // that has nothing to do differently ignores it.
+    val takeOver: Boolean = false,
     // Claude only, issue #282 (docs/design/REWIND-FORK.md): truncate the resumed context at a chain entry
     // (`--resume-session-at <uuid>`) — the CLI keeps everything up to and including that entry and drops the
     // rest. ALWAYS set together with [forkSession]: without a fork the CLI keeps the original id and APPENDS
