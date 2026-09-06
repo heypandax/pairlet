@@ -36,6 +36,8 @@ import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.QuotaRefreshTrigger
 import dev.ccpocket.app.epochMillis
+import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.ClaudeQuota
 import dev.ccpocket.protocol.ClaudeQuotaLimit
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.quota_title
@@ -81,46 +83,97 @@ import org.jetbrains.compose.resources.stringResource
  */
 @Composable
 fun QuotaStrip(repo: PocketRepository, onOpen: () -> Unit) {
-    val rows = quotaRows(repo.claudeQuota.value)
-    val session = rows.firstOrNull { isSessionWindow(it) }
-    val weekly = worstWeekly(rows)
-    val segments = listOfNotNull(session, weekly)
-    if (segments.isEmpty()) return
-    // the reset caption follows the tightest of the two DISPLAYED segments — captioning a hidden scoped
-    // row's reset next to numbers that don't include it read as a mismatch
-    val tightest = tightestLimit(segments)
+    val sections = quotaSections(repo)
+    if (sections.isEmpty()) return
     val now by rememberQuotaClock()
 
     Column(Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-        // The inset lives INSIDE the row, under its 48dp minimum: on an edge device the row grows to
-        // inset + reading (~58dp) and the text sits just above the home indicator, instead of a full
-        // 48dp band centring the text ABOVE an untouched 34dp of black — that stack was the "wasted
-        // bottom" complaint. Inset-less devices keep the handoff's 48dp box unchanged (min binds).
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets(bottom = 8.dp)))
-                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 3.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            // brand marker: this strip is the CLAUDE subscription's quota, not an all-backends gauge —
-            // other agents (Codex/dsh/…) simply have no snapshot and the strip stays absent for them
-            Text(
-                "Claude", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
-                style = tightCenter(12.sp), maxLines = 1,
-            )
-            segments.forEach { QuotaStripSegment(it) }
-            Spacer(Modifier.weight(1f))
-            // the reset the user actually has to plan around is the one attached to the tightest window
-            stripResetText(tightest?.resetsAt, now)?.let {
-                Text(
-                    it, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
-                    style = tightCenter(12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-            }
+        // one row per backend that has numbers (issue #348), Claude first. A single row is the pre-#348
+        // strip down to the dp; the stacked form only appears on a machine that really does have two
+        // subscriptions to report, where one merged row would have to drop a brand label or a window.
+        sections.forEachIndexed { i, sec ->
+            QuotaStripRow(sec, now, single = sections.size == 1, last = i == sections.lastIndex)
         }
     }
+}
+
+/** One backend's row in the docked strip. */
+@Composable
+private fun QuotaStripRow(sec: QuotaSection, now: Long, single: Boolean, last: Boolean) {
+    // the reset caption follows the tightest of the DISPLAYED segments — captioning a hidden scoped
+    // row's reset next to numbers that don't include it read as a mismatch
+    val tightest = tightestLimit(sec.segments)
+    // The inset lives INSIDE the LAST row, under its minimum height: on an edge device that row grows to
+    // inset + reading (~58dp) and the text sits just above the home indicator, instead of a full band
+    // centring the text ABOVE an untouched 34dp of black — that stack was the "wasted bottom" complaint.
+    // Inset-less devices keep the handoff's 48dp box unchanged (min binds). Rows ABOVE the last one take
+    // no inset: only the row that actually touches the physical edge may reserve it.
+    Row(
+        Modifier.fillMaxWidth()
+            .heightIn(min = if (single) 48.dp else if (last) 40.dp else 30.dp)
+            .then(
+                if (last) Modifier.windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets(bottom = 8.dp)))
+                else Modifier,
+            )
+            .padding(
+                start = 20.dp, end = 20.dp,
+                top = if (single || !last) 8.dp else 2.dp,
+                bottom = if (last) 3.dp else 0.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        // brand marker: WHOSE subscription this row reports. It was never decoration — a percentage with
+        // no account attached to it is the one number a multi-backend user cannot act on.
+        Text(
+            agentName(sec.agent), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+            style = tightCenter(12.sp), maxLines = 1,
+        )
+        sec.segments.forEach { QuotaStripSegment(it) }
+        Spacer(Modifier.weight(1f))
+        // the reset the user actually has to plan around is the one attached to the tightest window
+        stripResetText(tightest?.resetsAt, now)?.let {
+            Text(
+                it, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+                style = tightCenter(12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * One backend's readable allowance: the snapshot, its full row list, and the (at most two) windows the
+ * compact surfaces show. Built once and shared by the strip, the sheet and the desktop bar so "which
+ * backends have something to say" cannot be answered differently on two surfaces of the same app.
+ */
+data class QuotaSection(
+    val agent: AgentKind,
+    val quota: ClaudeQuota,
+    /** Every window, for the detail surfaces. */
+    val rows: List<ClaudeQuotaLimit>,
+    /** The session + weekly pair the strip/bar draws; never empty (a section with neither is dropped). */
+    val segments: List<ClaudeQuotaLimit>,
+)
+
+/** Claude first, then the rest of the vocabulary in its declared order — a stable reading order that does
+ *  not depend on which backend's reply happened to land first. */
+val QUOTA_AGENT_ORDER: List<AgentKind> = listOf(AgentKind.CLAUDE) + AgentKind.entries.filter { it != AgentKind.CLAUDE }
+
+/**
+ * The backends with something to show, in [QUOTA_AGENT_ORDER]. Empty for every "nothing to say" state —
+ * no snapshot, a transient failure before the first success, a signed-out/API-key machine, a daemon that
+ * predates the frame — and the callers then render NOTHING at all, exactly as before #348.
+ *
+ * Not a `@Composable`, but it READS snapshot state and is meant to be called from one: the read is what
+ * subscribes the caller to the next reply.
+ */
+fun quotaSections(repo: PocketRepository): List<QuotaSection> = QUOTA_AGENT_ORDER.mapNotNull { agent ->
+    val q = repo.quotaByAgent[agent] ?: return@mapNotNull null
+    val rows = quotaRows(q)
+    if (rows.isEmpty()) return@mapNotNull null
+    val segments = listOfNotNull(sessionWindow(rows), worstWeekly(rows))
+    if (segments.isEmpty()) null else QuotaSection(agent, q, rows, segments)
 }
 
 /** One `5h ▬▬ 64%` segment. Only the fill and the percentage take the warning colour; the label stays
@@ -151,28 +204,53 @@ private fun QuotaStripSegment(limit: ClaudeQuotaLimit) {
  *  "what a limit row looks like", wearing the phone's default faces. */
 @Composable
 fun QuotaSheet(repo: PocketRepository, onDismiss: () -> Unit) {
-    val q = repo.claudeQuota.value
-    val rows = quotaRows(q)
+    val sections = quotaSections(repo)
     val now by rememberQuotaClock()
+    // one footer for the whole sheet, aged from the OLDEST reading on it: with two backends fetched
+    // independently the honest headline age is the stalest number the user is looking at, not the freshest
+    val fetchedAt = sections.mapNotNull { it.quota.fetchedAt.takeIf { t -> t > 0 } }.minOrNull()
+        ?: repo.claudeQuota.value?.fetchedAt ?: 0
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(top = 4.dp, bottom = 16.dp)) {
             Text(stringResource(Res.string.quota_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(14.dp))
-            for (l in rows) {
-                QuotaLimitRow(l, now, labelWidth = 116.dp, fontSize = 12.sp)
-                Spacer(Modifier.height(10.dp))
+            for (sec in sections) {
+                // The brand/plan header is suppressed for exactly one case: a LONE CLAUDE section, which
+                // is the whole pre-#348 world and must stay unchanged down to the pixel. Anything else —
+                // two accounts, or a Codex-only machine — gets named, because an unattributed percentage
+                // is the number a multi-backend user cannot act on.
+                if (sections.size > 1 || sec.agent != AgentKind.CLAUDE) {
+                    Text(
+                        sectionHeading(sec), color = Tok.muted, fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp, style = tightCenter(11.sp), maxLines = 1,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                for (l in sec.rows) {
+                    QuotaLimitRow(l, now, labelWidth = 116.dp, fontSize = 12.sp)
+                    Spacer(Modifier.height(10.dp))
+                }
             }
             Spacer(Modifier.height(2.dp))
             Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
             Spacer(Modifier.height(10.dp))
             QuotaFreshnessRow(
-                fetchedAt = q?.fetchedAt ?: 0,
+                fetchedAt = fetchedAt,
                 now = now,
-                onRefresh = { repo.fetchClaudeQuota(forceRefresh = true) },
+                // refreshes EVERY backend on the sheet: the button sits under all of them, and refreshing
+                // only one would leave the other's "updated N min ago" pinned while the header moved
+                onRefresh = { repo.fetchAllQuotas(forceRefresh = true) },
                 fontSize = 12.sp,
             )
         }
     }
+}
+
+/** "Codex · pro" — the brand, plus the plan the backend names when it names one (Codex reports
+ *  `planType`; Claude's endpoint does not, so its heading stays the bare brand). */
+fun sectionHeading(sec: QuotaSection): String {
+    val plan = sec.quota.planType?.takeIf { it.isNotBlank() } ?: return agentName(sec.agent)
+    return "${agentName(sec.agent)} · $plan"
 }
 
 /**
@@ -189,7 +267,7 @@ fun QuotaSheet(repo: PocketRepository, onDismiss: () -> Unit) {
 @Composable
 fun ClaudeQuotaRefreshEffect(repo: PocketRepository, foreground: Boolean) {
     val policy = androidx.compose.runtime.remember(repo) {
-        ClaudeQuotaRefreshPolicy(now = { epochMillis() }, fetch = { force -> repo.fetchClaudeQuota(force) })
+        ClaudeQuotaRefreshPolicy(now = { epochMillis() }, fetch = { force -> repo.fetchAllQuotas(force) })
     }
     // the in-flight latch opens on ANY reply, success or failure
     DisposableEffect(repo, policy) {
@@ -211,8 +289,9 @@ fun ClaudeQuotaRefreshEffect(repo: PocketRepository, foreground: Boolean) {
         if (!foreground) return@LaunchedEffect
         while (true) { delay(QUOTA_TICK_MS); policy.tick() }
     }
-    // the staleness basis is the DAEMON's own fetch moment, not our request moment
-    val fetchedAt = repo.claudeQuota.value?.fetchedAt
+    // the staleness basis is the DAEMON's own fetch moment, not our request moment — and with several
+    // backends it is the OLDEST of them, so one backend refreshing cannot mark the other one fresh
+    val fetchedAt = repo.quotaByAgent.values.mapNotNull { it.fetchedAt.takeIf { t -> t > 0 } }.minOrNull()
     LaunchedEffect(policy, fetchedAt) { policy.snapshotFetchedAt(fetchedAt) }
 }
 

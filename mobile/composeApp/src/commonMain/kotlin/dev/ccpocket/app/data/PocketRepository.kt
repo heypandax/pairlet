@@ -2527,7 +2527,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         daemonUsageAgentFilter.value = false // ditto (issue #258): the next machine re-advertises its own
         // per-daemon truth: the allowance belongs to the ACCOUNT on the machine we just left. Showing it
         // under the next machine's name would be a straight lie about a billing number.
-        claudeQuotaDeadline?.cancel(); claudeQuota.value = null; claudeQuotaLoading.value = false; claudeQuotaStatus.value = null
+        quotaDeadlines.values.forEach { it.cancel() }; quotaDeadlines.clear(); quotaOutstanding.clear()
+        quotaByAgent.clear(); quotaLoadingByAgent.clear(); quotaStatusByAgent.clear()
+        daemonQuotaAgents.value = emptyList() // #348 capability: the next machine re-advertises its own
         daemonOwnsPromptRecovery = false // ditto: an older next daemon still needs the legacy fallback
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
@@ -3105,11 +3107,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             //    wait for the next trigger. Blanking the bar every time a laptop's wifi blips would make
             //    a persistent indicator useless.
             is ClaudeQuota -> {
-                claudeQuotaDeadline?.cancel()
-                claudeQuotaStatus.value = f.status
-                if (f.status == CLAUDE_QUOTA_OK || f.status == CLAUDE_QUOTA_NO_TOKEN) claudeQuota.value = f
-                claudeQuotaLoading.value = false
-                onClaudeQuotaReply?.invoke()
+                // ECHO CHECK (issue #348) before anything else: attribute the reading only to the backend
+                // the reply NAMES, and only when we have a request outstanding for it. An older daemon
+                // answering a Codex request with `agent=claude` therefore lands in the Claude slot (which
+                // is what it actually is) and leaves Codex with no data — the honest render — instead of
+                // drawing Claude's percentages under a Codex label.
+                val agent = f.agent
+                val pending = quotaOutstanding[agent] ?: 0
+                if (pending <= 0) return // unsolicited or late: no slot may claim it
+                quotaOutstanding[agent] = pending - 1
+                quotaDeadlines.remove(agent)?.cancel()
+                quotaStatusByAgent[agent] = f.status
+                if (f.status == CLAUDE_QUOTA_OK || f.status == CLAUDE_QUOTA_NO_TOKEN) quotaByAgent[agent] = f
+                quotaLoadingByAgent[agent] = false
+                // one policy drives every agent: open its latch only once nothing is still in flight
+                if (quotaLoadingByAgent.none { it.value }) onClaudeQuotaReply?.invoke()
             }
             is SkillCatalog -> {
                 skillCatalogDeadline?.cancel()
@@ -3250,6 +3262,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 daemonSupportedAgents.value = f.supportedAgents.toSet()
                 daemonAgentsKnown = true // #276: the daemon has now told us — the guard may deny an unsupported agent
                 daemonUsageAgentFilter.value = f.supportsUsageAgentFilter // issue #258: false = daemon ignores the filter
+                daemonQuotaAgents.value = f.quotaAgents // issue #348: empty (older daemon) = Claude only
                 daemonOwnsPromptRecovery = f.supportsPromptRecovery
                 if (daemonOwnsPromptRecovery) clearTurnWatchdogState()
                 // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
@@ -4245,34 +4258,83 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  absolute value is meaningless and it is never persisted. */
     val turnCompletions = mutableStateOf(0L)
 
-    // ── Claude subscription allowance (the 5h/7d windows behind the CLI's own `/usage` panel) ──
-    /** The daemon's latest [ClaudeQuota]. Null = we have not been told: either the fetch is still in
-     *  flight, or this daemon predates the frame and silently dropped the request — indistinguishable on
-     *  the wire, which is why the page hides the block in BOTH cases rather than showing an error. */
-    val claudeQuota = mutableStateOf<ClaudeQuota?>(null)
-    val claudeQuotaLoading = mutableStateOf(false)
+    // ── subscription allowance, PER BACKEND (issue #348) ──
+    //
+    //  Claude's 5h/7d windows behind the CLI's own `/usage` panel, and — since #348 — Codex's plan
+    //  windows read off `codex app-server`. One slot per agent, never one shared slot: the two are
+    //  different accounts with different reset clocks, and a single slot would make the last reply to
+    //  land silently overwrite the other backend's numbers under whatever label the UI drew last.
+    /** The latest reading per backend. Absent = we have not been told: the fetch is still in flight, this
+     *  daemon predates the frame and silently dropped the request, or (for a non-Claude agent) we never
+     *  asked because [daemonQuotaAgents] did not advertise it. All indistinguishable on the wire, which is
+     *  why every surface hides the block in ALL of those cases rather than showing an error. */
+    val quotaByAgent = mutableStateMapOf<AgentKind, ClaudeQuota>()
+    private val quotaLoadingByAgent = mutableStateMapOf<AgentKind, Boolean>()
+    private val quotaStatusByAgent = mutableStateMapOf<AgentKind, String>()
 
-    /** The status of the LAST reply, including the transient failures [claudeQuota] deliberately does not
+    /**
+     * The Claude slot under its historical name. Every pre-#348 caller (and every existing test, which
+     * ASSIGNS through it) keeps working unchanged: this is a live view of `quotaByAgent[CLAUDE]`, not a
+     * second copy, so the two can never disagree.
+     */
+    val claudeQuota: MutableState<ClaudeQuota?> = agentSlot(quotaByAgent, AgentKind.CLAUDE)
+    val claudeQuotaLoading: MutableState<Boolean> = agentFlag(quotaLoadingByAgent, AgentKind.CLAUDE, false)
+
+    /** The status of the LAST reply, including the transient failures [quotaByAgent] deliberately does not
      *  absorb. Null = never answered. Diagnostics only — no UI should turn a blip into an alarm. */
-    val claudeQuotaStatus = mutableStateOf<String?>(null)
+    val claudeQuotaStatus: MutableState<String?> = agentSlot(quotaStatusByAgent, AgentKind.CLAUDE)
 
-    /** Fired whenever a [ClaudeQuota] lands, success or failure. The refresh policy clears its in-flight
-     *  latch here; a callback rather than a state read so a dropped reply cannot look like a fresh one. */
+    /** The backends whose allowance THIS daemon says it can read ([DaemonInfo.quotaAgents], wire names).
+     *  Empty = an older daemon that never advertised: Claude only, exactly the pre-#348 behaviour. */
+    val daemonQuotaAgents = mutableStateOf<List<String>>(emptyList())
+
+    /** Fired when the LAST outstanding quota reply lands, success or failure. The refresh policy clears
+     *  its in-flight latch here; a callback rather than a state read so a dropped reply cannot look like a
+     *  fresh one. Waiting for the last one (not the first) keeps one policy driving N agents: opening the
+     *  latch on Claude's reply while Codex's is still in flight would let the next tick re-ask for both. */
     internal var onClaudeQuotaReply: (() -> Unit)? = null
 
-    private var claudeQuotaDeadline: Job? = null
+    private val quotaDeadlines = mutableMapOf<AgentKind, Job>()
 
-    /** Ask the daemon for the subscription allowance; the reply lands in [claudeQuota]. The daemon caches
-     *  briefly on its side, so re-entering the usage page is cheap and [forceRefresh] is the manual
-     *  override. A deadline clears the in-flight flag so an old daemon's silence does not spin forever. */
-    fun fetchClaudeQuota(forceRefresh: Boolean = false) {
-        claudeQuotaLoading.value = true
-        claudeQuotaDeadline?.cancel()
-        scope.launch { send(ClaudeQuotaGet(forceRefresh)) }
-        claudeQuotaDeadline = scope.launch {
+    /**
+     * How many requests we have outstanding per agent — the ECHO CHECK's ledger.
+     *
+     * A [ClaudeQuota] reply carries no request id, so the only thing tying it to what we asked is its own
+     * `agent`. An OLDER daemon drops the unknown `agent` key on the way in and answers with the CLAUDE
+     * allowance tagged `claude`; if we attributed a reply to whatever we asked for last, that Claude
+     * reading would be drawn under a "Codex" label — a wrong billing number, which is the exact failure
+     * this feature exists to avoid. So a reply is accepted only against an OUTSTANDING request for the
+     * agent it names, and a reply naming an agent we are not waiting on is dropped.
+     */
+    private val quotaOutstanding = mutableMapOf<AgentKind, Int>()
+
+    /** Ask the daemon for one backend's subscription allowance; the reply lands in [quotaByAgent].
+     *
+     * GATE: a non-Claude request goes out ONLY when [daemonQuotaAgents] advertises that backend. Sending
+     * `agent=codex` to a daemon that predates #348 would have it drop the key and answer with the CLAUDE
+     * numbers — the mis-attribution the echo check catches, prevented one step earlier. */
+    fun fetchQuota(agent: AgentKind = AgentKind.CLAUDE, forceRefresh: Boolean = false) {
+        if (agent != AgentKind.CLAUDE && agent.name.lowercase() !in daemonQuotaAgents.value) return
+        quotaLoadingByAgent[agent] = true
+        quotaOutstanding[agent] = (quotaOutstanding[agent] ?: 0) + 1
+        quotaDeadlines.remove(agent)?.cancel()
+        scope.launch { send(ClaudeQuotaGet(forceRefresh, agent)) }
+        quotaDeadlines[agent] = scope.launch {
             delay(12_000)
-            claudeQuotaLoading.value = false
+            quotaLoadingByAgent[agent] = false
+            // the request is no longer outstanding: a reply arriving after this deadline is a LATE one and
+            // must not be attributed, exactly like a mis-labelled one
+            quotaOutstanding[agent] = ((quotaOutstanding[agent] ?: 0) - 1).coerceAtLeast(0)
+            if (quotaLoadingByAgent.none { it.value }) onClaudeQuotaReply?.invoke()
         }
+    }
+
+    /** The Claude-only entry point, kept for every pre-#348 caller. */
+    fun fetchClaudeQuota(forceRefresh: Boolean = false) = fetchQuota(AgentKind.CLAUDE, forceRefresh)
+
+    /** One refresh trigger, every backend this daemon can answer for. */
+    fun fetchAllQuotas(forceRefresh: Boolean = false) {
+        for (a in quotaAgentsToFetch(daemonQuotaAgents.value)) fetchQuota(a, forceRefresh)
     }
 
     // ── installed skills/plugins catalog (issue #132): the desktop browse page ──
@@ -7106,4 +7168,37 @@ internal suspend fun retireJobBounded(prev: Job?, timeoutMs: Long) {
     prev ?: return
     prev.cancel()
     withTimeoutOrNull(timeoutMs) { prev.join() }
+}
+
+// ── per-agent state slots (issue #348) ────────────────────────────────────────────────────────────
+//
+//  A live VIEW of one key of a snapshot state map, wearing the `MutableState` face the pre-#348
+//  single-backend call sites (and their tests, which assign through it) already speak. A view rather
+//  than a mirrored copy on purpose: two holders of the same reading are two chances for the strip and
+//  the sheet to disagree about a billing number.
+
+/** The nullable slot: writing null REMOVES the key, so "no reading" stays absent from the map that the
+ *  multi-agent surfaces iterate — a lingering null entry would draw an empty section per agent. */
+private fun <V : Any> agentSlot(
+    map: androidx.compose.runtime.snapshots.SnapshotStateMap<AgentKind, V>,
+    agent: AgentKind,
+): MutableState<V?> = object : MutableState<V?> {
+    override var value: V?
+        get() = map[agent]
+        set(v) { if (v == null) map.remove(agent) else map[agent] = v }
+    override fun component1(): V? = value
+    override fun component2(): (V?) -> Unit = { value = it }
+}
+
+/** The non-null slot: an absent key reads as [absent] (a missing loading flag is "not loading"). */
+private fun <V : Any> agentFlag(
+    map: androidx.compose.runtime.snapshots.SnapshotStateMap<AgentKind, V>,
+    agent: AgentKind,
+    absent: V,
+): MutableState<V> = object : MutableState<V> {
+    override var value: V
+        get() = map[agent] ?: absent
+        set(v) { map[agent] = v }
+    override fun component1(): V = value
+    override fun component2(): (V) -> Unit = { value = it }
 }

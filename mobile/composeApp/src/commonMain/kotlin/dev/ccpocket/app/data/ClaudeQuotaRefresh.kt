@@ -1,5 +1,7 @@
 package dev.ccpocket.app.data
 
+import dev.ccpocket.protocol.AgentKind
+
 /** What asked for a quota refresh. Each carries its own admission rule — see [ClaudeQuotaRefreshPolicy]. */
 enum class QuotaRefreshTrigger {
     /** The daemon link went (re)ready. Always refreshes: a new machine has a different account. */
@@ -148,5 +150,30 @@ class ClaudeQuotaRefreshPolicy(
 
         /** Backstop for a request whose reply never arrives (old daemon / dropped link). */
         const val IN_FLIGHT_TIMEOUT_MS = 30_000L
+    }
+}
+
+/**
+ * Which backends one refresh trigger should ask about (issue #348), given [advertised] —
+ * [dev.ccpocket.protocol.DaemonInfo.quotaAgents] as the daemon sent it.
+ *
+ * Two rules, and the ORDER of them is the whole point:
+ *  1. **Claude is always in the list**, advertised or not. An older daemon sends no `quotaAgents` at all,
+ *     and it still answers a plain [dev.ccpocket.protocol.ClaudeQuotaGet] with the Claude allowance — that
+ *     is the entire pre-#348 world, and dropping Claude when the list is empty would turn every existing
+ *     daemon's strip off.
+ *  2. **Every other backend is opt-IN.** A name we do not recognise is skipped (it is a backend this app
+ *     build has no enum value for, so it could not label the reading anyway), and a daemon that never
+ *     advertised gets no non-Claude request — it would drop the unknown `agent` key and answer with the
+ *     CLAUDE numbers, which the client would then have to attribute to something else.
+ *
+ * Deliberately a pure function on a `List<String>` rather than a repository method: this IS the gate the
+ * mis-attribution defence rests on, and it must be assertable without a daemon, a socket or a Compose tree.
+ */
+fun quotaAgentsToFetch(advertised: List<String>): List<AgentKind> = buildList {
+    add(AgentKind.CLAUDE)
+    for (wire in advertised) {
+        val kind = AgentKind.entries.firstOrNull { it.name.lowercase() == wire.lowercase() } ?: continue
+        if (kind != AgentKind.CLAUDE && kind !in this) add(kind)
     }
 }

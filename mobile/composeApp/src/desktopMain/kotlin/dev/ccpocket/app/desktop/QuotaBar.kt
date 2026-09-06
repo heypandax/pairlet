@@ -51,15 +51,16 @@ import dev.ccpocket.app.resources.quota_used
 import dev.ccpocket.app.resources.quota_title
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.QuotaFreshnessRow
+import dev.ccpocket.app.ui.QuotaSection
+import dev.ccpocket.app.ui.agentName
+import dev.ccpocket.app.ui.quotaSections
+import dev.ccpocket.app.ui.sectionHeading
 import dev.ccpocket.app.ui.QuotaLimitRow
-import dev.ccpocket.app.ui.isSessionWindow
 import dev.ccpocket.app.ui.isWarn
 import dev.ccpocket.app.ui.quotaShortLabel
 import dev.ccpocket.app.ui.quotaLabel
 import dev.ccpocket.app.ui.rememberQuotaClock
-import dev.ccpocket.app.ui.worstWeekly
-import dev.ccpocket.protocol.CLAUDE_QUOTA_OK
-import dev.ccpocket.protocol.ClaudeQuota
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ClaudeQuotaLimit
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
@@ -88,13 +89,40 @@ fun QuotaBar(model: DesktopModel) {
     // would never fire and the strip could never appear. Hence: effect first, render decision after.
     ClaudeQuotaRefreshEffect(repo)
 
-    val q = repo.claudeQuota.value
-    if (q == null || q.status != CLAUDE_QUOTA_OK || q.limits.isEmpty()) return
+    // one thin row per backend that has numbers (issue #348), Claude first. A single backend is the
+    // pre-#348 strip unchanged; the second row only appears on a machine that really has two accounts.
+    val sections = quotaSections(repo)
+    if (sections.isEmpty()) return
+    // WHICH backend's popover is open. `model.showQuotaPopover` stays the boolean the window's overlay
+    // bookkeeping (anyOverlayOpen / Esc routing) already knows about — this only narrows it to a row.
+    var popoverAgent by remember { mutableStateOf<AgentKind?>(null) }
 
-    val session = q.limits.firstOrNull { isSessionWindow(it) }
-    val weekly = worstWeekly(q.limits)
-    if (session == null && weekly == null) return
+    Column(Modifier.fillMaxWidth()) {
+        for (sec in sections) {
+            QuotaAgentBar(
+                repo = repo,
+                sec = sec,
+                // same rule as the phone sheet: only a LONE CLAUDE row goes unnamed in its tooltip and
+                // popover title, because that is the pre-#348 surface
+                labelled = sections.size > 1 || sec.agent != AgentKind.CLAUDE,
+                popoverOpen = model.showQuotaPopover && popoverAgent == sec.agent,
+                onOpen = { popoverAgent = sec.agent; model.showQuotaPopover = true },
+                onDismiss = { model.showQuotaPopover = false },
+            )
+        }
+    }
+}
 
+/** One backend's strip row, with its own hover tooltip and its own click-through popover. */
+@Composable
+private fun QuotaAgentBar(
+    repo: PocketRepository,
+    sec: QuotaSection,
+    labelled: Boolean,
+    popoverOpen: Boolean,
+    onOpen: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
 
@@ -103,36 +131,36 @@ fun QuotaBar(model: DesktopModel) {
     Box(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp)) {
         Row(
             Modifier.fillMaxWidth().height(26.dp).clip(RoundedCornerShape(7.dp)).hoverFill(RoundedCornerShape(7.dp))
-                .hoverable(src).clickable { model.showQuotaPopover = true }
+                .hoverable(src).clickable(onClick = onOpen)
                 .padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // brand marker: Claude-subscription quota only (multi-agent users would otherwise read it as global)
-            Text("Claude", color = Tok.muted, fontFamily = Dk.mono, fontSize = 9.5.sp, maxLines = 1, style = tightCenter(9.5.sp))
+            // brand marker: WHOSE subscription this row reports (a bare percentage is the one number a
+            // multi-backend user cannot act on)
+            Text(agentName(sec.agent), color = Tok.muted, fontFamily = Dk.mono, fontSize = 9.5.sp, maxLines = 1, style = tightCenter(9.5.sp))
             // short labels, so the weekly segment can NAME a scoped cap ("7d·Fable") — an unlabelled
             // worst-of-weekly percent read as a wrong number next to the official panel's all-models row
-            session?.let { QuotaSegment(quotaShortLabel(it), it, Modifier.weight(1f)) }
-            weekly?.let { QuotaSegment(quotaShortLabel(it), it, Modifier.weight(1f)) }
+            sec.segments.forEach { QuotaSegment(quotaShortLabel(it), it, Modifier.weight(1f)) }
         }
 
         // Hover summary. The repo has no TooltipArea idiom anywhere, so this follows the one floating-
         // layer pattern it does have (the composer model chip): an anchored Popup, here NON-focusable so
         // merely pointing at the strip never steals the keyboard from the composer.
-        if (hovered && !model.showQuotaPopover) {
+        if (hovered && !popoverOpen) {
             val gap = with(LocalDensity.current) { 6.dp.roundToPx() }
             Popup(
                 popupPositionProvider = remember(gap) { AboveAnchorStartPopupPositionProvider(gap) },
                 properties = PopupProperties(focusable = false),
-            ) { QuotaTooltip(q.limits) }
+            ) { QuotaTooltip(sec, heading = if (labelled) sectionHeading(sec) else null) }
         }
-        if (model.showQuotaPopover) {
+        if (popoverOpen) {
             val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
             Popup(
                 popupPositionProvider = remember(gap) { AboveAnchorStartPopupPositionProvider(gap) },
-                onDismissRequest = { model.showQuotaPopover = false },
+                onDismissRequest = onDismiss,
                 properties = PopupProperties(focusable = true),
-            ) { QuotaPopover(repo, q) { model.showQuotaPopover = false } }
+            ) { QuotaPopover(repo, sec, titled = labelled, onDismiss = onDismiss) }
         }
     }
 }
@@ -157,15 +185,20 @@ private fun QuotaSegment(label: String, limit: ClaudeQuotaLimit, modifier: Modif
     }
 }
 
-/** Hover summary: one terse line per window, so the two-segment strip can be read in full without a click. */
+/** Hover summary: one terse line per window, so the two-segment strip can be read in full without a click.
+ *  [heading] names the backend, and is present only when more than one row is docked (with a single
+ *  backend it would name the obvious, and the pre-#348 tooltip is unchanged). */
 @Composable
-private fun QuotaTooltip(limits: List<ClaudeQuotaLimit>) {
+private fun QuotaTooltip(sec: QuotaSection, heading: String?) {
     val shape = RoundedCornerShape(8.dp)
     Column(
         Modifier.width(230.dp).clip(shape).background(Tok.raised).border(1.dp, Tok.hair, shape).padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        for (l in limits) {
+        heading?.let {
+            Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, maxLines = 1, style = tightCenter(10.sp))
+        }
+        for (l in sec.rows) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(quotaLabel(l), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, maxLines = 1, modifier = Modifier.weight(1f))
                 Text(
@@ -178,11 +211,12 @@ private fun QuotaTooltip(limits: List<ClaudeQuotaLimit>) {
 }
 
 /**
- * The click-through detail: every window in full (label, bar, remaining, reset countdown) plus the age of
- * the numbers and a manual refresh. Focusable like [ModelPopover], so it owns Esc from the inside.
+ * The click-through detail for ONE backend: every window in full (label, bar, remaining, reset countdown)
+ * plus the age of the numbers and a manual refresh. Focusable like [ModelPopover], so it owns Esc from
+ * the inside.
  */
 @Composable
-private fun QuotaPopover(repo: PocketRepository, q: ClaudeQuota, onDismiss: () -> Unit) {
+private fun QuotaPopover(repo: PocketRepository, sec: QuotaSection, titled: Boolean, onDismiss: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     val now by rememberQuotaClock()
 
@@ -192,20 +226,25 @@ private fun QuotaPopover(repo: PocketRepository, q: ClaudeQuota, onDismiss: () -
                 if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onDismiss(); true } else false
             },
     ) {
-        Text(stringResource(Res.string.quota_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            if (titled) "${stringResource(Res.string.quota_title)} · ${sectionHeading(sec)}" else stringResource(Res.string.quota_title),
+            color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+        )
         Spacer(Modifier.height(10.dp))
         // the rows and the freshness footer are the SHARED components (ui/QuotaRows.kt) — the phone's
         // bottom sheet renders the identical thing, wearing the platform's own faces instead of Dk's
-        for (l in q.limits) {
+        for (l in sec.rows) {
             QuotaLimitRow(l, now, uiFont = Dk.ui, monoFont = Dk.mono)
             Spacer(Modifier.height(8.dp))
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Spacer(Modifier.height(8.dp))
         QuotaFreshnessRow(
-            fetchedAt = q.fetchedAt,
+            fetchedAt = sec.quota.fetchedAt,
             now = now,
-            onRefresh = { repo.fetchClaudeQuota(forceRefresh = true) },
+            // this popover is ONE backend's, so its refresh is that backend's — refreshing the other one
+            // too would move an age line the user is not looking at and cost a second daemon round trip
+            onRefresh = { repo.fetchQuota(sec.agent, forceRefresh = true) },
             uiFont = Dk.ui,
             monoFont = Dk.mono,
             refreshDecoration = Modifier.hoverFill(RoundedCornerShape(7.dp)),
@@ -226,7 +265,7 @@ private fun QuotaPopover(repo: PocketRepository, q: ClaudeQuota, onDismiss: () -
 @Composable
 private fun ClaudeQuotaRefreshEffect(repo: PocketRepository) {
     val policy = remember(repo) {
-        ClaudeQuotaRefreshPolicy(now = { epochMillis() }, fetch = { force -> repo.fetchClaudeQuota(force) })
+        ClaudeQuotaRefreshPolicy(now = { epochMillis() }, fetch = { force -> repo.fetchAllQuotas(force) })
     }
     // the in-flight latch opens on ANY reply, success or failure
     DisposableEffect(repo, policy) {
@@ -251,8 +290,9 @@ private fun ClaudeQuotaRefreshEffect(repo: PocketRepository) {
     // the pump for the two time-driven rules (periodic + the turn debounce). Coarse on purpose: the
     // shortest deadline it has to resolve is 60s.
     LaunchedEffect(policy) { while (true) { delay(TICK_MS); policy.tick() } }
-    // keep the staleness basis honest — it is the daemon's OWN fetch moment, not our request moment
-    val fetchedAt = repo.claudeQuota.value?.fetchedAt
+    // keep the staleness basis honest — it is the daemon's OWN fetch moment, not our request moment,
+    // and with several backends the OLDEST of them (one refreshing must not mark the other one fresh)
+    val fetchedAt = repo.quotaByAgent.values.mapNotNull { it.fetchedAt.takeIf { t -> t > 0 } }.minOrNull()
     LaunchedEffect(policy, fetchedAt) { policy.snapshotFetchedAt(fetchedAt) }
 }
 

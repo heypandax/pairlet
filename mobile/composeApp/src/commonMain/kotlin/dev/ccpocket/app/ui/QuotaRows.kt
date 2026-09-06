@@ -107,6 +107,21 @@ fun worstWeekly(limits: List<ClaudeQuotaLimit>): ClaudeQuotaLimit? {
 }
 
 /**
+ * The session row the compact surfaces (strip / desktop bar) show, when there is one.
+ *
+ * Prefers the ACCOUNT-wide 5-hour window — the one with no model scope — and only falls back to the worst
+ * SCOPED short window when the account has none of its own. Claude always reports an unscoped session row,
+ * so this is a no-op there and the Claude strip is unchanged byte for byte; Codex (issue #348) is the case
+ * that needs it: an account can have a weekly-only top-level limit while a per-model cap
+ * (`GPT-5.3-Codex-Spark`, 300 min) is the only 5-hour window in the payload. Taking the first matching row
+ * would then label a per-model cap as if it were the account's.
+ */
+fun sessionWindow(limits: List<ClaudeQuotaLimit>): ClaudeQuotaLimit? {
+    val session = limits.filter { isSessionWindow(it) }
+    return session.firstOrNull { it.modelDisplayName == null } ?: session.maxByOrNull { it.percent }
+}
+
+/**
  * The single tightest window across BOTH groups — what the phone's one-slot pill reports. Same logic as
  * [worstWeekly] widened to include the 5-hour window: with room for one number, it must be the number
  * that will actually stop you, whichever clock it belongs to.
@@ -144,6 +159,10 @@ fun quotaLabel(row: ClaudeQuotaLimit): String = when {
  *  window we cannot classify — better a long chip than a chip that lies about which clock it means. */
 @Composable
 fun quotaShortLabel(row: ClaudeQuotaLimit): String = when {
+    // a SCOPED short window names its cap for the same reason the scoped weekly one does: an unlabelled
+    // percent in the 5h slot reads as the account's own number. Claude has no scoped session rows, so
+    // this branch is unreachable for it and its label is unchanged (issue #348 added the Codex case).
+    isSessionWindow(row) && row.modelDisplayName != null -> "${stringResource(Res.string.quota_5h_short)}·${row.modelDisplayName}"
     isSessionWindow(row) -> stringResource(Res.string.quota_5h_short)
     // a scoped weekly cap NAMES its model ("7d·Fable"): the strip shows the worst weekly row, and an
     // unlabelled 16% next to the official panel's all-models 8% read as a wrong number (owner, 08-24)

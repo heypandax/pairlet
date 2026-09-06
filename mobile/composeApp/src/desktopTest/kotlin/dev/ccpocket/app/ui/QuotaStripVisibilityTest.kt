@@ -21,6 +21,7 @@ import dev.ccpocket.protocol.CLAUDE_QUOTA_NETWORK
 import dev.ccpocket.protocol.CLAUDE_QUOTA_NO_TOKEN
 import dev.ccpocket.protocol.CLAUDE_QUOTA_OK
 import dev.ccpocket.protocol.CLAUDE_QUOTA_SEVERITY_NORMAL
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ClaudeQuota
 import dev.ccpocket.protocol.ClaudeQuotaLimit
 import kotlin.test.Test
@@ -41,6 +42,21 @@ class QuotaStripVisibilityTest {
         ),
         fetchedAt = 1787560000000,
         status = CLAUDE_QUOTA_OK,
+    )
+
+    /** A REAL Codex reading (codex-cli 0.153.4): weekly-only account plus the per-model caps the
+     *  `rateLimitsByLimitId` map carries. Note there is NO unscoped session row — the shape that would
+     *  make a "first session-looking row wins" strip label a per-model cap as the account's own. */
+    private fun codexSnapshot() = ClaudeQuota(
+        limits = listOf(
+            ClaudeQuotaLimit(kind = "weekly_all", group = "weekly", percent = 50, resetsAt = 1789179749_000, isActive = true),
+            ClaudeQuotaLimit(kind = "session", group = "session", percent = 12, resetsAt = 1788734199_000, modelDisplayName = "GPT-5.3-Codex-Spark"),
+            ClaudeQuotaLimit(kind = "weekly_scoped", group = "weekly", percent = 4, resetsAt = 1789320999_000, modelDisplayName = "GPT-5.3-Codex-Spark"),
+        ),
+        fetchedAt = 1787560000000,
+        status = CLAUDE_QUOTA_OK,
+        agent = AgentKind.CODEX,
+        planType = "pro",
     )
 
     @Test
@@ -113,6 +129,91 @@ class QuotaStripVisibilityTest {
                 "the strip rendered a shell for: $why",
             )
         }
+    }
+
+    // ── per-agent stacking (issue #348) ───────────────────────────────────────────────────────────
+
+    @Test
+    fun claudeOnlyDrawsExactlyOneBrandedRowAndNoCodexRow() = runDesktopComposeUiTest(402, 200) {
+        mainClock.autoAdvance = false
+        setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                val scope = rememberCoroutineScope()
+                val repo = remember { PocketRepository(scope).also { it.claudeQuota.value = snapshot() } }
+                PocketTheme(dark = true) { Box(Modifier.fillMaxSize()) { QuotaStrip(repo) {} } }
+            }
+        }
+        waitForIdle()
+        onAllNodes(hasText("Claude", substring = true)).onFirst().assertExists()
+        kotlin.test.assertTrue(
+            onAllNodes(hasText("Codex", substring = true)).fetchSemanticsNodes().isEmpty(),
+            "a Claude-only machine must render exactly the pre-#348 strip",
+        )
+        // …and at the pre-#348 geometry: the single row keeps its 48dp minimum
+        val row = onAllNodes(hasText("5h", substring = true)).onFirst().getUnclippedBoundsInRoot()
+        kotlin.test.assertTrue(row.top.value >= 0f)
+    }
+
+    @Test
+    fun bothBackendsStackOneBrandedRowEach() = runDesktopComposeUiTest(402, 300) {
+        mainClock.autoAdvance = false
+        setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                val scope = rememberCoroutineScope()
+                val repo = remember {
+                    PocketRepository(scope).also {
+                        it.claudeQuota.value = snapshot()
+                        it.quotaByAgent[AgentKind.CODEX] = codexSnapshot()
+                    }
+                }
+                PocketTheme(dark = true) { Box(Modifier.fillMaxSize()) { QuotaStrip(repo) {} } }
+            }
+        }
+        waitForIdle()
+        onAllNodes(hasText("Claude", substring = true)).onFirst().assertExists()
+        onAllNodes(hasText("Codex", substring = true)).onFirst().assertExists()
+        // Claude leads, whichever reply landed first — a reading order that does not depend on the network.
+        // UNMERGED tree: the whole strip is one clickable, so the merged node would report the same bounds
+        // for every label on it and the ordering assertion would be vacuous.
+        val claude = onAllNodes(hasText("Claude"), useUnmergedTree = true).onFirst().getUnclippedBoundsInRoot()
+        val codex = onAllNodes(hasText("Codex"), useUnmergedTree = true).onFirst().getUnclippedBoundsInRoot()
+        kotlin.test.assertTrue(claude.top.value < codex.top.value, "Claude must be the top row: claude=$claude codex=$codex")
+    }
+
+    @Test
+    fun aCodexOnlyMachineStillGetsAStripAndItIsNotLabelledClaude() = runDesktopComposeUiTest(402, 200) {
+        mainClock.autoAdvance = false
+        setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                val scope = rememberCoroutineScope()
+                val repo = remember {
+                    PocketRepository(scope).also { it.quotaByAgent[AgentKind.CODEX] = codexSnapshot() }
+                }
+                PocketTheme(dark = true) { Box(Modifier.fillMaxSize()) { QuotaStrip(repo) {} } }
+            }
+        }
+        waitForIdle()
+        onAllNodes(hasText("Codex", substring = true)).onFirst().assertExists()
+        kotlin.test.assertTrue(
+            onAllNodes(hasText("Claude", substring = true)).fetchSemanticsNodes().isEmpty(),
+            "a machine with no Claude reading must not draw a Claude row",
+        )
+        // the account's own weekly window is on screen (50%), not the per-model cap
+        onAllNodes(hasText("50%", substring = true)).onFirst().assertExists()
+    }
+
+    /**
+     * A Codex account can have NO unscoped 5-hour window while a per-model cap does have one. The strip's
+     * session slot must then name that cap rather than presenting it as the account's own 5h number.
+     */
+    @Test
+    fun aScopedShortWindowIsNamedInTheSessionSlotRatherThanPassedOffAsTheAccounts() {
+        val rows = codexSnapshot().limits
+        val session = sessionWindow(rows)
+        kotlin.test.assertEquals("GPT-5.3-Codex-Spark", session?.modelDisplayName)
+        // …and the unscoped one still wins wherever there is one (Claude's shape — unchanged)
+        kotlin.test.assertEquals(null, sessionWindow(snapshot().limits)?.modelDisplayName)
+        kotlin.test.assertEquals(67, sessionWindow(snapshot().limits)?.percent)
     }
 
     /**

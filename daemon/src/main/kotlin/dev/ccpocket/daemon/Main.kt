@@ -208,6 +208,7 @@ private class RunCmd : CliktCommand(name = "run") {
             prefs = prefs,
             claudeConfigDir = claudeHome,
             claudeBin = claudeBin,
+            codexBin = codexBin, // #348: the allowance reader must resolve the same codex the backend does
             presetStore = presetStore,
             openCodeModels = dev.ccpocket.daemon.opencode.OpenCodeModelService(opencodeBin),
             kimiModels = dev.ccpocket.daemon.kimi.KimiModelService(kimiBin),
