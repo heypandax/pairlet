@@ -137,7 +137,9 @@ fun PocketSheet(onDismiss: () -> Unit, dropKeyboard: Boolean = true, content: @C
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color(0x94000000)).pointerInput(Unit) { detectTapGestures { onDismiss() } })
         Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+            // #334: on a tablet a bottom sheet is capped and centred rather than stretched edge to
+            // edge; sheetMeasure() is the identity in narrow mode, so the phone chain is untouched.
+            Modifier.align(Alignment.BottomCenter).sheetMeasure().fillMaxWidth()
                 .graphicsLayer { translationY = dragY }
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                 .background(Tok.raised)

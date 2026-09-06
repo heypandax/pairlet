@@ -1999,4 +1999,6 @@
     <string name="privacy_gate_agree">Agree and continue</string>
     <string name="settings_privacy_title">Privacy policy</string>
     <string name="settings_privacy_sub">How your data is handled</string>
+    <!-- #334 wide layout: the right pane with nothing open -->
+    <string name="wide_pick_session">Select a session</string>
 </resources>
