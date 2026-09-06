@@ -138,6 +138,36 @@ class DshBackendPresetTest {
         assertEquals(listOf("standard"), meta, "a refused preset must never be announced as effective")
     }
 
+    /**
+     * Issue #333 review: an `ok:true` that does not ECHO the preset is not a confirmation of anything.
+     * Announcing the REQUESTED value on the strength of a bare ok would be the "display what we asked
+     * for" failure the whole read-back discipline exists to prevent — so the create-time value stands.
+     */
+    @Test
+    fun a_select_that_does_not_echo_the_preset_keeps_the_create_time_value() = opened(
+        spec(preset = "minimal"),
+        handlers(select = FakeDshHost.ok("{}")),
+    ) { _, host, events ->
+        assertTrue("agentPreset.select" in host.calls)
+        assertEquals(
+            listOf("standard"),
+            events.filterIsInstance<AgentEvent.RuntimeMeta>().mapNotNull { it.agentPreset },
+            "a bare ok:true is not evidence the preset moved",
+        )
+    }
+
+    /** A blank echo is no echo either — it must not blank out the preset that IS in force. */
+    @Test
+    fun a_blank_echo_is_treated_as_no_answer() = opened(
+        spec(preset = "minimal"),
+        handlers(select = FakeDshHost.ok("""{"agentPreset":""}""")),
+    ) { _, _, events ->
+        assertEquals(
+            listOf("standard"),
+            events.filterIsInstance<AgentEvent.RuntimeMeta>().mapNotNull { it.agentPreset },
+        )
+    }
+
     // ---- what gets announced ----------------------------------------------
 
     @Test

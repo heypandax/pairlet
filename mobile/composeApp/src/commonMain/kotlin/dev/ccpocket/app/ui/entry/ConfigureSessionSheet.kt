@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.cfg_claude_note
@@ -407,16 +408,19 @@ private fun PresetRow(name: String, detail: String?, custom: Boolean, selected: 
         ) {
             EntryCheckMark(selected)
             Column(Modifier.weight(1f).padding(start = Metric.gapS)) {
+                // CLAUDE.md 铁律：同排两个不同字号的 Text，两个都要 tightCenter——只给一个照样错位。
+                // 15sp 是 TypeRole.action 的字号，权重在这里显式带上（tightCenter 只管行高，不带字重）。
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(name, color = Tok.tx, style = TypeRole.action, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        name, color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        style = tightCenter(15.sp), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
                     if (custom) {
                         Spacer(Modifier.width(Metric.gapXs))
                         Text(
                             stringResource(Res.string.cfg_preset_custom),
-                            color = Tok.tx2,
-                            // tightCenter: this sits geometrically beside a LARGER text on the same row —
-                            // a bare fontSize would centre the line box, not the glyphs (project rule).
-                            style = tightCenter(11.sp),
+                            color = Tok.tx2, fontSize = 11.sp, style = tightCenter(11.sp),
                         )
                     }
                 }

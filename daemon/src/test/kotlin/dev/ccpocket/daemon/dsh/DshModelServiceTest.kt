@@ -1,6 +1,9 @@
 package dev.ccpocket.daemon.dsh
 
 import dev.ccpocket.protocol.AgentKind
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
@@ -142,6 +145,64 @@ class DshModelServiceTest {
         now = 11 * 60 * 1000L
         svc.fetch()
         assertTrue(seen.size > afterFirst, "past the TTL a newly authored preset must become visible")
+    }
+
+    /**
+     * Issue #333 review: two pickers opening at once (the phone's and the desktop's, or one impatient
+     * double tap) both miss the empty cache. Without a gate each one BOOTS A dsh HOST — two Node
+     * processes against the same `$DSH_HOME`, both immediately discarded. The loser must instead wait and
+     * read the cache the winner just filled.
+     */
+    @Test
+    fun concurrent_fetches_boot_exactly_one_throwaway_host() = runBlocking {
+        val boots = java.util.concurrent.atomic.AtomicInteger()
+        val svc = DshModelService(
+            liveRpc = { null },
+            transientHost = {
+                boots.incrementAndGet()
+                // Hold the lock long enough that a racing caller provably overlaps this one.
+                kotlinx.coroutines.delay(150)
+                DshModelService.TransientHost(rpc(catalogue), close = {})
+            },
+            nowMs = { 0L },
+        )
+        val results = List(8) { async(Dispatchers.Default) { svc.fetch() } }.awaitAll()
+        assertEquals(1, boots.get(), "each concurrent fetch booted its own dsh host")
+        assertTrue(results.all { it.error == null && it.models.size == 2 }, "every caller must get the answer")
+    }
+
+    /** …and the gate must not turn a warm cache into a queue: a cached answer never takes the lock. */
+    @Test
+    fun a_warm_cache_answers_without_booting_anything() = runBlocking {
+        val boots = java.util.concurrent.atomic.AtomicInteger()
+        val svc = DshModelService(
+            liveRpc = { null },
+            transientHost = {
+                boots.incrementAndGet()
+                DshModelService.TransientHost(rpc(catalogue), close = {})
+            },
+            nowMs = { 0L },
+        )
+        repeat(5) { svc.fetch() }
+        assertEquals(1, boots.get())
+    }
+
+    /**
+     * Issue #333 review: `trust` is dsh vouching for a preset as its OWN. An ABSENT field is not that
+     * vouching, so the row is custom. Defaulting the other way would pass a preset the user wrote off as
+     * shipped — and "yours" is the tag that tells them which rows they can edit.
+     */
+    @Test
+    fun a_preset_with_no_trust_field_counts_as_custom() = runBlocking {
+        val list = service(
+            mapOf(
+                "llm.models" to catalogue.getValue("llm.models"),
+                "agentPreset.list" to FakeDshHost.ok(
+                    """{"presets":[{"id":"mystery","name":"Mystery","isDefault":false}],"authorable":true}""",
+                ),
+            ),
+        ).fetch()
+        assertTrue(list.agentPresets.single().custom, "no `trust` is not dsh vouching for the preset")
     }
 
     /** A dsh that was mid-upgrade for one fetch must not be remembered as broken for ten minutes. */

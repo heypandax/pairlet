@@ -10,6 +10,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -75,8 +77,27 @@ class DshModelService(
 
     @Volatile private var cache: Cached? = null
 
+    /**
+     * Serializes [fetch]. Without it two pickers opening at once (the phone's and the desktop's, or one
+     * user tapping twice) each miss the empty cache and each BOOT A dsh HOST — two Node processes against
+     * the same `$DSH_HOME`, both then thrown away. The fast path below still answers a warm cache with no
+     * locking at all; only an actual catalogue read queues, and the loser re-reads the cache the winner
+     * just filled rather than repeating the work.
+     */
+    private val gate = Mutex()
+
     suspend fun fetch(): ModelsList {
-        cache?.takeIf { nowMs() - it.at < CACHE_TTL_MS }?.let { return it.list }
+        cache?.takeIf(::fresh)?.let { return it.list }
+        return gate.withLock {
+            // Re-check under the lock: whoever we queued behind has almost certainly just filled it.
+            cache?.takeIf(::fresh)?.let { return@withLock it.list }
+            readCatalogue()
+        }
+    }
+
+    private fun fresh(c: Cached): Boolean = nowMs() - c.at < CACHE_TTL_MS
+
+    private suspend fun readCatalogue(): ModelsList {
         val live = runCatching { liveRpc() }.getOrNull()
         if (live != null) {
             // A live host that refuses is reported as-is: it is the user's real dsh, and booting a second
@@ -91,6 +112,8 @@ class DshModelService(
         return try {
             remember(read(host.rpc, attempts = RPC_ATTEMPTS))
         } finally {
+            // ALWAYS, cancellation included: a leaked throwaway host is a Node process holding the user's
+            // $DSH_HOME open for the rest of the daemon's life.
             runCatching { host.close() }
         }
     }
@@ -172,9 +195,11 @@ class DshModelService(
                 detail = p.str("description")?.takeIf { it.isNotBlank() },
                 // `trust` is dsh's own provenance marker: "system" = shipped with the CLI, "user" = authored
                 // by the human in `$DSH_HOME/.agent-presets/`. Both spellings are probe-verified in the
-                // rc.6 bundle; anything else is treated as custom, because "not one of ours" is the safer
-                // way to be wrong (it labels a row, it does not gate anything).
-                custom = p.str("trust")?.let { it != "system" } ?: false,
+                // rc.6 bundle. ANYTHING ELSE — the field being ABSENT included — counts as custom: only an
+                // explicit "system" is dsh vouching for a preset as its own. The safer way to be wrong is
+                // to tag a shipped row "yours" rather than to pass the user's own preset off as shipped.
+                // It labels a row; it gates nothing.
+                custom = p.str("trust") != "system",
                 recommended = p.bool("isDefault") ?: false,
             )
         }
@@ -192,13 +217,15 @@ class DshModelService(
 
         /** Unwrap one RPC to its `value`, retrying the boot window, or null on a carrier/business failure. */
         suspend fun DshRpc.call(method: String, attempts: Int): JsonObject? {
-            repeat(attempts) {
+            repeat(attempts) { attempt ->
                 val result = rpc(method, buildJsonObject { })
                 if (result != null) {
                     // A business error is dsh's verdict and will not improve by asking again.
                     return if (result["ok"]?.toString() == "true") result.obj("value") else null
                 }
-                delay(RPC_RETRY_MS)
+                // The budget is the gap BETWEEN tries: sleeping after the LAST one delays nothing but the
+                // caller's failure (here, 250ms added to every "dsh is not reachable" answer).
+                if (attempt < attempts - 1) delay(RPC_RETRY_MS)
             }
             return null
         }
@@ -229,25 +256,34 @@ class DshModelService(
                 }
                 portFuture.complete(0) // stdout closed without a banner — unblock the waiter
             }.apply { isDaemon = true; name = "dsh-catalogue-stdout" }.start()
-            val port = runCatching {
-                portFuture.get(BOOT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            }.getOrDefault(0)
-            if (port <= 0) {
-                proc.destroyForcibly()
-                return@withContext null
-            }
-            // No mux: start() is deliberately never called (see the class KDoc). The scope is only the
-            // client's constructor contract and owns nothing here.
-            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-            val client = DshApiClient(port, scope, onFrame = {}, onFatal = {})
-            TransientHost(
-                rpc = { m, p -> client.rpc(m, p) },
-                close = {
-                    runCatching { client.close() }
-                    runCatching { scope.cancel() }
+            // From here the child is OURS to kill. Every exit that is not a successfully returned
+            // TransientHost — a cancelled fetch, a boot timeout, a throw while building the client — must
+            // take the process with it, or a Node host outlives the request holding $DSH_HOME open with
+            // nobody left who knows how to close it.
+            try {
+                val port = runCatching {
+                    portFuture.get(BOOT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                }.getOrDefault(0)
+                if (port <= 0) {
                     proc.destroyForcibly()
-                },
-            )
+                    return@withContext null
+                }
+                // No mux: start() is deliberately never called (see the class KDoc). The scope is only the
+                // client's constructor contract and owns nothing here.
+                val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+                val client = DshApiClient(port, scope, onFrame = {}, onFatal = {})
+                TransientHost(
+                    rpc = { m, p -> client.rpc(m, p) },
+                    close = {
+                        runCatching { client.close() }
+                        runCatching { scope.cancel() }
+                        proc.destroyForcibly()
+                    },
+                )
+            } catch (t: Throwable) {
+                proc.destroyForcibly()
+                throw t
+            }
         }
     }
 }
