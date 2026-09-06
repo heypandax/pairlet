@@ -28,6 +28,9 @@ const val SETUP_GUIDE_URL = "https://heypandax.github.io/cc-pocket/"
 // the release page that already carries the APK, and the store listing — so the nudge never becomes a
 // second update channel of its own.
 const val RELEASES_URL = "https://github.com/heypandax/cc-pocket/releases/latest"
+// Where "Report an Issue" goes (issue #350's Help menu). The PUBLIC tracker — the same one the README
+// points at — so a bug report never depends on the reporter knowing a support address.
+const val ISSUES_URL = "https://github.com/heypandax/cc-pocket/issues"
 const val APP_STORE_URL = "https://apps.apple.com/app/id6778773969"
 
 // Linked from the first-run data-disclosure gate and from Settings — guideline 5.1.1(i) requires the
