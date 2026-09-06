@@ -1,11 +1,12 @@
 package dev.ccpocket.app.ui
 
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -28,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +47,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -186,6 +191,61 @@ private fun SentImageTiles(images: List<ByteArray>, onOpen: (Int) -> Unit) {
     }
 }
 
+/**
+ * The pictures a TOOL RESULT returned, inside its band (issue #332) — a browser screenshot, a `Read`
+ * of a PNG.
+ *
+ * A compact horizontal strip rather than [SentImages]' grid, on purpose: a tool band is a dense
+ * scanning row in the transcript, and a half-width natural-aspect tile (what a sent prompt gets)
+ * would make one screenshot louder than the reply it belongs to. Fixed height, natural width, scrolls
+ * sideways past three or four.
+ *
+ * [truncated] renders even with an EMPTY [images], for the same reason it does on a user turn: a
+ * result whose only screenshot the budget shed must say so rather than look like a text-only call.
+ */
+@Composable
+fun ToolResultImages(images: List<ByteArray>, truncated: Boolean = false, onOpen: (Int) -> Unit) {
+    if (images.isEmpty() && !truncated) return
+    Column(Modifier.testTag(TOOL_IMAGES_TAG), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        if (images.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                images.forEachIndexed { i, bytes ->
+                    val shape = RoundedCornerShape(8.dp)
+                    val bmp = rememberImageBitmap(bytes)
+                    // natural aspect within a fixed height: a wide browser capture and a tall phone
+                    // screenshot both stay recognizable, where a square crop would behead both
+                    val ar = bmp?.let { if (it.height > 0) it.width.toFloat() / it.height else 4f / 3f } ?: 4f / 3f
+                    Box(
+                        Modifier.testTag("$TOOL_IMAGE_TILE_TAG$i")
+                            .height(TOOL_THUMB_HEIGHT).aspectRatio(ar.coerceIn(0.5f, 2.6f))
+                            .clip(shape).background(Tok.raised).border(1.dp, Tok.hair, shape)
+                            .clickable { onOpen(i) },
+                    ) {
+                        if (bmp != null) Image(bmp, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+                        else UndecodableFill(9.sp)
+                    }
+                }
+            }
+        }
+        if (truncated) {
+            Text(
+                stringResource(Res.string.img_replay_truncated),
+                color = Tok.muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+            )
+        }
+    }
+}
+
+/** Tall enough to tell two screenshots apart at a glance, short enough not to dominate the band. */
+private val TOOL_THUMB_HEIGHT = 92.dp
+
+/** Test handles for the strip and its tiles (issue #332). */
+const val TOOL_IMAGES_TAG = "tool-result-images"
+const val TOOL_IMAGE_TILE_TAG = "tool-result-image-"
+
 /** Stand-in for bytes the platform decoder refused (issue #254). Before this, a null bitmap drew
  *  NOTHING — the tile was an empty rounded rectangle and the full-screen viewer opened pure black,
  *  which is exactly what "tap it and it's blank" looked like. Same wording as the file preview's
@@ -199,32 +259,53 @@ private fun BoxScope.UndecodableFill(fontSize: TextUnit) {
     )
 }
 
-/** Full-screen image viewer: swipe between, swipe down to dismiss, tap to zoom. */
+/**
+ * Full-screen image viewer: swipe between, swipe down to dismiss, pinch/double-tap to zoom.
+ *
+ * The zoom was a 1.25x tap toggle until issue #332 put SCREENSHOTS in here — a browser capture is
+ * dense text at phone size, and 1.25x is not a way to read it. Now: pinch 1–4x with a clamped pan
+ * ([ImageZoomState]) and a double tap for 2.5x.
+ */
 @Composable
 fun ImageViewer(images: List<ByteArray>, startIndex: Int, onClose: () -> Unit) {
     if (images.isEmpty()) return
     val pager = rememberPagerState(initialPage = startIndex.coerceIn(0, images.size - 1)) { images.size }
     var dragY by remember { mutableStateOf(0f) }
+    // swipe-down-to-dismiss belongs to the ZOOMED-OUT state only: while zoomed, a vertical drag is a
+    // pan, and dismissing the viewer under the finger that was reading the bottom of a tall screenshot
+    // is the single most annoying thing this gesture could do.
+    var dismissArmed by remember { mutableStateOf(true) }
+    val onZoomChanged: (Boolean) -> Unit = { atRest -> dismissArmed = atRest }
     // `pointerInput(Unit)` never restarts, so the lambda it captured on FIRST composition is the one that
     // runs forever — a later [onClose] (callers pass inline lambdas that close over changing state) would
     // never be seen, and the pull-down would dismiss through a stale closure. Re-keying on [onClose] is the
     // wrong fix: an identity flip mid-drag cancels the coroutine, and detectVerticalDragGestures does not
     // run onDragCancel in that path, leaving [dragY] parked. Same resolution as PocketSheet's drag handle.
     val currentOnClose by rememberUpdatedState(onClose)
+    // same stale-closure hazard as [currentOnClose]: the drag lambda is captured once, so it must read
+    // the arming flag through a holder rather than closing over the boolean's first value
+    val armed = rememberUpdatedState(dismissArmed)
     Box(
         Modifier.fillMaxSize().background(Color(0xFF08090A))
             .graphicsLayer { translationY = dragY; alpha = 1f - (dragY / 900f).coerceIn(0f, 0.55f) }
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
-                    onVerticalDrag = { _, d -> dragY = (dragY + d).coerceAtLeast(0f) },
+                    onVerticalDrag = { _, d -> if (armed.value) dragY = (dragY + d).coerceAtLeast(0f) },
                     onDragEnd = { if (dragY > 90f) currentOnClose() else dragY = 0f },
                     onDragCancel = { dragY = 0f },
                 )
             },
     ) {
         HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-            var zoom by remember { mutableStateOf(false) }
-            val scale by animateFloatAsState(if (zoom) 1.25f else 1f, label = "zoom")
+            // one zoom state PER PAGE, reset when the page scrolls away: coming back to a screenshot
+            // still parked at 4x and panned into a corner reads as a broken viewer
+            val zoomState = remember(page) { ImageZoomState() }
+            LaunchedEffect(pager.currentPage) { if (pager.currentPage != page) zoomState.reset() }
+            var bounds by remember(page) { mutableStateOf(ZoomBounds(0f, 0f, 0f, 0f)) }
+            // report zoom state as an EFFECT, never as a write during composition
+            LaunchedEffect(zoomState.atRest, pager.currentPage) {
+                if (pager.currentPage == page) onZoomChanged(zoomState.atRest)
+            }
             val bmp = rememberImageBitmap(images[page])
             Box(Modifier.fillMaxSize().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
                 if (bmp != null) {
@@ -232,8 +313,28 @@ fun ImageViewer(images: List<ByteArray>, startIndex: Int, onClose: () -> Unit) {
                     val shape = RoundedCornerShape(14.dp)
                     Image(
                         bmp, null,
-                        Modifier.fillMaxWidth(0.92f).aspectRatio(ar).graphicsLayer { scaleX = scale; scaleY = scale }
-                            .clip(shape).border(1.dp, Tok.hair, shape).clickable { zoom = !zoom },
+                        Modifier.fillMaxWidth(0.92f).aspectRatio(ar)
+                            .onSizeChanged {
+                                // the laid-out (scale 1) extents ARE the content extents here: the
+                                // aspectRatio modifier has already fitted the picture, so no second fit
+                                bounds = ZoomBounds(it.width.toFloat(), it.height.toFloat(), it.width.toFloat(), it.height.toFloat())
+                                zoomState.clamp(bounds)
+                            }
+                            .graphicsLayer {
+                                scaleX = zoomState.scale; scaleY = zoomState.scale
+                                translationX = zoomState.offsetX; translationY = zoomState.offsetY
+                            }
+                            .clip(shape).border(1.dp, Tok.hair, shape)
+                            // transform gestures BEFORE the tap detector so a two-finger pinch is never
+                            // consumed as a tap on the way past
+                            .pointerInput(page) {
+                                detectTransformGestures { _, pan, zoom, _ ->
+                                    zoomState.transform(zoom, pan.x, pan.y, bounds)
+                                }
+                            }
+                            .pointerInput(page) {
+                                detectTapGestures(onDoubleTap = { zoomState.toggleDoubleTap(bounds) })
+                            },
                         contentScale = ContentScale.Fit,
                     )
                 } else {

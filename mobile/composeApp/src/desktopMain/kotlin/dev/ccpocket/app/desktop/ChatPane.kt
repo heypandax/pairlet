@@ -234,6 +234,7 @@ import dev.ccpocket.app.ui.QuestionCard
 import dev.ccpocket.app.ui.TruncatedNote
 import dev.ccpocket.app.ui.renderClip
 import dev.ccpocket.app.ui.SentImages
+import dev.ccpocket.app.ui.ToolResultImages
 import dev.ccpocket.app.ui.SubagentCard
 import dev.ccpocket.app.ui.WorkflowCard
 import dev.ccpocket.app.ui.folderName
@@ -1406,6 +1407,9 @@ private fun MessageRow(
                     null -> if (item.taskId != null) ToolStatus.RUN else ToolStatus.UNKNOWN
                 },
                 output = item.output,
+                // phone parity (issue #332): the pictures the result returned, in the row's details
+                images = item.images,
+                imagesTruncated = item.imagesTruncated,
             )
         is ChatItem.Sys -> Text(
             pathLinked(item.text), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,
@@ -1471,7 +1475,15 @@ enum class ToolStatus { RUN, OK, FAIL, UNKNOWN }
 internal const val TOOL_ROW_TAG = "plain-tool-row"
 
 @Composable
-fun ToolRow(name: String, cmd: String, status: ToolStatus, output: String? = null) {
+fun ToolRow(
+    name: String,
+    cmd: String,
+    status: ToolStatus,
+    output: String? = null,
+    /** Pictures the RESULT returned (issue #332) - shown in the expanded details, phone parity. */
+    images: List<ByteArray> = emptyList(),
+    imagesTruncated: Boolean = false,
+) {
     val col = when (status) {
         ToolStatus.OK -> Tok.ok
         ToolStatus.FAIL -> Tok.danger
@@ -1482,7 +1494,9 @@ fun ToolRow(name: String, cmd: String, status: ToolStatus, output: String? = nul
     // one visual line at 12sp mono inside the stream column holds ~70 chars — beyond that (or any
     // newline) the ellipsis hides content. A replayed tool result also makes the row expandable: before
     // #306 desktop threw that output field away even though the daemon had preserved it.
-    val expandable = cmd.length > 70 || '\n' in cmd || !output.isNullOrBlank()
+    // a result that returned only a picture has neither a long command nor any output text - without
+    // counting the images the row would have no way to open and the screenshot would be unreachable
+    val expandable = cmd.length > 70 || '\n' in cmd || !output.isNullOrBlank() || images.isNotEmpty() || imagesTruncated
     val details = remember(cmd, output) {
         buildString {
             append(cmd)
@@ -1510,6 +1524,14 @@ fun ToolRow(name: String, cmd: String, status: ToolStatus, output: String? = nul
                 cmd.lineSequence().first(), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
+            if (images.isNotEmpty()) {
+                // a picture count on the collapsed row, so a screenshot is discoverable without
+                // expanding every tool call to look for one
+                Text(
+                    "\u25A3 ${images.size}", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp,
+                    style = tightCenter(11.sp),
+                )
+            }
             if (expandable) {
                 Icon(
                     Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted,
@@ -1524,6 +1546,17 @@ fun ToolRow(name: String, cmd: String, status: ToolStatus, output: String? = nul
         }
         if (expanded) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+            if (images.isNotEmpty() || imagesTruncated) {
+                // DisableSelection so a click reaches the tile through the stream-wide SelectionContainer
+                // - the same carve-out the sent-attachment tiles need (#76 / #85)
+                Box(Modifier.fillMaxWidth().background(Tok.base.copy(alpha = 0.45f)).padding(12.dp)) {
+                    DisableSelection {
+                        ToolResultImages(images, imagesTruncated) { i ->
+                            previewFile("tool-image-${i + 1}.png", images[i], "image/png")
+                        }
+                    }
+                }
+            }
             Box(Modifier.fillMaxWidth().background(Tok.base.copy(alpha = 0.45f))) {
                 SelectionContainer {
                     Text(

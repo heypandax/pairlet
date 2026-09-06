@@ -3776,6 +3776,14 @@ private fun MessageItem(
                         isPlan && expanded -> ({ MarkdownText(m.preview, Tok.tx2) }) // plan rendered as markdown
                         else -> null
                     },
+                    // the pictures the tool's RESULT returned (issue #332) — a browser screenshot, a
+                    // `Read` of a PNG. Tapping opens the same full-screen viewer a sent attachment does,
+                    // so there is one way to look at an image in this app.
+                    footerSlot = if (m.images.isEmpty() && !m.imagesTruncated) {
+                        null
+                    } else {
+                        ({ ToolResultImages(m.images, m.imagesTruncated) { i -> onOpenImages(m.images, i) } })
+                    },
                 )
             }
         }

@@ -99,7 +99,20 @@ class ChatTranscript {
             f.phase == ToolPhase.RESULT -> {
                 val i = cardIndex(f.toolUseId)
                 // no card on screen (opened mid-run): the reattach history replay carries the outcome instead
-                if (i >= 0) messages[i] = (messages[i] as ChatItem.Tool).copy(ok = f.ok, output = f.output)
+                if (i >= 0) {
+                    val card = messages[i] as ChatItem.Tool
+                    // UPDATE the existing START card — an ordinary tool that returned a screenshot now
+                    // gets a RESULT too (issue #332), and appending a second row for it would show the
+                    // same call twice. The taskId match is what makes this an update: an ordinary START
+                    // card has carried its toolUseId since the beginning (see the `else` branch below).
+                    messages[i] = card.copy(
+                        ok = f.ok,
+                        output = f.output,
+                        // absent images never ERASE what the card already had: a sub-agent's RESULT and
+                        // an image-bearing RESULT are different frames, and only one of them speaks here
+                        images = f.images.takeIf { it.isNotEmpty() }?.let(::decodeImages) ?: card.images,
+                    )
+                }
             }
             parent != null -> {
                 val i = cardIndex(parent)
@@ -187,6 +200,16 @@ class ChatTranscript {
     }
 }
 
+/**
+ * Wire [ImageData] -> renderable bytes, shared by the replay path and the live RESULT frame (issue
+ * #332). A blob the platform refuses to base64-decode is DROPPED rather than passed on as bytes that
+ * would fail again inside the image decoder — the renderer's own undecodable card is for bytes that
+ * are valid base64 but not a valid image, which is a different (and rarer) failure worth naming.
+ */
+@OptIn(ExperimentalEncodingApi::class)
+internal fun decodeImages(images: List<dev.ccpocket.protocol.ImageData>): List<ByteArray> =
+    images.mapNotNull { runCatching { Base64.Default.decode(it.base64) }.getOrNull() }
+
 /** One replayed history row as the stream item it should render as. Moved here with [ChatTranscript] so a
  *  split pane replays its backlog exactly the way the focused conversation does. */
 @OptIn(ExperimentalEncodingApi::class)
@@ -225,5 +248,10 @@ internal fun historyItem(h: HistoryMessage): ChatItem = when (h.role) {
         // it actually is. Every backend's replay names the tool the same way (see the daemon's
         // TranscriptReplay / DshTranscriptReplay ASK_TOOL), so this needs no per-agent branch.
         ?: h.text.takeIf { h.tool == ASK_QUESTION_TOOL }?.let { ChatItem.QuestionsUnanswered(it) }
-        ?: ChatItem.Tool(h.tool ?: "tool", h.text, ok = h.ok, output = h.output, workflowRunId = h.workflowRunId)
+        // …and a plain tool row, which since issue #332 can carry the pictures its RESULT returned
+        // (a browser screenshot, a `Read` of a PNG) exactly the way a USER row carries its attachments.
+        ?: ChatItem.Tool(
+            h.tool ?: "tool", h.text, ok = h.ok, output = h.output, workflowRunId = h.workflowRunId,
+            images = decodeImages(h.images), imagesTruncated = h.imagesTruncated,
+        )
 }

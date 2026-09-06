@@ -303,6 +303,10 @@ fun ToolTurnBand(
     expanded: Boolean = false,
     onToggle: (() -> Unit)? = null,
     previewSlot: (@Composable () -> Unit)? = null,
+    /** Rendered INSIDE the band, under the payload (issue #332: the pictures the result returned).
+     *  A slot rather than an images parameter so the band keeps knowing nothing about image decoding —
+     *  and so it stays exactly as it was for the ~all tools that return only text. */
+    footerSlot: (@Composable () -> Unit)? = null,
 ) {
     Column(modifier.fillMaxWidth()) {
         Hairline()
@@ -333,6 +337,7 @@ fun ToolTurnBand(
                     overflow = if (showFullPayload) TextOverflow.Clip else TextOverflow.Ellipsis,
                 )
             }
+            footerSlot?.invoke()
         }
         Hairline()
     }
