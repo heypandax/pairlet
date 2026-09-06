@@ -454,6 +454,13 @@
     <string name="fr_cta">装好了，现在配对</string>
     <string name="fr_enter_code">已经装好了？直接输验证码</string>
     <string name="fr_demo_sub">不用电脑也能看</string>
+    <string name="fr_install_script">脚本</string>
+    <string name="fr_install_pkg">包管理器</string>
+    <string name="fr_trust_title">隐私是怎么保住的</string>
+    <string name="fr_trust_open">开源——手机端和电脑端的代码都摆在那里，你可以自己读。</string>
+    <string name="fr_trust_github">去 GitHub 看代码</string>
+    <string name="fr_trust_e2e">端到端加密，只发往你自己配对的那台电脑。中继只负责转发密文，读不到内容。</string>
+    <string name="fr_trust_policy">发送了什么、去往哪里、由谁处理。</string>
     <string name="ob_step_install">安装</string>
     <string name="ob_step_run">开机自启</string>
     <string name="ob_step_bucket">添加 bucket</string>
@@ -462,7 +469,6 @@
     <string name="ob_note_mac_run">一条命令：安装（已签名公证）并注册后台服务 —— 开机自启、自动重连。</string>
     <string name="ob_note_win">一条命令：安装、注册后台服务并直接进入配对。需已安装 Claude Code CLI。</string>
     <string name="ob_note_linux">注册 systemd --user 服务；重跑即升级。</string>
-    <string name="ob_secure">配对码不会离开你的设备——中继只看得到密文。</string>
     <string name="ob_pair_now">去配对</string>
     <string name="ob_guide">完整安装指南</string>
     <string name="model_switch_hint">切换会重启会话——历史会保留。</string>

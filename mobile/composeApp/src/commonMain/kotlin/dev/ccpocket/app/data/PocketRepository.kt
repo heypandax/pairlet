@@ -1667,18 +1667,24 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Pair from a scanned/pasted `ccpocket://pair?...` link, then connect end-to-end.
      *  [fromScan] only flavors telemetry (source=qr-link vs link) — see [handleIncomingLink]. */
     fun pair(link: String, fromScan: Boolean = false) {
+        // ONE derivation for both outcomes: a reject and a success from the same tap must report the same
+        // origin, or the parse failures would pile up under a source the successes never use (issue #342).
+        val source = if (fromScan) "qr-link" else "link"
         val info = Pairing.parse(link.trim())
         if (info == null) {
             status.value = StatusMsg(Res.string.status_invalid_link)
             // a reject BEFORE any network is still a pairing failure — untracked, it looked like "never tried"
             setPairFailure(PairFailure.PARSE)
-            Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to PairFailure.PARSE.wireReason(null)))
+            Telemetry.track(
+                TelEvent.PairFailed,
+                mapOf(TelKey.Reason to PairFailure.PARSE.wireReason(null), TelKey.Source to source),
+            )
             return
         }
         setPairFailure(null)
         pairVerifying.value = true
         status.value = StatusMsg(Res.string.status_pairing)
-        scope.launch { doPair(if (fromScan) "qr-link" else "link") { info } }
+        scope.launch { doPair(source) { info } }
     }
 
     /** A scanned/opened `ccpocket://…` URL. Kept as the historical name for the pairing call sites, but it
@@ -1745,9 +1751,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     private suspend fun doPair(source: String, getInfo: suspend (HttpClient) -> dev.ccpocket.app.pairing.PairingInfo) {
-        // before any network: this is the "the user actually tried" mark the funnel was missing (issue #278)
-        Telemetry.track(TelEvent.PairStarted, mapOf(TelKey.Source to source))
+        // before any network: this is the "the user actually tried" mark the funnel was missing (issue #278).
+        // Incremented FIRST so every event of this attempt — started, paired, failed — carries the same
+        // ordinal: without it a user's fourth try and a user's first try are indistinguishable (issue #342).
         val attempt = ++pairAttempt
+        Telemetry.track(TelEvent.PairStarted, mapOf(TelKey.Source to source, TelKey.Attempt to attempt))
         setPairFailure(null)          // this attempt's outcome is not known yet; the last one's card must go
         pairVerifying.value = true
         // constructed INSIDE the try: an engine that fails to initialise would otherwise skip the finally
@@ -1765,7 +1773,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             replace(pairedList, Pairing.loadAll())
             addingDevice.value = false
             firstTicket = info.ticket
-            Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to source))
+            Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to source, TelKey.Attempt to attempt))
             startRelay()
         } catch (t: Throwable) {
             status.value = StatusMsg(Res.string.status_pair_failed, t.message ?: t::class.simpleName ?: "error")
@@ -1773,7 +1781,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // unconditional: a superseded attempt really did fail, and suppressing it here would change what
             // the funnel counts (a pre-existing race, out of this change's scope).
             if (attempt == pairAttempt) setPairFailure(classifyPairFailure(t))
-            Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t)))
+            Telemetry.track(
+                TelEvent.PairFailed,
+                mapOf(TelKey.Reason to pairFailReason(t), TelKey.Source to source, TelKey.Attempt to attempt),
+            )
             Telemetry.recordError(t.message ?: "pair failed", "pairing")
         } finally {
             if (attempt == pairAttempt) pairVerifying.value = false
@@ -2541,7 +2552,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 onDone(true)
             } catch (t: Throwable) {
                 status.value = StatusMsg(Res.string.status_pair_failed, t.message ?: t::class.simpleName ?: "error")
-                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t)))
+                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t), TelKey.Source to "code-add"))
                 onDone(false)
             } finally {
                 client.close()
@@ -2758,6 +2769,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Enter the demo: seed the project list + slash commands, then render like a connected session. */
     fun enterDemo() {
+        // Fired on the TRANSITION only: the demo's own routes re-enter it, and a repeat would count one
+        // walkthrough as several (issue #342). Everything the demo does afterwards is already split off real
+        // activation by [demoTag] — Connected/SessionOpened/PromptSent all run through the shared call sites.
+        if (!demoMode.value) Telemetry.track(TelEvent.DemoEntered)
         demoMode.value = true
         // Demo has no handshake, so explicitly emulate a current daemon rather than inheriting the
         // disconnected socket's deny-by-default capability state.
@@ -4961,7 +4976,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 onCollaboratorLinkAdded?.invoke(link, invite.ticket)
             } catch (t: Throwable) {
                 collabRedeemError.value = t.message ?: t::class.simpleName ?: "error"
-                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t)))
+                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t), TelKey.Source to "collaborator"))
                 Telemetry.recordError(t.message ?: "collaborator redeem failed", "pairing")
             } finally {
                 collabRedeeming.value = false
@@ -5041,7 +5056,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             IncomingLink.Unknown -> {
                 status.value = StatusMsg(Res.string.status_invalid_link)
                 setPairFailure(PairFailure.PARSE)
-                Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to PairFailure.PARSE.wireReason(null)))
+                Telemetry.track(
+                    TelEvent.PairFailed,
+                    mapOf(
+                        TelKey.Reason to PairFailure.PARSE.wireReason(null),
+                        // the URI never parsed, so the entry point is the only origin that exists here
+                        TelKey.Source to if (fromScan) "qr-link" else "link",
+                    ),
+                )
             }
         }
         return link
