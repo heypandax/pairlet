@@ -49,6 +49,7 @@ import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.quota_used
 import dev.ccpocket.app.resources.quota_title
+import dev.ccpocket.app.resources.quota_title_generic
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.QuotaFreshnessRow
 import dev.ccpocket.app.ui.QuotaSection
@@ -234,7 +235,7 @@ private fun QuotaPopover(repo: PocketRepository, sec: QuotaSection, titled: Bool
             },
     ) {
         Text(
-            if (titled) "${stringResource(Res.string.quota_title)} · ${sectionHeading(sec)}" else stringResource(Res.string.quota_title),
+            if (titled) "${stringResource(Res.string.quota_title_generic)} · ${sectionHeading(sec)}" else stringResource(Res.string.quota_title),
             color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.height(10.dp))

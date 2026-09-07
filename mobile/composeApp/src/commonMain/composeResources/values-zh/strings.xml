@@ -528,6 +528,7 @@
     <string name="usage_scope_no_filter">这是本机所有 agent 的合计——当前 daemon 还不支持按 agent 拆开看。</string>
     <string name="usage_cache_ratio">%1$s / %2$s tokens</string>
     <!-- ── Claude 订阅额度（CLI /usage 面板背后的 5 小时 / 7 天窗口）── -->
+    <string name="quota_title_generic">订阅额度</string>
     <string name="quota_title">Claude 订阅额度</string>
     <string name="quota_5h">5 小时</string>
     <string name="quota_7d">7 天</string>
@@ -593,6 +594,9 @@
     <string name="files_stale_banner">更新电脑上的 daemon 后可查看逐行改动。</string>
     <string name="diff_tab">改动</string>
     <string name="file_tab">文件</string>
+    <string name="html_preview">预览</string>
+    <string name="html_source">源码</string>
+    <string name="html_preview_failed">网页预览暂不可用，已显示源码。</string>
     <string name="diff_truncated">改动已截断——仅显示前 %1$d KB</string>
     <string name="diff_stale_title">逐行改动需要更新 daemon</string>
     <string name="diff_stale_hint">在电脑上运行更新命令</string>
@@ -621,6 +625,9 @@
     <string name="img_excluded">· 已排除 %1$d 张</string>
     <string name="img_too_large">过大 · %1$dKB</string>
     <string name="viewer_hint">下滑关闭 · 点按缩放</string>
+    <string name="image_zoom_in">放大</string>
+    <string name="image_zoom_out">缩小</string>
+    <string name="image_zoom_fit">适应窗口</string>
     <string name="img_replay_truncated">· 部分图片过大或过多，未同步</string>
 
     <!-- ── 会话信息 + 快捷操作 ───────────────────────────────────── -->

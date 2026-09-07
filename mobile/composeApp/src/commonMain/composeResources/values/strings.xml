@@ -528,6 +528,7 @@
     <string name="usage_scope_no_filter">Every agent on this computer, added together — this daemon can't break the number down per agent yet.</string>
     <string name="usage_cache_ratio">%1$s / %2$s tokens</string>
     <!-- ── Claude subscription allowance (the 5h/7d windows behind the CLI's own /usage panel) ── -->
+    <string name="quota_title_generic">Plan allowance</string>
     <string name="quota_title">Claude plan allowance</string>
     <string name="quota_5h">5-hour</string>
     <string name="quota_7d">7-day</string>
@@ -593,6 +594,9 @@
     <string name="files_stale_banner">Update the daemon on your computer to see line-level diffs.</string>
     <string name="diff_tab">Diff</string>
     <string name="file_tab">File</string>
+    <string name="html_preview">Preview</string>
+    <string name="html_source">Source</string>
+    <string name="html_preview_failed">Web preview is unavailable. Showing the source instead.</string>
     <string name="diff_truncated">Diff truncated — showing the first %1$d KB</string>
     <string name="diff_stale_title">Line-level diffs need a newer daemon</string>
     <string name="diff_stale_hint">Run the update command on your computer</string>
@@ -621,6 +625,9 @@
     <string name="img_excluded">· %1$d excluded</string>
     <string name="img_too_large">too large · %1$dKB</string>
     <string name="viewer_hint">Swipe down to close · tap to zoom</string>
+    <string name="image_zoom_in">Zoom in</string>
+    <string name="image_zoom_out">Zoom out</string>
+    <string name="image_zoom_fit">Fit</string>
     <string name="img_replay_truncated">· some images weren\'t synced (too large or too many)</string>
 
     <!-- ── session info + quick actions ──────────────────────────── -->

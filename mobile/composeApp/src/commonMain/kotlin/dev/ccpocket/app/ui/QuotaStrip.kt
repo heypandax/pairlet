@@ -41,6 +41,7 @@ import dev.ccpocket.protocol.ClaudeQuota
 import dev.ccpocket.protocol.ClaudeQuotaLimit
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.quota_title
+import dev.ccpocket.app.resources.quota_title_generic
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.tightCenter
 import kotlinx.coroutines.delay
@@ -82,18 +83,20 @@ import org.jetbrains.compose.resources.stringResource
  * true bottom band, the caller marks the inset consumed and the strip falls back to the plain box.
  */
 @Composable
-fun QuotaStrip(repo: PocketRepository, onOpen: () -> Unit) {
+fun QuotaStrip(repo: PocketRepository, onOpen: (AgentKind) -> Unit) {
     val sections = quotaSections(repo)
     if (sections.isEmpty()) return
     val now by rememberQuotaClock()
 
-    Column(Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
+    Column(Modifier.fillMaxWidth()) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-        // one row per backend that has numbers (issue #348), Claude first. A single row is the pre-#348
-        // strip down to the dp; the stacked form only appears on a machine that really does have two
-        // subscriptions to report, where one merged row would have to drop a brand label or a window.
-        if (sections.size == 1) QuotaStripRow(sections[0], now, single = true, last = true)
-        else QuotaStripMergedRow(sections)
+        // A lone backend is the pre-#348 strip down to the dp, one tap target for the whole row. With two
+        // backends on one row EACH group is its own tap target (user, 09-07): tapping the Codex figures
+        // must open Codex's sheet, not a sheet headed "Claude" with Codex somewhere below.
+        if (sections.size == 1) {
+            val only = sections[0]
+            Box(Modifier.fillMaxWidth().clickable { onOpen(only.agent) }) { QuotaStripRow(only, now, single = true, last = true) }
+        } else QuotaStripMergedRow(sections, onOpen)
     }
 }
 
@@ -104,7 +107,7 @@ fun QuotaStrip(repo: PocketRepository, onOpen: () -> Unit) {
  * backends sit at the right edge so Claude's second figure is never clipped behind them.
  */
 @Composable
-private fun QuotaStripMergedRow(sections: List<QuotaSection>) {
+private fun QuotaStripMergedRow(sections: List<QuotaSection>, onOpen: (AgentKind) -> Unit) {
     Row(
         Modifier.fillMaxWidth()
             .heightIn(min = 48.dp)
@@ -118,7 +121,7 @@ private fun QuotaStripMergedRow(sections: List<QuotaSection>) {
             // first at their natural width and sit at the right edge — so the right-hand figures are never
             // the ones that get clipped when the row runs out of room
             Row(
-                if (i == 0) Modifier.weight(1f) else Modifier,
+                (if (i == 0) Modifier.weight(1f) else Modifier).clickable { onOpen(sec.agent) },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -241,8 +244,13 @@ private fun QuotaStripSegment(limit: ClaudeQuotaLimit, bar: Boolean = true) {
  *  SAME components as the desktop popover ([QuotaLimitRow] / [QuotaFreshnessRow]) — one implementation of
  *  "what a limit row looks like", wearing the phone's default faces. */
 @Composable
-fun QuotaSheet(repo: PocketRepository, onDismiss: () -> Unit) {
-    val sections = quotaSections(repo)
+fun QuotaSheet(repo: PocketRepository, agent: AgentKind? = null, onDismiss: () -> Unit) {
+    // [agent] scopes the sheet to ONE backend (the group the user tapped); null = everything, the
+    // pre-#348 entry point. A scoped sheet that finds no section falls back to all of them.
+    val sections = quotaSections(repo).let { all -> agent?.let { a -> all.filter { it.agent == a }.ifEmpty { all } } ?: all }
+    // "Claude plan allowance" is the pre-#348 title and stays for a lone Claude sheet; any other
+    // composition is titled neutrally and named per section, so a Codex sheet never reads as Claude's.
+    val loneClaude = sections.size == 1 && sections[0].agent == AgentKind.CLAUDE
     val now by rememberQuotaClock()
     // one footer for the whole sheet, aged from the OLDEST reading on it: with two backends fetched
     // independently the honest headline age is the stalest number the user is looking at, not the freshest
@@ -250,14 +258,18 @@ fun QuotaSheet(repo: PocketRepository, onDismiss: () -> Unit) {
         ?: repo.claudeQuota.value?.fetchedAt ?: 0
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(top = 4.dp, bottom = 16.dp)) {
-            Text(stringResource(Res.string.quota_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            val title = when {
+                loneClaude -> stringResource(Res.string.quota_title)
+                sections.size == 1 -> "${stringResource(Res.string.quota_title_generic)} · ${sectionHeading(sections[0])}"
+                else -> stringResource(Res.string.quota_title_generic)
+            }
+            Text(title, color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(14.dp))
             for (sec in sections) {
-                // The brand/plan header is suppressed for exactly one case: a LONE CLAUDE section, which
-                // is the whole pre-#348 world and must stay unchanged down to the pixel. Anything else —
-                // two accounts, or a Codex-only machine — gets named, because an unattributed percentage
-                // is the number a multi-backend user cannot act on.
-                if (sections.size > 1 || sec.agent != AgentKind.CLAUDE) {
+                // The brand/plan header is suppressed when the title already names the backend (a lone
+                // section: the pre-#348 Claude sheet, or a scoped Codex sheet). Two sections get named,
+                // because an unattributed percentage is the number a multi-backend user cannot act on.
+                if (sections.size > 1) {
                     Text(
                         sectionHeading(sec), color = Tok.muted, fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp, style = tightCenter(11.sp), maxLines = 1,
