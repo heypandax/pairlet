@@ -114,12 +114,20 @@ private fun QuotaStripMergedRow(sections: List<QuotaSection>) {
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         sections.forEachIndexed { i, sec ->
-            if (i > 0) Spacer(Modifier.weight(1f))
-            Text(
-                agentName(sec.agent), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
-                style = tightCenter(12.sp), maxLines = 1,
-            )
-            sec.segments.forEach { QuotaStripSegment(it, bar = false) }
+            // first group takes the remaining width (weighted = measured last), later groups are measured
+            // first at their natural width and sit at the right edge — so the right-hand figures are never
+            // the ones that get clipped when the row runs out of room
+            Row(
+                if (i == 0) Modifier.weight(1f) else Modifier,
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    agentName(sec.agent), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+                    style = tightCenter(12.sp), maxLines = 1,
+                )
+                sec.segments.forEach { QuotaStripSegment(it, bar = false) }
+            }
         }
     }
 }

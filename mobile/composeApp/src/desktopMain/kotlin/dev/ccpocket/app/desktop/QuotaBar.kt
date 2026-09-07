@@ -105,9 +105,10 @@ fun QuotaBar(model: DesktopModel) {
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         sections.forEachIndexed { i, sec ->
-            // Claude at its natural width on the left, every other backend pushed to the right edge —
-            // splitting the width evenly clipped Claude's 7d figure behind the Codex group (user, 09-07)
-            if (i > 0) Spacer(Modifier.weight(1f))
+            // The FIRST group (Claude) takes whatever is left; every later group is measured first at its
+            // natural width and sits at the right edge. Weighted children are laid out last, so the Codex
+            // figures can never be clipped by the row running out of room — an even split clipped Claude's
+            // 7d, a trailing spacer clipped Codex's "%" (user, 09-07).
             QuotaAgentBar(
                 repo = repo,
                 sec = sec,
@@ -117,6 +118,7 @@ fun QuotaBar(model: DesktopModel) {
                 popoverOpen = model.showQuotaPopover && popoverAgent == sec.agent,
                 onOpen = { popoverAgent = sec.agent; model.showQuotaPopover = true },
                 onDismiss = { model.showQuotaPopover = false },
+                modifier = if (i == 0 && sections.size > 1) Modifier.weight(1f) else Modifier,
             )
         }
     }
@@ -144,7 +146,7 @@ private fun QuotaAgentBar(
                 .hoverable(src).clickable(onClick = onOpen)
                 .padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             // brand marker: WHOSE subscription this group reports (a bare percentage is the one number a
             // multi-backend user cannot act on)
