@@ -69,6 +69,23 @@ class QuotaAgentRoutingTest {
     }
 
     @Test
+    fun a_backend_advertised_AFTER_the_connect_refresh_is_fetched_as_soon_as_daemonInfo_lands() {
+        // the LAN link is ready before DaemonInfo arrives: the CONNECTED refresh asked for Claude alone
+        val (repo, sent) = repo()
+        repo.fetchAllQuotas()
+        assertEquals(listOf(AgentKind.CLAUDE), sent.filterIsInstance<ClaudeQuotaGet>().map { it.agent })
+        advertise(repo, "claude", "codex")
+        assertEquals(
+            listOf(AgentKind.CLAUDE, AgentKind.CODEX),
+            sent.filterIsInstance<ClaudeQuotaGet>().map { it.agent },
+            "the newly advertised backend must not wait for the next periodic tick",
+        )
+        // a repeated DaemonInfo (reconnect) with the same list does not fan out again while a reply is outstanding
+        advertise(repo, "claude", "codex")
+        assertEquals(2, sent.filterIsInstance<ClaudeQuotaGet>().size)
+    }
+
+    @Test
     fun claude_is_always_askable_even_when_the_daemon_advertised_nothing() {
         val (repo, sent) = repo()
         advertise(repo)

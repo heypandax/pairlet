@@ -3270,7 +3270,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 daemonSupportedAgents.value = f.supportedAgents.toSet()
                 daemonAgentsKnown = true // #276: the daemon has now told us — the guard may deny an unsupported agent
                 daemonUsageAgentFilter.value = f.supportsUsageAgentFilter // issue #258: false = daemon ignores the filter
+                val previouslyAdvertised = daemonQuotaAgents.value
                 daemonQuotaAgents.value = f.quotaAgents // issue #348: empty (older daemon) = Claude only
+                // The CONNECTED refresh can fire BEFORE this frame lands (the LAN link is ready as soon as
+                // the socket is, DaemonInfo follows), in which case it asked for Claude alone and the next
+                // periodic tick is minutes away. A backend this frame newly advertises is fetched right here.
+                // Only when a refresh already ran on this link (a Claude reading or request exists) — a
+                // frame that precedes the first refresh changes nothing, the refresh itself will fan out.
+                val refreshRanAlready = quotaByAgent[AgentKind.CLAUDE] != null || (quotaOutstanding[AgentKind.CLAUDE] ?: 0) > 0
+                if (refreshRanAlready) for (a in quotaAgentsToFetch(f.quotaAgents)) {
+                    val wire = a.name.lowercase()
+                    if (a != AgentKind.CLAUDE && wire !in previouslyAdvertised && quotaByAgent[a] == null && (quotaOutstanding[a] ?: 0) == 0) fetchQuota(a)
+                }
                 daemonOwnsPromptRecovery = f.supportsPromptRecovery
                 if (daemonOwnsPromptRecovery) clearTurnWatchdogState()
                 // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
