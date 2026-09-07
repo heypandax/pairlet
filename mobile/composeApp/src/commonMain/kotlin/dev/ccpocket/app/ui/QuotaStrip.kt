@@ -170,9 +170,13 @@ val QUOTA_AGENT_ORDER: List<AgentKind> = listOf(AgentKind.CLAUDE) + AgentKind.en
  */
 fun quotaSections(repo: PocketRepository): List<QuotaSection> = QUOTA_AGENT_ORDER.mapNotNull { agent ->
     val q = repo.quotaByAgent[agent] ?: return@mapNotNull null
-    val rows = quotaRows(q)
+    val all = quotaRows(q)
+    // Owner decision (09-07): a non-Claude backend shows ONE number — its account-wide weekly window —
+    // and nothing else. Codex reports per-model scoped caps too (gpt-reserve, a Spark 5h window…), and
+    // they read as noise next to the one figure the user plans against. Claude keeps its 5h + 7d pair.
+    val rows = if (agent == AgentKind.CLAUDE) all else all.filter { isWeeklyWindow(it) && it.modelDisplayName == null }.take(1)
     if (rows.isEmpty()) return@mapNotNull null
-    val segments = listOfNotNull(sessionWindow(rows), worstWeekly(rows))
+    val segments = if (agent == AgentKind.CLAUDE) listOfNotNull(sessionWindow(rows), worstWeekly(rows)) else rows
     if (segments.isEmpty()) null else QuotaSection(agent, q, rows, segments)
 }
 

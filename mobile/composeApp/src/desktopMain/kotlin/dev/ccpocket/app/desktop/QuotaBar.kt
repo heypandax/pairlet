@@ -97,7 +97,13 @@ fun QuotaBar(model: DesktopModel) {
     // bookkeeping (anyOverlayOpen / Esc routing) already knows about — this only narrows it to a row.
     var popoverAgent by remember { mutableStateOf<AgentKind?>(null) }
 
-    Column(Modifier.fillMaxWidth()) {
+    // ONE row for every backend (owner decision, 09-07): `Claude 5h 78% 7d 40%   Codex 7d 54%` — plain
+    // numbers, no bars. Each backend keeps its own hover tooltip and click-through popover.
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp).height(26.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         for (sec in sections) {
             QuotaAgentBar(
                 repo = repo,
@@ -108,6 +114,7 @@ fun QuotaBar(model: DesktopModel) {
                 popoverOpen = model.showQuotaPopover && popoverAgent == sec.agent,
                 onOpen = { popoverAgent = sec.agent; model.showQuotaPopover = true },
                 onDismiss = { model.showQuotaPopover = false },
+                modifier = Modifier.weight(1f, fill = false),
             )
         }
     }
@@ -122,26 +129,27 @@ private fun QuotaAgentBar(
     popoverOpen: Boolean,
     onOpen: () -> Unit,
     onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
 
     // No hairline of its own: the host ([FooterActions]) already draws the footer's single divider above
     // this strip, and a second one 26dp below it would read as a stack of docked rows.
-    Box(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp)) {
+    Box(modifier) {
         Row(
-            Modifier.fillMaxWidth().height(26.dp).clip(RoundedCornerShape(7.dp)).hoverFill(RoundedCornerShape(7.dp))
+            Modifier.height(26.dp).clip(RoundedCornerShape(7.dp)).hoverFill(RoundedCornerShape(7.dp))
                 .hoverable(src).clickable(onClick = onOpen)
                 .padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // brand marker: WHOSE subscription this row reports (a bare percentage is the one number a
+            // brand marker: WHOSE subscription this group reports (a bare percentage is the one number a
             // multi-backend user cannot act on)
             Text(agentName(sec.agent), color = Tok.muted, fontFamily = Dk.mono, fontSize = 9.5.sp, maxLines = 1, style = tightCenter(9.5.sp))
             // short labels, so the weekly segment can NAME a scoped cap ("7d·Fable") — an unlabelled
             // worst-of-weekly percent read as a wrong number next to the official panel's all-models row
-            sec.segments.forEach { QuotaSegment(quotaShortLabel(it), it, Modifier.weight(1f)) }
+            sec.segments.forEach { QuotaSegment(quotaShortLabel(it), it) }
         }
 
         // Hover summary. The repo has no TooltipArea idiom anywhere, so this follows the one floating-
@@ -165,18 +173,13 @@ private fun QuotaAgentBar(
     }
 }
 
-/** One `label · bar · NN%` segment. [limit] drives both the fill fraction and the segment's warn state. */
+/** One `label NN%` segment — numbers only, no bar (owner decision, 09-07). [limit] drives the warn state;
+ *  the percent is USED, mirroring the official claude.ai usage panel (owner decision, 08-24). */
 @Composable
 private fun QuotaSegment(label: String, limit: ClaudeQuotaLimit, modifier: Modifier = Modifier) {
     val warn = isWarn(limit)
-    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, color = if (warn) Tok.warn else Tok.muted, fontFamily = Dk.mono, fontSize = 9.5.sp, maxLines = 1, style = tightCenter(9.5.sp))
-        Box(Modifier.weight(1f).height(3.dp).clip(RoundedCornerShape(999.dp)).background(Tok.hair)) {
-            // fills by USED, mirroring the official claude.ai usage panel (owner decision, 08-24)
-            if (limit.percent > 0) {
-                Box(Modifier.fillMaxWidth(limit.percent.coerceIn(0, 100) / 100f).fillMaxHeight().background(if (warn) Tok.warn else Tok.tx2))
-            }
-        }
         Text(
             "${limit.percent.coerceIn(0, 100)}%",
             color = if (warn) Tok.warn else Tok.tx2, fontFamily = Dk.mono, fontSize = 9.5.sp, maxLines = 1,
