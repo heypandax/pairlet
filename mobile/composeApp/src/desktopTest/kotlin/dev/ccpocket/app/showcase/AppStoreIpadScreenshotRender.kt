@@ -188,14 +188,15 @@ class AppStoreIpadScreenshotRender {
      * on purpose: it is the one frame that states what the layout IS before showing it working.
      */
     private fun frames(): List<Frame> = listOf(
-        // 01 · Projects in the list column, the chat column waiting — the two-pane shape, stated plainly.
+        // 01 · The headline frame: sessions on the left, a turn streaming with tool calls on the right —
+        // leads the store page because it shows the layout WORKING, not just its shape
+        Frame("sessions") { s -> attached(); sessionList(blocked = false); streamingTurn(s) },
+        // 02 · Projects in the list column, the chat column waiting — the two-pane shape, stated plainly.
         // The FLAT view is picked deliberately: the demo tree collapses these four projects into two
         // parent folders (`code`, `Library`), which is correct and says nothing about the product.
         Frame("projects") {
             attached(); treeView.value = false; receiveForTest(ShowcaseSeeds.directories())
         },
-        // 02 · The headline frame: sessions on the left, a turn streaming with tool calls on the right
-        Frame("sessions") { s -> attached(); sessionList(blocked = false); streamingTurn(s) },
         // 03 · The same two panes with a real permission request open — Chat pins it, the list marks the row
         Frame("approve") { s ->
             attached(); sessionList(); streamingTurn(s)

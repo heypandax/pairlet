@@ -49,7 +49,9 @@ import org.jetbrains.compose.resources.stringResource
 val WIDE_LAYOUT_MIN_WIDTH = 700.dp
 
 /** Left pane (the list column). Fixed like the desktop sidebar's default rather than proportional. */
-private val LEFT_PANE_WIDTH = 340.dp
+// 380dp: the sessions dock ("+ New session" + the mode chip) and the quota strip both clipped at 340dp
+// in English on the iPad store frames; 380 fits them and still leaves ≥ 640dp of chat at 1024pt.
+private val LEFT_PANE_WIDTH = 380.dp
 
 /** …clamped so the chat column never drops below a usable measure on a 700–740dp window. */
 private val RIGHT_PANE_MIN_WIDTH = 360.dp

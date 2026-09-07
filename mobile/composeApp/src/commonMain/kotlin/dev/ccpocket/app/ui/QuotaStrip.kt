@@ -3,6 +3,7 @@ package dev.ccpocket.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -143,6 +144,10 @@ private fun QuotaStripRow(sec: QuotaSection, now: Long, single: Boolean, last: B
     // centring the text ABOVE an untouched 34dp of black — that stack was the "wasted bottom" complaint.
     // Inset-less devices keep the handoff's 48dp box unchanged (min binds). Rows ABOVE the last one take
     // no inset: only the row that actually touches the physical edge may reserve it.
+    // the reset caption is the first thing to go when the row is narrow (a 380dp iPad list column clipped
+    // it to "r…"): the sheet behind the tap still carries every reset moment
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val roomForCaption = maxWidth >= 400.dp
     Row(
         Modifier.fillMaxWidth()
             .heightIn(min = if (single) 48.dp else if (last) 40.dp else 30.dp)
@@ -167,12 +172,13 @@ private fun QuotaStripRow(sec: QuotaSection, now: Long, single: Boolean, last: B
         sec.segments.forEach { QuotaStripSegment(it) }
         Spacer(Modifier.weight(1f))
         // the reset the user actually has to plan around is the one attached to the tightest window
-        stripResetText(tightest?.resetsAt, now)?.let {
+        if (roomForCaption) stripResetText(tightest?.resetsAt, now)?.let {
             Text(
                 it, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
                 style = tightCenter(12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
+    }
     }
 }
 
