@@ -13,6 +13,12 @@ METADATA = ROOT / "fastlane" / "metadata"
 SCREENSHOTS = ROOT / "fastlane" / "screenshots"
 PREVIEWS = ROOT / "fastlane" / "previews"
 LOCALES = ("en-US", "zh-Hans")
+# The iPad set lives one level down so the two device sets stay tellable apart. The name is ours to
+# choose (deliver never descends into a language folder); "ipadPro129" is the string fastlane itself
+# uses to disambiguate a 2048x2732 file between the 2nd- and 3rd-gen 12.9-inch slots
+# (Deliver::AppScreenshot.resolve_ipadpro_conflict_if_needed), so it stays readable to fastlane eyes.
+IPAD_DIR = "ipadPro129"
+IPAD_SIZE = (2048, 2732)
 LIMITS = {
     "description.txt": 4000,
     "keywords.txt": 100,
@@ -67,7 +73,9 @@ def main() -> None:
                 fail(f"{path} is {len(value)} characters; limit is {limit}")
             public_text.append(value)
 
-        shots = sorted((SCREENSHOTS / locale).glob("*.png"))
+        # 6.5-inch iPhone set — TOP-LEVEL pngs only. glob("*.png") does not recurse, which is exactly
+        # what keeps the iPad subfolder checked below out of this set; do not make it "**/*.png".
+        shots = sorted(path for path in (SCREENSHOTS / locale).glob("*.png") if path.is_file())
         if len(shots) != 6:
             fail(f"{locale} needs exactly 6 screenshots; found {len(shots)}")
         expected = [f"{index:02d}-" for index in range(1, 7)]
@@ -76,6 +84,30 @@ def main() -> None:
         for shot in shots:
             if png_dimensions(shot) != (1242, 2688):
                 fail(f"{shot} must be 1242x2688 for APP_IPHONE_65; got {png_dimensions(shot)}")
+
+        # 12.9-inch iPad set (issue #334). App Store Connect will not accept a submission for the
+        # universal binary without one, and it lives in a subfolder because `fastlane deliver` globs a
+        # language folder non-recursively — so deliver never sees these and cannot guess a display type
+        # from their pixel size (2048x2732 is ALSO the 2nd-gen 12.9 slot). sync-appstore-screenshots.rb
+        # uploads them to APP_IPAD_PRO_3GEN_129 by name instead.
+        ipad_dir = SCREENSHOTS / locale / IPAD_DIR
+        ipad_shots = sorted(path for path in ipad_dir.glob("*.png") if path.is_file())
+        if len(ipad_shots) != 6:
+            fail(f"{locale}/{IPAD_DIR} needs exactly 6 iPad screenshots; found {len(ipad_shots)}")
+        if any(shot.name[:3] != prefix for shot, prefix in zip(ipad_shots, expected)):
+            fail(f"{locale}/{IPAD_DIR} screenshots must use stable 01- through 06- ordering")
+        for shot in ipad_shots:
+            if png_dimensions(shot) != IPAD_SIZE:
+                fail(
+                    f"{shot} must be {IPAD_SIZE[0]}x{IPAD_SIZE[1]} for APP_IPAD_PRO_3GEN_129; "
+                    f"got {png_dimensions(shot)}"
+                )
+
+        # anything else nested under the locale is invisible to BOTH deliver and the sync script, so
+        # it would ship as a silently missing device set rather than as an error
+        strays = sorted(p.name for p in (SCREENSHOTS / locale).iterdir() if p.is_dir() and p.name != IPAD_DIR)
+        if strays:
+            fail(f"{locale} has screenshot subfolder(s) nothing uploads: {', '.join(strays)}")
 
         preview = PREVIEWS / locale / "app-preview.mov"
         if not preview.is_file() or preview.stat().st_size < 1_000_000:
@@ -112,7 +144,10 @@ def main() -> None:
         if phrase.casefold() in joined.casefold():
             fail(f"public metadata must not promote or expose draft text: {phrase}")
 
-    print("App Store content OK: 2 locales, 8 metadata fields, 12 screenshots, 2 previews")
+    print(
+        "App Store content OK: 2 locales, 8 metadata fields, "
+        "12 iPhone 6.5\" + 12 iPad 12.9\" screenshots, 2 previews"
+    )
 
 
 if __name__ == "__main__":

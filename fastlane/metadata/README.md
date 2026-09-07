@@ -2,7 +2,7 @@
 
 `fastlane/metadata/<locale>/` 是描述、关键词、宣传文本、版本说明的来源，`fastlane/screenshots/<locale>/` 是商店截图来源，`fastlane/previews/<locale>/app-preview.mov` 是 App Preview 来源。当前启用 `zh-Hans`、`en-US`。
 
-截图必须从真实 Compose UI 自动生成（脚本数据，不含真实用户数据），不要手工重画界面：
+截图必须从真实 Compose UI 自动生成（脚本数据，不含真实用户数据），不要手工重画界面。一次跑完 iPhone 与 iPad 两套：
 
 ```bash
 bash marketing/appstore/generate-assets.sh
@@ -16,9 +16,13 @@ bash marketing/appstore/generate-assets.sh --reuse
 
 - 语言目录须与 App Store Connect 里**已启用**的本地化一致（当前：`zh-Hans`、`en-US`）。若 deliver 报某语言不存在，删掉对应目录或先在 ASC 启用该语言。
 - 文本均为纯文本（不渲染 Markdown）。描述和版本说明上限 4000 字符，宣传文本 170，关键词 100。
-- 截图固定为 1242×2688（`APP_IPHONE_65`，与版本页当前展示槽位一致），每种语言 6 张；文件名 `01-` 到 `06-` 决定展示顺序。
+- iPhone 截图固定为 1242×2688（`APP_IPHONE_65`，与版本页当前展示槽位一致），放在 `fastlane/screenshots/<语言>/` 根下，每种语言 6 张；文件名 `01-` 到 `06-` 决定展示顺序。
+- **iPad 截图**（issue #334）固定为 2048×2732（`APP_IPAD_PRO_3GEN_129`，12.9 英寸 iPad Pro 竖屏），放在**子目录** `fastlane/screenshots/<语言>/ipadPro129/`，同样每种语言 6 张、`01-` 到 `06-` 排序。v1.9.7 起 iOS 包是通用二进制（`TARGETED_DEVICE_FAMILY = 1,2`），**没有 iPad 截图集就不能提交版本**。
+  - 为什么放子目录：`fastlane deliver` 扫语言目录时是**非递归**的（`Deliver::Loader::LanguageFolder#file_paths` 只 glob `<语言>/*.png`），只对 `appleTV` / `iMessage` 这两个特殊目录下钻。所以子目录里的文件 deliver 完全看不见——这正是我们要的：deliver 靠**像素尺寸**猜机型，而 2048×2732 同时是 12.9 英寸二代（`APP_IPAD_PRO_129`）和三代（`APP_IPAD_PRO_3GEN_129`）两个槽位的尺寸，deliver 只能靠文件名里是否含 `ipadPro129` / `IPAD_PRO_3GEN_129` 去消歧（`Deliver::AppScreenshot.resolve_ipadpro_conflict_if_needed`）。与其让它猜，不如由 `scripts/sync-appstore-screenshots.rb` 按显示类型显式上传。目录名沿用 fastlane 自己的 `ipadPro129` 写法，看代码的人一眼能对上。
+  - 顺序有依赖：工作流先跑 `deliver --overwrite_screenshots true`，它会把**该语言下所有**截图集（含 iPad）整组删掉，再由 `sync-appstore-screenshots.rb` 把两套都补回来。这两步的先后不能调换。
+  - iPad 帧不走 ffmpeg 缩放：渲染器直接按 1024×1366 pt @ `Density(2f)` 出图，落盘即 2048×2732，文字不会被重采样。
 - App Preview 用 `marketing/preview/make-preview.sh <lang> --compose` 从当前真实 Compose UI 帧自动生成；每种语言 1 个，上传新视频处理成功后才删除旧视频。模拟器交互录制仅作为可选验收路线。
-- `python3 scripts/check-appstore-content.py` 会校验字段长度、截图数量/尺寸，并阻止已知问题功能或内部草稿语句进入商店。
+- `python3 scripts/check-appstore-content.py` 会校验字段长度、两套截图各自的数量/尺寸（顶层 6×1242×2688、`ipadPro129/` 6×2048×2732），拦住任何**没人上传**的多余子目录，并阻止已知问题功能或内部草稿语句进入商店。
 - `review_information/notes.txt` 是给审核员的备注（Demo 模式入口说明——2.1a 教训），每个版本都会随提审带上，别删。
 - 提审问卷答案（IDFA / 第三方内容）在 `fastlane/Deliverfile` 的 `submission_information`。
 - 本地手动推送（需 .p8）：

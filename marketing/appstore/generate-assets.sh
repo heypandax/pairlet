@@ -5,9 +5,15 @@
 #   bash marketing/appstore/generate-assets.sh
 #   bash marketing/appstore/generate-assets.sh --reuse  # reuse current site/fleet frames
 #
-# Phone pixels are rendered by ShowcaseRender with scripted demo data. AppStoreScreenshotRender
-# only adds the marketing canvas and localized copy; no product UI is drawn by hand. The final
-# resize targets the 6.5-inch slot currently used by App Store Connect (1242x2688).
+# TWO device sets come out of this, both from the real Compose UI and never drawn by hand:
+#
+#   fastlane/screenshots/<locale>/*.png              6 x 1242x2688  APP_IPHONE_65
+#   fastlane/screenshots/<locale>/ipadPro129/*.png   6 x 2048x2732  APP_IPAD_PRO_3GEN_129  (issue #334)
+#
+# Phone pixels are rendered by ShowcaseRender with scripted demo data; AppStoreScreenshotRender only
+# adds the marketing canvas and localized copy, and the final resize targets the 6.5-inch slot.
+# The iPad set is plain full-bleed two-pane frames from AppStoreIpadScreenshotRender — no canvas and
+# no resize, because the tablet story IS the layout and the scene already renders at the exact size.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -65,6 +71,28 @@ for shot in "$OUT"/en-US/*.png "$OUT"/zh-Hans/*.png; do
   ffmpeg -nostdin -y -loglevel error -i "$shot" -vf "scale=1242:2688:flags=lanczos" "$tmp"
   mv "$tmp" "$shot"
 done
+
+# iPad set (issue #334). Runs AFTER the phone set on purpose: the compose step above wipes
+# "$OUT/<locale>" wholesale, subfolders included.
+#
+# No ffmpeg pass here — the renderer composes 1024x1366 pt at Density(2f), so the bitmap already IS
+# 2048x2732 and never gets resampled. Not covered by --reuse either: there is no expensive
+# intermediate to reuse (6 frames, ~40s), and the whole point of these frames is that they are the
+# CURRENT two-pane UI.
+render_ipad() {
+  local lang="$1" locale="$2" dir="$OUT/$2/ipadPro129"
+  step "render iPad Pro 12.9 screenshots · $lang"
+  rm -rf "$dir"
+  APPSTORE_IPAD_OUT="$OUT" SHOWCASE_LANG="$lang" CCP_CAPTURE_LOCALE="$lang" \
+    "$ROOT/gradlew" -p "$ROOT" :mobile:composeApp:desktopTest \
+      --tests dev.ccpocket.app.showcase.AppStoreIpadScreenshotRender --rerun --console=plain -q
+  local count
+  count="$(find "$dir" -name '*.png' 2>/dev/null | wc -l | tr -d ' ')"
+  [ "$count" = "6" ] || die "iPad renderer produced $count frames for $locale (want 6)"
+}
+
+render_ipad en en-US
+render_ipad zh zh-Hans
 
 step "validate"
 python3 "$ROOT/scripts/check-appstore-content.py"
