@@ -9,9 +9,17 @@ on:
         description: "Editable App Store version to create or update (for example 1.8.1)."
         required: true
         type: string
+      verify_only:
+        description: "Read back the existing store media without changing metadata or uploading anything."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+
+concurrency:
+  group: ios-store-metadata-${{ inputs.version }}
+  cancel-in-progress: false
 
 jobs:
   sync:
@@ -37,6 +45,8 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.2"
+      - name: Test screenshot verification
+        run: ruby scripts/test-appstore-screenshot-state.rb
       - run: gem install fastlane --no-document
 
       - name: Stage App Store Connect API key
@@ -56,8 +66,8 @@ jobs:
                 > "$RUNNER_TEMP/asc_api_key.json"
 
       - name: Stage store-page metadata only
-        # Do not copy release_notes.txt: the repo is still versioned 1.8.0, and 1.8.1 What's New
-        # must be written from the real binary diff when that release is ready to submit.
+        if: ${{ !inputs.verify_only }}
+        # Release notes are managed by ios-release, which attaches the matching binary.
         run: |
           for locale in en-US zh-Hans; do
             mkdir -p "$RUNNER_TEMP/store-metadata/$locale"
@@ -68,6 +78,7 @@ jobs:
           done
 
       - name: Create or update App Store version ${{ inputs.version }}
+        if: ${{ !inputs.verify_only }}
         env:
           VERSION: ${{ inputs.version }}
         run: |
@@ -76,13 +87,13 @@ jobs:
             --app_version "$VERSION" \
             --metadata_path "$RUNNER_TEMP/store-metadata" \
             --skip_binary_upload true \
-            --skip_screenshots false \
-            --overwrite_screenshots true \
+            --skip_screenshots true \
             --skip_metadata false \
             --submit_for_review false \
             --force true
 
-      - name: Converge the visible 6.5-inch screenshot sets
+      - name: Converge iPhone and iPad screenshot sets
+        if: ${{ !inputs.verify_only }}
         env:
           VERSION: ${{ inputs.version }}
           ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
@@ -90,13 +101,14 @@ jobs:
         run: ruby scripts/sync-appstore-screenshots.rb
 
       - name: Replace localized App Previews after processing
+        if: ${{ !inputs.verify_only }}
         env:
           VERSION: ${{ inputs.version }}
           ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
         run: ruby scripts/sync-appstore-previews.rb
 
-      - name: Verify media in the visible 6.5-inch slot
+      - name: Verify iPhone and iPad media
         env:
           VERSION: ${{ inputs.version }}
           ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
@@ -106,13 +118,15 @@ jobs:
       - name: Summary
         env:
           VERSION: ${{ inputs.version }}
+          VERIFY_ONLY: ${{ inputs.verify_only }}
         run: |
           {
-            echo "## App Store page synced"
+            echo "## App Store media verified"
             echo "- Version: $VERSION"
             echo "- Locales: en-US, zh-Hans"
-            echo "- Screenshots: 6 per locale (6.5-inch slot)"
+            echo "- Screenshots: 6 per locale per device family (iPhone 6.5-inch + iPad 12.9-inch)"
             echo "- App Previews: 1 per locale"
+            echo "- Read-only verification: $VERIFY_ONLY"
             echo "- Binary uploaded: no"
             echo "- Submitted for review: no"
           } >> "$GITHUB_STEP_SUMMARY"
