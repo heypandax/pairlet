@@ -11,12 +11,13 @@
 # the size of BOTH 12.9-inch slots, and deliver would otherwise have to guess between
 # APP_IPAD_PRO_129 and APP_IPAD_PRO_3GEN_129 from the filename alone.
 #
-# Ordering note: the workflow runs `deliver --overwrite_screenshots true` BEFORE this script, and
-# that deletes every screenshot set of every locale it uploads — the iPad set included. Restoring it
-# in the same run is this script's job, so these two steps must stay in that order.
+# This script owns both screenshot families. Metadata-only deliver must skip screenshots so a
+# retry preserves already-correct sets instead of deleting and uploading them again.
 
-require "digest"
 require "spaceship"
+require_relative "appstore_screenshot_state"
+
+$stdout.sync = true
 
 version_string = ENV.fetch("VERSION")
 token = Spaceship::ConnectAPI::Token.create(
@@ -31,17 +32,10 @@ platform = Spaceship::ConnectAPI::Platform.map("ios")
 version = app.get_edit_app_store_version(platform: platform) or abort("no editable iOS version")
 abort("editable version is #{version.version_string}, expected #{version_string}") unless version.version_string == version_string
 
-DISPLAY_TYPES = Spaceship::ConnectAPI::AppScreenshotSet::DisplayType
-SETS = [
-  { type: DISPLAY_TYPES::APP_IPHONE_65, label: "6.5-inch", glob: "*.png" },
-  { type: DISPLAY_TYPES::APP_IPAD_PRO_3GEN_129, label: "iPad 12.9-inch", glob: "ipadPro129/*.png" },
-].freeze
-
 # Converge ONE display type of ONE localization onto exactly `paths`, in that order.
 def converge_set(localization, display_type, label, paths)
   locale = localization.locale
-  abort("#{locale} #{label}: expected 6 local screenshots, got #{paths.size}") unless paths.size == 6
-  checksums = paths.map { |path| Digest::MD5.file(path).hexdigest }
+  checksums = AppStoreScreenshotState.checksums(paths)
 
   shot_set = localization.get_app_screenshot_sets.find { |item| item.screenshot_display_type == display_type }
   shot_set ||= localization.create_app_screenshot_set(attributes: { screenshotDisplayType: display_type })
@@ -67,9 +61,9 @@ def converge_set(localization, display_type, label, paths)
 
   desired_ids = keepers.map(&:id)
   shot_set.reorder_screenshots(app_screenshot_ids: desired_ids)
-  final = Spaceship::ConnectAPI::AppScreenshotSet.get(app_screenshot_set_id: shot_set.id).app_screenshots
-  final_checksums = final.map { |item| item.source_file_checksum&.downcase }
-  abort("#{locale} #{label}: screenshot sync did not converge") unless final.size == 6 && final.all?(&:complete?) && final_checksums == checksums
+  AppStoreScreenshotState.wait_for_set(label: "#{locale} #{label}", checksums: checksums, ids: desired_ids) do
+    Spaceship::ConnectAPI::AppScreenshotSet.get(app_screenshot_set_id: shot_set.id).app_screenshots
+  end
 
   puts("#{locale}: 6 ordered screenshots ready in the #{label} slot")
 end
@@ -78,7 +72,7 @@ localizations = version.get_app_store_version_localizations
 
 %w[en-US zh-Hans].each do |locale|
   localization = localizations.find { |item| item.locale == locale } or abort("missing ASC locale #{locale}")
-  SETS.each do |set|
+  AppStoreScreenshotState::SETS.each do |set|
     paths = Dir["fastlane/screenshots/#{locale}/#{set[:glob]}"].sort
     converge_set(localization, set[:type], set[:label], paths)
   end

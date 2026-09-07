@@ -1,6 +1,6 @@
 # fastlane deliver — App Store metadata source of truth.
-# The binary upload stays with xcodebuild in ios-release.yml. ios-store-metadata.yml overrides
-# skip_screenshots to create/update an editable store page without uploading or submitting a build.
+# The binary upload stays with xcodebuild in ios-release.yml. Store screenshots are managed by
+# scripts/sync-appstore-screenshots.rb for both iPhone and iPad.
 app_identifier "com.panda.ccpocket"
 skip_binary_upload true
 skip_screenshots true
