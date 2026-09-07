@@ -1,6 +1,9 @@
-What's new in 1.9.6
+What's new in 1.9.7
 
-• The desktop window can now show several conversations side by side, each with its own input, and the session sidebar can be collapsed to give them the room.
-• Clicking a session that is already open in a column now focuses it instead of leaving the main area stuck on "Opening…".
-• A column keeps working after the daemon restarts, and a question raised in a column can now be answered right there.
-• Buttons inside a column — stop, approvals, "always allow" — now act on that column's conversation instead of the focused one.
+• Screenshots and images returned by tools now show up on the phone: tap a thumbnail to view full screen with pinch-to-zoom, live and when reopening a session.
+• Codex accounts show their remaining weekly allowance next to Claude's, on the phone and in the desktop sidebar.
+• DeepSeek Harness sessions can pick an agent preset and a model when starting, and switch models mid-session.
+• A separate Thinking switch next to reasoning effort — turn it off for gateways whose models reject thinking content.
+• iPad and Android tablets get a two-pane layout: session list and conversation side by side.
+• macOS gets a full application menu bar; Settings and shortcuts are reachable even before connecting.
+• Fixed the back button occasionally bouncing back into the session list, and gateway model lists for plain-http gateways.
