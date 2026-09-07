@@ -155,7 +155,7 @@ class QuotaStripVisibilityTest {
     }
 
     @Test
-    fun bothBackendsStackOneBrandedRowEach() = runDesktopComposeUiTest(402, 300) {
+    fun bothBackendsShareOneRowWithCodexAtTheRightEdge() = runDesktopComposeUiTest(402, 300) {
         mainClock.autoAdvance = false
         setContent {
             CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
@@ -172,12 +172,17 @@ class QuotaStripVisibilityTest {
         waitForIdle()
         onAllNodes(hasText("Claude", substring = true)).onFirst().assertExists()
         onAllNodes(hasText("Codex", substring = true)).onFirst().assertExists()
-        // Claude leads, whichever reply landed first — a reading order that does not depend on the network.
-        // UNMERGED tree: the whole strip is one clickable, so the merged node would report the same bounds
-        // for every label on it and the ordering assertion would be vacuous.
+        // ONE row (user decision, 09-07): Claude leads at the left, Codex sits at the right edge, so
+        // Claude's second figure is never clipped behind the Codex group. UNMERGED tree: the whole strip
+        // is one clickable, so the merged node would report the same bounds for every label on it.
         val claude = onAllNodes(hasText("Claude"), useUnmergedTree = true).onFirst().getUnclippedBoundsInRoot()
         val codex = onAllNodes(hasText("Codex"), useUnmergedTree = true).onFirst().getUnclippedBoundsInRoot()
-        kotlin.test.assertTrue(claude.top.value < codex.top.value, "Claude must be the top row: claude=$claude codex=$codex")
+        kotlin.test.assertEquals(claude.top, codex.top, "both brands must sit on the same row: claude=$claude codex=$codex")
+        kotlin.test.assertTrue(claude.right.value < codex.left.value, "Claude must lead: claude=$claude codex=$codex")
+        // Claude's 7d figure must be fully visible, left of the Codex group
+        val sevenDay = onAllNodes(hasText("7d", substring = true), useUnmergedTree = true).onFirst().getUnclippedBoundsInRoot()
+        kotlin.test.assertTrue(sevenDay.right.value <= codex.left.value, "Claude's 7d must not be covered: 7d=$sevenDay codex=$codex")
+        kotlin.test.assertTrue(codex.left.value > 200f, "Codex must be pushed to the right edge: codex=$codex")
     }
 
     @Test

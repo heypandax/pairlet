@@ -92,8 +92,34 @@ fun QuotaStrip(repo: PocketRepository, onOpen: () -> Unit) {
         // one row per backend that has numbers (issue #348), Claude first. A single row is the pre-#348
         // strip down to the dp; the stacked form only appears on a machine that really does have two
         // subscriptions to report, where one merged row would have to drop a brand label or a window.
+        if (sections.size == 1) QuotaStripRow(sections[0], now, single = true, last = true)
+        else QuotaStripMergedRow(sections)
+    }
+}
+
+/**
+ * Two (or more) backends on ONE row (user decision, 09-07): `Claude 5h 87% 7d 40%        Codex 7d 54%`.
+ * Numbers only — the bars and the reset caption do not fit next to a second brand on a phone width, and
+ * the sheet behind the tap still has both. Claude keeps its natural width on the left; the other
+ * backends sit at the right edge so Claude's second figure is never clipped behind them.
+ */
+@Composable
+private fun QuotaStripMergedRow(sections: List<QuotaSection>) {
+    Row(
+        Modifier.fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets(bottom = 8.dp)))
+            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         sections.forEachIndexed { i, sec ->
-            QuotaStripRow(sec, now, single = sections.size == 1, last = i == sections.lastIndex)
+            if (i > 0) Spacer(Modifier.weight(1f))
+            Text(
+                agentName(sec.agent), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+                style = tightCenter(12.sp), maxLines = 1,
+            )
+            sec.segments.forEach { QuotaStripSegment(it, bar = false) }
         }
     }
 }
@@ -183,7 +209,7 @@ fun quotaSections(repo: PocketRepository): List<QuotaSection> = QUOTA_AGENT_ORDE
 /** One `5h ▬▬ 64%` segment. Only the fill and the percentage take the warning colour; the label stays
  *  quiet, exactly as the handoff draws it — two-thirds of the segment turning amber would shout. */
 @Composable
-private fun QuotaStripSegment(limit: ClaudeQuotaLimit) {
+private fun QuotaStripSegment(limit: ClaudeQuotaLimit, bar: Boolean = true) {
     val warn = isWarn(limit)
     // USED percent + used-fill, mirroring the official claude.ai panel so its numbers compare 1:1
     val used = limit.percent.coerceIn(0, 100)
@@ -192,7 +218,7 @@ private fun QuotaStripSegment(limit: ClaudeQuotaLimit) {
             quotaShortLabel(limit), color = Tok.tx2, fontFamily = FontFamily.Monospace,
             fontSize = 12.5.sp, fontWeight = FontWeight.Medium, style = tightCenter(12.5.sp), maxLines = 1,
         )
-        Box(Modifier.width(40.dp).height(2.dp).clip(RoundedCornerShape(1.dp)).background(Tok.hair)) {
+        if (bar) Box(Modifier.width(40.dp).height(2.dp).clip(RoundedCornerShape(1.dp)).background(Tok.hair)) {
             // fraction of the TRACK; an untouched window draws nothing rather than a stray dot at the left edge
             if (used > 0) Box(Modifier.fillMaxWidth(used / 100f).fillMaxHeight().background(if (warn) Tok.warn else Tok.tx2))
         }

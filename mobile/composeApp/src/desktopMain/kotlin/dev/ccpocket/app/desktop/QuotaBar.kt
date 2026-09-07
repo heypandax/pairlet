@@ -104,7 +104,10 @@ fun QuotaBar(model: DesktopModel) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        for (sec in sections) {
+        sections.forEachIndexed { i, sec ->
+            // Claude at its natural width on the left, every other backend pushed to the right edge —
+            // splitting the width evenly clipped Claude's 7d figure behind the Codex group (user, 09-07)
+            if (i > 0) Spacer(Modifier.weight(1f))
             QuotaAgentBar(
                 repo = repo,
                 sec = sec,
@@ -114,7 +117,6 @@ fun QuotaBar(model: DesktopModel) {
                 popoverOpen = model.showQuotaPopover && popoverAgent == sec.agent,
                 onOpen = { popoverAgent = sec.agent; model.showQuotaPopover = true },
                 onDismiss = { model.showQuotaPopover = false },
-                modifier = Modifier.weight(1f, fill = false),
             )
         }
     }
