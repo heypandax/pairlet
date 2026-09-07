@@ -127,6 +127,9 @@ data class AppMenuState(
     val hasSession: Boolean = false,
     /** Its title, shown as the Session menu's inert header so the menu names what it will act on. */
     val sessionTitle: String? = null,
+    /** The open chat's row is resolvable (listed or reconstructed) — pin/archive act on a ROW, so they
+     *  stay off for a chat whose row is nowhere to be found even though the chat itself is open. */
+    val sessionRowKnown: Boolean = true,
     val sessionPinned: Boolean = false,
     /** The open session's turn is streaming — the only thing "停止当前回合" can act on. */
     val streaming: Boolean = false,
@@ -149,14 +152,18 @@ data class AppMenuState(
 
 /** Fold the live shell into [AppMenuState]. The only place the menu touches the model. */
 internal fun appMenuState(model: DesktopModel, fullscreen: Boolean): AppMenuState {
-    val session = model.selectedSessionId?.let { model.liveSession(it) }
+    // "a session is open" = the chat pane is showing one — NOT "its row is in the currently listed
+    // directory": a chat entered from a RECENT group of another project has no row in `sessions`, and
+    // reading that as "no session" greyed the whole 会话 menu while a chat was plainly open (user, 09-07).
+    val selectedId = model.selectedSessionId
     val workdir = model.chatWorkdir
     val panel = model.terminalPanel
     return AppMenuState(
         connected = model.connected,
-        hasSession = session != null,
-        sessionTitle = session?.title?.takeIf { it.isNotBlank() },
-        sessionPinned = session != null && model.isPinned(session.sessionId),
+        hasSession = model.hasChat,
+        sessionTitle = model.chatTitle.takeIf { model.hasChat && it.isNotBlank() },
+        sessionPinned = selectedId != null && model.isPinned(selectedId),
+        sessionRowKnown = selectedId != null && model.liveSession(selectedId) != null,
         streaming = model.streaming,
         observing = model.observing,
         canArchiveSessions = model.canArchiveSessions,
@@ -299,14 +306,14 @@ fun appMenuSections(s: AppMenuState): List<AppMenuSection> {
             AppMenuItem(
                 AppMenuAction.SESSION_TOGGLE_PIN,
                 if (s.sessionPinned) Res.string.menu_unpin_session else Res.string.menu_pin_session,
-                enabled = onSession,
+                enabled = onSession && s.sessionRowKnown,
             ),
             AppMenuItem(AppMenuAction.SESSION_COPY_WORKDIR, Res.string.menu_copy_workdir, enabled = onSession && s.hasWorkdir),
             AppMenuSeparator,
             // "会话闲置 → 停止禁用；不能因为『连接成功』就启用全部命令"
             AppMenuItem(AppMenuAction.SESSION_STOP_TURN, Res.string.menu_stop_turn, enabled = canMutateSession && s.streaming),
             AppMenuSeparator,
-            AppMenuItem(AppMenuAction.SESSION_ARCHIVE, Res.string.menu_archive_session, enabled = canMutateSession && s.canArchiveSessions),
+            AppMenuItem(AppMenuAction.SESSION_ARCHIVE, Res.string.menu_archive_session, enabled = canMutateSession && s.canArchiveSessions && s.sessionRowKnown),
             AppMenuSeparator,
             AppMenuSubmenu(Res.string.menu_jump_to_pin, pinItems),
         ),
