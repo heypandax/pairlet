@@ -55,17 +55,13 @@ import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.app.data.ConnPhase
-import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.FileDiff
 import dev.ccpocket.protocol.HistoryMessage
-import dev.ccpocket.protocol.PendingApproval
-import dev.ccpocket.protocol.PendingApprovals
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionRiskUpdated
 import dev.ccpocket.protocol.SessionLive
-import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.TokenUsage
@@ -544,54 +540,12 @@ class ShowcaseRender {
     )
 
     private fun coreFrames(): List<CoreFrame> {
-        val dir = DemoData.LIVE_DIR
-        val convoId = "core"
-        fun live(executing: Boolean) = SessionLive(
-            convoId = convoId, workdir = dir, sessionId = "core-s1", mode = PermissionMode.DEFAULT,
-            executing = executing, model = "claude-sonnet-4-5", agent = AgentKind.CLAUDE,
-        )
-        // one transcript for every Chat frame: a user turn, an agent turn and a real tool result
-        val transcript = ConvoHistory(
-            convoId,
-            listOf(
-                HistoryMessage(ChatRole.USER, "add a unit test for the stream parser"),
-                HistoryMessage(ChatRole.ASSISTANT, "The parser now emits exactly one event when a frame is split across chunks."),
-                HistoryMessage(ChatRole.TOOL, "./gradlew :protocol:test", tool = "Bash", ok = true),
-                HistoryMessage(ChatRole.ASSISTANT, "I'm checking the remaining call sites that read `TokenStore`."),
-            ),
-        )
-        // the blocking ask: pinned as Approval required in Chat, and as the loudest row in Sessions
-        val ask = PermissionAsk(
-            convoId = convoId, askId = "core-ap", tool = "Bash", title = "Upload coverage to Codecov",
-            inputPreview = "./gradlew test && bash scripts/upload-coverage.sh",
-            grantOptions = listOf("once", "task"), timeoutSec = 600,
-        )
-        val minute = 60_000L
-        fun ago(ms: Long) = dev.ccpocket.app.epochMillis() - ms
-        val sessions = Sessions(
-            dir,
-            listOf(
-                SessionSummary(
-                    sessionId = "core-s1", title = "Refactor auth module",
-                    firstPrompt = "Review the concurrency around the refresh mutex before I open the PR.",
-                    messageCount = 24, cwd = dir, lastModified = ago(3 * minute),
-                    gitBranch = "feat/auth-refactor", live = true,
-                ),
-                SessionSummary(
-                    sessionId = "core-s2", title = "Fix flaky socket test",
-                    firstPrompt = "The reconnect test still fails intermittently on CI.",
-                    messageCount = 9, cwd = dir, lastModified = ago(120 * minute),
-                    gitBranch = "fix/socket-test", agent = AgentKind.CODEX,
-                ),
-                SessionSummary(
-                    sessionId = "core-s3", title = "Release notes 1.6",
-                    firstPrompt = "Summarize the user-visible changes from the last 12 commits.",
-                    messageCount = 15, cwd = dir, lastModified = ago(1680 * minute),
-                    gitBranch = "main",
-                ),
-            ),
-        )
-        val blocked = PendingApprovals(listOf(PendingApproval(ask, workdir = dir, sessionId = "core-s1")))
+        // every fixture below lives in [ShowcaseSeeds] so the App Store frames tell the same story
+        fun live(executing: Boolean) = ShowcaseSeeds.live(executing)
+        val transcript = ShowcaseSeeds.transcript()
+        val ask = ShowcaseSeeds.approvalAsk()
+        val sessions = ShowcaseSeeds.sessions()
+        val blocked = ShowcaseSeeds.blockedApprovals()
         return listOf(
             // 01/02 · Sessions in both palettes: context hierarchy, Active/Recent, one pinned dock, and an
             // attention row that is the only filled control on the screen
@@ -666,32 +620,8 @@ class ShowcaseRender {
 
     private fun entryFrames(): List<EntryFrame> {
         val dir = DemoData.LIVE_DIR
-        val minute = 60_000L
-        fun ago(ms: Long) = dev.ccpocket.app.epochMillis() - ms
-        // real DirectoryEntry shapes only: one live project with a branch and a live title, then plain rows
-        // that claim nothing beyond a name, a path and the daemon's own mtime
-        val directories = Directories(
-            listOf(
-                DirectoryEntry(
-                    path = dir, name = "cc-pocket", isDir = true, hasSessions = true, recent = true,
-                    lastModified = ago(3 * minute), open = true, executing = true,
-                    activeSessionId = "entry-s1", activeSessionTitle = "Add demo mode for App Review",
-                    gitBranch = "main",
-                ),
-                DirectoryEntry(
-                    path = "/Users/alex/code/cc-pocket-site", name = "cc-pocket-site", isDir = true,
-                    hasSessions = true, lastModified = ago(90 * minute),
-                ),
-                DirectoryEntry(
-                    path = "/Users/alex/code/relay-server", name = "relay-server", isDir = true,
-                    hasSessions = true, lastModified = ago(600 * minute),
-                ),
-                DirectoryEntry(
-                    path = "/Users/alex/Library/Mobile Documents/com~apple~CloudDocs/notes-cli",
-                    name = "notes-cli", isDir = true, hasSessions = true, lastModified = ago(2400 * minute),
-                ),
-            ),
-        )
+        // real DirectoryEntry shapes only, shared with the App Store frames — see [ShowcaseSeeds]
+        val directories = ShowcaseSeeds.directories()
         return listOf(
             // 01 · Pairing: code-first, camera-free. The scanner is a route below the hairline, never the page.
             EntryFrame("pair") { PairingScreen(it) },
@@ -942,10 +872,7 @@ class ShowcaseRender {
     }
 
     /** A real paired binding, so the machine name in the Sessions header is a rendered fact, not a blank. */
-    private val coreAccount = dev.ccpocket.app.pairing.PairedDaemon(
-        relay = "wss://showcase.invalid", accountId = "showcase", daemonPub = "pub",
-        deviceId = "dev", credential = "cred", hostName = "alex-macbook",
-    )
+    private val coreAccount = ShowcaseSeeds.ACCOUNT
 
     /**
      * NOT a test — the Secure Approval acceptance stills at the Mobile UI 2.0 release baseline (402 × 874 pt,
