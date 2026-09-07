@@ -83,20 +83,17 @@ import org.jetbrains.compose.resources.stringResource
  * true bottom band, the caller marks the inset consumed and the strip falls back to the plain box.
  */
 @Composable
-fun QuotaStrip(repo: PocketRepository, onOpen: (AgentKind) -> Unit) {
+fun QuotaStrip(repo: PocketRepository, onOpen: () -> Unit) {
     val sections = quotaSections(repo)
     if (sections.isEmpty()) return
     val now by rememberQuotaClock()
 
-    Column(Modifier.fillMaxWidth()) {
+    // ONE tap target for the whole strip, whichever backend the finger lands on: the sheet behind it
+    // lists every backend in order (Claude, then Codex), which the owner confirmed is the wanted shape.
+    Column(Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-        // A lone backend is the pre-#348 strip down to the dp, one tap target for the whole row. With two
-        // backends on one row EACH group is its own tap target (user, 09-07): tapping the Codex figures
-        // must open Codex's sheet, not a sheet headed "Claude" with Codex somewhere below.
-        if (sections.size == 1) {
-            val only = sections[0]
-            Box(Modifier.fillMaxWidth().clickable { onOpen(only.agent) }) { QuotaStripRow(only, now, single = true, last = true) }
-        } else QuotaStripMergedRow(sections, onOpen)
+        if (sections.size == 1) QuotaStripRow(sections[0], now, single = true, last = true)
+        else QuotaStripMergedRow(sections)
     }
 }
 
@@ -107,7 +104,7 @@ fun QuotaStrip(repo: PocketRepository, onOpen: (AgentKind) -> Unit) {
  * backends sit at the right edge so Claude's second figure is never clipped behind them.
  */
 @Composable
-private fun QuotaStripMergedRow(sections: List<QuotaSection>, onOpen: (AgentKind) -> Unit) {
+private fun QuotaStripMergedRow(sections: List<QuotaSection>) {
     Row(
         Modifier.fillMaxWidth()
             .heightIn(min = 48.dp)
@@ -121,7 +118,7 @@ private fun QuotaStripMergedRow(sections: List<QuotaSection>, onOpen: (AgentKind
             // first at their natural width and sit at the right edge — so the right-hand figures are never
             // the ones that get clipped when the row runs out of room
             Row(
-                (if (i == 0) Modifier.weight(1f) else Modifier).clickable { onOpen(sec.agent) },
+                if (i == 0) Modifier.weight(1f) else Modifier,
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -244,10 +241,8 @@ private fun QuotaStripSegment(limit: ClaudeQuotaLimit, bar: Boolean = true) {
  *  SAME components as the desktop popover ([QuotaLimitRow] / [QuotaFreshnessRow]) — one implementation of
  *  "what a limit row looks like", wearing the phone's default faces. */
 @Composable
-fun QuotaSheet(repo: PocketRepository, agent: AgentKind? = null, onDismiss: () -> Unit) {
-    // [agent] scopes the sheet to ONE backend (the group the user tapped); null = everything, the
-    // pre-#348 entry point. A scoped sheet that finds no section falls back to all of them.
-    val sections = quotaSections(repo).let { all -> agent?.let { a -> all.filter { it.agent == a }.ifEmpty { all } } ?: all }
+fun QuotaSheet(repo: PocketRepository, onDismiss: () -> Unit) {
+    val sections = quotaSections(repo)
     // "Claude plan allowance" is the pre-#348 title and stays for a lone Claude sheet; any other
     // composition is titled neutrally and named per section, so a Codex sheet never reads as Claude's.
     val loneClaude = sections.size == 1 && sections[0].agent == AgentKind.CLAUDE
@@ -267,8 +262,8 @@ fun QuotaSheet(repo: PocketRepository, agent: AgentKind? = null, onDismiss: () -
             Spacer(Modifier.height(14.dp))
             for (sec in sections) {
                 // The brand/plan header is suppressed when the title already names the backend (a lone
-                // section: the pre-#348 Claude sheet, or a scoped Codex sheet). Two sections get named,
-                // because an unattributed percentage is the number a multi-backend user cannot act on.
+                // section). Two sections get named, because an unattributed percentage is the number a
+                // multi-backend user cannot act on.
                 if (sections.size > 1) {
                     Text(
                         sectionHeading(sec), color = Tok.muted, fontFamily = FontFamily.Monospace,

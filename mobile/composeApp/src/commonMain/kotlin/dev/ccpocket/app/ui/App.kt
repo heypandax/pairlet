@@ -1156,7 +1156,6 @@ internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header aga
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { NavBarPadded { SettingsScreen(repo, onBack = { showSettings = false }) }; return }
     var showQuota by remember { mutableStateOf(false) }
-    var quotaSheetAgent by remember { mutableStateOf<AgentKind?>(null) }
     ProjectsHeader(
         title = stringResource(Res.string.dir_projects),
         phase = repo.phase.value,
@@ -1185,11 +1184,11 @@ internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header aga
         // the skeleton carries the strip too: on a RECONNECT the previous link's snapshot is already in
         // hand, and a strip that only appeared once the list landed would be exactly the skeleton→list
         // shift this header is built to avoid (EntryFlowUiTest pins it)
-        QuotaStrip(repo) { a -> quotaSheetAgent = a; showQuota = true }
+        QuotaStrip(repo) { showQuota = true }
     }
     // AFTER the header content, so the sheet paints over everything the skeleton drew (z-order bug
     // otherwise: composed first = painted under). AnimatedVisibility's scope stacks these two like a Box.
-    if (showQuota) QuotaSheet(repo, quotaSheetAgent) { showQuota = false }
+    if (showQuota) QuotaSheet(repo) { showQuota = false }
 }
 
 /** The breath, phase-shifted by [LoadingMotion.STAGGER_MS] per row. Flat (no animation at all, at the
@@ -1441,7 +1440,6 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     // sheets), NOT here — composed this early it painted UNDER the FAB stack/scrim (same z-order bug as
     // the strip itself).
     var showQuota by remember { mutableStateOf(false) }
-    var quotaSheetAgent by remember { mutableStateOf<AgentKind?>(null) }
     // long-press a project → "Share this folder…" opens the owner invite flow full-screen (issue #115)
     var shareTarget by remember { mutableStateOf<DirectoryEntry?>(null) }
     shareTarget?.let { NavBarPadded { ShareFolderScreen(repo, it, onBack = { shareTarget = null }) }; return }
@@ -1691,7 +1689,7 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
         // no snapshot. Last child of the header's Column, so it sits on the window's bottom edge.
         // Measured so the bottom overlays (scrim / FABs / toast) lift off it instead of painting over it.
         Box(Modifier.fillMaxWidth().onSizeChanged { quotaStripPx = it.height }) {
-            QuotaStrip(repo) { a -> quotaSheetAgent = a; showQuota = true }
+            QuotaStrip(repo) { showQuota = true }
         }
     }
         // ── the bottom-right stack: the approval pill above the new-task FAB ──
@@ -1728,7 +1726,7 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
             onBrowseOther = { showNewTask = false; openFolderEntry() },
             onDismiss = { showNewTask = false },
         )
-        if (showQuota) QuotaSheet(repo, quotaSheetAgent) { showQuota = false }
+        if (showQuota) QuotaSheet(repo) { showQuota = false }
         // Entering the new conversation needs no navigation call: the root router renders ChatScreen the
         // moment convoId lands, and the sheet closed on send — so a delivered prompt IS the chat opening.
         // The FAILURE direction is the one that needs wiring: nothing opened, so this screen is still here
@@ -2329,7 +2327,6 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
     var showArchived by remember { mutableStateOf(false) }
     if (showArchived) { NavBarPadded { ArchivedSessionsScreen(repo, onBack = { showArchived = false }) }; return }
     var showQuota by remember { mutableStateOf(false) } // the allowance pill's detail sheet
-    var quotaSheetAgent by remember { mutableStateOf<AgentKind?>(null) }
     // Session groups (issue #119). Membership + the group list are daemon-owned; these hold only the
     // transient UI: which manage-sheet/dialog is open, and (client-only) which sections are collapsed —
     // kept per group id and reset per project (keyed on [dir]), so folding a group doesn't leak across projects.
@@ -2541,7 +2538,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
             // full inset — siblings don't see each other's inset handling, consumption for descendants
             // is the only way to say "someone below you owns the edge".
             Box(Modifier.fillMaxWidth().consumeWindowInsets(WindowInsets.navigationBars)) {
-                QuotaStrip(repo) { a -> quotaSheetAgent = a; showQuota = true }
+                QuotaStrip(repo) { showQuota = true }
             }
             // one tap starts right away with the persisted defaults (openSession's own fallbacks); the
             // trailing chip shows those defaults and opens the full agent+mode picker instead
@@ -2549,7 +2546,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 SessionDefaultsChip(repo.sessionDefaultAgent, repo.defaultMode.value, enabled = !starting) { pickMode = true }
             }
         }
-        if (showQuota) QuotaSheet(repo, quotaSheetAgent) { showQuota = false }
+        if (showQuota) QuotaSheet(repo) { showQuota = false }
         if (pickMode) {
             LaunchedEffect(Unit) { repo.fetchModels(AgentKind.CLAUDE) }
             StartSessionModeSheet(
