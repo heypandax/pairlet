@@ -1,6 +1,8 @@
 # #291 dsh 提问与审批桥接设计（草案 v1）
 
-> 状态：**待用户拍板**。全部结论以 2026-08-23 的实证为准（dsh 0.1.0-rc.6，`scripts/probe-dsh-api.py --probe-ask` 36/36 固化），不凭文档推断。
+> 状态：**已实现，实时那一半已于 2026-09-10 作废**。dsh 0.1.2-rc.1 删掉了本文所依赖的 web profile 本地 API，后端改走官方 ACP profile（审批变成 `session/request_permission`，提问工具不在 acp profile 的工具集里）——见 [DSH-ACP-TRANSPORT.md](DSH-ACP-TRANSPORT.md)。**仍然有效的是磁盘回放那一半**（`DshAsk` ＋ `DshTranscriptReplay`：历史会话里的提问／审批记录照旧渲染）。当年的探针 `scripts/probe-dsh-api.py` 已随通道一起删除。
+>
+> 以下为当时的原文，作为历史决策记录保留。全部结论以 2026-08-23 的实证为准（dsh 0.1.0-rc.6，`probe-dsh-api.py --probe-ask` 36/36 固化）。
 
 ## 1. 实证要点（设计的地基）
 

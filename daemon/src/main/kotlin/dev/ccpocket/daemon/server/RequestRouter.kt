@@ -675,17 +675,17 @@ class RequestRouter(
                     // route a guest's path scope through PermissionBridge, but that path is unverified (probe
                     // blocked on device-code auth), so a restricted credential must not open one yet. P2
                     // re-evaluates once the ACP approval face is proven end-to-end.
-                    // DSH: still fail-closed AFTER the approval bridge landed (issue #291) — the old reason
-                    // ("no approvals are bridged at all") has expired, and this is deliberately NOT the
-                    // moment to lift it. A dsh ask now reaches PermissionBridge, but the three walls a
-                    // restricted session depends on all key on CLAUDE tool spellings and Claude-shaped
-                    // inputs, and dsh matches none of them:
-                    //   - `handoffWriteBanned` matches Write/Edit/… ; dsh names its own tools.
+                    // DSH: still fail-closed AFTER the approval bridge landed (issue #291) and after the
+                    // dsh 0.1.2 ACP switch, and this is deliberately NOT the moment to lift it. A dsh
+                    // ask does reach PermissionBridge, and on the ACP wire it even carries the tool's real
+                    // `rawInput` now — but the walls a restricted session depends on all key on CLAUDE
+                    // tool SPELLINGS, and dsh matches none of them:
+                    //   - `handoffWriteBanned` matches Write/Edit/… ; dsh's tools are `write` / `bash` / …
                     //   - the guest/bridge path wall reads `file_path`/`path`/`notebook_path` out of the
-                    //     tool input; a dsh `approval/requested` carries NO tool arguments at all (only a
-                    //     model-authored `reason`), so `pathTargets` is always empty and the wall passes
-                    //     vacuously on every call.
-                    //   - `BridgeCommandPolicy` only classifies `toolName == "Bash"` with an `input.command`.
+                    //     tool input; dsh happens to spell its write target `file_path`, but nothing keeps
+                    //     the two vocabularies in step, so the match is a coincidence rather than a wall.
+                    //   - `BridgeCommandPolicy` only classifies `toolName == "Bash"` with an `input.command`;
+                    //     dsh's shell tool is `bash`, so every command classifies as unknown.
                     // A guest/bridge would therefore self-approve tool calls the daemon cannot even name.
                     // Lifting this needs tool-name normalization + real target extraction FIRST, not just
                     // the presence of an approval channel.

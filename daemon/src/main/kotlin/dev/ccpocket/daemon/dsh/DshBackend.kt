@@ -19,67 +19,90 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import java.nio.file.Path
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Drives the DeepSeek Harness (`dsh`) — issue #255.
+ * Drives the DeepSeek Harness (`dsh`) over its ACP v1 stdio profile (issue #255, re-transported for dsh 0.1.2).
  *
- * ## Why this backend is shaped differently from the others
+ * ## Why the transport changed
  *
- * Every backend before it spoke newline-delimited JSON on its child's stdout, so `parse(line)` was the
- * whole event path. dsh has no such mode: rc.6 ships no ACP server, and its SDK JSON-RPC mode has neither
- * cancel, resume, nor an approval callback. The only channel that can carry a real interactive session is
- * the local HTTP + WebSocket API of its `web` profile. So:
+ * v1 of this backend drove the `web` profile's local HTTP+WebSocket API, because dsh rc.6 had no ACP
+ * server at all. dsh 0.1.2-rc.1 deleted that API (`@deepseek-ai/dsh-host-apiproxy` stops at 0.1.1-rc.2)
+ * and replaced it with the Typert gateway: `POST /api/<namespace>/<method>`, a bidirectional
+ * `/api/remote.mux` socket, and — decisively — a signed browser cookie that only `GET /?token=<launch
+ * token>` can mint, required on EVERY `/api` request. The old client could no longer even open its
+ * socket, which is what the phone reported as *"could not reach the dsh local API on 127.0.0.1:<port>
+ * after 20 attempts"*. The same release shipped `dsh --profile acp`, a STANDARD Agent Client Protocol
+ * server on stdio, so this backend now looks like every other one:
  *
  * ```
- *   processBuilder → dsh --profile web --port 0        (child; stdout carries only its boot banner)
- *   parse(bootline) → learn the port → DshApiClient    (WS connects, session opens)
- *   WS frames      → io.inject(json) → parse(json)     (back through the SAME pump, in order)
- *   sendPrompt     → HTTP POST /api/session.prompt
+ *   processBuilder → dsh --profile acp      (stdout = ACP JSON-RPC frames, stderr = dsh's own logs)
+ *   attach         → initialize → session/new | session/resume
+ *   parse(line)    → session/update … → AgentEvent
+ *   sendPrompt     → session/prompt (one in flight; the rest queue here)
  * ```
  *
- * The re-injection is what keeps this honest: events still arrive on one channel, in one order, with the
- * Conversation's single pump assigning `seq`. See [AgentIo.inject].
+ * Every shape below is pinned by `scripts/probe-dsh-acp.py` against dsh 0.1.2-rc.1 — RE-RUN IT AFTER
+ * EVERY dsh UPGRADE, because drift here is silent (a renamed param degrades to "the model never
+ * switched", not to an error anyone sees).
  *
- * ## v1 scope (deliberately narrow)
+ * ## Probe-verified facts that shape this class
  *
- * Session discovery, history replay, opening a session, sending/receiving messages including live
- * streaming, (issue #291) the question/approval bridge, and (issue #320) the session's self-reported
- * model / reasoning effort / context window plus its live per-call token usage. NOT included: model
- * switching, tool cards, the web UI, plugins.
+ *  1. **One prompt in flight per session.** A second `session/prompt` is refused with `-32602 "a prompt
+ *     is already in flight for this session"`, so the FIFO lives HERE (same as [dev.ccpocket.daemon.kimi.KimiBackend]).
+ *  2. **There is no `user_message_chunk`.** The prompt's own response IS the consumption receipt, so the
+ *     [AgentEvent.UserReplay] is synthesized when the turn settles. Without it Conversation's
+ *     unconsumed-prompt ledger never settles and every relaunch re-runs old prompts (issue #122).
+ *  3. **`session/set_config_option` takes `configId`, not `optionId`** (a wrong name is a zod error, not
+ *     a no-op), and the model VALUE is the opaque `["<provider>","<model>"]` JSON string dsh advertised —
+ *     a bare model id is rejected with `unknown model option`. The bare id is what cc-pocket shows the
+ *     user, so the two are joined through the advertised catalogue ([DshConfigOptions]).
+ *  4. **`session/request_permission` carries only `toolCall.toolCallId`** — no name, no input. The card's
+ *     body therefore comes from the `tool_call` update we saw earlier in the turn, which is why tool
+ *     calls are tracked even though v1 renders no tool cards.
+ *  5. **`session/resume` replays NO history** and happily loads sessions created by the old web profile
+ *     (probe-verified against a pre-upgrade session): existing sessions stay resumable, and history keeps
+ *     coming from the on-disk transcript, which 0.1.2 did not change ([DshTranscriptReplay]).
  *
- * ## Two product constraints worth quoting in the follow-up work
+ * ## What the ACP surface does not carry (deliberate scope loss vs. the web transport)
  *
- *  1. **dsh has no "always allow".** Its `ApprovalOutcome` is `allowed-once | rejected | cancelled |
- *     unavailable`, and its `ApprovalPolicy` of `never` AUTO-REJECTS rather than auto-allowing. So the
- *     "remember this decision" half of cc-pocket's approval UI has no counterpart to map onto; a future
- *     bridge must either hide it for dsh or implement remembering on the daemon side.
- *  2. **The permission mode is NOT fixed for the session's life.** `DSH_PERMISSION_MODE` only seeds the
- *     boot default; dsh records mode changes as durable log events (`sandbox/mode`, `approval/policy`,
- *     `permission/preset`) and a `/permission <preset>` typed into the chat moves it mid-session. Any
- *     future mode UI must read the session's projection rather than trusting the launch value.
+ * Agent presets, `/`-commands, session rename and fork have no ACP counterpart — dsh states this
+ * explicitly ("modes, commands, plans, terminals, elicitation" are outside the automation surface). So
+ * [renameSession] answers false, the preset axis is no longer advertised ([DshModelService]), and
+ * `spec.agentPreset` is ignored with a log line rather than silently pretended into the header.
  *
- * ## Approvals and questions: bridged, and fail-CLOSED rather than fail-hang (issue #291)
+ * ## Permissions
  *
- * `approval/requested` and `question/requested` become real [AgentEvent.ControlRequest]s, so they run the
- * same [dev.ccpocket.daemon.agent.PermissionBridge] path every other backend uses — one card, one budget,
- * one verdict route. Nothing is ever auto-allowed here.
- *
- * The window matters more for dsh than for any other backend: **dsh has no timeout of its own**. An
- * unanswered request hangs the turn forever (probe-verified; the host source has no `setTimeout`), so the
- * pre-#291 "log it and leave it" was fail-HANG, not fail-closed. The coordinator's budget now bounds it
- * and an expired approval is answered `rejected`. See [DshAskLedger] for the rest of the contract.
+ * `session/request_permission` becomes a real [AgentEvent.ControlRequest] on the same
+ * [dev.ccpocket.daemon.agent.PermissionBridge] every other backend uses. dsh offers only
+ * `allow-once` / `reject-once` (no always-allow), so `remember` cannot be honoured and a remembered
+ * scope can never form — same product constraint as v1.
  */
-class DshBackend(private val dshBin: String?) : AgentBackend {
+class DshBackend(
+    private val dshBin: String?,
+    private val catalog: DshCatalog = DshCatalog,
+) : AgentBackend {
     private val log = logger("DshBackend")
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val idSeq = AtomicLong(1)
 
-    // Owns the WS client's coroutines; cancelled when the process ends so a dead session leaves nothing behind.
-    private var clientScope: CoroutineScope? = null
+    /** Owns the handshake watchdog and the async config pushes; cancelled when the process ends. */
+    private var scope: CoroutineScope? = null
 
     @Volatile private var io: AgentIo? = null
     @Volatile private var resolvedExe: Path? = null
@@ -87,48 +110,71 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
     @Volatile private var resumeId: String? = null
     @Volatile private var mode: PermissionMode = PermissionMode.DEFAULT
 
-    /** issue #333: the launch knobs the client chose. [launchPreset] is honoured ONLY on a fresh
-     *  `session.create` — dsh locks the agent preset the moment a session produces output
-     *  (`agent-preset-locked`), so a resume can never move it and must not pretend to. [launchModel] /
-     *  [launchEffort] ARE live-switchable and are re-applied on every [applySettings]. */
-    @Volatile private var launchPreset: String? = null
+    /** The launch knobs the client chose. Both are live-switchable through `session/set_config_option`
+     *  and are re-applied on every [applySettings]. */
     @Volatile private var launchModel: String? = null
     @Volatile private var launchEffort: String? = null
 
-    @Volatile private var api: DshApiClient? = null
-    @Volatile private var port: Int = 0
     @Volatile private var sessionId: String? = null
 
-    /** issue #291: the pending question/approval table + the `/api/respond` return path. Lives for the
-     *  backend's whole life (not per process) and is [DshAskLedger.reset] on every attach, because an
-     *  rpcId only means anything to the host process that minted it. */
-    private val asks = DshAskLedger(
-        ourSession = { ourSessionId() },
-        send = { rpcId, value -> api?.respond(rpcId, value) ?: DshRespond.UNREACHABLE },
-        // A refused reply is surfaced as a NOTICE, not a turn error: the dsh turn really is still running
-        // (that is the whole problem), and faking a TurnResult would tell the phone it had ended.
-        report = { message -> io?.inject?.invoke(syntheticNotice("⚠️ $message")) },
+    /** The session's advertised configuration options, as last read back from dsh. The model picker
+     *  ([DshModelService]) reads the same catalogue through [DshCatalog], and every model/effort write
+     *  joins its opaque wire value out of it. */
+    @Volatile private var options: DshConfigOptions = DshConfigOptions.EMPTY
+
+    // JSON-RPC id correlation.
+    @Volatile private var initializeId: Long = -1
+    @Volatile private var sessionOpenId: Long = -1
+
+    /** outstanding session/prompt id → the prompt text, replayed as the consumption receipt on settle. */
+    private val promptIds = ConcurrentHashMap<Long, String>()
+
+    /** outstanding set_config_option id → what it was trying to do, so its answer can be reported and the
+     *  chain continued. */
+    private val configIds = ConcurrentHashMap<Long, ConfigWrite>()
+
+    /** toolCallId → what dsh said it was about, so a later permission request (which carries only the id)
+     *  can render a card a human can decide on. */
+    private val toolCalls = ConcurrentHashMap<String, ToolInfo>()
+
+    /** askId → the JSON-RPC request id + the options it offered. */
+    private val pendingApprovals = ConcurrentHashMap<String, PendingApproval>()
+
+    private data class ToolInfo(val title: String?, val input: JsonObject?)
+    private data class PendingApproval(val rpcId: JsonElement, val options: JsonArray)
+
+    /** One pending `session/set_config_option`. [announce] marks a USER-driven switch, which is allowed to
+     *  say out loud that it failed; a launch-time application stays quiet (a message before the first turn
+     *  reads as output the agent never wrote). [flushAfter] carries the "open the prompt gate when this
+     *  settles" duty through the response. */
+    private data class ConfigWrite(
+        val configId: String,
+        val value: String,
+        val announce: Boolean,
+        val flushAfter: Boolean,
     )
 
-    /**
-     * The session id this backend may claim frames for — issue #321.
-     *
-     * `resumeId` stands in until `session.create`/resume has landed [sessionId], and a RESUMED id is
-     * provably ours: the conversation asked the host for exactly that session. That closes the one window
-     * where an ask that really was ours got dropped — the host replays still-pending `…/requested` frames
-     * the moment a mux subscribes, which is BEFORE `openSession` assigns [sessionId]. A dropped ask is not
-     * a lost card, it is a dsh turn that then waits forever (dsh has no timeout of its own).
-     *
-     * A FRESH session keeps the strict null, and must: before `session.create` returns our session does not
-     * exist yet, so no pending ask can possibly belong to it, and claiming one would be claiming somebody
-     * else's.
-     */
-    private fun ourSessionId(): String? = sessionId ?: resumeId
-
-    /** Guards [sessionId] and [pendingPrompts] so the opening turn can never be lost to a race between
-     *  "the session is not open yet, buffer it" and "the session just opened, flush the buffer". */
+    /** Guards [sessionId], [pendingPrompts] and [promptQueue] so the opening turn can never be lost to a
+     *  race between "not open yet, buffer it" and "just opened, flush the buffer". */
     private val bootstrap = Mutex()
-    private val pendingPrompts = ArrayDeque<String>()
+
+    /** Prompts that arrived before the session was ready to take them. */
+    private val pendingPrompts = ArrayDeque<Prompt>()
+
+    /**
+     * Closed from launch until the session is open AND its launch-time model/effort have landed.
+     *
+     * A prompt that slips through the window between `session/new` answering and the config write
+     * settling would run the opening turn on the model the user did NOT pick — which is what the whole
+     * write-then-flush chain exists to prevent, and which a "buffer only while sessionId is null" gate
+     * misses by exactly the round trip that matters.
+     */
+    @Volatile private var promptGate = false
+
+    /** Prompts that arrived while a turn was in flight (fact 1). */
+    private val promptQueue = ArrayDeque<Prompt>()
+
+    private data class Prompt(val text: String, val images: List<ImageData>)
 
     override val kind: AgentKind = AgentKind.DSH
 
@@ -150,508 +196,333 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         this.workdir = spec.workdir.toString()
         this.resumeId = spec.resumeId
         this.mode = spec.mode
-        this.launchPreset = spec.agentPreset
         this.launchModel = spec.model
         this.launchEffort = spec.effort
-        // reset per-process state (attach runs on EVERY relaunch)
-        teardownClient()
-        port = 0
-        // Every pending rpcId died with the previous host process; the conversation retires their cards
-        // through PermissionBridge.cancelAll on the same relaunch.
-        asks.reset()
-        bootstrap.withLock { sessionId = null; pendingPrompts.clear() }
-        // Nothing else can happen yet: the port is only knowable from the child's boot line, which
-        // arrives on stdout and lands in parse().
+        spec.agentPreset?.takeIf { it.isNotBlank() }?.let {
+            // The ACP surface has no agent-preset axis; announcing one we cannot select would be a lie in
+            // the session header. Dropped loudly in the log, silently on the wire.
+            log.info("dsh agent preset '$it' ignored — the ACP profile exposes no preset selection")
+        }
+        // reset per-process protocol state (runs on EVERY (re)launch)
+        sessionId = null
+        promptGate = false
+        options = DshConfigOptions.EMPTY
+        catalog.unpublish(this)
+        promptIds.clear(); configIds.clear(); toolCalls.clear(); pendingApprovals.clear()
+        bootstrap.withLock { pendingPrompts.clear(); promptQueue.clear() }
+        scope?.let { runCatching { it.cancel() } }
+        val fresh = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        scope = fresh
+        initializeId = rpcRequest("initialize", buildJsonObject {
+            put("protocolVersion", ACP_PROTOCOL_VERSION)
+            putJsonObject("clientCapabilities") {
+                // We serve no filesystem or terminal on the agent's behalf; dsh does its own IO.
+                putJsonObject("fs") { put("readTextFile", false); put("writeTextFile", false) }
+            }
+        })
+        fresh.launch { watchHandshake() }
     }
 
     /**
-     * One line from the pump. Two very different kinds arrive here:
-     *  - dsh's OWN stdout — human-readable log text, of which only the boot banner matters, and
-     *  - re-injected WebSocket frames — JSON MuxFrames (see [AgentIo.inject]).
-     *
-     * They are told apart by shape: a MuxFrame is a JSON object, dsh's banner is not.
+     * A handshake that never answers is the ONE failure this backend cannot diagnose from a frame, and it
+     * is exactly what a pre-0.1.2 dsh does: `--profile acp` composes a profile with no app in it, so
+     * nothing ever claims stdio and the session would sit silent forever. Bounded, and the message names
+     * the version to install.
      */
+    private suspend fun watchHandshake() {
+        repeat(HANDSHAKE_POLLS) {
+            if (sessionId != null || initializeId < 0) return
+            delay(HANDSHAKE_POLL_MS)
+            if (sessionOpenId >= 0) return // the handshake got as far as opening a session; errors ride the wire
+        }
+        if (sessionOpenId < 0 && sessionId == null) {
+            io?.inject?.invoke(syntheticError(DshLauncher.outdatedHint()))
+        }
+    }
+
+    // ---- inbound ----
+
     override suspend fun parse(line: String): List<AgentEvent> {
-        val trimmed = line.trim()
-        if (trimmed.isEmpty()) return emptyList()
-        if (trimmed.startsWith("{")) {
-            val root = DshTranscript.parseLine(trimmed) ?: return listOf(AgentEvent.Unparseable(trimmed))
-            return runCatching { translateMux(root) }
-                .getOrElse { log.warn("dsh frame translate failed: ${it.message}"); emptyList() }
-        }
-        // stdout log line — the only one we act on is the boot banner carrying the bound port
-        if (port == 0) {
-            DshLauncher.parseBootPort(trimmed)?.let { bound ->
-                port = bound
-                log.info("dsh web profile bound to 127.0.0.1:$bound")
-                startClient(bound)
+        val t = line.trim()
+        if (t.isEmpty()) return emptyList()
+        val root = runCatching { json.parseToJsonElement(t) }.getOrNull() as? JsonObject
+            // dsh keeps its logs on stderr, so an unparseable stdout line is genuinely unexpected.
+            ?: return listOf(AgentEvent.Unparseable(t))
+        // Frames we injected ourselves never travelled to dsh; they carry our own namespaced type.
+        synthetic(root)?.let { return it }
+        val method = root.str("method")
+        val idEl = root["id"]?.takeIf { it !is JsonNull }
+        return runCatching {
+            when {
+                method != null && idEl != null -> handleServerRequest(method, idEl, root.obj("params"))
+                method != null -> handleNotification(method, root.obj("params"))
+                root.containsKey("result") -> handleResponse(idEl, root.obj("result"))
+                root.containsKey("error") -> handleErrorResponse(idEl, root.obj("error"))
+                else -> emptyList()
             }
-        }
-        return listOf(AgentEvent.Ignored("dsh-stdout"))
+        }.getOrElse { log.warn("dsh parse failed: ${it.message}"); emptyList() }
     }
 
-    // ---- transport lifecycle ----
-
-    private fun startClient(port: Int) {
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        clientScope = scope
-        val bound = io
-        val client = DshApiClient(
-            port = port,
-            scope = scope,
-            // Straight back into the Conversation pump — this is the ONLY place dsh events enter the
-            // daemon, and routing them here keeps ordering and seq assignment untouched.
-            onFrame = { frame -> bound?.inject?.invoke(frame) },
-            onFatal = { why ->
-                log.warn("dsh transport failed: $why")
-                // Surfaced as a turn error through the same channel, so the phone sees a reason instead
-                // of a session that simply stops answering.
-                bound?.inject?.invoke(syntheticError(why))
-            },
-        )
-        api = client
-        // issue #333: the model/preset catalogue is HOST-level, so a picker opened while this session
-        // lives should ask THIS dsh rather than boot a second one against the same $DSH_HOME.
-        DshHosts.register(client)
-        client.start()
-        scope.launch { openSession(client) }
-    }
-
-    /** Poll the client's connect flag for a bounded window. Returns false if it never came up. */
-    private suspend fun awaitConnected(client: DshApiClient): Boolean {
-        repeat(READY_POLLS) {
-            if (client.connected) return true
-            delay(READY_POLL_MS)
-        }
-        return client.connected
-    }
-
-    private fun teardownClient() {
-        api?.let { DshHosts.unregister(it) }
-        runCatching { api?.close() }
-        api = null
-        runCatching { clientScope?.cancel() }
-        clientScope = null
-    }
-
-    /**
-     * Open the conversation's session and release any prompt that arrived while we were booting.
-     *
-     * RESUME uses the recorded id directly rather than re-creating: dsh's host addresses sessions by id
-     * and loads them from the store on demand. A resume whose id the host cannot load surfaces as a
-     * failed `session.prompt` below, with dsh's own error text — which is the honest outcome, since we
-     * genuinely cannot tell "unknown id" from "unreadable transcript" from out here.
-     */
-    private suspend fun openSession(client: DshApiClient) {
-        // Wait for the mux socket before issuing the first RPC. dsh prints its port once the LISTENER is
-        // up, which is a moment before the app has finished mounting its routes — firing session.create
-        // into that window returns a carrier error and the session would open onto a dead conversation.
-        // The WS client already retries across exactly this window, so its connect is the readiness
-        // signal; if it never arrives, onFatal has already reported why and there is nothing to open.
-        val ready = awaitConnected(client)
-        if (!ready) return
-        val existing = resumeId
-        var preset: String?
-        val sid = if (existing != null) {
-            // A resume adopts whatever preset the session was CREATED with — dsh will not move it, so the
-            // only honest thing to announce is what the store says (issue #333).
-            preset = readSessionPreset(client, existing)
-            existing
-        } else {
-            val result = client.rpc("session.create", buildJsonObject { put("cwd", workdir) })
-            val value = result?.obj("value")
-            val created = value?.str("sessionId")
-            if (created == null) {
-                val why = result?.obj("error")?.str("message") ?: "dsh did not return a session id"
-                io?.inject?.invoke(syntheticError("could not start a DeepSeek Harness session: $why"))
-                return
-            }
-            // `session.create` already answers with the preset it defaulted to; a select below may move it.
-            preset = value.str("agentPreset")
-            launchPreset?.let { wanted -> preset = selectPreset(client, created, wanted) ?: preset }
-            created
-        }
-        // Model/effort AFTER the preset and BEFORE the prompt gate opens: dsh accepts selectModel at any
-        // point in a session's life, but running the opening turn on the previous model and correcting it
-        // afterwards would bill the user for the model they did not pick.
-        val current = selectModel(client, sid, launchModel, launchEffort, announceFailure = false)
-        val flush = bootstrap.withLock {
-            sessionId = sid
-            pendingPrompts.toList().also { pendingPrompts.clear() }
-        }
-        io?.inject?.invoke(syntheticInit(sid))
-        // Seeds the header before the first turn. Pre-#333 the model chip stayed blank until dsh happened
-        // to emit a `request/*` frame, i.e. until the session had already answered once.
-        syntheticMeta(preset, current?.model, current?.effort)?.let { io?.inject?.invoke(it) }
-        flush.forEach { writePrompt(sid, it) }
-    }
-
-    /** The preset a RESUMED session was created with, off dsh's own session index. Null when the host
-     *  cannot say — the phone then shows no preset row rather than a guessed one. */
-    private suspend fun readSessionPreset(client: DshApiClient, sid: String): String? {
-        val result = client.rpc("session.list", buildJsonObject { }) ?: return null
-        if (result["ok"]?.toString() != "true") return null
-        return result.obj("value")?.arr("items").orEmpty()
-            .mapNotNull { it as? JsonObject }
-            .firstOrNull { it.str("sessionId") == sid }
-            ?.str("agentPreset")
-    }
-
-    /**
-     * `agentPreset.select` on a still-BLANK session. Returns the preset dsh confirms, or null when it
-     * refused (the caller then keeps the create-time default).
-     *
-     * `agent-preset-locked` is tolerated on purpose: it means the session already produced output, so the
-     * preset the user picked is simply not available any more. Failing the open over it would take a
-     * perfectly good session down for a preference.
-     */
-    private suspend fun selectPreset(client: DshApiClient, sid: String, wanted: String): String? {
-        val result = client.rpc(
-            "agentPreset.select",
-            buildJsonObject { put("sessionId", sid); put("agentPreset", wanted) },
-        )
-        if (result != null && result["ok"]?.toString() == "true") {
-            // Only the ECHO counts. Returning `wanted` on a bare ok:true would announce the REQUESTED
-            // preset as effective on no evidence — the one thing this path exists to prevent. No echo ⇒
-            // null ⇒ the caller keeps what `session.create` reported, which is itself a read-back.
-            return result.obj("value")?.str("agentPreset")?.takeIf { it.isNotBlank() }
-        }
-        val error = result?.obj("error")
-        log.warn(
-            "dsh agentPreset.select($wanted) refused: " +
-                "${error?.str("code") ?: "unreachable"} ${error?.str("message").orEmpty()}",
-        )
-        return null
-    }
-
-    /** What a model selection settled on — both fields are dsh's read-back, never our request. */
-    private data class SelectedModel(val model: String?, val effort: String?)
-
-    /**
-     * Point the session at [model] / [effort] and report what dsh actually settled on.
-     *
-     * Three details this has to get right:
-     *  - **provider is a SEPARATE argument.** dsh's `session.selectModel` takes `{provider, model}`, so the
-     *    provider is joined here out of the session's own `groups` (falling back to the current selection's
-     *    provider) rather than smuggled into the model id — the id is what the phone shows the user.
-     *  - **effort is per-model.** dsh rc.6 offers off/high/max; cc-pocket's persisted ladder also has
-     *    low/medium/xhigh. A level this model does not have is retried ONCE without it, so a stale
-     *    preference degrades to "the model's default effort" instead of failing the whole switch.
-     *  - **the read-back is the answer.** With nothing to change this still returns the CURRENT selection,
-     *    which is what seeds the header on a fresh session.
-     */
-    private suspend fun selectModel(
-        client: DshApiClient,
-        sid: String,
-        model: String?,
-        effort: String?,
-        announceFailure: Boolean,
-    ): SelectedModel? {
-        val listed = client.rpc("session.models", buildJsonObject { put("sessionId", sid) })
-            ?.takeIf { it["ok"]?.toString() == "true" }?.obj("value") ?: return null
-        val current = listed.obj("current")
-        val currentSelection = SelectedModel(current?.str("model"), current?.str("reasoningEffort"))
-        val wanted = model?.takeIf { it.isNotBlank() }
-        if (wanted == null) {
-            // Nothing to change → the read-back IS the answer (this is what seeds a fresh session's header).
-            if (effort == null) return currentSelection
-            return switchEffortOnly(client, sid, listed, effort, announceFailure) ?: currentSelection
-        }
-        val provider = providerFor(listed, wanted)
-            ?: current?.str("provider")
-            ?: run {
-                log.warn("dsh has no provider routing model $wanted — leaving the session's own selection")
-                return currentSelection
-            }
-        return applySelection(client, sid, provider, wanted, effort, announceFailure) ?: currentSelection
-    }
-
-    /** An effort change with no model change still needs a full `{provider, model}` — reuse the current one. */
-    private suspend fun switchEffortOnly(
-        client: DshApiClient,
-        sid: String,
-        listed: JsonObject,
-        effort: String?,
-        announceFailure: Boolean,
-    ): SelectedModel? {
-        val current = listed.obj("current") ?: return null
-        val model = current.str("model") ?: return null
-        val provider = current.str("provider") ?: providerFor(listed, model) ?: return null
-        return applySelection(client, sid, provider, model, effort, announceFailure)
-    }
-
-    private suspend fun applySelection(
-        client: DshApiClient,
-        sid: String,
-        provider: String,
-        model: String,
-        effort: String?,
-        announceFailure: Boolean,
-    ): SelectedModel? {
-        suspend fun attempt(level: String?): JsonObject? = client.rpc(
-            "session.selectModel",
-            buildJsonObject {
-                put("sessionId", sid)
-                put("provider", provider)
-                put("model", model)
-                level?.takeIf { it.isNotBlank() }?.let { put("reasoningEffort", it) }
-            },
-        )
-
-        var result = attempt(effort)
-        if (effort != null && result != null && result["ok"]?.toString() != "true") {
-            // Almost always a level this model does not offer. Keep the MODEL switch, drop the level.
-            log.info("dsh rejected reasoningEffort=$effort on $model; retrying without it")
-            result = attempt(null)
-        }
-        if (result != null && result["ok"]?.toString() == "true") {
-            val selected = result.obj("value")?.obj("selected")
-            return SelectedModel(selected?.str("model") ?: model, selected?.str("reasoningEffort"))
-        }
-        val why = result?.obj("error")?.str("message") ?: "the dsh local API did not answer"
-        log.warn("dsh session.selectModel($provider/$model) failed: $why")
-        // Only a USER-driven switch says so out loud: at launch the session has produced nothing yet and a
-        // message appearing before the first turn reads as output the agent never wrote.
-        if (announceFailure) io?.inject?.invoke(syntheticNotice("⚠️ could not switch the model: $why"))
-        return null
-    }
-
-    /** The provider that routes [model], out of a `session.models` / `llm.models` group listing. */
-    private fun providerFor(listed: JsonObject, model: String): String? =
-        listed.arr("groups").orEmpty().mapNotNull { it as? JsonObject }.firstOrNull { group ->
-            group.arr("models").orEmpty().any { (it as? JsonObject)?.str("id") == model }
-        }?.str("id")
-
-    // ---- inbound: MuxFrame translation ----
-
-    /**
-     * `{type:"server-request", rpcId, method, payload}` — the envelope's `method` IS the frame's own
-     * discriminant, so this switch is the complete downstream vocabulary.
-     */
-    private suspend fun translateMux(root: JsonObject): List<AgentEvent> {
-        // Synthetic frames we injected ourselves (init / errors) carry our own marker type.
-        when (root.str("type")) {
-            SYNTHETIC_INIT -> return listOf(
-                AgentEvent.SessionInit(root.str("sessionId"), workdir, model = null),
-            )
-            SYNTHETIC_ERROR -> return listOf(
+    /** Our own injections (see [syntheticError] / [syntheticNotice]) — the only frames on this pump that
+     *  dsh did not write. */
+    private fun synthetic(root: JsonObject): List<AgentEvent>? {
+        return when (root.str("type")) {
+            SYNTHETIC_ERROR -> listOf(
                 AgentEvent.AssistantText("⚠️ ${root.str("message").orEmpty()}"),
                 AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
             )
-            // A message with no verdict about the turn — the turn is still running (issue #291).
-            SYNTHETIC_NOTICE -> return listOf(AgentEvent.AssistantText(root.str("message").orEmpty()))
-            // issue #333: preset/model facts read off an RPC. Same event the `request/*` frames produce, so
-            // the Conversation reconciles it through exactly one path.
-            SYNTHETIC_META -> return listOfNotNull(
-                runtimeMeta(
-                    model = root.str("model"),
-                    effort = root.str("effort"),
-                    agentPreset = root.str("agentPreset"),
-                ),
+            // A message with no verdict about the turn — the turn itself is untouched (issue #291).
+            SYNTHETIC_NOTICE -> listOf(AgentEvent.AssistantText(root.str("message").orEmpty()))
+            else -> null
+        }
+    }
+
+    private suspend fun handleResponse(idEl: JsonElement?, result: JsonObject?): List<AgentEvent> {
+        val id = (idEl as? JsonPrimitive)?.longOrNull ?: return emptyList()
+        if (id == initializeId) { openSession(); return emptyList() }
+        if (id == sessionOpenId) return onSessionOpened(result)
+        configIds.remove(id)?.let { return onConfigApplied(it, result) }
+        val consumed = promptIds.remove(id) ?: return emptyList()
+        // Settle → the consumption receipt (fact 2) BEFORE the TurnResult, so the ledger entry is gone by
+        // the time the task-grant check runs — then let the next queued prompt out.
+        val events = listOf(AgentEvent.UserReplay(consumed)) + onPromptDone(result)
+        flushQueuedPrompt()
+        return events
+    }
+
+    private suspend fun handleErrorResponse(idEl: JsonElement?, error: JsonObject?): List<AgentEvent> {
+        val id = (idEl as? JsonPrimitive)?.longOrNull
+        val why = error?.str("message") ?: "the DeepSeek Harness rejected the request"
+        configIds.remove(id ?: -1)?.let { return onConfigFailed(it, why) }
+        if (id != null && id == sessionOpenId) {
+            return listOf(
+                AgentEvent.AssistantText("⚠️ could not start a DeepSeek Harness session: $why"),
+                AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
             )
         }
-        val method = root.str("method") ?: return emptyList()
-        // issue #291: the envelope's rpcId is the ONLY correlation token an ask carries — the payload has
-        // none — and the answer must echo it back. It used to be dropped here.
-        val rpcId = root.str("rpcId")
-        val payload = root.obj("payload") ?: return emptyList()
-        // The mux is MULTIPLEXED across every session the host holds — including sub-agents' own
-        // sessions. Without this filter another session's output would be spliced into this chat.
-        val frameSession = payload.str("sessionId")
-        val ours = ourSessionId()
-        if (frameSession != null && ours != null && frameSession != ours) return emptyList()
+        val consumed = id?.let { promptIds.remove(it) }
+        if (consumed != null) {
+            flushQueuedPrompt() // a failed prompt must not stall the FIFO behind it
+            return listOf(
+                // A failed prompt was still CONSUMED — its failure surfaced right here as an error turn.
+                // Left unsettled, Conversation would re-inject it on every relaunch and loop the failure.
+                AgentEvent.UserReplay(consumed),
+                AgentEvent.AssistantText("⚠️ $why"),
+                AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
+            )
+        }
+        log.warn("dsh error response id=$id: $why")
+        return emptyList()
+    }
 
-        return when (method) {
-            "session/event" -> translateSessionEvent(payload.obj("event") ?: return emptyList())
-            "stream/error" -> {
-                val msg = payload.obj("error")?.str("message") ?: "dsh stream error"
-                listOf(
-                    AgentEvent.AssistantText("⚠️ $msg"),
-                    AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
-                )
-            }
-            // issue #291. A card, on the same PermissionBridge every other backend uses. Null = nothing new
-            // to show: a mux replay of a card already pending, or a frame too malformed to answer.
-            DshAskLedger.QUESTION_REQUESTED, DshAskLedger.APPROVAL_REQUESTED ->
-                listOf(asks.requested(method, rpcId, payload) ?: AgentEvent.Ignored(method))
-            // Somebody else settled it (the desktop web UI answered, or the turn was cancelled): retire
-            // OUR card too, whatever the outcome. Our own answers left the table before this arrives.
-            DshAskLedger.QUESTION_RESOLVED, DshAskLedger.APPROVAL_RESOLVED ->
-                listOf(asks.resolved(method, payload) ?: AgentEvent.Ignored(method))
-            else -> listOf(AgentEvent.Ignored(method))
+    private suspend fun openSession() {
+        val rid = resumeId
+        sessionOpenId = if (rid != null) {
+            // A resume adopts the session's own recorded configuration; dsh verifies the workspace and
+            // restores the log WITHOUT replaying updates (fact 5).
+            rpcRequest("session/resume", buildJsonObject {
+                put("sessionId", rid)
+                put("cwd", workdir)
+                putJsonArray("mcpServers") {}
+            })
+        } else {
+            rpcRequest("session/new", buildJsonObject {
+                put("cwd", workdir)
+                putJsonArray("mcpServers") {}
+            })
         }
     }
 
     /**
-     * One `SessionEvent` from a `session/event` frame.
-     *
-     * STREAMING vs FINAL: dsh emits `assistant/chunk` deltas as the reply is generated AND a complete
-     * `assistant/message` when the step ends. Surfacing both would print every reply twice, so the LIVE
-     * path takes the deltas (that is what makes text appear progressively) and drops the assembled
-     * message. The DISK path does the exact opposite for the same reason — see [DshTranscriptReplay].
+     * `session/new` answers `{sessionId, configOptions}`; `session/resume` answers `{configOptions}` for
+     * the id we sent. The catalogue read-back is what seeds the header — the model chip used to stay
+     * blank until the session happened to answer once.
      */
-    private fun translateSessionEvent(event: JsonObject): List<AgentEvent> {
-        if (event["ignorable"]?.toString() == "true") return emptyList()
-        val data = event.obj("data")
-        return when (val type = event.str("type")) {
-            // The consumption receipt for a prompt we sent: dsh echoes the user turn once it is really
-            // in the conversation. Conversation's unconsumed-prompt ledger (issue #122) settles on this;
-            // without it every relaunch would re-inject and re-run past prompts.
-            "user/message" -> listOf(AgentEvent.UserReplay(DshTranscript.messageText(data)))
-            "assistant/chunk" -> {
-                val chunk = data?.obj("chunk") ?: return emptyList()
-                when (chunk.str("type")) {
-                    "text-delta" -> chunk.str("text")?.takeIf { it.isNotEmpty() }
-                        ?.let { listOf(AgentEvent.AssistantText(it)) }.orEmpty()
-                    "reasoning-delta" -> chunk.str("text")?.takeIf { it.isNotEmpty() }
-                        ?.let { listOf(AgentEvent.AssistantThinking(it)) }.orEmpty()
-                    // tool-call-delta: streamed tool arguments. v1 renders no tool cards (see scope).
-                    else -> emptyList()
-                }
-            }
-            // The session's real context window, straight off dsh's own wire (issue #320) — the header's
-            // usage % has no denominator without it, because no window table on our side knows deepseek ids.
-            "request/context" -> listOf(
-                runtimeMeta(model = data?.str("model"), contextWindow = data?.long("contextWindow"))
-                    ?: AgentEvent.Ignored(type),
-            )
-            // The resolved per-request configuration. `reasoningEffort` is the session header's only source
-            // for the level a dsh turn actually runs at.
-            // ⚠️ `config.maxTokens` is deliberately NOT read: it is the OUTPUT cap (256k on the same model
-            // that reports a 1,000,000-token window above), and mistaking it for the context window would
-            // understate occupancy four-fold. The window comes from `request/context`, full stop.
-            "request/header" -> {
-                val config = data?.obj("header")?.obj("config")
-                listOf(
-                    runtimeMeta(model = config?.str("model"), effort = config?.str("reasoningEffort"))
-                        ?: AgentEvent.Ignored(type),
-                )
-            }
-            // The assembled reply is still NOT rendered — it was already streamed as chunks above (see the
-            // class comment: live takes the deltas, disk takes the message). What it IS mined for is the two
-            // facts nothing else on the live wire carries: which model answered, and what the call cost.
-            "assistant/message" -> listOfNotNull(
-                runtimeMeta(model = data?.obj("message")?.obj("source")?.str("model")),
-                assistantUsage(data),
-            )
-            "turn/end" -> listOf(AgentEvent.TurnResult(finalText = null, usage = null, isError = false))
-            // v1 is text-only in BOTH the live and the replay path, so tool events render nothing. Doing
-            // it in one path only would make a resumed session look different from the live one.
-            "tool/call", "tool/result", "turn/start", "step/start", "step/end" ->
-                listOf(AgentEvent.Ignored(type))
-            else -> listOf(AgentEvent.Ignored(type ?: "dsh-event"))
+    private suspend fun onSessionOpened(result: JsonObject?): List<AgentEvent> {
+        val sid = result?.str("sessionId") ?: resumeId ?: run {
+            io?.inject?.invoke(syntheticError("dsh did not return a session id"))
+            return emptyList()
         }
+        options = DshConfigOptions.parse(result?.arr("configOptions"))
+        catalog.publish(this, options)
+        sessionId = sid
+        val events = listOfNotNull(
+            AgentEvent.SessionInit(sessionId = sid, cwd = workdir, model = options.currentModel),
+            runtimeMeta(model = options.currentModel, effort = options.currentEffort),
+        )
+        // Model/effort BEFORE the prompt gate opens: running the opening turn on the previous model and
+        // correcting it afterwards would bill the user for a model they did not pick. Each write is a
+        // request, so the gate opens on its RESPONSE (see [onConfigApplied]) rather than on hope.
+        if (!startConfigChain(launchModel, launchEffort, announce = false)) flushPendingPrompts()
+        return events
     }
 
-    /** A [AgentEvent.RuntimeMeta] only when at least one field is really present — an all-null event would
-     *  travel to the Conversation to say nothing, and blanks are dropped so a `""` can never displace a
-     *  model we already know. */
-    private fun runtimeMeta(
-        model: String? = null,
-        effort: String? = null,
-        contextWindow: Long? = null,
-        agentPreset: String? = null,
-    ): AgentEvent.RuntimeMeta? {
-        val m = model?.takeIf { it.isNotBlank() }
-        val e = effort?.takeIf { it.isNotBlank() }
-        val w = contextWindow?.takeIf { it > 0 }
-        val p = agentPreset?.takeIf { it.isNotBlank() }
-        return if (m == null && e == null && w == null && p == null) null else AgentEvent.RuntimeMeta(m, e, w, p)
-    }
-
-    /**
-     * One `assistant/message`'s token spend, normalized to cc-pocket's disjoint columns (issue #320).
-     *
-     * ⚠️ `usage` sits under `data` as a SIBLING of `message`, NOT inside it — the same trap
-     * [DshUsageScanner] calls out; reading `message.usage` yields nothing and the statusline stays empty.
-     *
-     * DeepSeek is OpenAI-lineage, so `cacheReadTokens` is a SUBSET of `inputTokens`, while
-     * [dev.ccpocket.protocol.TokenUsage.contextTokens] adds its four columns as DISJOINT sets. Passing the
-     * pair through raw would count the cached prefix twice and overstate occupancy. Subtracting is exactly
-     * what [DshUsageScanner] does on the disk path, so the live statusline and the usage page agree.
-     *
-     * Absent or all-zero usage returns null rather than zeros: a zero [AgentEvent.AssistantUsage] becomes a
-     * zero TurnDone usage, which snaps the phone's context readout back to 0% mid-session — the same reason
-     * [AgentEvent.TurnResult] carries a null usage instead of placeholder zeros.
-     */
-    private fun assistantUsage(data: JsonObject?): AgentEvent.AssistantUsage? {
-        val usage = data?.obj("usage") ?: return null
-        val input = usage.long("inputTokens") ?: 0L
-        val cacheRead = usage.long("cacheReadTokens") ?: 0L
-        if (input <= 0L && cacheRead <= 0L) return null
-        return AgentEvent.AssistantUsage(
-            inputTokens = (input - cacheRead).coerceAtLeast(0L),
-            // null vs 0 is a real distinction here: dsh has NO cache-write counter (null = never reported),
-            // while `cacheReadTokens` IS reported and is simply 0 on a cold prompt (a measurement).
-            cacheCreationInputTokens = null,
-            cacheReadInputTokens = cacheRead,
+    private fun onPromptDone(result: JsonObject?): List<AgentEvent> {
+        // ACP prompt response: {stopReason: end_turn | cancelled | max_tokens | refusal | …}
+        val stop = result?.str("stopReason")
+        return listOf(
+            AgentEvent.TurnResult(
+                finalText = null, // already streamed as agent_message_chunk
+                // No per-turn totals on this wire; occupancy rides usage_update (see [handleUpdate]).
+                usage = null,
+                isError = stop == "refusal",
+            ),
         )
     }
 
-    // ---- outbound ----
+    // ---- inbound: notifications ----
 
-    override suspend fun sendPrompt(text: String, images: List<ImageData>) {
-        // NOTE images ride no further: dsh's PromptContentPart does support an image part
-        // ({type:"image", mediaType, data}), but v1 is text-only end to end and sending a half-wired
-        // image part would fail the whole prompt rather than degrade.
-        val sid = bootstrap.withLock {
-            val current = sessionId
-            if (current == null) pendingPrompts.addLast(text)
-            current
-        } ?: return
-        writePrompt(sid, text)
+    private fun handleNotification(method: String, params: JsonObject?): List<AgentEvent> {
+        params ?: return emptyList()
+        return when (method) {
+            "session/update" -> {
+                // The stdio connection is single-session, but dsh stamps every update anyway; a frame for
+                // another session (a sub-agent's) must never be spliced into this chat.
+                val sid = params.str("sessionId")
+                if (sid != null && sessionId != null && sid != sessionId) return emptyList()
+                handleUpdate(params.obj("update") ?: return emptyList())
+            }
+            else -> emptyList()
+        }
     }
 
-    private suspend fun writePrompt(sid: String, text: String) {
-        val client = api ?: return
-        val payload = buildJsonObject {
-            put("sessionId", sid)
-            // "queue" is the mid-turn-safe mode: a prompt sent while a turn runs is queued rather than
-            // rejected, which matches how the Claude CLI buffers stdin. "steer" would interrupt.
-            put("mode", "queue")
-            putJsonArray("content") {
-                addJsonObject { put("type", "text"); put("text", text) }
+    private fun handleUpdate(update: JsonObject): List<AgentEvent> = when (val kind = update.str("sessionUpdate")) {
+        "agent_message_chunk" -> textOf(update)?.let { listOf(AgentEvent.AssistantText(it)) }.orEmpty()
+        "agent_thought_chunk" -> textOf(update)?.let { listOf(AgentEvent.AssistantThinking(it)) }.orEmpty()
+        // Not observed on this wire (fact 2), but harmless to honour if a later dsh starts sending it.
+        "user_message_chunk" -> listOf(AgentEvent.UserReplay(textOf(update)))
+        // `{used, size}` — the session's context occupancy and its real window, the only place either
+        // reaches the live wire (issue #320). `used` is a TOTAL, so it rides the ONE AssistantUsage column
+        // that means "context-bearing input"; splitting it across the cache columns would double count,
+        // because downstream treats those columns as disjoint sets.
+        "usage_update" -> {
+            val used = update.long("used")
+            listOfNotNull(
+                runtimeMeta(contextWindow = update.long("size")),
+                used?.takeIf { it > 0 }?.let {
+                    AgentEvent.AssistantUsage(
+                        inputTokens = it,
+                        cacheCreationInputTokens = null,
+                        cacheReadInputTokens = null,
+                    )
+                },
+            )
+        }
+        // v1 renders no tool cards for dsh, in the LIVE path and the replay path alike — a resumed session
+        // must not look different from a live one. The state is still recorded: a permission request names
+        // only the tool-call id (fact 4), and this is the only place its subject is on the wire.
+        "tool_call", "tool_call_update" -> {
+            update.str("toolCallId")?.let { id ->
+                val previous = toolCalls[id]
+                toolCalls[id] = ToolInfo(
+                    title = update.str("title") ?: previous?.title,
+                    input = update.obj("rawInput") ?: previous?.input,
+                )
+                if (update.str("status").let { it == "completed" || it == "failed" }) toolCalls.remove(id)
+            }
+            listOf(AgentEvent.Ignored(kind))
+        }
+        else -> listOf(AgentEvent.Ignored(kind))
+    }
+
+    /** ACP ContentBlock → its text, when it is one. */
+    private fun textOf(update: JsonObject): String? =
+        update.obj("content")?.takeIf { it.str("type") == "text" }?.str("text")?.takeIf { it.isNotEmpty() }
+
+    // ---- inbound: server→client requests ----
+
+    private suspend fun handleServerRequest(
+        method: String,
+        idEl: JsonElement,
+        params: JsonObject?,
+    ): List<AgentEvent> {
+        val askId = (idEl as? JsonPrimitive)?.contentOrNull ?: idEl.toString()
+        return when (method) {
+            "session/request_permission" -> {
+                val options = params?.arr("options") ?: JsonArray(emptyList())
+                pendingApprovals[askId] = PendingApproval(idEl, options)
+                // The request carries only toolCall.toolCallId (fact 4) — the subject comes from the
+                // tool_call update we recorded earlier in this turn.
+                val toolCallId = params?.obj("toolCall")?.str("toolCallId")
+                val info = toolCallId?.let { toolCalls[it] }
+                val name = info?.title ?: params?.obj("toolCall")?.str("title") ?: "tool"
+                val input = info?.input ?: buildJsonObject { put("description", name) }
+                listOf(AgentEvent.ControlRequest(askId, name, input))
+            }
+            // We declared no fs/terminal capabilities, so nothing else should arrive. Decline explicitly:
+            // an unanswered server request hangs dsh's turn forever (it has no timeout of its own).
+            else -> {
+                log.warn("dsh unsupported server request: $method")
+                rpcRespondError(idEl, -32601, "not supported by cc-pocket")
+                emptyList()
             }
         }
-        val result = client.rpc("session.prompt", payload)
-        // A 200 with ok:false is the normal way dsh reports a refusal — never treat the HTTP status alone
-        // as success (that is how a failing session ends up looking merely silent).
-        if (result != null && result["ok"]?.toString() != "true") {
-            val why = result.obj("error")?.str("message") ?: "dsh rejected the prompt"
-            io?.inject?.invoke(syntheticError(why))
-        } else if (result == null) {
-            io?.inject?.invoke(syntheticError("could not reach the dsh local API"))
+    }
+
+    // ---- outbound: prompts ----
+
+    override suspend fun sendPrompt(text: String, images: List<ImageData>) {
+        val reserved = bootstrap.withLock {
+            when {
+                sessionId == null || !promptGate -> { pendingPrompts.addLast(Prompt(text, images)); null }
+                // A turn is in flight — dsh refuses a second prompt (fact 1), so FIFO it here and flush
+                // when the in-flight one settles.
+                promptIds.isNotEmpty() -> { promptQueue.addLast(Prompt(text, images)); null }
+                else -> reservePrompt(text)
+            }
         }
+        reserved?.let { writePrompt(it, text) }
     }
 
-    /**
-     * VISIBLE FOR TESTS ONLY. The real session id is minted by a `session.create` RPC against a live dsh
-     * host, and until one exists the ask bridge refuses every frame (fail-closed, [DshAskLedger]) — so
-     * without this a test cannot reach the mux translation path at all.
-     */
-    internal fun bindSessionForTest(id: String) {
-        sessionId = id
+    /** Allocate the request id and mark the prompt in flight — MUST run inside [bootstrap] so a racing
+     *  send/flush can never see "idle" between the decision and the registration (a double send is
+     *  exactly the `-32602 already in flight` the queue exists to prevent). */
+    private fun reservePrompt(text: String): Long = idSeq.getAndIncrement().also { promptIds[it] = text }
+
+    /** The session just opened (and any launch-time config landed): release what arrived before it. */
+    private suspend fun flushPendingPrompts() {
+        val first = bootstrap.withLock {
+            if (sessionId == null) return
+            promptGate = true
+            // Everything moves onto the one FIFO; only its head may go out, and only if no turn is
+            // running (this can be reached mid-session by a user-driven model switch).
+            promptQueue.addAll(pendingPrompts)
+            pendingPrompts.clear()
+            if (promptIds.isNotEmpty()) return@withLock null
+            promptQueue.removeFirstOrNull()?.let { reservePrompt(it.text) to it.text }
+        }
+        first?.let { (id, text) -> writePrompt(id, text) }
     }
 
-    /** VISIBLE FOR TESTS ONLY. Stands in for the `resumeId` [attach] would have taken off the spec, so the
-     *  pre-`session.create` window issue #321 closes can be exercised without a live host. */
-    internal fun bindResumeForTest(id: String) {
-        resumeId = id
+    /** The in-flight prompt settled (any stopReason, error included) — send the oldest queued one. */
+    private suspend fun flushQueuedPrompt() {
+        val next = bootstrap.withLock {
+            if (sessionId == null || promptIds.isNotEmpty()) return@withLock null
+            promptQueue.removeFirstOrNull()?.let { reservePrompt(it.text) to it.text }
+        }
+        next?.let { (id, text) -> writePrompt(id, text) }
+    }
+
+    // NOTE images ride the Prompt through the queues but are DROPPED at the write: dsh's ACP profile
+    // advertises `promptCapabilities.image = false` (probe 0.1.2-rc.1), so an image block would fail the
+    // whole prompt rather than degrade. Keeping them queued preserves the data for the day it flips.
+    private suspend fun writePrompt(id: Long, text: String) {
+        val sid = sessionId ?: return
+        rpcSend(id, "session/prompt", buildJsonObject {
+            put("sessionId", sid)
+            putJsonArray("prompt") { addJsonObject { put("type", "text"); put("text", text) } }
+        })
     }
 
     override suspend fun interrupt() {
         val sid = sessionId ?: return
-        api?.rpc("session.cancel", buildJsonObject { put("sessionId", sid) })
+        // ACP session/cancel is a NOTIFICATION; the in-flight prompt then resolves stopReason=cancelled.
+        rpcNotify("session/cancel", buildJsonObject { put("sessionId", sid) })
     }
 
-    override suspend fun renameSession(title: String): Boolean {
-        val sid = sessionId ?: return false
-        val result = api?.rpc(
-            "session.rename",
-            buildJsonObject { put("sessionId", sid); put("title", title) },
-        )
-        return result?.get("ok")?.toString() == "true"
-    }
+    /** The ACP surface has no rename (dsh names sessions itself, from the first prompt). Answering false
+     *  lets the caller fall back rather than reporting a rename that never happened. */
+    override suspend fun renameSession(title: String): Boolean = false
 
     override suspend fun respondPermission(
         askId: String,
@@ -661,27 +532,120 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         updatedInput: String?,
         denyMessage: String?,
     ) {
-        // issue #291. `remember` / `originalInput` are deliberately unused: dsh has no "always allow"
-        // (its outcome vocabulary is allowed-once / rejected, full stop), so the card is minted
-        // neverRemember and a remembered scope can never form. `denyMessage` has no counterpart either —
-        // dsh takes an outcome, not a sentence.
-        if (!asks.answer(askId, allow, updatedInput)) {
+        val pending = pendingApprovals.remove(askId) ?: run {
             log.info("dsh respondPermission($askId) had nothing pending — already resolved or withdrawn")
+            return
         }
+        // `remember` / `denyMessage` are deliberately unused: dsh offers allow-once / reject-once only
+        // (probe 0.1.2-rc.1), so a remembered scope can never form and there is no place for a sentence.
+        val optionId = pickOption(pending.options, allow)
+        val outcome = if (optionId != null) {
+            buildJsonObject { put("outcome", "selected"); put("optionId", optionId) }
+        } else {
+            buildJsonObject { put("outcome", "cancelled") } // nothing matched → cancel beats guessing
+        }
+        rpcRespondResult(pending.rpcId, buildJsonObject { put("outcome", outcome) })
+    }
+
+    /** The option whose `kind` matches the decision. Ids are dsh's own strings (`allow-once`), never ours. */
+    private fun pickOption(options: JsonArray, allow: Boolean): String? {
+        val byKind = options.mapNotNull { it as? JsonObject }
+            .mapNotNull { o -> o.str("optionId")?.let { (o.str("kind") ?: "") to it } }
+        fun of(vararg kinds: String): String? =
+            kinds.firstNotNullOfOrNull { k -> byKind.firstOrNull { it.first == k }?.second }
+        return if (allow) of("allow_once", "allow_always") else of("reject_once", "reject_always")
+    }
+
+    // ---- outbound: model / effort ----
+
+    /**
+     * Queue the `session/set_config_option` writes [model] and [effort] need, and send the first.
+     *
+     * Returns true when a write really went out, i.e. when the caller must wait for its response rather
+     * than proceeding. Nothing is sent for a value the session is ALREADY on — dsh would accept it, but
+     * an unnecessary round trip at launch delays the opening turn for nothing.
+     */
+    private suspend fun startConfigChain(model: String?, effort: String?, announce: Boolean): Boolean {
+        val sid = sessionId ?: return false
+        val writes = ArrayList<ConfigWrite>(2)
+        model?.takeIf { it.isNotBlank() && it != options.currentModel }?.let { wanted ->
+            val value = options.modelValue(wanted)
+            if (value == null) {
+                // The id is not in dsh's catalogue: say so rather than sending a value it will reject.
+                log.warn("dsh has no model option for $wanted — leaving the session's own selection")
+                if (announce) io?.inject?.invoke(syntheticNotice("⚠️ DeepSeek Harness has no model $wanted"))
+            } else {
+                writes += ConfigWrite(DshConfigOptions.MODEL, value, announce, flushAfter = false)
+            }
+        }
+        effort?.takeIf { it.isNotBlank() && it != options.currentEffort }?.let {
+            writes += ConfigWrite(DshConfigOptions.EFFORT, it, announce, flushAfter = false)
+        }
+        if (writes.isEmpty()) return false
+        // Only the LAST write opens the prompt gate; the model must land before the effort, because the
+        // valid effort levels are a property of the selected model.
+        val chain = writes.mapIndexed { i, w -> w.copy(flushAfter = i == writes.lastIndex) }
+        pendingConfig.addAll(chain.drop(1))
+        sendConfig(sid, chain.first())
+        return true
+    }
+
+    /** The remaining writes of the current chain, in order. Written from the parse pump AND from
+     *  [applySettings]'s scope launch, so it is concurrent by construction. */
+    private val pendingConfig = java.util.concurrent.ConcurrentLinkedDeque<ConfigWrite>()
+
+    private suspend fun sendConfig(sid: String, write: ConfigWrite) {
+        val id = idSeq.getAndIncrement()
+        configIds[id] = write
+        rpcSend(id, "session/set_config_option", buildJsonObject {
+            put("sessionId", sid)
+            put("configId", write.configId) // NOT optionId (fact 3)
+            put("value", write.value)
+        })
+    }
+
+    /** dsh answers a config write with the COMPLETE resulting state — that read-back, never our request,
+     *  is what the header is told. */
+    private suspend fun onConfigApplied(write: ConfigWrite, result: JsonObject?): List<AgentEvent> {
+        options = DshConfigOptions.parse(result?.arr("configOptions"), fallback = options)
+        catalog.publish(this, options)
+        val meta = runtimeMeta(model = options.currentModel, effort = options.currentEffort)
+        continueConfigChain(write)
+        return listOfNotNull(meta)
+    }
+
+    private suspend fun onConfigFailed(write: ConfigWrite, why: String): List<AgentEvent> {
+        log.warn("dsh set_config_option(${write.configId}=${write.value}) failed: $why")
+        // Only a user-driven switch says so out loud (see [ConfigWrite.announce]).
+        if (write.announce) {
+            val what = if (write.configId == DshConfigOptions.MODEL) "the model" else "the reasoning effort"
+            io?.inject?.invoke(syntheticNotice("⚠️ could not switch $what: $why"))
+        }
+        continueConfigChain(write)
+        return emptyList()
+    }
+
+    /** Send the next write of the chain, or — when this was the last one — open the prompt gate. A FAILED
+     *  write still advances: queued prompts must never be held hostage by a preference that dsh refused. */
+    private suspend fun continueConfigChain(write: ConfigWrite) {
+        val next = pendingConfig.pollFirst()
+        val sid = sessionId
+        if (next != null && sid != null) {
+            sendConfig(sid, next)
+            return
+        }
+        // End of the chain — or the session went away under it, which must not strand the queue either.
+        if (write.flushAfter || next != null) flushPendingPrompts()
     }
 
     /**
-     * dsh bakes the sandbox mode into the process environment at launch, so a MODE change needs a relaunch.
+     * A model/effort change applies to the NEXT turn — no relaunch (`session/set_config_option` is
+     * accepted at any point in a session's life). A MODE change does need one: `DSH_PERMISSION_MODE` is
+     * read at process boot and the ACP surface exposes no mode switch.
      *
-     * A MODEL/EFFORT change does not (issue #333): `session.selectModel` is accepted at any point in a
-     * session's life, so the switch is pushed live and the next turn simply runs on the new model. Sending
-     * the session through a relaunch for it would drop the dsh host, re-resume the transcript and cost the
-     * user their live context for a preference change — the exact behaviour the Claude/Codex backends avoid.
-     *
-     * The RPC is fired on the client scope rather than awaited: this method is called from the Conversation's
-     * command path, which must not block on a network round trip, and its Boolean answers only the relaunch
-     * question. The read-back rides back as a [AgentEvent.RuntimeMeta] so the header follows the truth
-     * rather than the request.
+     * The write is fired on the backend scope rather than awaited: this runs on the Conversation's command
+     * path, which must not block on IO, and the Boolean only answers the relaunch question. The read-back
+     * rides home as a [AgentEvent.RuntimeMeta], so the header follows the truth rather than the request.
      */
     override fun applySettings(mode: PermissionMode?, model: String?, effort: String?): Boolean {
         var relaunch = false
@@ -692,23 +656,18 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
         model?.let { launchModel = it }
         effort?.let { launchEffort = it }
         if (model == null && effort == null) return relaunch
-        val client = api
-        val sid = sessionId
-        // No live host yet (a lazy open that has not spawned dsh): the values are already stored above and
-        // the launch path applies them at `session.create` time.
-        if (client == null || sid == null) return relaunch
-        clientScope?.launch {
-            val settled = selectModel(client, sid, model, effort, announceFailure = true)
-            syntheticMeta(null, settled?.model, settled?.effort)?.let { io?.inject?.invoke(it) }
-        }
+        if (sessionId == null) return relaunch // stored above; the launch path applies it at session open
+        scope?.launch { startConfigChain(model, effort, announce = true) }
         return relaunch
     }
 
     override suspend fun onProcessEnded(sessionId: String?) {
-        teardownClient()
+        catalog.unpublish(this)
+        runCatching { scope?.cancel() }
+        scope = null
     }
 
-    // ---- disk ----
+    // ---- disk (unchanged by the transport switch: dsh 0.1.2 did not move or reshape the store) ----
 
     override fun transcriptDir(workdir: String): Path = DshPaths.sessionsRoot()
 
@@ -726,18 +685,17 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
             ?: ReplaySlice.EMPTY
 
     /** The RESUME SEED only — the occupancy a reopened session shows BEFORE its first new turn. Still null:
-     *  issue #320 wired the LIVE path (`assistant/message.usage` → [assistantUsage]), so the readout appears
-     *  as soon as the session answers once, but seeding it off disk means re-reading the transcript's tail
-     *  and is a separate piece of work. Null (no readout) beats a stale or wrong one. */
+     *  the LIVE path is wired (`usage_update`), so the readout appears as soon as the session answers once,
+     *  but seeding it off disk means re-reading the transcript's tail and is a separate piece of work.
+     *  Null (no readout) beats a stale or wrong one. */
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
 
     // ---- resume metadata (issue #320) ----
     //
-    // dsh states its model / effort / context window on `request/*` frames of a RUNNING request, never on
-    // the session header and never on our synthetic init. So a reopened session showed "default" with no
-    // denominator until it happened to run another turn. These three read the same facts off the same
-    // records, on disk — see [DshTranscript.resumeMeta]. No evidence ⇒ null ⇒ the phone keeps saying
-    // unknown; nothing here is inferred from a model name or from the local config.
+    // These read the model / effort / context window off the RECORDS of a running request on disk (see
+    // [DshTranscript.resumeMeta]). The live wire says the same things through `session/new`'s
+    // configOptions and `usage_update`, but only once the process is up; a reopened session shows the
+    // header before that. No evidence ⇒ null ⇒ the phone keeps saying unknown.
 
     override fun resumeModel(workdir: String, sessionId: String): String? =
         resumeMeta(workdir, sessionId).model
@@ -753,7 +711,7 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
     /** The Conversation asks for the three facts one at a time; the answer costs a full-transcript stream, so
      *  it is parsed ONCE per (file, mtime). Keyed by mtime rather than cached outright: a live session's file
      *  keeps growing, and a resume that landed on a stale parse would announce yesterday's model. */
-    private val metaCache = java.util.concurrent.ConcurrentHashMap<String, CachedMeta>()
+    private val metaCache = ConcurrentHashMap<String, CachedMeta>()
 
     private fun resumeMeta(workdir: String, sessionId: String): DshTranscript.ResumeMeta {
         val found = runCatching { DshTranscriptScanner.find(sessionId, workdir, storeRoot()) }.getOrNull()
@@ -775,50 +733,85 @@ class DshBackend(private val dshBin: String?) : AgentBackend {
 
     private fun storeRoot(): Path = storeRootForTest ?: DshPaths.sessionsRoot()
 
-    // ---- synthetic frames (our own injections, distinguished from dsh's by their `type`) ----
+    /** VISIBLE FOR TESTS ONLY: what dsh last reported as this session's model (the live IT asserts the
+     *  read-back rather than the request — see [DshBackendLiveIT]). */
+    internal fun liveModelForTest(): String? = options.currentModel
 
-    private fun syntheticInit(sid: String): String =
-        buildJsonObject { put("type", SYNTHETIC_INIT); put("sessionId", sid) }.toString()
+    /** VISIBLE FOR TESTS ONLY: stands in for the session a live handshake would have opened. */
+    internal fun bindSessionForTest(id: String, options: DshConfigOptions = DshConfigOptions.EMPTY) {
+        sessionId = id
+        this.options = options
+    }
+
+    // ---- helpers ----
+
+    /** A [AgentEvent.RuntimeMeta] only when at least one field is really present — an all-null event would
+     *  travel to the Conversation to say nothing, and blanks are dropped so a `""` can never displace a
+     *  model we already know. */
+    private fun runtimeMeta(
+        model: String? = null,
+        effort: String? = null,
+        contextWindow: Long? = null,
+    ): AgentEvent.RuntimeMeta? {
+        val m = model?.takeIf { it.isNotBlank() }
+        val e = effort?.takeIf { it.isNotBlank() }
+        val w = contextWindow?.takeIf { it > 0 }
+        return if (m == null && e == null && w == null) null else AgentEvent.RuntimeMeta(m, e, w)
+    }
 
     private fun syntheticError(message: String): String =
         buildJsonObject { put("type", SYNTHETIC_ERROR); put("message", message) }.toString()
 
-    /**
-     * The session facts we learned from an RPC rather than from an event (issue #333): the effective agent
-     * preset and the model/effort `session.models` reports. Null when there is nothing to say — an empty
-     * meta frame would travel the whole pump to change nothing.
-     *
-     * It rides the SAME injection path as every dsh event on purpose: the Conversation's single pump keeps
-     * ordering, so this can never overtake the `SessionInit` it is stamped alongside.
-     */
-    private fun syntheticMeta(agentPreset: String?, model: String?, effort: String?): String? {
-        val p = agentPreset?.takeIf { it.isNotBlank() }
-        val m = model?.takeIf { it.isNotBlank() }
-        val e = effort?.takeIf { it.isNotBlank() }
-        if (p == null && m == null && e == null) return null
-        return buildJsonObject {
-            put("type", SYNTHETIC_META)
-            p?.let { put("agentPreset", it) }
-            m?.let { put("model", it) }
-            e?.let { put("effort", it) }
-        }.toString()
-    }
-
-    /** Like [syntheticError] but WITHOUT a TurnResult: says something went wrong while leaving the turn's
-     *  state alone (issue #291 — a refused `/api/respond` leaves the dsh turn genuinely still running). */
+    /** Like [syntheticError] but WITHOUT a TurnResult: something went wrong while the turn's own state is
+     *  untouched (a refused config write leaves the session perfectly alive). */
     private fun syntheticNotice(message: String): String =
         buildJsonObject { put("type", SYNTHETIC_NOTICE); put("message", message) }.toString()
 
+    // ---- JSON-RPC 2.0 plumbing ----
+
+    private suspend fun rpcRequest(method: String, params: JsonObject?): Long {
+        val id = idSeq.getAndIncrement()
+        rpcSend(id, method, params)
+        return id
+    }
+
+    /** A request whose id was pre-allocated (see [reservePrompt] / [sendConfig] — both register first). */
+    private suspend fun rpcSend(id: Long, method: String, params: JsonObject?) {
+        write(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", id)
+            put("method", method)
+            params?.let { put("params", it) }
+        })
+    }
+
+    private suspend fun rpcNotify(method: String, params: JsonObject?) =
+        write(buildJsonObject { put("jsonrpc", "2.0"); put("method", method); params?.let { put("params", it) } })
+
+    private suspend fun rpcRespondResult(id: JsonElement, result: JsonObject) =
+        write(buildJsonObject { put("jsonrpc", "2.0"); put("id", id); put("result", result) })
+
+    private suspend fun rpcRespondError(id: JsonElement, code: Int, message: String) =
+        write(
+            buildJsonObject {
+                put("jsonrpc", "2.0"); put("id", id)
+                putJsonObject("error") { put("code", code); put("message", message) }
+            },
+        )
+
+    private suspend fun write(obj: JsonObject) { io?.writeLine(obj.toString()) }
+
     private companion object {
-        /** Namespaced so they can never collide with a real dsh frame type. */
-        const val SYNTHETIC_INIT = "cc-pocket/dsh-init"
+        /** ACP v1. dsh answers `protocolVersion: 1` (probe 0.1.2-rc.1). */
+        const val ACP_PROTOCOL_VERSION = 1
+
+        /** Namespaced so they can never collide with a real dsh frame. */
         const val SYNTHETIC_ERROR = "cc-pocket/dsh-error"
         const val SYNTHETIC_NOTICE = "cc-pocket/dsh-notice"
-        const val SYNTHETIC_META = "cc-pocket/dsh-meta"
 
-        /** Readiness window for the mux socket: comfortably longer than the client's own retry budget,
-         *  so this never gives up while that is still trying. */
-        const val READY_POLLS = 60
-        const val READY_POLL_MS = 200L
+        /** Handshake watchdog: generous, because a cold Node start plus the profile compose can take a few
+         *  seconds on a slow machine, and a false accusation of "your dsh is too old" is worse than waiting. */
+        const val HANDSHAKE_POLLS = 60
+        const val HANDSHAKE_POLL_MS = 500L
     }
 }

@@ -12,45 +12,29 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 
 /**
- * The dsh ask/approval VOCABULARY (issue #291) — pure translation, no state and no IO, so every rule below
- * is unit-testable against the real frames. [DshAskLedger] owns the pending table; [DshBackend] owns the
- * transport.
+ * The dsh ask/approval vocabulary as it appears ON DISK (issue #291; the live half retired by the dsh 0.1.2 ACP switch) — pure translation, no state
+ * and no IO, so every rule below is unit-testable against real records.
  *
- * Everything here is source-verified against dsh rc.6 (`@deepseek-ai/dsh-host-apiproxy`,
- * `dsh-user-questions`, `dsh-user-approval`, `dsh-tool-ask-user`) and the `--probe-ask` tier of
- * `scripts/probe-dsh-api.py`. Four facts drive the shapes and each one fails as a silent `bad-response`
- * if ignored:
+ * SCOPE: this is now the REPLAY half only. The live half spoke the `web` profile's `question/requested` /
+ * `approval/requested` frames and answered them over `/api/respond`; dsh 0.1.2-rc.1 removed that API and
+ * its ACP replacement carries approvals as `session/request_permission` instead (see [DshBackend]). Old
+ * transcripts still hold the records below, so reading them stays this file's job — and the shapes stay
+ * source-verified against rc.6 (`dsh-user-questions`, `dsh-user-approval`, `dsh-tool-ask-user`).
  *
- *  1. **The answer vocabulary is the option LABEL, verbatim.** Not an index, not an option id — dsh
- *     validates every entry of `selected` against `options[].label` and rejects the whole response
- *     otherwise. There is no option id on the wire at all.
- *  2. **A question is answered as a WHOLE BATCH, positionally, with matching ids.** dsh requires
- *     `answers.length == questions.length` and `answers[i].id == questions[i].id`. Answering only the
- *     questions the human actually picked is rejected — an unanswered one rides as `selected: []`, which
- *     is exactly what dsh's own web UI sends for a skipped question.
- *  3. **`custom` and `selected` are mutually exclusive on a SINGLE-select question** (and `selected` is
- *     capped at one entry there); on a multi-select they may ride together. A blank `custom` is rejected.
- *  4. **The approval id is spelled differently on the wire and on disk.** `approvalId` in the
- *     `approval/requested` / `approval/resolved` frames and in the `/api/respond` payload; plain `id` in
- *     the `approval/asked` / `approval/decided` session records. Same value, two names.
+ * Two facts drive what is left, and both are easy to get wrong from the wire's spelling alone:
+ *
+ *  1. **The answer vocabulary is the option LABEL, verbatim** — not an index and not an option id; there
+ *     is no option id on this wire at all, so a replayed answer is matched back by label text.
+ *  2. **The approval id is spelled differently on the wire and on disk.** `approvalId` in the frames;
+ *     plain `id` in the `approval/asked` / `approval/decided` session records. Same value, two names.
  */
 internal object DshAsk {
 
     /** dsh's own name for the question tool, as it appears in `tool/call.name` on disk. */
     const val QUESTION_TOOL = "ask_user_question"
 
-    /** The only two outcomes a CLIENT may send. `cancelled` / `unavailable` are host-minted and are
-     *  rejected as `bad-response` if a client tries to claim them. dsh has NO "always allow". */
+    /** The outcome a decided approval carries in its durable record. dsh has NO "always allow". */
     const val OUTCOME_ALLOW = "allowed-once"
-    const val OUTCOME_REJECT = "rejected"
-
-    /** askId namespace, mirroring the shell service's `sh-` convention. The rpcId follows it verbatim. */
-    const val ASK_ID_PREFIX = "dsh-"
-
-    fun askIdOf(rpcId: String): String = ASK_ID_PREFIX + rpcId
-
-    /** The rpcId inside an askId we minted, or null for an askId that was never ours. */
-    fun rpcIdOf(askId: String): String? = askId.removePrefix(ASK_ID_PREFIX).takeIf { it != askId && it.isNotEmpty() }
 
     data class Option(val label: String, val description: String?)
 
@@ -96,112 +80,6 @@ internal object DshAsk {
                 },
             )
         }
-    }
-
-    /**
-     * The Claude-shaped `AskUserQuestion` tool input, so [dev.ccpocket.daemon.agent.AskQuestions.parse]
-     * builds the protocol's `AskQuestion` list with the code every other backend already uses. dsh's
-     * question `id` is deliberately absent — it never goes to the phone.
-     */
-    fun askQuestionInput(questions: List<Question>): JsonObject = buildJsonObject {
-        putJsonArray("questions") {
-            questions.forEach { q ->
-                addJsonObject {
-                    put("question", q.question)
-                    q.header?.let { put("header", it) }
-                    if (q.multiSelect) put("multiSelect", true)
-                    putJsonArray("options") {
-                        q.options.forEach { opt ->
-                            addJsonObject {
-                                put("label", opt.label)
-                                opt.description?.let { put("description", it) }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /** The approval ask's tool input. dsh sends NO tool arguments with an approval — only the model's own
-     *  `reason` for wanting the escalation, which is the sentence a human actually needs. Put under
-     *  `description` because that is the generic key [dev.ccpocket.daemon.agent.ToolMetadata] previews. */
-    fun approvalInput(reason: String?, callId: String?): JsonObject = buildJsonObject {
-        reason?.takeIf { it.isNotBlank() }?.let { put("description", it) }
-        callId?.let { put("callId", it) }
-    }
-
-    // ---- outbound: verdict → `/api/respond` value ----
-
-    /**
-     * `{sessionId, answer:{answers:[…]}}` for a question verdict.
-     *
-     * [answers] is the protocol's question-TEXT → answer-string map; [response] is the card's "reply
-     * instead of answering" free text, which applies to every question that has no pick of its own.
-     * The answer string is the phone's comma-joined form ("Red, Blue", or an "Other…" text appended
-     * last), so each part is matched against the question's real labels: what matches rides in
-     * `selected`, whatever is left over is the human's own words and rides in `custom`.
-     *
-     * ALWAYS one entry per question, in question order — see rule 2 in the class comment.
-     */
-    fun answerValue(
-        sessionId: String?,
-        questions: List<Question>,
-        answers: Map<String, String>?,
-        response: String?,
-    ): JsonObject {
-        val freeform = response?.trim()?.takeIf { it.isNotEmpty() }
-        return buildJsonObject {
-            sessionId?.let { put("sessionId", it) }
-            put(
-                "answer",
-                buildJsonObject {
-                    putJsonArray("answers") {
-                        questions.forEach { q ->
-                            val raw = answers?.get(q.question)?.trim()?.takeIf { it.isNotEmpty() }
-                            addJsonObject { putAnswer(q, raw ?: freeform) }
-                        }
-                    }
-                },
-            )
-        }
-    }
-
-    /** One `{id, selected, custom?}` entry, obeying dsh's single-vs-multi exclusivity rules. */
-    private fun kotlinx.serialization.json.JsonObjectBuilder.putAnswer(q: DshAsk.Question, raw: String?) {
-        put("id", q.id)
-        if (raw == null) { // skipped / unanswered — dsh's own UI sends exactly this
-            putJsonArray("selected") {}
-            return
-        }
-        val labels = q.options.map { it.label }
-        // Whole-string match first: a label may legitimately contain ", " and splitting would destroy it.
-        val exact = raw in labels
-        val parts = if (exact) listOf(raw) else raw.split(", ").map { it.trim() }.filter { it.isNotEmpty() }
-        val picked = parts.filter { it in labels }.distinct()
-        val leftover = parts.filterNot { it in labels }.joinToString(", ").takeIf { it.isNotEmpty() }
-        // Single-select: `custom` and `selected` may not ride together, and `selected` holds at most one.
-        // The human's own words win when there are any — a typed "Other…" answer is what they meant, and
-        // silently dropping it to keep a partially-matched label would answer a question they didn't.
-        if (!q.multiSelect) {
-            if (leftover != null) {
-                putJsonArray("selected") {}
-                put("custom", leftover)
-            } else {
-                putJsonArray("selected") { picked.take(1).forEach { add(it) } }
-            }
-            return
-        }
-        putJsonArray("selected") { picked.forEach { add(it) } }
-        leftover?.let { put("custom", it) }
-    }
-
-    /** `{sessionId, approvalId, outcome}` for an approval verdict. dsh validates BOTH ids, so both are
-     *  echoed from the request that minted the card rather than re-derived. */
-    fun approvalValue(sessionId: String?, approvalId: String, allow: Boolean): JsonObject = buildJsonObject {
-        sessionId?.let { put("sessionId", it) }
-        put("approvalId", approvalId)
-        put("outcome", if (allow) OUTCOME_ALLOW else OUTCOME_REJECT)
     }
 
     // ---- disk replay helpers ----
@@ -271,16 +149,4 @@ internal object DshAsk {
     private fun JsonPrimitive.contentOrNullSafe(): String? = if (isString) content else content.takeIf { it != "null" }
 
     private const val MAX_ANSWER_CHARS = 2000
-}
-
-/** What `/api/respond` said. `reason` is dsh's own word — `not-pending` (someone else claimed it, or the
- *  turn was cancelled) is a BENIGN race; `bad-response` means WE built the wrong shape and is a bug the
- *  user must be told about rather than a silence. */
-data class DshRespond(val accepted: Boolean, val reason: String?) {
-    val benign: Boolean get() = accepted || reason == NOT_PENDING
-
-    companion object {
-        const val NOT_PENDING = "not-pending"
-        val UNREACHABLE = DshRespond(false, "unreachable")
-    }
 }

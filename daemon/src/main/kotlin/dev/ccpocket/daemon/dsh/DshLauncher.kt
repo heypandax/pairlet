@@ -7,13 +7,18 @@ import java.io.File
 import java.nio.file.Path
 
 /**
- * Resolves the `dsh` (DeepSeek Harness) executable and builds its `--profile web` launch command
- * (issue #255).
+ * Resolves the `dsh` (DeepSeek Harness) executable and builds its `--profile acp` launch command
+ * (issue #255, re-transported for dsh 0.1.2).
  *
- * WHY THE WEB PROFILE: dsh rc.6 ships no ACP server, and its SDK JSON-RPC mode has no cancel, no resume
- * and no approval callback — so the only channel that can carry a real interactive session is the local
- * HTTP/WebSocket API the `web` profile serves. The daemon runs it on loopback and speaks to it directly;
- * the browser UI it also serves is never opened. See [DshApiClient] for the protocol side.
+ * WHY THE ACP PROFILE: this backend originally drove the `web` profile's local HTTP/WebSocket API,
+ * because dsh rc.6 shipped no ACP server and its SDK JSON-RPC mode had no cancel, no resume and no
+ * approval callback. dsh 0.1.2-rc.1 ended both facts at once: it replaced that local API wholesale
+ * (`dsh-host-apiproxy` → the Typert gateway: `/api/<ns>/<method>`, a bidirectional `/api/remote.mux`
+ * socket, and a signed browser cookie minted from a launch token on EVERY /api request — the old client
+ * cannot even connect) and it added `--profile acp`, a standard Agent Client Protocol v1 server on
+ * stdio with session create/resume/cancel, model selection and permission requests. Speaking the
+ * documented protocol is both less code and far less exposed to dsh's internals; see [DshBackend].
+ * Behaviors are pinned by `scripts/probe-dsh-acp.py`, which must be re-run after every dsh upgrade.
  */
 object DshLauncher {
     private val log = logger("DshLauncher")
@@ -55,70 +60,69 @@ object DshLauncher {
         )
 
     /**
-     * `dsh --profile web --port 0`, bound to loopback.
+     * `dsh --profile acp` — the ACP v1 stdio server, spoken over the child's own stdin/stdout.
      *
-     * PORT 0 IS DELIBERATE: dsh's web profile accepts `--port 0` to mean "let the OS pick a free one",
-     * then prints the bound URL on stdout (see [parseBootPort]). Pre-reserving a port ourselves with a
-     * throwaway `ServerSocket(0)` would introduce a TOCTOU window in which anything else on the machine
-     * could take it between our close and dsh's bind; reading back the port dsh ACTUALLY bound has no
-     * such race. `--host` is left at its default (127.0.0.1) — dsh rejects `0.0.0.0` outright, and
-     * loopback is what the browser-trust fence wants anyway.
+     * STDIN IS THE UPLINK, so it is deliberately NOT redirected (the web profile took none and this
+     * used to point at /dev/null — under ACP that reads as an immediate client disconnect and dsh shuts
+     * down cleanly, i.e. the session would die at launch with no error anywhere). Stdout carries ONLY
+     * protocol frames; dsh keeps its logs on stderr, which [dev.ccpocket.daemon.agent.AgentProcess]
+     * drains separately.
      *
-     * PERMISSION MODE is seeded through `DSH_PERMISSION_MODE` (default `workspace-write`). This is the
-     * BOOT-TIME default only: dsh records mode changes as durable log events (`sandbox/mode`,
-     * `approval/policy`, `permission/preset`) and a `/permission <preset>` inside the chat will move it
-     * for the rest of the session. The daemon does not drive that in v1 — but nothing here should be
-     * read as "the mode is pinned for the session's life", because it is not.
+     * PERMISSION MODE is seeded through `DSH_PERMISSION_MODE` (default `workspace-write`) — the base
+     * profile's `sandbox-policy` and `approval/policy` rows both read that variable at boot
+     * (source-verified, dsh 0.1.2-rc.1). It is the BOOT-TIME default: ACP exposes no mode-switch method,
+     * so [DshBackend] relaunches to change it.
      *
      * NO CREDENTIALS ARE PASSED. dsh reads `DEEPSEEK_API_KEY` from the environment or
      * `~/.dsh/.credentials.yaml` itself; the daemon deliberately does not manage, forward or store the
      * user's key.
      */
     fun processBuilder(exe: Path, spec: AgentSpec, permissionMode: String): ProcessBuilder {
-        val argv = listOf(
-            exe.toString(),
-            "--profile", "web",
-            "--port", "0",
-        )
+        val argv = listOf(exe.toString(), "--profile", PROFILE)
         log.info("launch argv: ${argv.joinToString(" ")} (cwd=${spec.workdir})")
         return ProcessBuilder(argv).apply {
             directory(spec.workdir.toFile())
-            redirectErrorStream(false)
-            redirectInput(ProcessBuilder.Redirect.from(File(if (isWindows) "NUL" else "/dev/null")))
+            redirectErrorStream(false) // keep dsh's own logs off the stdout ACP stream
             val env = environment()
             env["DSH_PERMISSION_MODE"] = permissionMode
             env.putIfAbsent("LANG", "C.UTF-8")
         }
     }
 
+    /** The profile whose app IS the ACP server. Shipped since dsh 0.1.2-rc.1 ([MIN_VERSION]). */
+    const val PROFILE = "acp"
+
+    /** First dsh release carrying `--profile acp` (and the release that broke the old `web`-profile
+     *  local API this backend used to drive — see [DshBackend]). Quoted in the user-facing hints. */
+    const val MIN_VERSION = "0.1.2-rc.1"
+
     /**
-     * Recover the bound port from dsh's boot line, which reads
-     * `dsh web: http://127.0.0.1:53124` (optionally followed by ` (LAN: …)`).
+     * Translate a launch failure's stderr into something a user can act on, or null when it says nothing
+     * we recognize.
      *
-     * Returns null for every other stdout line, so the caller can simply offer it each line until it
-     * answers. Matching is anchored on the loopback authority rather than on the `dsh web:` prefix so a
-     * banner reword upstream doesn't silently strand us with no port.
+     *  - **Too-old dsh.** `--profile acp` on a pre-0.1.2 install boots a profile whose bundle list has no
+     *    app in it: nothing ever claims stdio and the handshake simply never answers. That is also the
+     *    exact symptom of the release that broke the old web transport, so it is worth naming the version.
+     *  - **Too-old Node.** dsh requires Node ≥ 22.12; under an older one the failure surfaces as an opaque
+     *    syntax/engine error.
      */
-    fun parseBootPort(line: String): Int? =
-        BOOT_PORT_RE.find(line)?.groupValues?.getOrNull(1)?.toIntOrNull()?.takeIf { it in 1..65535 }
-
-    private val BOOT_PORT_RE = Regex("""https?://(?:127\.0\.0\.1|localhost|\[::1]):(\d{1,5})""")
-
-    /** dsh requires Node ≥ 22.12. When it is launched through a too-old Node the failure surfaces as an
-     *  opaque syntax/engine error on stderr, so translate the well-known spellings into something a user
-     *  can act on. Returns null when [stderr] is not a Node-version complaint. */
-    fun nodeVersionHint(stderr: String?): String? {
+    fun launchHint(stderr: String?): String? {
         val s = stderr?.lowercase() ?: return null
         val looksLikeEngineFailure = "unsupported engine" in s ||
             ("node" in s && ("requires" in s || "engine" in s)) ||
             "unexpected token" in s || "syntaxerror" in s
-        return if (looksLikeEngineFailure) {
-            "DeepSeek Harness requires Node.js 22.12 or newer — upgrade Node, or point --dsh-bin at a " +
+        if (looksLikeEngineFailure) {
+            return "DeepSeek Harness requires Node.js 22.12 or newer — upgrade Node, or point --dsh-bin at a " +
                 "dsh installed under a newer runtime."
-        } else {
-            null
         }
+        val looksLikeMissingProfile = "profile" in s && ("acp" in s || "unknown" in s || "no app" in s)
+        return if (looksLikeMissingProfile) outdatedHint() else null
     }
+
+    /** What to tell a user whose dsh cannot serve ACP at all. */
+    fun outdatedHint(): String =
+        "this DeepSeek Harness has no `acp` profile — cc-pocket needs dsh $MIN_VERSION or newer " +
+            "(npm i -g @deepseek-ai/dsh@latest, Node >= 22.12)."
 
     /** Default permission ceiling for a dsh session. `workspace-write` matches dsh's own default. */
     const val DEFAULT_PERMISSION_MODE = "workspace-write"
