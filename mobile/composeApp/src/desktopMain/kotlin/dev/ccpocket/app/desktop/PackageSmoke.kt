@@ -16,6 +16,12 @@ internal fun runPackageSmoke(successMarker: String? = null) {
     check(ModuleLayer.boot().findModule("java.net.http").isPresent) {
         "packaged runtime is missing java.net.http"
     }
+    // HTML preview initializes these only on first use. A development JVM has them even when
+    // jlink silently drops them from the app image; keep this check in the packaged-image smoke.
+    for (module in listOf("java.scripting", "jdk.jsobject", "jdk.unsupported.desktop", "jdk.xml.dom")) {
+        check(ModuleLayer.boot().findModule(module).isPresent) { "packaged HTML preview is missing $module" }
+    }
+    Class.forName("javafx.scene.web.WebEngine", false, Thread.currentThread().contextClassLoader)
     // Initializing the Kotlin object constructs its JDK HttpClient. Class loading alone is the exact
     // boundary that used to throw `Could not initialize class ...ReleaseClient` before any network I/O.
     Class.forName(

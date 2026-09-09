@@ -156,4 +156,31 @@ class ImageZoomStateTest {
         assertEquals(640f, b.contentWidth)
         assertEquals(480f, b.contentHeight)
     }
+
+    @Test
+    fun focused_zoom_keeps_the_image_point_under_the_finger_while_panning() {
+        val s = ImageZoomState()
+        s.transformAt(2f, 0f, 0f, bounds, focusX = 650f, focusY = 300f)
+        assertEquals(-150f, s.offsetX)
+        assertEquals(100f, s.offsetY)
+        s.transformAt(1.25f, 25f, -35f, bounds, focusX = 650f, focusY = 300f)
+        // The original point (150,-100) relative to the image centre stays at focus + pan.
+        assertEquals(675f, 500f + s.offsetX + 150f * s.scale)
+        assertEquals(265f, 400f + s.offsetY - 100f * s.scale)
+    }
+
+    @Test
+    fun zooming_at_the_scale_limit_does_not_move_the_image() {
+        val s = ImageZoomState()
+        s.transformAt(99f, 0f, 0f, bounds, focusX = 100f, focusY = 100f)
+        val x = s.offsetX
+        val y = s.offsetY
+        s.transformAt(99f, 0f, 0f, bounds, focusX = 100f, focusY = 100f)
+        assertEquals(x, s.offsetX)
+        assertEquals(y, s.offsetY)
+        s.transformAt(0.001f, 0f, 0f, bounds, focusX = 100f, focusY = 100f)
+        assertEquals(0f, s.offsetX)
+        assertEquals(0f, s.offsetY)
+        assertTrue(s.atRest)
+    }
 }

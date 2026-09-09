@@ -13,7 +13,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.hoverable
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -62,7 +61,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -249,7 +247,7 @@ fun rememberWrapState(): WrapState = remember { WrapState(mutableStateOf(false),
  *  lines to wrap (markdown already reflows, images/binaries have none). */
 fun wrapApplies(diffTab: Boolean, diff: FileDiff?, content: FileContent?, ext: String, isImage: Boolean): Boolean =
     if (diffTab) diff?.ok == true
-    else content?.ok == true && content.base64 == null && !isImage && ext !in markdownExts
+    else content?.ok == true && content.base64 == null && !isImage && ext !in markdownExts && !isHtmlExtension(ext)
 
 /** The header's quiet soft-wrap toggle: a wrap-text glyph in a 30dp square, filled with a faint accent
  *  when ON. Shares the export chips' hover lift so it reads as a control on desktop; the glyph stays
@@ -488,17 +486,20 @@ private fun DiffLineRow(line: DiffLine, dense: Boolean, wrap: Boolean, hScroll: 
 // ── the shared viewer surface (mobile full-screen viewer + desktop Changes pane) ──
 
 /** The [ Diff | File ] selection (true = Diff), with the shared default + auto-flip policy: images
- *  land on File (no text diff), everything else on Diff; a diff that comes back empty-for-real
+ *  and HTML land on File, everything else on Diff; a diff that comes back empty-for-real
  *  (not the stale-daemon state) flips to File — except deleted files, where the diff is the only
  *  thing left to show. */
 @Composable
 fun rememberDiffTab(path: String, isImage: Boolean, deleted: Boolean, diff: FileDiff?): MutableState<Boolean> {
-    val tab = remember(path) { mutableStateOf(!isImage) }
+    val tab = remember(path) { mutableStateOf(defaultDiffTab(path, isImage, deleted)) }
     LaunchedEffect(diff) {
         if (tab.value && diff != null && !diff.ok && !diff.staleDaemon && !deleted) tab.value = false
     }
     return tab
 }
+
+internal fun defaultDiffTab(path: String, isImage: Boolean, deleted: Boolean): Boolean =
+    !isImage && (deleted || !isHtmlPath(path))
 
 /** 回复已到、但这个文件没有逐行改动可看（≠「还在加载」，也≠「daemon 太旧」）。「全部」视角点开
  *  一个本会话没改过的文件，走的就是这条——查看器落到全文、Diff 段置灰。 */
@@ -573,7 +574,7 @@ fun DiffEmptyState(glyph: String, title: String, caption: String?) {
     }
 }
 
-/** The File tab's whole body — the original full-content view: markdown via [MarkdownText] (selectable,
+/** The File tab's whole body: HTML via the embedded browser, markdown via [MarkdownText] (selectable,
  *  issue #95), base64 images, everything else as selectable highlighted monospace that reflows when
  *  [wrap] is on (else it pans horizontally). [dense] = desktop metrics. [exportSlot] renders under a
  *  failed read's reason — the mobile viewer docks its "request export" entry / waiting row there
@@ -615,10 +616,7 @@ fun FileTabBody(
                 val bytes = remember(content.base64) { runCatching { Base64.Default.decode(content.base64!!) }.getOrNull() }
                 val bmp = bytes?.let { rememberImageBitmap(it) }
                 when {
-                    bmp != null -> Image(
-                        bmp, contentDescription = null, contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize().padding(12.dp),
-                    )
+                    bmp != null -> FileImagePreview(bmp, content.path)
                     // documents & other binaries (issues #67/#79): no inline rendering — hand the
                     // bytes to the platform's native preview / share-save gesture instead
                     bytes != null -> DocumentCard(content.path, bytes, content.mediaType, content.totalBytes, dense)
@@ -628,6 +626,7 @@ fun FileTabBody(
                     )
                 }
             }
+            isHtmlExtension(ext) -> HtmlFileBody(content, dense)
             else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
                 if (content.truncated) Text(
                     stringResource(Res.string.file_truncated, (content.text?.length ?: 0) / 1024, (content.totalBytes / 1024).toInt()),

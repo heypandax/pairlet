@@ -48,6 +48,23 @@ class ImageZoomState(
         clamp(bounds)
     }
 
+    /** Zoom around a point in the UNTRANSFORMED viewport (pinch centre, pointer, or button zoom).
+     * Account for the effective scale at the limits, so further pinching at max zoom cannot drift.
+     * Keeping gesture coordinates outside the scaled image also makes a 20px drag move it by 20px. */
+    fun transformAt(
+        zoomDelta: Float, panX: Float, panY: Float, bounds: ZoomBounds,
+        focusX: Float = bounds.viewportWidth / 2f,
+        focusY: Float = bounds.viewportHeight / 2f,
+    ) {
+        val ratio = (scale * zoomDelta).coerceIn(minScale, maxScale) / scale
+        transform(
+            zoomDelta,
+            panX + (offsetX - (focusX - bounds.viewportWidth / 2f)) * (ratio - 1f),
+            panY + (offsetY - (focusY - bounds.viewportHeight / 2f)) * (ratio - 1f),
+            bounds,
+        )
+    }
+
     /** Double tap: zoom out to rest if zoomed at all, else jump to [doubleTapScale] centered. */
     fun toggleDoubleTap(bounds: ZoomBounds) {
         if (atRest) {

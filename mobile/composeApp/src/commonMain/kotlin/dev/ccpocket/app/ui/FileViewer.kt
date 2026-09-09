@@ -226,8 +226,8 @@ private fun ChangedFileRow(f: ChangedFile, onClick: () -> Unit) {
 
 /**
  * Full-screen viewer for one changed file (replaces the chat screen like [TerminalScreen] does).
- * Default tab is the line-level Diff (design handoff, Screen 2); the File tab keeps the original
- * full-content view. The panes and the tab policy are the shared pieces in DiffView.kt; content
+ * HTML and images open on File; other changed files default to the line-level Diff. The File tab
+ * renders HTML in an embedded browser. The panes and tab policy are shared in DiffView.kt; content
  * state lives in the repo ([PocketRepository.viewedFile] + [PocketRepository.viewedFileDiff]), so
  * a reply landing after a reconnect still finds its way here.
  */

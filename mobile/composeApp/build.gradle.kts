@@ -84,6 +84,18 @@ kotlin {
             implementation(libs.jediterm.core)
             implementation(libs.jediterm.ui)
             implementation(libs.pty4j)
+            // Embedded HTML preview: WebKit via JavaFX, bundled for this build host (no first-use
+            // runtime download). Explicit classifiers avoid Maven's OS profile choosing x64 on ARM.
+            val os = System.getProperty("os.name").lowercase()
+            val arm = System.getProperty("os.arch") in setOf("aarch64", "arm64")
+            val javafxPlatform = when {
+                os.contains("mac") -> if (arm) "mac-aarch64" else "mac"
+                os.contains("win") -> "win"
+                else -> if (arm) "linux-aarch64" else "linux"
+            }
+            listOf("base", "graphics", "controls", "media", "web", "swing").forEach { module ->
+                implementation("org.openjfx:javafx-$module:21.0.12:$javafxPlatform") { isTransitive = false }
+            }
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
@@ -158,7 +170,9 @@ compose.desktop {
             // ReleaseClient uses JDK HttpClient. Compose's automatic jdeps pass misses that dependency
             // through the KMP protocol jar, so v1.9.0 shipped a seven-module runtime without java.net.http
             // and update checks failed before touching the network (#305).
-            modules("java.net.http")
+            // WebKit/JFXPanel also reach JDK modules that jdeps misses through their native/reflective
+            // paths. In particular, SwingInterOpUtils lives in jdk.unsupported.desktop, not java.desktop.
+            modules("java.net.http", "java.scripting", "jdk.jsobject", "jdk.unsupported", "jdk.unsupported.desktop", "jdk.xml.dom")
             // User-visible app name (Finder / Dock / taskbar). Release artifacts keep the cc-pocket-desktop-* names —
             // the release scripts rename the jpackage output, but local paths ARE affected: the bundle is now
             // "CC Pocket.app" / app/CC Pocket (see scripts/update-local-desktop.sh and build-windows.yml).
