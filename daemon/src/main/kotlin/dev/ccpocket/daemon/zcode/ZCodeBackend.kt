@@ -33,7 +33,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * ZCode 3.7.6's persistent `app-server --stdio` backend (issue #228). Its wire is strict newline-delimited
+ * ZCode's persistent `app-server --stdio` backend (issue #228; wire probed on 3.7.6, re-verified against the
+ * official 3.11.2 bundle). Its wire is strict newline-delimited
  * ZCode Protocol — JSON request/response envelopes WITHOUT JSON-RPC's `jsonrpc` member. The runtime
  * accepts one foreground `session/send` at a time, so prompts after the first are held in a per-process
  * FIFO and settled only by the authoritative `turn.started.payload.input` receipt.
@@ -42,6 +43,8 @@ class ZCodeBackend(
     private val zcodeBin: String?,
     private val modelService: ZCodeModelService = ZCodeModelService(),
     private val executable: () -> Path = { ZCodeLauncher.resolveExecutable(zcodeBin) },
+    /** Injectable so the open path can be exercised without touching the real ZCode session store. */
+    private val storedModel: (String) -> String? = ZCodeTranscriptScanner::resumeModel,
 ) : AgentBackend {
     private val log = logger("ZCodeBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -128,13 +131,22 @@ class ZCodeBackend(
         }
         openId = nextId()
         val method = if (resumeId == null) "session/create" else "session/resume"
+        // The runtime resolves an unqualified model against ~/.zcode/cli/config.json, which ZCode 3.9+ no
+        // longer writes — every open would fail with ModelConfigMissing. Carry the provider inline instead,
+        // exactly as the official desktop shell does. On resume the stored model wins over the default so we
+        // register the provider the session actually runs on, not whichever one happens to be first.
+        val selected = model?.trim()?.takeIf { it.isNotEmpty() }
+            ?: resumeId?.let(storedModel)
+            ?: modelService.defaultModel()
         val params = buildJsonObject {
             resumeId?.let { put("sessionId", it) }
             putJsonObject("workspace") { put("workspacePath", workdir); put("workspaceKey", workdir) }
             if (resumeId == null) {
                 put("mode", zcodeMode(mode))
-                modelRef(model)?.let { put("model", it) }
+                modelRef(selected)?.let { put("model", it) }
             }
+            // Last: this is the only field carrying a provider credential (see ZCodeProviderCatalog).
+            modelService.runtimeModel(selected)?.let { put("runtimeModel", it) }
         }
         send(openId, method, params)
     }

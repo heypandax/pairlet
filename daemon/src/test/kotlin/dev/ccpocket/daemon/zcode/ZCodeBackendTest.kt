@@ -572,4 +572,51 @@ class ZCodeBackendTest {
         assertTrue(result.isError)
         assertEquals("toolu_1", result.toolUseId)
     }
+
+    @Test
+    fun `session create carries the provider inline so the runtime never reads cli config json`() = runBlocking {
+        val config = kotlin.io.path.createTempFile("zcode-open", ".json")
+        config.toFile().writeText(
+            """{"provider":{"acme":{"kind":"anthropic","source":"custom",
+               "options":{"apiKey":"sk-redacted","baseURL":"https://llm.example.test/v1"},
+               "models":{"glm-5.3":{"limit":{"context":1000,"output":100}}}}}}""",
+        )
+        val writes = mutableListOf<String>()
+        val backend = ZCodeBackend(
+            null,
+            modelService = ZCodeModelService(config),
+            executable = { Path.of("/fake/zcode") },
+            storedModel = { null },
+        )
+        backend.attach(AgentIo({ writes += it }, {}), AgentSpec(Path.of("/repo")))
+        val params = (json.parseToJsonElement(writes.withMethod("session/create")) as JsonObject)["params"] as JsonObject
+        // Without runtimeModel the 3.9+ runtime resolves the model against ~/.zcode/cli/config.json — a file
+        // the desktop no longer writes — and answers ModelConfigMissing before the first prompt.
+        val runtime = params["runtimeModel"] as JsonObject
+        assertEquals("""{"providerId":"acme","modelId":"glm-5.3"}""", runtime["model"].toString())
+        assertEquals("acme", ((params["model"] as JsonObject)["providerId"]).toString().trim('"'))
+    }
+
+    @Test
+    fun `resume registers the provider of the session's stored model, not the default`() = runBlocking {
+        val config = kotlin.io.path.createTempFile("zcode-resume", ".json")
+        config.toFile().writeText(
+            """{"provider":{
+               "acme":{"kind":"anthropic","options":{"apiKey":"sk-a"},"models":{"glm-5.3":{}}},
+               "other":{"kind":"anthropic","options":{"apiKey":"sk-b"},"models":{"glm-4.7":{}}}}}""",
+        )
+        val writes = mutableListOf<String>()
+        val backend = ZCodeBackend(
+            null,
+            modelService = ZCodeModelService(config),
+            executable = { Path.of("/fake/zcode") },
+            storedModel = { "other/glm-4.7" },
+        )
+        backend.attach(AgentIo({ writes += it }, {}), AgentSpec(Path.of("/repo"), resumeId = "sess_1"))
+        val params = (json.parseToJsonElement(writes.withMethod("session/resume")) as JsonObject)["params"] as JsonObject
+        val runtime = params["runtimeModel"] as JsonObject
+        assertEquals("""{"providerId":"other","modelId":"glm-4.7"}""", runtime["model"].toString())
+        // session/resume has no `model` member in the runtime's strict schema — the stored session wins.
+        assertFalse(params.containsKey("model"))
+    }
 }
