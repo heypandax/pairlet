@@ -2,76 +2,70 @@ package dev.ccpocket.daemon.dsh
 
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AgentKind
-import dev.ccpocket.protocol.AgentPresetInfo
 import dev.ccpocket.protocol.ModelCapabilities
 import dev.ccpocket.protocol.ModelsList
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
+import java.io.BufferedReader
+import java.io.File
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * The DeepSeek Harness model + agent-preset catalogue (issue #333), read from dsh's OWN host RPCs
- * rather than guessed from a config file.
+ * The DeepSeek Harness model + reasoning-effort catalogue (issue #333, re-sourced by the dsh 0.1.2 ACP switch), read from dsh's OWN ACP
+ * answer rather than guessed from a config file.
  *
- * ```
- *   llm.models       → {groups:[{id:<provider>, name, models:[{id, name, reasoning:{efforts:[{id,name}],
- *                                                                                  defaultEffort}}]}], failures}
- *   agentPreset.list → {presets:[{id, trust:"system"|"user", isDefault, name, description}],
- *                       authorable, hasDocument}
- * ```
- * Both are HOST-level and need NO session (probe-verified against dsh 0.1.0-rc.6 on 2026-09-07), which is
- * what makes a catalogue read possible before the user has opened anything. `llm.discoverModels` is NOT
- * used: it demands a `settingsNs` argument and re-probes a provider's remote endpoint, i.e. it is the
- * "go ask the network" call, not the "what do I have" one.
+ * On the ACP surface the catalogue is a property of a SESSION: `session/new` and `session/resume` return
+ * `configOptions` describing the selectable models and effort levels, and there is no host-level
+ * "what do you have" method to ask instead (the `llm.models` RPC this class used to call lived on the web
+ * profile's local API, which dsh 0.1.2-rc.1 removed — see [DshBackend]). So:
  *
- * ## Two sources, in this order
+ *  1. **A live session's read-back.** If the daemon is already driving a dsh conversation, its own
+ *     `configOptions` are free, current, and describe the very session the user is about to change
+ *     ([DshCatalog]).
+ *  2. **A throwaway ACP client.** Otherwise boot `dsh --profile acp`, handshake, open ONE session in a
+ *     scratch directory, read its options and kill the process. This costs a Node start-up, which is why
+ *     the answer is cached for [CACHE_TTL_MS].
  *
- *  1. **A live host.** If the daemon is already driving a dsh session, its [DshApiClient] answers these
- *     RPCs directly ([DshHosts]). Free, instant, and it avoids a second dsh process transiently touching
- *     the same `$DSH_HOME` store.
- *  2. **A throwaway host.** Otherwise boot `dsh --profile web --port 0`, ask, and kill it. This costs a
- *     Node start-up, which is exactly why the answer is cached for [CACHE_TTL_MS].
- *
- * The transient host deliberately does NOT open the mux WebSocket — [DshApiClient.start] is never called.
- * RPC is plain HTTP; a catalogue read has no events to receive, and opening a downlink we would
- * immediately abandon is the kind of thing that leaves a host holding a subscription for a client that
- * is already gone.
+ * The scratch directory is deliberate: `session/new` needs a cwd and dsh persists every session it
+ * creates, so pointing this at a real project would litter that project's session list with empty rows.
+ * A temp dir keys the throwaway session under a project nobody browses (see [DshPaths.projectKey]).
  *
  * ## What "no answer" means
  *
  * Every failure path returns `ModelsList(agent = DSH, error = …)` — an empty list with no reason is how a
- * picker ends up silently blank, which is the state issue #255 shipped and #333 replaces. Only SUCCESS is
- * cached: a dsh that was mid-upgrade for one fetch must not be remembered as broken for ten minutes.
+ * picker ends up silently blank. Only SUCCESS is cached: a dsh that was mid-upgrade for one fetch must
+ * not be remembered as broken for ten minutes.
  *
  * ## Model ids on the wire
  *
- * The wire id is dsh's OWN model name (`deepseek-v4-pro`), never `provider/model`. dsh's
- * `session.selectModel` takes provider and model as SEPARATE arguments, and [DshBackend] re-joins the
- * provider from the SESSION's own `session.models` listing at selection time — which is also the listing
- * that decides, so the join can never go stale against this cache. Encoding the provider into the id
- * would leak a daemon-internal join into [dev.ccpocket.protocol.SessionLive.model], the model chip and
- * the session header — all of which show the raw string to the user.
+ * The wire id is the bare dsh model name (`deepseek-v4-pro`), never `provider/model` and never dsh's
+ * opaque `["provider","model"]` selection value — [DshConfigOptions] owns that join, on both sides, so
+ * a daemon-internal encoding can never leak into the model chip or the session header.
+ *
+ * ## Agent presets are gone
+ *
+ * The ACP surface exposes no agent-preset axis (dsh: "modes, commands, plans, terminals and elicitation
+ * remain outside this automation surface"), so no `agentPresets` are advertised any more. An empty list
+ * means the pickers show no preset row — which is honest, where offering one we cannot select was not.
  */
 class DshModelService(
     private val dshBin: String? = null,
-    /** A host we are already driving; null = none open, boot a throwaway one. */
-    private val liveRpc: () -> DshRpc? = { DshHosts.first() },
-    /** Seam for tests: opens a throwaway host, or null when one cannot be started. */
-    private val transientHost: suspend () -> TransientHost? = { bootTransient(dshBin) },
+    /** A session we are already driving; null = none open, boot a throwaway client. */
+    private val liveOptions: () -> DshConfigOptions? = { DshCatalog.current() },
+    /** Seam for tests: reads a catalogue from a throwaway dsh, or null when one cannot be started. */
+    private val transientRead: suspend () -> DshConfigOptions? = { bootTransient(dshBin) },
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
     private val log = logger("DshModelService")
-
-    /** A throwaway dsh host: something to ask, and a way to stop it. */
-    class TransientHost(val rpc: DshRpc, val close: () -> Unit)
 
     private data class Cached(val at: Long, val list: ModelsList)
 
@@ -79,8 +73,8 @@ class DshModelService(
 
     /**
      * Serializes [fetch]. Without it two pickers opening at once (the phone's and the desktop's, or one
-     * user tapping twice) each miss the empty cache and each BOOT A dsh HOST — two Node processes against
-     * the same `$DSH_HOME`, both then thrown away. The fast path below still answers a warm cache with no
+     * user tapping twice) each miss the empty cache and each BOOT A dsh — two Node processes against the
+     * same `$DSH_HOME`, both then thrown away. The fast path below still answers a warm cache with no
      * locking at all; only an actual catalogue read queues, and the loser re-reads the cache the winner
      * just filled rather than repeating the work.
      */
@@ -89,7 +83,6 @@ class DshModelService(
     suspend fun fetch(): ModelsList {
         cache?.takeIf(::fresh)?.let { return it.list }
         return gate.withLock {
-            // Re-check under the lock: whoever we queued behind has almost certainly just filled it.
             cache?.takeIf(::fresh)?.let { return@withLock it.list }
             readCatalogue()
         }
@@ -98,24 +91,16 @@ class DshModelService(
     private fun fresh(c: Cached): Boolean = nowMs() - c.at < CACHE_TTL_MS
 
     private suspend fun readCatalogue(): ModelsList {
-        val live = runCatching { liveRpc() }.getOrNull()
-        if (live != null) {
-            // A live host that refuses is reported as-is: it is the user's real dsh, and booting a second
-            // one to contradict it would report a catalogue the open session is not actually using.
-            // ONE attempt: a host we are already driving is known-good, so a null answer is a real
-            // carrier failure, not the boot window the retry loop below exists for.
-            return remember(read(live, attempts = 1))
-        }
-        val host = runCatching { transientHost() }.getOrElse {
+        // A live session's own answer wins: it is the user's real dsh, and booting a second one to
+        // contradict it would report a catalogue the open session is not actually using.
+        runCatching { liveOptions() }.getOrNull()?.let { return remember(toList(it)) }
+        val options = runCatching { transientRead() }.getOrElse {
             return failure("could not start DeepSeek Harness to read its models: ${it.message}")
-        } ?: return failure("could not start DeepSeek Harness to read its models")
-        return try {
-            remember(read(host.rpc, attempts = RPC_ATTEMPTS))
-        } finally {
-            // ALWAYS, cancellation included: a leaked throwaway host is a Node process holding the user's
-            // $DSH_HOME open for the rest of the daemon's life.
-            runCatching { host.close() }
-        }
+        } ?: return failure(
+            "could not start DeepSeek Harness to read its models — cc-pocket needs dsh " +
+                "${DshLauncher.MIN_VERSION} or newer (npm i -g @deepseek-ai/dsh@latest).",
+        )
+        return remember(toList(options))
     }
 
     private fun remember(list: ModelsList): ModelsList {
@@ -128,161 +113,111 @@ class DshModelService(
         return ModelsList(agent = AgentKind.DSH, error = why)
     }
 
-    /** Both catalogue RPCs, folded into one [ModelsList]. */
-    private suspend fun read(rpc: DshRpc, attempts: Int): ModelsList {
-        val models = rpc.call("llm.models", attempts)
-            ?: return failure("DeepSeek Harness did not answer llm.models")
-        val groups = models.arr("groups").orEmpty()
-        val ids = LinkedHashSet<String>()
-        val caps = mutableListOf<ModelCapabilities>()
-        for (group in groups) {
-            val g = group as? JsonObject ?: continue
-            // The group id IS the provider. It is not carried onto the wire — [DshBackend] re-joins it from
-            // the session's own listing at selection time — but a model routed by two providers must still
-            // appear ONCE, or the picker shows the user a duplicate row.
-            g.str("id") ?: continue
-            for (entry in g.arr("models").orEmpty()) {
-                val m = entry as? JsonObject ?: continue
-                val id = m.str("id")?.takeIf { it.isNotBlank() } ?: continue
-                if (!ids.add(id)) continue
-                val reasoning = m.obj("reasoning")
-                val efforts = reasoning?.arr("efforts").orEmpty()
-                    .mapNotNull { (it as? JsonObject)?.str("id")?.takeIf(String::isNotBlank) }
-                val default = reasoning?.str("defaultEffort")?.takeIf { it.isNotBlank() }
-                if (efforts.isNotEmpty() || default != null) {
-                    caps += ModelCapabilities(
-                        model = id,
-                        reasoningEfforts = efforts,
-                        defaultReasoningEffort = default,
-                    )
-                }
-            }
+    /** One session's advertised options → the picker's rows. */
+    private fun toList(options: DshConfigOptions): ModelsList {
+        if (options.models.isEmpty()) {
+            return failure("DeepSeek Harness listed no models — check its provider configuration.")
         }
-        if (ids.isEmpty()) {
-            // dsh reports per-provider failures rather than throwing, and an empty catalogue with no
-            // reason is indistinguishable from "the picker is broken". Quote its own words.
-            val why = models.arr("failures").orEmpty()
-                .mapNotNull { (it as? JsonObject)?.str("message") ?: (it as? JsonObject)?.str("error") }
-                .firstOrNull()
-            return failure(
-                why?.let { "DeepSeek Harness listed no usable models: $it" }
-                    ?: "DeepSeek Harness listed no models — check its provider configuration.",
-            )
-        }
-        // Presets degrade INDEPENDENTLY: a dsh build without agentPreset.list still has a model picker,
-        // and failing the whole fetch over the newer of the two RPCs would take the older one down with it.
-        // One attempt: llm.models just answered, so the host is up — a null here means this dsh has no
-        // such method, not that it is still booting.
-        val presets = runCatching { rpc.call("agentPreset.list", attempts = 1) }.getOrNull()
-            ?.let(::presetRows).orEmpty()
+        val efforts = options.efforts.map { it.id }
         return ModelsList(
             agent = AgentKind.DSH,
-            models = ids.toList(),
-            modelCapabilities = caps,
-            agentPresets = presets,
+            models = options.models.map { it.id },
+            // dsh advertises ONE effort ladder per session, not per model — but the current model is the
+            // only one it was advertised for, so it rides as that model's capability AND as the
+            // backend-wide list, which is what a picker with no selection yet can use.
+            supportedEfforts = efforts,
+            modelCapabilities = options.currentModel
+                ?.takeIf { efforts.isNotEmpty() }
+                ?.let {
+                    listOf(
+                        ModelCapabilities(
+                            model = it,
+                            reasoningEfforts = efforts,
+                            defaultReasoningEffort = options.currentEffort,
+                        ),
+                    )
+                }
+                .orEmpty(),
         )
     }
 
-    private fun presetRows(value: JsonObject): List<AgentPresetInfo> =
-        value.arr("presets").orEmpty().mapNotNull { entry ->
-            val p = entry as? JsonObject ?: return@mapNotNull null
-            val id = p.str("id")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            AgentPresetInfo(
-                id = id,
-                // dsh calls them name/description; the wire calls them label/detail. Verbatim either way —
-                // dsh ships localized copy ("标准模式") and translating it here would be inventing text.
-                label = p.str("name")?.takeIf { it.isNotBlank() } ?: id,
-                detail = p.str("description")?.takeIf { it.isNotBlank() },
-                // `trust` is dsh's own provenance marker: "system" = shipped with the CLI, "user" = authored
-                // by the human in `$DSH_HOME/.agent-presets/`. Both spellings are probe-verified in the
-                // rc.6 bundle. ANYTHING ELSE — the field being ABSENT included — counts as custom: only an
-                // explicit "system" is dsh vouching for a preset as its own. The safer way to be wrong is
-                // to tag a shipped row "yours" rather than to pass the user's own preset off as shipped.
-                // It labels a row; it gates nothing.
-                custom = p.str("trust") != "system",
-                recommended = p.bool("isDefault") ?: false,
-            )
-        }
-
     private companion object {
-        /** Long enough that opening the picker twice does not boot dsh twice; short enough that a preset
-         *  the user just authored in `$DSH_HOME/.agent-presets/` shows up without restarting the daemon. */
+        /** Long enough that opening the picker twice does not boot dsh twice; short enough that a model
+         *  a user just configured shows up without restarting the daemon. */
         const val CACHE_TTL_MS = 10 * 60 * 1000L
 
-        /** dsh prints its bound port once the LISTENER is up, a moment before its routes finish mounting —
-         *  the same window [DshApiClient] retries across. */
-        const val RPC_ATTEMPTS = 20
-        const val RPC_RETRY_MS = 250L
+        /** A cold Node start plus dsh's profile compose; generous because the alternative is a blank picker. */
         const val BOOT_TIMEOUT_MS = 60_000L
 
-        /** Unwrap one RPC to its `value`, retrying the boot window, or null on a carrier/business failure. */
-        suspend fun DshRpc.call(method: String, attempts: Int): JsonObject? {
-            repeat(attempts) { attempt ->
-                val result = rpc(method, buildJsonObject { })
-                if (result != null) {
-                    // A business error is dsh's verdict and will not improve by asking again.
-                    return if (result["ok"]?.toString() == "true") result.obj("value") else null
-                }
-                // The budget is the gap BETWEEN tries: sleeping after the LAST one delays nothing but the
-                // caller's failure (here, 250ms added to every "dsh is not reachable" answer).
-                if (attempt < attempts - 1) delay(RPC_RETRY_MS)
-            }
-            return null
-        }
+        private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
         /**
-         * Boot `dsh --profile web --port 0`, wait for its banner, and hand back an RPC seam plus a killer.
+         * Boot `dsh --profile acp`, handshake, open one scratch session, read its `configOptions`, kill it.
          *
-         * The child's stdout is drained on a daemon thread for its whole life: dsh keeps logging, and a
-         * full pipe buffer would wedge the process we are about to ask a question of.
+         * The child is OURS to kill from the moment it starts: every exit — a timeout, a throw, a
+         * cancelled fetch — must take the process with it, or a Node host outlives the request holding
+         * `$DSH_HOME` open with nobody left who knows how to close it.
          */
-        suspend fun bootTransient(dshBin: String?): TransientHost? = withContext(Dispatchers.IO) {
+        suspend fun bootTransient(dshBin: String?): DshConfigOptions? = withContext(Dispatchers.IO) {
             val exe = DshLauncher.resolveExecutable(dshBin)
-            val proc = ProcessBuilder(exe.toString(), "--profile", "web", "--port", "0")
-                .redirectErrorStream(true)
-                .redirectInput(
-                    ProcessBuilder.Redirect.from(
-                        java.io.File(if (System.getProperty("os.name").lowercase().contains("win")) "NUL" else "/dev/null"),
-                    ),
-                )
+            val scratch = kotlin.io.path.createTempDirectory("cc-pocket-dsh-models").toFile()
+            val proc = ProcessBuilder(exe.toString(), "--profile", DshLauncher.PROFILE)
+                .directory(scratch)
+                .redirectErrorStream(false) // dsh logs on stderr; stdout is exclusively ACP frames
                 .also { it.environment().putIfAbsent("LANG", "C.UTF-8") }
                 .start()
-            val portFuture = java.util.concurrent.CompletableFuture<Int>()
+            val answers = CompletableFuture<JsonObject>()
+            Thread {
+                // Drain stderr for the child's whole life: a full pipe buffer would wedge the process we
+                // are about to ask a question of.
+                runCatching { proc.errorStream.bufferedReader().forEachLine { } }
+            }.apply { isDaemon = true; name = "dsh-models-stderr" }.start()
             Thread {
                 runCatching {
-                    proc.inputStream.bufferedReader().forEachLine { line ->
-                        if (!portFuture.isDone) DshLauncher.parseBootPort(line)?.let(portFuture::complete)
+                    proc.inputStream.bufferedReader().use { reader: BufferedReader ->
+                        reader.forEachLine { line ->
+                            val root = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject
+                            val result = root?.obj("result") ?: return@forEachLine
+                            // The session answer is the one carrying configOptions; initialize's has none.
+                            if (result.arr("configOptions") != null && !answers.isDone) answers.complete(result)
+                        }
                     }
                 }
-                portFuture.complete(0) // stdout closed without a banner — unblock the waiter
-            }.apply { isDaemon = true; name = "dsh-catalogue-stdout" }.start()
-            // From here the child is OURS to kill. Every exit that is not a successfully returned
-            // TransientHost — a cancelled fetch, a boot timeout, a throw while building the client — must
-            // take the process with it, or a Node host outlives the request holding $DSH_HOME open with
-            // nobody left who knows how to close it.
+                answers.complete(JsonObject(emptyMap())) // stdout closed with no answer — unblock the waiter
+            }.apply { isDaemon = true; name = "dsh-models-stdout" }.start()
             try {
-                val port = runCatching {
-                    portFuture.get(BOOT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                }.getOrDefault(0)
-                if (port <= 0) {
-                    proc.destroyForcibly()
-                    return@withContext null
+                val writer = proc.outputStream.bufferedWriter()
+                fun send(obj: JsonObject) {
+                    writer.write(obj.toString()); writer.write("\n"); writer.flush()
                 }
-                // No mux: start() is deliberately never called (see the class KDoc). The scope is only the
-                // client's constructor contract and owns nothing here.
-                val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-                val client = DshApiClient(port, scope, onFrame = {}, onFatal = {})
-                TransientHost(
-                    rpc = { m, p -> client.rpc(m, p) },
-                    close = {
-                        runCatching { client.close() }
-                        runCatching { scope.cancel() }
-                        proc.destroyForcibly()
+                send(
+                    buildJsonObject {
+                        put("jsonrpc", "2.0"); put("id", 1); put("method", "initialize")
+                        putJsonObject("params") {
+                            put("protocolVersion", 1)
+                            putJsonObject("clientCapabilities") {
+                                putJsonObject("fs") { put("readTextFile", false); put("writeTextFile", false) }
+                            }
+                        }
                     },
                 )
-            } catch (t: Throwable) {
-                proc.destroyForcibly()
-                throw t
+                // No need to wait for the initialize response: dsh answers requests in order, and a
+                // session/new arriving behind an unfinished handshake is queued, not refused.
+                send(
+                    buildJsonObject {
+                        put("jsonrpc", "2.0"); put("id", 2); put("method", "session/new")
+                        putJsonObject("params") {
+                            put("cwd", scratch.absolutePath)
+                            putJsonArray("mcpServers") {}
+                        }
+                    },
+                )
+                val result = runCatching { answers.get(BOOT_TIMEOUT_MS, TimeUnit.MILLISECONDS) }.getOrNull()
+                val options = result?.arr("configOptions")?.let { DshConfigOptions.parse(it) }
+                options?.takeIf { !it.isEmpty }
+            } finally {
+                runCatching { proc.destroyForcibly() }
+                runCatching { scratch.deleteRecursively() }
             }
         }
     }

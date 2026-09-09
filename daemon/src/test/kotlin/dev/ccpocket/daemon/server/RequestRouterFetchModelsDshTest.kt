@@ -5,9 +5,8 @@ import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
+import dev.ccpocket.daemon.dsh.DshConfigOptions
 import dev.ccpocket.daemon.dsh.DshModelService
-import dev.ccpocket.daemon.dsh.DshRpc
-import dev.ccpocket.daemon.dsh.DshTranscript
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.session.SessionRegistry
@@ -22,7 +21,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -59,11 +59,11 @@ class RequestRouterFetchModelsDshTest {
         )
     }
 
-    private fun service(answers: Map<String, String>) = DshModelService(
-        liveRpc = {
-            DshRpc { method, _ -> answers[method]?.let { DshTranscript.json.parseToJsonElement(it) as JsonObject } }
+    private fun service(configOptions: String?) = DshModelService(
+        liveOptions = {
+            configOptions?.let { DshConfigOptions.parse(Json.parseToJsonElement(it) as JsonArray) }
         },
-        transientHost = { null },
+        transientRead = { null },
     )
 
     /** FetchModels is answered off-pump (`scope.launch(Dispatchers.IO)`) — await the single reply. */
@@ -76,13 +76,11 @@ class RequestRouterFetchModelsDshTest {
     fun a_dsh_fetch_is_answered_by_the_dsh_model_service_with_real_rows() = runBlocking {
         val emitted = mutableListOf<Frame>()
         val svc = service(
-            mapOf(
-                "llm.models" to """{"ok":true,"value":{"groups":[{"id":"deepseek-official","name":"DeepSeek",
-                    "models":[{"id":"deepseek-v4-pro","name":"Pro","reasoning":{"efforts":[{"id":"off"},
-                    {"id":"high"},{"id":"max"}],"defaultEffort":"high"}}]}],"failures":[]}}""",
-                "agentPreset.list" to """{"ok":true,"value":{"presets":[{"id":"standard","trust":"system",
-                    "isDefault":true,"name":"标准模式"}],"authorable":true,"hasDocument":true}}""",
-            ),
+            """[{"id":"model","currentValue":"[\"deepseek-official\",\"deepseek-v4-pro\"]",
+                 "options":[{"group":"deepseek-official","options":[
+                   {"value":"[\"deepseek-official\",\"deepseek-v4-pro\"]","name":"Pro"}]}]},
+                {"id":"reasoning_effort","currentValue":"high","options":[
+                   {"value":"off"},{"value":"high"},{"value":"max"}]}]""",
         )
         router(CoroutineScope(Dispatchers.Default), svc)
             .handle(FetchModels(AgentKind.DSH), { synchronized(emitted) { emitted += it } })
@@ -91,7 +89,7 @@ class RequestRouterFetchModelsDshTest {
         assertEquals(AgentKind.DSH, list.agent)
         assertNull(list.error, "the #255 placeholder text must be gone")
         assertEquals(listOf("deepseek-v4-pro"), list.models)
-        assertEquals(listOf("standard"), list.agentPresets.map { it.id })
+        assertEquals(listOf("off", "high", "max"), list.supportedEfforts)
         assertEquals(listOf("off", "high", "max"), list.modelCapabilities.single().reasoningEfforts)
     }
 
@@ -99,7 +97,7 @@ class RequestRouterFetchModelsDshTest {
     @Test
     fun an_unreachable_dsh_still_answers_the_frame_with_a_reason() = runBlocking {
         val emitted = mutableListOf<Frame>()
-        router(CoroutineScope(Dispatchers.Default), service(emptyMap()))
+        router(CoroutineScope(Dispatchers.Default), service(null))
             .handle(FetchModels(AgentKind.DSH), { synchronized(emitted) { emitted += it } })
 
         val list = awaitReply(emitted) as ModelsList
