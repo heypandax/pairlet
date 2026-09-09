@@ -1,11 +1,13 @@
 package dev.ccpocket.app.desktop
 
 import dev.ccpocket.app.ui.PathOpener
+import dev.ccpocket.app.ui.markdownExts
 import java.io.File
 
 /**
- * Opens transcript paths on THIS machine: folders open in Finder / Explorer, files reveal inside
- * their folder (mac `open -R`; elsewhere the parent directory opens). exists() gates linkification
+ * Opens transcript paths on THIS machine: Markdown goes to [onPreviewMarkdown] when the desktop shell
+ * provides it; folders open in Finder / Explorer and other files reveal inside their folder
+ * (mac `open -R`; elsewhere the parent directory opens). exists() gates linkification
  * upstream, so paths from a remote machine's session simply never become links here.
  *
  * [baseDir] is the session's working directory (issue #74): a RELATIVE transcript path like
@@ -17,7 +19,10 @@ import java.io.File
  * other machine" case degrades to plain text (no dead-clicking), matching [TerminalLauncher]'s
  * locality contract.
  */
-class DesktopPathOpener(private val baseDir: String? = null) : PathOpener {
+class DesktopPathOpener(
+    private val baseDir: String? = null,
+    private val onPreviewMarkdown: ((File) -> Unit)? = null,
+) : PathOpener {
     private val mac = System.getProperty("os.name").lowercase().contains("mac")
 
     private fun expandTilde(path: String): String =
@@ -47,6 +52,11 @@ class DesktopPathOpener(private val baseDir: String? = null) : PathOpener {
 
     override fun open(path: String) {
         val f = resolve(path)
+        if (!f.exists()) return
+        if (f.isFile && f.extension.lowercase() in markdownExts && onPreviewMarkdown != null) {
+            onPreviewMarkdown.invoke(f.absoluteFile.normalize())
+            return
+        }
         runCatching {
             when {
                 mac && f.isFile -> ProcessBuilder("open", "-R", f.absolutePath).start()

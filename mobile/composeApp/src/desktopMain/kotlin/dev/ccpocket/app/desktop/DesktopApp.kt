@@ -88,6 +88,7 @@ fun DesktopApp(
         )
     }
     val density = LocalDensity.current
+    val filePreview = remember(model) { DesktopFilePreviewState() }
     // One silent update check per launch (issue #200), extending the existing #87 checker rather than
     // adding a channel: it only ever moves updateState, never downloads — applying stays a click in
     // Settings ▸ About. Delayed so it can't compete with connect/first paint, and guarded on Idle so a
@@ -130,7 +131,7 @@ fun DesktopApp(
         // drag-to-split: the one gesture state shared between the sidebar (where a drag starts) and the
         // chat columns (where it lands). Provided here so every row below can reach the same instance.
         val drag = remember { SplitDragState() }
-        CompositionLocalProvider(LocalSplitDrag provides drag) {
+        CompositionLocalProvider(LocalSplitDrag provides drag, LocalDesktopFilePreview provides filePreview) {
         Row(Modifier.fillMaxSize()) {
             // Collapsed = ZERO chrome on this edge (desktop chrome v2): the old reveal strip is gone, and
             // with it the hairline that used to stand in for the missing sidebar. The way back is the
@@ -149,6 +150,8 @@ fun DesktopApp(
                     onCollapse = { model.setSidebarCollapsed(true) },
                 )
             }
+            DesktopFilePreviewLayout(filePreview, Modifier.weight(1f)) {
+            Row(Modifier.fillMaxSize()) {
             val watch = model.watch
             val split = model.sidePanes
             when {
@@ -200,6 +203,8 @@ fun DesktopApp(
             if (dockedWf != null) {
                 Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
                 WorkflowPanel(model, dockedWf)
+            }
+            }
             }
         }
         }

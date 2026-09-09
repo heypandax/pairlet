@@ -2,6 +2,7 @@ package dev.ccpocket.app.desktop
 
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -11,6 +12,23 @@ import kotlin.test.assertTrue
  * otherwise the link never forms (exists() false) or opens the wrong file.
  */
 class DesktopPathOpenerTest {
+
+    @Test
+    fun markdownLinksOpenResolvedFilesInThePreview() {
+        val base = kotlin.io.path.createTempDirectory("ccpocket-preview").toFile()
+        try {
+            val document = File(base, "会议/材料.MD").apply { parentFile.mkdirs(); writeText("# 标题") }
+            val longExtension = File(base, "guide.markdown").apply { writeText("正文") }
+            val opened = mutableListOf<File>()
+            val opener = DesktopPathOpener(base.path, opened::add)
+            opener.open("会议/材料.MD")
+            opener.open(longExtension.absolutePath)
+            opener.open("missing.md")
+            assertEquals(listOf(document, longExtension), opened)
+        } finally {
+            base.deleteRecursively()
+        }
+    }
 
     @Test
     fun relativePathResolvesAgainstBaseDir() {

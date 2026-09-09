@@ -311,7 +311,10 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
     // wrote about. remember(chatWorkdir) keeps one opener per cwd so pathLinked()'s per-text memo (and
     // the opener's own exists() cache) survive recomposition. A remote session's cwd isn't local, so
     // those relative paths fail exists() and stay plain — no dead links.
-    val pathOpener = remember(model.chatWorkdir) { DesktopPathOpener(model.chatWorkdir) }
+    val filePreview = LocalDesktopFilePreview.current
+    val pathOpener = remember(model.chatWorkdir, filePreview) {
+        DesktopPathOpener(model.chatWorkdir, onPreviewMarkdown = filePreview?.let { it::open })
+    }
     CompositionLocalProvider(LocalPathOpener provides pathOpener, LocalPathCwd provides model.chatWorkdir) {
     // Drag a file anywhere over THIS pane and it arms as a drop target (issue #90, design:
     // desktop-attach.jsx) — the sidebar deliberately does not participate. Dropped images join the
