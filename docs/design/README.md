@@ -8,6 +8,7 @@ cc-pocket 移动端设计资料，**统一采用 claude.ai/design**。Stitch 的
 |---|---|
 | `UI-DESIGN.md` | 设计规格：设计系统 ／ 7 屏逐屏 ／ 组件 ／ 状态 ／ 无障碍 ＋ i18n ／ §10 可粘贴生成 prompt |
 | `CLAUDE-DESIGN-PROMPT.md` | 喂给 claude.ai/design 的开场 + 逐屏 prompt（生成本设计所用） |
+| [DESKTOP-UI-OPTIMIZATION-EVALUATING.md](DESKTOP-UI-OPTIMIZATION-EVALUATING.md) | **桌面端 UI 优化方向，评估中** —— 基于用户提供的 ChatGPT App 与 CC Pocket 截图，整理整页信息层级、执行摘要、导航识别、阅读排版与状态表达的优化方向、优先级和验收方法；尚未冻结视觉规格或进入实现 |
 | `claude-design-handoff/` | **设计版本本体** —— claude.ai/design 的 Handoff bundle：7 屏 `.html/.jsx` + 设计对话 `chats/` + `README`（coding agent 落地指引） |
 | `REVIEW-REQUEST.md` | **任务上下文交接，后续实现依据** —— 围绕 MR / 文档发送异步评审请求；接收者使用自己的 Agent 和本地上下文。App / 桌面端 Review Center 是一等控制面（建联、发送、收件、回复），CLI 与 Skill 是它的对等入口；三者共用 daemon 的同一套 service，两个 UI 全关之后投递、重试和历史照常运转 |
 | `SESSION-HANDOFF.md` | **运行时上下文交接，现有能力继续保留** —— 接收者在发起人电脑的原始 Session、代码和运行状态上接续；适合远程协助与联合调试 |
