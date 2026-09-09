@@ -13,7 +13,7 @@ plugins {
 // Single source of truth for the app version: the Android versionName AND the in-app "About" version both
 // derive from this (the latter via the generated constant below, so it can never drift — which is how it
 // got stuck at 0.1.0). Keep in lockstep with the iOS CFBundleShortVersionString in iosApp/iosApp/Info.plist.
-val appVersionName = "1.9.7"
+val appVersionName = "1.9.8"
 
 // Emit a commonMain constant from [appVersionName] so the displayed version always matches the build.
 val generateAppVersion by tasks.registering {
@@ -127,7 +127,7 @@ android {
         applicationId = "com.panda.ccpocket" // matches the iOS bundle id + the Firebase google-services.json client
         minSdk = libs.versions.androidMinSdk.get().toInt()
         targetSdk = libs.versions.androidTargetSdk.get().toInt()
-        versionCode = 29
+        versionCode = 30
         versionName = appVersionName // single source of truth (see top); lockstep with iOS CFBundleShortVersionString
     }
     // release signing comes from ~/.gradle/gradle.properties (CCPOCKET_KEYSTORE*) — keys never
@@ -177,7 +177,7 @@ compose.desktop {
             // the release scripts rename the jpackage output, but local paths ARE affected: the bundle is now
             // "CC Pocket.app" / app/CC Pocket (see scripts/update-local-desktop.sh and build-windows.yml).
             packageName = "CC Pocket"
-            packageVersion = "1.9.7"
+            packageVersion = "1.9.8"
             windows {
                 iconFile.set(project.file("desktop-icons/cc-pocket.ico"))
             }
