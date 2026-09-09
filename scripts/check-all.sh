@@ -42,7 +42,7 @@ if [[ "${1:-}" == "--affected" ]]; then
       echo "✅ --affected：改动不涉及测试模块（$(echo "$changed" | head -3 | tr '\n' ' ')…），无需跑测试"
       exit 0
     fi
-    echo "── --affected（基线 $base）→ ${tasks[*]} ──"
+    echo "── --affected（基线 ${base}）→ ${tasks[*]} ──"
   fi
 fi
 mobile_targets="Desktop"
