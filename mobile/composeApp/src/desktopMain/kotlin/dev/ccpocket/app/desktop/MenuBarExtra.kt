@@ -27,8 +27,6 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.rememberWindowState
 import dev.ccpocket.app.resources.Res
-import dev.ccpocket.app.resources.tray_exit_app
-import dev.ccpocket.app.resources.tray_open_app
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import java.awt.BasicStroke
@@ -60,8 +58,8 @@ import org.jetbrains.skiko.currentSystemTheme
  * Compose [Window] packed to the popover's content, anchored under the click (macOS) or above it
  * (bottom taskbars), dismissed on focus loss / Esc; ⌘⏎ raises the main window. The popover renders the
  * SAME [TrayPopover] the title-bar dot shows in-window — one surface, promoted to the OS layer.
- * Windows additionally gets a right-click menu drawn by the OS ([trayContextMenu]) and a transparent
- * flyout shell so the 8dp corners can actually read ([trayWindowChrome]) — both issue #322.
+ * On Windows the RIGHT button opens that same flyout ([trayOpensOn]), plus a transparent flyout
+ * shell so the 8dp corners can actually read ([trayWindowChrome]) — both issue #322.
  *
  * Headless / unsupported trays (Linux without a tray, CI) compose to nothing, so every other platform
  * behavior is unchanged.
@@ -132,7 +130,11 @@ internal fun MenuBarExtra(
         // so writing the anchor state here is safe
         val mouse = object : java.awt.event.MouseAdapter() {
             override fun mousePressed(e: java.awt.event.MouseEvent) {
-                if (e.button == java.awt.event.MouseEvent.BUTTON1) toggle(e.xOnScreen, e.yOnScreen)
+                if (trayOpensOn(isWindows, e.button, TrayClickPhase.PRESSED)) toggle(e.xOnScreen, e.yOnScreen)
+            }
+
+            override fun mouseReleased(e: java.awt.event.MouseEvent) {
+                if (trayOpensOn(isWindows, e.button, TrayClickPhase.RELEASED)) toggle(e.xOnScreen, e.yOnScreen)
             }
         }
         val action = java.awt.event.ActionListener {
@@ -151,47 +153,6 @@ internal fun MenuBarExtra(
         }
     }
 
-    // ── 右键：Windows 的原生上下文菜单（issue #322） ──
-    // stringResource 是 composable，effect 里调不了，所以文案先在组合作用域取出来，再当 key 用
-    // （换语言 → 菜单重建；托盘图标本身不重挂，避免语言开关顺带让通知区图标闪一下）。
-    val openLabel = stringResource(Res.string.tray_open_app)
-    val exitLabel = stringResource(Res.string.tray_exit_app)
-    val menuSpec = trayContextMenu(isWindows, openLabel, exitLabel, canExit = onExitApplication != null)
-    // 菜单项活得比一次组合长，回调用 rememberUpdatedState 取最新的一份，避免钉死首次组合的闭包
-    val activate by rememberUpdatedState(onActivateWindow)
-    val exitApp by rememberUpdatedState(onExitApplication)
-    DisposableEffect(menuSpec) {
-        val items = menuSpec ?: return@DisposableEffect onDispose { }
-        // PopupMenu 在 headless 下构造即抛 HeadlessException；这里已被 supported 挡住，兜底照 file 里
-        // 其它 AWT 调用的写法用 runCatching，起不来就当没有右键菜单，左键那条路不受影响
-        val built = runCatching {
-            val menu = java.awt.PopupMenu()
-            val wired = items.map { item ->
-                val mi = java.awt.MenuItem(item.label)
-                val l = java.awt.event.ActionListener {
-                    anchor = null // 右键选中即收起左键浮层——两条路不该同时占着屏幕
-                    closedAt = System.currentTimeMillis()
-                    when (item.action) {
-                        TrayMenuAction.OPEN_MAIN -> activate()
-                        TrayMenuAction.EXIT_APP -> exitApp?.invoke()
-                    }
-                }
-                mi.addActionListener(l)
-                menu.add(mi)
-                mi to l
-            }
-            trayIcon.popupMenu = menu
-            menu to wired
-        }.getOrNull()
-        onDispose {
-            if (built != null) {
-                val (menu, wired) = built
-                trayIcon.popupMenu = null // 先摘引用，AWT 才肯放掉 popup 的 isTrayIconPopup 标记
-                wired.forEach { (mi, l) -> mi.removeActionListener(l) }
-                menu.removeAll()
-            }
-        }
-    }
     // every redraw asks the OS afresh; an appearance flip alone lands on the next state change or click
     LaunchedEffect(spec, appearancePing) { trayIcon.image = menuBarImage(spec, darkMenuBar = menuBarIsDark()) }
 
@@ -333,40 +294,30 @@ internal const val WIN_FLYOUT_SHADOW_GUTTER = WIN_FLYOUT_GAP
 internal fun hostIsWindows(): Boolean =
     System.getProperty("os.name").orEmpty().lowercase().contains("windows")
 
-// ── 托盘右键菜单（issue #322） ────────────────────────────────────────────────────────────────────
+// ── 托盘右键（issue #322） ────────────────────────────────────────────────────────────────────────
 
-/** 右键菜单一项对应的出口。 */
-internal enum class TrayMenuAction { OPEN_MAIN, EXIT_APP }
-
-/** 右键菜单的一项：[label] 已本地化，[action] 是它落到哪个出口。 */
-internal data class TrayMenuItem(val action: TrayMenuAction, val label: String)
+/** 一次点击的两个相位——右键按 Win32 惯例在抬起时才算数，见 [trayOpensOn]。 */
+internal enum class TrayClickPhase { PRESSED, RELEASED }
 
 /**
- * 托盘图标右键该弹什么 —— **纯函数**，因为另一半（[java.awt.PopupMenu]）在 headless 下构造即抛，
- * 测不了；把「挂不挂、挂哪几项」的决策搬到 AWT 之外，至少这一半是可断言的。
+ * 托盘图标上的这一下该不该开浮层 —— **纯函数**，因为另一半（AWT 的鼠标事件）在 headless 下根本不来，
+ * 测不了；把「哪个键、哪个相位算数」的决策搬到 AWT 之外，至少这一半是可断言的。
  *
- * `null` = **一个 popupMenu 都不挂**。issue #322 的边界写死「不改 macOS／Linux 行为」：mac 菜单栏图标
- * 的右键由系统给（等同左键那套），Linux 各家托盘实现也自带右键语义，硬塞一个 AWT 菜单只是多一层
- * 不属于那个平台的东西。
+ * 左键在所有平台都开，沿用按下即开。**右键只在 Windows 算数，且在抬起时**：Win32 的通知区惯例是
+ * WM_RBUTTONUP 才弹菜单；另一个更硬的理由是 [toggle] 的 350ms 去抖——按下开、抬起再判一次的话，按住
+ * 超过 350ms 的一次慢点击会被读成「开了又关」，分相就没有这个重叠。mac 菜单栏图标的右键由系统给
+ * （等同左键那套）、Linux 各家托盘实现也自带右键语义，硬塞一层只会和系统抢，所以两个平台一律不接。
  *
- * Windows 反过来——通知区图标右键弹菜单是刻在肌肉记忆里的，而 #322 之前 [MenuBarExtra] 只监听
- * BUTTON1，右键**完全没有出口**（发仔复报的「右键无响应」）。走 AWT 原生 [java.awt.PopupMenu] 而不是
- * 自己监听 BUTTON3 再弹一扇 Compose 窗口：Win32 的托盘右键菜单由系统绘制、定位和消失，自绘的那种
- * 在多屏 + 任务栏靠侧边时必然错位，还得自己复刻「点别处就关」。
- *
- * [canExit] 为假时只留「打开」：[dev.ccpocket.app.main] 只在 Windows 传 onExitApplication（#189，
- * mac/Linux 的关窗语义不同），菜单里不该长出一个点了没反应的退出项。
+ * issue #322 当初把 Windows 右键接到 AWT 原生 [java.awt.PopupMenu] 上，理由是「自绘的在多屏 + 任务栏
+ * 靠侧边时必然错位，还得自己复刻点别处就关」。这条理由已被同一个文件里的左键推翻：左键开的就是自绘的
+ * [WinTrayFlyout]，贴角锚定（[winFlyoutAnchor]）与失焦关闭都在正常工作，且锚点与光标位置无关，右键沿用
+ * 同一套。而原生菜单的代价是实测拿不掉的——它是 Win32 传统菜单，不跟随每显示器 DPI 缩放（高分屏上小到
+ * 看不清）、也吃不到任何应用样式，中英文还会落到度量不同的两套 fallback 字体上。所以右键改走和左键同
+ * 一扇浮层：尺寸、样式、定位一次性都对，「打开 / 退出」两个出口在浮层页脚里原样都在。
  */
-internal fun trayContextMenu(
-    isWindows: Boolean,
-    openLabel: String,
-    exitLabel: String,
-    canExit: Boolean,
-): List<TrayMenuItem>? {
-    if (!isWindows) return null
-    val items = mutableListOf(TrayMenuItem(TrayMenuAction.OPEN_MAIN, openLabel))
-    if (canExit) items += TrayMenuItem(TrayMenuAction.EXIT_APP, exitLabel)
-    return items
+internal fun trayOpensOn(isWindows: Boolean, button: Int, phase: TrayClickPhase): Boolean = when (phase) {
+    TrayClickPhase.PRESSED -> button == java.awt.event.MouseEvent.BUTTON1
+    TrayClickPhase.RELEASED -> isWindows && button == java.awt.event.MouseEvent.BUTTON3
 }
 
 // ── 浮层外壳：透明 / 圆角 / 投影归谁（issue #322） ────────────────────────────────────────────────

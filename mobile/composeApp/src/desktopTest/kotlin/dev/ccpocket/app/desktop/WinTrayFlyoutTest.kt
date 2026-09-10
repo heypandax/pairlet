@@ -27,9 +27,9 @@ import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import java.awt.Rectangle
+import java.awt.event.MouseEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -255,35 +255,33 @@ class WinTrayFlyoutTest {
         assertTrue(!model.showTray, "并收起托盘浮层")
     }
 
-    // ── 托盘右键菜单（issue #322，纯决策） ────────────────────────────────────────────────────
+    // ── 托盘右键（issue #322，纯决策） ──────────────────────────────────────────────────────
 
     @Test
-    fun windowsTrayGrowsANativeRightClickMenu() {
-        // 改动前 MenuBarExtra 只监听 BUTTON1，Windows 通知区右键**完全没有出口**——发仔复报的「右键无响应」
-        assertEquals(
-            listOf(
-                TrayMenuItem(TrayMenuAction.OPEN_MAIN, "Open cc-pocket"),
-                TrayMenuItem(TrayMenuAction.EXIT_APP, "Exit cc-pocket"),
-            ),
-            trayContextMenu(isWindows = true, openLabel = "Open cc-pocket", exitLabel = "Exit cc-pocket", canExit = true),
-        )
+    fun leftClickOpensTheFlyoutEverywhereAndRightClickOnWindows() {
+        // #322 起初把 Windows 右键接到 AWT 原生 PopupMenu 上。那个菜单是 Win32 传统菜单：不跟随每显示器
+        // DPI（高分屏上小到看不清）、吃不到任何应用样式，中英文还落到度量不同的两套 fallback 字体上。
+        // 右键改走左键那扇自绘浮层，尺寸／样式／定位一次性都对。
+        assertTrue(trayOpensOn(true, MouseEvent.BUTTON1, TrayClickPhase.PRESSED))
+        assertTrue(trayOpensOn(false, MouseEvent.BUTTON1, TrayClickPhase.PRESSED))
+        assertTrue(trayOpensOn(true, MouseEvent.BUTTON3, TrayClickPhase.RELEASED))
     }
 
     @Test
-    fun nonWindowsHostsGetNoPopupMenuAtAll() {
-        // #322 的边界写死「不改 macOS／Linux 行为」：null = 连 popupMenu 都不挂给 TrayIcon，
-        // 那两个平台的右键语义由系统 / 各家托盘实现自己给
-        assertNull(trayContextMenu(isWindows = false, openLabel = "o", exitLabel = "e", canExit = true))
-        assertNull(trayContextMenu(isWindows = false, openLabel = "o", exitLabel = "e", canExit = false))
+    fun rightClickStaysTheSystemsBusinessOffWindows() {
+        // #322 的边界仍然写死「不改 macOS／Linux 行为」：mac 菜单栏图标的右键由系统给（等同左键那套），
+        // Linux 各家托盘实现自带右键语义，多接一层只会和系统抢
+        assertTrue(!trayOpensOn(false, MouseEvent.BUTTON3, TrayClickPhase.RELEASED))
+        assertTrue(!trayOpensOn(false, MouseEvent.BUTTON3, TrayClickPhase.PRESSED))
+        assertTrue(!trayOpensOn(true, MouseEvent.BUTTON2, TrayClickPhase.RELEASED))
     }
 
     @Test
-    fun contextMenuDropsExitWhenTheHostOffersNoExitPath() {
-        // Main 只在 Windows 传 onExitApplication（#189）；没有出口时不该长出一个点了没反应的退出项
-        assertEquals(
-            listOf(TrayMenuItem(TrayMenuAction.OPEN_MAIN, "o")),
-            trayContextMenu(isWindows = true, openLabel = "o", exitLabel = "e", canExit = false),
-        )
+    fun eachButtonFiresInExactlyOnePhase() {
+        // 两个相位不能重叠：toggle 有 350ms 去抖，同一次点击在按下和抬起各判一次的话，
+        // 按住超过 350ms 的慢点击会被读成「开了又关」
+        assertTrue(!trayOpensOn(true, MouseEvent.BUTTON1, TrayClickPhase.RELEASED), "左键只在按下算数")
+        assertTrue(!trayOpensOn(true, MouseEvent.BUTTON3, TrayClickPhase.PRESSED), "右键只在抬起算数")
     }
 
     // ── 浮层外壳：透明 / 圆角 / 投影归谁（issue #322） ────────────────────────────────────────
