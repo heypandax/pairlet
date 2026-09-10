@@ -787,183 +787,200 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
     // …or after a short timeout, so a silent relaunch never leaves the sheet stuck spinning
     LaunchedEffect(switchingTo) { if (switchingTo != null) { delay(4000); onDone() } }
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        // chip-direct opens (ModelSheet) have no quick-actions page to go back to — the title stands alone
-        if (onBack != null) Text("‹ ", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(enabled = switchingTo == null, onClick = onBack).padding(end = 4.dp))
-        Text(stringResource(Res.string.qa_model), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-    }
-    // Gateway model presets (issue #139): one-tap vendor ids for third-party gateway users. When the
-    // daemon reports a gateway ANTHROPIC_BASE_URL (DaemonInfo) the section LEADS the picker — those
-    // users pick vendor ids, not Claude aliases. On the official endpoint it sits behind a collapsed
-    // toggle below, so the sheet keeps today's size for everyone else. Claude sessions only: Codex
-    // model routing doesn't go through ANTHROPIC_BASE_URL, and OpenCode has its own model format
-    // (provider/name) — gateway presets would send bare ids like "deepseek-chat" that cause hangs.
-    val pickPreset: (String) -> Unit = { switchingTo = it; repo.switchModel(it) }
-    // Preserve OpenCode's existing surface; its provider catalog predates ZCode and is independent.
-    if (agent == AgentKind.OPENCODE && (agentModels?.error != null || choices.isEmpty())) {
-        Column(Modifier.padding(top = 10.dp)) {
-            agentModels?.error?.let { Text(it, color = Tok.danger, fontSize = 12.sp, lineHeight = 16.sp) }
-            if (choices.isEmpty() && agentModels?.error == null) {
-                Text(stringResource(Res.string.opencode_models_loading), color = Tok.muted, fontSize = 12.5.sp)
+    // The sheet is bottom-anchored and wraps its content, so a long list (gateway catalogs run to 200
+    // entries, #366) grows straight off the top of the screen: the last rows go unreachable AND the scrim
+    // disappears — and the scrim is the only way out on iOS (no system Back). Same shape as the
+    // quick-actions page: cap against the height the sheet actually has, scroll inside it, title outside
+    // the scroll area. weight()/the cap only bind under a bounded host — with infinite incoming height
+    // they'd measure at zero (QuestionCard #150).
+    BoxWithConstraints {
+        val bounded = constraints.hasBoundedHeight
+        val scroll = rememberScrollState()
+        Column(if (bounded) Modifier.heightIn(max = maxHeight * 0.86f) else Modifier) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // chip-direct opens (ModelSheet) have no quick-actions page to go back to — the title stands alone
+                if (onBack != null) Text("‹ ", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(enabled = switchingTo == null, onClick = onBack).padding(end = 4.dp))
+                Text(stringResource(Res.string.qa_model), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
-        }
-    }
-    // ZCode has no static fallback: distinguish an in-flight fetch from a completed empty answer,
-    // and preserve a refresh error even when last-good provider/model rows remain visible.
-    modelCatalogNotice(agent, agentModels, choices.isNotEmpty())?.let { notice ->
-        Column(Modifier.padding(top = 10.dp)) {
-            when (notice) {
-                ModelCatalogNotice.ERROR -> Text(agentModels?.error.orEmpty(), color = Tok.danger, fontSize = 12.sp, lineHeight = 16.sp)
-                ModelCatalogNotice.LOADING -> Text(
-                    stringResource(Res.string.model_models_loading, agentName(agent)),
-                    color = Tok.muted,
-                    fontSize = 12.5.sp,
-                )
-                ModelCatalogNotice.EMPTY -> Text(
-                    stringResource(Res.string.model_models_empty, agentName(agent)),
-                    color = Tok.muted,
-                    fontSize = 12.5.sp,
-                )
-            }
-        }
-    }
-    if (gatewayUrl != null) {
-        // Issue #167: on a gateway the Claude ALIASES lead. Anthropic-compatible endpoints map
-        // opus/sonnet/haiku onto their own tiers, so an alias follows the vendor across generations
-        // — while a hand-written native id rots silently (#168 was exactly that rot coming due).
-        // The vendor rows keep their place one group below as cold-start seeds: aggregator gateways
-        // that don't map aliases still need them, and so does anyone wanting a specific tier.
-        Row(Modifier.padding(top = 12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel(stringResource(Res.string.model_section_anthropic))
-            Spacer(Modifier.weight(1f)) // pill sits flush right (0714 design)
-            gatewayHostLabel(gatewayUrl)?.let { host -> GatewayHostPill(host) }
-        }
-        Text(
-            stringResource(Res.string.model_gateway_alias_note),
-            color = Tok.muted, fontSize = 11.5.sp, lineHeight = 16.sp,
-            modifier = Modifier.padding(top = 6.dp),
-        )
-    }
-    Column(Modifier.padding(top = if (gatewayUrl != null) 8.dp else 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        choices.forEach { c ->
-            // raw compare too (desktop's isActive does the same): full-id rows like Opus 5 never
-            // alias-match `selected`, but the daemon echoes the id verbatim
-            val isSel = c.pick.equals(selected, ignoreCase = true) || c.pick.equals(repo.model.value, ignoreCase = true)
-            val isSwitching = switchingTo?.equals(c.pick, ignoreCase = true) == true
-            val raised = isSwitching || (isSel && switchingTo == null)
-            val dimmed = (switchingTo != null && !isSwitching) || c.unavailable
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                    .background(if (raised) Tok.raised else Color.Transparent)
-                    .then(if (raised) Modifier.border(1.dp, Tok.hair, RoundedCornerShape(12.dp)) else Modifier)
-                    .clickable(enabled = switchingTo == null && !c.unavailable) { switchingTo = c.pick; repo.switchModel(c.pick) }
-                    .alpha(if (dimmed) 0.45f else 1f)
-                    .padding(horizontal = 14.dp, vertical = 13.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(c.name, color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        if (c.unavailable) {
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                stringResource(Res.string.model_not_installed), color = Tok.muted, fontSize = 10.5.sp,
-                                modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp)).padding(horizontal = 8.dp, vertical = 1.dp),
-                            )
-                        }
-                    }
-                    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(c.id, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, maxLines = 1)
-                        if (c.ctx.isNotEmpty()) { Spacer(Modifier.width(8.dp)); CtxPill(c.ctx, c.big) }
-                    }
-                }
-                Box(Modifier.width(22.dp), contentAlignment = Alignment.Center) {
-                    when {
-                        isSwitching -> CircularProgressIndicator(Modifier.size(17.dp), color = Tok.accent, strokeWidth = 2.dp)
-                        isSel -> Text("✓", color = Tok.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            // the scroll rides WITH the cap: a scrollable container measured with infinite max height
+            // throws outright (checkScrollableContainerConstraints), so an unbounded host gets the plain
+            // uncapped column it had before — no cap to scroll inside of anyway.
+            Column(if (bounded) Modifier.weight(1f, fill = false).verticalScroll(scroll) else Modifier) {
+            // Gateway model presets (issue #139): one-tap vendor ids for third-party gateway users. When the
+            // daemon reports a gateway ANTHROPIC_BASE_URL (DaemonInfo) the section LEADS the picker — those
+            // users pick vendor ids, not Claude aliases. On the official endpoint it sits behind a collapsed
+            // toggle below, so the sheet keeps today's size for everyone else. Claude sessions only: Codex
+            // model routing doesn't go through ANTHROPIC_BASE_URL, and OpenCode has its own model format
+            // (provider/name) — gateway presets would send bare ids like "deepseek-chat" that cause hangs.
+            val pickPreset: (String) -> Unit = { switchingTo = it; repo.switchModel(it) }
+            // Preserve OpenCode's existing surface; its provider catalog predates ZCode and is independent.
+            if (agent == AgentKind.OPENCODE && (agentModels?.error != null || choices.isEmpty())) {
+                Column(Modifier.padding(top = 10.dp)) {
+                    agentModels?.error?.let { Text(it, color = Tok.danger, fontSize = 12.sp, lineHeight = 16.sp) }
+                    if (choices.isEmpty() && agentModels?.error == null) {
+                        Text(stringResource(Res.string.opencode_models_loading), color = Tok.muted, fontSize = 12.5.sp)
                     }
                 }
             }
-        }
-    }
-    // …then the vendor ids, demoted to the second group (issue #167). Ranking + "suggested" ticks
-    // still read the host, but the pill has moved up to the recommended group's header.
-    if (gatewayUrl != null) {
-        Column(Modifier.padding(top = 14.dp)) { Hairline() }
-        GatewayPresetSection(repo, gatewayUrl, switchingTo, pickPreset, showHostPill = false)
-    }
-    // Custom model id (issue #54): third-party gateways (cc-switch presets etc.) route ids a fixed list
-    // can't know, and `--model` passes any string through — so hand that power to the user. Prefilled when
-    // the session already runs an id outside the presets, with the same ✓/spinner the preset rows use.
-    val presetActive = choices.any { it.pick.equals(selected, ignoreCase = true) || it.pick.equals(repo.model.value, ignoreCase = true) }
-    val customActive = !presetActive && !repo.model.value.isNullOrBlank()
-    // #333: dsh has no arbitrary-id path — see [supportsCustomModelId]. Hidden rather than disabled: a
-    // greyed-out field invites the user to wonder what would unlock it.
-    if (supportsCustomModelId(agent)) {
-        // NOT keyed on the live model: an external switch (another device's /model, SessionLive echo)
-        // must never wipe an id the user is mid-typing here
-        var custom by remember { mutableStateOf(if (customActive) repo.model.value.orEmpty() else "") }
-        Column(Modifier.padding(top = 12.dp)) {
-            Text(stringResource(Res.string.model_custom_label), color = Tok.muted, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
-            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    custom, { custom = it },
-                    placeholder = { Text(stringResource(Res.string.model_custom_hint), color = Tok.muted, fontSize = 12.5.sp) },
-                    singleLine = true, enabled = switchingTo == null,
-                    textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Tok.tx),
-                    modifier = Modifier.weight(1f),
-                )
-                Box(Modifier.width(40.dp), contentAlignment = Alignment.Center) {
-                    val t = custom.trim()
-                    val isSwitchingCustom = switchingTo != null && switchingTo.equals(t, ignoreCase = true) && !presetActive
-                    // the arrow appears only for ids the backend can take at all (opencode: provider/model;
-                    // codex: not a Claude alias) — the ONE surface where the compat guard gates a user action
-                    val canSwitchCustom = t.isNotEmpty() && isModelCompatibleWithAgent(agent, t)
-                    when {
-                        isSwitchingCustom -> CircularProgressIndicator(Modifier.size(17.dp), color = Tok.accent, strokeWidth = 2.dp)
-                        customActive && t.equals(repo.model.value, ignoreCase = true) && switchingTo == null ->
-                            Text("✓", color = Tok.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        canSwitchCustom && switchingTo == null -> Text(
-                            "→", color = Tok.accent, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clip(RoundedCornerShape(8.dp))
-                                .clickable { switchingTo = t; repo.switchModel(t) }.padding(6.dp),
+            // ZCode has no static fallback: distinguish an in-flight fetch from a completed empty answer,
+            // and preserve a refresh error even when last-good provider/model rows remain visible.
+            modelCatalogNotice(agent, agentModels, choices.isNotEmpty())?.let { notice ->
+                Column(Modifier.padding(top = 10.dp)) {
+                    when (notice) {
+                        ModelCatalogNotice.ERROR -> Text(agentModels?.error.orEmpty(), color = Tok.danger, fontSize = 12.sp, lineHeight = 16.sp)
+                        ModelCatalogNotice.LOADING -> Text(
+                            stringResource(Res.string.model_models_loading, agentName(agent)),
+                            color = Tok.muted,
+                            fontSize = 12.5.sp,
+                        )
+                        ModelCatalogNotice.EMPTY -> Text(
+                            stringResource(Res.string.model_models_empty, agentName(agent)),
+                            color = Tok.muted,
+                            fontSize = 12.5.sp,
                         )
                     }
                 }
             }
-        }
-    }
-    // no gateway detected: the same preset rows wait behind ONE quiet disclosure row at the very end
-    // (0714 design) — official-endpoint users keep today's picker, no gateway chrome above it.
-    // Claude only: gateway presets are bare vendor ids, meaningless to codex and a hang for opencode.
-    if (claude && gatewayUrl == null) {
-        var showGateway by remember { mutableStateOf(false) }
-        Column(Modifier.padding(top = 14.dp)) {
-            Hairline()
-            Row(
-                Modifier.padding(top = 2.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                    .clickable(enabled = switchingTo == null) { showGateway = !showGateway }
-                    .padding(horizontal = 12.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(stringResource(Res.string.model_gateway_show), color = Tok.tx2, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                Text(if (showGateway) "⌃" else "›", color = Tok.muted, fontSize = 14.sp)
+            if (gatewayUrl != null) {
+                // Issue #167: on a gateway the Claude ALIASES lead. Anthropic-compatible endpoints map
+                // opus/sonnet/haiku onto their own tiers, so an alias follows the vendor across generations
+                // — while a hand-written native id rots silently (#168 was exactly that rot coming due).
+                // The vendor rows keep their place one group below as cold-start seeds: aggregator gateways
+                // that don't map aliases still need them, and so does anyone wanting a specific tier.
+                Row(Modifier.padding(top = 12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel(stringResource(Res.string.model_section_anthropic))
+                    Spacer(Modifier.weight(1f)) // pill sits flush right (0714 design)
+                    gatewayHostLabel(gatewayUrl)?.let { host -> GatewayHostPill(host) }
+                }
+                Text(
+                    stringResource(Res.string.model_gateway_alias_note),
+                    color = Tok.muted, fontSize = 11.5.sp, lineHeight = 16.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
             }
-            // expanded: same rows, no host pill ([gatewayUrl] null keeps the header pill + ticks away)
-            if (showGateway) GatewayPresetSection(repo, gatewayUrl = null, switchingTo = switchingTo, onPick = pickPreset)
-        }
-    }
-    Column(Modifier.padding(top = 14.dp)) {
-        Hairline()
-        Box(Modifier.padding(top = 12.dp)) {
-            if (switchingTo != null) Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(13.dp), color = Tok.accent, strokeWidth = 2.dp)
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(Res.string.model_switching), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
-            } else Column {
-                // mid-turn (issue #157): the running turn keeps its model — say the pick lands NEXT turn
-                if (repo.streaming.value) Text(stringResource(Res.string.model_next_turn_note), color = Tok.tx2, fontSize = 12.5.sp, modifier = Modifier.padding(bottom = 6.dp))
-                Text(stringResource(Res.string.model_switch_hint), color = Tok.muted, fontSize = 12.5.sp)
+            Column(Modifier.padding(top = if (gatewayUrl != null) 8.dp else 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                choices.forEach { c ->
+                    // raw compare too (desktop's isActive does the same): full-id rows like Opus 5 never
+                    // alias-match `selected`, but the daemon echoes the id verbatim
+                    val isSel = c.pick.equals(selected, ignoreCase = true) || c.pick.equals(repo.model.value, ignoreCase = true)
+                    val isSwitching = switchingTo?.equals(c.pick, ignoreCase = true) == true
+                    val raised = isSwitching || (isSel && switchingTo == null)
+                    val dimmed = (switchingTo != null && !isSwitching) || c.unavailable
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .background(if (raised) Tok.raised else Color.Transparent)
+                            .then(if (raised) Modifier.border(1.dp, Tok.hair, RoundedCornerShape(12.dp)) else Modifier)
+                            .clickable(enabled = switchingTo == null && !c.unavailable) { switchingTo = c.pick; repo.switchModel(c.pick) }
+                            .alpha(if (dimmed) 0.45f else 1f)
+                            .padding(horizontal = 14.dp, vertical = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(c.name, color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                if (c.unavailable) {
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        stringResource(Res.string.model_not_installed), color = Tok.muted, fontSize = 10.5.sp,
+                                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp)).padding(horizontal = 8.dp, vertical = 1.dp),
+                                    )
+                                }
+                            }
+                            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(c.id, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, maxLines = 1)
+                                if (c.ctx.isNotEmpty()) { Spacer(Modifier.width(8.dp)); CtxPill(c.ctx, c.big) }
+                            }
+                        }
+                        Box(Modifier.width(22.dp), contentAlignment = Alignment.Center) {
+                            when {
+                                isSwitching -> CircularProgressIndicator(Modifier.size(17.dp), color = Tok.accent, strokeWidth = 2.dp)
+                                isSel -> Text("✓", color = Tok.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+            // …then the vendor ids, demoted to the second group (issue #167). Ranking + "suggested" ticks
+            // still read the host, but the pill has moved up to the recommended group's header.
+            if (gatewayUrl != null) {
+                Column(Modifier.padding(top = 14.dp)) { Hairline() }
+                GatewayPresetSection(repo, gatewayUrl, switchingTo, pickPreset, showHostPill = false)
+            }
+            // Custom model id (issue #54): third-party gateways (cc-switch presets etc.) route ids a fixed list
+            // can't know, and `--model` passes any string through — so hand that power to the user. Prefilled when
+            // the session already runs an id outside the presets, with the same ✓/spinner the preset rows use.
+            val presetActive = choices.any { it.pick.equals(selected, ignoreCase = true) || it.pick.equals(repo.model.value, ignoreCase = true) }
+            val customActive = !presetActive && !repo.model.value.isNullOrBlank()
+            // #333: dsh has no arbitrary-id path — see [supportsCustomModelId]. Hidden rather than disabled: a
+            // greyed-out field invites the user to wonder what would unlock it.
+            if (supportsCustomModelId(agent)) {
+                // NOT keyed on the live model: an external switch (another device's /model, SessionLive echo)
+                // must never wipe an id the user is mid-typing here
+                var custom by remember { mutableStateOf(if (customActive) repo.model.value.orEmpty() else "") }
+                Column(Modifier.padding(top = 12.dp)) {
+                    Text(stringResource(Res.string.model_custom_label), color = Tok.muted, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            custom, { custom = it },
+                            placeholder = { Text(stringResource(Res.string.model_custom_hint), color = Tok.muted, fontSize = 12.5.sp) },
+                            singleLine = true, enabled = switchingTo == null,
+                            textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Tok.tx),
+                            modifier = Modifier.weight(1f),
+                        )
+                        Box(Modifier.width(40.dp), contentAlignment = Alignment.Center) {
+                            val t = custom.trim()
+                            val isSwitchingCustom = switchingTo != null && switchingTo.equals(t, ignoreCase = true) && !presetActive
+                            // the arrow appears only for ids the backend can take at all (opencode: provider/model;
+                            // codex: not a Claude alias) — the ONE surface where the compat guard gates a user action
+                            val canSwitchCustom = t.isNotEmpty() && isModelCompatibleWithAgent(agent, t)
+                            when {
+                                isSwitchingCustom -> CircularProgressIndicator(Modifier.size(17.dp), color = Tok.accent, strokeWidth = 2.dp)
+                                customActive && t.equals(repo.model.value, ignoreCase = true) && switchingTo == null ->
+                                    Text("✓", color = Tok.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                canSwitchCustom && switchingTo == null -> Text(
+                                    "→", color = Tok.accent, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                        .clickable { switchingTo = t; repo.switchModel(t) }.padding(6.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            // no gateway detected: the same preset rows wait behind ONE quiet disclosure row at the very end
+            // (0714 design) — official-endpoint users keep today's picker, no gateway chrome above it.
+            // Claude only: gateway presets are bare vendor ids, meaningless to codex and a hang for opencode.
+            if (claude && gatewayUrl == null) {
+                var showGateway by remember { mutableStateOf(false) }
+                Column(Modifier.padding(top = 14.dp)) {
+                    Hairline()
+                    Row(
+                        Modifier.padding(top = 2.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .clickable(enabled = switchingTo == null) { showGateway = !showGateway }
+                            .padding(horizontal = 12.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(Res.string.model_gateway_show), color = Tok.tx2, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        Text(if (showGateway) "⌃" else "›", color = Tok.muted, fontSize = 14.sp)
+                    }
+                    // expanded: same rows, no host pill ([gatewayUrl] null keeps the header pill + ticks away)
+                    if (showGateway) GatewayPresetSection(repo, gatewayUrl = null, switchingTo = switchingTo, onPick = pickPreset)
+                }
+            }
+            Column(Modifier.padding(top = 14.dp)) {
+                Hairline()
+                Box(Modifier.padding(top = 12.dp)) {
+                    if (switchingTo != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(13.dp), color = Tok.accent, strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(Res.string.model_switching), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
+                    } else Column {
+                        // mid-turn (issue #157): the running turn keeps its model — say the pick lands NEXT turn
+                        if (repo.streaming.value) Text(stringResource(Res.string.model_next_turn_note), color = Tok.tx2, fontSize = 12.5.sp, modifier = Modifier.padding(bottom = 6.dp))
+                        Text(stringResource(Res.string.model_switch_hint), color = Tok.muted, fontSize = 12.5.sp)
+                    }
+                }
+            }
             }
         }
     }
