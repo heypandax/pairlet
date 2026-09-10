@@ -4,13 +4,15 @@
 
 ## 2.0 改名准备
 
-- 中英文商店名称均为 `Pairlet`（`name.txt`）。副标题独立写入 `subtitle.txt`：中文 `AI 编程伴侣`，英文 `Coding agents, within reach`。名称和副标题各不超过 30 字符。
-- 中文品类说明依据[改名方案第 2 节](../../docs/plans/2026-09-09-pairlet-rebrand-plan.md#2-品牌与产品表达)。原命名评估表述为「Pairlet｜AI 编程伴侣」「你的编程任务，随时接续」以及 `Pairlet — Your coding agents, within reach.`；实施方案的中文主张为「随时接续你的 AI 编程任务」。`Your coding agents, within reach.` 共 33 字符，商店副标题去掉 `Your` 和句号后为 27 字符，其余宣传场景可保留完整原句。不要再从旧商店标题回填「随身编程遥控 / AI Code Remote」。
+- 中英文商店过渡名称均为 `CC Pairlet`（`name.txt`）。副标题独立写入 `subtitle.txt`：中文 `AI 编程伴侣`，英文 `Coding agents, within reach`。名称和副标题各不超过 30 字符。
+- 当前口径见[名称与过渡期约定](../../docs/PAIRLET-NAMING.md)。原命名评估表述为「Pairlet｜AI 编程伴侣」「你的编程任务，随时接续」以及 `Pairlet — Your coding agents, within reach.`；实施方案的中文主张为「随时接续你的 AI 编程任务」。`Your coding agents, within reach.` 共 33 字符，商店副标题去掉 `Your` 和句号后为 27 字符，其余宣传场景可保留完整原句。不要再从旧商店标题回填「随身编程遥控 / AI Code Remote」。
 - 介绍保留原有功能与能力边界，在首段说明原名 CC Pocket，并补齐 iPhone / iPad；关键词保留 `CC Pocket` 供老用户搜索。
 - `marketing_url.txt` 指向中文官网 `https://pairlet.org/` 或英文官网 `https://pairlet.org/en/`；`support_url.txt`、`privacy_url.txt` 分别指向 `https://pairlet.org/support/`、`https://pairlet.org/privacy.html`。上传前要检查公开访问；本地校验只验证 URL 格式。
+- 当前过渡阶段在商店及设备上统一显示 `CC Pairlet`；最终品牌仍为 Pairlet，后续移除 `CC` 必须经用户另行确定。`CC Pocket` 关键词用于商店搜索，不能作为安装后系统搜索命中的证明。
 - 沿用 App Store 记录 `6778773969` 与 Bundle ID `com.panda.ccpocket`。桌面显示名 CC Pairlet、旧命令和旧本地目录不等于商店需要创建新应用。
 - `release_notes.txt` 目前只包含已合入的 2.0 改名及兼容变更；另外两个模块合入后，按最终代码差异补齐再提审。最终 UI 改动也需重新核对中英 iPhone / iPad 截图与预览。
-- 当前阶段仅准备仓库内容，不运行 `ios-store-metadata` 或 `ios-release`。公开商店、ASC 元数据、构建上传、审核、上架是不同状态。宣传文本可不随新版本提交而更新，不能把「不提审」当作「不会影响公开页面」。
+- 2026-09-10 用户已授权创建 2.0.0 商店草稿并同步素材供人工复核；允许运行仅操作目标草稿的元数据工作流，不运行 `ios-release`、不挂 build、不提交审核、不发布。公开商店、ASC 元数据、构建上传、审核、上架是不同状态。宣传文本可不随新版本提交而更新，不能把「不提审」当作「不会影响公开页面」。
+- 当前 1.9.8（build 55）正在审核，用户决定保留审核，等其上架后再创建 2.0.0 草稿。不得撤回或重编号 1.9.8；若已有他人建立或修改的 2.0 草稿，先核对差异，避免覆盖人工工作。
 
 ## 生成与上传
 
@@ -22,7 +24,9 @@ bash marketing/appstore/generate-assets.sh
 bash marketing/appstore/generate-assets.sh --reuse
 ```
 
-创建或同步一个**可编辑**的 App Store 版本，运行 GitHub Actions 的 `ios-store-metadata`，输入目标版本号。该工作流上传名称、副标题、描述、关键词、宣传文本、三个 URL 字段、截图和 App Preview，不上传 binary、不挂 build、不提交审核，也不会提前覆盖 `release_notes.txt` 或审核备注；最后通过 ASC API 反查 iPhone 与 iPad 媒体。此反查不验证文本；需另行回读 ASC 的名称、副标题、描述和 URL。「此版本的新增功能」必须在正式提交 binary 时按真实代码差异填写。
+创建或同步一个**可编辑**的 App Store 版本，运行 GitHub Actions 的 `ios-store-metadata`，输入目标版本号。工作流先确认不会覆盖其他未上架版本；新建版本要求最新版本已上架，更新要求目标就是当前可编辑草稿。它上传名称、副标题、描述、关键词、宣传文本、三个 URL 字段、截图和 App Preview，不上传 binary、不挂 build、不提交审核，并将目标设为手动发布。
+
+`include_release_notes` 默认关闭；用户授权同步完整草稿时打开，一并上传 `release_notes.txt` 和审核备注，供人工核对。正式提交 binary 前仍需按最终代码差异补齐。同步后通过 ASC API 回读本次上传的全部文本及手动发布设置，并校验 iPhone / iPad 媒体。`verify_only` 保持只读媒体检查，不写入任何字段。
 
 正式发版仍走 `ios-release.yml`：`ios` job 上传二进制 → `submit` job 轮询 ASC 处理完成 → deliver 推元数据、挂本次构建，并按输入决定是否提交审核及自动上架。
 

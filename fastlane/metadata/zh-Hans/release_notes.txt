@@ -1,6 +1,6 @@
 本次更新（2.0.0）
 
-• CC Pocket 正式更名为 Pairlet，应用内更新名称，并通过一次性提示说明改名。
+• CC Pocket 开始过渡到 Pairlet，商店和设备上暂时显示为 CC Pairlet，并通过一次性提示说明改名。
 • 电脑端命令简化为 pairlet，沿用原来的子命令；cc-pocket-daemon 继续可用。
 • 更新 pairlet.org 官网与帮助入口，兼容新旧 GitHub 仓库链接。
 • 改进 daemon 在后台运行时对独立安装的 OpenCode CLI 的识别。

@@ -1,6 +1,6 @@
 What's new in 2.0.0
 
-• CC Pocket is now Pairlet. The new name appears throughout the app, with a one-time notice explaining the change.
+• CC Pocket is transitioning to Pairlet. Look for CC Pairlet in the App Store and on your device during the transition, with a one-time notice explaining the change.
 • A shorter computer command: use pairlet with the same subcommands as cc-pocket-daemon. The legacy command remains available.
 • Updated website and help links for pairlet.org, with support for both the old and new GitHub repository addresses.
 • Improved discovery of standalone OpenCode CLI installations when the daemon runs in the background.

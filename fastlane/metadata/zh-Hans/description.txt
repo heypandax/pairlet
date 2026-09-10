@@ -1,6 +1,6 @@
 离开键盘，也能让编程任务继续推进。
 
-Pairlet（原名 CC Pocket）是一款开源、本地优先的命令行 AI 编程 Agent 伴侣。Agent 继续运行在你自己的 macOS、Windows 或 Linux 电脑上，并直接使用本机代码目录；你可以通过 iPhone 或 iPad 实时查看进度、处理权限请求、继续同一个会话，并检查实际改动。
+CC Pairlet（原名 CC Pocket）是一款开源、本地优先的命令行 AI 编程 Agent 伴侣。Agent 继续运行在你自己的 macOS、Windows 或 Linux 电脑上，并直接使用本机代码目录；你可以通过 iPhone 或 iPad 实时查看进度、处理权限请求、继续同一个会话，并检查实际改动。
 
 支持的 AGENT
 • Claude Code

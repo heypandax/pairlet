@@ -1,6 +1,6 @@
 Keep coding work moving when you are away from the keyboard.
 
-Pairlet (formerly CC Pocket) is an open-source, local-first companion for command-line AI coding agents. Your agent keeps running on your own Mac, Windows, or Linux computer, against your own checkout. From your iPhone or iPad, you can watch it work, answer permission requests, continue the same session, and review what changed.
+CC Pairlet (formerly CC Pocket) is an open-source, local-first companion for command-line AI coding agents. Your agent keeps running on your own Mac, Windows, or Linux computer, against your own checkout. From your iPhone or iPad, you can watch it work, answer permission requests, continue the same session, and review what changed.
 
 SUPPORTED AGENTS
 • Claude Code
