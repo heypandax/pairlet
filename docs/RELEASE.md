@@ -24,7 +24,7 @@ gh workflow run release-preview.yml --ref main \
 ```
 
 预演固定使用触发时的提交；`expected_sha` 防止并行模块恰好推送后误测另一份代码。
-支持 `all`、`daemon`、`desktop`、`android`、`ios` 范围。默认检查版本和改名兼容性，
+支持 `all`、`daemon`、`desktop`、`windows-desktop`、`android`、`ios` 范围。默认检查版本和改名兼容性，
 构建五种 daemon、三种桌面安装包、Android unsigned release APK 和 iOS unsigned archive，
 并检查桌面包内 JVM；macOS daemon 另测新旧命令。Harmony 只执行静态发布契约检查。
 

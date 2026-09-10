@@ -13,14 +13,18 @@ function Read-Rows([string]$sql) {
     # COM methods can emit return values into PowerShell's success stream. Only the row array
     # belongs in this function's output; extra values make a single property look ambiguous.
     [void]$view.Execute()
-    $rows = @()
+    $rows = [System.Collections.Generic.List[object]]::new()
     while ($null -ne ($record = $view.Fetch())) {
-        $row = @()
-        for ($i = 1; $i -le $record.FieldCount; $i++) { $row += $record.StringData($i) }
-        $rows += ,$row
+        $count = $record.GetType().InvokeMember('FieldCount', 'GetProperty', $null, $record, $null)
+        $values = [string[]]::new($count)
+        for ($i = 1; $i -le $count; $i++) {
+            $values[$i - 1] = $record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, $i)
+        }
+        # Keep single-column records as rows, not strings that [0][0] truncates to one character.
+        $rows.Add([pscustomobject]@{ Values = $values })
     }
     [void]$view.Close()
-    return ,$rows
+    return ,$rows.ToArray()
 }
 function Execute-Sql([string]$sql) {
     $view = $database.OpenView($sql)
@@ -30,11 +34,12 @@ function Execute-Sql([string]$sql) {
 function Property-Value([string]$name) {
     $rows = Read-Rows "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = '$name'"
     if ($rows.Count -ne 1) { throw "Missing/ambiguous MSI property $name (rows: $($rows.Count))" }
-    return $rows[0][0]
+    return $rows[0].Values[0]
 }
 # Read from the SHA-256-verified v1.9.8 MSI, not generated from the new product name.
 $expectedUpgrade = '{230D5F5E-4C7A-3DE9-98EE-6E492CCCB7D0}'
-if ((Property-Value 'UpgradeCode') -ne $expectedUpgrade) { throw 'MSI UpgradeCode drifted from v1.9.8' }
+$actualUpgrade = Property-Value 'UpgradeCode'
+if ($actualUpgrade -ne $expectedUpgrade) { throw "MSI UpgradeCode drifted from v1.9.8: $actualUpgrade" }
 if ((Property-Value 'ProductName') -notin @('CC Pocket', 'CC Pairlet')) { throw 'Unexpected product name' }
 $properties = @('UpgradeCode','ProductCode','ProductVersion','Manufacturer','ALLUSERS')
 $beforeProperties = @{}
@@ -52,10 +57,10 @@ if ($shortcutTables.Count -gt 0) {
     $branded = 0
     foreach ($row in $shortcuts) {
         # The launcher and destination stay CC Pocket; only its system-search/Start-menu label changes.
-        $longName = ($row[1] -split '\|')[-1]
+        $longName = ($row.Values[1] -split '\|')[-1]
         if ($longName -in @('CC Pocket', 'CC Pocket.lnk', 'CC Pairlet', 'CC Pairlet.lnk')) {
             $displayName = if ($longName.EndsWith('.lnk')) { 'CC Pairlet.lnk' } else { 'CC Pairlet' }
-            $id = $row[0].Replace("'", "''")
+            $id = $row.Values[0].Replace("'", "''")
             Execute-Sql "UPDATE ``Shortcut`` SET ``Name`` = '$displayName' WHERE ``Shortcut`` = '$id'"
             $branded++
         }
@@ -64,8 +69,8 @@ if ($shortcutTables.Count -gt 0) {
     $after = Read-Rows 'SELECT `Shortcut`, `Name`, `Target`, `Component_`, `Directory_` FROM `Shortcut`'
     if ($after.Count -ne $shortcuts.Count) { throw 'Shortcut count changed' }
     for ($i=0; $i -lt $after.Count; $i++) {
-        foreach ($j in @(0,2,3,4)) { if ($after[$i][$j] -ne $shortcuts[$i][$j]) { throw 'Shortcut target changed' } }
-        if ((($after[$i][1] -split '\|')[-1]) -in @('CC Pocket', 'CC Pocket.lnk')) { throw 'Legacy shortcut label remained' }
+        foreach ($j in @(0,2,3,4)) { if ($after[$i].Values[$j] -ne $shortcuts[$i].Values[$j]) { throw 'Shortcut target changed' } }
+        if ((($after[$i].Values[1] -split '\|')[-1]) -in @('CC Pocket', 'CC Pocket.lnk')) { throw 'Legacy shortcut label remained' }
     }
 }
 foreach ($name in $properties) {

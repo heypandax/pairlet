@@ -48,6 +48,9 @@ function Read-Scalar([string]$path, [string]$sql) {
 try {
     $valid = Join-Path $testRoot 'valid candidate.msi'
     New-Fixture $valid '{230D5F5E-4C7A-3DE9-98EE-6E492CCCB7D0}'
+    if ((Read-Scalar $valid "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'UpgradeCode'") -ne '{230D5F5E-4C7A-3DE9-98EE-6E492CCCB7D0}') {
+        throw 'Fixture did not preserve the expected upgrade identity'
+    }
     # Repeat to verify that rerunning a packaging hook preserves an already branded candidate.
     foreach ($attempt in 1..2) {
         & powershell -NoProfile -File $brandScript -Path $valid

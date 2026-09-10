@@ -16,7 +16,7 @@ on:
       scope:
         description: Platforms to rehearse
         type: choice
-        options: [all, daemon, desktop, android, ios]
+        options: [all, daemon, desktop, windows-desktop, android, ios]
         default: all
 
 permissions:
@@ -140,28 +140,13 @@ jobs:
 
   desktop:
     needs: preflight
-    if: inputs.scope == 'all' || inputs.scope == 'desktop'
+    if: inputs.scope == 'all' || inputs.scope == 'desktop' || inputs.scope == 'windows-desktop'
     timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: macos-arm64
-            runner: macos-14
-            jdk_arch: aarch64
-            package_task: packageDmg
-            image: CC Pocket.app
-          - platform: macos-x86_64
-            runner: macos-14
-            jdk_arch: x64
-            package_task: packageDmg
-            image: CC Pocket.app
-          - platform: windows-x86_64
-            runner: windows-latest
-            jdk_arch: x64
-            package_task: packageMsi
-            image: CC Pocket
-    runs-on: ${{ matrix.runner }}
+        platform: ${{ fromJSON(inputs.scope == 'windows-desktop' && '["windows-x86_64"]' || '["macos-arm64", "macos-x86_64", "windows-x86_64"]') }}
+    runs-on: ${{ matrix.platform == 'windows-x86_64' && 'windows-latest' || 'macos-14' }}
     defaults:
       run:
         shell: bash
@@ -176,19 +161,19 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          architecture: ${{ matrix.jdk_arch }}
+          architecture: ${{ matrix.platform == 'macos-arm64' && 'aarch64' || 'x64' }}
       - uses: android-actions/setup-android@v4
       - name: Use placeholder Firebase config
         run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
       - name: Build app and check bundled JVM
         env:
-          APP_IMAGE: ${{ matrix.image }}
+          APP_IMAGE: ${{ runner.os == 'Windows' && 'CC Pocket' || 'CC Pocket.app' }}
         run: |
           ./gradlew --no-daemon :mobile:composeApp:createDistributable
           bash scripts/smoke-desktop-image.sh "mobile/composeApp/build/compose/binaries/main/app/$APP_IMAGE"
       - name: Build installer with branding and compatibility hooks
         env:
-          PACKAGE_TASK: ${{ matrix.package_task }}
+          PACKAGE_TASK: ${{ runner.os == 'Windows' && 'packageMsi' || 'packageDmg' }}
         run: ./gradlew --no-daemon ":mobile:composeApp:$PACKAGE_TASK"
       - name: Collect unsigned installers
         env:
