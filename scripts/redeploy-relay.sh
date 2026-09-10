@@ -10,6 +10,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Stop before uploading or stopping services if a stale branch would remove website hosts.
+python3 scripts/check-production-caddy.py
+
 # auto-load secrets from .env if present (RELAY_HOST_HK / SSHPASS_HK). .env is gitignored.
 # Production relay moved to the HK box on 07-08 — the legacy RELAY_HOST/SSHPASS pair points at
 # the decommissioned US-East machine, so this script deliberately reads only the *_HK variables.

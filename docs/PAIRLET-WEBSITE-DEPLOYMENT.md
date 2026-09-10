@@ -45,6 +45,16 @@
 
 ## 备份与回退
 
+### 2026-09-11 07:36 CST：再次恢复被旧部署配置覆盖的新域路由
+
+公开官网、中英文页、支持页和隐私页再次返回 Cloudflare 525；直连香港源站的 Pairlet TLS 握手也失败。远端 Caddyfile SHA-256 再次为上线前的 `1cc8fa35…`，没有 Pairlet 域名块。站点仍指向 `website-20260910-r2`，relay 本地健康检查正常。常用部署工作区 `~/Desktop/Project/app/cc-pocket` 的 Caddyfile 同样是这份旧配置；这证明存在再次覆盖的风险，但未追溯确认具体是哪次操作导致覆盖。
+
+核对旧域配置逐字节不变后，验证候选配置、备份、原子替换并 reload Caddy。备份为 `/var/backups/pairlet/20260911/website-route-repair-2336/Caddyfile.before`；恢复后摘要为 `d072b9e85994d886e61f3f67c6e43b6b8c2a9cf2d07697b0cb3db18683ecc42c`。relay PID 前后均为 `546725`，未重启 relay，也未替换站点内容、下载文件或稳定版本清单。
+
+常用部署工作区仅同步此前未修改的 `deploy/Caddyfile`，保留其正在进行的可观测性代码和部署脚本改动，不提交该工作区的其他内容。主分支新增 `scripts/check-production-caddy.py`，在 relay 部署、镜像初始化和 CI 中检查原域及三个新域的站点块；校验在任何服务器操作之前执行。旧分支须同步配置和此检查后再部署，检查本身不能保护仍在使用旧版脚本的其他 checkout。
+
+修复后官网、中英文页、支持页、隐私页、支持 API `/config`、新旧 relay 健康接口均返回 200；浏览器已显示完整中文首页。直接连接香港源站、启用系统证书及 hostname 验证也返回 200；www 返回 308 并保留路径和 query。新旧下载清单均为 1.9.8，字节一致（SHA-256 `7dce7e76a6ceab363e2753b0cef35093c1ea54a7e10bf8ffbdf4840d340741e2`）。旧 Caddyfile 回归样本会被新检查拒绝，当前配置检查、两个 shell 脚本语法、workflow actionlint 和 diff 检查通过。没有执行支持 AI 问答或客户端配对验收；App Store 2.0 草稿、发布状态与包管理器未改动。
+
 ### 2026-09-10 12:05 UTC：恢复被旧配置覆盖的新域路由
 
 准备 App Store 2.0 元数据时发现新域返回 Cloudflare 525。源站的 Caddyfile 摘要已恢复为下述官网上线前的 `1cc8fa35…`，不含任何 Pairlet host 块；站点 `current` 仍指向 `website-20260910-r2`，Caddy 与 relay 均 active。尚未确认是哪次部署覆盖了配置。

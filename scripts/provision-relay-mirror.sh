@@ -8,6 +8,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Mirror provisioning also replaces the shared Caddyfile; preserve all public hosts.
+python3 scripts/check-production-caddy.py
+
 [ -f .env ] && { set -a; . ./.env; set +a; }
 : "${RELAY_HOST_HK:?set RELAY_HOST_HK in .env (HK origin IP)}"
 : "${SSHPASS_HK:?set SSHPASS_HK in .env (HK server root password)}"
