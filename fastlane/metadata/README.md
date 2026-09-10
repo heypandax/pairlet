@@ -1,10 +1,11 @@
 # App Store 元数据与截图（fastlane deliver）
 
-`fastlane/metadata/<locale>/` 管理名称、描述、关键词、宣传文本、版本说明以及官网、支持、隐私政策 URL；`fastlane/screenshots/<locale>/` 是商店截图来源，`fastlane/previews/<locale>/app-preview.mov` 是 App Preview 来源。当前启用 `zh-Hans`、`en-US`。
+`fastlane/metadata/<locale>/` 管理名称、副标题、描述、关键词、宣传文本、版本说明以及官网、支持、隐私政策 URL；`fastlane/screenshots/<locale>/` 是商店截图来源，`fastlane/previews/<locale>/app-preview.mov` 是 App Preview 来源。当前启用 `zh-Hans`、`en-US`。
 
 ## 2.0 改名准备
 
-- 中文名称：`Pairlet - 随身编程遥控`；英文名称：`Pairlet - AI Code Remote`。保留原标题的功能描述，名称均不超过 30 字符。
+- 中英文商店名称均为 `Pairlet`（`name.txt`）。副标题独立写入 `subtitle.txt`：中文 `AI 编程伴侣`，英文 `Coding agents, within reach`。名称和副标题各不超过 30 字符。
+- 中文品类说明依据[改名方案第 2 节](../../docs/plans/2026-09-09-pairlet-rebrand-plan.md#2-品牌与产品表达)。原命名评估表述为「Pairlet｜AI 编程伴侣」「你的编程任务，随时接续」以及 `Pairlet — Your coding agents, within reach.`；实施方案的中文主张为「随时接续你的 AI 编程任务」。`Your coding agents, within reach.` 共 33 字符，商店副标题去掉 `Your` 和句号后为 27 字符，其余宣传场景可保留完整原句。不要再从旧商店标题回填「随身编程遥控 / AI Code Remote」。
 - 介绍保留原有功能与能力边界，在首段说明原名 CC Pocket，并补齐 iPhone / iPad；关键词保留 `CC Pocket` 供老用户搜索。
 - `marketing_url.txt` 指向中文官网 `https://pairlet.org/` 或英文官网 `https://pairlet.org/en/`；`support_url.txt`、`privacy_url.txt` 分别指向 `https://pairlet.org/support/`、`https://pairlet.org/privacy.html`。上传前要检查公开访问；本地校验只验证 URL 格式。
 - 沿用 App Store 记录 `6778773969` 与 Bundle ID `com.panda.ccpocket`。桌面显示名 CC Pairlet、旧命令和旧本地目录不等于商店需要创建新应用。
@@ -21,12 +22,12 @@ bash marketing/appstore/generate-assets.sh
 bash marketing/appstore/generate-assets.sh --reuse
 ```
 
-创建或同步一个**可编辑**的 App Store 版本，运行 GitHub Actions 的 `ios-store-metadata`，输入目标版本号。该工作流上传名称、描述、关键词、宣传文本、三个 URL 字段、截图和 App Preview，不上传 binary、不挂 build、不提交审核，也不会提前覆盖 `release_notes.txt` 或审核备注；最后通过 ASC API 反查 iPhone 与 iPad 媒体。此反查不验证文本；需另行回读 ASC 的名称、描述和 URL。「此版本的新增功能」必须在正式提交 binary 时按真实代码差异填写。
+创建或同步一个**可编辑**的 App Store 版本，运行 GitHub Actions 的 `ios-store-metadata`，输入目标版本号。该工作流上传名称、副标题、描述、关键词、宣传文本、三个 URL 字段、截图和 App Preview，不上传 binary、不挂 build、不提交审核，也不会提前覆盖 `release_notes.txt` 或审核备注；最后通过 ASC API 反查 iPhone 与 iPad 媒体。此反查不验证文本；需另行回读 ASC 的名称、副标题、描述和 URL。「此版本的新增功能」必须在正式提交 binary 时按真实代码差异填写。
 
 正式发版仍走 `ios-release.yml`：`ios` job 上传二进制 → `submit` job 轮询 ASC 处理完成 → deliver 推元数据、挂本次构建，并按输入决定是否提交审核及自动上架。
 
 - 语言目录须与 App Store Connect 里**已启用**的本地化一致（当前：`zh-Hans`、`en-US`）。若 deliver 报某语言不存在，删掉对应目录或先在 ASC 启用该语言。
-- 文本均为纯文本（不渲染 Markdown）。描述和版本说明上限 4000 字符，宣传文本 170，关键词 100。
+- 文本均为纯文本（不渲染 Markdown）。名称和副标题各上限 30 字符，描述和版本说明 4000，宣传文本 170，关键词 100。
 - iPhone 截图固定为 1242×2688（`APP_IPHONE_65`，与版本页当前展示槽位一致），放在 `fastlane/screenshots/<语言>/` 根下，每种语言 6 张；文件名 `01-` 到 `06-` 决定展示顺序。
 - **iPad 截图**（issue #334）固定为 2048×2732（`APP_IPAD_PRO_3GEN_129`，12.9 英寸 iPad Pro 竖屏），放在**子目录** `fastlane/screenshots/<语言>/ipadPro129/`，同样每种语言 6 张、`01-` 到 `06-` 排序。v1.9.7 起 iOS 包是通用二进制（`TARGETED_DEVICE_FAMILY = 1,2`），**没有 iPad 截图集就不能提交版本**。
   - 为什么放子目录：`fastlane deliver` 扫语言目录时是**非递归**的（`Deliver::Loader::LanguageFolder#file_paths` 只 glob `<语言>/*.png`），只对 `appleTV` / `iMessage` 这两个特殊目录下钻。所以子目录里的文件 deliver 完全看不见——这正是我们要的：deliver 靠**像素尺寸**猜机型，而 2048×2732 同时是 12.9 英寸二代（`APP_IPAD_PRO_129`）和三代（`APP_IPAD_PRO_3GEN_129`）两个槽位的尺寸，deliver 只能靠文件名里是否含 `ipadPro129` / `IPAD_PRO_3GEN_129` 去消歧（`Deliver::AppScreenshot.resolve_ipadpro_conflict_if_needed`）。与其让它猜，不如由 `scripts/sync-appstore-screenshots.rb` 按显示类型显式上传。目录名沿用 fastlane 自己的 `ipadPro129` 写法，看代码的人一眼能对上。

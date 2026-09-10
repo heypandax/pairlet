@@ -22,6 +22,7 @@ IPAD_DIR = "ipadPro129"
 IPAD_SIZE = (2048, 2732)
 LIMITS = {
     "name.txt": 30,
+    "subtitle.txt": 30,
     "description.txt": 4000,
     "keywords.txt": 100,
     "promotional_text.txt": 170,
