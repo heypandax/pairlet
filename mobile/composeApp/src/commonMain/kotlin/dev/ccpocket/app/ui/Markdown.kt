@@ -294,6 +294,21 @@ private fun CodeBlock(code: String, lang: String?, closed: Boolean = true) {
     }
 }
 
+/**
+ * ATX heading level of [line] (1–6), or null when the line is ordinary text. CommonMark's rule: 1–6 `#`
+ * then a space/tab or the end of the line. Issue #355: the old check was `startsWith("#")`, so a
+ * paragraph that happened to open with `#5 已修复…` (an item reference) or `#include` rendered as an
+ * H1 — big, bold, with a heading's air around it — which is exactly the "one paragraph suddenly huge"
+ * DSH report. Seven-plus `#` is also not a heading (CommonMark).
+ */
+internal fun mdHeadingLevel(line: String): Int? {
+    if (!line.startsWith("#")) return null
+    val level = line.takeWhile { it == '#' }.length
+    if (level > 6) return null
+    val next = line.getOrNull(level) ?: return level // "##" alone = empty heading
+    return if (next == ' ' || next == '\t') level else null
+}
+
 @Composable
 private fun MdLine(raw: String, color: Color) {
     val line = raw.trimEnd()
@@ -302,8 +317,8 @@ private fun MdLine(raw: String, color: Color) {
     val body = 14.sp * scale // explicit so the chat text scale (issue #8) reaches plain body/list lines too
     when {
         line.isBlank() -> Spacer(Modifier.height(3.dp))
-        line.startsWith("#") -> {
-            val level = line.takeWhile { it == '#' }.length
+        mdHeadingLevel(line) != null -> {
+            val level = mdHeadingLevel(line)!!
             LinkifiedText(
                 inline(line.drop(level).trim()),
                 color = color,
