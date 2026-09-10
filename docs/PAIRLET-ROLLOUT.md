@@ -1,6 +1,6 @@
 # Pairlet 发布准备与回退
 
-官网已于 2026-09-10 部署到香港源站，并启用 pairlet.org；详见 [网站部署记录](PAIRLET-WEBSITE-DEPLOYMENT.md)。仓库已改为 heypandax/pairlet，旧仓库 URL 保留跳转，旧 Pages 已提供对应路径的跳转文档。客户端仍为本地候选，改名客户端未提交商店，包管理器命令/包名迁移未发布。版本仍为 1.9.8 开发候选；发布前重新核实最新稳定版本并统一提高版本与构建号。兼容身份见 [兼容清单](PAIRLET-COMPATIBILITY.md)，已完成检查与验收限制见 [验证记录](PAIRLET-VALIDATION.md)；后续入口复查与待补项见 [兼容入口复查](PAIRLET-COMPATIBILITY-AUDIT.md)。
+官网已于 2026-09-10 部署到香港源站，并启用 pairlet.org；详见 [网站部署记录](PAIRLET-WEBSITE-DEPLOYMENT.md)。仓库已改为 heypandax/pairlet，旧仓库 URL 保留跳转，旧 Pages 已提供对应路径的跳转文档。客户端仍为本地候选，改名客户端未提交商店，包管理器命令/包名迁移未发布。首个正式 Pairlet 版本按用户决定为 **2.0**，源码与发行标签使用 **2.0.0 / v2.0.0**；尚未创建标签或发布。Android versionCode 已递增为 31；iOS 正式构建号仍由发布工作流的 run number 生成；Harmony 采用发布脚本映射的 2000000。正式发布前重新核实各渠道构建号与升级路径。兼容身份见 [兼容清单](PAIRLET-COMPATIBILITY.md)，已完成检查与验收限制见 [验证记录](PAIRLET-VALIDATION.md)；后续入口复查与待补项见 [兼容入口复查](PAIRLET-COMPATIBILITY-AUDIT.md)。
 
 ## 渠道基线（2026-09-10）
 

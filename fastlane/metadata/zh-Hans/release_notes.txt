@@ -1,9 +1,6 @@
-本次更新（1.9.8）
+本次更新（2.0.0）
 
-• DeepSeek Harness 会话恢复可用：dsh 0.1.2 换掉了 cc-pocket 一直对接的本地 API，会话因此报「连不上 dsh local API」。daemon 已改走 dsh 官方的 ACP 接口——请把 dsh 升级到 0.1.2-rc.1 或更新版本。
-• DeepSeek Harness 不再提供 agent 预设与会话重命名：官方自动化接口只暴露模型与推理强度两项。
-• ZCode 3.9 及以上恢复可用：模型改为直接传给运行时，不再依赖它已不再读取的配置文件。
-• HTML 文件可直接内嵌预览（沙箱浏览视图），一键切回源码。
-• 文件查看器里的图片支持缩放：双指放大、限位拖动、一键还原。
-• 桌面端：Markdown 文档在对话右侧的预览栏中打开。
-• iPad：会话列表加宽，英文「New session」不再被截断；额度条在过窄时不再显示重置时间。
+• CC Pocket 正式更名为 Pairlet，应用内更新名称，并通过一次性提示说明改名。
+• 电脑端命令简化为 pairlet，沿用原来的子命令；cc-pocket-daemon 继续可用。
+• 更新 pairlet.org 官网与帮助入口，兼容新旧 GitHub 仓库链接。
+• 改进 daemon 在后台运行时对独立安装的 OpenCode CLI 的识别。

@@ -1,9 +1,6 @@
-What's new in 1.9.8
+What's new in 2.0.0
 
-• DeepSeek Harness sessions work again with the latest dsh: its 0.1.2 release replaced the local API cc-pocket was talking to, so sessions failed with "could not reach the dsh local API". The daemon now drives dsh over its official ACP interface — update dsh to 0.1.2-rc.1 or newer.
-• DeepSeek Harness no longer offers agent presets or session rename; the official automation interface exposes only model and reasoning effort.
-• ZCode 3.9 and newer open again: the model is now passed to the runtime directly instead of through a config file it stopped reading.
-• HTML files preview inline in a sandboxed browser view, with the source a tap away.
-• Images in the file viewer zoom: pinch, pan within bounds, and fit back to the page.
-• Desktop: Markdown documents open in a preview pane beside the conversation.
-• iPad: a wider session list so "New session" no longer truncates, and the quota bar drops its reset time when the row is too narrow to hold it.
+• CC Pocket is now Pairlet. The new name appears throughout the app, with a one-time notice explaining the change.
+• A shorter computer command: use pairlet with the same subcommands as cc-pocket-daemon. The legacy command remains available.
+• Updated website and help links for pairlet.org, with support for both the old and new GitHub repository addresses.
+• Improved discovery of standalone OpenCode CLI installations when the daemon runs in the background.

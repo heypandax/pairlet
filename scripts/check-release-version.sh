@@ -20,6 +20,13 @@ with open("iosApp/iosApp/Info.plist", "rb") as handle:
     print(plistlib.load(handle)["CFBundleShortVersionString"])
 PY
 )
+HARMONY_VERSION=$(python3 - <<'PY'
+import json
+
+with open("harmony/AppScope/app.json5", encoding="utf-8") as handle:
+    print(json.load(handle)["app"]["versionName"])
+PY
+)
 
 [ -n "$MOBILE_VERSION" ] || fail "could not read mobile appVersionName"
 [[ "$MOBILE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || \
@@ -30,6 +37,7 @@ for entry in \
   "desktop-package:$DESKTOP_VERSION" \
   "desktop-seed:$SEED_VERSION" \
   "ios:$IOS_VERSION" \
+  "harmony:$HARMONY_VERSION" \
   "homebrew-template:$CASK_VERSION"
 do
   label=${entry%%:*}
