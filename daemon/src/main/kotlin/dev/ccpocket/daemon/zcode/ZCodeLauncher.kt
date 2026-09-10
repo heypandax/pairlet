@@ -122,9 +122,12 @@ object ZCodeLauncher {
         (listOf(base.trimEnd('\\', '/')) + parts).joinToString("\\")
 
     /**
-     * Install directories recorded by the NSIS uninstall entries. `reg query <key> /s /f ZCode /d`
-     * searches value *data* (not names), so a bundle installed anywhere still surfaces its own path.
-     * Non-Windows hosts short-circuit: there is no registry to ask.
+     * Install directories recorded by the NSIS uninstall entries, in two passes. Pass 1 —
+     * `reg query <hive> /s /f ZCode` — matches "ZCode" in key names, value names AND data, so the entry is
+     * found through its DisplayName even when the bundle sits somewhere without "ZCode" in the path
+     * (`D:\Apps\Zai`). It only prints the matching lines, though, so pass 2 re-queries each matched
+     * uninstall subkey in full and reads InstallLocation / DisplayIcon from that. Non-Windows hosts
+     * short-circuit: there is no registry to ask.
      */
     internal fun registryInstallLocations(
         query: (List<String>) -> String? = ::runReg,
@@ -132,11 +135,28 @@ object ZCodeLauncher {
     ): List<String> {
         if (!osName.lowercase().contains("win")) return emptyList()
         val found = LinkedHashMap<String, String>()
-        for (key in uninstallKeys) {
-            val output = query(listOf("reg.exe", "query", key, "/s", "/f", "ZCode", "/d")) ?: continue
-            for (dir in parseRegistryInstallLocations(output)) found.putIfAbsent(dir.lowercase(), dir)
+        for (hive in uninstallKeys) {
+            val hits = query(listOf("reg.exe", "query", hive, "/s", "/f", "ZCode")) ?: continue
+            for (subkey in parseRegistrySubkeys(hits, hive)) {
+                val full = query(listOf("reg.exe", "query", subkey)) ?: continue
+                for (dir in parseRegistryInstallLocations(full)) found.putIfAbsent(dir.lowercase(), dir)
+            }
         }
         return found.values.toList()
+    }
+
+    /** The uninstall SUBKEYS named in a `/s /f` listing: the lines that spell out a full key path one level
+     *  below [hive] (reg.exe prints `HKEY_CURRENT_USER\...` long-form names; [hive] uses the short alias). */
+    internal fun parseRegistrySubkeys(regOutput: String, hive: String): List<String> {
+        val longHive = hive
+            .replace(Regex("^HKCU", RegexOption.IGNORE_CASE), "HKEY_CURRENT_USER")
+            .replace(Regex("^HKLM", RegexOption.IGNORE_CASE), "HKEY_LOCAL_MACHINE")
+        return regOutput.lineSequence().map { it.trim() }
+            .filter { it.startsWith("HKEY_", ignoreCase = true) }
+            .filter { it.length > longHive.length && it.startsWith(longHive + "\\", ignoreCase = true) }
+            .filter { !it.substring(longHive.length + 1).contains('\\') } // one level down = the app's own key
+            .distinctBy { it.lowercase() }
+            .toList()
     }
 
     /**

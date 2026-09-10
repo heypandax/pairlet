@@ -73,21 +73,49 @@ class ZCodeLauncherTest {
     }
 
     @Test
-    fun `registry lookup queries the uninstall hives on windows`() {
+    fun `registry subkeys are read off the search listing`() {
+        val listing = """
+            |
+            |HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\5d2a-zcode
+            |    DisplayName    REG_SZ    ZCode
+            |
+            |HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\other\nested
+            |    DisplayName    REG_SZ    ZCode Helper
+            |
+            |End of search: 2 match(es) found.
+        """.trimMargin()
+        assertEquals(
+            listOf("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\5d2a-zcode"),
+            ZCodeLauncher.parseRegistrySubkeys(listing, "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
+        )
+    }
+
+    @Test
+    fun `registry lookup queries the uninstall hives on windows in two passes`() {
         val queried = mutableListOf<List<String>>()
         val dirs = ZCodeLauncher.registryInstallLocations(
             query = { argv ->
                 queried += argv
-                "    InstallLocation    REG_SZ    D:\\Apps\\ZCode\n"
+                if ("/f" in argv) {
+                    // pass 1: the search listing names the matching subkey (DisplayName hit, path has no "ZCode")
+                    val hive = argv[2]
+                    if (hive.startsWith("HKCU")) "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\5d2a-zcode\n    DisplayName    REG_SZ    ZCode\n" else ""
+                } else {
+                    // pass 2: the full subkey carries the install path
+                    "    DisplayName    REG_SZ    ZCode\n    InstallLocation    REG_SZ    D:\\Apps\\Zai\n"
+                }
             },
             osName = "Windows 11",
         )
 
-        assertEquals(listOf("D:\\Apps\\ZCode"), dirs)
-        assertEquals(3, queried.size)
-        assertTrue(queried.all { it.first() == "reg.exe" && it.containsAll(listOf("query", "/s", "/f", "ZCode", "/d")) })
-        assertTrue(queried.any { it.any { arg -> arg.startsWith("HKCU\\Software\\Microsoft") } })
-        assertTrue(queried.any { it.any { arg -> arg.startsWith("HKLM\\Software\\WOW6432Node") } })
+        assertEquals(listOf("D:\\Apps\\Zai"), dirs)
+        val searches = queried.filter { "/f" in it }
+        val fulls = queried.filter { "/f" !in it }
+        assertEquals(3, searches.size)
+        assertTrue(searches.all { it.first() == "reg.exe" && it.containsAll(listOf("query", "/s", "/f", "ZCode")) && "/d" !in it })
+        assertTrue(searches.any { it.any { arg -> arg.startsWith("HKCU\\Software\\Microsoft") } })
+        assertTrue(searches.any { it.any { arg -> arg.startsWith("HKLM\\Software\\WOW6432Node") } })
+        assertEquals(listOf(listOf("reg.exe", "query", "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\5d2a-zcode")), fulls)
     }
 
     @Test
