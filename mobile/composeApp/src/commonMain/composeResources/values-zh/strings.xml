@@ -869,6 +869,8 @@
     <string name="group_move_to_section">移动到分组</string>
     <string name="sidebar_archived">已归档会话</string>
     <string name="archive_remove_from_recents">从最近中移除</string>
+    <!-- issue #359: the RECENT group header's own removal verb — forgets the PROJECT, not a session -->
+    <string name="recent_forget_project">从最近移除</string>
     <string name="palette_archived_placeholder">搜索已归档会话……</string>
     <string name="palette_archived_legend">⏎ 打开 · ⌘⏎ 取消归档 · esc 退出归档</string>
 

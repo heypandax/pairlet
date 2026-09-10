@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** In-memory [DesktopStore] so model tests never read or write the developer's real store file. */
@@ -98,6 +99,36 @@ class RepoDesktopModelRecentTest {
         // a restart after clear stays cleared — nothing refills from thin air
         val (_, m3) = demoModel(store)
         assertTrue(m3.sessionGroups.isEmpty())
+    }
+
+    /**
+     * Issue #359: one project can be forgotten on its own — the RECENT group header's right-click — with
+     * the same non-destructive contract [RepoDesktopModel.clearRecent] has. The OTHER visit survives, in
+     * memory and on disk, and neither pins nor hidden rows move.
+     */
+    @Test
+    fun forgetProjectDropsOnlyThatVisitAndPersistsTheRest() {
+        val store = FakeDesktopStore()
+        val (_, m) = demoModel(store)
+        val (a, b) = DemoData.dirs()
+        m.openProject(DkProject(a.path, a.name))
+        m.openProject(DkProject(b.path, b.name)) // current listing = b, so a is an ordinary RECENT group
+        m.pin(m.sessions.first())
+        val pinsBefore = store.map.getValue(pinsKey)
+        assertEquals(listOf(b.path, a.path), m.sessionGroups.map { it.path })
+
+        m.forgetProject(m.sessionGroups.first { it.path == a.path })
+
+        assertEquals(listOf(b.path), m.sessionGroups.map { it.path }, "only the forgotten group leaves")
+        // quoted forms on purpose: the demo dirs are "/Users/alex/code/cc-pocket" and
+        // "…/cc-pocket-site", so a bare substring test would see the forgotten path inside the kept one
+        assertTrue(store.map.getValue(visitsKey).contains("\"${b.path}\""), "the surviving visit stays on disk")
+        assertFalse(store.map.getValue(visitsKey).contains("\"${a.path}\""), "the forgotten one is gone from disk too")
+        assertEquals(pinsBefore, store.map[pinsKey], "pins are untouched")
+
+        // a restart re-reads the store: the forget survived it, and b is still there to refill
+        val (_, m2) = demoModel(store)
+        assertEquals(listOf(b.path), m2.sessionGroups.map { it.path })
     }
 
     /**

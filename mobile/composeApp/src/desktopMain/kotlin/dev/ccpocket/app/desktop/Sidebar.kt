@@ -132,6 +132,7 @@ import dev.ccpocket.app.resources.switcher_all_projects
 import dev.ccpocket.app.resources.switcher_recent
 import dev.ccpocket.app.resources.new_session_here
 import dev.ccpocket.app.resources.pin_project
+import dev.ccpocket.app.resources.recent_forget_project
 import dev.ccpocket.app.resources.this_machine
 import dev.ccpocket.app.resources.unpin_project
 import dev.ccpocket.app.theme.Tok
@@ -728,6 +729,7 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                         onRefresh = { refreshTarget = g.path; model.refresh(g) },
                         onTogglePin = { if (model.isProjectPinned(g.path)) model.unpinProject(g.path) else model.pinProject(g.path, g.name) },
                         onNewSession = { model.openNewSession(tilde(g.path)) },
+                        onForget = { model.forgetProject(g) },
                         onToggle = { if (closed) collapsed.remove(g.path) else collapsed.add(g.path) },
                     )
                 }
@@ -852,9 +854,42 @@ private fun recentRowIndex(
  * this list ("that project — start something there"), and a hover-only entry would leave the path from
  * RECENT to a new session as invisible as it was before. Pin joins the hover cluster instead, next to
  * refresh — it's a preference, not a call to action, and it wears the same glyphs the session rows use.
+ *
+ * Right-click reaches the two verbs a PROJECT owns (issue #359), in the same navigate → edit → file →
+ * remove order the session rows use: pin/unpin (edit) and "Remove from recents" (remove). The session
+ * rows' identically-worded entry forgets ONE row; this one forgets the whole folder — the verb is the
+ * same promise at a different scope, so it is deliberately the same words.
  */
 @Composable
 private fun GroupHeader(
+    g: DkSessionGroup,
+    closed: Boolean,
+    current: Boolean,
+    refreshing: Boolean,
+    pinned: Boolean,
+    onRefresh: () -> Unit,
+    onTogglePin: () -> Unit,
+    onNewSession: () -> Unit,
+    onForget: () -> Unit,
+    onToggle: () -> Unit,
+) {
+    val pinLabel = stringResource(if (pinned) Res.string.unpin_project else Res.string.pin_project)
+    val forget = stringResource(Res.string.recent_forget_project)
+    ContextMenuArea(
+        items = {
+            joinMenuFamilies(
+                listOf(PocketMenuItem(pinLabel, onClick = onTogglePin)),
+                // the CURRENT dir is exempt: it is not a RECENT entry at all but the synthetic live group
+                // (#211's chip says so), so it would come straight back and the verb would read as broken
+                buildList { if (!current) add(PocketMenuItem(forget, removal = true, onClick = onForget)) },
+            )
+        },
+        content = { GroupHeaderBody(g, closed, current, refreshing, pinned, onRefresh, onTogglePin, onNewSession, onToggle) },
+    )
+}
+
+@Composable
+private fun GroupHeaderBody(
     g: DkSessionGroup,
     closed: Boolean,
     current: Boolean,

@@ -136,7 +136,7 @@ class SidePaneModelDelegationGuardTest {
         "projectPins", "pinProject", "unpinProject", "isProjectPinned", "projectListReveal",
         "openProjectPin", "browseProjects",
         "projects", "sessions", "openProject", "selectSession", "hideSession",
-        "sessionGroups", "clearRecent", "sessionsRefreshing", "refresh", "liveSession",
+        "sessionGroups", "clearRecent", "forgetProject", "sessionsRefreshing", "refresh", "liveSession",
         "customGroups", "canEditGroups", "createGroup", "renameGroup", "deleteGroup", "assignGroup",
         "groupCollapsed",
         "archivedSessions", "canArchiveSessions", "archiveSession", "unarchiveSession",

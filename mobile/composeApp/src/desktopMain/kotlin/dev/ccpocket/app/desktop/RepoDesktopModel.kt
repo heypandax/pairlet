@@ -790,6 +790,15 @@ class RepoDesktopModel(
         saveVisits()
     }
 
+    /** RECENT's per-project forget (issue #359) — the group header's right-click. Drops just this
+     *  project's visit; pins, hidden rows and every session on disk are untouched, exactly as
+     *  [clearRecent] leaves them. [sameDir] (issue #58) does the matching, so a group rendered from a
+     *  tilde key still finds its absolute visit. */
+    override fun forgetProject(g: DkSessionGroup) {
+        val acct = repo.paired.value?.accountId ?: return
+        if (visits.removeAll { it.accountId == acct && sameDir(it.path, g.path) }) saveVisits()
+    }
+
     // ── custom session groups (issue #119): the current project's groups + mutations ───────────────
     // repo.sessionGroups already tracks the listed dir's groups (null/older-daemon collapsed to empty
     // upstream — so an empty list is the flat-render signal). Every mutation targets the current dir; the

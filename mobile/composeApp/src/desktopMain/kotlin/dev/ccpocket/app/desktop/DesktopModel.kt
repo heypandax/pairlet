@@ -548,6 +548,13 @@ interface DesktopModel {
      *  deliberately untouched. No-op for seed/preview models. */
     fun clearRecent() {}
 
+    /** Forget ONE visited project — the RECENT group header's right-click (issue #359), for the folder
+     *  that is done and only in the way. Same non-destructive contract [clearRecent] has: no session data,
+     *  no pins, no hidden rows are touched, and reopening the folder brings its group straight back. The
+     *  CURRENTLY listed dir has no entry offered — it re-enters instantly as the synthetic live group, so
+     *  removing it could only look broken. No-op for seed/preview models. */
+    fun forgetProject(g: DkSessionGroup) {}
+
     // ── custom session groups (issue #119) ────────────────────────────────────────────────────────
     // These describe ONLY the current (live-listed) project — the daemon lists groups per directory, so a
     // non-current RECENT snapshot has none and stays flat. Empty [customGroups] = an older daemon that omits
