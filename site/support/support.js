@@ -436,7 +436,7 @@
       if (parsed.protocol !== 'https:' || parsed.username || parsed.password || (parsed.port && parsed.port !== '443')) return false;
       if (['pairlet.org', 'pocket.ark-nexus.cc'].includes(parsed.hostname)) return parsed.pathname.startsWith('/manual/');
       if (parsed.hostname === 'heypandax.github.io') return parsed.pathname.startsWith('/cc-pocket/');
-      if (parsed.hostname === 'github.com') return parsed.pathname === '/heypandax/cc-pocket' || parsed.pathname.startsWith('/heypandax/cc-pocket/');
+      if (parsed.hostname === 'github.com') return ['/heypandax/pairlet', '/heypandax/cc-pocket'].some(repo => parsed.pathname === repo || parsed.pathname.startsWith(repo + '/'));
       return false;
     } catch (error) {
       return false;

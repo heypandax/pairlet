@@ -317,8 +317,9 @@ def is_public_source_url(value: str) -> bool:
     if hostname == "heypandax.github.io":
         return parsed.path.startswith("/cc-pocket/")
     if hostname == "github.com":
-        return parsed.path == "/heypandax/cc-pocket" or parsed.path.startswith(
-            "/heypandax/cc-pocket/"
+        return any(
+            parsed.path == repo or parsed.path.startswith(repo + "/")
+            for repo in ("/heypandax/pairlet", "/heypandax/cc-pocket")
         )
     return False
 

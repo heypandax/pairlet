@@ -41,13 +41,6 @@ def make_store(path=":memory:", **overrides):
 
 
 class FakeResponse:
-    def test_pairlet_manual_sources_keep_old_urls_and_reject_lookalikes(self):
-        for host in ("pairlet.org", "pocket.ark-nexus.cc"):
-            self.assertTrue(support_web.is_public_source_url(f"https://{host}/manual/zh/install-and-pair/"))
-            for url in (f"https://{host}/support-api/config", f"https://{host}.evil.example/manual/", f"https://{host}@evil.example/manual/", f"http://{host}/manual/", f"https://{host}:8443/manual/"):
-                self.assertFalse(support_web.is_public_source_url(url))
-        self.assertTrue(support_web.is_public_source_url("https://heypandax.github.io/cc-pocket/manual/en/"))
-
     def __init__(self, payload):
         self.payload = json.dumps(payload).encode("utf-8")
 
@@ -62,6 +55,32 @@ class FakeResponse:
 
 
 class SupportWebTest(unittest.TestCase):
+    def test_pairlet_manual_sources_keep_old_urls_and_reject_lookalikes(self):
+        for host in ("pairlet.org", "pocket.ark-nexus.cc"):
+            self.assertTrue(support_web.is_public_source_url(f"https://{host}/manual/zh/install-and-pair/"))
+            for url in (f"https://{host}/support-api/config", f"https://{host}.evil.example/manual/", f"https://{host}@evil.example/manual/", f"http://{host}/manual/", f"https://{host}:8443/manual/"):
+                self.assertFalse(support_web.is_public_source_url(url))
+        self.assertTrue(support_web.is_public_source_url("https://heypandax.github.io/cc-pocket/manual/en/"))
+
+    def test_repository_sources_accept_both_names_without_accepting_lookalikes(self):
+        accepted = []
+        for repo in ("pairlet", "cc-pocket"):
+            for suffix in ("", "/", "/issues/42", "/blob/main/README.md#L1"):
+                url = f"https://github.com/heypandax/{repo}{suffix}"
+                self.assertTrue(support_web.is_public_source_url(url), url)
+                accepted.append(url)
+            for url in (
+                f"https://github.com/heypandax/{repo}-other/issues/42",
+                f"https://github.com/other/{repo}",
+                f"https://github.com.evil.example/heypandax/{repo}",
+                f"https://github.com@evil.example/heypandax/{repo}",
+                f"https://evil@github.com/heypandax/{repo}",
+                f"http://github.com/heypandax/{repo}",
+                f"https://github.com:8443/heypandax/{repo}",
+            ):
+                self.assertFalse(support_web.is_public_source_url(url), url)
+        self.assertEqual(accepted, support_web.extract_public_sources("\n".join(accepted)))
+
     def test_bind_failure_preserves_the_socket_error(self):
         store = make_store()
         fake_socket = mock.Mock()

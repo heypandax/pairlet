@@ -1,6 +1,6 @@
 # Pairlet 发布准备与回退
 
-官网已于 2026-09-10 部署到香港源站，并启用 pairlet.org；详见 [网站部署记录](PAIRLET-WEBSITE-DEPLOYMENT.md)。客户端仍为本地候选，未提交商店、未改名仓库或包管理器。版本仍为 1.9.8 开发候选；发布前重新核实最新稳定版本并统一提高版本与构建号。兼容身份见 [兼容清单](PAIRLET-COMPATIBILITY.md)，已完成检查与验收限制见 [验证记录](PAIRLET-VALIDATION.md)。
+官网已于 2026-09-10 部署到香港源站，并启用 pairlet.org；详见 [网站部署记录](PAIRLET-WEBSITE-DEPLOYMENT.md)。仓库已改为 heypandax/pairlet，旧仓库 URL 保留跳转，旧 Pages 已提供对应路径的跳转文档。客户端仍为本地候选，改名客户端未提交商店，包管理器命令/包名迁移未发布。版本仍为 1.9.8 开发候选；发布前重新核实最新稳定版本并统一提高版本与构建号。兼容身份见 [兼容清单](PAIRLET-COMPATIBILITY.md)，已完成检查与验收限制见 [验证记录](PAIRLET-VALIDATION.md)；后续入口复查与待补项见 [兼容入口复查](PAIRLET-COMPATIBILITY-AUDIT.md)。
 
 ## 渠道基线（2026-09-10）
 
@@ -23,7 +23,7 @@
 - `deploy/Caddyfile` 已承接并部署新域站点；旧域配置块保持原样。`Caddyfile.pairlet-candidate` 保留为部署前草案，运行配置以 `Caddyfile` 为准。新官网使用 `/var/www/pairlet-site/current`，relay.pairlet.org 指向同一个 relay，www 308 保留完整 URI。服务器旧配置备份位置见部署记录。
 - 新站支持页使用同源 `/support-api`；运行服务已加入新域 origin/hostname，保留旧域和 Pages。新域浏览器问答已收到回答。现有服务未配置 Turnstile 密钥，保持原有禁用策略；没有宣称挑战链验收。支持机器人仍使用既有知识库，可能返回旧品牌及旧手册链接。
 - 旧 pocket.ark-nexus.cc 保留 WS、配对、API、下载；不能整站重定向。客户端默认 relay/镜像暂不切换。
-- 旧 `heypandax.github.io/cc-pocket/<path>` 迁移需要实际 Pages 仓库的对应变更；本分支不自动推送另一仓库，不能靠仓库改名期待 Pages 跳转。
+- 旧 `heypandax.github.io/cc-pocket/<path>` 已通过实际 Pages 仓库的对应变更提供到新站的 HTML 跳转；仓库改名本身不会自动提供 Pages 跳转。
 
 ## 发布前必须完成
 
