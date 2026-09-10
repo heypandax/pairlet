@@ -5,13 +5,33 @@
 设备显示名为 **CC Pairlet**，应用内名称为 **Pairlet**。原 `CC Pocket.app`、启动器、
 `cc-pocket-*` 发布资产、CLI、应用身份与服务名继续保留，详见
 [改名兼容清单](PAIRLET-COMPATIBILITY.md) 和 [候选状态及发布顺序](PAIRLET-ROLLOUT.md)。
-本地品牌候选沿用基线版本以便审阅；正式升级试用及发布前必须统一提高版本和平台构建号。
+首个改名版本定为 **2.0.0**，版本和平台构建号已提高；正式发布等待其他模块合并与验收。
 
 macOS `createDistributable` 自动写入名称本地化并沿用配置的签名身份重封外层 bundle，
 随后 `packageDmg` 使用该已校验的 image。Windows `packageMsi` 自动运行
 `scripts/brand-windows-msi.ps1`，固定旧 UpgradeCode，仅改变产品与快捷方式显示名。
 所有钩子必须在签名、checksum 和上传之前成功；失败留下的 MSI 不得发布。
 源与包兼容门禁不能替代原签名升级、系统搜索、Dock/快捷方式或图标实际尺寸验收。
+
+## 只预演，不正式发布
+
+推送 `main` 只自动运行 `ci.yml`。需要构建发布候选时，手动运行独立的
+`release-preview.yml`，无需 tag 或 GitHub Release：
+
+```bash
+gh workflow run release-preview.yml --ref main \
+  -f version=2.0.0 -f expected_sha="$(git rev-parse HEAD)" -f scope=all
+```
+
+预演固定使用触发时的提交；`expected_sha` 防止并行模块恰好推送后误测另一份代码。
+支持 `all`、`daemon`、`desktop`、`android`、`ios` 范围。默认检查版本和改名兼容性，
+构建五种 daemon、三种桌面安装包、Android unsigned release APK 和 iOS unsigned archive，
+并检查桌面包内 JVM；macOS daemon 另测新旧命令。Harmony 只执行静态发布契约检查。
+
+产物仅保存到 Actions，保留 14 天，随包提供提交 SHA、运行链接和 SHA-256。
+流程只有仓库读取权限，不读取发布密钥，不创建 tag/Release，不上传商店或 TestFlight，
+不更新 Homebrew/Scoop、镜像和生产服务。移动端使用 Firebase 占位配置；无签名 APK/archive
+仅用于构建验证。预演通过后仍需正式签名、公证及旧版本升级验收；其他模块合并后应重新预演。
 
 ## 当前全平台主流程
 

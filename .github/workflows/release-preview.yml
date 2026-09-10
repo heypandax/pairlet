@@ -1,0 +1,291 @@
+name: release-preview
+run-name: Preview ${{ inputs.version }} · ${{ inputs.scope }} · ${{ github.sha }}
+
+# Build from the dispatch snapshot, without release/signing credentials or publishing jobs.
+# Artifacts are temporary, unsigned test candidates; production workflows remain tag-only.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Repository version (no leading v)
+        required: true
+        default: "2.0.0"
+      expected_sha:
+        description: Optional full commit SHA; fail if main moved before dispatch
+        required: false
+      scope:
+        description: Platforms to rehearse
+        type: choice
+        options: [all, daemon, desktop, android, ios]
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-preview-${{ github.ref }}-${{ inputs.scope }}
+  cancel-in-progress: false
+
+env:
+  PREVIEW_VERSION: ${{ inputs.version }}
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check source, version and compatibility
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          [ -z "$EXPECTED_SHA" ] || [ "$GITHUB_SHA" = "$EXPECTED_SHA" ] || {
+            echo "::error::Expected $EXPECTED_SHA, dispatch selected $GITHUB_SHA"
+            exit 1
+          }
+          bash scripts/check-release-version.sh "$PREVIEW_VERSION"
+          python3 scripts/check-brand-compatibility.py
+          python3 scripts/check-firebase-placeholders.py
+          bash scripts/check-harmony-release.sh
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          Preview version: $PREVIEW_VERSION
+
+          Source: $GITHUB_SHA
+
+          Unsigned build rehearsal only. Artifacts expire after 14 days.
+          No tag, Release, store upload, package-manager update or deployment is performed.
+          Firebase uses placeholders. Harmony receives static checks only.
+          EOF
+
+  daemon:
+    needs: preflight
+    if: inputs.scope == 'all' || inputs.scope == 'daemon'
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-14
+            jdk_arch: aarch64
+          - platform: macos-x86_64
+            runner: macos-14
+            jdk_arch: x64
+          - platform: linux-x86_64
+            runner: ubuntu-latest
+            jdk_arch: x64
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+            jdk_arch: aarch64
+          - platform: windows-x86_64
+            runner: windows-latest
+            jdk_arch: x64
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install Rosetta
+        if: matrix.platform == 'macos-x86_64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          architecture: ${{ matrix.jdk_arch }}
+      - name: Build native daemon image
+        run: ./gradlew --no-daemon :daemon:packageDaemon -PappVersion="$PREVIEW_VERSION"
+      - name: Check packaged version without running a service
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess
+          root = pathlib.Path("daemon/build/jpackage")
+          launcher = {
+              "macOS": "cc-pocket-daemon.app/Contents/MacOS/cc-pocket-daemon",
+              "Linux": "cc-pocket-daemon/bin/cc-pocket-daemon",
+              "Windows": "cc-pocket-daemon/cc-pocket-daemon.exe",
+          }[os.environ["RUNNER_OS"]]
+          result = subprocess.run([str((root / launcher).resolve()), "--version"],
+                                  capture_output=True, text=True, check=True, timeout=30)
+          print(result.stdout)
+          assert os.environ["PREVIEW_VERSION"] in result.stdout, result.stdout
+          PY
+      - name: Check macOS native CLI aliases in an isolated home
+        if: runner.os == 'macOS'
+        run: python3 scripts/smoke-daemon-cli.py daemon/build/jpackage/cc-pocket-daemon.app
+      - name: Archive image
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          mkdir -p out
+          if [ "$RUNNER_OS" = Windows ]; then
+            pwsh -NoProfile -Command 'Compress-Archive -Path daemon/build/jpackage/cc-pocket-daemon -DestinationPath "out/cc-pocket-daemon-$env:PREVIEW_VERSION-$env:PLATFORM-preview.zip"'
+          else
+            APP=cc-pocket-daemon
+            [ "$RUNNER_OS" != macOS ] || APP=cc-pocket-daemon.app
+            tar -C daemon/build/jpackage -czf "out/cc-pocket-daemon-$PREVIEW_VERSION-$PLATFORM-preview.tar.gz" "$APP"
+          fi
+          python3 scripts/preview-manifest.py out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pairlet-preview-${{ inputs.version }}-daemon-${{ matrix.platform }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+  desktop:
+    needs: preflight
+    if: inputs.scope == 'all' || inputs.scope == 'desktop'
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-14
+            jdk_arch: aarch64
+            package_task: packageDmg
+            image: CC Pocket.app
+          - platform: macos-x86_64
+            runner: macos-14
+            jdk_arch: x64
+            package_task: packageDmg
+            image: CC Pocket.app
+          - platform: windows-x86_64
+            runner: windows-latest
+            jdk_arch: x64
+            package_task: packageMsi
+            image: CC Pocket
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install Rosetta
+        if: matrix.platform == 'macos-x86_64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          architecture: ${{ matrix.jdk_arch }}
+      - uses: android-actions/setup-android@v4
+      - name: Use placeholder Firebase config
+        run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+      - name: Build app and check bundled JVM
+        env:
+          APP_IMAGE: ${{ matrix.image }}
+        run: |
+          ./gradlew --no-daemon :mobile:composeApp:createDistributable
+          bash scripts/smoke-desktop-image.sh "mobile/composeApp/build/compose/binaries/main/app/$APP_IMAGE"
+      - name: Build installer with branding and compatibility hooks
+        env:
+          PACKAGE_TASK: ${{ matrix.package_task }}
+        run: ./gradlew --no-daemon ":mobile:composeApp:$PACKAGE_TASK"
+      - name: Collect unsigned installers
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          mkdir -p out
+          python3 - <<'PY'
+          import os, pathlib, shutil
+          extension = "msi" if os.environ["RUNNER_OS"] == "Windows" else "dmg"
+          packages = list(pathlib.Path("mobile/composeApp/build/compose/binaries/main").glob(f"{extension}/*.{extension}"))
+          assert len(packages) == 1, packages
+          shutil.copy2(packages[0], f"out/cc-pocket-desktop-{os.environ['PREVIEW_VERSION']}-{os.environ['PLATFORM']}-preview.{extension}")
+          PY
+          python3 scripts/preview-manifest.py out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pairlet-preview-${{ inputs.version }}-desktop-${{ matrix.platform }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve packaging logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preview-logs-desktop-${{ matrix.platform }}
+          path: mobile/composeApp/build/compose/logs/
+          retention-days: 7
+
+  android:
+    needs: preflight
+    if: inputs.scope == 'all' || inputs.scope == 'android'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v4
+      - name: Build unsigned release APK with placeholder Firebase
+        run: |
+          cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+          ./gradlew --no-daemon :mobile:composeApp:assembleRelease
+          mkdir -p out
+          cp mobile/composeApp/build/outputs/apk/release/*-unsigned.apk out/
+          python3 scripts/preview-manifest.py out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pairlet-preview-${{ inputs.version }}-android-unsigned
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    needs: preflight
+    if: inputs.scope == 'all' || inputs.scope == 'ios'
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Prepare Xcode project with placeholder Firebase
+        run: |
+          brew install xcodegen
+          cp iosApp/iosApp/GoogleService-Info.plist.template iosApp/iosApp/GoogleService-Info.plist
+          cd iosApp
+          xcodegen generate
+      - name: Archive without signing or provisioning
+        run: |
+          set -o pipefail
+          xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Pairlet-preview.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            archive | tee "$RUNNER_TEMP/preview-archive.log"
+          grep -q 'ARCHIVE SUCCEEDED' "$RUNNER_TEMP/preview-archive.log"
+          mkdir -p out
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/Pairlet-preview.xcarchive" "out/Pairlet-$PREVIEW_VERSION-ios-unsigned.xcarchive.zip"
+          python3 scripts/preview-manifest.py out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pairlet-preview-${{ inputs.version }}-ios-unsigned
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve archive log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preview-logs-ios
+          path: ${{ runner.temp }}/preview-archive.log
+          retention-days: 7
