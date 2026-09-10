@@ -120,6 +120,8 @@ else
 fi
 [ -x "$launcher" ] || err "unexpected layout: $launcher not found after extraction"
 ln -sfn "$launcher" "$BINDIR/$BIN"
+# Relative alias follows every future atomic switch of the legacy launcher.
+ln -sfn "$BIN" "$BINDIR/pairlet-daemon"
 
 # --- background service, anchored at the SYMLINK (stable across upgrades/self-update) ---
 if [ "${CC_POCKET_NO_SERVICE:-}" = "1" ]; then

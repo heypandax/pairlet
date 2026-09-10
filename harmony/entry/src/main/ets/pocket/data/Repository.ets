@@ -183,6 +183,7 @@ export class Repository {
   private retryDelay = 2000;
   private intentionalDown = false;
   private initialized = false;
+  brandNoticePending: boolean = false;
   private pendingIdSeq = 1;
   private uploadRunning = false;      // 一次只传一个文件（对齐 Kotlin：chunks 不饿死心跳）
   private uploadCancelCap: string | null = null;
@@ -198,6 +199,7 @@ export class Repository {
   async init(): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
+    this.brandNoticePending = Store.brandNoticePending();
     // 主题：首帧渲染前应用（Tok 是 static，build 时读取）
     this.themeMode = (Store.loadThemeMode() ?? 'dark') as ThemeMode;
     Tok.apply(Tok.resolveDark(this.themeMode));
@@ -222,6 +224,11 @@ export class Repository {
     Store.saveThemeMode(mode);
     Tok.apply(Tok.resolveDark(mode));
     this.themeVersion = this.themeVersion + 1;
+  }
+
+  dismissBrandNotice(): void {
+    Store.dismissBrandNotice();
+    this.brandNoticePending = false;
   }
 
   // ═══ 权限模式 ═══

@@ -47,6 +47,7 @@ import dev.ccpocket.app.SUPPORT_CHAT_URL
 import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.pairing.encode
+import dev.ccpocket.app.resources.brand_former_name
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.ui.share.DEFAULT_TIER
@@ -1875,7 +1876,7 @@ private fun AboutPane(model: DesktopModel) {
                 Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center,
             ) { AgentGlyph(AgentKind.CLAUDE, size = 20) }
-            Text("cc-pocket", color = Tok.tx, fontFamily = Dk.ui, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(Res.string.brand_former_name), color = Tok.tx, fontFamily = Dk.ui, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
         Text(
             stringResource(Res.string.about_desktop_blurb),

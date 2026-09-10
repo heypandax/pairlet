@@ -54,7 +54,7 @@ class WinTrayFlyoutTest {
     fun flyoutShowsRealFleetContent() = runComposeUiTest {
         val model = SeedDesktopModel()
         setContent { PocketTheme { WinTrayFlyout(model) } }
-        assertPresent("CC Pocket")                              // 头部字标（品牌名，不走翻译）
+        assertPresent("CC Pairlet")                              // 头部字标（品牌名，不走翻译）
         assertPresent(str(Res.string.tray_needs_you))           // 与 mac 同一份 label 资源，不另起炉灶
         assertPresent(str(Res.string.win_tray_running))
         assertPresent("Bash")                                   // 真实机群审批的 tool（标题位）

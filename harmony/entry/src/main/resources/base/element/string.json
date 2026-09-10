@@ -2,15 +2,15 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "cc-pocket HarmonyOS client"
+      "value": "Pairlet HarmonyOS client"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "cc-pocket main ability"
+      "value": "Pairlet main ability"
     },
     {
       "name": "EntryAbility_label",
-      "value": "CC Pocket"
+      "value": "CC Pairlet"
     }
   ]
 }

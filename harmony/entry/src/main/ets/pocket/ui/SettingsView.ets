@@ -210,7 +210,7 @@ export struct SettingsView {
           // ── 关于 ──
           this.SectionLabel('关于')
           Column({ space: 4 }) {
-            Text('CC Pocket · HarmonyOS')
+            Text('Pairlet · HarmonyOS · 原 CC Pocket')
               .fontSize(14)
               .fontColor(Tok.tx)
             Text('零知识 E2E 中继 · 版本 0.1.0')

@@ -19,6 +19,7 @@ if [[ -z "${ANDROID_HOME:-}" && -d /opt/homebrew/share/android-commandlinetools 
   export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 fi
 python3 scripts/check-firebase-placeholders.py
+python3 scripts/check-brand-compatibility.py
 # :protocol:allTests 含 iOS Simulator target，本机 Xcode 缺对应 SDK 时在**配置期**即失败
 # （Xcode does not support simulator tests for ios_simulator_arm64）——与代码无关。默认只跑
 # JVM 侧；iOS 侧统一归 CHECK_IOS=1 开关（下面会一并追加 protocol 的模拟器测试）。

@@ -145,7 +145,7 @@ fun AppLockGate(c: AppLockController) {
                 AppMarkGlyph(color = if (dim) Tok.muted else Tok.tx2, width = 30.dp)
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "cc-pocket",
+                    "Pairlet",
                     color = if (dim) Tok.muted else Tok.tx,
                     fontFamily = FontFamily.Monospace, fontSize = 24.sp, fontWeight = FontWeight.Medium,
                     letterSpacing = (-0.5).sp,
@@ -182,7 +182,7 @@ fun AppLockCover() {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             AppMarkGlyph(color = Tok.tx2, width = 28.dp)
             Spacer(Modifier.height(15.dp))
-            Text("cc-pocket", color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 22.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.5).sp)
+            Text("Pairlet", color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 22.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.5).sp)
             Spacer(Modifier.height(42.dp))
             FaceIdGlyph(color = Tok.accent, size = 76.dp)
         }

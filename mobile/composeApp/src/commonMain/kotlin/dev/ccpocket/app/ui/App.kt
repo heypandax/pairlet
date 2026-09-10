@@ -272,6 +272,11 @@ import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun App(scope: CoroutineScope) {
+    val brandTransition = remember {
+        dev.ccpocket.app.brand.BrandTransition(
+            dev.ccpocket.app.secure.SecureStore::getString, dev.ccpocket.app.secure.SecureStore::putString,
+        )
+    }
     val repo = remember { PocketRepository(scope) }
     // one live link per paired computer: the primary repo keeps its exact semantics; the coordinator
     // maintains pinned satellites for the other bindings so the whole fleet is live at once
@@ -402,6 +407,7 @@ fun App(scope: CoroutineScope) {
                     .imePadding()
                     .then(coveredContent),
             ) {
+                if (!appLock.locked.value) BrandNotice(brandTransition)
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
                 // preview/recording mode hides the demo banner for a clean marketing capture
                 if (repo.demoMode.value && !dev.ccpocket.app.isPreviewMode()) StatusBanner(Tok.accent, stringResource(Res.string.demo_banner))
@@ -655,7 +661,7 @@ private fun DemoConnectScreen(onDone: () -> Unit) {
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("CC Pocket", color = Tok.tx, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        Text("Pairlet", color = Tok.tx, fontSize = 30.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(44.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             Icon(Icons.Rounded.Smartphone, null, tint = Tok.tx2, modifier = Modifier.size(40.dp))

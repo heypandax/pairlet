@@ -76,7 +76,7 @@ import org.jetbrains.compose.resources.stringResource
 fun ConnectPanel(repo: PocketRepository) {
     Box(Modifier.fillMaxSize().background(Tok.base), contentAlignment = Alignment.Center) {
         Column(Modifier.width(380.dp).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("CC Pocket", color = Tok.tx, fontFamily = Dk.ui, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text("Pairlet", color = Tok.tx, fontFamily = Dk.ui, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(28.dp))
             if (repo.addingDevice.value || repo.pairedList.isEmpty()) PairingForm(repo) else DevicePicker(repo)
             Spacer(Modifier.height(18.dp))

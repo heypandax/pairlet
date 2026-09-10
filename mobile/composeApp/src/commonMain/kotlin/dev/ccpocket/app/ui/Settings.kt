@@ -797,6 +797,7 @@ private fun SupportPage(repo: PocketRepository, onHelp: () -> Unit, onExit: () -
     VersionsGroup(repo.versionStatus.value)
 
     SectionLabel(stringResource(Res.string.about_section))
+    Text(stringResource(Res.string.brand_former_name), color = Tok.tx2, modifier = Modifier.padding(bottom = 8.dp))
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
         AboutRow(stringResource(Res.string.about_license), "MIT")
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))

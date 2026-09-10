@@ -3518,7 +3518,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     val preview = f.error ?: (messages.lastOrNull { it is ChatItem.Assistant } as? ChatItem.Assistant)
                         ?.text?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(140)
                     onTurnFinished?.invoke(
-                        chatTitle.value ?: workdir.value?.substringAfterLast('/') ?: "CC Pocket",
+                        chatTitle.value ?: workdir.value?.substringAfterLast('/') ?: "Pairlet",
                         preview,
                         sessionKey.value, // click→jump target for the desktop banner (issue #99)
                     )

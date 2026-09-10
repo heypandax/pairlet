@@ -41,7 +41,7 @@ private class AndroidBiometrics : Biometrics {
         val a = activity ?: return AuthResult.Unavailable
         return suspendCancellableCoroutine { cont ->
             val builder = BiometricPrompt.PromptInfo.Builder()
-                .setTitle("cc-pocket")
+                .setTitle("Pairlet")
                 .setSubtitle(reason)
             if (allowCredential) {
                 // biometric OR device passcode — the explicit fallback path

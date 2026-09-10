@@ -9,6 +9,7 @@ APP_IMAGE=${1:?usage: smoke-desktop-image.sh <jpackage-app-image>}
 
 case "$(uname -s)" in
   Darwin)
+    python3 "$(dirname "$0")/check-brand-compatibility.py" --mac-app "$APP_IMAGE"
     LAUNCHER="$APP_IMAGE/Contents/MacOS/CC Pocket"
     ;;
   *)

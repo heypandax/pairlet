@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>CC Pocket</string>
+	<string>CC Pairlet</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -52,15 +52,15 @@
 		<string>_ccpocket._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>cc-pocket uses the camera to scan the pairing QR code shown by cc-pocket pair on your computer.</string>
+	<string>Pairlet uses the camera to scan the pairing QR code shown by cc-pocket-daemon pair on your computer.</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>cc-pocket uses Face ID to lock the app, so only you can open your sessions and approve tool actions.</string>
+	<string>Pairlet uses Face ID to lock the app, so only you can open your sessions and approve tool actions.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>cc-pocket connects to the daemon running on your computer over the local network.</string>
+	<string>Pairlet connects to the daemon running on your computer over the local network.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>cc-pocket uses the mic to dictate prompts. Audio is transcribed for this message only — nothing is recorded or stored.</string>
+	<string>Pairlet uses the mic to dictate prompts. Audio is transcribed for this message only — nothing is recorded or stored.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>cc-pocket uses Apple speech recognition to transcribe your dictation so you can speak prompts instead of typing them.</string>
+	<string>Pairlet uses Apple speech recognition to transcribe your dictation so you can speak prompts instead of typing them.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<!-- #334: universal (TARGETED_DEVICE_FAMILY 1,2) requires the iPad contract below. Opting out of

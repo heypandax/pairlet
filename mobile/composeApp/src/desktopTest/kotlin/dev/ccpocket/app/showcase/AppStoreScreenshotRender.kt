@@ -194,7 +194,7 @@ class AppStoreScreenshotRender {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "CC POCKET",
+                        "PAIRLET",
                         color = Color(0xFFF3F1EE),
                         fontSize = 34.sp,
                         fontWeight = FontWeight.Black,

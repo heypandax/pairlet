@@ -294,7 +294,7 @@ private fun WinFlyoutHeader(computers: Int, sessions: Int, menuOpen: Boolean, on
         }
         Column(Modifier.weight(1f)) {
             Text(
-                "CC Pocket", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                "CC Pairlet", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Text(

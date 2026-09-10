@@ -82,7 +82,11 @@ jobs:
           APP="mobile/composeApp/build/compose/binaries/main/app/CC Pocket"
           bash scripts/smoke-desktop-image.sh "$APP"
           # MSI needs the WiX Toolset; don't fail the run if it's absent — the portable zip is the guaranteed deliverable.
-          ./gradlew :mobile:composeApp:packageMsi --no-daemon || echo "::warning::packageMsi failed (WiX missing?) — portable zip still produced"
+          if ! ./gradlew :mobile:composeApp:packageMsi --no-daemon; then
+            # A failed branding/compatibility hook can leave an MSI on disk. Never upload that candidate.
+            find mobile/composeApp/build/compose/binaries -name '*.msi' -delete
+            echo "::warning::packageMsi or its compatibility hook failed — only the portable zip will be uploaded"
+          fi
 
       - name: Collect artifacts
         shell: bash

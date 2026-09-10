@@ -120,6 +120,7 @@ fun main(args: Array<String>) {
     // 窗口内容中" the design forbids. No-op on every other platform.
     if (System.getProperty("os.name").lowercase().contains("mac")) {
         System.setProperty("apple.laf.useScreenMenuBar", "true")
+        System.setProperty("apple.awt.application.name", "CC Pairlet")
     }
     application { PocketApplication() }
 }
@@ -147,10 +148,10 @@ private fun ApplicationScope.PocketApplication() {
                 runCatching {
                     javax.swing.JOptionPane.showMessageDialog(
                         window,
-                        "CC Pocket hit an unexpected error and has to close.\n\n" +
+                        "Pairlet hit an unexpected error and has to close.\n\n" +
                             DesktopCrashGuard.oneLineSummary(DesktopCrashGuard.ERR_WINDOW, t) + "\n\n" +
                             "Details were written to:\n" + DesktopCrashGuard.logFile.path,
-                        "CC Pocket",
+                        "CC Pairlet",
                         javax.swing.JOptionPane.ERROR_MESSAGE,
                     )
                 }
@@ -165,6 +166,9 @@ private fun ApplicationScope.PocketApplication() {
 
 @Composable
 private fun ApplicationScope.PocketShell() {
+    val brandTransition = remember {
+        dev.ccpocket.app.brand.BrandTransition(SecureStore::getString, SecureStore::putString)
+    }
     // GA4 Measurement Protocol backend for desktop analytics — resolves credentials (env / ga4.properties)
     // up front so a missing config logs at launch. No-op when unconfigured. Every PocketRepository event
     // (pair / connect / conn_failed / session / prompt / approval) fires automatically since desktop drives
@@ -285,7 +289,7 @@ private fun ApplicationScope.PocketShell() {
 
     Window(
         onCloseRequest = closeMainWindow,
-        title = "CC Pocket",
+        title = "CC Pairlet",
         // taskbar/window icon on Windows & Linux and the dev-run (gradle :run) Dock icon on macOS;
         // the packaged macOS Dock icon comes from the bundle's .icns (build.gradle.kts iconFile)
         icon = androidx.compose.ui.res.painterResource("app-icon.png"),
@@ -369,7 +373,7 @@ private fun ApplicationScope.PocketShell() {
         // [appMenuSections] fold (asserted in AppMenuModelTest) rather than from checks written here.
         if (mac) {
             // About / Settings / Quit belong to the menu AppKit already draws; handlers replace what those
-            // native entries do instead of drawing a second "CC Pocket" menu beside it.
+            // native entries do instead of drawing a second "CC Pairlet" menu beside it.
             InstallMacAppMenuHandlers(
                 onAbout = { openSettings(SettingsTab.ABOUT) },
                 onSettings = { openSettings(SettingsTab.GENERAL) },
@@ -600,6 +604,7 @@ private fun ApplicationScope.PocketShell() {
                 androidx.compose.foundation.LocalContextMenuRepresentation provides dev.ccpocket.app.desktop.PocketContextMenuRepresentation,
             ) {
             Column(Modifier.fillMaxSize().background(Tok.base)) {
+                dev.ccpocket.app.ui.BrandNotice(brandTransition)
                 // Nothing spans the window width any more (desktop chrome v2) — the columns below run to
                 // the window's top edge and carry the chrome themselves. What survives here is the
                 // Win/Linux fullscreen affordance (issue #94): macOS auto-reveals its own menu bar on

@@ -305,7 +305,7 @@ fun OnboardingScreen(
     }
 }
 
-private const val WORDMARK = "cc-pocket"
+private const val WORDMARK = "Pairlet"
 
 /** The collapsed head: wordmark plus the screen's name on one hairline-terminated line. */
 @Composable

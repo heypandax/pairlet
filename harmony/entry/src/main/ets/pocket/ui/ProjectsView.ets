@@ -17,7 +17,7 @@ export struct ProjectsView {
           Row() {
             // 电脑名（可点：多绑定时打开切换器）
             Row({ space: 4 }) {
-              Text(this.repo.paired?.displayName() ?? 'CC Pocket')
+              Text(this.repo.paired?.displayName() ?? 'Pairlet')
                 .fontSize(18)
                 .fontColor(Tok.tx)
                 .fontWeight(FontWeight.Medium)

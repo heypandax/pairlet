@@ -253,7 +253,7 @@ private class RunCmd : CliktCommand(name = "run") {
                 }.getOrNull()
             }
             val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl, hostname = hostName, gatewayBaseUrl = gatewayUrl)
-            echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"} — relay=$relay")
+            echo("Pairlet daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"} — relay=$relay")
             echo("account id: ${identity.accountId}")
             echo("(run `cc-pocket-daemon pair` in another terminal to add a phone)")
             // E2E-gated direct listener beside the relay: paired devices on this machine/LAN connect
@@ -299,7 +299,7 @@ private class RunCmd : CliktCommand(name = "run") {
             // phone can only reach us once the user explicitly binds beyond loopback — show the
             // pairing URL/QR only then, never for a loopback bind the phone can't connect to.
             val lan = lanIp()
-            echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"}")
+            echo("Pairlet daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"}")
             echo("")
             if (host == "127.0.0.1") {
                 echo("  Bound to 127.0.0.1 (loopback only) — not reachable from your phone.")
@@ -318,7 +318,7 @@ private class RunCmd : CliktCommand(name = "run") {
                 }
                 echo("  LAN server on $url")
                 echo("")
-                echo("  On your phone, open CC Pocket and tap:")
+                echo("  On your phone, open CC Pairlet and tap:")
                 echo("    Advanced: Direct LAN")
                 echo("  Then enter: $url")
                 echo("")
@@ -400,7 +400,7 @@ private class PairCmd : CliktCommand(name = "pair") {
                 val info = runCatching { PocketJson.decodeFromString<LoopbackPair>(body) }.getOrNull()
                 if (info != null) {
                     echo("")
-                    echo("  Open CC Pocket on your phone and scan this — or type the code (valid ${info.ttlSec}s):")
+                    echo("  Open CC Pairlet on your phone and scan this — or type the code (valid ${info.ttlSec}s):")
                     echo("")
                     echo(QrTerminal.render("ccpocket://pair?code=${info.code}"))
                     echo("        code:  ${info.code.chunked(3).joinToString(" ")}")
@@ -542,7 +542,7 @@ private class BridgesCmd : CliktCommand(name = "bridges") {
 /**
  * Mint / list / revoke folder-share invites headlessly (issue #115) — the `pair --headless` sibling for
  * granting a guest a scoped, expiring folder credential without opening the app. The minted code is
- * byte-identical to the app's "Create invite": the guest pastes it into CC Pocket ▸ Connect.
+ * byte-identical to the app's "Create invite": the guest pastes it into CC Pairlet ▸ Connect.
  */
 private class ShareCmd : CliktCommand(name = "share") {
     private val pairPort by option("--pair-port", help = "loopback port of the running daemon").int().default(8799)
@@ -591,7 +591,7 @@ private class ShareCmd : CliktCommand(name = "share") {
         }
         val leftMs = (minted.expiresAt ?: 0L) - System.currentTimeMillis()
         echo("")
-        echo("  Folder share ready — paste into CC Pocket ▸ Connect. Works once.")
+        echo("  Folder share ready — paste into CC Pairlet ▸ Connect. Works once.")
         echo("")
         echo(minted.code)
         echo("")

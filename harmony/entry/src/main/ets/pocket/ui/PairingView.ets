@@ -59,7 +59,7 @@ export struct PairingView {
 
       Blank()
 
-      Text(this.repo.bindings.length > 0 ? '添加电脑' : 'CC Pocket')
+      Text(this.repo.bindings.length > 0 ? '添加电脑' : 'Pairlet')
         .fontSize(30)
         .fontColor(Tok.tx)
         .fontWeight(FontWeight.Bold)

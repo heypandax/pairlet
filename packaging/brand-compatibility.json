@@ -1,0 +1,66 @@
+{
+  "baseline": "6ca601737b1c82381c66ef5075d534c146844390",
+  "frozenFiles": [
+    {
+      "path": "protocol/src/commonMain/kotlin/dev/ccpocket/protocol/e2e/E2ESession.kt",
+      "sha256": "6ddb28c6fb02369e2e147c05bd2ec3168505c44c4accb3ff3eff9104a88b36bb"
+    },
+    {
+      "path": "protocol/src/jvmMain/kotlin/dev/ccpocket/protocol/update/ReleaseClient.kt",
+      "sha256": "7f726501136fd7768132a5cf1882fa521e1f627d49d970f7ad7dab586742f43e"
+    },
+    {
+      "path": "daemon/src/main/kotlin/dev/ccpocket/daemon/service/ServiceInstaller.kt",
+      "sha256": "42a778f3a65a881acd70934870027621b24704bbd0d78ca3f085136112091c3f"
+    },
+    {
+      "path": "daemon/src/main/kotlin/dev/ccpocket/daemon/identity/Identity.kt",
+      "sha256": "eabaca21c54c28cf5f0fa6ba5a6a4d54a45678aa3e577ab79eb5643e828950fb"
+    },
+    {
+      "path": "daemon/src/main/kotlin/dev/ccpocket/daemon/update/UpdateService.kt",
+      "sha256": "c03e3fd4df0610737a09fba2aa10de185c68191cac5c05976948e8599ca156ce"
+    },
+    {
+      "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/Pairing.kt",
+      "sha256": "632eee241a0228974b759d1440f5290ebca6bf54bc469c582af4333468749693"
+    },
+    {
+      "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/IncomingLink.kt",
+      "sha256": "6ec06223778a0a6cf947e8d140bdcc7d64bd344fc27c5dc36f772aa336ac4929"
+    },
+    {
+      "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/ShareInvites.kt",
+      "sha256": "efab47fb125424a7b619f68094f336d9699008139c8dc8e1e24613d18d98d1c4"
+    },
+    {
+      "path": "mobile/composeApp/src/desktopMain/kotlin/dev/ccpocket/app/desktop/DesktopUpdater.kt",
+      "sha256": "879f1e5a8bf66286e050c3ccf3c62c2ce5dac4a5fb6cae0677d4533cd3d0ab7c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pocket/crypto/E2ESession.ets",
+      "sha256": "22037cc62a3489bbeaadca944cdad7cc6447eaf60fe7bc76fed0c172c4175d1e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pocket/crypto/E2ECrypto.ets",
+      "sha256": "b343ecfecc40c9ee3cfca038c306cd6e9a5029b777a86acaddeef006f1358487"
+    },
+    {
+      "path": "mobile/composeApp/src/iosMain/kotlin/dev/ccpocket/app/secure/SecureStore.ios.kt",
+      "sha256": "6d6b653e924d1c4f3d9aa9394c09f862d916a008bec146796533b7f623709994"
+    },
+    {
+      "path": "mobile/composeApp/src/desktopMain/kotlin/dev/ccpocket/app/secure/SecureStore.desktop.kt",
+      "sha256": "5af68dbca50540fea3bfb5758319036cb735ed154e35ffac4ee662227f81af6d"
+    },
+    {
+      "path": "mobile/composeApp/src/androidMain/kotlin/dev/ccpocket/app/secure/SecureStore.android.kt",
+      "sha256": "b85b0c5f2b002e898afbbd224b84c29b3286d5fc97a2c7a666acf62b88236a09"
+    },
+    {
+      "path": "protocol/src/commonMain/kotlin/dev/ccpocket/protocol/Messages.kt",
+      "sha256": "cd549d77bd9ab0ae4ef624148f0c2eb50387a9e9c15234805845ba56281f618e"
+    }
+  ],
+  "windowsUpgradeCode": "230d5f5e-4c7a-3de9-98ee-6e492cccb7d0"
+}

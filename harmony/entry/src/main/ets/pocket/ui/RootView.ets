@@ -1,3 +1,4 @@
+import { Tok } from './Theme';
 import { Repository } from '../data/Repository';
 import { PairingView } from './PairingView';
 import { ProjectsView } from './ProjectsView';
@@ -11,18 +12,28 @@ export struct RootView {
   @ObjectLink repo: Repository;
 
   build() {
-    Stack() {
-      if (this.repo.screen === 'pairing') {
-        PairingView({ repo: this.repo })
-      } else if (this.repo.screen === 'projects') {
-        ProjectsView({ repo: this.repo })
-      } else if (this.repo.screen === 'sessions') {
-        SessionsView({ repo: this.repo })
-      } else if (this.repo.screen === 'settings') {
-        SettingsView({ repo: this.repo })
-      } else {
-        ChatView({ repo: this.repo })
+    Column() {
+      if (this.repo.brandNoticePending) {
+        Row() {
+          Text('CC Pocket 现已更名为 Pairlet，设备上显示为 CC Pairlet。')
+            .fontSize(13).fontColor(Tok.tx2).layoutWeight(1)
+          Button('知道了').onClick(() => this.repo.dismissBrandNotice())
+        }.padding(12).width('100%').backgroundColor(Tok.surface)
       }
+      Stack() {
+        if (this.repo.screen === 'pairing') {
+          PairingView({ repo: this.repo })
+        } else if (this.repo.screen === 'projects') {
+          ProjectsView({ repo: this.repo })
+        } else if (this.repo.screen === 'sessions') {
+          SessionsView({ repo: this.repo })
+        } else if (this.repo.screen === 'settings') {
+          SettingsView({ repo: this.repo })
+        } else {
+          ChatView({ repo: this.repo })
+        }
+      }
+      .width('100%').layoutWeight(1)
     }
     .width('100%')
     .height('100%')

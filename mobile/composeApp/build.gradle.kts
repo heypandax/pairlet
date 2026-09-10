@@ -173,16 +173,20 @@ compose.desktop {
             // WebKit/JFXPanel also reach JDK modules that jdeps misses through their native/reflective
             // paths. In particular, SwingInterOpUtils lives in jdk.unsupported.desktop, not java.desktop.
             modules("java.net.http", "java.scripting", "jdk.jsobject", "jdk.unsupported", "jdk.unsupported.desktop", "jdk.xml.dom")
-            // User-visible app name (Finder / Dock / taskbar). Release artifacts keep the cc-pocket-desktop-* names —
-            // the release scripts rename the jpackage output, but local paths ARE affected: the bundle is now
-            // "CC Pocket.app" / app/CC Pocket (see scripts/update-local-desktop.sh and build-windows.yml).
+            // Compatibility identity: also controls the .app directory, executable and Windows install path.
+            // Keep this stable; Pairlet's device name is separate metadata (see docs/PAIRLET-COMPATIBILITY.md).
             packageName = "CC Pocket"
             packageVersion = "1.9.8"
             windows {
+                // From the verified v1.9.8 MSI. Changing the displayed name must not create a second product.
+                upgradeUuid = "230d5f5e-4c7a-3de9-98ee-6e492cccb7d0"
+                menu = true
+                shortcut = true
                 iconFile.set(project.file("desktop-icons/cc-pocket.ico"))
             }
             macOS {
                 bundleID = "dev.ccpocket.app"
+                dockName = "CC Pairlet"
                 iconFile.set(project.file("desktop-icons/cc-pocket.icns"))
                 // Developer ID signing — pass -PccpocketSignId="Developer ID Application: … (TEAMID)".
                 // Off by default so unsigned dev builds still work. Notarization is done after packaging
@@ -223,4 +227,36 @@ tasks.withType(org.gradle.api.tasks.testing.Test::class.java).configureEach {
         systemProperty("user.country", if (zh) "CN" else "US")
     }
     doFirst { testStore.delete(); testCrashLog.delete() }
+}
+
+// MSI ProductName and shortcut labels are display metadata. jpackage's packageName must stay stable
+// for file paths, so apply the display-only transaction before any signing/checksum/upload step.
+if (System.getProperty("os.name").lowercase().contains("win")) {
+    tasks.matching { it.name == "packageMsi" }.configureEach {
+        inputs.file(rootProject.file("scripts/brand-windows-msi.ps1"))
+        doLast {
+            val packages = layout.buildDirectory.dir("compose/binaries/main/msi").get().asFile
+                .listFiles { file -> file.extension == "msi" }.orEmpty()
+            check(packages.size == 1) { "Expected exactly one candidate MSI, found ${packages.size}" }
+            project.exec {
+                commandLine("powershell", "-NoProfile", "-File", rootProject.file("scripts/brand-windows-msi.ps1"),
+                    "-Path", packages.single().absolutePath)
+            }
+        }
+    }
+}
+
+// Compose 1.7.3 hardcodes CFBundleName from packageName. Finish the private image and re-seal its
+// outer signature using the same identity BEFORE packageDmg consumes it; never mutate an installed app.
+if (System.getProperty("os.name").lowercase().contains("mac")) {
+    tasks.matching { it.name == "createDistributable" }.configureEach {
+        inputs.file(rootProject.file("scripts/brand-macos-image.py"))
+        doLast {
+            project.exec {
+                commandLine("python3", rootProject.file("scripts/brand-macos-image.py"),
+                    "--app", layout.buildDirectory.dir("compose/binaries/main/app/CC Pocket.app").get().asFile,
+                    "--identity", (findProperty("ccpocketSignId") as String?)?.takeIf { it.isNotBlank() } ?: "-")
+            }
+        }
+    }
 }

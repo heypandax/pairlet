@@ -104,6 +104,21 @@ export class Store {
     }
   }
 
+  /** Read before deviceKeys/default writes so a new install cannot become an upgrade later. */
+  static brandNoticePending(): boolean {
+    const key = 'pairlet_brand_notice_v1';
+    const saved = Store.getString(key);
+    if (saved !== null) return saved === 'pending';
+    const existing = [K_PRIV, K_PUB, K_PAIRED, K_BINDINGS, K_THEME_MODE, K_DEFAULT_MODE]
+      .some((k: string) => Store.getString(k) !== null);
+    Store.putString(key, existing ? 'pending' : 'done');
+    return existing;
+  }
+
+  static dismissBrandNotice(): void {
+    Store.putString('pairlet_brand_notice_v1', 'done');
+  }
+
   private static p(): preferences.Preferences {
     if (Store.prefs === null) throw new Error('Store.init() not called');
     return Store.prefs;

@@ -118,7 +118,7 @@ fun TrayPopover(
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 CcGlyphMark(Tok.tx, 16.dp)
-                Text("cc-pocket", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                Text("CC Pairlet", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
                 Text(trayStatsLine(computers, sessions), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
                 Icon(

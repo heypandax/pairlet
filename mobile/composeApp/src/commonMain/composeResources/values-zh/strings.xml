@@ -6,7 +6,7 @@
     <string name="daemon_ws_url">daemon WebSocket 地址</string>
     <string name="connect_direct">直连</string>
     <string name="pairing_title">连接你的电脑</string>
-    <string name="pairing_subtitle">将这台手机与电脑上的 cc-pocket 守护进程配对。</string>
+    <string name="pairing_subtitle">将这台手机与电脑上的 Pairlet 守护进程配对。</string>
     <string name="scanning">扫描中…</string>
     <string name="run_code_prefix">在电脑上运行</string>
     <string name="run_code_suffix">获取配对码。</string>
@@ -26,7 +26,7 @@
     <string name="status_pairing">配对中…</string>
     <string name="status_pair_failed">配对失败：%1$s</string>
     <string name="status_checking_network">正在检查网络权限…</string>
-    <string name="status_local_denied">本地网络访问被拒绝，请在 设置 → 隐私 → 本地网络 中允许 cc-pocket</string>
+    <string name="status_local_denied">本地网络访问被拒绝，请在 设置 → 隐私 → 本地网络 中允许 CC Pairlet</string>
     <string name="status_connecting">连接中…</string>
     <string name="status_reconnecting">重连中…</string>
     <string name="status_connected">已连接</string>
@@ -37,7 +37,7 @@
     <string name="conn_retry">重试</string>
     <string name="conn_repair">重新配对</string>
     <string name="conn_computer_offline_title">你的电脑已离线</string>
-    <string name="conn_computer_offline_body">CC Pocket 找不到你的电脑。请确认电脑已唤醒，且 cc-pocket 正在运行。</string>
+    <string name="conn_computer_offline_body">Pairlet 找不到你的电脑。请确认电脑已唤醒，且 Pairlet 正在运行。</string>
     <string name="conn_computer_offline_hint">电脑恢复后会自动重新连接。</string>
     <string name="conn_computer_offline_banner">电脑已离线，正在等待恢复…</string>
     <string name="conn_connecting_banner">正在连接电脑…</string>
@@ -256,7 +256,7 @@
     <string name="transcribing">转写中…</string>
     <string name="done">完成</string>
     <string name="mic_title">需要麦克风权限</string>
-    <string name="mic_body">cc-pocket 使用麦克风进行语音输入。音频仅用于转写本条消息，不会被录制或存储。</string>
+    <string name="mic_body">Pairlet 使用麦克风进行语音输入。音频仅用于转写本条消息，不会被录制或存储。</string>
     <string name="open_settings">打开设置</string>
     <string name="not_now">暂不</string>
     <string name="voice_section">语音输入</string>
@@ -344,10 +344,10 @@
     <string name="help_read_guide">阅读完整指南</string>
     <string name="help_source">来源：公开用户手册 · %1$s 核验</string>
     <string name="help_all_guides">浏览全部已核验指南</string>
-    <string name="help_content_note">内容来源：CC Pocket 公开用户手册，核验于 %1$s。这里仅提供静态说明，App 不会记录你的学习进度。</string>
+    <string name="help_content_note">内容来源：Pairlet 公开用户手册，核验于 %1$s。这里仅提供静态说明，App 不会记录你的学习进度。</string>
     <string name="settings_help_copy_ai">复制链接给 AI</string>
     <string name="settings_help_copied">手册链接已复制</string>
-    <string name="settings_help_ai_prompt">打开这份公开的 CC Pocket 用户手册，并依据其中已核验的步骤回答我的问题。</string>
+    <string name="settings_help_ai_prompt">打开这份公开的 Pairlet 用户手册，并依据其中已核验的步骤回答我的问题。</string>
 
     <!-- ── 通知 ──────────────────────────────────────────────────── -->
     <string name="notifications_section">通知</string>
@@ -395,7 +395,7 @@
     <!-- ── 强调色（issue #204）────────────────────────────────────── -->
     <string name="settings_accent">强调色</string>
     <string name="settings_accent_sub">全局强调色，用于按钮、选中态与高亮。</string>
-    <string name="accent_pocket">CC Pocket</string>
+    <string name="accent_pocket">Pairlet</string>
     <string name="accent_codex">Codex</string>
     <!-- ── 会话流对齐（issue #213）────────────────────────────────── -->
     <string name="settings_chat_align">消息布局</string>
@@ -405,13 +405,13 @@
     <!-- ── 应用锁 / 安全（issue #109）─────────────────────────────── -->
     <string name="security_section">安全</string>
     <string name="app_lock_require">需要 %1$s</string>
-    <string name="app_lock_require_sub">打开 cc-pocket 时用 %1$s 解锁。</string>
+    <string name="app_lock_require_sub">打开 CC Pairlet 时用 %1$s 解锁。</string>
     <string name="app_lock_autolock">自动锁定</string>
     <string name="app_lock_immediately">立即</string>
     <string name="app_lock_after_1min">离开 1 分钟后</string>
-    <string name="app_lock_autolock_hint">离开 cc-pocket 多久后重新锁定。</string>
+    <string name="app_lock_autolock_hint">离开 CC Pairlet 多久后重新锁定。</string>
     <string name="app_lock_verifying">正在用 %1$s 验证以开启……</string>
-    <string name="app_lock_reason">解锁 cc-pocket</string>
+    <string name="app_lock_reason">解锁 CC Pairlet</string>
     <string name="app_lock_enable_reason">验证身份以开启应用锁</string>
     <string name="biometry_face">Face ID</string>
     <string name="biometry_touch">Touch ID</string>
@@ -441,11 +441,11 @@
     <string name="dir_picker_remote_title">选择远程电脑上的目录</string>
     <string name="dir_picker_choose_here">选择此目录</string>
     <string name="dir_picker_remote_only">远程电脑 — 请在此手动输入路径</string>
-    <string name="ob_open">还没在电脑上安装 cc-pocket？</string>
+    <string name="ob_open">还没在电脑上安装 Pairlet？</string>
     <string name="ob_title">连接你的电脑</string>
     <string name="ob_sub">手机负责发号施令，干活的 AI 编程助手跑在你自己的电脑上。</string>
     <!-- ── 首启 · 连接你的电脑（issue #278 批次 2） ──── -->
-    <string name="fr_step_install">在电脑上装好 cc-pocket</string>
+    <string name="fr_step_install">在电脑上装好 Pairlet</string>
     <string name="fr_step_pair_body">在电脑上跑 cc-pocket-daemon pair，它会给出一个 6 位验证码和一个二维码。</string>
     <string name="fr_prereq">那台电脑上要先有 Claude Code CLI</string>
     <string name="fr_prereq_what">那是什么？</string>
@@ -749,7 +749,7 @@
 
     <!-- owner: invite ready -->
     <string name="share_invite_ready">邀请已就绪</string>
-    <string name="share_invite_hint">让对方在 CC Pocket ▸ 连接 里粘贴此码加入。仅可用一次。</string>
+    <string name="share_invite_hint">让对方在 CC Pairlet ▸ 连接 里粘贴此码加入。仅可用一次。</string>
     <string name="share_invite_code">邀请码</string>
     <string name="share_invite_copy">复制邀请码</string>
     <string name="share_invite_copied">已复制</string>
@@ -889,7 +889,7 @@
     <string name="schedule_tasks_title">定时任务</string>
     <string name="schedule_empty">暂无定时任务</string>
     <string name="schedule_empty_hint">在任意会话长按发送键，即可把消息排到以后自动发送。</string>
-    <string name="schedule_stale_title">请更新电脑上的 cc-pocket</string>
+    <string name="schedule_stale_title">请更新电脑上的 Pairlet</string>
     <string name="schedule_stale_body">电脑端版本过旧，无法执行定时任务；现有任务已暂停。</string>
     <string name="schedule_next_run">%1$s 后</string>
     <string name="schedule_next_at">下次 %1$s</string>
@@ -978,7 +978,7 @@
     <string name="term_app_system">系统终端</string>
     <string name="settings_menu_bar">菜单栏</string>
     <string name="settings_menu_bar_sub">常驻状态图标——不用唤起窗口，也能一眼看到审批与运行中的会话。</string>
-    <string name="settings_menu_bar_toggle">在菜单栏显示 cc-pocket</string>
+    <string name="settings_menu_bar_toggle">在菜单栏显示 CC Pairlet</string>
     <string name="settings_menu_bar_win">托盘图标与悬浮面板</string>
     <string name="settings_menu_bar_sub_win">通知区状态图标＋悬浮面板——一眼看到审批与运行中的会话。不需要可以在这里整个关掉。</string>
     <string name="settings_menu_bar_toggle_win">显示托盘图标和悬浮面板</string>
@@ -1065,7 +1065,7 @@
     <!-- 设置：电脑 / 定时任务 / 共享 / 快捷键 / 关于 -->
     <string name="settings_paired_computers">已配对的电脑</string>
     <string name="settings_no_computers">还没有配对的电脑。</string>
-    <string name="settings_schedules_stale">更新电脑上的 cc-pocket 后才能使用定时任务。</string>
+    <string name="settings_schedules_stale">更新电脑上的 Pairlet 后才能使用定时任务。</string>
     <string name="settings_schedules_empty">暂无定时任务。在手机端长按发送键即可创建。</string>
     <string name="schedule_repeats">重复</string>
     <string name="share_path_hint">输入这台电脑上某个文件夹的绝对路径。</string>
@@ -1183,9 +1183,9 @@
     <string name="tray_all_clear">没有需要你处理的事</string>
     <string name="tray_no_running">没有运行中的会话</string>
     <string name="tray_more_sessions">还有 %1$d 个会话</string>
-    <string name="tray_open_app">打开 cc-pocket</string>
-    <string name="tray_exit_app">退出 cc-pocket</string>
-    <string name="tray_more_waiting">还有 %1$d 个待处理——打开 cc-pocket</string>
+    <string name="tray_open_app">打开 CC Pairlet</string>
+    <string name="tray_exit_app">退出 CC Pairlet</string>
+    <string name="tray_more_waiting">还有 %1$d 个待处理——打开 CC Pairlet</string>
     <string name="tray_answer_in_session">到会话里回答 ↗</string>
     <string name="tray_computers_one">%1$d 台电脑</string>
     <string name="tray_computers_many">%1$d 台电脑</string>
@@ -1207,7 +1207,7 @@
     <string name="skills_title">技能与插件</string>
     <string name="skills_count">%1$d 个技能 · %2$d 个插件</string>
     <string name="skills_stale_title">无法浏览技能</string>
-    <string name="skills_stale_body">这台电脑上的 cc-pocket daemon 版本过旧。升级后才能读取已安装的技能与插件。</string>
+    <string name="skills_stale_body">这台电脑上的 Pairlet daemon 版本过旧。升级后才能读取已安装的技能与插件。</string>
     <string name="skills_empty_title">什么都还没装</string>
     <string name="skills_empty_body">这台电脑上没有找到技能或插件。在 .claude/skills 下添加 SKILL.md，或从市场安装一个插件。</string>
     <string name="skills_section">技能</string>
@@ -1628,7 +1628,7 @@
     <string name="rv_join_title">添加同事</string>
     <string name="rv_join_sub">扫描或粘贴对方发来的邀请。凭证存在你的电脑上，所以这个 App 关着也照样收评审。</string>
     <string name="rv_join_paste">粘贴邀请</string>
-    <string name="rv_join_bad">这不是 cc-pocket 邀请。</string>
+    <string name="rv_join_bad">这不是 Pairlet 邀请。</string>
     <string name="rv_join_confirm">接受之前，先和对方念一遍这几个词。</string>
     <string name="rv_join_accept">连接</string>
     <string name="rv_dir_outbound">你可以给他发评审</string>
@@ -1669,13 +1669,13 @@
     <string name="pair_err_link_body">扫 cc-pocket-daemon pair 打出来的那个二维码，或者把完整的 ccpocket:// 链接粘进来。</string>
     <string name="pair_err_other_title">配对没走完</string>
     <string name="pair_err_other_body">这次尝试被拒了，但原因不在已知的几种里。下面是它自己报出来的信息。</string>
-    <string name="pair_install_first">电脑上还没装 cc-pocket？先去装</string>
+    <string name="pair_install_first">电脑上还没装 Pairlet？先去装</string>
     <string name="pair_help_sub">在线客服，不用登录</string>
 
     <!-- ── 显式进入的扫码页（唯一会开摄像头的界面） ────────────────── -->
     <string name="scan_title">扫描二维码</string>
     <string name="scan_unavailable_title">摄像头不可用</string>
-    <string name="scan_unavailable_body">cc-pocket 无法在这台设备上使用摄像头。配对本来就不需要它。</string>
+    <string name="scan_unavailable_body">Pairlet 无法在这台设备上使用摄像头。配对本来就不需要它。</string>
     <string name="scan_open_settings">打开系统设置</string>
     <string name="scan_without_camera">不用摄像头也能配对</string>
     <string name="scan_without_camera_body">扫码只是其中一条路，不是唯一一条。下面两种方式都能独立完成配对。</string>
@@ -1755,9 +1755,9 @@
 
     <!-- ── 六种连接状态：六句话，六组动作 ─────────── -->
     <string name="conn_relay_title">连不上中转</string>
-    <string name="conn_relay_body">cc-pocket 没能连上中转服务器。这说明不了电脑本身有没有问题。</string>
+    <string name="conn_relay_body">Pairlet 没能连上中转服务器。这说明不了电脑本身有没有问题。</string>
     <string name="conn_offline_title">电脑离线</string>
-    <string name="conn_offline_body">中转回应了，但那台电脑上的 daemon 没在跑。去启动 cc-pocket，或者把电脑唤醒后重试。</string>
+    <string name="conn_offline_body">中转回应了，但那台电脑上的 daemon 没在跑。去启动 Pairlet，或者把电脑唤醒后重试。</string>
     <string name="conn_invalid_title">配对已失效</string>
     <string name="conn_invalid_body">这台电脑拒绝了已保存的凭据，重试也没有用。</string>
 
@@ -1822,7 +1822,7 @@
     <string name="cfg_codex_note">审批 × 沙箱的组合来自 CODEX_PRESETS</string>
     <string name="cfg_kimi_note">Kimi 没有对应「自动改文件」的档位。</string>
     <string name="cfg_opencode_title">全自动运行</string>
-    <string name="cfg_opencode_body">OpenCode 不支持审批。它会在这个目录里直接读写文件、执行命令，中途不会停，cc-pocket 也无法为了要权限打断它。</string>
+    <string name="cfg_opencode_body">OpenCode 不支持审批。它会在这个目录里直接读写文件、执行命令，中途不会停，Pairlet 也无法为了要权限打断它。</string>
     <string name="cfg_opencode_body2">这里没有模式可选。想被询问，就换一个 Agent。</string>
     <string name="cfg_opencode_note">审批请求、审批队列和安全审批面板，在 OpenCode 会话里都不起作用。</string>
 
@@ -1995,13 +1995,13 @@
 
     <!-- 一次性数据披露门（App Review 5.1.2(i)） -->
     <string name="privacy_gate_title">开始之前</string>
-    <string name="privacy_gate_intro">CC Pocket 用于遥控运行在你自己电脑上的编程 Agent。你的数据去向如下。</string>
+    <string name="privacy_gate_intro">Pairlet 用于遥控运行在你自己电脑上的编程 Agent。你的数据去向如下。</string>
     <string name="privacy_gate_what_title">发送什么</string>
     <string name="privacy_gate_what_body">你输入的提示词、附加的图片、口述的语音。</string>
     <string name="privacy_gate_where_title">去往哪里</string>
     <string name="privacy_gate_where_body">端到端加密，只发往你自己配对的电脑，别无他处。中继服务器只转发密文，无法读取内容。</string>
     <string name="privacy_gate_who_title">由谁处理</string>
-    <string name="privacy_gate_who_body">你在电脑上自行安装并登录的 Agent CLI（例如 Claude Code）。它以你自己的账号和条款与其模型提供方通信。CC Pocket 不内置任何第三方 AI 服务，也不持有任何 AI 凭证。</string>
+    <string name="privacy_gate_who_body">你在电脑上自行安装并登录的 Agent CLI（例如 Claude Code）。它以你自己的账号和条款与其模型提供方通信。Pairlet 不内置任何第三方 AI 服务，也不持有任何 AI 凭证。</string>
     <string name="privacy_gate_voice_title">语音口述</string>
     <string name="privacy_gate_voice_body">默认由 Apple 语音服务转写，或可选发往你自己的电脑转写——绝不经由我们的任何云端 AI 服务。</string>
     <string name="privacy_gate_demo">演示模式完全在本机运行，使用示例数据。</string>
@@ -2022,9 +2022,9 @@
     <string name="menu_computer">电脑</string>
     <string name="menu_window">窗口</string>
     <string name="menu_help">帮助</string>
-    <string name="menu_about">关于 CC Pocket</string>
+    <string name="menu_about">关于 CC Pairlet</string>
     <string name="menu_settings">设置…</string>
-    <string name="menu_quit">退出 CC Pocket</string>
+    <string name="menu_quit">退出 CC Pairlet</string>
     <string name="menu_new_session">新建会话…</string>
     <string name="menu_open_folder">打开文件夹…</string>
     <string name="menu_all_projects">全部项目…</string>
@@ -2061,8 +2061,11 @@
     <string name="menu_minimize">最小化</string>
     <string name="menu_zoom">缩放</string>
     <string name="menu_show_main_window">显示主窗口</string>
-    <string name="menu_help_manual">CC Pocket 帮助</string>
+    <string name="menu_help_manual">CC Pairlet 帮助</string>
     <string name="menu_help_shortcuts">键盘快捷键</string>
     <string name="menu_check_updates">检查更新…</string>
     <string name="menu_report_issue">反馈问题…</string>
+    <string name="brand_former_name">Pairlet，原 CC Pocket</string>
+    <string name="brand_renamed">CC Pocket 现已更名为 Pairlet，设备上显示为 CC Pairlet。</string>
+    <string name="brand_dismiss">知道了</string>
 </resources>

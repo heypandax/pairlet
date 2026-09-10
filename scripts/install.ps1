@@ -102,6 +102,8 @@ $binDir = Join-Path $root "bin"
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 $shim = Join-Path $binDir "cc-pocket-daemon.cmd"
 Set-Content -Path $shim -Value @('@echo off', "`"$exe`" %*") -Encoding Oem
+# Forward to the old stable shim: self-update rewrites that file on every version.
+Set-Content -Path (Join-Path $binDir "pairlet-daemon.cmd") -Value @('@echo off', '@"%~dp0cc-pocket-daemon.cmd" %*') -Encoding Oem
 
 # add $binDir to the USER Path, idempotently (case-insensitive; tolerate a trailing '\')
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
