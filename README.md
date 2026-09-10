@@ -1,6 +1,8 @@
 # Pairlet
 
-[![CI](https://github.com/heypandax/cc-pocket/actions/workflows/ci.yml/badge.svg)](https://github.com/heypandax/cc-pocket/actions/workflows/ci.yml) [![Latest release](https://img.shields.io/github/v/release/heypandax/cc-pocket)](https://github.com/heypandax/cc-pocket/releases/latest) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+**Pairlet was formerly called CC Pocket (`cc-pocket`). This is the same project, with its history and existing download links preserved.**
+
+[![CI](https://github.com/heypandax/pairlet/actions/workflows/ci.yml/badge.svg)](https://github.com/heypandax/pairlet/actions/workflows/ci.yml) [![Latest release](https://img.shields.io/github/v/release/heypandax/pairlet)](https://github.com/heypandax/pairlet/releases/latest) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **English** | [简体中文](README.zh-CN.md)
 
@@ -10,7 +12,7 @@ Pairlet is an open-source, local-first control plane for command-line coding age
 
 **v1.9.4** drives six agent backends — Claude Code, OpenAI Codex, OpenCode, Kimi Code (Preview), ZCode and DeepSeek. They are not equivalent: see [the capability matrix](#agent-support) before you pick one.
 
-**🌐 [Website](https://pairlet.org/)** · **📖 [User manual](https://pairlet.org/manual/en/)** · **💬 [Support, no sign-in](https://pairlet.org/support/)** · **📦 [Latest release](https://github.com/heypandax/cc-pocket/releases/latest)**
+**🌐 [Website](https://pairlet.org/)** · **📖 [User manual](https://pairlet.org/manual/en/)** · **💬 [Support, no sign-in](https://pairlet.org/support/)** · **📦 [Latest release](https://github.com/heypandax/pairlet/releases/latest)**
 
 <p align="center"><a href="https://pairlet.org/"><img src="site/assets/product/overview.png" alt="Pairlet: the desktop console showing paired machines and a live session, beside the phone app showing a session list and an approval decision." width="900"></a></p>
 
@@ -18,13 +20,13 @@ Pairlet is an open-source, local-first control plane for command-line coding age
 
 ## Quick start
 
-**1 · Get the app** — [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) (iPhone · iPad) · [TestFlight beta](https://testflight.apple.com/join/8z26MWWr) · [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk). Prefer a computer? See the [Desktop app](#platforms--distribution).
+**1 · Get the app** — [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) (iPhone · iPad) · [TestFlight beta](https://testflight.apple.com/join/8z26MWWr) · [Android APK](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-android.apk). Prefer a computer? See the [Desktop app](#platforms--distribution).
 
 **2 · Install the daemon** on the machine that runs your agent CLI — any supported one, not Claude specifically:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash   # macOS · Linux
-irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex          # Windows
+curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.sh | bash   # macOS · Linux
+irm https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.ps1 | iex          # Windows
 ```
 
 **3 · Pair** — run `cc-pocket-daemon pair`, then scan the QR it prints (or type the 6-digit code) in the app. You are connected end-to-end.
@@ -44,7 +46,7 @@ Capability differs by backend — the matrix below is the source of truth.
 
 ## Agent support
 
-Public capability claims for **v1.9.4**, audited against commit [`e9ee816f`](https://github.com/heypandax/cc-pocket/commit/e9ee816f) on `main`. Machine-readable copy: [`site/public-capabilities.json`](site/public-capabilities.json).
+Public capability claims for **v1.9.4**, audited against commit [`e9ee816f`](https://github.com/heypandax/pairlet/commit/e9ee816f) on `main`. Machine-readable copy: [`site/public-capabilities.json`](site/public-capabilities.json).
 
 | Agent | Core session | Approval & mode | Changes & diff | Usage |
 |---|---|---|---|---|
@@ -72,14 +74,14 @@ flowchart LR
 
 The **daemon** runs on your computer, drives the agent CLI as a subprocess and dials *out* to the relay — no inbound ports to open. The **relay** pairs your devices and routes opaque encrypted frames; it holds no message content and no private keys. The app and the daemon run an end-to-end session (P-256 ECDH + HKDF + AES-256-GCM, an X3DH/Noise-style handshake), so plaintext never leaves the two trusted endpoints. On the same network the app connects to the daemon directly for lower latency; the relay stays as the from-anywhere fallback. Pairings expire and can be revoked.
 
-Honest limits: the agent still executes with your own operating-system permissions — end-to-end encryption is not a sandbox. OpenCode sessions have no enforceable interactive approval. The custom Noise-style channel has not had an independent third-party audit. Threat model: [`docs/SECURITY.md`](docs/SECURITY.md). Report vulnerabilities privately via [GitHub security advisories](https://github.com/heypandax/cc-pocket/security/advisories/new).
+Honest limits: the agent still executes with your own operating-system permissions — end-to-end encryption is not a sandbox. OpenCode sessions have no enforceable interactive approval. The custom Noise-style channel has not had an independent third-party audit. Threat model: [`docs/SECURITY.md`](docs/SECURITY.md). Report vulnerabilities privately via [GitHub security advisories](https://github.com/heypandax/pairlet/security/advisories/new).
 
 ## Platforms & distribution
 
 | Surface | Official packages |
 |---|---|
-| **Phone / tablet app** | iOS · iPadOS ([App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969), [TestFlight](https://testflight.apple.com/join/8z26MWWr)) · Android [APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk) |
-| **Desktop app** | macOS [Apple Silicon](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg) (signed `.dmg`) · Windows x86_64 [`.msi`](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi). **No official Linux desktop package — [build from source](#build-from-source).** |
+| **Phone / tablet app** | iOS · iPadOS ([App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969), [TestFlight](https://testflight.apple.com/join/8z26MWWr)) · Android [APK](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-android.apk) |
+| **Desktop app** | macOS [Apple Silicon](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Intel](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg) (signed `.dmg`) · Windows x86_64 [`.msi`](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi). **No official Linux desktop package — [build from source](#build-from-source).** |
 | **Local daemon** | macOS Apple Silicon · macOS Intel · Linux x86_64 · Linux arm64 · Windows x86_64 |
 | **HarmonyOS** | Signed HAP, **Preview** — limited capability |
 | **Relay** | Hosted zero-knowledge relay by default; [self-hosting](https://pairlet.org/guides/self-hosting.html) supported |
@@ -92,7 +94,7 @@ The desktop app and the local daemon are **different packages**: the app is a cl
 <summary><b>macOS</b> — signed &amp; notarized</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.sh | bash
 cc-pocket-daemon pair
 ```
 
@@ -103,7 +105,7 @@ Verifies the download against the release's `SHA256SUMS`, installs under `~/.loc
 <summary><b>Linux</b> — x86_64 / arm64 daemon</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.sh | bash
 cc-pocket-daemon pair
 ```
 
@@ -114,7 +116,7 @@ Pulls a self-contained tarball (bundled JRE, no system Java), installs under `~/
 <summary><b>Windows</b> — x86_64</summary>
 
 ```powershell
-irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.ps1 | iex
 ```
 
 One command: installs, registers a logon Scheduled Task, and drops straight into pairing. [Scoop](https://scoop.sh): `scoop bucket add heypandax https://github.com/heypandax/scoop-bucket` then `scoop install cc-pocket-daemon`.
@@ -191,7 +193,7 @@ Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via
 
 ## Contributing
 
-Issues and PRs welcome — [`CONTRIBUTING.md`](CONTRIBUTING.md) covers build prerequisites, test entry points, and which scripts are maintainer-only. Please report security issues privately via [GitHub security advisories](https://github.com/heypandax/cc-pocket/security/advisories/new).
+Issues and PRs welcome — [`CONTRIBUTING.md`](CONTRIBUTING.md) covers build prerequisites, test entry points, and which scripts are maintainer-only. Please report security issues privately via [GitHub security advisories](https://github.com/heypandax/pairlet/security/advisories/new).
 
 ## License
 

@@ -1,6 +1,8 @@
 # Pairlet
 
-[![CI](https://github.com/heypandax/cc-pocket/actions/workflows/ci.yml/badge.svg)](https://github.com/heypandax/cc-pocket/actions/workflows/ci.yml) [![最新版本](https://img.shields.io/github/v/release/heypandax/cc-pocket)](https://github.com/heypandax/cc-pocket/releases/latest) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+**Pairlet 原名 CC Pocket（`cc-pocket`），是同一个项目的延续；历史记录和旧下载入口继续保留。**
+
+[![CI](https://github.com/heypandax/pairlet/actions/workflows/ci.yml/badge.svg)](https://github.com/heypandax/pairlet/actions/workflows/ci.yml) [![最新版本](https://img.shields.io/github/v/release/heypandax/pairlet)](https://github.com/heypandax/pairlet/releases/latest) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [English](README.md) | **简体中文**
 
@@ -10,7 +12,7 @@ Pairlet 是一个开源的本地优先控制面，用来遥控命令行编码 ag
 
 **v1.9.4** 支持六个 agent 后端：Claude Code、OpenAI Codex、OpenCode、Kimi Code（Preview）、ZCode 和 DeepSeek。它们的能力**并不等价**，选之前先看[能力矩阵](#agent-支持)。
 
-**🌐 [官网](https://pairlet.org/)** · **📖 [用户手册](https://pairlet.org/manual/zh/)** · **💬 [帮助与客服（免登录）](https://pairlet.org/support/)** · **📦 [最新 Release](https://github.com/heypandax/cc-pocket/releases/latest)**
+**🌐 [官网](https://pairlet.org/)** · **📖 [用户手册](https://pairlet.org/manual/zh/)** · **💬 [帮助与客服（免登录）](https://pairlet.org/support/)** · **📦 [最新 Release](https://github.com/heypandax/pairlet/releases/latest)**
 
 <p align="center"><a href="https://pairlet.org/"><img src="site/assets/product/overview.png" alt="Pairlet：左边是桌面控制台的已配对电脑与运行中会话，右边是手机上的会话列表和一次授权决策。" width="900"></a></p>
 
@@ -18,13 +20,13 @@ Pairlet 是一个开源的本地优先控制面，用来遥控命令行编码 ag
 
 ## 三步上手
 
-**1 · 装 App** —— [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969)（iPhone · iPad）· [TestFlight 测试版](https://testflight.apple.com/join/8z26MWWr) · [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk)。想用电脑？见[桌面 App](#平台与分发)。
+**1 · 装 App** —— [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969)（iPhone · iPad）· [TestFlight 测试版](https://testflight.apple.com/join/8z26MWWr) · [Android APK](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-android.apk)。想用电脑？见[桌面 App](#平台与分发)。
 
 **2 · 在跑 agent 的那台电脑上装 daemon** —— 任一受支持的 CLI 都行，不是非要 Claude：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash   # macOS · Linux
-irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex          # Windows
+curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.sh | bash   # macOS · Linux
+irm https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.ps1 | iex          # Windows
 ```
 
 **3 · 配对** —— 跑 `cc-pocket-daemon pair`，用 App 扫终端里打出的二维码（或敲那 6 位码）。连上了，端到端加密。
@@ -44,7 +46,7 @@ irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.p
 
 ## Agent 支持
 
-**v1.9.4** 的公开能力已对照 `main` 分支的 [`e9ee816f`](https://github.com/heypandax/cc-pocket/commit/e9ee816f) 提交核验。机器可读版本：[`site/public-capabilities.json`](site/public-capabilities.json)。
+**v1.9.4** 的公开能力已对照 `main` 分支的 [`e9ee816f`](https://github.com/heypandax/pairlet/commit/e9ee816f) 提交核验。机器可读版本：[`site/public-capabilities.json`](site/public-capabilities.json)。
 
 | Agent | 核心会话 | 审批与模式 | 改动与 diff | 用量 |
 |---|---|---|---|---|
@@ -72,14 +74,14 @@ flowchart LR
 
 **daemon** 跑在你的电脑上，把 agent CLI 当子进程驱动，并主动**向外**连中继——不用开任何入站端口。**中继**只做两件事：帮设备配对、转发不透明的加密帧；它不持有消息内容，也不持有私钥。App 与 daemon 之间跑一条端到端会话（P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手），明文自始至终只在这两个可信端点上。同一局域网内 App 会直连 daemon，延迟更低；中继是「人在外面」时的兜底。配对可设有效期，也可随时吊销。
 
-**必须说清的限制**：agent 仍以你本机操作系统用户的权限执行——端到端加密不等于沙箱。OpenCode 会话没有可执法的交互审批。项目自定义的 Noise 式通道也还没做过独立第三方审计。威胁模型见 [`docs/SECURITY.md`](docs/SECURITY.md)。安全问题请走 [GitHub security advisories](https://github.com/heypandax/cc-pocket/security/advisories/new) 私下报告。
+**必须说清的限制**：agent 仍以你本机操作系统用户的权限执行——端到端加密不等于沙箱。OpenCode 会话没有可执法的交互审批。项目自定义的 Noise 式通道也还没做过独立第三方审计。威胁模型见 [`docs/SECURITY.md`](docs/SECURITY.md)。安全问题请走 [GitHub security advisories](https://github.com/heypandax/pairlet/security/advisories/new) 私下报告。
 
 ## 平台与分发
 
 | 组成 | 正式分发 |
 |---|---|
-| **手机 / 平板 App** | iOS · iPadOS（[App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969)、[TestFlight](https://testflight.apple.com/join/8z26MWWr)）· Android [APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk) |
-| **桌面 App** | macOS [Apple 芯片](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg)（已签名 `.dmg`）· Windows x86_64 [`.msi`](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)。**Linux 没有正式桌面安装包——只能[从源码构建](#从源码构建)。** |
+| **手机 / 平板 App** | iOS · iPadOS（[App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969)、[TestFlight](https://testflight.apple.com/join/8z26MWWr)）· Android [APK](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-android.apk) |
+| **桌面 App** | macOS [Apple 芯片](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Intel](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg)（已签名 `.dmg`）· Windows x86_64 [`.msi`](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)。**Linux 没有正式桌面安装包——只能[从源码构建](#从源码构建)。** |
 | **本机 daemon** | macOS Apple 芯片 · macOS Intel · Linux x86_64 · Linux arm64 · Windows x86_64 |
 | **鸿蒙** | 签名 HAP，**Preview**——能力受限 |
 | **中继** | 默认走托管的零知识中继，也支持[自托管](https://pairlet.org/guides/self-hosting.html) |
@@ -92,7 +94,7 @@ flowchart LR
 <summary><b>macOS</b> —— 已签名公证</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.sh | bash
 cc-pocket-daemon pair
 ```
 
@@ -103,7 +105,7 @@ cc-pocket-daemon pair
 <summary><b>Linux</b> —— x86_64 / arm64 daemon</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.sh | bash
 cc-pocket-daemon pair
 ```
 
@@ -114,7 +116,7 @@ cc-pocket-daemon pair
 <summary><b>Windows</b> —— x86_64</summary>
 
 ```powershell
-irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.ps1 | iex
 ```
 
 一条命令搞定：装好、注册登录时的计划任务、直接进入配对。想用 [Scoop](https://scoop.sh)：`scoop bucket add heypandax https://github.com/heypandax/scoop-bucket`，再 `scoop install cc-pocket-daemon`。
@@ -191,7 +193,7 @@ daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair    # 另开一�
 
 ## 参与贡献
 
-欢迎提 issue 和 PR —— [`CONTRIBUTING.md`](CONTRIBUTING.md) 写了构建前置、测试入口，以及哪些脚本只给维护者用。安全问题请走 [GitHub security advisories](https://github.com/heypandax/cc-pocket/security/advisories/new) 私下报告。
+欢迎提 issue 和 PR —— [`CONTRIBUTING.md`](CONTRIBUTING.md) 写了构建前置、测试入口，以及哪些脚本只给维护者用。安全问题请走 [GitHub security advisories](https://github.com/heypandax/pairlet/security/advisories/new) 私下报告。
 
 ## 许可证
 
