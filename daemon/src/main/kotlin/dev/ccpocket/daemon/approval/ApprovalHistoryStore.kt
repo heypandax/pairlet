@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.approval
 
+import dev.ccpocket.daemon.diagnostics.storageReadFailed
+import dev.ccpocket.daemon.diagnostics.storageWriteFailed
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.feishu.SecretRedactor
 import dev.ccpocket.daemon.util.logger
@@ -33,7 +35,7 @@ class ApprovalHistoryStore(private val file: File) {
                 file.appendText(JSON.encodeToString(ApprovalHistoryItem.serializer(), sanitize(item)) + "\n")
                 if (countLines() > MAX_LINES) rotate()
             }
-        }.onFailure { log.warn("history append failed: ${it.message}") }
+        }.onFailure { storageWriteFailed(it); log.warn("history append failed: ${it.message}") }
     }
 
     /** Newest-first page for the account-wide history view. Corrupt lines are skipped, never a crash. */
@@ -41,7 +43,7 @@ class ApprovalHistoryStore(private val file: File) {
         synchronized(lock) {
             if (!file.exists()) return emptyList()
             val newest = file.readLines().asReversed().asSequence()
-                .mapNotNull { line -> runCatching { JSON.decodeFromString(ApprovalHistoryItem.serializer(), line) }.getOrNull() }
+                .mapNotNull { line -> runCatching { JSON.decodeFromString(ApprovalHistoryItem.serializer(), line) }.onFailure(::storageReadFailed).getOrNull() }
                 .map(::sanitize) // also protects rows written by a pre-hardening daemon
                 .take(limit.coerceIn(1, MAX_PAGE))
             val page = ArrayList<ApprovalHistoryItem>()
@@ -54,7 +56,7 @@ class ApprovalHistoryStore(private val file: File) {
             }
             page
         }
-    }.getOrElse { emptyList() }
+    }.onFailure(::storageReadFailed).getOrElse { emptyList() }
 
     private fun countLines(): Int = if (file.exists()) file.readLines().size else 0
 
@@ -69,7 +71,7 @@ class ApprovalHistoryStore(private val file: File) {
             if (!file.exists()) return@synchronized
             setOwnerOnly(file)
             val safeLines = file.readLines().mapNotNull { line ->
-                runCatching { JSON.decodeFromString(ApprovalHistoryItem.serializer(), line) }.getOrNull()
+                runCatching { JSON.decodeFromString(ApprovalHistoryItem.serializer(), line) }.onFailure(::storageReadFailed).getOrNull()
                     ?.let(::sanitize)
                     ?.let { JSON.encodeToString(ApprovalHistoryItem.serializer(), it) }
             }.takeLast(MAX_LINES)

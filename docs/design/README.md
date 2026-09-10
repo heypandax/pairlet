@@ -18,6 +18,12 @@ cc-pocket 移动端设计资料，**统一采用 claude.ai/design**。Stitch 的
 | `SMART-APPROVAL.md` | **风险评估子设计** —— 纳入统一审批系统：确定性行为序列＋Agent 风险建议＋高风险审批升级；不再作为独立审批架构 |
 | `CHANNEL-INTEGRATIONS-EVALUATING.md` | ⚠️ **评估中** —— 官方渠道集成（Claude Channels / Slack、Codex Slack / Linear）机制调研与机会分析。含五条方向层候选，**均未定案、未录台账**；定案后去掉 `-EVALUATING` 后缀 |
 | `SPLIT-PANES.md` | **桌面分屏（issue #311）** —— 主内容区同时放下多个会话，每列独立滚动 / 输入 / 审批。为什么走「一条链路按 convoId 分流」而不是第二条连接、两个挂点各自守什么、一列有什么没什么 |
+| [FOLLOW-UP-PLAN.md](../observability/FOLLOW-UP-PLAN.md) | **日志系统后续任务，已启动 A 批** —— 首批部署后的剩余范围、四批执行顺序、交付物、平台依赖与验收标准；实际结果见实施记录 |
+| [PRODUCT-INSIGHTS.md](../observability/PRODUCT-INSIGHTS.md) | **用户使用与问题分析，已纳入开发** —— 五个产品视角；Firebase/GA4 看激活、使用和留存，Sentry 查失败与性能原因，含事件口径和决策用途 |
+| [OBSERVABILITY.md](OBSERVABILITY.md) | **日志与故障追踪实施方案，首批已接入并部署** —— Firebase Analytics 看趋势，Sentry 追 App、desktop、daemon、relay 故障；统一字段、独立上报、配额、隐私、跨端关联与 P0–P3 验收 |
+| [ERROR-PATHS.md](../observability/ERROR-PATHS.md) | **核心出错路径与开发任务，部分已接入** —— 30 类核心路径、10 个实施任务；按源码入口列出失败分支、诊断字段、故障注入与正常对照，完整验收尚未完成 |
+| [OBSERVABILITY-EVALUATING.md](OBSERVABILITY-EVALUATING.md) | **历史供应商评估** —— 保留 Firebase/GCP 等候选分析，已由 Sentry 实施方案替代，不作为开发入口 |
+| [SESSION-OPEN-DIAGNOSTICS-EVALUATING.md](/Users/lidapeng/Desktop/Project/app/cc-pocket/docs/design/SESSION-OPEN-DIAGNOSTICS-EVALUATING.md) | **会话打开场景附录，评估中** —— 使用通用诊断体系，定义打开阶段、历史完成标记与兼容验收 |
 | `TASKBOARD-EVALUATING.md` | ⚠️ **评估中** —— 评估 dashi-taskboard 的持久任务能力与 cc-pocket 的适配性；建议原生实现 Task 层、拒绝直接嵌入，并给出 M0/M1 边界、架构、安全与验收条件 |
 
 > 命名约定：文件名带 `-EVALUATING` 后缀 = 调研 / 提案阶段，结论未定，不可作为实现依据。

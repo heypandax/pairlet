@@ -13,6 +13,12 @@ actual object PushController {
     /** Set from Swift at launch: requests authorization, then registers for remote notifications. */
     var registrar: (() -> Unit)? = null
 
+    /** Swift reports a fixed registration boundary, never an APNs token or NSError description. */
+    fun registrationFailed() {
+        dev.ccpocket.observability.Diagnostics.report(dev.ccpocket.observability.ErrorPath.PUSH,
+            dev.ccpocket.observability.Stage.REQUEST, dev.ccpocket.observability.ErrorCode.UNAVAILABLE)
+    }
+
     actual fun start(onToken: (PushToken) -> Unit) {
         cb = onToken
         last?.let { onToken(it) } // replay a token that arrived before start()

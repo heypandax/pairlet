@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.presets
 
+import dev.ccpocket.daemon.diagnostics.storageReadFailed
+import dev.ccpocket.daemon.diagnostics.storageWriteFailed
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.protocol.PresetEnv
 import dev.ccpocket.protocol.PresetSummary
@@ -138,7 +140,8 @@ class PresetStore private constructor(private val path: File) {
         if (!path.exists()) runCatching {
             Files.createFile(path.toPath(), PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
         }
-        path.writeText(JSON.encodeToString(Stored.serializer(), state))
+        try { path.writeText(JSON.encodeToString(Stored.serializer(), state)) }
+        catch (error: Exception) { storageWriteFailed(error); throw error }
         // re-assert owner-only (an older file predating the createFile path, or a non-atomic FS); same
         // bar as identity.json. No-op on non-POSIX (Windows home dirs are user-private by ACL).
         runCatching { Files.setPosixFilePermissions(path.toPath(), PosixFilePermissions.fromString("rw-------")) }
@@ -150,7 +153,7 @@ class PresetStore private constructor(private val path: File) {
         fun defaultPath(): File = File(Identity.defaultPath().parentFile, "presets.json")
 
         fun load(path: File = defaultPath()): PresetStore = PresetStore(path).apply {
-            if (path.exists()) runCatching { state = JSON.decodeFromString(Stored.serializer(), path.readText()) }
+            if (path.exists()) runCatching { state = JSON.decodeFromString(Stored.serializer(), path.readText()) }.onFailure(::storageReadFailed)
         }
 
         /** Display mask: short prefix + last 4, middle elided (`sk-…••••3f9a`). Short tokens flatten

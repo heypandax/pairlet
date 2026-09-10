@@ -631,7 +631,7 @@ class ZCodeBackend(
     override fun transcriptDir(workdir: String): Path = ZCodePaths.database().parent
     override fun listSessions(workdir: String): List<SessionSummary> = ZCodeTranscriptScanner.scan(workdir)
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = ZCodeTranscriptReplay.read(sessionId)
-    override fun replaySlice(workdir: String, sessionId: String, sinceSeq: Long?): ReplaySlice = ReplaySlice(replayHistory(workdir, sessionId))
+    override fun replaySlice(workdir: String, sessionId: String, sinceSeq: Long?): ReplaySlice = ZCodeTranscriptReplay.slice(sessionId)
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
     override fun resumeModel(workdir: String, sessionId: String): String? = ZCodeTranscriptScanner.resumeModel(sessionId)
     override fun defaultModel(workdir: String): String? = modelService.defaultModel()

@@ -1896,6 +1896,8 @@ private fun AboutPane(model: DesktopModel) {
         }
         DaemonUpdateHint(model)
         UpdatesSection(model)
+        Spacer(Modifier.height(18.dp))
+        dev.ccpocket.app.ui.DiagnosticSharingSetting()
     }
 }
 

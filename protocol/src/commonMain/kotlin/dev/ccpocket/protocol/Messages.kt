@@ -161,6 +161,7 @@ data class OpenSession(
      * daemon drops the key (backend default, exactly today), an old App never sends it.
      */
     val agentPreset: String? = null,
+    val diagnostic: DiagnosticContext? = null,
 ) : ToDaemon
 
 /** Restart the live conversation's claude process under a new cwd. */
@@ -179,6 +180,7 @@ data class SendPrompt(
     val text: String,
     val images: List<ImageData> = emptyList(),
     val promptId: String? = null,
+    val diagnostic: DiagnosticContext? = null,
 ) : ToDaemon
 
 /** A base64 image attached to a prompt — downscaled on the phone to fit the relay frame cap. */
@@ -212,6 +214,7 @@ data class PermissionVerdict(
     // ignoring both delivers the plain deny [message], which is a safe degrade.
     val retrySafer: Boolean = false,
     val constraints: List<String>? = null,
+    val diagnostic: DiagnosticContext? = null,
 ) : ToDaemon
 
 /** Switch the live conversation's permission mode (relaunches claude with --resume + the new mode).
@@ -367,6 +370,7 @@ data class ReadFile(
     val path: String,
     val agent: AgentKind = AgentKind.CLAUDE,
     val allowChunks: Boolean = false,
+    val diagnostic: DiagnosticContext? = null,
 ) : ToDaemon
 
 /**
@@ -390,6 +394,7 @@ data class ExportFile(
     val sessionId: String,
     val path: String,
     val agent: AgentKind = AgentKind.CLAUDE,
+    val diagnostic: DiagnosticContext? = null,
 ) : ToDaemon
 
 /** [ListPathEntries.filter]'s one non-default value: the file BROWSER's view of a directory — dot-prefixed
@@ -905,6 +910,7 @@ data class SessionLive(
      * session-info surface. Null = backend default / not applicable / older daemon. Additive both ways.
      */
     val agentPreset: String? = null,
+    val diagnostic: DiagnosticContext? = null,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
@@ -1287,6 +1293,7 @@ data class DaemonInfo(
      * (older daemon) decodes to empty = "Claude only, legacy behaviour"; it never means "no quota".
      */
     val quotaAgents: List<String> = emptyList(),
+    val supportsDiagnostics: Boolean = false,
 ) : ToPhone
 
 @Serializable
@@ -1383,6 +1390,7 @@ data class ConvoHistory(
     val firstSeq: Long? = null,
     val delta: Boolean = false,
     val hasMore: Boolean = false,
+    val diagnostic: DiagnosticContext? = null,
 ) : ToPhone
 
 /**
@@ -1787,6 +1795,7 @@ data class FileContent(
     val mediaType: String? = null, // e.g. "image/png" when base64 is set
     val truncated: Boolean = false,
     val totalBytes: Long = 0,
+    val diagnostic: DiagnosticContext? = null,
 ) : ToPhone
 
 /**
@@ -1813,6 +1822,7 @@ data class FileContentChunk(
     val base64: String,
     val mediaType: String? = null,
     val totalBytes: Long = 0,
+    val diagnostic: DiagnosticContext? = null,
 ) : ToPhone
 
 /** Hard total cap for a chunked [ReadFile] (issue #134) — generous for office documents while still
@@ -2055,6 +2065,7 @@ data class ClientCaps(
     // undeclared peer — an already-shipped client drops unknown frame types silently, but gating
     // here keeps the wire quiet and the contract explicit.
     val supportsApprovalV2: Boolean = false,
+    val supportsDiagnostics: Boolean = false,
 ) : ToDaemon
 
 // ── agent model listing ─────────────────────────────────────────────────
@@ -2242,7 +2253,8 @@ data class DeviceHello(val deviceId: String, val secret: String, val protoV: Int
  *  key), so every feature gated on it fails CLOSED. See [PROTO_V_TARGETED_PUSH]. */
 @Serializable
 @SerialName("pocket/attached")
-data class Attached(val role: Role, val accountId: String, val relayProtoV: Int = 0) : ToRelay
+data class Attached(val role: Role, val accountId: String, val relayProtoV: Int = 0,
+    val connectionId: DiagnosticId? = null, val peerConnectionId: DiagnosticId? = null) : ToRelay
 
 /** relay -> peer: auth/handshake failed; the relay closes the socket after this. */
 @Serializable
@@ -2308,7 +2320,7 @@ data class DeviceRevoked(val deviceId: String) : ToRelay
 /** relay -> peer: the other end's online/offline transition. */
 @Serializable
 @SerialName("pocket/peer.presence")
-data class PeerPresence(val online: Boolean) : ToRelay
+data class PeerPresence(val online: Boolean, val connectionId: DiagnosticId? = null) : ToRelay
 
 /** peer -> relay: application-level liveness probe. The relay echoes [Pong] with the same [ts].
  *  Getting the echo proves the relay *application* (not merely the TCP socket) is alive — this

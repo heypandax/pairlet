@@ -1,5 +1,8 @@
 package dev.ccpocket.daemon.approval
 
+import dev.ccpocket.observability.*
+import dev.ccpocket.protocol.ApprovalProgress
+
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AskWithdrawn
 import dev.ccpocket.protocol.AskWithdrawnReason
@@ -210,6 +213,7 @@ class ApprovalCoordinator(
             // then let the adapter answer its backend honestly ("no answer", never "denied by user")
             timedOut.emit(AskWithdrawn(ask.convoId, ask.askId, AskWithdrawnReason.TIMED_OUT))
             record(timedOut, "TIMED_OUT")
+            Diagnostics.report(ErrorPath.APPROVAL, Stage.WAIT, ErrorCode.EXPIRED)
             timedOut.onOutcome(ApprovalOutcome.TimedOut)
         }
         emit(ask)
@@ -223,6 +227,7 @@ class ApprovalCoordinator(
         val p = synchronized(lock) { pending[Key(convoId, askId)] } ?: return
         if (visible) {
             p.leaseUntil = System.currentTimeMillis() + LEASE_MS
+            if (!p.everLeased) Diagnostics.report(ErrorPath.APPROVAL, Stage.RECEIVE, ErrorCode.OK)
             p.everLeased = true
         } else {
             p.leaseUntil = 0L
@@ -232,7 +237,7 @@ class ApprovalCoordinator(
     /** Route a verdict by askId. True iff it resolved a pending request; false = unknown/expired/duplicate
      *  (the caller surfaces "ask_expired" to the device that tapped — a tap must never look like a silent
      *  success, issue #100). */
-    suspend fun onVerdict(v: PermissionVerdict): Boolean {
+    suspend fun onVerdict(v: PermissionVerdict, diagnosticEmit: (suspend (Frame) -> Unit)? = null): Boolean {
         // the composite lookup is load-bearing: a verdict resolves ONLY an ask of the conversation it names
         // (which upstream guards vetted the sender against) — never a same-askId ask of another conversation
         val p = synchronized(lock) { pending.remove(Key(v.convoId, v.askId)) } ?: run {
@@ -241,7 +246,29 @@ class ApprovalCoordinator(
         }
         p.timeoutJob?.cancel()
         record(p, "${v.decision}${if (v.remember) "+remember" else ""}")
-        p.onOutcome(ApprovalOutcome.Answered(v))
+        val context = v.diagnostic?.validated()
+        val trace = context?.let { Diagnostics.begin(ErrorPath.APPROVAL, it.traceId) }?.also { it.stage(Stage.VERDICT) }
+        try {
+            p.onOutcome(ApprovalOutcome.Answered(v))
+            // Adapter return is observable; the Agent interfaces do not promise an application ACK.
+            trace?.finish(Outcome.SUCCESS, Stage.DISPATCH, metrics = SafeMetrics(resultQuality = ResultQuality.UNKNOWN))
+            if (context != null && diagnosticEmit != null) {
+                scope.launch {
+                    runCatching { withTimeoutOrNull(EMIT_TIMEOUT_MS) {
+                        diagnosticEmit(ApprovalProgress(v.convoId, context,
+                            if (p.source == ApprovalSource.AGENT) "adapter_returned" else "gate_resolved"))
+                    } }
+                }
+            }
+        } catch (error: Exception) {
+            trace?.finish(Outcome.FAILURE, Stage.APPLY, ErrorCode.APPLY_FAILED, error)
+            if (context != null && diagnosticEmit != null) scope.launch {
+                runCatching { withTimeoutOrNull(EMIT_TIMEOUT_MS) {
+                    diagnosticEmit(ApprovalProgress(v.convoId, context, "adapter_failed", "failure"))
+                } }
+            }
+            throw error
+        }
         return true
     }
 

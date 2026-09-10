@@ -1,5 +1,10 @@
 package dev.ccpocket.app.data
 
+import dev.ccpocket.app.telemetry.*
+import dev.ccpocket.observability.ErrorCode
+import dev.ccpocket.protocol.HistoryComplete
+import dev.ccpocket.protocol.HistoryApplied
+
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import dev.ccpocket.protocol.AgentKind
@@ -79,6 +84,14 @@ class SidePane(
      *  a column stuck on "Opening…" forever reads as "my click never happened", so say it failed and
      *  offer the retry instead. */
     val openFailed = mutableStateOf(false)
+    internal var openObservation: SessionOpenObservation? = null
+    val historyLayoutToken = mutableStateOf<String?>(null)
+    fun onHistoryLaidOut(token: String, hasVisibleContent: Boolean) {
+        val observation = openObservation ?: return
+        if (historyLayoutToken.value != token || observation.context.traceId != token || observation.convoId != convoId.value) return
+        observation.laidOut(hasVisibleContent)
+        historyLayoutToken.value = null
+    }
     val error = mutableStateOf<String?>(null)
 
     /** The approval — or the AskUserQuestion — this pane's session is blocked on. Resolved through the
@@ -187,6 +200,10 @@ class SidePanes(
      *  exactly as the focused path consults its own `daemonOwnsPromptRecovery`. Defaulted so the phone and the
      *  existing tests (which open no columns, or drive the deadline explicitly) construct unchanged. */
     private val daemonOwnsPromptRecovery: () -> Boolean = { false },
+    private val diagnosticsSupported: () -> Boolean = { false },
+    private val productDimensions: () -> Map<TelKey, Any> = { emptyMap() },
+    private val receiptExpired: (String?, String) -> Unit = { _, _ -> },
+    private val responseExpired: (String?, String, Boolean) -> Unit = { _, _, _ -> },
 ) {
     val panes = mutableStateListOf<SidePane>()
     private var paneSeq = 0L
@@ -267,6 +284,7 @@ class SidePanes(
         // slot k lands the new column at position k, pushing the focused chat right when k is at or
         // before it. -1 keeps the historic append-at-the-right-end (the context-menu path).
         val slot = if (at < 0) panes.size + 1 else at.coerceIn(0, panes.size + 1)
+        ProductFeatures.used(ProductFeature.SESSION_VIEW, productDimensions())
         panes.add(paneIndexForSlot(slot, focusedSlot.value), pane)
         if (slot <= focusedSlot.value) focusedSlot.value += 1
         recount()
@@ -315,11 +333,22 @@ class SidePanes(
 
     private fun dispatchOpen(pane: SidePane, lastEventSeq: Long) {
         val gen = ++pane.openGen
+        pane.openObservation?.fail(ProductResult.CANCELLED, ErrorCode.SUPERSEDED)
+        pane.historyLayoutToken.value = null
+        val observation = SessionOpenObservation(productDimensions() + mapOf(TelKey.Backend to pane.agent.name.lowercase()))
+            .also { it.requested = diagnosticsSupported() }
+        pane.openObservation = observation
+        scope.launch {
+            delay(15_000)
+            if (panes.any { it === pane } && pane.openObservation === observation && observation.negotiated)
+                observation.fail(ProductResult.TIMEOUT, ErrorCode.TIMEOUT)
+        }
         scope.launch {
             send(
                 OpenSession(
                     workdir = pane.workdir, resumeId = pane.sessionId, mode = pane.mode,
                     agent = pane.agent, lastEventSeq = lastEventSeq,
+                    diagnostic = observation.context.takeIf { observation.requested },
                 ),
             )
         }
@@ -329,6 +358,7 @@ class SidePanes(
             if (gen == pane.openGen && pane.convoId.value == null) {
                 pane.opening.value = false
                 pane.openFailed.value = true
+                observation.fail(ProductResult.TIMEOUT, ErrorCode.TIMEOUT)
             }
         }
     }
@@ -374,6 +404,9 @@ class SidePanes(
         val i = panes.indexOfFirst { it.paneId == paneId }
         if (i < 0) return null
         val pane = panes.removeAt(i)
+        pane.openObservation?.fail(ProductResult.CANCELLED, ErrorCode.CANCELLED)
+        pane.openObservation = null
+        pane.historyLayoutToken.value = null
         if (i < focusedSlot.value) focusedSlot.value -= 1
         return pane
     }
@@ -395,6 +428,9 @@ class SidePanes(
             // index p and putting the focus at slot p is exactly "the chat walks over to that column".
             val p = panes.indexOfFirst { it.paneId == pane.paneId }
             panes.removeAt(p)
+            pane.openObservation?.fail(ProductResult.CANCELLED, ErrorCode.SUPERSEDED)
+            pane.openObservation = null
+            pane.historyLayoutToken.value = null
             focusedSlot.value = p
         }
         // Unconditional: disowned.remove above changes openCount's truth even when no pane matched
@@ -406,7 +442,12 @@ class SidePanes(
 
     /** Drop every column without touching the sessions behind them (disconnect, machine switch, sign-out). */
     fun clear() {
-        for (pane in panes) cancelWatchdogs(pane) // #329: no orphaned deadline may outlive the column list
+        for (pane in panes) {
+            cancelWatchdogs(pane) // #329: no orphaned deadline may outlive the column list
+            pane.openObservation?.fail(ProductResult.CANCELLED, ErrorCode.CANCELLED)
+            pane.openObservation = null
+            pane.historyLayoutToken.value = null
+        }
         panes.clear()
         disowned.clear()
         focusedSlot.value = 0
@@ -429,6 +470,16 @@ class SidePanes(
     fun route(f: Frame) {
         if (openCount == 0) return
         when (f) {
+            is HistoryComplete -> byConvo(f.convoId)?.let { pane ->
+                val observation = pane.openObservation
+                if (observation?.completed(f) == true) {
+                    pane.historyLayoutToken.value = observation.context.traceId
+                    scope.launch {
+                        if (panes.any { it === pane } && pane.openObservation === observation)
+                            send(HistoryApplied(f.convoId, observation.context))
+                    }
+                }
+            }
             is SessionLive -> bind(f)
             is ConvoHistory -> byConvo(f.convoId)?.let { replay(it, f) }
             // real turn evidence first (issue #329): any of these retires this pane's stall watchdogs before
@@ -591,7 +642,10 @@ class SidePanes(
         pane.promptWatchdog?.cancel()
         pane.promptWatchdog = scope.launch {
             delay(receiptTimeoutMs)
-            if (pane.promptOutstanding && pane.activePromptId == promptId) pane.sendStalled.value = true
+            if (pane.promptOutstanding && pane.activePromptId == promptId) {
+                receiptExpired(pane.convoId.value, promptId)
+                pane.sendStalled.value = true
+            }
         }
     }
 
@@ -633,6 +687,7 @@ class SidePanes(
         pane.turnWatchdog = scope.launch {
             delay(turnTimeoutMs)
             if (!pane.awaitingTurn || pane.activePromptId != promptId || pane.convoId.value != c || !pane.streaming.value) return@launch
+            responseExpired(c, promptId, queued)
             if (queued) pane.turnQueued.value = true else pane.turnStalled.value = true
         }
     }
@@ -750,6 +805,9 @@ class SidePanes(
             }
             return
         }
+        pane.openObservation?.let { observation ->
+            if (f.diagnostic?.validated() == null || observation.matches(f.diagnostic)) observation.live(f.convoId, f.diagnostic)
+        }
         pane.convoId.value = f.convoId
         pane.opening.value = false
         pane.openFailed.value = false
@@ -775,6 +833,7 @@ class SidePanes(
         // if the replay resolved this pane's pending bubble, that is delivery evidence — settle the watchdogs.
         pane.transcript.mergeHistory(f) { before, after -> reconcilePromptReceipt(pane, before, after) }
             ?.let { pane.historySeq = it }
+        pane.openObservation?.historyApplied(f.diagnostic)
     }
 
     private fun endTurn(pane: SidePane, f: TurnDone) {

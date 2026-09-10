@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.conversation
 
+import dev.ccpocket.daemon.diagnostics.completeInitialHistory
+
 import dev.ccpocket.daemon.codex.CodexTranscriptReplay
 import dev.ccpocket.daemon.codex.CodexTranscriptScanner
 import dev.ccpocket.daemon.disk.TranscriptReplay
@@ -52,6 +54,7 @@ class ObserveSession(
     fun start() {
         scope.launch {
             runCatching {
+                var initialReplay = true
                 var lastMtime = -2L // first pass always announces, even when the file is missing (-1)
                 while (isActive) {
                     val mtime = if (file.exists()) file.getLastModifiedTime().toMillis() else -1L
@@ -72,6 +75,10 @@ class ObserveSession(
                         }
                         // only a delta-capable client (sinceSeq != null, see above) graduates to delta
                         // ticks; an old client keeps receiving the full window on every write
+                        if (initialReplay) {
+                            initialReplay = false
+                            sink.completeInitialHistory(convoId, slice.messages.size, slice.messages.isNotEmpty() || !slice.delta, slice.quality, slice.sourceRows, slice.failedRows)
+                        }
                         if (sinceSeq != null) sentCursor = slice.lastSeq ?: sentCursor
                     }
                     delay(1500)

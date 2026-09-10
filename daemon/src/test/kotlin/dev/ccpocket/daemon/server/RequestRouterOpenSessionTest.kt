@@ -56,6 +56,33 @@ import kotlin.test.assertTrue
  * internally (validateOrCreateWorkdir); it just must not leak into the announce.
  */
 class RequestRouterOpenSessionTest {
+    @Test
+    fun diagnosticHistoryCompletionIsNegotiatedPerOwnerIngress() = runBlocking {
+        val root = Files.createTempDirectory("ccp-open-diagnostic")
+        val context = dev.ccpocket.protocol.DiagnosticContext("1234567890abcdef1234567890abcdef")
+        for (mode in listOf("owner", "legacy", "guest")) {
+            val job = kotlinx.coroutines.SupervisorJob()
+            try {
+                val emitted = java.util.concurrent.CopyOnWriteArrayList<Frame>()
+                val caps = RequestRouter.ClientCapsHolder().apply { supportsDiagnostics = mode != "legacy" }
+                router(CoroutineScope(Dispatchers.Default + job)).handle(
+                    OpenSession(root.toString(), diagnostic = context), { emitted += it },
+                    origin = if (mode == "guest") "share:alex" else null,
+                    guestScope = if (mode == "guest") guestScope(root) else null, caps = caps,
+                )
+                val live = awaitLive(emitted)
+                if (mode == "owner") {
+                    withTimeout(5_000) { while (emitted.none { it is dev.ccpocket.protocol.HistoryComplete }) delay(20) }
+                    assertEquals(context, live.diagnostic)
+                    assertEquals(context, emitted.filterIsInstance<dev.ccpocket.protocol.HistoryComplete>().single().diagnostic)
+                } else {
+                    assertEquals(null, live.diagnostic)
+                    assertTrue(emitted.none { it is dev.ccpocket.protocol.HistoryComplete })
+                }
+            } finally { job.cancel() }
+        }
+    }
+
 
     /** Never launches: a plain (non-takeOver) open is lazy (#61), so no process member is reached. */
     private class StubBackend : AgentBackend {

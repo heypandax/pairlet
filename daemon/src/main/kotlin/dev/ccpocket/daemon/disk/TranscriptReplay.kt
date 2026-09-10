@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.disk
 
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.media.ImageThumbnail
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
@@ -39,8 +41,9 @@ object TranscriptReplay {
         maxMessages: Int = 100,
         maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES,
     ): ReplaySlice {
-        val (rows, cursor) = parse(file)
-        return ReplaySlicer.slice(rows, cursor, sinceSeq, maxMessages, maxFrameTextBytes)
+        val parsed = parse(file)
+        return ReplaySlicer.slice(parsed.first, parsed.second, sinceSeq, maxMessages, maxFrameTextBytes)
+            .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows)
     }
 
     /** One page of history OLDER than [beforeSeq] — the scroll-to-top lazy load (issue #147). */
@@ -50,8 +53,9 @@ object TranscriptReplay {
         limit: Int = 100,
         maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES,
     ): ReplaySlice {
-        val (rows, _) = parse(file)
-        return ReplaySlicer.page(rows, beforeSeq, limit, maxFrameTextBytes)
+        val parsed = parse(file)
+        return ReplaySlicer.page(parsed.first, beforeSeq, limit, maxFrameTextBytes)
+            .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows)
     }
 
     /**
@@ -79,24 +83,32 @@ object TranscriptReplay {
     /** Parse the whole transcript into rows tagged with their source line (the #147 seq) + the total
      *  line count (the cursor). Every raw line — noise included — advances the cursor, so it equals
      *  the file's line count and stays stable under append-only growth. */
-    private fun parse(file: Path): Pair<List<ReplaySlicer.Row>, Long> =
-        parseRows(file).let { (rows, cursor) -> rows.map { ReplaySlicer.Row(it.msg, it.line, it.patchLine) } to cursor }
+    private fun parse(file: Path): ReplayRead<ReplaySlicer.Row> =
+        parseRows(file).let { parsed -> ReplayRead(parsed.first.map { ReplaySlicer.Row(it.msg, it.line, it.patchLine) },
+            parsed.second, parsed.quality, parsed.failedRows) }
 
     /** The shared pass behind [parse] and [chain] — the latter needs the chain identity the former drops. */
-    private fun parseRows(file: Path): Pair<List<MutableRow>, Long> {
-        if (!file.exists()) return emptyList<MutableRow>() to 0L
+    private fun parseRows(file: Path): ReplayRead<MutableRow> {
+        if (!file.exists()) return ReplayRead(emptyList(), 0L, "unavailable")
         val out = ArrayList<MutableRow>()
         val taskIdx = HashMap<String, Int>() // sub-agent tool_use id -> its card's index in `out` (issue #77)
         val questionIdx = HashMap<String, Int>() // AskUserQuestion tool_use id -> its row's index (issue #110)
         val toolIdx = HashMap<String, Int>() // ordinary tool_use id -> its row's index, for images (issue #332)
         var lineNo = 0L
+        var malformed = 0L
+        var lastMalformed = -1L
+        var firstError: Throwable? = null
+        var readFailed = false
         runCatching {
             file.bufferedReader().useLines { lines ->
                 for (raw in lines) {
                     lineNo += 1
                     val line = raw.trim()
                     if (line.isEmpty()) continue
-                    val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                    val obj = runCatching { json.parseToJsonElement(line) }.onFailure {
+                        malformed++; lastMalformed = lineNo
+                        if (firstError == null) firstError = it
+                    }.getOrNull() as? JsonObject ?: continue
                     // a sub-agent's inner records share the file with isSidechain:true — they fold into
                     // the Task card (live: parent-tagged tool events), never the main transcript (issue #77)
                     if ((obj["isSidechain"] as? JsonPrimitive)?.booleanOrNull == true) continue
@@ -145,7 +157,18 @@ object TranscriptReplay {
                 }
             }
         }
-        return out to lineNo
+        .onFailure { readFailed = true; Diagnostics.report(ErrorPath.HISTORY_READ, Stage.READ, ErrorCode.READ_FAILED, it,
+            SafeMetrics(totalCount = lineNo, returnedCount = out.size.toLong(), resultQuality = ResultQuality.PARTIAL)) }
+        // A writer's unfinished final line is expected during tailing. Older malformed rows are not.
+        if (malformed > 0) {
+            val corrupt = malformed > 1 || lastMalformed != lineNo
+            Diagnostics.report(ErrorPath.HISTORY_READ, Stage.PARSE,
+                if (corrupt) ErrorCode.DECODE_FAILED else ErrorCode.INCOMPLETE,
+                if (corrupt) firstError else null,
+                SafeMetrics(totalCount = lineNo, failedCount = malformed, returnedCount = out.size.toLong(), resultQuality = ResultQuality.PARTIAL),
+                isError = corrupt)
+        }
+        return ReplayRead(out, lineNo, if (readFailed || malformed > 0) "partial" else "complete", malformed)
     }
 
     /** One history row + (for a sub-agent tool_use) its tool_use id, so the reader can key the card. */

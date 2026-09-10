@@ -21,6 +21,7 @@ androidTargetSdk = "35"
 googleServices = "4.4.2"
 firebaseCrashlyticsPlugin = "3.0.2"
 firebaseBom = "33.7.0"
+sentryJava = "8.41.0"
 # Embedded terminal engine (issue #153, desktop only). 3.72 is the newest JediTerm built with
 # Kotlin 2.1.21 — this project's exact compiler; 3.73+ jumps to kotlin-stdlib 2.4.0, whose klib
 # metadata a 2.1 compiler can't read. pty4j 0.13.12 is likewise 2.1.21 and shares our jna 5.14.0.
@@ -28,6 +29,7 @@ jediterm = "3.72"
 pty4j = "0.13.12"
 
 [libraries]
+sentry-java = { module = "io.sentry:sentry", version.ref = "sentryJava" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
 kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinxCoroutines" }

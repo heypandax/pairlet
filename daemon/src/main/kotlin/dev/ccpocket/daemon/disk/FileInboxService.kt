@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.disk
 
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.FileChunk
@@ -35,10 +37,13 @@ class FileInboxService(
         when (result) {
             is UploadReassembler.Result.Incomplete, UploadReassembler.Result.Stale -> {}
             is UploadReassembler.Result.Complete -> {
+                Diagnostics.report(ErrorPath.FILE_UPLOAD, Stage.COMMIT, ErrorCode.OK,
+                    metrics = SafeMetrics(byteCount = result.size, resultQuality = ResultQuality.COMPLETE))
                 log.info("${f.convoId} landed ${result.relPath} (${result.size} bytes)")
                 sink.emit(FileUploaded(f.convoId, result.captureId, path = result.relPath, name = result.name, size = result.size))
             }
             is UploadReassembler.Result.Refused -> {
+                Diagnostics.report(ErrorPath.FILE_UPLOAD, Stage.VERIFY, ErrorCode.REJECTED)
                 log.info("${f.convoId} upload ${result.captureId} refused: ${result.error}")
                 sink.emit(FileUploaded(f.convoId, result.captureId, ok = false, error = result.error))
             }

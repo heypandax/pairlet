@@ -1,5 +1,11 @@
 package dev.ccpocket.app.net
 
+import dev.ccpocket.observability.Diagnostics
+import dev.ccpocket.observability.ErrorPath
+import dev.ccpocket.observability.ErrorCode
+import dev.ccpocket.observability.Stage as DiagnosticStage
+import dev.ccpocket.observability.SafeMetrics
+
 import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.util.B64Url
@@ -88,6 +94,8 @@ class RelayE2EConnection {
                     awaitHandshake(init)
                 }
             } catch (e: TimeoutCancellationException) {
+                if (gen == connSeq) Diagnostics.report(ErrorPath.HANDSHAKE, DiagnosticStage.HANDSHAKE,
+                    ErrorCode.TIMEOUT, isError = true)
                 throw DeadLinkException()
             }
             // superseded while handshaking — a newer connect() owns the outboxes now; die before touching them (#142)
@@ -149,7 +157,8 @@ class RelayE2EConnection {
                             // …and disarms the silence watchdog: the daemon demonstrably holds our session
                             sentSinceInbound = 0
                             lastInboundAt = epochMillis()
-                            runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }.getOrNull()?.let { inbound.emit(it.body) }
+                            runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }
+                                .onFailure { Diagnostics.protocolDecodeFailed(it, pt.size.toLong()) }.getOrNull()?.let { inbound.emit(it.body) }
                         }
                         // relay control frames ride the TEXT plane after the handshake (e.g. PeerPresence)
                         frame is WsFrame.Text ->

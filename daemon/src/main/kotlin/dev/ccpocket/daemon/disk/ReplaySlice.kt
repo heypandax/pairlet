@@ -24,6 +24,10 @@ data class ReplaySlice(
     val delta: Boolean = false,
     /** Rows older than [firstSeq] exist (shed by the count/byte caps or the page bound). */
     val hasMore: Boolean = false,
+    /** Read quality is independent of the deliberately bounded history window. */
+    val quality: String = "unknown",
+    val sourceRows: Long? = null,
+    val failedRows: Long? = null,
 ) {
     companion object {
         val EMPTY = ReplaySlice(emptyList())
@@ -111,3 +115,7 @@ object ReplaySlicer {
         )
     }
 }
+
+/** The parser's existing pass, including safe accounting; no second transcript parse. */
+internal data class ReplayRead<T>(val first: List<T>, val second: Long, val quality: String,
+    val failedRows: Long = 0)

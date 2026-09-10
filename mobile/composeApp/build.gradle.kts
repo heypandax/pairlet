@@ -51,6 +51,7 @@ kotlin {
             implementation(compose.ui)
             implementation(compose.components.resources) // localized strings (en default, values-zh)
             implementation(project(":protocol"))
+            implementation(project(":observability"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.ktor.client.core)
@@ -59,6 +60,7 @@ kotlin {
             implementation(libs.highlights) // syntax highlighting for chat code blocks (issue #51); Android consumes its jvm variant
         }
         androidMain.dependencies {
+            implementation(project(":observability-sentry"))
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.biometric) // App Lock (issue #109): BiometricPrompt + FragmentActivity
             implementation(libs.ktor.client.cio)
@@ -71,6 +73,7 @@ kotlin {
             implementation(libs.peekaboo) // image picker + resize (android variant)
         }
         desktopMain.dependencies {
+            implementation(project(":observability-sentry"))
             implementation(compose.desktop.currentOs)
             implementation(libs.ktor.client.cio)
             implementation(libs.kotlinx.coroutines.swing)
@@ -104,6 +107,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(kotlin("test")) // Native-run coverage for commonMain logic (e.g. regex constructs K/N must accept)
+            implementation(libs.kotlinx.coroutines.test)
         }
         val desktopTest by getting
         desktopTest.dependencies {
@@ -111,7 +115,6 @@ kotlin {
             @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
             implementation(compose.uiTest)
             implementation(kotlin("test"))
-            implementation(libs.kotlinx.coroutines.test)
             implementation(libs.zxing.core) // independent decode oracle for the desktop QR matrix test
         }
     }

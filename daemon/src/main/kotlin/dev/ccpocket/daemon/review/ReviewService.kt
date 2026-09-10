@@ -49,12 +49,14 @@ class ReviewService(
      *  recipient binding, or one addressed elsewhere, never reaches a restricted sink. */
     suspend fun broadcast(changed: List<ReviewRequest>) {
         if (changed.isEmpty()) return
+        val delivery = dev.ccpocket.daemon.diagnostics.PeerDeliveryDiagnostics()
         for (r in changed) {
             for (t in clients.values) {
                 if (t.recipientDeviceId != null && r.recipientDeviceId != t.recipientDeviceId) continue
-                runCatching { t.sink.emit(ReviewUpdated(r)) }
+                delivery.sent(runCatching { t.sink.emit(ReviewUpdated(r)) })
             }
         }
+        delivery.finish()
     }
 
     /**
@@ -109,7 +111,7 @@ class ReviewService(
     suspend fun sweepLoop(intervalMs: Long = SWEEP_SCAN_MS) {
         while (true) {
             delay(intervalMs)
-            runCatching { reconcile() }
+            runCatching { reconcile() }.onFailure { dev.ccpocket.daemon.diagnostics.peerReconcileFailed(it) }
         }
     }
 

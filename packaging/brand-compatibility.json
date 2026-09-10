@@ -19,8 +19,8 @@
     },
     {
       "path": "daemon/src/main/kotlin/dev/ccpocket/daemon/update/UpdateService.kt",
-      "sha256": "7dd2d16d574324f7ff3d38143e49693a8dce14583856a0271e11c846e6ad9b01",
-      "note": "2026-09-10 CLI compatibility: selfExe resolves symlinks before ownership detection; asset names, version switching and services stay unchanged."
+      "sha256": "286248d0135cdbe4bc36698260156f86ce8218d28690bcccaebac41305fd1998",
+      "note": "2026-09-11 observability: add bounded upgrade diagnostics and a post-switch receipt; preserve CLI symlink resolution, asset names, checksums, install paths, version switching and service identity."
     },
     {
       "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/Pairing.kt",
@@ -60,7 +60,8 @@
     },
     {
       "path": "protocol/src/commonMain/kotlin/dev/ccpocket/protocol/Messages.kt",
-      "sha256": "cd549d77bd9ab0ae4ef624148f0c2eb50387a9e9c15234805845ba56281f618e"
+      "sha256": "55e1f8ee89ebb3341dc4fd512448ec42acf95f79b9b6b11e5c1c7bd6a5dfcc1e",
+      "note": "2026-09-11 observability: optional diagnostic context and connection IDs; capability defaults false. Existing wire names, identity and E2E payload semantics preserved; DiagnosticWireCompatTest covers older peers and malformed metadata."
     }
   ],
   "windowsUpgradeCode": "230d5f5e-4c7a-3de9-98ee-6e492cccb7d0"

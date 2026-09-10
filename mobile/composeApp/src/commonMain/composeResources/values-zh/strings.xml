@@ -2070,4 +2070,8 @@
     <string name="brand_former_name">Pairlet，原 CC Pocket</string>
     <string name="brand_renamed">CC Pocket 现已更名为 Pairlet，设备上显示为 CC Pairlet。</string>
     <string name="brand_dismiss">知道了</string>
+    <string name="diagnostic_sharing_title">共享使用与诊断数据</string>
+    <string name="diagnostic_sharing_save_failed">未能保存此设置供下次启动使用，请重试。</string>
+    <string name="diagnostic_sharing_description">Firebase 接收使用事件和崩溃报告，Sentry 接收诊断错误与日志，用于改善稳定性和功能。诊断不包含会话正文、提示词和文件内容。关闭后停止新采集，并清理平台支持清理的待发报告；已送达的数据仍会保留。此设置仅控制当前 App，电脑端诊断单独设置。</string>
+    <string name="diagnostic_copy_id">复制最近诊断编号</string>
 </resources>

@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon
 
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.agent.AgentBackendFactory
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.disk.DirectoryService
@@ -69,7 +71,12 @@ class DaemonCore(
     peerInboxFactory: (CoroutineScope) -> dev.ccpocket.daemon.review.PeerInboxService =
         dev.ccpocket.daemon.review.PeerInboxService::inMemory,
 ) {
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + kotlinx.coroutines.CoroutineExceptionHandler { _, error ->
+        Diagnostics.report(ErrorPath.ASYNC_WORKER, Stage.EXECUTE, ErrorCode.UNEXPECTED, error)
+        // Preserve the existing uncaught exception path after the explicit diagnostic capture.
+        val thread = Thread.currentThread()
+        thread.uncaughtExceptionHandler?.uncaughtException(thread, error)
+    })
 
     /** The shared claude launch context (binary override + credential store + preset env) for auxiliary
      *  claude processes — e.g. the Feishu Guardian Reviewer (reviewed-trust §21.2): a helper that resolved
@@ -167,7 +174,8 @@ class DaemonCore(
         executor = ScheduleExecutor { entry ->
             // watching=false: this sink is a black hole (headless fire, no client attached). Counting it
             // as a watcher would suppress the owner ask-push while nobody can see/answer the card (C1).
-            val sink = KeyedSink("scheduler", OutboundSink { /* headless fire — no client is attached */ }, watching = false)
+            val execution = dev.ccpocket.daemon.diagnostics.BackgroundExecutionDiagnostics()
+            val sink = KeyedSink("scheduler", OutboundSink(execution::frame), watching = false)
             val wd = dirs.validateWorkdir(entry.workdir)
                 ?: return@ScheduleExecutor "not a readable directory: ${entry.workdir}"
             val convoId = registry.open(
@@ -183,13 +191,15 @@ class DaemonCore(
             // the handoff drive gate covers scheduled fires too (SESSION-HANDOFF.md §5.3: a WAITING/
             // handed-off session accepts input from its controller only — the scheduler is never that)
             val handoffDeny = if (convoId.isEmpty()) null else registry.driveDenied(convoId, "scheduler")
-            when {
+            val failure = when {
                 convoId.isEmpty() -> "agent unavailable"
                 handoffDeny != null -> handoffDeny.message
-                !registry.sendPrompt(SendPrompt(convoId, entry.prompt, promptId = "sched-${entry.id}")) ->
+                !registry.sendPrompt(SendPrompt(convoId, entry.prompt, promptId = "sched-${entry.id}", diagnostic = execution.context)) ->
                     "session unavailable (live in another client?)"
                 else -> null
             }
+            if (failure != null) execution.dispatchFailed()
+            failure
         },
     )
 

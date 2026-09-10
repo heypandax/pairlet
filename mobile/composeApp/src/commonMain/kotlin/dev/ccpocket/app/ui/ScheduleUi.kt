@@ -523,6 +523,7 @@ private fun RowScope.LimitConfirmedContent(repo: PocketRepository, confirmed: Po
 /** Scheduled-tasks management (issue #137): list + cancel; repeats show their next fire time. */
 @Composable
 fun ScheduleScreen(repo: PocketRepository, onBack: () -> Unit) {
+    androidx.compose.runtime.LaunchedEffect(repo) { repo.exposeFeature(dev.ccpocket.app.telemetry.ProductFeature.BACKGROUND_TASK) }
     LaunchedEffect(Unit) { repo.fetchSchedules() }
     var now by remember { mutableStateOf(epochMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(30_000); now = epochMillis() } }

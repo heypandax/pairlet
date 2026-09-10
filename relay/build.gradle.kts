@@ -12,6 +12,8 @@ application {
 
 dependencies {
     implementation(project(":protocol"))
+    implementation(project(":observability"))
+    implementation(project(":observability-sentry"))
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.ktor.server.core)

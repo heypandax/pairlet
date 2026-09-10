@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.schedule
 
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.MIN_SCHEDULE_INTERVAL_MS
 import dev.ccpocket.protocol.ScheduleCreate
@@ -109,7 +111,10 @@ class SchedulerService(
      *  see the class KDoc's sleep/wake rationale. */
     suspend fun runLoop() {
         while (true) {
-            runCatching { checkDue() }.onFailure { log.warn("schedule tick failed: ${it.message}") }
+            runCatching { checkDue() }.onFailure {
+                Diagnostics.report(ErrorPath.BACKGROUND, Stage.RECONCILE, ErrorCode.UNEXPECTED, it)
+                log.warn("schedule tick failed: ${it.message}")
+            }
             delay(TICK_MS)
         }
     }
@@ -123,12 +128,17 @@ class SchedulerService(
             val due = entry.nextRunAtMs ?: continue
             if (due > now) continue
             if (now - due > missedGraceMs) {
+                Diagnostics.report(ErrorPath.BACKGROUND, Stage.RECONCILE, ErrorCode.EXPIRED)
                 // too stale to run — settle/skip, never execute
                 log.info("schedule ${entry.id.take(8)}… missed its window (${now - due}ms late)")
                 store.update(entry.copy(nextRunAtMs = nextOccurrence(entry, now), lastOutcome = OUTCOME_MISSED))
                 continue
             }
-            val outcome = runCatching { executor.fire(entry) }.getOrElse { it.message ?: "fire failed" }
+            val outcome = runCatching { executor.fire(entry) }.onFailure {
+                Diagnostics.report(ErrorPath.BACKGROUND, Stage.EXECUTE, ErrorCode.UNEXPECTED, it)
+            }.getOrElse { it.message ?: "fire failed" }
+            Diagnostics.report(ErrorPath.BACKGROUND, Stage.DISPATCH, if (outcome == null) ErrorCode.OK else ErrorCode.REJECTED,
+                metrics = SafeMetrics(resultQuality = ResultQuality.PARTIAL)) // fire() confirms dispatch, never Agent completion
             fired++
             log.info("schedule ${entry.id.take(8)}… fired → ${outcome ?: OUTCOME_OK}")
             store.update(

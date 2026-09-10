@@ -101,22 +101,26 @@ class HandoffService(
         if (changed.isEmpty()) return
         for (h in changed) cutRecipientSinks(h)
         synchronized(lastBroadcast) { changed.forEach { lastBroadcast[it.id] = it.status } }
+        val delivery = dev.ccpocket.daemon.diagnostics.PeerDeliveryDiagnostics()
         for (h in changed) {
             for (t in clients.values) {
                 if (t.recipientDeviceId != null && h.recipientDeviceId != t.recipientDeviceId) continue
-                runCatching { t.sink.emit(HandoffUpdated(h)) }
+                delivery.sent(runCatching { t.sink.emit(HandoffUpdated(h)) })
             }
         }
+        delivery.finish()
     }
 
     /** Deliver a non-handoff owner-plane frame (Collaborator* contact changes) to every FULL-POWER
      *  attached client — restricted sinks are skipped entirely (their egress caps would drop these
      *  frames anyway; keeping them out of the target set is the belt to that brace). */
     suspend fun emitToOwners(frame: dev.ccpocket.protocol.ToPhone) {
+        val delivery = dev.ccpocket.daemon.diagnostics.PeerDeliveryDiagnostics()
         for (t in clients.values) {
             if (t.recipientDeviceId != null) continue
-            runCatching { t.sink.emit(frame) }
+            delivery.sent(runCatching { t.sink.emit(frame) })
         }
+        delivery.finish()
     }
 
     /** A collaborator link was severed: settle every Grant bound to that device (WAITING→CANCELLED,
@@ -302,10 +306,10 @@ class HandoffService(
     /** The periodic expiry pump (the SchedulerService.runLoop pattern): WAITING past its deadline →
      *  EXPIRED, a dead lease → RECALLED, each fanned out as [HandoffUpdated]. */
     suspend fun sweepLoop(intervalMs: Long = SWEEP_SCAN_MS) {
-        runCatching { reconcile() } // seed the diff baseline; boot-recovered history is not re-announced
+        runCatching { reconcile() }.onFailure { dev.ccpocket.daemon.diagnostics.peerReconcileFailed(it) } // seed the diff baseline
         while (true) {
             delay(intervalMs)
-            runCatching { reconcile() }
+            runCatching { reconcile() }.onFailure { dev.ccpocket.daemon.diagnostics.peerReconcileFailed(it) }
         }
     }
 

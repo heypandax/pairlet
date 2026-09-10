@@ -33,7 +33,16 @@ def main():
         assert store_name == ios["CFBundleDisplayName"], f"Store and device transition names differ: {locale}"
     assert ios["CFBundleURLTypes"][0]["CFBundleURLSchemes"] == ["ccpocket"]
     project = (ROOT / "iosApp/iosApp.xcodeproj/project.pbxproj").read_text()
-    assert set(re.findall(r'PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);', project)) == {"com.panda.ccpocket"}
+    app_ids = set()
+    for settings in re.findall(r'buildSettings = \{(.*?)\};', project, re.S):
+        identifier = re.search(r'PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);', settings)
+        if identifier is None:
+            continue
+        if "TEST_TARGET_NAME = iosApp;" in settings:
+            assert identifier.group(1) == "com.panda.ccpocket.DiagnosticTests"
+        else:
+            app_ids.add(identifier.group(1))
+    assert app_ids == {"com.panda.ccpocket"}, "Production iOS bundle identity changed"
     android = ET.parse(ROOT / "mobile/composeApp/src/androidMain/AndroidManifest.xml").getroot()
     ns = "{http://schemas.android.com/apk/res/android}"
     assert android.find("application").get(ns + "label") == "CC Pairlet"

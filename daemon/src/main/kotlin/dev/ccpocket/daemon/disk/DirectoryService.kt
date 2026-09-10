@@ -43,6 +43,14 @@ class DirectoryService(
 
     private companion object { const val ACTIVE_WINDOW_MS = 30_000L } // wrote within 30s = actively executing
 
+    private fun scanSource(backend: dev.ccpocket.observability.AgentBackendLabel,
+        read: () -> Map<String, Long>): Map<String, Long> = runCatching(read).onFailure { error ->
+        dev.ccpocket.observability.Diagnostics.report(dev.ccpocket.observability.ErrorPath.SESSION_LIST,
+            dev.ccpocket.observability.Stage.SCAN, dev.ccpocket.observability.ErrorCode.READ_FAILED, error,
+            dev.ccpocket.observability.SafeMetrics(backend = backend, totalCount = 1, failedCount = 1,
+                resultQuality = dev.ccpocket.observability.ResultQuality.PARTIAL))
+    }.getOrDefault(emptyMap())
+
     fun noteRecent(workdir: String) {
         recents.remove(workdir)
         recents.add(workdir)
@@ -82,11 +90,11 @@ class DirectoryService(
     ): List<DirectoryEntry> {
         // canonical-keyed so ANY spelling mismatch (tilde, symlink, separators) between OpenSession's
         // workdir and a transcript's recorded cwd still matches
-        val codex = runCatching(codexCwds).getOrDefault(emptyMap())
-        val opencode = if (includeOpencode) runCatching(opencodeCwds).getOrDefault(emptyMap()) else emptyMap()
-        val kimi = if (includeKimi) runCatching(kimiCwds).getOrDefault(emptyMap()) else emptyMap()
-        val zcode = if (includeZcode) runCatching(zcodeCwds).getOrDefault(emptyMap()) else emptyMap()
-        val dsh = if (includeDsh) runCatching(dshCwds).getOrDefault(emptyMap()) else emptyMap()
+        val codex = scanSource(dev.ccpocket.observability.AgentBackendLabel.CODEX, codexCwds)
+        val opencode = if (includeOpencode) scanSource(dev.ccpocket.observability.AgentBackendLabel.OPENCODE, opencodeCwds) else emptyMap()
+        val kimi = if (includeKimi) scanSource(dev.ccpocket.observability.AgentBackendLabel.KIMI, kimiCwds) else emptyMap()
+        val zcode = if (includeZcode) scanSource(dev.ccpocket.observability.AgentBackendLabel.ZCODE, zcodeCwds) else emptyMap()
+        val dsh = if (includeDsh) scanSource(dev.ccpocket.observability.AgentBackendLabel.DSH, dshCwds) else emptyMap()
         val daemonLive = liveByCwd.entries
             .groupBy({ ProjectPaths.canonicalKey(it.key) }, { it.value })
             .mapValues { (_, v) -> v.flatten() }

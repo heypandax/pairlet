@@ -19,6 +19,9 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import dev.ccpocket.app.data.FileViewObservation
+import dev.ccpocket.app.telemetry.*
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -112,8 +115,11 @@ private fun DesktopFilePreviewPane(state: DesktopFilePreviewState, file: File, m
     // A new path/reload disposes the previous read and scroll state; its late result cannot replace
     // the new document. Blocking disk I/O always runs off the UI thread.
     key(file, state.revision) {
+        val observation = remember { FileViewObservation(mapOf(TelKey.UsageMode to "own", TelKey.Backend to "unknown"), local = true) }
+        DisposableEffect(observation) { onDispose { observation.cancel() } }
         val content by produceState<FileContent?>(null) {
             value = withContext(Dispatchers.IO) { readDesktopMarkdown(file) }
+            value?.let(observation::received)
         }
         val opener = remember(file.parent, state) { DesktopPathOpener(file.parent, state::open) }
         CompositionLocalProvider(LocalPathOpener provides opener, LocalPathCwd provides file.parent) {
@@ -146,7 +152,8 @@ private fun DesktopFilePreviewPane(state: DesktopFilePreviewState, file: File, m
                     content?.takeIf { it.ok }?.text?.let { CopyChip(it) }
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-                FileTabBody(content, file.extension.lowercase(), dense = true, path = file.path, wrap = true)
+                FileTabBody(content, file.extension.lowercase(), dense = true, path = file.path, wrap = true,
+                    diagnosticToken = observation.token, onRendered = observation::displayed)
             }
         }
     }

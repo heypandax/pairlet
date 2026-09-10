@@ -33,6 +33,24 @@ import kotlin.test.assertTrue
  * These pin the row a filtered client sees. [RequestRouter.filterDirs] is `internal` for exactly this.
  */
 class ClientCapsFilterTest {
+    @Test fun diagnosticMilestonesRequireEachIndividualPeersCapability() {
+        val context = dev.ccpocket.protocol.DiagnosticContext("1234567890abcdef1234567890abcdef")
+        val frames = listOf(
+            dev.ccpocket.protocol.HistoryComplete("c", context),
+            dev.ccpocket.protocol.PromptProgress("c", context, "consumed"),
+            dev.ccpocket.protocol.ApprovalProgress("c", context, "adapter_returned"),
+        )
+        val modern = RequestRouter.ClientCapsHolder().apply { supportsDiagnostics = true }
+        val legacySibling = RequestRouter.ClientCapsHolder()
+        for (frame in frames) {
+            assertTrue(RequestRouter.allowedForCaps(frame, modern))
+            assertFalse(RequestRouter.allowedForCaps(frame, legacySibling))
+            assertFalse(RequestRouter.allowedForCaps(frame, null))
+        }
+        modern.supportsDiagnostics = false
+        assertTrue(frames.none { RequestRouter.allowedForCaps(it, modern) })
+    }
+
 
     private fun undeclared() = RequestRouter.ClientCapsHolder() // default: supportsOpencode = false
     private fun declared() = RequestRouter.ClientCapsHolder().apply { supportsOpencode = true }

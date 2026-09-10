@@ -1,5 +1,11 @@
 package dev.ccpocket.daemon.disk
 
+import dev.ccpocket.observability.Diagnostics
+import dev.ccpocket.observability.ErrorPath
+import dev.ccpocket.observability.ErrorCode
+import dev.ccpocket.observability.Stage as DiagnosticStage
+import dev.ccpocket.observability.SafeMetrics
+
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.util.logger
 import kotlinx.serialization.Serializable
@@ -67,7 +73,11 @@ object SessionArchive {
         if (file == cacheFile && mtime == cacheMtime) return cache
         val parsed =
             if (file.exists()) runCatching { json.decodeFromString<Map<String, ArchivedProject>>(file.readText()) }
-                .getOrElse { log.warn("archive read failed (${it.message}) — starting empty"); emptyMap() }
+                .getOrElse {
+                    Diagnostics.report(ErrorPath.STORAGE, DiagnosticStage.READ, ErrorCode.READ_FAILED, it,
+                        SafeMetrics(resultQuality = dev.ccpocket.observability.ResultQuality.FALLBACK))
+                    log.warn("archive read failed (${it.message}) — starting empty"); emptyMap()
+                }
             else emptyMap()
         cacheFile = file; cacheMtime = mtime; cache = parsed
         return parsed
@@ -89,7 +99,10 @@ object SessionArchive {
                 .onFailure { runCatching { tmp.delete() } }
                 .getOrThrow()
             cacheFile = file; cacheMtime = file.lastModified(); cache = data
-        }.onFailure { log.warn("archive write failed: ${it.message}") }
+        }.onFailure {
+            Diagnostics.report(ErrorPath.STORAGE, DiagnosticStage.COMMIT, ErrorCode.COMMIT_FAILED, it)
+            log.warn("archive write failed: ${it.message}")
+        }
     }
 
     // Keyed on the CANONICAL path, not [ProjectPaths.dirKey]. dirKey collapses every non-alphanumeric to

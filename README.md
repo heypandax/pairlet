@@ -18,6 +18,8 @@ Pairlet is an open-source, local-first control plane for command-line coding age
 
 <sub>Real product UI with scripted demo data — regenerate with `bash marketing/site/generate-assets.sh`. Provenance: [`site/assets/product/manifest.json`](site/assets/product/manifest.json).</sub>
 
+Development builds now include Firebase/GA4 product outcomes and Sentry diagnostics, with controls for sharing usage and diagnostic data. See the [observability guide](docs/observability/README.md) for configuration, privacy boundaries, verified results and remaining release requirements.
+
 ## Quick start
 
 **1 · Get the app** — [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) (iPhone · iPad) · [TestFlight beta](https://testflight.apple.com/join/8z26MWWr) · [Android APK](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-android.apk). Prefer a computer? See the [Desktop app](#platforms--distribution).

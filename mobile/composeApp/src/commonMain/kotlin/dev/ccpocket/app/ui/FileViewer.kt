@@ -66,6 +66,7 @@ import org.jetbrains.compose.resources.stringResource
  */
 @Composable
 fun ChangedFilesSheet(repo: PocketRepository, onOpen: (String) -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.runtime.LaunchedEffect(repo) { repo.exposeFeature(dev.ccpocket.app.telemetry.ProductFeature.FILE_VIEW) }
     // 视角与所在层住在 repo：打开查看器时这张 sheet 会被整个移出 composition（App 的全屏路由早于它
     // 就 return 了），内部 remember 撑不到返回——那样每看一个文件都会掉回变更视角的根目录。
     val view = if (repo.filesAllView.value) FilesView.ALL else FilesView.CHANGES
@@ -291,10 +292,15 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
                 fileInfo?.let { StatusChip(it.op) }
             }
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.weight(1f).fillMaxWidth().observeHistoryLayout(
+            token = { repo.fileViewToken?.takeIf { diffTab && diff?.ok == true } },
+            onPlaced = { repo.onFileDisplayed(it, dev.ccpocket.app.telemetry.ProductResult.SUCCESS, partial = true) },
+        )) {
             if (diffTab) DiffPaneBody(diff, ext = ext.ifEmpty { null }, dense = false, wrap = wrap.diff.value)
             else FileTabBody(
                 repo.viewedFile.value, ext, path = path, wrap = wrap.file.value,
+                diagnosticToken = repo.fileViewToken,
+                onRendered = { result, code, partial -> repo.fileViewToken?.let { repo.onFileDisplayed(it, result, code, partial) } },
                 // chunked-read progress (issue #134): drives the loading card's determinate bar
                 progress = repo.viewedFileProgress.value,
                 // a path the changed-set refused can still leave through the owner's approval gate

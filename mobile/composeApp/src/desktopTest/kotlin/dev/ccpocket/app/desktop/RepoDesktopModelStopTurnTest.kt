@@ -4,9 +4,12 @@ import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.DemoData
 import dev.ccpocket.app.data.PocketRepository
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -24,15 +27,20 @@ import kotlin.test.assertTrue
  * session's persisted draft is cleared up front so the composer deterministically starts blank
  * even when the dev-machine store carries one from an earlier run.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class RepoDesktopModelStopTurnTest {
 
     private fun withDemoModel(block: (PocketRepository, RepoDesktopModel) -> Unit) {
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        // Keep the delayed demo reply/draft workers on virtual time. Wall-clock Unconfined can
+        // resume them on DefaultExecutor halfway through the refill assertion under suite load.
+        val scheduler = TestCoroutineScheduler()
+        val scope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(scheduler))
         val repo = PocketRepository(scope)
         repo.enterDemo()
         repo.clearDraft(DemoData.LIVE_SESSION_ID) // the draft key a demo open lands on (SessionLive echoes this id)
         val model = RepoDesktopModel(repo, scope, store = FakeDesktopStore())
         repo.openSession(DemoData.LIVE_DIR) // demo loops SessionLive back synchronously — convoId is live
+        scheduler.runCurrent()
         try {
             block(repo, model)
         } finally {

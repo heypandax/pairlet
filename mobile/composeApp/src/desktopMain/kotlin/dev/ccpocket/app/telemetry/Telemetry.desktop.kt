@@ -1,6 +1,9 @@
 package dev.ccpocket.app.telemetry
 
 import dev.ccpocket.app.APP_VERSION
+import dev.ccpocket.observability.*
+import dev.ccpocket.observability.sentry.SentryRuntime
+
 import dev.ccpocket.app.secure.SecureStore
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
@@ -11,10 +14,10 @@ import io.ktor.http.contentType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
-import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -39,10 +42,11 @@ private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 // bounded request time so a black-holed network can't stack up fire-and-forget coroutines indefinitely
 private val http: HttpClient by lazy { HttpClient(CIO) { engine { requestTimeout = 10_000 } } }
 
-/** Stable per-install pseudonymous id (a random UUID) — GA4 keys sessions/users off this, not off anything
- *  identifying. Persisted next to the app's other desktop prefs. */
-private val clientId: String by lazy {
-    SecureStore.getString("ga4_client_id") ?: UUID.randomUUID().toString().also { SecureStore.putString("ga4_client_id", it) }
+/** Stable random installation seed. Preserve it locally and serialize the numeric GA4 wire format. */
+private val clientId: String? by lazy {
+    val seed = SecureStore.getString("ga4_client_id")
+        ?: UUID.randomUUID().toString().also { SecureStore.putString("ga4_client_id", it) }
+    ga4ClientId(seed)
 }
 
 /** A per-process session id so events group into a session in GA4. Millis is fine — this is only a bucket key. */
@@ -67,11 +71,26 @@ private val config: Ga4Config? by lazy {
     if (m != null && s != null) Ga4Config(m, s) else null
 }
 
-private var collectionEnabled: Boolean = SecureStore.getString("telemetry_enabled") != "false" // default on
+@Volatile private var collectionEnabled: Boolean = SecureStore.getString("telemetry_enabled") != "false" // default on
+
+private data class AnalyticsPacket(val name: String, val params: Map<TelKey, Any>)
+private val metadata by lazy {
+    TelemetryMetadata(Component.DESKTOP, SentryRuntime.configuredEnvironmentOrNull(),
+        System.getenv("CCPOCKET_ANALYTICS_INTERNAL")?.toBooleanStrictOrNull())
+}
+private val transportProbe by lazy {
+    if (ga4ProbeEnabled(System.getenv("CCPOCKET_GA4_DEBUG"), metadata.environment))
+        Ga4TransportProbe { System.err.println(it) }
+    else null
+}
+private val delivery by lazy {
+    TelemetryDelivery<AnalyticsPacket>(io, collectionEnabled) { packet -> sendPacket(packet) }
+}
 
 /** Optional early hook from [main] — forces lazies (config/clientId) to resolve up front so a bad config
  *  surfaces in logs at launch rather than on the first event. Safe to skip; every path is lazy anyway. */
 fun initDesktopTelemetry() {
+    SentryRuntime.configure(Component.DESKTOP, APP_VERSION, collectionEnabled)
     if (config == null) {
         System.err.println("[telemetry] no GA4 credentials (env or ga4.properties) — desktop analytics disabled")
     }
@@ -81,10 +100,16 @@ fun initDesktopTelemetry() {
  *  opt-out/credential gates so desktopTest can pin WHICH enum event a repo path fires without a GA4 config.
  *  It never sees more than [Telemetry.track]'s own arguments — enum event + enum-keyed params. */
 internal var telemetryTap: ((TelEvent, Map<TelKey, Any>) -> Unit)? = null
+private val firstValue = FirstValueObservation(CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    { env -> diagnosticBudgetStore(Component.DESKTOP, env,
+        java.nio.file.Path.of(System.getProperty("user.home"), ".cc-pocket", "first-value").toString()) })
 
 actual object Telemetry {
     actual fun setEnabled(enabled: Boolean) {
+        TelemetryConsent.changed()
         collectionEnabled = enabled
+        delivery.setEnabled(enabled)
+        SentryRuntime.configure(Component.DESKTOP, APP_VERSION, enabled)
         SecureStore.putString("telemetry_enabled", enabled.toString())
     }
 
@@ -92,56 +117,52 @@ actual object Telemetry {
 
     actual fun track(event: TelEvent, params: Map<TelKey, Any>) {
         telemetryTap?.invoke(event, params)
-        send(event.id) {
-            params.forEach { (k, v) ->
-                when (v) {
-                    is Int -> put(k.id, v)
-                    is Long -> put(k.id, v)
-                    is Double -> put(k.id, v)
-                    is Boolean -> put(k.id, if (v) 1 else 0)
-                    else -> put(k.id, v.toString())
-                }
-            }
-        }
+        if (!collectionEnabled || System.getProperty("ccpocket.test") == "true" || config == null || clientId == null) return
+        val generation = delivery.currentGeneration() ?: return
+        val prepared = metadata.prepare(event, params)
+        if (delivery.offer(AnalyticsPacket(event.id, prepared), generation)) firstValue.observe(event, prepared)
     }
+}
 
-    // No Crashlytics on the JVM — surface errors as an `app_error` GA4 event carrying the same phase key.
-    actual fun recordError(message: String, phase: String?) = send("app_error") {
-        put("message", message.take(100))
-        if (phase != null) put(TelKey.Phase.id, phase)
-    }
-
-    /** The ONE MP envelope for every event. Fire-and-forget: telemetry must never block or crash the app —
-     *  all failures are swallowed, and both the JSON build and the POST run on the IO scope (track() is
-     *  called from interactive paths). */
-    private fun send(name: String, eventParams: JsonObjectBuilder.() -> Unit) {
-        if (!collectionEnabled) return
-        val cfg = config ?: return
-        io.launch {
-            runCatching {
-                val body = buildJsonObject {
-                    put("client_id", clientId)
-                    put("non_personalized_ads", true)
-                    putJsonArray("events") {
-                        addJsonObject {
-                            put("name", name)
-                            put("params", buildJsonObject {
-                                eventParams()
-                                // fixed dimensions on every event: edition splits desktop vs mobile; the two GA4
-                                // required params below make events count toward sessions/engagement.
-                                put("edition", "desktop")
-                                put("app_version", APP_VERSION)
-                                put("session_id", sessionId)
-                                put("engagement_time_msec", "100")
-                            })
+/** Serial IO worker owns the request; opt-out cancels it and discards the bounded pending queue. */
+private suspend fun sendPacket(packet: AnalyticsPacket) {
+    if (!collectionEnabled) return
+    val cfg = config ?: return
+    val cid = clientId ?: return
+    val body = buildJsonObject {
+        put("client_id", cid)
+        put("non_personalized_ads", true)
+        putJsonArray("events") {
+            addJsonObject {
+                put("name", packet.name)
+                put("params", buildJsonObject {
+                    packet.params.forEach { (k, v) ->
+                        when (v) {
+                            is Int -> put(k.id, v)
+                            is Long -> put(k.id, v)
+                            is Double -> put(k.id, v)
+                            is Boolean -> put(k.id, if (v) 1 else 0)
+                            else -> put(k.id, v.toString())
                         }
                     }
-                }
-                http.post("https://www.google-analytics.com/mp/collect?measurement_id=${cfg.measurementId}&api_secret=${cfg.apiSecret}") {
-                    contentType(ContentType.Application.Json)
-                    setBody(body.toString())
-                }
+                    put("edition", "desktop")
+                    put("app_version", APP_VERSION)
+                    put("session_id", sessionId)
+                    // Legacy MP compatibility parameter, not measured engagement. See EVENT-CATALOG.md.
+                    put("engagement_time_msec", "100")
+                    if (transportProbe != null) put("debug_mode", 1)
+                })
             }
         }
     }
+    if (!collectionEnabled) return
+    currentCoroutineContext().ensureActive()
+    val request: suspend () -> Int = {
+        http.post("https://www.google-analytics.com/mp/collect?measurement_id=${cfg.measurementId}&api_secret=${cfg.apiSecret}") {
+            contentType(ContentType.Application.Json)
+            setBody(body.toString())
+        }.status.value
+    }
+    val probe = transportProbe
+    if (probe != null) probe.send(request) else request()
 }

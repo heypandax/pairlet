@@ -1,5 +1,7 @@
 package dev.ccpocket.relay.push
 
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.relay.store.PushTarget
 import dev.ccpocket.relay.store.RelayStore
 import java.util.concurrent.atomic.AtomicInteger
@@ -89,7 +91,7 @@ class StorePushService(
             val sender = senders[t.platform]
             if (sender == null) { log("[push] no sender for platform=${t.platform} (device=${t.deviceId.take(8)}…)"); continue }
             val result = runCatching { sender.send(t.token, title, body, route) }
-                .getOrElse { log("[push] send failed platform=${t.platform}: ${it.message}"); SendResult.FAILED }
+                .getOrElse { Diagnostics.report(ErrorPath.PUSH, Stage.DISPATCH, ErrorCode.SEND_FAILED, it); log("[push] send failed platform=${t.platform}: ${it.message}"); SendResult.FAILED }
             when (result) {
                 SendResult.ACCEPTED -> accepted++
                 SendResult.INVALID_TOKEN -> {
@@ -99,6 +101,13 @@ class StorePushService(
                 SendResult.FAILED -> {}
             }
         }
+        Diagnostics.report(ErrorPath.PUSH, Stage.DISPATCH,
+            if (accepted == targets.size) ErrorCode.OK else if (accepted > 0) ErrorCode.PARTIAL_RESULT else ErrorCode.SEND_FAILED,
+            metrics = SafeMetrics(totalCount = targets.size.toLong(), returnedCount = accepted.toLong(),
+                failedCount = (targets.size - accepted).toLong(), resultQuality = if (accepted == targets.size) ResultQuality.COMPLETE else ResultQuality.PARTIAL))
+        // Provider acceptance is the only observed delivery fact; no claim about phone display.
+        if (pruned > 0) Diagnostics.report(ErrorPath.PUSH, Stage.RECONCILE, ErrorCode.EXPIRED,
+            metrics = SafeMetrics(totalCount = pruned.toLong()))
         if (accepted == 0) {
             val streak = consecutiveFullFailures.incrementAndGet()
             log("[push] WARN account=${account.take(8)}… all ${targets.size} send(s) failed (pruned=$pruned, consecutive=$streak)")

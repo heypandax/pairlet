@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.git
 
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.ActiveSession
@@ -653,6 +655,9 @@ class GitService(
         error: String? = null,
     ): GitActionResult {
         val ok = r.code == 0
+        Diagnostics.report(ErrorPath.GIT, Stage.EXECUTE,
+            if (r.timedOut) ErrorCode.TIMEOUT else if (ok) ErrorCode.OK else ErrorCode.REJECTED,
+            metrics = SafeMetrics(exitCode = r.code))
         // one extra status read on success so the panel refreshes in place — no second round trip from
         // the phone, and no polling anywhere.
         val after = if (ok) runCatching { statusAt(f.convoId, f.workdir, repo.root, withBranches = false) }.getOrNull() else null
@@ -710,6 +715,7 @@ class GitService(
                 if (!finished) Exec(-1, stdout, stderr, timedOut = true, failure = "git took too long and was stopped")
                 else Exec(proc.exitValue(), stdout, stderr)
             } catch (e: Exception) {
+                Diagnostics.report(ErrorPath.GIT, Stage.SPAWN, ErrorCode.SPAWN_FAILED, e)
                 log.warn("git ${args.firstOrNull()} failed to start", e)
                 Exec(-1, "", "", failure = e.message ?: "could not run git")
             }

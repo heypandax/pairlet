@@ -164,6 +164,9 @@ class SidePaneModel(
     override fun goForward() = base.goForward()
 
     // ── PANE_INERT: focused-conversation verbs, deliberately no-ops here (see the class doc) ─────────
+    override fun exposeFeature(feature: dev.ccpocket.app.telemetry.ProductFeature) = base.exposeFeature(feature)
+    override val historyLayoutToken: String? get() = base.sideContentLayoutToken(pane)
+    override fun onHistoryLaidOut(token: String, hasVisibleContent: Boolean, lastVisibleContent: Int) = base.onSideContentLaidOut(pane, token, hasVisibleContent, lastVisibleContent)
     override val historyHasMore: Boolean get() = false
     override val historyLoadingOlder: Boolean get() = false
     override val historyPrependGen: Int get() = 0

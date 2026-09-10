@@ -1,5 +1,8 @@
 package dev.ccpocket.app.desktop
 
+import dev.ccpocket.observability.*
+import dev.ccpocket.observability.sentry.SentryRuntime
+
 import java.io.File
 import java.time.Instant
 import kotlin.system.exitProcess
@@ -127,6 +130,7 @@ object DesktopCrashGuard {
      * window AND we still learn the code.
      */
     fun note(code: String, t: Throwable, context: String? = null) {
+        if (!isBenignJdkTrayNpe(t)) Diagnostics.report(ErrorPath.ASYNC_WORKER, Stage.EXECUTE, ErrorCode.UNEXPECTED, t)
         runCatching { append(formatEntry(code, t, context, Instant.now().toString())) }
     }
 
@@ -146,6 +150,7 @@ object DesktopCrashGuard {
      */
     fun exitCrashed(code: String, t: Throwable): Nothing {
         runCatching { System.err.println(oneLineSummary(code, t)) }
+        runCatching { SentryRuntime.flush() }
         exitProcess(EXIT_CRASH)
     }
 

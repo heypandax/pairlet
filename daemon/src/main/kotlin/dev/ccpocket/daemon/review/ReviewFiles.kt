@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.review
 
+import dev.ccpocket.daemon.diagnostics.storageReadFailed
+import dev.ccpocket.daemon.diagnostics.storageWriteFailed
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.util.logger
 import java.io.File
@@ -33,9 +35,9 @@ internal object ReviewFiles {
      *  preserved as `<file>.corrupt` and reported as null (the caller starts from its own empty state). */
     fun <T> read(file: File, decode: (String) -> T): T? {
         if (!file.exists()) return null
-        val text = runCatching { file.readText() }.getOrNull()
+        val text = runCatching { file.readText() }.onFailure(::storageReadFailed).getOrNull()
         if (text != null) {
-            runCatching { return decode(text) }
+            runCatching { return decode(text) }.onFailure(::storageReadFailed)
         }
         val base = File(file.parentFile, "${file.name}.corrupt")
         val quarantine = if (!base.exists()) base else File(file.parentFile, "${file.name}.corrupt.${System.currentTimeMillis()}")
@@ -73,6 +75,7 @@ internal object ReviewFiles {
         ownerOnly(file)
         true
     }.getOrElse {
+        storageWriteFailed(it)
         log.warn("could not persist ${file.name}: ${it.message}")
         false
     }

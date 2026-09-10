@@ -166,6 +166,7 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
     override fun listSessions(workdir: String): List<SessionSummary> = OpenCodeTranscriptScanner.scan(workdir)
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =
         OpenCodeTranscriptReplay.read(sessionId)
+    override fun replaySlice(workdir: String, sessionId: String, sinceSeq: Long?) = OpenCodeTranscriptReplay.slice(sessionId)
 
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
 

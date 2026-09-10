@@ -25,6 +25,8 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
@@ -336,18 +338,28 @@ class SessionRegistryReattachModeTest {
         withRegistry(ScriptedBackend(script)) { registry, dir, _ ->
             val first = OutboundSink { }
             val replacement = OutboundSink { }
+            assertFalse(first == replacement, "distinct LAN sockets must have distinct sink identities")
+            val cleanup = CompletableDeferred<Job>()
+            val reattached = CompletableDeferred<Unit>()
+            registry.beforePendingCloseClaim = {
+                cleanup.complete(currentCoroutineContext()[Job]!!)
+                reattached.await()
+            }
             val convoId = registry.open(
                 OpenSession(workdir = dir.toString(), resumeId = "s-remode"),
                 first,
             )
-            registry.scheduleClose(convoId, first, graceMs = 40)
+            registry.scheduleClose(convoId, first, graceMs = 0)
 
             val again = registry.open(
                 OpenSession(workdir = dir.toString(), resumeId = "s-remode"),
                 replacement,
             )
             assertEquals(convoId, again, "the reconnect must reuse the warm conversation")
-            delay(120)
+            // Observe this exact cleanup job completing; a wall-clock sleep can return before the
+            // dispatcher ran the timer. A cancellation/ownership regression still times out here.
+            reattached.complete(Unit)
+            withTimeout(5_000) { cleanup.await().join() }
 
             assertTrue(
                 registry.close(convoId, requester = replacement),
@@ -366,6 +378,12 @@ class SessionRegistryReattachModeTest {
         withRegistry(ScriptedBackend(script)) { registry, dir, _ ->
             val first = OutboundSink { }
             val second = OutboundSink { }
+            val cleanups = kotlinx.coroutines.channels.Channel<Job>(2)
+            val bothScheduled = CompletableDeferred<Unit>()
+            registry.beforePendingCloseClaim = {
+                cleanups.send(currentCoroutineContext()[Job]!!)
+                bothScheduled.await()
+            }
             val convoId = registry.open(
                 OpenSession(workdir = dir.toString(), resumeId = "s-remode"),
                 first,
@@ -375,9 +393,10 @@ class SessionRegistryReattachModeTest {
                 registry.open(OpenSession(workdir = dir.toString(), resumeId = "s-remode"), second),
             )
 
-            registry.scheduleClose(convoId, first, graceMs = 40)
-            registry.scheduleClose(convoId, second, graceMs = 40)
-            delay(120)
+            registry.scheduleClose(convoId, first, graceMs = 0)
+            registry.scheduleClose(convoId, second, graceMs = 0)
+            bothScheduled.complete(Unit)
+            withTimeout(5_000) { repeat(2) { cleanups.receive().join() } }
 
             assertFalse(
                 registry.sendPrompt(SendPrompt(convoId, "must be gone")),

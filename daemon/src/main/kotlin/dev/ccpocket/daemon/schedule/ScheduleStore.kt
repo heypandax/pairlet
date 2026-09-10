@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.schedule
 
+import dev.ccpocket.daemon.diagnostics.storageReadFailed
+import dev.ccpocket.daemon.diagnostics.storageWriteFailed
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionMode
@@ -87,7 +89,7 @@ class ScheduleStore private constructor(private val path: File) {
         runCatching {
             path.parentFile?.mkdirs()
             path.writeText(JSON.encodeToString(Stored.serializer(), state))
-        }
+        }.onFailure(::storageWriteFailed)
     }
 
     companion object {
@@ -97,7 +99,7 @@ class ScheduleStore private constructor(private val path: File) {
 
         /** Load from [path]; a missing or corrupt file yields an empty store (never a crash at boot). */
         fun load(path: File = defaultPath()): ScheduleStore = ScheduleStore(path).apply {
-            if (path.exists()) runCatching { state = JSON.decodeFromString(Stored.serializer(), path.readText()) }
+            if (path.exists()) runCatching { state = JSON.decodeFromString(Stored.serializer(), path.readText()) }.onFailure(::storageReadFailed)
         }
     }
 }

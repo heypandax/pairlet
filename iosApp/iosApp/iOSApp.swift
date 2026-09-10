@@ -77,6 +77,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
         // transient — Kotlin re-attempts registration on the next foreground/connect
+        PushController.shared.registrationFailed()
     }
 
     // surface the alert even when the app is in the foreground
@@ -111,15 +112,20 @@ struct iOSApp: App {
         // clone intentionally ships a placeholder plist for local builds; Firebase Installations aborts
         // the process when that placeholder API key is passed to configure, so telemetry must degrade to
         // its existing no-op sink until a real Firebase configuration is supplied.
-        if Self.configureFirebaseIfUsable() {
-            Analytics.setAnalyticsCollectionEnabled(true) // plist ships IS_ANALYTICS_ENABLED=false; opt in here
+        let diagnosticTest = ProcessInfo.processInfo.environment["CCPOCKET_TEST_MODE"] == "1"
+        if !diagnosticTest { PocketDiagnostics.shared.register() }
+        if !diagnosticTest && Self.configureFirebaseIfUsable() {
+            MainViewControllerKt.setTelemetryCollectionSink { enabled in
+                Analytics.setAnalyticsCollectionEnabled(enabled.boolValue)
+                Crashlytics.crashlytics().setCrashlyticsCollectionEnabled(enabled.boolValue)
+                if !enabled.boolValue {
+                    Analytics.resetAnalyticsData()
+                    Crashlytics.crashlytics().deleteUnsentReports()
+                }
+            }
             MainViewControllerKt.setTelemetrySink(
                 onEvent: { event, params in
                     Analytics.logEvent(event, parameters: params)
-                },
-                onError: { message, phase in
-                    let info: [String: Any] = [NSLocalizedDescriptionKey: message, "phase": phase ?? ""]
-                    Crashlytics.crashlytics().record(error: NSError(domain: "ccpocket", code: 0, userInfo: info))
                 }
             )
         }
@@ -127,7 +133,8 @@ struct iOSApp: App {
         // Kotlin's PushController calls this when registration starts (after pairing), so the prompt
         // follows pairing rather than firing at cold launch.
         MainViewControllerKt.setPushRegistrar {
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+                if error != nil { PushController.shared.registrationFailed() }
                 guard granted else { return }
                 DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() }
             }

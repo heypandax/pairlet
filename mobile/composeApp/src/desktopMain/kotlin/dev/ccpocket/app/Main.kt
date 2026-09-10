@@ -114,6 +114,7 @@ fun main(args: Array<String>) {
     // window was gone but the non-daemon SystemTray thread kept the process alive as an unquittable
     // zombie. Installed outside application{} so a failure during Compose start-up is covered too.
     DesktopCrashGuard.install()
+    dev.ccpocket.app.telemetry.initDesktopTelemetry()
     // macOS application menu (issue #350). MUST be set before AWT initializes — the first Window created
     // decides whether its JMenuBar is drawn in the system bar at the top of the screen or inside the
     // window, and an in-window menu bar under an undecorated window is exactly the "把 Mac 菜单样式绘制到
@@ -174,7 +175,6 @@ private fun ApplicationScope.PocketShell() {
     // (pair / connect / conn_failed / session / prompt / approval) fires automatically since desktop drives
     // the same repo; AppLaunch is the one exception — the shared App() composable that fires it on mobile
     // isn't used here, so we track it explicitly below.
-    remember { dev.ccpocket.app.telemetry.initDesktopTelemetry() }
     val osName = System.getProperty("os.name").lowercase()
     val mac = osName.contains("mac")
     val windows = osName.contains("windows")
@@ -547,6 +547,9 @@ private fun ApplicationScope.PocketShell() {
         // (un-minimize, tray → Open) restarts the loop and its leading sync pulls at once instead of waiting
         // out a tick; going away cancels it outright, leaving nothing ticking behind a hidden window.
         val pollDirectories = shouldPollDirectories(mainWindowVisible, windowState.isMinimized)
+        LaunchedEffect(pollDirectories, repo) {
+            fleet.repos().forEach { if (pollDirectories) it.onAppForeground() else it.onAppBackground() }
+        }
         LaunchedEffect(pollDirectories) {
             if (!pollDirectories) return@LaunchedEffect
             while (true) {

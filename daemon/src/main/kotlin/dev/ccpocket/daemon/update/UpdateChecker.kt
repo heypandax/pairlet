@@ -52,7 +52,12 @@ object UpdateChecker {
             Thread.sleep(FIRST_CHECK_DELAY_MS) // let boot + relay attach settle first
             while (true) {
                 runCatching { checkOnce(relay, autoApply) }
-                    .onFailure { log.warn("update check failed: ${it.message}") }
+                    .onFailure {
+                        dev.ccpocket.observability.Diagnostics.report(dev.ccpocket.observability.ErrorPath.UPDATE,
+                            dev.ccpocket.observability.Stage.REQUEST, dev.ccpocket.observability.ErrorCode.UNAVAILABLE, it,
+                            isError = false) // apply() owns the primary failure; this is the periodic loop boundary
+                        log.warn("update check failed: ${it.message}")
+                    }
                 Thread.sleep(CHECK_INTERVAL_MS)
             }
         }

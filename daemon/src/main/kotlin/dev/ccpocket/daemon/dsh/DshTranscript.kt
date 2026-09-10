@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.dsh
 
+import dev.ccpocket.observability.*
+
 import com.github.luben.zstd.ZstdInputStreamNoFinalizer
 import dev.ccpocket.daemon.util.logger
 import kotlinx.serialization.json.Json
@@ -84,15 +86,17 @@ object DshTranscript {
      * A trailing partial line (no terminating newline) is dropped: it is a half-flushed record, and
      * handing it to a JSON parser would only produce noise.
      */
-    fun lines(file: Path, maxBytes: Long = MAX_DECOMPRESSED_BYTES): List<String> {
-        if (!file.isRegularFile()) return emptyList()
+    class ReadStatus { var partial = false; var unavailable = false }
+    fun lines(file: Path, maxBytes: Long = MAX_DECOMPRESSED_BYTES, status: ReadStatus? = null): List<String> {
+        if (!file.isRegularFile()) { status?.unavailable = true; return emptyList() }
         val bytes = if (file.fileName.toString().endsWith(".zstd")) {
-            decompressPrefix(file, maxBytes)
+            decompressPrefix(file, maxBytes, status)
         } else {
-            readPlain(file, maxBytes)
+            readPlain(file, maxBytes, status)
         }
         if (bytes.isEmpty()) return emptyList()
         val text = String(bytes, Charsets.UTF_8)
+        if (bytes.size >= maxBytes || !text.endsWith("\n")) status?.partial = true
         val split = text.split('\n')
         // The last element is "" when the text ended on a newline (every line complete); otherwise it is
         // a half-flushed record — or, when we stopped on the byte budget, an arbitrary cut. Drop it either
@@ -119,7 +123,7 @@ object DshTranscript {
      * being appended to is in. The surrounding runCatching is belt-and-braces for a genuinely damaged
      * middle frame — we still return the good prefix accumulated so far.
      */
-    private fun decompressPrefix(file: Path, maxBytes: Long): ByteArray {
+    private fun decompressPrefix(file: Path, maxBytes: Long, status: ReadStatus?): ByteArray {
         val out = ByteArrayOutputStream()
         runCatching {
             ZstdInputStreamNoFinalizer(BufferedInputStream(Files.newInputStream(file))).use { zin ->
@@ -133,13 +137,16 @@ object DshTranscript {
                 }
             }
         }.onFailure {
+            status?.partial = true
+            Diagnostics.report(ErrorPath.HISTORY_READ, Stage.READ, ErrorCode.INCOMPLETE,
+                metrics = SafeMetrics(byteCount = out.size().toLong(), resultQuality = ResultQuality.PARTIAL))
             // Not an error path worth surfacing: a live writer lands here routinely.
             log.debug("dsh transcript $file decode stopped early (${it.javaClass.simpleName}); using ${out.size()}B prefix")
         }
         return out.toByteArray()
     }
 
-    private fun readPlain(file: Path, maxBytes: Long): ByteArray =
+    private fun readPlain(file: Path, maxBytes: Long, status: ReadStatus?): ByteArray =
         runCatching {
             Files.newInputStream(file).use { input ->
                 val out = ByteArrayOutputStream()
@@ -152,6 +159,9 @@ object DshTranscript {
                 }
                 out.toByteArray()
             }
+        }.onFailure {
+            status?.unavailable = true
+            Diagnostics.report(ErrorPath.HISTORY_READ, Stage.READ, ErrorCode.READ_FAILED, it)
         }.getOrDefault(ByteArray(0))
 
     /** Parse the header (first line). Null when the file is empty/unreadable or the first line is not a

@@ -46,7 +46,7 @@ object WorkflowFiles {
         if (!dir.isDirectory()) return emptyList()
         val files = Files.newDirectoryStream(dir, "*.json").use { it.toList() }
         return files.filter { it.isRegularFile() }
-            .mapNotNull { f -> runCatching { parseManifest(f) }.getOrNull() }
+            .mapNotNull { f -> runCatching { parseManifest(f) }.onFailure { dev.ccpocket.daemon.diagnostics.storageReadFailed(it) }.getOrNull() }
             .sortedBy { it.startedAt }
     }
 
@@ -54,7 +54,7 @@ object WorkflowFiles {
     fun readRun(sessionDir: Path, runId: String): WorkflowRun? {
         val f = sessionDir.resolve("workflows").resolve("$runId.json")
         if (!f.isRegularFile()) return null
-        return runCatching { parseManifest(f) }.getOrNull()
+        return runCatching { parseManifest(f) }.onFailure { dev.ccpocket.daemon.diagnostics.storageReadFailed(it) }.getOrNull()
     }
 
     /** The full prompt + return of ONE workflow agent, for the detail sheet. Prompt comes from the

@@ -13,4 +13,8 @@ plugins {
 allprojects {
     group = "dev.ccpocket"
     version = "0.0.1-SNAPSHOT"
+    tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+        // Synthetic repository failures must not become production Analytics/Sentry traffic.
+        systemProperty("ccpocket.test", "true")
+    }
 }

@@ -6,6 +6,19 @@ package dev.ccpocket.app.telemetry
  * the only backing and stays hidden behind this single API, so business code never imports Firebase.
  */
 enum class TelEvent(val id: String) {
+    SessionOpenResult("session_open_result"),
+    SessionOpenRecovered("session_open_recovered"),
+    PromptResponseResult("prompt_response_result"),
+    PromptResponseRecovered("prompt_response_recovered"),
+    TurnResult("turn_result"),
+    ConnectionRecoveryResult("connection_recovery_result"),
+    ApprovalApplyResult("approval_apply_result"),
+    FileViewResult("file_view_result"),
+    BackgroundTaskResult("background_task_result"),
+    ValueReached("value_reached"),
+    FirstValueObserved("first_value_observed"),
+    FeatureExposed("feature_exposed"),
+    FeatureUsed("feature_used"),
     AppLaunch("app_launch"),
     // activation funnel (issue #278): the stretch between app_launch and paired used to be a black box, so a
     // drop-off there was unattributable. OnboardingShown measures install-guide exposure; PairStarted fires on
@@ -61,6 +74,13 @@ enum class TelEvent(val id: String) {
 
 /** Parameter keys — also enum-only; values are short categorical strings or counts, never content. */
 enum class TelKey(val id: String) {
+    AppVersion("app_version"),
+    Result("result"),
+    Coverage("coverage"),
+    DurationMs("duration_ms"),
+    Feature("feature"),
+    Reuse("reuse"),
+    Backend("backend"),
     Source("source"),       // qr | qr-link | code | link | share | collaborator | code-add
     Transport("transport"), // relay | direct
     Resume("resume"),       // 0 | 1
@@ -90,6 +110,11 @@ enum class TelKey(val id: String) {
     // the one categorical qualifier a Target sometimes needs (the OS a segment selected, the install
     // method a copy came from). Same rule: a fixed vocabulary, never free text.
     Value("value"),
+    AnalyticsSchema("analytics_schema"),
+    AppPlatform("app_platform"),
+    Environment("app_environment"),
+    InternalTraffic("internal_traffic"),
+    UsageMode("usage_mode"),
 }
 
 /** The single seam over Firebase Analytics + Crashlytics. Default-on, opt-out via [setEnabled]. */
@@ -97,5 +122,4 @@ expect object Telemetry {
     fun setEnabled(enabled: Boolean)
     fun isEnabled(): Boolean
     fun track(event: TelEvent, params: Map<TelKey, Any> = emptyMap())
-    fun recordError(message: String, phase: String? = null)
 }

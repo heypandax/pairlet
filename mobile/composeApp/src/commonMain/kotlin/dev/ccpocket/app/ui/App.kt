@@ -328,7 +328,11 @@ fun App(scope: CoroutineScope) {
     }
     // App Lock: arm auto-lock when fully backgrounded; draw the opaque privacy cover the instant the app is
     // obscured (before the OS app-switcher snapshot) so a session is never visible in the task switcher.
-    dev.ccpocket.app.OnAppBackground { appForeground = false; appLock.onBackground() }
+    dev.ccpocket.app.OnAppBackground {
+        appForeground = false; appLock.onBackground()
+        (dev.ccpocket.app.data.FleetRuntime.coordinator?.repos() ?: listOf(repo)).forEach { it.onAppBackground() }
+        collabInbox.repos().forEach { it.onAppBackground() }
+    }
     dev.ccpocket.app.OnAppObscured { appLock.onWillObscure() }
     // The Claude allowance refresh rules, mounted ONCE here rather than inside the pill: two instances
     // would mean two policies and two in-flight latches, i.e. double the traffic the de-duplication
@@ -2623,6 +2627,12 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     // spot is how the switcher shipped opening mid-transcript twice (issue #165)
     listStateForTest: LazyListState? = null,
 ) {
+    LaunchedEffect(repo) { repo.exposeFeature(dev.ccpocket.app.telemetry.ProductFeature.SESSION_VIEW) }
+    LaunchedEffect(repo, repo.observing.value, repo.convoId.value) {
+        if (!repo.observing.value && repo.convoId.value != null)
+            repo.exposeFeature(dev.ccpocket.app.telemetry.ProductFeature.PROMPT_TASK)
+    }
+
     // Restore the composer draft (keyed per conversation, workdir for a brand-new session). Re-inits on a
     // REAL switch only — keyed off composerEpoch, NOT draftKey (#29 semantics kept): the key chain flips in
     // place mid-typing (brand-new session materializing, forked resume corrected by SessionLive), and
@@ -3026,7 +3036,18 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 val pathOpener = remember(repo) { RemotePathOpener { repo.openChangedFile(it) } }
                 CompositionLocalProvider(LocalPathCwd provides repo.workdir.value, LocalPathOpener provides pathOpener) {
                 LazyColumn(
-                    Modifier.fillMaxSize().padding(16.dp).graphicsLayer { alpha = if (landed) 1f else 0f }
+                    Modifier.fillMaxSize().padding(16.dp)
+                        .observeHistoryLayout({ repo.contentLayoutToken.takeIf { landed } }) { token ->
+                            val offset = if (historyLoaderVisible) 1 else 0
+                            val visibleContent = listState.layoutInfo.visibleItemsInfo.any { row ->
+                                repo.messages.getOrNull(row.index - offset)?.let { it is ChatItem.User || it is ChatItem.Assistant || it is ChatItem.Tool } == true
+                            }
+                            val lastOutput = listState.layoutInfo.visibleItemsInfo.map { it.index - offset }.filter {
+                                repo.messages.getOrNull(it)?.let { m -> m is ChatItem.Assistant || m is ChatItem.Tool } == true
+                            }.maxOrNull() ?: -1
+                            repo.onHistoryLaidOut(token, visibleContent, lastOutput)
+                        }
+                        .graphicsLayer { alpha = if (landed) 1f else 0f }
                         .pointerInput(Unit) { detectTapGestures { focus.clearFocus() } },
                     state = listState, verticalArrangement = Arrangement.spacedBy(10.dp),
                     // #334: on a tablet the turns are capped at a readable measure and this centres

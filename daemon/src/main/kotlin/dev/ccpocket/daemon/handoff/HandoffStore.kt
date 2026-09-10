@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.handoff
 
+import dev.ccpocket.daemon.diagnostics.storageReadFailed
+import dev.ccpocket.daemon.diagnostics.storageWriteFailed
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.SessionControllerLease
@@ -87,7 +89,7 @@ class HandoffStore private constructor(private val path: File) {
             runCatching { // best-effort 0600 (POSIX only; Windows ACLs inherit the profile dir)
                 Files.setPosixFilePermissions(path.toPath(), PosixFilePermissions.fromString("rw-------"))
             }
-        }
+        }.onFailure(::storageWriteFailed)
     }
 
     companion object {
@@ -95,7 +97,7 @@ class HandoffStore private constructor(private val path: File) {
 
         /** Load from [path]; a missing or corrupt file yields an empty store (never a crash at boot). */
         fun load(path: File = defaultPath()): HandoffStore = HandoffStore(path).apply {
-            if (path.exists()) runCatching { state = PocketJson.decodeFromString(Stored.serializer(), path.readText()) }
+            if (path.exists()) runCatching { state = PocketJson.decodeFromString(Stored.serializer(), path.readText()) }.onFailure(::storageReadFailed)
         }
     }
 }
