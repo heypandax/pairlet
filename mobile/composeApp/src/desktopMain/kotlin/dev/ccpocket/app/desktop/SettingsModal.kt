@@ -1586,8 +1586,8 @@ private fun ComputersPane(model: DesktopModel) {
                         Text(c.accountId, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (c.online) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        PulseDot(Tok.ok, 6.dp); Text(stringResource(Res.string.presence_online), color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.sp)
-                    } else Text(stringResource(Res.string.presence_offline), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
+                        PulseDot(Tok.ok, 6.dp); Text(stringResource(Res.string.presence_online), color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp)) // #293: dot + 10sp beside 12.5sp TextBtns
+                    } else Text(stringResource(Res.string.presence_offline), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp))
                     TextBtn(stringResource(Res.string.device_rename), Tok.tx2) { editingId = c.accountId; draft = "" }
                     TextBtn(stringResource(Res.string.device_remove), Tok.danger) { removing = c }
                 }
@@ -1939,16 +1939,16 @@ private fun UpdatesSection(model: DesktopModel) {
             is DkUpdateState.Available -> {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Dot(Tok.accent, 8.dp)
-                    Text(stringResource(Res.string.update_available), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(Res.string.update_available), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(13.sp))
                     Spacer(Modifier.weight(1f))
-                    Text("v${model.appVersion} → v${s.latest}", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+                    Text("v${model.appVersion} → v${s.latest}", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp)) // #293: dot + 13sp + 11sp in one row
                 }
                 Spacer(Modifier.height(10.dp))
                 when (s.source) {
                     // standalone: one click downloads, verifies, replaces this app and relaunches
                     DkInstallSource.STANDALONE -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextBtn(stringResource(Res.string.update_download_restart), Tok.accent) { model.applyUpdate() }
-                        Text(stringResource(Res.string.update_replace_note), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
+                        Text(stringResource(Res.string.update_replace_note), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, style = tightCenter(11.5.sp)) // #293: sits beside a 12.5sp TextBtn
                     }
                     // package-manager copies never self-overwrite (two updaters, one tree) — show the command
                     DkInstallSource.BREW, DkInstallSource.SCOOP -> Column {
