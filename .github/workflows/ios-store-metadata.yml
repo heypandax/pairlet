@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Editable App Store version to create or update (for example 1.8.1)."
+        description: "Editable App Store version to create or update (for example 2.0.0)."
         required: true
         type: string
       verify_only:
@@ -75,6 +75,9 @@ jobs:
                "fastlane/metadata/$locale/description.txt" \
                "fastlane/metadata/$locale/keywords.txt" \
                "fastlane/metadata/$locale/promotional_text.txt" \
+               "fastlane/metadata/$locale/marketing_url.txt" \
+               "fastlane/metadata/$locale/support_url.txt" \
+               "fastlane/metadata/$locale/privacy_url.txt" \
                "$RUNNER_TEMP/store-metadata/$locale/"
           done
 

@@ -1,6 +1,6 @@
 Keep coding work moving when you are away from the keyboard.
 
-Pairlet is an open-source, local-first companion for command-line AI coding agents. Your agent keeps running on your own Mac, Windows, or Linux computer, against your own checkout. From your iPhone, you can watch it work, answer permission requests, continue the same session, and review what changed.
+Pairlet (formerly CC Pocket) is an open-source, local-first companion for command-line AI coding agents. Your agent keeps running on your own Mac, Windows, or Linux computer, against your own checkout. From your iPhone or iPad, you can watch it work, answer permission requests, continue the same session, and review what changed.
 
 SUPPORTED AGENTS
 • Claude Code
@@ -24,5 +24,6 @@ The daemon runs on your computer and drives the agent CLI there. It makes an out
 HONEST CAPABILITY BOUNDARIES
 Agent backends are not equivalent. Approval, changed-files, usage, model controls, and other features depend on what each agent exposes. OpenCode has no enforceable interactive approval and runs with Full access. DeepSeek support is deliberately narrow: remote approvals fail closed, and changed-files, usage, and model switching are not available.
 
-Pairlet is MIT-licensed and built in Kotlin. Learn more, inspect the source, and read the security model at:
-https://github.com/heypandax/cc-pocket
+Pairlet is MIT-licensed and built in Kotlin.
+Website and user guide: https://pairlet.org/en/
+Source and security model: https://github.com/heypandax/pairlet

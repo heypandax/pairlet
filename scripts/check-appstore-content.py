@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import struct
 import sys
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 METADATA = ROOT / "fastlane" / "metadata"
@@ -26,6 +27,7 @@ LIMITS = {
     "promotional_text.txt": 170,
     "release_notes.txt": 4000,
 }
+URL_FIELDS = ("marketing_url.txt", "support_url.txt", "privacy_url.txt")
 FORBIDDEN = (
     "Session Handoff",
     "Folder Share",
@@ -73,6 +75,15 @@ def main() -> None:
             if len(value) > limit:
                 fail(f"{path} is {len(value)} characters; limit is {limit}")
             public_text.append(value)
+
+        for filename in URL_FIELDS:
+            path = directory / filename
+            if not path.is_file():
+                fail(f"missing metadata: {path}")
+            value = path.read_text(encoding="utf-8").strip()
+            url = urlsplit(value)
+            if url.scheme != "https" or not url.netloc or any(c.isspace() for c in value):
+                fail(f"{path} must contain one HTTPS URL")
 
         # 6.5-inch iPhone set — TOP-LEVEL pngs only. glob("*.png") does not recurse, which is exactly
         # what keeps the iPad subfolder checked below out of this set; do not make it "**/*.png".
@@ -146,7 +157,8 @@ def main() -> None:
             fail(f"public metadata must not promote or expose draft text: {phrase}")
 
     print(
-        "App Store content OK: 2 locales, 10 metadata fields, "
+        f"App Store content OK: {len(LOCALES)} locales, "
+        f"{len(LOCALES) * (len(LIMITS) + len(URL_FIELDS))} metadata fields, "
         "12 iPhone 6.5\" + 12 iPad 12.9\" screenshots, 2 previews"
     )
 

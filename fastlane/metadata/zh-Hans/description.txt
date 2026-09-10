@@ -1,6 +1,6 @@
 离开键盘，也能让编程任务继续推进。
 
-Pairlet 是一款开源、本地优先的命令行 AI 编程 Agent 伴侣。Agent 继续运行在你自己的 macOS、Windows 或 Linux 电脑上，并直接使用本机代码目录；你可以通过 iPhone 实时查看进度、处理权限请求、继续同一个会话，并检查实际改动。
+Pairlet（原名 CC Pocket）是一款开源、本地优先的命令行 AI 编程 Agent 伴侣。Agent 继续运行在你自己的 macOS、Windows 或 Linux 电脑上，并直接使用本机代码目录；你可以通过 iPhone 或 iPad 实时查看进度、处理权限请求、继续同一个会话，并检查实际改动。
 
 支持的 AGENT
 • Claude Code
@@ -24,5 +24,6 @@ daemon 运行在你的电脑上，并在本机驱动 Agent CLI。它只需主动
 真实的能力边界
 不同 Agent 后端能力并不相同。权限审批、Changed files、用量统计、模型控制等功能，取决于对应 Agent 实际提供的接口。OpenCode 没有可强制执行的交互式审批，会以 Full access 运行。DeepSeek 目前是窄范围支持：远程审批会安全失败，且暂不提供 Changed files、用量统计和模型切换。
 
-Pairlet 使用 Kotlin 开发，并以 MIT 许可证开源。查看源码和安全模型：
-https://github.com/heypandax/cc-pocket
+Pairlet 使用 Kotlin 开发，并以 MIT 许可证开源。
+官网与使用指南：https://pairlet.org/
+源码和安全模型：https://github.com/heypandax/pairlet

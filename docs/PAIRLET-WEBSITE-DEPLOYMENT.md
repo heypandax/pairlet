@@ -45,6 +45,16 @@
 
 ## 备份与回退
 
+### 2026-09-10 12:05 UTC：恢复被旧配置覆盖的新域路由
+
+准备 App Store 2.0 元数据时发现新域返回 Cloudflare 525。源站的 Caddyfile 摘要已恢复为下述官网上线前的 `1cc8fa35…`，不含任何 Pairlet host 块；站点 `current` 仍指向 `website-20260910-r2`，Caddy 与 relay 均 active。尚未确认是哪次部署覆盖了配置。
+
+已在核对远端摘要未变化后，将 `deploy/Caddyfile` 中的新域路由恢复到源站。候选配置的旧域前缀与当时线上配置逐字节相同；Caddy validate 通过后 reload，relay PID 前后相同。备份保存在 `/var/backups/pairlet/20260910/appstore-route-repair-120457/Caddyfile.before`，恢复后的 Caddyfile SHA-256 为 `d072b9e85994d886e61f3f67c6e43b6b8c2a9cf2d07697b0cb3db18683ecc42c`。
+
+公开主站、中英文页面、支持页、隐私页、新旧 relay 健康接口和原下载清单均返回 200，www 可重定向到主域。后续从其他分支部署 relay 时，需要先合入当前 `deploy/Caddyfile` 的新域路由，不能用改名前的整份配置覆盖源站。
+
+同次将隐私页的 GitHub Pages 托管说明改为香港自有服务器 + Cloudflare，更新仓库链接，并明确编程会话与可选客服是不同的数据路径。只原子替换 `current/privacy.html`；旧文件备份为同目录的 `privacy.html.before`。公网回读与本地 `site/privacy.html` 逐字节一致，SHA-256 为 `fbd0a4a8a4e7fd8cd296e4dfb27ae5647c8c2f97e805b9fb6b1a21e752f1510b`。该单文件更新之后，最初 66 文件清单中的隐私页摘要已过时，其余静态文件未改。
+
 香港备份目录 `/var/backups/pairlet/20260910/` 保存原 `Caddyfile.before`、两个站点包及对应清单。原 Caddyfile SHA-256 为 `1cc8fa35503b6bec4594df8b72d163a2af2cab6866226f18a2570f6eb74a9789`。
 
 只回退本次最后一轮静态内容时，在香港服务器原子切回首轮目录：
