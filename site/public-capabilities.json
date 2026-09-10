@@ -1,5 +1,5 @@
 {
-  "$comment": "Public capability contract for CC Pocket. The website, both READMEs and scripts/check-public-content.py all answer to this file. Serving the static site needs no build step — the HTML restates these facts inline and the checker proves the two agree.",
+  "$comment": "Public capability contract for Pairlet. The website, both READMEs and scripts/check-public-content.py all answer to this file. Serving the static site needs no build step — the HTML restates these facts inline and the checker proves the two agree.",
   "schemaVersion": 1,
   "baseline": {
     "version": "1.9.4",
@@ -160,7 +160,7 @@
       "limits": {
         "en": [
           "No \"always allow\" — DeepSeek only has allow-once and reject, so every request is decided again.",
-          "DeepSeek never times out a request on its own; CC Pocket's own window bounds it — an expired approval is rejected, an expired question is skipped.",
+          "DeepSeek never times out a request on its own; Pairlet's own window bounds it — an expired approval is rejected, an expired question is skipped.",
           "Sandbox mode is fixed at launch — changing it relaunches the session.",
           "No Changed files or line diff.",
           "No usage accounting.",
@@ -168,7 +168,7 @@
         ],
         "zh": [
           "没有「总是允许」——DeepSeek 只有本次允许和拒绝，每次请求都要重新决定。",
-          "DeepSeek 自己永不超时；由 CC Pocket 的审批时限兜底——审批超时按拒绝回，提问超时按跳过回。",
+          "DeepSeek 自己永不超时；由 Pairlet 的审批时限兜底——审批超时按拒绝回，提问超时按跳过回。",
           "sandbox 模式在启动时定死——改模式会重启会话。",
           "没有改动文件列表和行级 diff。",
           "没有用量统计。",

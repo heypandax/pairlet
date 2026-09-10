@@ -58,8 +58,8 @@
       const prompt =
         button.dataset.copyPrompt ||
         (locale === "zh"
-          ? "打开这份公开的 CC Pocket 用户手册，并依据其中已核验的步骤回答我的问题。"
-          : "Open this public CC Pocket manual and answer my question using its verified steps.");
+          ? "打开这份公开的 Pairlet 用户手册，并依据其中已核验的步骤回答我的问题。"
+          : "Open this public Pairlet manual and answer my question using its verified steps.");
       copyText(url + "\n" + prompt, button, locale === "zh" ? "已复制给 AI" : "Copied for AI");
     });
   });

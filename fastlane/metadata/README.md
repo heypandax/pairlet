@@ -1,6 +1,6 @@
 # App Store 元数据与截图（fastlane deliver）
 
-`fastlane/metadata/<locale>/` 是描述、关键词、宣传文本、版本说明的来源，`fastlane/screenshots/<locale>/` 是商店截图来源，`fastlane/previews/<locale>/app-preview.mov` 是 App Preview 来源。当前启用 `zh-Hans`、`en-US`。
+`fastlane/metadata/<locale>/` 包含 name.txt（Pairlet，30 字符以内），也是描述、关键词、宣传文本、版本说明的来源，`fastlane/screenshots/<locale>/` 是商店截图来源，`fastlane/previews/<locale>/app-preview.mov` 是 App Preview 来源。当前启用 `zh-Hans`、`en-US`。
 
 截图必须从真实 Compose UI 自动生成（脚本数据，不含真实用户数据），不要手工重画界面。一次跑完 iPhone 与 iPad 两套：
 

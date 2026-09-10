@@ -1,4 +1,4 @@
-// cc-pocket — marketing site interactions
+// Pairlet — marketing site interactions
 
 (function(){
   const root = document.documentElement;
@@ -55,8 +55,8 @@
     try { localStorage.setItem('ccp-lang', l); } catch(e){}
     langHooks.forEach(fn => fn(l));
   }
-  let savedLang = 'en';
-  try { savedLang = localStorage.getItem('ccp-lang') || 'en'; } catch(e){}
+  // The URL chooses the initial language; stored preferences must not override a shared link.
+  const savedLang = root.getAttribute('data-lang') || 'zh';
   setLang(savedLang);
   document.querySelectorAll('[data-setlang]').forEach(b => b.addEventListener('click', () => setLang(b.dataset.setlang)));
 

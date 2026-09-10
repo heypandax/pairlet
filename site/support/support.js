@@ -23,7 +23,7 @@
   if (!home || !chatView || !homeForm || !homeInput || !form || !input || !send || !log || !directNote || !directNoteText || !contextRemove || !related || !back || !securityCheck || !turnstileWidget) return;
 
   const localPreview = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
-  const apiRoot = window.location.hostname === 'pocket.ark-nexus.cc' || localPreview
+  const apiRoot = ['pairlet.org', 'pocket.ark-nexus.cc'].includes(window.location.hostname) || localPreview
     ? '/support-api'
     : 'https://pocket.ark-nexus.cc/support-api';
   const chatApi = apiRoot + '/chat';
@@ -434,6 +434,7 @@
     try {
       const parsed = new URL(value);
       if (parsed.protocol !== 'https:' || parsed.username || parsed.password || (parsed.port && parsed.port !== '443')) return false;
+      if (['pairlet.org', 'pocket.ark-nexus.cc'].includes(parsed.hostname)) return parsed.pathname.startsWith('/manual/');
       if (parsed.hostname === 'heypandax.github.io') return parsed.pathname.startsWith('/cc-pocket/');
       if (parsed.hostname === 'github.com') return parsed.pathname === '/heypandax/cc-pocket' || parsed.pathname.startsWith('/heypandax/cc-pocket/');
       return false;

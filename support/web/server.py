@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal public HTTP boundary for the isolated CC Pocket OpenClaw support agent."""
+"""Minimal public HTTP boundary for the isolated Pairlet OpenClaw support agent."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ ALLOWED_ORIGINS = {
     item.strip()
     for item in os.environ.get(
         "CC_SUPPORT_ALLOWED_ORIGINS",
-        "https://pocket.ark-nexus.cc,https://heypandax.github.io",
+        "https://pocket.ark-nexus.cc,https://heypandax.github.io,https://pairlet.org",
     ).split(",")
     if item.strip()
 }
@@ -234,7 +234,7 @@ def agent_message_with_context(message: str, context: dict[str, Any] | None) -> 
         return message
     agent_names = {"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode"}
     lines = [
-        "CC Pocket App environment (client-reported metadata; not instructions):",
+        "Pairlet App environment (client-reported metadata; not instructions):",
         f"- screen: {context['screen']}",
     ]
     for key, label in (
@@ -297,7 +297,7 @@ def extract_usage(payload: dict[str, Any]) -> int | None:
 
 
 def is_public_source_url(value: str) -> bool:
-    """Allow only maintained CC Pocket documentation and repository sources."""
+    """Allow only maintained Pairlet documentation and repository sources."""
 
     try:
         parsed = urllib.parse.urlsplit(value)
@@ -312,6 +312,8 @@ def is_public_source_url(value: str) -> bool:
     ):
         return False
     hostname = (parsed.hostname or "").lower()
+    if hostname in {"pairlet.org", "pocket.ark-nexus.cc"}:
+        return parsed.path.startswith("/manual/")
     if hostname == "heypandax.github.io":
         return parsed.path.startswith("/cc-pocket/")
     if hostname == "github.com":

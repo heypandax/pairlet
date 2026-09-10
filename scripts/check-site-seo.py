@@ -13,7 +13,7 @@ from xml.etree import ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
-BASE = "https://heypandax.github.io/cc-pocket/"
+BASE = "https://pairlet.org/"
 SKIP_SCHEMES = {"data", "javascript", "mailto", "tel"}
 
 
@@ -104,14 +104,17 @@ def local_target(page: Path, raw: str) -> Path | None:
     if parsed.scheme in SKIP_SCHEMES or (parsed.scheme and parsed.scheme not in {"http", "https"}):
         return None
     if parsed.netloc:
-        if parsed.netloc != "heypandax.github.io" or not parsed.path.startswith("/cc-pocket/"):
+        if parsed.netloc == "pairlet.org":
+            relative = unquote(parsed.path.lstrip("/"))
+        elif parsed.netloc == "heypandax.github.io" and parsed.path.startswith("/cc-pocket/"):
+            relative = unquote(parsed.path[len("/cc-pocket/"):])
+        else:
             return None
-        relative = unquote(parsed.path[len("/cc-pocket/") :])
         target = SITE / relative
     else:
         if not parsed.path:
             return page
-        target = page.parent / unquote(parsed.path)
+        target = (SITE / unquote(parsed.path).lstrip("/")) if parsed.path.startswith("/") else page.parent / unquote(parsed.path)
     if raw.endswith("/") or target.is_dir():
         target /= "index.html"
     return target.resolve()

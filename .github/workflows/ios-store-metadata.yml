@@ -71,7 +71,8 @@ jobs:
         run: |
           for locale in en-US zh-Hans; do
             mkdir -p "$RUNNER_TEMP/store-metadata/$locale"
-            cp "fastlane/metadata/$locale/description.txt" \
+            cp "fastlane/metadata/$locale/name.txt" \
+               "fastlane/metadata/$locale/description.txt" \
                "fastlane/metadata/$locale/keywords.txt" \
                "fastlane/metadata/$locale/promotional_text.txt" \
                "$RUNNER_TEMP/store-metadata/$locale/"

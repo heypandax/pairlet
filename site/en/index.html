@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pairlet — Open-source control plane for local coding agents</title>
+<meta name="description" content="Your coding agents stay on your computer; you stay in control from anywhere. Watch, approve, continue and inspect six agent backends from a phone, tablet or another computer. Open source, end-to-end encrypted, no account." />
+<link rel="canonical" href="https://pairlet.org/en/" />
+<link rel="alternate" hreflang="en" href="https://pairlet.org/en/" />
+<link rel="alternate" hreflang="zh-CN" href="https://pairlet.org/" />
+<link rel="alternate" hreflang="x-default" href="https://pairlet.org/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+<meta name="author" content="heypandax" />
+<meta name="application-name" content="Pairlet" />
+<meta name="theme-color" content="#0E0F11" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#FAF9F7" media="(prefers-color-scheme: light)" />
+
+<!-- Open Graph -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Pairlet" />
+<meta property="og:title" content="Pairlet — Open-source control plane for local coding agents" />
+<meta property="og:description" content="Six agent backends keep running on your own computer. Watch, approve, continue and inspect from anywhere, end-to-end encrypted, with no Pairlet account." />
+<meta property="og:url" content="https://pairlet.org/en/" />
+<meta property="og:image" content="https://pairlet.org/assets/product/overview.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="The Pairlet desktop console showing paired machines and a live session, beside the phone app showing a session list and an approval decision." />
+<meta property="og:locale" content="en_US" />
+<meta property="og:locale:alternate" content="zh_CN" />
+
+<!-- Twitter / X -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Pairlet — Open-source control plane for local coding agents" />
+<meta name="twitter:description" content="Six agent backends keep running on your own computer. Watch, approve, continue and inspect from anywhere, end-to-end encrypted." />
+<meta name="twitter:image" content="https://pairlet.org/assets/product/overview.png" />
+<meta name="twitter:image:alt" content="The Pairlet desktop console beside the phone app: a session list on one screen, an approval decision on the other." />
+
+<!-- Icons & manifest -->
+<link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+<link rel="icon" href="../favicon-32.png" sizes="32x32" type="image/png" />
+<link rel="apple-touch-icon" href="../apple-touch-icon.png" />
+<link rel="manifest" href="../site.webmanifest" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../styles.css" />
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://pairlet.org/#app",
+      "name": "Pairlet",
+      "alternateName": "cc-pocket",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "iOS, iPadOS, Android, macOS, Windows, Linux, HarmonyOS",
+      "url": "https://pairlet.org/",
+      "downloadUrl": "https://github.com/heypandax/cc-pocket/releases/latest",
+      "softwareVersion": "1.9.4",
+      "releaseNotes": "v1.9.4 release. Public capability claims were audited against commit e9ee816f on main.",
+      "softwareHelp": "https://pocket.ark-nexus.cc/manual/en/",
+      "image": "https://pairlet.org/assets/product/overview.png",
+      "screenshot": "https://pairlet.org/assets/product/desktop-console.png",
+      "description": "Open-source, local-first, end-to-end encrypted cross-device control plane for command-line coding agents. Six agent backends keep running on your own computer; from a phone, tablet or another computer you watch the stream, answer permission requests, continue the same session and read line-level diffs. Traffic passes through a zero-knowledge relay that only forwards ciphertext.",
+      "license": "https://github.com/heypandax/cc-pocket/blob/main/LICENSE",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "featureList": [
+        "Watch a local agent's live stream, tool events and background tasks from another device",
+        "Approve or deny the agent's permission requests remotely, with a safe auto-deny on timeout",
+        "Continue a running session in place instead of forking it, and start new tasks from phone or desktop",
+        "Inspect changed files with line-level diffs, file preview, context and usage",
+        "Six agent backends: Claude Code, OpenAI Codex, OpenCode, Kimi Code (Preview), ZCode and DeepSeek",
+        "Filter projects, sessions and usage by agent backend",
+        "Native desktop app for macOS and Windows as a two-pane console",
+        "Local daemon for macOS, Linux x86_64/arm64 and Windows",
+        "End-to-end encryption (P-256 ECDH + HKDF + AES-256-GCM) over a zero-knowledge relay",
+        "No Pairlet account; pairings expire and can be revoked",
+        "Self-hostable relay, MIT licensed"
+      ],
+      "keywords": "coding agent, Claude Code, OpenAI Codex, OpenCode, Kimi Code, ZCode, DeepSeek, remote approval, end-to-end encryption, developer tools",
+      "publisher": { "@id": "https://github.com/heypandax#org" }
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://pairlet.org/#website",
+      "name": "Pairlet",
+      "url": "https://pairlet.org/",
+      "inLanguage": ["en", "zh-CN"],
+      "about": { "@id": "https://pairlet.org/#app" },
+      "publisher": { "@id": "https://github.com/heypandax#org" }
+    },
+    {
+      "@type": "VideoObject",
+      "name": "The Pairlet control loop: watch, approve, continue, inspect",
+      "description": "A single session seen from the phone app: the machine's running work, the live stream, an approval decision, the session continuing, and the resulting line-level diff. Real product UI with scripted demo data.",
+      "thumbnailUrl": "https://pairlet.org/assets/product/control-loop-en-poster.jpg",
+      "contentUrl": "https://pairlet.org/assets/product/control-loop-en.mp4",
+      "duration": "PT10.5S",
+      "uploadDate": "2026-08-16",
+      "inLanguage": "en",
+      "isFamilyFriendly": true
+    },
+    {
+      "@type": "Organization",
+      "@id": "https://github.com/heypandax#org",
+      "name": "heypandax",
+      "url": "https://github.com/heypandax",
+      "logo": "https://pairlet.org/apple-touch-icon.png",
+      "sameAs": [
+        "https://github.com/heypandax/cc-pocket",
+        "https://apps.apple.com/cn/app/id6778773969"
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+
+<!-- ══════════════ NAV ══════════════ -->
+<nav class="nav" id="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Pairlet home">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="wordmark mono">Pairlet</span>
+    </a>
+    <div class="nav-links">
+      <a href="#loop" data-sec="loop"><span class="i18n-en">Control loop</span><span class="i18n-zh">控制回路</span></a>
+      <a href="#agents" data-sec="agents"><span class="i18n-en">Agents</span><span class="i18n-zh">Agent 支持</span></a>
+      <a href="#surfaces" data-sec="surfaces"><span class="i18n-en">Platforms</span><span class="i18n-zh">平台</span></a>
+      <a href="#security" data-sec="security"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></a>
+      <a href="#start" data-sec="start"><span class="i18n-en">Download</span><span class="i18n-zh">下载</span></a>
+    </div>
+    <div class="nav-right">
+      <div class="seg" role="group" aria-label="Language">
+        <button type="button" data-setlang="zh" aria-pressed="false">中</button>
+        <button type="button" data-setlang="en" class="on" aria-pressed="true">EN</button>
+      </div>
+      <button class="icon-btn" type="button" id="theme-btn" aria-label="Toggle theme"></button>
+      <a class="btn btn-primary desktop-github" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
+        <span class="gh-glyph" aria-hidden="true"></span>
+        <span class="i18n-en">View on GitHub</span><span class="i18n-zh">在 GitHub 查看</span>
+        <span class="star-pill mono" style="display:none"><span class="star-ico" aria-hidden="true"></span><span class="star-n"></span></span>
+      </a>
+      <button class="icon-btn hamburger" type="button" id="hamburger" aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu"></button>
+    </div>
+  </div>
+</nav>
+<div class="mobile-menu" id="mobile-menu">
+  <a href="#loop"><span class="i18n-en">Control loop</span><span class="i18n-zh">控制回路</span></a>
+  <a href="#jobs"><span class="i18n-en">Four jobs</span><span class="i18n-zh">四件事</span></a>
+  <a href="#agents"><span class="i18n-en">Agent support</span><span class="i18n-zh">Agent 支持</span></a>
+  <a href="#surfaces"><span class="i18n-en">Platforms</span><span class="i18n-zh">平台</span></a>
+  <a href="#security"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></a>
+  <a href="#start"><span class="i18n-en">Download</span><span class="i18n-zh">下载</span></a>
+  <a href="/manual/en/"><span class="i18n-en">User manual</span><span class="i18n-zh">用户手册</span></a>
+  <a href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener" style="color:var(--accent)">GitHub →</a>
+</div>
+
+<span id="top"></span>
+
+<!-- ══════════════ 1 · HERO ══════════════ -->
+<header class="hero">
+  <div class="wrap">
+    <div class="hero-copy reveal">
+      <p class="eyebrow mono">OPEN SOURCE · LOCAL FIRST · E2E ENCRYPTED</p>
+      <h1>
+        <span class="i18n-en">A companion for the coding agents on your computer.</span>
+        <span class="i18n-zh">随时接续你的 AI 编程任务。</span>
+      </h1>
+      <p class="sub">
+        <span class="i18n-en">Pairlet drives six command-line coding agents running on your own machine — from your phone, your tablet, or another computer. Watch them work, approve what they are blocked on, continue the same session, and read what changed. End-to-end encrypted; capability differs by backend.</span>
+        <span class="i18n-zh">连接自己的电脑，在手机、平板和桌面端发起、跟进和接续 AI 编程任务。查看进展、回应授权、继续会话、检查代码与文件。端到端加密；能力因后端而异。</span>
+      </p>
+      <div class="hero-btns">
+        <a class="btn btn-primary" href="#start">
+          <span class="i18n-en">Get CC Pairlet ↓</span><span class="i18n-zh">获取 CC Pairlet ↓</span>
+        </a>
+        <a class="btn btn-ghost" href="#loop">
+          <span class="i18n-en">See the control loop →</span><span class="i18n-zh">看真实流程 →</span>
+        </a>
+      </div>
+
+      <ul class="agent-chips" aria-label="Agent backends in v1.9.4">
+        <li class="agent-chip"><span class="an">Claude Code</span></li>
+        <li class="agent-chip"><span class="an">OpenAI Codex</span></li>
+        <li class="agent-chip"><span class="an">OpenCode</span></li>
+        <li class="agent-chip"><span class="an">Kimi Code</span> <span class="atag mono">Preview</span></li>
+        <li class="agent-chip"><span class="an">ZCode</span></li>
+        <li class="agent-chip"><span class="an">DeepSeek</span> <span class="atag mono"><span class="i18n-en">narrow v1</span><span class="i18n-zh">有限 v1</span></span></li>
+      </ul>
+      <p class="trustline mono">
+        <span class="i18n-en">six agent backends in v1.9.4 <span class="dot">·</span> <a href="#agents">capability differs — see the matrix</a></span>
+        <span class="i18n-zh">v1.9.4 支持六个后端 <span class="dot">·</span> <a href="#agents">能力不一样，看矩阵</a></span>
+      </p>
+    </div>
+
+    <div class="hero-visual reveal">
+      <figure class="shot-phone">
+        <img class="i18n-en" src="../assets/product/control-loop-en-poster.jpg" width="780" height="1688" alt="The Pairlet phone app holding an approval: 'Run command · Bash', the command it wants to run, a 17-second countdown that auto-denies, and Deny / Allow once / Allow for task." loading="eager" decoding="async" />
+        <img class="i18n-zh" src="../assets/product/control-loop-zh-poster.jpg" width="780" height="1688" alt="Pairlet 手机端拦下一次授权：「运行命令 · Bash」、待执行的命令、17 秒后自动拒绝的倒计时，以及拒绝 / 允许一次 / 本次任务内允许。" loading="eager" decoding="async" />
+        <figcaption class="shot-cap mono">
+          <span class="i18n-en">Real product UI · scripted demo data</span>
+          <span class="i18n-zh">真实产品界面 · 演示数据由脚本生成</span>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════════ 2 · CONTROL LOOP ══════════════ -->
+<section class="section loop" id="loop">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Control loop</span><span class="i18n-zh">控制回路</span></p>
+      <h2><span class="i18n-en">Leave the computer. Stay in the control loop.</span><span class="i18n-zh">人离开电脑，别离开控制回路。</span></h2>
+      <p><span class="i18n-en">One session, start to finish, recorded from the phone app.</span><span class="i18n-zh">一个会话从头到尾，画面取自手机端。</span></p>
+    </div>
+
+    <div class="loop-grid reveal">
+      <ol class="loop-steps" id="loop-steps">
+        <li class="loop-step on" data-at="0">
+          <button type="button" class="loop-btn" aria-pressed="true">
+            <span class="ln mono">01</span>
+            <span class="lb">
+              <strong><span class="i18n-en">Watch</span><span class="i18n-zh">查看</span></strong>
+              <span><span class="i18n-en">What is running, then the stream itself — output, thinking, tool events.</span><span class="i18n-zh">先看这台电脑在跑什么，再看它一句句写——正文、思考、工具事件。</span></span>
+            </span>
+          </button>
+        </li>
+        <li class="loop-step" data-at="3.9">
+          <button type="button" class="loop-btn" aria-pressed="false">
+            <span class="ln mono">02</span>
+            <span class="lb">
+              <strong><span class="i18n-en">Approve</span><span class="i18n-zh">授权</span></strong>
+              <span><span class="i18n-en">It stops at a sensitive command. Allow once, allow for the task, or deny — no answer times out to a deny.</span><span class="i18n-zh">碰到敏感命令它就停。允许一次、本次任务内允许，或者拒绝——不理它，超时也是拒绝。</span></span>
+            </span>
+          </button>
+        </li>
+        <li class="loop-step" data-at="6.0">
+          <button type="button" class="loop-btn" aria-pressed="false">
+            <span class="ln mono">03</span>
+            <span class="lb">
+              <strong><span class="i18n-en">Continue</span><span class="i18n-zh">继续</span></strong>
+              <span><span class="i18n-en">The same session picks up where it stopped and finishes the turn.</span><span class="i18n-zh">同一个会话从断点接着走，把这一轮做完。</span></span>
+            </span>
+          </button>
+        </li>
+        <li class="loop-step" data-at="8.3">
+          <button type="button" class="loop-btn" aria-pressed="false">
+            <span class="ln mono">04</span>
+            <span class="lb">
+              <strong><span class="i18n-en">Inspect</span><span class="i18n-zh">检查</span></strong>
+              <span><span class="i18n-en">Read the line-level diff before you trust the result.</span><span class="i18n-zh">信之前，先把行级 diff 看一遍。</span></span>
+            </span>
+          </button>
+        </li>
+      </ol>
+
+      <figure class="loop-media">
+        <div class="loop-frame">
+          <video class="i18n-en" id="loop-video-en" width="780" height="1688"
+                 poster="assets/product/control-loop-en-poster.jpg"
+                 muted playsinline loop controls preload="none"
+                 aria-label="The Pairlet control loop: a running session, the live stream, an approval decision, the session continuing, and the resulting line-level diff.">
+            <source src="../assets/product/control-loop-en.mp4" type="video/mp4" />
+            <img src="../assets/product/control-loop-en-poster.jpg" width="780" height="1688" alt="The Pairlet phone app holding an approval for a shell command, with a countdown that auto-denies." />
+          </video>
+          <video class="i18n-zh" id="loop-video-zh" width="780" height="1688"
+                 poster="assets/product/control-loop-zh-poster.jpg"
+                 muted playsinline loop controls preload="none"
+                 aria-label="Pairlet 控制回路：运行中的会话、实时流式输出、一次授权决策、会话继续，以及最后的行级 diff。">
+            <source src="../assets/product/control-loop-zh.mp4" type="video/mp4" />
+            <img src="../assets/product/control-loop-zh-poster.jpg" width="780" height="1688" alt="Pairlet 手机端拦下一次 shell 命令授权，倒计时结束会自动拒绝。" />
+          </video>
+        </div>
+        <figcaption class="shot-cap mono">
+          <span class="i18n-en">10.5s · no audio · real product UI with scripted demo data</span>
+          <span class="i18n-zh">10.5 秒 · 无声 · 真实产品界面，演示数据由脚本生成</span>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 3 · FOUR JOBS ══════════════ -->
+<section class="section jobs" id="jobs" style="background:var(--surface);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Four jobs</span><span class="i18n-zh">四件事</span></p>
+      <h2><span class="i18n-en">Four jobs, one loop.</span><span class="i18n-zh">四件事，一个回路。</span></h2>
+      <p><span class="i18n-en">Not a feature wall — the four things you actually leave your desk needing.</span><span class="i18n-zh">不是功能墙——只是你离开工位后真正要做的那四件事。</span></p>
+    </div>
+    <div class="job-grid">
+      <article class="job-card reveal">
+        <p class="jn mono">01</p>
+        <h3><span class="i18n-en">Watch</span><span class="i18n-zh">查看</span></h3>
+        <p class="jr"><span class="i18n-en">See what the agent is doing without walking back to the desk.</span><span class="i18n-zh">人不在电脑前，也知道 agent 干到哪一步了。</span></p>
+        <ul>
+          <li><span class="i18n-en">Streaming output, syntax-highlighted code, tool events with timing.</span><span class="i18n-zh">流式输出、带高亮的代码块、带耗时的工具事件。</span></li>
+          <li><span class="i18n-en">Sub-agent cards and background-task state.</span><span class="i18n-zh">子 agent 卡片和后台任务状态。</span></li>
+          <li><span class="i18n-en">Filter projects, sessions and usage by agent.</span><span class="i18n-zh">项目、会话、用量都能按 agent 筛。</span></li>
+        </ul>
+      </article>
+      <article class="job-card reveal">
+        <p class="jn mono">02</p>
+        <h3><span class="i18n-en">Approve</span><span class="i18n-zh">授权</span></h3>
+        <p class="jr"><span class="i18n-en">Unblock a stopped agent from wherever you are — or refuse it.</span><span class="i18n-zh">agent 卡住了，随手放行，或者拒掉。</span></p>
+        <ul>
+          <li><span class="i18n-en">The request reaches your phone the moment it is raised.</span><span class="i18n-zh">它一开口请求，手机立刻收到。</span></li>
+          <li><span class="i18n-en">No answer times out to a safe deny — never a silent allow.</span><span class="i18n-zh">没顾上，超时自动拒绝——绝不会静默放行。</span></li>
+          <li><span class="i18n-en">Execution modes and per-session allow rules you can inspect and revoke. <a href="#agents">Not every backend can enforce them.</a></span><span class="i18n-zh">执行模式和会话级允许规则都能查、能撤。<a href="#agents">但不是每个后端都执行得了。</a></span></li>
+        </ul>
+      </article>
+      <article class="job-card reveal">
+        <p class="jn mono">03</p>
+        <h3><span class="i18n-en">Continue</span><span class="i18n-zh">继续</span></h3>
+        <p class="jr"><span class="i18n-en">Pick the same session back up instead of starting over.</span><span class="i18n-zh">接着原来那个会话往下走，不用重开。</span></p>
+        <ul>
+          <li><span class="i18n-en">Take over a running session <em>in place</em>; it only forks while the terminal is genuinely still writing.</span><span class="i18n-zh"><em>原地</em>接管正在跑的会话；只有终端那头真的还在写时才分叉。</span></li>
+          <li><span class="i18n-en">Start a new task straight from the phone or the desktop app.</span><span class="i18n-zh">手机和桌面 App 都能直接起一个新任务。</span></li>
+          <li><span class="i18n-en">Output missed during a dropout is backfilled on reconnect.</span><span class="i18n-zh">掉线期间漏掉的输出，重连后补齐。</span></li>
+        </ul>
+      </article>
+      <article class="job-card reveal">
+        <p class="jn mono">04</p>
+        <h3><span class="i18n-en">Inspect</span><span class="i18n-zh">检查</span></h3>
+        <p class="jr"><span class="i18n-en">Read what actually changed before you trust the result.</span><span class="i18n-zh">结果值不值得信，先看它到底改了什么。</span></p>
+        <ul>
+          <li><span class="i18n-en">Changed files with line-level diffs and file preview. <a href="#agents">Claude Code and Codex only.</a></span><span class="i18n-zh">改动文件、行级 diff、文件预览。<a href="#agents">只有 Claude Code 和 Codex 有。</a></span></li>
+          <li><span class="i18n-en">Context and usage — Kimi Code and ZCode report usage in v1.8.0.</span><span class="i18n-zh">上下文与用量——Kimi Code 和 ZCode 在 v1.8.0 也有用量了。</span></li>
+          <li><span class="i18n-en">Images in your own prompts stay visible in session replay.</span><span class="i18n-zh">自己发的提示词里的图片，回放时还在。</span></li>
+        </ul>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 4 · AGENT SUPPORT ══════════════ -->
+<section class="section" id="agents">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Agent support</span><span class="i18n-zh">Agent 支持</span></p>
+      <h2><span class="i18n-en">Six backends. Not the same six capabilities.</span><span class="i18n-zh">六个后端，能力并不一样。</span></h2>
+      <p>
+        <span class="i18n-en">Capability claims for v1.9.4 were audited against commit <a href="https://github.com/heypandax/cc-pocket/commit/e9ee816f" class="mono" target="_blank" rel="noopener">e9ee816f</a> on <span class="mono">main</span>. Machine-readable: <a href="../public-capabilities.json" class="mono">public-capabilities.json</a>.</span>
+        <span class="i18n-zh">v1.9.4 的公开能力已对照 <span class="mono">main</span> 分支的 <a href="https://github.com/heypandax/cc-pocket/commit/e9ee816f" class="mono" target="_blank" rel="noopener">e9ee816f</a> 提交核验。机器可读版本：<a href="../public-capabilities.json" class="mono">public-capabilities.json</a>。</span>
+      </p>
+    </div>
+
+    <div class="matrix-wrap reveal">
+      <table class="matrix">
+        <caption class="sr-only"><span class="i18n-en">Agent backend capability matrix for v1.9.4: core session, approval and mode, changes and diff, usage.</span><span class="i18n-zh">v1.9.4 的 agent 后端能力矩阵：核心会话、审批与模式、改动与 diff、用量。</span></caption>
+        <thead>
+          <tr>
+            <th scope="col"><span class="i18n-en">Agent</span><span class="i18n-zh">Agent</span></th>
+            <th scope="col"><span class="i18n-en">Core session</span><span class="i18n-zh">核心会话</span></th>
+            <th scope="col"><span class="i18n-en">Approval &amp; mode</span><span class="i18n-zh">审批与模式</span></th>
+            <th scope="col"><span class="i18n-en">Changes &amp; diff</span><span class="i18n-zh">改动与 diff</span></th>
+            <th scope="col"><span class="i18n-en">Usage</span><span class="i18n-zh">用量</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr data-agent="claude">
+            <th scope="row"><span class="anm">Claude Code</span></th>
+            <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="approvalMode" data-state="yes" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="changesDiff" data-state="yes" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="usage" data-state="yes" data-label-en="Usage" data-label-zh="用量"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+          </tr>
+          <tr data-agent="codex">
+            <th scope="row"><span class="anm">OpenAI Codex</span></th>
+            <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="approvalMode" data-state="yes" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="changesDiff" data-state="yes" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="usage" data-state="yes" data-label-en="Usage" data-label-zh="用量"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+          </tr>
+          <tr data-agent="opencode">
+            <th scope="row"><span class="anm">OpenCode</span></th>
+            <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="approvalMode" data-state="no" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span><span class="cell-note"><span class="i18n-en">Always Full access</span><span class="i18n-zh">恒为 Full access</span></span></td>
+            <td data-cap="changesDiff" data-state="no" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span></td>
+            <td data-cap="usage" data-state="yes" data-label-en="Usage" data-label-zh="用量"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+          </tr>
+          <tr data-agent="opencode-warn" class="matrix-warn">
+            <td colspan="5">
+              <span class="warn-mark mono" aria-hidden="true">!</span>
+              <span class="i18n-en"><b>OpenCode has no enforceable interactive approval.</b> <span class="mono">opencode run</span> has no approval protocol, so those sessions run at <b>Full access</b>. Pairlet says so up front instead of offering modes it cannot enforce.</span>
+              <span class="i18n-zh"><b>OpenCode 没有可执法的交互审批。</b><span class="mono">opencode run</span> 本身就没有审批协议，所以这类会话恒为 <b>Full access</b>。Pairlet 会直接说明，而不是摆出一排它根本管不住的模式。</span>
+            </td>
+          </tr>
+          <tr data-agent="kimi">
+            <th scope="row"><span class="anm">Kimi Code</span> <span class="atag mono">Preview</span></th>
+            <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="approvalMode" data-state="yes" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="changesDiff" data-state="no" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span></td>
+            <td data-cap="usage" data-state="yes" data-label-en="Usage" data-label-zh="用量"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span><span class="cell-note"><span class="i18n-en">New in v1.8.0</span><span class="i18n-zh">v1.8.0 新增</span></span></td>
+          </tr>
+          <tr data-agent="zcode">
+            <th scope="row"><span class="anm">ZCode</span></th>
+            <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="approvalMode" data-state="yes" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span></td>
+            <td data-cap="changesDiff" data-state="no" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span></td>
+            <td data-cap="usage" data-state="yes" data-label-en="Usage" data-label-zh="用量"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span><span class="cell-note"><span class="i18n-en">New in v1.8.0</span><span class="i18n-zh">v1.8.0 新增</span></span></td>
+          </tr>
+          <tr data-agent="deepseek">
+            <th scope="row"><span class="anm">DeepSeek Harness</span> <span class="atag mono"><span class="i18n-en">narrow v1</span><span class="i18n-zh">有限 v1</span></span></th>
+            <td data-cap="coreSession" data-state="yes" data-label-en="Core session" data-label-zh="核心会话"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span><span class="cell-note"><span class="i18n-en">Discover, replay, create, resume, text, live streaming</span><span class="i18n-zh">发现、回放、新建、恢复、收发文本、实时流式</span></span></td>
+            <td data-cap="approvalMode" data-state="yes" data-label-en="Approval &amp; mode" data-label-zh="审批与模式"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span><span class="i18n-en">Yes</span><span class="i18n-zh">支持</span></span><span class="cell-note"><span class="i18n-en">Approvals and questions bridged; sandbox mode fixed at launch</span><span class="i18n-zh">审批与提问已桥接；sandbox 档位启动时固定</span></span></td>
+            <td data-cap="changesDiff" data-state="no" data-label-en="Changes &amp; diff" data-label-zh="改动与 diff"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span></td>
+            <td data-cap="usage" data-state="no" data-label-en="Usage" data-label-zh="用量"><span class="st st-no"><span class="sym" aria-hidden="true">✕</span><span class="i18n-en">No</span><span class="i18n-zh">不支持</span></span></td>
+          </tr>
+          <tr data-agent="deepseek-warn" class="matrix-warn">
+            <td colspan="5">
+              <span class="warn-mark mono" aria-hidden="true">!</span>
+              <span class="i18n-en"><b>DeepSeek is supported, but narrow.</b> Sessions, approvals and multiple-choice questions are bridged to the app; the sandbox mode is fixed at launch, and there is no Changed-files or diff view, no usage accounting and no model switching. DeepSeek has no timeout of its own — an unanswered request rides the daemon's approval window: an approval that expires is answered reject, a question that expires is answered skipped.</span>
+              <span class="i18n-zh"><b>DeepSeek 已支持，但很窄。</b>会话、审批与选择题式提问都已桥接到 App；sandbox 档位启动时固定，仍没有改动文件与 diff、没有用量统计、不能切换模型。DeepSeek 自身没有超时——无人应答的请求走 daemon 的审批窗口：审批到期按拒绝作答，提问到期按跳过作答。</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="matrix-foot">
+        <span class="i18n-en"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span>Yes</span> <span class="st st-lim"><span class="sym" aria-hidden="true">△</span>Limited</span> <span class="st st-no"><span class="sym" aria-hidden="true">✕</span>No</span> — symbol and text, never colour alone. <b>Core session</b> means discover, replay, create, resume, send and receive text, and live streaming. Capability boundaries follow the release; full detail in <a href="../features.html">Features</a> and the <a href="/manual/en/">User manual</a>.</span>
+        <span class="i18n-zh"><span class="st st-yes"><span class="sym" aria-hidden="true">✓</span>支持</span> <span class="st st-lim"><span class="sym" aria-hidden="true">△</span>有限</span> <span class="st st-no"><span class="sym" aria-hidden="true">✕</span>不支持</span>——符号加文字，不靠颜色区分。<b>核心会话</b>指发现、回放、新建、恢复、收发文本和实时流式。能力边界跟随正式 Release；完整说明见<a href="../features.html">能力页</a>与<a href="/manual/zh/">用户手册</a>。</span>
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 5 · PRODUCT SURFACES ══════════════ -->
+<section class="section" id="surfaces" style="background:var(--surface);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Product surfaces</span><span class="i18n-zh">产品组成</span></p>
+      <h2><span class="i18n-en">Four pieces. Each one has a job.</span><span class="i18n-zh">四个组成，各管一段。</span></h2>
+      <p><span class="i18n-en">The desktop app and the local daemon are different packages — a common mix-up worth getting right before you install.</span><span class="i18n-zh">桌面 App 和本机 daemon 是两个不同的安装包——装之前先分清，能省一轮折腾。</span></p>
+    </div>
+
+    <div class="surface-map reveal">
+      <div class="surface">
+        <p class="sname"><span class="i18n-en">Phone &amp; tablet app</span><span class="i18n-zh">手机与平板 App</span></p>
+        <p class="sdesc"><span class="i18n-en">Where you watch, approve, continue and inspect. iOS · iPadOS · Android.</span><span class="i18n-zh">查看、授权、继续、检查都在这儿。iOS · iPadOS · Android。</span></p>
+      </div>
+      <div class="surface">
+        <p class="sname"><span class="i18n-en">Desktop app</span><span class="i18n-zh">桌面 App</span></p>
+        <p class="sdesc"><span class="i18n-en">The same client as a two-pane console — one computer driving another. macOS · Windows.</span><span class="i18n-zh">同一个客户端的两栏控制台——用一台电脑操另一台。macOS · Windows。</span></p>
+      </div>
+      <div class="surface">
+        <p class="sname"><span class="i18n-en">Local daemon</span><span class="i18n-zh">本机 daemon</span></p>
+        <p class="sdesc"><span class="i18n-en">Runs on the computer that owns your code and drives the agent CLI. macOS · Linux · Windows.</span><span class="i18n-zh">跑在放着你代码的那台电脑上，驱动 agent CLI。macOS · Linux · Windows。</span></p>
+      </div>
+      <div class="surface">
+        <p class="sname"><span class="i18n-en">Zero-knowledge relay</span><span class="i18n-zh">零知识中继</span></p>
+        <p class="sdesc"><span class="i18n-en">Pairs your devices and forwards ciphertext. Hosted for you, or run your own.</span><span class="i18n-zh">帮设备配对、转发密文。默认用托管的，也可以自建。</span></p>
+      </div>
+    </div>
+
+    <figure class="shot-desktop reveal">
+      <img src="../assets/product/desktop-console.png" width="1600" height="1082" loading="lazy" decoding="async"
+           alt="The Pairlet desktop app: a sidebar of paired machines with pinned and running sessions, the live session transcript in the middle, and a terminal pane on the right." />
+      <figcaption class="shot-cap mono">
+        <span class="i18n-en">Desktop app · real product UI with scripted demo data</span>
+        <span class="i18n-zh">桌面 App · 真实产品界面，演示数据由脚本生成</span>
+      </figcaption>
+    </figure>
+
+    <p class="surface-foot reveal">
+      <span class="i18n-en">Pair several computers and one screen shows each machine's state, running projects and waiting approvals. That is an overview you drive — not an automatic team that runs itself.</span>
+      <span class="i18n-zh">配几台电脑，一屏就能看到每台的状态、在跑的项目和等着批的授权。这是一个由你操作的总览——不是一支自己跑起来的自动团队。</span>
+    </p>
+  </div>
+</section>
+
+<!-- ══════════════ 6 · TRUST ══════════════ -->
+<section class="section" id="security">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Trust</span><span class="i18n-zh">信任边界</span></p>
+      <h2><span class="i18n-en">Why it is safe to let it touch your machine.</span><span class="i18n-zh">凭什么敢让它碰你的机器。</span></h2>
+    </div>
+
+    <ol class="trust-chain reveal">
+      <li>
+        <h3><span class="i18n-en">Local execution</span><span class="i18n-zh">本地执行</span></h3>
+        <p><span class="i18n-en">The agent and your code never leave your computer. The daemon dials <em>out</em> — no inbound port to open.</span><span class="i18n-zh">agent 和你的代码从不离开你的电脑。daemon 主动<em>往外</em>连——不用开任何入站端口。</span></p>
+      </li>
+      <li>
+        <h3><span class="i18n-en">End-to-end encryption</span><span class="i18n-zh">端到端加密</span></h3>
+        <p><span class="i18n-en">P-256 ECDH + HKDF + AES-256-GCM, an X3DH/Noise-style handshake. Plaintext stays on your two trusted endpoints.</span><span class="i18n-zh">P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手。明文只留在你的两个可信端点上。</span></p>
+      </li>
+      <li>
+        <h3><span class="i18n-en">Zero-knowledge relay</span><span class="i18n-zh">零知识中继</span></h3>
+        <p><span class="i18n-en">It pairs devices and forwards opaque frames. No message content, no private keys, no content logging — and you can host your own.</span><span class="i18n-zh">它只帮设备配对、转发不透明的帧。没有消息内容、没有私钥、不记内容日志——不放心还能自建。</span></p>
+      </li>
+      <li>
+        <h3><span class="i18n-en">Expiry &amp; revocation</span><span class="i18n-zh">到期与吊销</span></h3>
+        <p><span class="i18n-en">No Pairlet account. Pairing carries the daemon's key out-of-band via QR, so even a malicious relay cannot MITM that path; pairings expire and can be revoked.</span><span class="i18n-zh">没有 Pairlet 账号。配对时 daemon 的密钥经二维码带外传递，中继就算变坏也插不进来；配对可设有效期，也能随时吊销。</span></p>
+      </li>
+    </ol>
+
+    <div class="limits reveal">
+      <p class="limits-t"><span class="i18n-en">Where the boundary actually is</span><span class="i18n-zh">边界到底在哪</span></p>
+      <ul>
+        <li><span class="i18n-en">The agent still runs with <b>your own operating-system permissions</b>. End-to-end encryption is not a sandbox.</span><span class="i18n-zh">agent 仍以<b>你本机操作系统用户的权限</b>执行。端到端加密不等于沙箱。</span></li>
+        <li><span class="i18n-en"><b>OpenCode sessions have no enforceable interactive approval</b> and run at Full access.</span><span class="i18n-zh"><b>OpenCode 会话没有可执法的交互审批</b>，恒为 Full access。</span></li>
+        <li><span class="i18n-en">Backends differ — check the <a href="#agents">matrix</a> before you rely on approvals.</span><span class="i18n-zh">后端各不相同——指望审批之前，先看<a href="#agents">矩阵</a>。</span></li>
+        <li><span class="i18n-en">The custom Noise-style channel has not had an independent third-party audit.</span><span class="i18n-zh">项目自定义的 Noise 式通道还没做过独立第三方审计。</span></li>
+      </ul>
+    </div>
+
+    <div class="pullquote reveal">
+      <blockquote><span class="i18n-en">Trust without trusting us.</span><span class="i18n-zh">信任，但不必信任我们。</span></blockquote>
+      <a class="tm-link" href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" target="_blank" rel="noopener"><span class="i18n-en">Read the security model →</span><span class="i18n-zh">阅读安全模型 →</span></a>
+      <a class="tm-link" href="../guides/self-hosting.html"><span class="i18n-en">Self-host the relay →</span><span class="i18n-zh">自托管中继 →</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 7 · GET STARTED ══════════════ -->
+<section class="section start" id="start" style="background:var(--surface);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Get started</span><span class="i18n-zh">开始使用</span></p>
+      <h2><span class="i18n-en">Three steps.</span><span class="i18n-zh">三步接上。</span></h2>
+      <p>
+        <span class="i18n-en">Install the app, install the daemon on the computer that runs your agent, pair them. On a phone, tap to install; on a computer, scan the QR with your phone's camera.</span>
+        <span class="i18n-zh">装 App、在跑 agent 的电脑上装 daemon、把两边配上。用手机点一下就装；用电脑就拿手机相机扫码。</span>
+      </p>
+    </div>
+
+    <p class="start-sub mono"><span class="i18n-en">Step 1 — get the app</span><span class="i18n-zh">第 1 步 —— 装 App</span></p>
+    <div class="dl-grid">
+      <!-- iOS / App Store -->
+      <div class="dl-card reveal" data-store="ios"
+           data-href="https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969">
+        <div class="dl-card-hd">
+          <span class="dl-ico" aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M16.36 12.78c.02 2.45 2.15 3.27 2.17 3.28-.02.06-.34 1.17-1.12 2.31-.67.99-1.37 1.97-2.48 1.99-1.08.02-1.43-.64-2.67-.64s-1.62.62-2.65.66c-1.06.04-1.87-1.07-2.55-2.05-1.39-2.01-2.45-5.68-1.02-8.16.71-1.23 1.98-2.01 3.36-2.03 1.05-.02 2.03.71 2.67.71.63 0 1.83-.88 3.09-.75.53.02 2.01.21 2.96 1.61-.08.05-1.77 1.04-1.75 3.07M14.4 5.39c.56-.68.94-1.62.84-2.56-.81.03-1.79.54-2.37 1.22-.52.6-.98 1.56-.86 2.48.9.07 1.82-.46 2.39-1.14"/></svg>
+          </span>
+          <div>
+            <div class="dl-name">iOS · iPadOS</div>
+            <div class="dl-sub"><span class="i18n-en">iPhone &amp; iPad</span><span class="i18n-zh">iPhone 与 iPad</span></div>
+          </div>
+        </div>
+        <div class="dl-qr" aria-hidden="true"><div class="dl-qr-box"></div></div>
+        <p class="dl-qr-hint mono"><span class="i18n-en">Scan to download</span><span class="i18n-zh">扫码下载</span></p>
+        <a class="btn btn-primary dl-btn" href="https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969" target="_blank" rel="noopener">
+          <span class="i18n-en">Download on the App Store</span><span class="i18n-zh">前往 App Store 下载</span>
+        </a>
+        <p class="dl-beta">
+          <span class="i18n-en">New versions land first on the <a href="https://testflight.apple.com/join/8z26MWWr" target="_blank" rel="noopener">TestFlight beta</a>.</span>
+          <span class="i18n-zh">新版本先上 <a href="https://testflight.apple.com/join/8z26MWWr" target="_blank" rel="noopener">TestFlight 测试版</a>。</span>
+        </p>
+      </div>
+      <!-- Android / APK — data-href is a direct-APK fallback; app.js upgrades it via the GitHub API -->
+      <div class="dl-card reveal" data-store="android"
+           data-href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk">
+        <div class="dl-card-hd">
+          <span class="dl-ico" aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 9.48l1.84-3.18a.4.4 0 00-.69-.4l-1.86 3.23a11.4 11.4 0 00-9.78 0L5.25 5.9a.4.4 0 10-.69.4L6.4 9.48A10.8 10.8 0 001 18.02h22a10.8 10.8 0 00-5.4-8.54M7 15.25a1.1 1.1 0 110-2.2 1.1 1.1 0 010 2.2m10 0a1.1 1.1 0 110-2.2 1.1 1.1 0 010 2.2"/></svg>
+          </span>
+          <div>
+            <div class="dl-name">Android · APK</div>
+            <div class="dl-sub"><span class="i18n-en">Install package on GitHub</span><span class="i18n-zh">GitHub 安装包</span></div>
+          </div>
+        </div>
+        <div class="dl-qr" aria-hidden="true"><div class="dl-qr-box"></div></div>
+        <p class="dl-qr-hint mono"><span class="i18n-en">Scan to download</span><span class="i18n-zh">扫码下载</span></p>
+        <a class="btn btn-primary dl-btn" href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk" target="_blank" rel="noopener">
+          <span class="i18n-en">Download APK on GitHub</span><span class="i18n-zh">前往 GitHub 下载 APK</span>
+        </a>
+        <p class="dl-beta">
+          <span class="i18n-en">HarmonyOS: a signed HAP is available as a <b>Preview</b> with limited capability — see <a href="https://github.com/heypandax/cc-pocket/releases/latest" target="_blank" rel="noopener">Releases</a>.</span>
+          <span class="i18n-zh">鸿蒙：有签名 HAP，属 <b>Preview</b>、能力受限——见 <a href="https://github.com/heypandax/cc-pocket/releases/latest" target="_blank" rel="noopener">Releases</a>。</span>
+        </p>
+      </div>
+    </div>
+
+    <div class="start-connect reveal">
+      <p class="start-sub mono"><span class="i18n-en">Step 2 — install the daemon on the computer that runs your agent</span><span class="i18n-zh">第 2 步 —— 在跑 agent 的那台电脑上装 daemon</span></p>
+      <p class="dl-desktop">
+        <span class="i18n-en">Any supported agent CLI will do — you do not have to use Claude.</span>
+        <span class="i18n-zh">任一受支持的 agent CLI 都行——不是非要 Claude。</span>
+      </p>
+
+      <!-- OS tabs: JS preselects the visitor's OS; click to switch if detection is wrong -->
+      <div class="os-tabs" role="tablist" aria-label="Operating system">
+        <button class="os-tab" type="button" role="tab" data-os="mac" aria-selected="false">macOS</button>
+        <button class="os-tab" type="button" role="tab" data-os="linux" aria-selected="false">Linux</button>
+        <button class="os-tab" type="button" role="tab" data-os="windows" aria-selected="false">Windows</button>
+      </div>
+      <!-- Install / Update: one toggle drives the visible command in whichever OS panel is active -->
+      <div class="mode-tabs" role="tablist" aria-label="Install or update">
+        <button class="mode-tab" type="button" role="tab" data-mode="install" aria-selected="true"><span class="i18n-en">Install</span><span class="i18n-zh">安装</span></button>
+        <button class="mode-tab" type="button" role="tab" data-mode="update" aria-selected="false"><span class="i18n-en">Update</span><span class="i18n-zh">更新</span></button>
+      </div>
+
+      <div class="os-panel" data-os="mac">
+        <div class="mode-block" data-mode="install">
+          <div class="cmd"><span class="prompt mono">$</span><code class="mono">curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash</code><button class="copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p class="os-note"><span class="i18n-en">Apple Silicon &amp; Intel — signed &amp; notarized, checksum-verified, installs under <span class="mono">~/.local</span> and registers the launchd service. Homebrew: <span class="mono">brew install --cask heypandax/tap/cc-pocket</span></span><span class="i18n-zh">Apple 芯片、Intel 都能用——已签名公证、下载自动校验，装进 <span class="mono">~/.local</span>，顺手注册好 launchd 服务。Homebrew：<span class="mono">brew install --cask heypandax/tap/cc-pocket</span></span></p>
+          <p class="os-note"><span class="i18n-en"><b>Desktop app</b> (optional, drive one computer from another): <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg">Apple Silicon .dmg</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg">Intel .dmg</a></span><span class="i18n-zh"><b>桌面 App</b>（可选，用一台电脑操另一台）：<a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg">Apple 芯片 .dmg</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg">Intel .dmg</a></span></p>
+        </div>
+        <div class="mode-block" data-mode="update">
+          <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket-daemon update</code><button class="copy" type="button" data-copy="cc-pocket-daemon update" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p class="os-note"><span class="i18n-en">A daemon installed by the one-liner keeps itself current (opt out with <span class="mono">cc-pocket-daemon config --auto-update off</span> and get a phone notification instead). Homebrew installs: <span class="mono">brew upgrade --cask heypandax/tap/cc-pocket</span></span><span class="i18n-zh">用一键脚本装的 daemon 会自己保持最新（想关掉就 <span class="mono">cc-pocket-daemon config --auto-update off</span>，改成只推一条手机通知）。Homebrew 装的用 <span class="mono">brew upgrade --cask heypandax/tap/cc-pocket</span></span></p>
+        </div>
+      </div>
+
+      <div class="os-panel" data-os="linux">
+        <div class="mode-block" data-mode="install">
+          <div class="cmd"><span class="prompt mono">$</span><code class="mono">curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash</code><button class="copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p class="os-note"><span class="i18n-en">Daemon for x86_64 / arm64. Self-contained tarball (bundled JRE), installs under <span class="mono">~/.local</span> + a <span class="mono">systemd&nbsp;--user</span> service.</span><span class="i18n-zh">daemon 支持 x86_64 / arm64。自带 JRE 的独立包，装进 <span class="mono">~/.local</span>，注册 <span class="mono">systemd&nbsp;--user</span> 服务。</span></p>
+          <p class="os-note linux-desktop"><span class="i18n-en"><b>No official Linux desktop package.</b> The desktop app is not distributed for Linux — <a href="https://github.com/heypandax/cc-pocket#build-from-source">build it from source</a>. The daemon above is the piece Linux actually needs.</span><span class="i18n-zh"><b>Linux 没有正式桌面安装包。</b>桌面 App 不为 Linux 分发——<a href="https://github.com/heypandax/cc-pocket#从源码构建">自己从源码构建</a>。Linux 上真正需要的是上面那个 daemon。</span></p>
+        </div>
+        <div class="mode-block" data-mode="update">
+          <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket-daemon update</code><button class="copy" type="button" data-copy="cc-pocket-daemon update" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p class="os-note"><span class="i18n-en">The daemon updates itself (it also checks daily and notifies your phone). Re-running the install one-liner works too.</span><span class="i18n-zh">daemon 会自己升级（每天自查，有新版就推到手机）。重跑一遍安装命令也一样。</span></p>
+        </div>
+      </div>
+
+      <div class="os-panel" data-os="windows">
+        <div class="mode-block" data-mode="install">
+          <div class="cmd"><span class="prompt mono">&gt;</span><code class="mono">irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex</code><button class="copy" type="button" data-copy="irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p class="os-note"><span class="i18n-en">Daemon for x86_64. One command: installs, registers a logon Scheduled Task, and drops straight into pairing. <a href="https://scoop.sh" target="_blank" rel="noopener">Scoop</a>: <span class="mono">scoop bucket add heypandax https://github.com/heypandax/scoop-bucket; scoop install cc-pocket-daemon</span></span><span class="i18n-zh">daemon 支持 x86_64。一条命令搞定：装好、注册登录时的计划任务、直接进配对。想用 <a href="https://scoop.sh" target="_blank" rel="noopener">Scoop</a>：<span class="mono">scoop bucket add heypandax https://github.com/heypandax/scoop-bucket; scoop install cc-pocket-daemon</span></span></p>
+          <p class="os-note"><span class="i18n-en"><b>Desktop app</b> (optional): <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi">Windows x86_64 .msi</a> — unsigned, so SmartScreen asks: More info → Run anyway.</span><span class="i18n-zh"><b>桌面 App</b>（可选）：<a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi">Windows x86_64 .msi</a>——未签名，SmartScreen 会拦：更多信息 → 仍要运行。</span></p>
+        </div>
+        <div class="mode-block" data-mode="update">
+          <div class="cmd"><span class="prompt mono">&gt;</span><code class="mono">cc-pocket-daemon update</code><button class="copy" type="button" data-copy="cc-pocket-daemon update" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p class="os-note"><span class="i18n-en">Re-running the install one-liner works too; Scoop installs: <span class="mono">scoop update cc-pocket-daemon</span></span><span class="i18n-zh">重跑一遍安装命令也一样；Scoop 装的用 <span class="mono">scoop update cc-pocket-daemon</span></span></p>
+        </div>
+      </div>
+
+      <p class="start-sub mono" style="margin-top:34px"><span class="i18n-en">Step 3 — pair</span><span class="i18n-zh">第 3 步 —— 配对</span></p>
+      <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket-daemon pair</code><button class="copy" type="button" data-copy="cc-pocket-daemon pair" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+      <p class="step-foot"><span class="i18n-en">Scan the QR it prints, or type the 6-digit code into the app. You are connected end-to-end. In mainland China use the mirror: <span class="mono">https://pocket.ark-nexus.cc/dl/install.sh</span></span><span class="i18n-zh">扫终端里打出的二维码，或把那 6 位码敲进 App。连上了，端到端加密。国内走镜像：<span class="mono">https://pocket.ark-nexus.cc/dl/install.sh</span></span></p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 8 · OPEN SOURCE / DOCS / COMMUNITY ══════════════ -->
+<section class="section" id="opensource">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Open source</span><span class="i18n-zh">开源</span></p>
+      <h2><span class="i18n-en">Read it, run it, host it.</span><span class="i18n-zh">看得到、跑得起、自己托管。</span></h2>
+      <p><span class="i18n-en">MIT, clean-room Kotlin. Android · iOS · desktop from one Compose Multiplatform codebase, plus the daemon, the relay and the shared wire protocol.</span><span class="i18n-zh">MIT 许可，Kotlin 从零写起。Android · iOS · 桌面同一套 Compose Multiplatform 代码，外加 daemon、中继和共享 wire 协议。</span></p>
+    </div>
+    <div class="sec-grid cols3">
+      <a class="sec-card resource-card reveal" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
+        <h4>GitHub</h4>
+        <p><span class="i18n-en">Source, issues, releases and the build instructions.</span><span class="i18n-zh">源码、issue、release 和构建说明。</span></p>
+        <span class="more"><span class="i18n-en">Open repository →</span><span class="i18n-zh">打开仓库 →</span></span>
+      </a>
+      <a class="sec-card resource-card reveal" href="/manual/en/">
+        <h4><span class="i18n-en">User manual</span><span class="i18n-zh">用户手册</span></h4>
+        <p><span class="i18n-en">Task-based steps with stable public URLs you can hand to an AI assistant.</span><span class="i18n-zh">按任务写的操作步骤，每篇都有稳定公开链接，可以直接发给 AI。</span></p>
+        <span class="more"><span class="i18n-en">Read the manual →</span><span class="i18n-zh">打开手册 →</span></span>
+      </a>
+      <a class="sec-card resource-card reveal" href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">
+        <h4><span class="i18n-en">Security model</span><span class="i18n-zh">安全模型</span></h4>
+        <p><span class="i18n-en">Threat model, what the relay can see, and the limits stated plainly.</span><span class="i18n-zh">威胁模型、中继看得到什么，以及边界在哪。</span></p>
+        <span class="more"><span class="i18n-en">Review security →</span><span class="i18n-zh">查看安全 →</span></span>
+      </a>
+      <a class="sec-card resource-card reveal" href="../features.html">
+        <h4><span class="i18n-en">Full feature list</span><span class="i18n-zh">完整能力列表</span></h4>
+        <p><span class="i18n-en">Everything the app does, in one long page.</span><span class="i18n-zh">App 能做的全部，一页写完。</span></p>
+        <span class="more"><span class="i18n-en">See everything →</span><span class="i18n-zh">全部看一遍 →</span></span>
+      </a>
+      <a class="sec-card resource-card reveal" href="/support/">
+        <h4><span class="i18n-en">Smart support</span><span class="i18n-zh">帮助与客服</span></h4>
+        <p><span class="i18n-en">Ask without signing in, or report a reproducible problem.</span><span class="i18n-zh">免登录提问，或者报一个可复现的问题。</span></p>
+        <span class="more"><span class="i18n-en">Ask a question →</span><span class="i18n-zh">去提问 →</span></span>
+      </a>
+      <a class="sec-card resource-card reveal" href="https://github.com/heypandax/cc-pocket/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">
+        <h4><span class="i18n-en">Contributing</span><span class="i18n-zh">参与贡献</span></h4>
+        <p><span class="i18n-en">Build prerequisites, test entry points, and how to report a vulnerability privately.</span><span class="i18n-zh">构建前置、测试入口，以及安全问题怎么私下报。</span></p>
+        <span class="more"><span class="i18n-en">Start here →</span><span class="i18n-zh">从这里开始 →</span></span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="osband">
+  <div class="wrap reveal">
+    <p>
+      <span class="i18n-en">Free and open source. <span class="accent">MIT licensed.</span> No Pairlet account, ever.</span>
+      <span class="i18n-zh">自由开源，<span class="accent">MIT 许可</span>。永远不需要 Pairlet 账号。</span>
+    </p>
+    <a class="btn btn-primary" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
+      <span class="star-ico" aria-hidden="true"></span>
+      <span class="i18n-en">Star on GitHub</span><span class="i18n-zh">在 GitHub 加星</span>
+      <span class="star-pill mono" style="display:none"><span class="star-ico" aria-hidden="true"></span><span class="star-n"></span></span>
+    </a>
+  </div>
+</section>
+
+<!-- ══════════════ FOOTER ══════════════ -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="top">
+      <div class="brand-col">
+        <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">Pairlet</span></a>
+        <p class="tagline"><span class="i18n-en">A companion for the coding agents on your computer.</span><span class="i18n-zh">随时接续你的 AI 编程任务。</span></p>
+      </div>
+      <div class="col">
+        <h5><span class="i18n-en">Product</span><span class="i18n-zh">产品</span></h5>
+        <a href="#loop"><span class="i18n-en">Control loop</span><span class="i18n-zh">控制回路</span></a>
+        <a href="#agents"><span class="i18n-en">Agent support</span><span class="i18n-zh">Agent 支持</span></a>
+        <a href="#surfaces"><span class="i18n-en">Platforms</span><span class="i18n-zh">平台</span></a>
+        <a href="#security"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></a>
+        <a href="../features.html"><span class="i18n-en">Full feature list</span><span class="i18n-zh">完整能力列表</span></a>
+        <a href="#start"><span class="i18n-en">Download</span><span class="i18n-zh">下载</span></a>
+      </div>
+      <div class="col">
+        <h5><span class="i18n-en">Resources</span><span class="i18n-zh">资源</span></h5>
+        <a href="../manual/"><span class="i18n-en">User manual</span><span class="i18n-zh">用户手册</span></a>
+        <a href="/support/"><span class="i18n-en">Help &amp; support</span><span class="i18n-zh">帮助与客服</span></a>
+        <a href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">GitHub</a>
+        <a href="../guides/claude-code-mobile-remote.html"><span class="i18n-en">Claude Code guide</span><span class="i18n-zh">Claude Code 指南</span></a>
+        <a href="../guides/codex-mobile-remote.html"><span class="i18n-en">Codex guide</span><span class="i18n-zh">Codex 指南</span></a>
+        <a href="../guides/compare-remote-options.html"><span class="i18n-en">Compare remote options</span><span class="i18n-zh">远程方案对比</span></a>
+        <a href="../guides/self-hosting.html"><span class="i18n-en">Self-hosting</span><span class="i18n-zh">自托管</span></a>
+        <a href="../guides/faq.html"><span class="i18n-en">FAQ</span><span class="i18n-zh">常见问题</span></a>
+      </div>
+      <div class="col">
+        <h5><span class="i18n-en">Legal</span><span class="i18n-zh">法律</span></h5>
+        <a href="https://github.com/heypandax/cc-pocket/blob/main/LICENSE" target="_blank" rel="noopener"><span class="i18n-en">MIT License</span><span class="i18n-zh">MIT 许可证</span></a>
+        <a href="../privacy.html"><span class="i18n-en">Privacy policy</span><span class="i18n-zh">隐私政策</span></a>
+        <a href="../guides/security.html"><span class="i18n-en">Security model</span><span class="i18n-zh">安全模型</span></a>
+      </div>
+    </div>
+    <div class="bottom">
+      <span class="copy-line mono">© 2026 Pairlet · MIT</span>
+      <div class="seg" role="group" aria-label="Language">
+        <a class="lang-page-link" href="/" lang="zh-CN" hreflang="zh-CN">中文首页</a><a class="lang-page-link" href="/en/" lang="en" hreflang="en">English page</a>
+        <button type="button" data-setlang="zh" aria-pressed="false">中</button>
+        <button type="button" data-setlang="en" class="on" aria-pressed="true">EN</button>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@04f46c6a/qrcode.min.js"></script>
+<script src="../app.js"></script>
+</body>
+</html>

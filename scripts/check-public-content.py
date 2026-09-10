@@ -51,6 +51,7 @@ PUBLIC_TARGETS = [
     "README.zh-CN.md",
     "site/index.html",
     "site/zh/index.html",
+    "site/en/index.html",
     "site/features.html",
     "site/privacy.html",
     "site/app.js",
@@ -109,7 +110,7 @@ EXPECTED_AGENTS = [
 BASELINE_VERSION = "1.9.4"
 SOURCE_COMMIT = "e9ee816f"
 # Files that must state the baseline and must not carry the previous public version.
-BASELINE_TARGETS = ["README.md", "README.zh-CN.md", "site/index.html", "site/zh/index.html", "site/llms.txt"]
+BASELINE_TARGETS = ["README.md", "README.zh-CN.md", "site/index.html", "site/en/index.html", "site/llms.txt"]
 PREVIOUS_VERSION = r"\b1\.9\.3\b"
 STALE_SOURCE_COMMITS = ["6162816a", "4016673b"]
 BASELINE_PHRASES = {
@@ -119,10 +120,9 @@ BASELINE_PHRASES = {
         f"Agent backend capability matrix for v{BASELINE_VERSION}",
         f"v{BASELINE_VERSION} 的 agent 后端能力矩阵",
     ],
-    "site/zh/index.html": [
+    "site/en/index.html": [
         f'"softwareVersion": "{BASELINE_VERSION}"',
-        f"<span>v{BASELINE_VERSION}</span>",
-        f"能力核验基线 main @ {SOURCE_COMMIT}",
+        f"Agent backend capability matrix for v{BASELINE_VERSION}",
     ],
 }
 

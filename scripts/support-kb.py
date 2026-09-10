@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Search and govern the CC Pocket support knowledge base.
+"""Search and govern the Pairlet support knowledge base.
 
 The public manual is canonical. Code-backed answers are stored as candidates
 with immutable evidence hashes so they can be reused provisionally, audited
@@ -24,7 +24,7 @@ from typing import Any, Iterable
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANUAL = ROOT / "site" / "manual" / "manual-content.json"
 DEFAULT_KB = ROOT / "support" / "kb"
-PUBLIC_MANUAL = "https://heypandax.github.io/cc-pocket/manual"
+PUBLIC_MANUAL = "https://pairlet.org/manual"
 ALLOWED_EVIDENCE_ROOTS = {
     "daemon",
     "docs",
@@ -530,7 +530,7 @@ def build_ai_index(manual_path: Path, output: Path, llms_output: Path) -> None:
     verified_at = str(manual.get("verifiedAt", "unknown"))
     articles: list[dict[str, Any]] = []
     llms_lines = [
-        "# CC Pocket User Manual — full AI index",
+        "# Pairlet User Manual — full AI index",
         "",
         f"Canonical source: {PUBLIC_MANUAL}/",
         f"Content verified: {verified_at}",

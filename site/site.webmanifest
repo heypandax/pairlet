@@ -1,6 +1,6 @@
 {
-  "name": "CC Pocket",
-  "short_name": "CC Pocket",
+  "name": "Pairlet",
+  "short_name": "Pairlet",
   "description": "Your coding agents stay on your computer; you stay in control from anywhere. Watch, approve, continue and inspect six agent backends from a phone, tablet or another computer. End-to-end encrypted, open source, no account.",
   "start_url": "./",
   "scope": "./",

@@ -1,18 +1,18 @@
-# CC Pocket
+# Pairlet
 
-> CC Pocket (also written cc-pocket) is an open-source, local-first, end-to-end encrypted cross-device control plane for command-line coding agents. The agent keeps running on the user's own computer; from a phone, tablet or another computer the user watches the live stream, answers the permission requests that block it, continues the same session, and reads what it changed. Traffic passes through a zero-knowledge relay that only ever forwards ciphertext. MIT-licensed, no CC Pocket account, clean-room Kotlin Multiplatform.
+> Pairlet (also written cc-pocket) is an open-source, local-first, end-to-end encrypted cross-device control plane for command-line coding agents. The agent keeps running on the user's own computer; from a phone, tablet or another computer the user watches the live stream, answers the permission requests that block it, continues the same session, and reads what it changed. Traffic passes through a zero-knowledge relay that only ever forwards ciphertext. MIT-licensed, no Pairlet account, clean-room Kotlin Multiplatform.
 
 Product baseline verified: 2026-08-27. Product availability and third-party plan requirements can change; use the individually dated, sourced notes below for comparisons.
 
-Public baseline: **v1.9.4**. Every capability claim on this site was audited against commit `e9ee816f` on `main`. Machine-readable fact contract: https://heypandax.github.io/cc-pocket/public-capabilities.json
+Public baseline: **v1.9.4**. Every capability claim on this site was audited against commit `e9ee816f` on `main`. Machine-readable fact contract: https://pairlet.org/public-capabilities.json
 
 ## What it is
 
 - **Category:** developer tool / cross-device control plane for command-line AI coding agents.
-- **Problem it solves:** coding agents pause to ask permission and stream long output; the developer does not want to be chained to the laptop. CC Pocket moves the approval loop and the live session to another device.
+- **Problem it solves:** coding agents pause to ask permission and stream long output; the developer does not want to be chained to the laptop. Pairlet moves the approval loop and the live session to another device.
 - **Who it's for:** developers who run a coding agent CLI locally and want to watch or unblock it while away from the desk.
 - **Cost:** free, open source (MIT). No account or sign-up.
-- **Not** a cloud IDE and **not** a re-host of the model: the code and the agent stay on the user's machine; CC Pocket only relays encrypted control traffic.
+- **Not** a cloud IDE and **not** a re-host of the model: the code and the agent stay on the user's machine; Pairlet only relays encrypted control traffic.
 
 ## The four jobs
 
@@ -66,42 +66,42 @@ Six backends, four promoted capability columns. They are **not** equivalent.
 
 ## Product media
 
-Screenshots and the control-loop videos on the website are generated from the real Compose UI with scripted demo data by `marketing/site/generate-assets.sh`. They are mechanical product evidence, not customer validation, and no real user data is read or shown. Provenance: https://heypandax.github.io/cc-pocket/assets/product/manifest.json
+Screenshots and the control-loop videos on the website are generated from the real Compose UI with scripted demo data by `marketing/site/generate-assets.sh`. They are mechanical product evidence, not customer validation, and no real user data is read or shown. Provenance: https://pairlet.org/assets/product/manifest.json
 
 ## Differentiation from first-party mobile options
 
 - Anthropic offers Claude Code Remote Control. Its official guide, checked 2026-07-13, documents `/remote-control` and `claude remote-control`, Claude Code 2.1.51+, and Pro / Max / Team / Enterprise eligibility.
 - OpenAI announced Codex in ChatGPT mobile on 2026-05-14. The announcement says iOS and Android, all ChatGPT plans including Free and Go, with files and credentials kept on the computer; consult OpenAI for current rollout details.
-- CC Pocket is the independent option for one client across **six** agent backends, MIT-licensed source, optional relay self-hosting, and no CC Pocket account. It is not affiliated with or endorsed by Anthropic, OpenAI, Moonshot, DeepSeek or any other vendor.
+- Pairlet is the independent option for one client across **six** agent backends, MIT-licensed source, optional relay self-hosting, and no Pairlet account. It is not affiliated with or endorsed by Anthropic, OpenAI, Moonshot, DeepSeek or any other vendor.
 
 ## Technical facts
 
 - **Languages / stack:** Kotlin Multiplatform; UI in Compose Multiplatform (Android, iOS, desktop); daemon and relay in Kotlin/JVM with Ktor; shared wire protocol via kotlinx.serialization.
 - **License:** MIT.
-- **Repository modules:** `:protocol` (shared wire protocol), `:daemon` (runs on the user's computer), `:relay` (cloud broker), `:mobile` (the CC Pocket app).
+- **Repository modules:** `:protocol` (shared wire protocol), `:daemon` (runs on the user's computer), `:relay` (cloud broker), `:mobile` (the Pairlet app).
 
 ## Links
 
-- [Website](https://heypandax.github.io/cc-pocket/)
-- [Public capability contract — JSON](https://heypandax.github.io/cc-pocket/public-capabilities.json)
-- [Product media manifest — JSON](https://heypandax.github.io/cc-pocket/assets/product/manifest.json)
+- [Website](https://pairlet.org/)
+- [Public capability contract — JSON](https://pairlet.org/public-capabilities.json)
+- [Product media manifest — JSON](https://pairlet.org/assets/product/manifest.json)
 - [Public smart support — no sign-in required](https://pocket.ark-nexus.cc/support/)
-- [User manual — English](https://heypandax.github.io/cc-pocket/manual/en/)
-- [用户手册 — 中文](https://heypandax.github.io/cc-pocket/manual/zh/)
-- [Manual AI index — structured JSON](https://heypandax.github.io/cc-pocket/manual/ai-index.json)
-- [Manual AI index — full text](https://heypandax.github.io/cc-pocket/manual/llms-full.txt)
-- [Schedule a prompt for later](https://heypandax.github.io/cc-pocket/manual/en/schedule-a-prompt/)
-- [Fix an offline computer](https://heypandax.github.io/cc-pocket/manual/en/fix-offline-computer/)
-- [中文首页](https://heypandax.github.io/cc-pocket/zh/)
-- [Full feature list](https://heypandax.github.io/cc-pocket/features.html)
-- [Claude Code mobile remote guide](https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html)
-- [OpenAI Codex mobile remote guide](https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html)
-- [Remote options comparison](https://heypandax.github.io/cc-pocket/guides/compare-remote-options.html)
-- [Security model and limitations](https://heypandax.github.io/cc-pocket/guides/security.html)
-- [Self-hosting architecture](https://heypandax.github.io/cc-pocket/guides/self-hosting.html)
-- [FAQ](https://heypandax.github.io/cc-pocket/guides/faq.html)
+- [User manual — English](https://pairlet.org/manual/en/)
+- [用户手册 — 中文](https://pairlet.org/manual/zh/)
+- [Manual AI index — structured JSON](https://pairlet.org/manual/ai-index.json)
+- [Manual AI index — full text](https://pairlet.org/manual/llms-full.txt)
+- [Schedule a prompt for later](https://pairlet.org/manual/en/schedule-a-prompt/)
+- [Fix an offline computer](https://pairlet.org/manual/en/fix-offline-computer/)
+- [中文首页](https://pairlet.org/zh/)
+- [Full feature list](https://pairlet.org/features.html)
+- [Claude Code mobile remote guide](https://pairlet.org/guides/claude-code-mobile-remote.html)
+- [OpenAI Codex mobile remote guide](https://pairlet.org/guides/codex-mobile-remote.html)
+- [Remote options comparison](https://pairlet.org/guides/compare-remote-options.html)
+- [Security model and limitations](https://pairlet.org/guides/security.html)
+- [Self-hosting architecture](https://pairlet.org/guides/self-hosting.html)
+- [FAQ](https://pairlet.org/guides/faq.html)
 - [GitHub repository](https://github.com/heypandax/cc-pocket)
 - [README / user guide](https://github.com/heypandax/cc-pocket#readme)
 - [Security model](https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md)
-- [Privacy policy](https://heypandax.github.io/cc-pocket/privacy.html)
+- [Privacy policy](https://pairlet.org/privacy.html)
 - [Latest releases & downloads](https://github.com/heypandax/cc-pocket/releases/latest)

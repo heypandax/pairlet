@@ -32,7 +32,7 @@ TEXT = {
             "Your computer keeps working.\nYou stay in control.",
         ],
         "tagline": "Your AI coding agent, in your pocket.",
-        "banner": ("CC POCKET", "now", "Task complete", "Clean the build cache · done in 4s"),
+        "banner": ("CC Pairlet", "now", "Task complete", "Clean the build cache · done in 4s"),
         "cap_size": 72, "cap_lh": 92,
     },
     "zh": {
@@ -45,7 +45,7 @@ TEXT = {
             "电脑持续工作\n掌控始终在你手中",
         ],
         "tagline": "你的 AI 编程助手，就在口袋里",
-        "banner": ("CC POCKET", "现在", "任务已完成", "清理构建缓存 · 用时 4 秒"),
+        "banner": ("CC Pairlet", "现在", "任务已完成", "清理构建缓存 · 用时 4 秒"),
         "cap_size": 76, "cap_lh": 100,
     },
 }[LANG]
@@ -87,8 +87,8 @@ for i, cap in enumerate(TEXT["captions"], 1):
 # ===== logo end-card =====
 card = Image.new("RGB", (W, H), (11, 12, 13)); d = ImageDraw.Draw(card)
 big = rounded(icon.resize((340, 340)), 76); card.paste(big, ((W - 340) // 2, 1000), big)
-f1 = bold(132); tw = d.textlength("CC Pocket", font=f1)
-d.text(((W - tw) // 2, 1430), "CC Pocket", font=f1, fill=(245, 245, 247))
+f1 = bold(132); tw = d.textlength("Pairlet", font=f1)
+d.text(((W - tw) // 2, 1430), "Pairlet", font=f1, fill=(245, 245, 247))
 f2 = body(54); tw2 = d.textlength(TEXT["tagline"], font=f2)
 d.text(((W - tw2) // 2, 1610), TEXT["tagline"], font=f2, fill=(150, 150, 154))
 card.save(f"{OUT}/logo.png")

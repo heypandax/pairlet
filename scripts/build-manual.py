@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the public, static CC Pocket manual from one bilingual content source."""
+"""Build the public, static Pairlet manual from one bilingual content source."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANUAL = ROOT / "site" / "manual"
 CONTENT = MANUAL / "manual-content.json"
-PUBLIC_BASE = "https://heypandax.github.io/cc-pocket/manual"
+PUBLIC_BASE = "https://pairlet.org/manual"
 VERIFIED = ""
 
 
@@ -60,18 +60,18 @@ def page_head(
 <link rel="alternate" hreflang="x-default" href="{x_default}" />
 <meta name="robots" content="{"noindex, nofollow" if noindex else "index, follow, max-image-preview:large, max-snippet:-1"}" />
 <meta property="og:type" content="{page_type}" />
-<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:site_name" content="Pairlet" />
 <meta property="og:title" content="{text(title)}" />
 <meta property="og:description" content="{text(description)}" />
 <meta property="og:url" content="{canonical}" />
-<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image" content="https://pairlet.org/manual/og-manual.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
 <meta property="og:locale" content="{og_locale}" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="{text(title)}" />
 <meta name="twitter:description" content="{text(description)}" />
-<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta name="twitter:image" content="https://pairlet.org/manual/og-manual.png" />
 <link rel="icon" href="{prefix}favicon.svg" type="image/svg+xml" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -90,7 +90,7 @@ def nav(locale: str, depth: int) -> str:
 <body data-locale="{locale}">
 <nav class="manual-nav">
   <div class="manual-wrap nav-inner">
-    <a class="brand" href="{site_root}" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <a class="brand" href="{site_root}" aria-label="Pairlet home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">Pairlet</span></a>
     <span class="nav-slash">/</span>
     <a class="manual-word" href="{manual_root}{locale}/">{"Manual" if locale == "en" else "用户手册"}</a>
     <div class="nav-actions">
@@ -164,7 +164,7 @@ def home_page(data: dict, locale: str) -> str:
   "url":"{canonical}",
   "description":{json.dumps(copy["metaDescription"], ensure_ascii=False)},
   "inLanguage":"{"zh-CN" if locale == "zh" else "en"}",
-  "isPartOf":{{"@id":"https://heypandax.github.io/cc-pocket/#website"}}
+  "isPartOf":{{"@id":"https://pairlet.org/#website"}}
 }}
 </script>
 """
@@ -172,7 +172,7 @@ def home_page(data: dict, locale: str) -> str:
         + f"""
 <main>
   <header class="manual-hero manual-wrap">
-    <div class="breadcrumbs"><a href="../../">CC Pocket</a><span>/</span><span>{"Manual" if locale == "en" else "用户手册"}</span></div>
+    <div class="breadcrumbs"><a href="../../">Pairlet</a><span>/</span><span>{"Manual" if locale == "en" else "用户手册"}</span></div>
     <p class="eyebrow">{"USER MANUAL" if locale == "en" else "用户手册"}</p>
     <h1>{text(copy["title"])}</h1>
     <p class="hero-lede">{text(copy["lede"])}</p>
@@ -214,7 +214,7 @@ def home_page(data: dict, locale: str) -> str:
     <div class="updated-list">{recent}</div>
   </section>
 </main>
-<footer class="manual-footer"><div class="manual-wrap"><span>© 2026 CC Pocket · MIT</span><span><a href="../../features.html">{"Features" if locale == "en" else "功能"}</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<footer class="manual-footer"><div class="manual-wrap"><span>© 2026 Pairlet · MIT</span><span><a href="../../features.html">{"Features" if locale == "en" else "功能"}</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
 <script id="manual-search-index" type="application/json">{index_json}</script>
 <script src="../manual.js"></script>
 </body>
@@ -270,13 +270,13 @@ def article_page(data: dict, article: dict, locale: str) -> str:
     )
     sections = "".join(render_section(section, locale) for section in article["sections"])
     prompt = (
-        "Open this public CC Pocket manual page and answer my question using only the verified steps on the page."
+        "Open this public Pairlet manual page and answer my question using only the verified steps on the page."
         if locale == "en"
-        else "打开这篇公开的 CC Pocket 用户手册，只依据页面中已核验的步骤回答我的问题。"
+        else "打开这篇公开的 Pairlet 用户手册，只依据页面中已核验的步骤回答我的问题。"
     )
     return (
         page_head(
-            title=f"{title} — CC Pocket {'Manual' if locale == 'en' else '用户手册'}",
+            title=f"{title} — Pairlet {'Manual' if locale == 'en' else '用户手册'}",
             description=summary,
             canonical=canonical,
             locale=locale,
@@ -334,26 +334,26 @@ def root_page() -> str:
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>CC Pocket User Manual</title>
-<meta name="description" content="Public task-based help for CC Pocket users and AI assistants." />
-<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/" />
-<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/" />
-<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/" />
-<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/" />
+<title>Pairlet User Manual</title>
+<meta name="description" content="Public task-based help for Pairlet users and AI assistants." />
+<link rel="canonical" href="https://pairlet.org/manual/" />
+<link rel="alternate" hreflang="en" href="https://pairlet.org/manual/en/" />
+<link rel="alternate" hreflang="zh-CN" href="https://pairlet.org/manual/zh/" />
+<link rel="alternate" hreflang="x-default" href="https://pairlet.org/manual/" />
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
 <meta property="og:type" content="website" />
-<meta property="og:site_name" content="CC Pocket" />
-<meta property="og:title" content="CC Pocket User Manual" />
-<meta property="og:description" content="Public, task-based help for CC Pocket users and AI assistants." />
-<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/" />
-<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:site_name" content="Pairlet" />
+<meta property="og:title" content="Pairlet User Manual" />
+<meta property="og:description" content="Public, task-based help for Pairlet users and AI assistants." />
+<meta property="og:url" content="https://pairlet.org/manual/" />
+<meta property="og:image" content="https://pairlet.org/manual/og-manual.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="CC Pocket User Manual" />
-<meta name="twitter:description" content="Public, task-based help for CC Pocket users and AI assistants." />
-<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","name":"CC Pocket User Manual","url":"https://heypandax.github.io/cc-pocket/manual/","inLanguage":["en","zh-CN"],"isPartOf":{"@type":"WebSite","name":"CC Pocket","url":"https://heypandax.github.io/cc-pocket/"}}</script>
+<meta name="twitter:title" content="Pairlet User Manual" />
+<meta name="twitter:description" content="Public, task-based help for Pairlet users and AI assistants." />
+<meta name="twitter:image" content="https://pairlet.org/manual/og-manual.png" />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","name":"Pairlet User Manual","url":"https://pairlet.org/manual/","inLanguage":["en","zh-CN"],"isPartOf":{"@type":"WebSite","name":"Pairlet","url":"https://pairlet.org/"}}</script>
 <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
 <link rel="stylesheet" href="../styles.css" />
 <link rel="stylesheet" href="manual.css" />
@@ -366,7 +366,7 @@ def root_page() -> str:
 </head>
 <body>
 <main class="language-gate manual-wrap">
-  <p class="eyebrow">CC POCKET</p>
+  <p class="eyebrow">Pairlet</p>
   <h1>User manual · 用户手册</h1>
   <p>Public, task-based help that can be opened by people and AI assistants.</p>
   <div><a class="manual-button primary" href="en/">English</a><a class="manual-button secondary" href="zh/">中文</a></div>

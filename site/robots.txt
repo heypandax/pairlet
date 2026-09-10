@@ -1,4 +1,4 @@
-# CC Pocket — https://heypandax.github.io/cc-pocket/
+# Pairlet — https://pairlet.org/
 # Public product documentation is open to crawling.
 
 User-agent: *
@@ -56,4 +56,4 @@ Allow: /
 User-agent: Bytespider
 Allow: /
 
-Sitemap: https://heypandax.github.io/cc-pocket/sitemap.xml
+Sitemap: https://pairlet.org/sitemap.xml

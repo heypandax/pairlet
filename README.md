@@ -1,4 +1,4 @@
-# CC Pocket
+# Pairlet
 
 [![CI](https://github.com/heypandax/cc-pocket/actions/workflows/ci.yml/badge.svg)](https://github.com/heypandax/cc-pocket/actions/workflows/ci.yml) [![Latest release](https://img.shields.io/github/v/release/heypandax/cc-pocket)](https://github.com/heypandax/cc-pocket/releases/latest) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -6,13 +6,13 @@
 
 **Your coding agents stay on your computer. You stay in control from anywhere.**
 
-CC Pocket is an open-source, local-first control plane for command-line coding agents. The agent keeps running on your own machine, against your own checkout; from a phone, a tablet or another computer you watch it work, answer the permission prompts that block it, continue the same session, and read what it changed. Traffic is end-to-end encrypted and passes through a **zero-knowledge relay** that only ever forwards ciphertext — no CC Pocket account, no content logging. Clean-room Kotlin, MIT.
+Pairlet is an open-source, local-first control plane for command-line coding agents. The agent keeps running on your own machine, against your own checkout; from a phone, a tablet or another computer you watch it work, answer the permission prompts that block it, continue the same session, and read what it changed. Traffic is end-to-end encrypted and passes through a **zero-knowledge relay** that only ever forwards ciphertext — no Pairlet account, no content logging. Clean-room Kotlin, MIT.
 
 **v1.9.4** drives six agent backends — Claude Code, OpenAI Codex, OpenCode, Kimi Code (Preview), ZCode and DeepSeek. They are not equivalent: see [the capability matrix](#agent-support) before you pick one.
 
 **🌐 [Website](https://heypandax.github.io/cc-pocket/)** · **📖 [User manual](https://pocket.ark-nexus.cc/manual/en/)** · **💬 [Support, no sign-in](https://pocket.ark-nexus.cc/support/)** · **📦 [Latest release](https://github.com/heypandax/cc-pocket/releases/latest)**
 
-<p align="center"><a href="https://heypandax.github.io/cc-pocket/"><img src="site/assets/product/overview.png" alt="CC Pocket: the desktop console showing paired machines and a live session, beside the phone app showing a session list and an approval decision." width="900"></a></p>
+<p align="center"><a href="https://heypandax.github.io/cc-pocket/"><img src="site/assets/product/overview.png" alt="Pairlet: the desktop console showing paired machines and a live session, beside the phone app showing a session list and an approval decision." width="900"></a></p>
 
 <sub>Real product UI with scripted demo data — regenerate with `bash marketing/site/generate-assets.sh`. Provenance: [`site/assets/product/manifest.json`](site/assets/product/manifest.json).</sub>
 
@@ -58,14 +58,14 @@ Public capability claims for **v1.9.4**, audited against commit [`e9ee816f`](htt
 - **Core session** means discover, replay, create, resume, send and receive text, and live streaming. Every backend does all of it.
 - **OpenCode has no enforceable interactive approval.** `opencode run` has no approval protocol, so those sessions run at **Full access** and the app says so up front instead of offering modes it cannot enforce.
 - **Kimi Code is Preview.** DeepSeek is supported, but narrow: approvals and multiple-choice questions are bridged to the app, but the sandbox mode is fixed at launch (changing it relaunches the session), and there is no Changed-files/diff view, no usage accounting and no model switching.
-- **DeepSeek Harness has no timeout of its own.** Left alone, an unanswered approval or question blocks its turn indefinitely — it does not deny. CC Pocket puts the request on the daemon's normal approval window instead: an approval that expires is answered *reject*, and a question that expires is answered *skipped*, so an unanswered request ends the wait rather than hanging it. DeepSeek also has no "always allow" — every request is a one-off decision.
+- **DeepSeek Harness has no timeout of its own.** Left alone, an unanswered approval or question blocks its turn indefinitely — it does not deny. Pairlet puts the request on the daemon's normal approval window instead: an approval that expires is answered *reject*, and a question that expires is answered *skipped*, so an unanswered request ends the wait rather than hanging it. DeepSeek also has no "always allow" — every request is a one-off decision.
 - Boundaries follow the release. Full detail: [Features](https://heypandax.github.io/cc-pocket/features.html) and the [User manual](https://pocket.ark-nexus.cc/manual/en/).
 
 ## Architecture & trust boundary
 
 ```mermaid
 flowchart LR
-    app["📱🖥️ CC Pocket app<br/>(phone · tablet · desktop)"] -- "wss · ciphertext" --> relay["relay<br/>(zero-knowledge broker)"]
+    app["📱🖥️ Pairlet app<br/>(phone · tablet · desktop)"] -- "wss · ciphertext" --> relay["relay<br/>(zero-knowledge broker)"]
     relay -- "wss · ciphertext" --> daemon["local daemon<br/>(your computer)"]
     daemon -- "stdio" --> agent["agent CLI<br/>(claude · codex · opencode · kimi · zcode · DeepSeek)"]
 ```
@@ -144,7 +144,7 @@ For a custom CLI location or an older daemon, persist its absolute path with `cc
 
 ### Works with third-party gateways
 
-If you route Claude Code through an LLM gateway or API relay (`ANTHROPIC_BASE_URL`), the official Remote Control [is disabled as of v2.1.196](https://code.claude.com/docs/en/remote-control) — it requires talking to `api.anthropic.com` directly. CC Pocket drives the CLI over stdio on your machine, so the endpoint does not matter. The daemon detects a gateway `ANTHROPIC_BASE_URL` and the model picker leads with one-tap presets for common vendor ids (DeepSeek, GLM, Kimi, Qwen, MiniMax) alongside a free-form custom id field. Which model an id actually reaches is decided by your gateway.
+If you route Claude Code through an LLM gateway or API relay (`ANTHROPIC_BASE_URL`), the official Remote Control [is disabled as of v2.1.196](https://code.claude.com/docs/en/remote-control) — it requires talking to `api.anthropic.com` directly. Pairlet drives the CLI over stdio on your machine, so the endpoint does not matter. The daemon detects a gateway `ANTHROPIC_BASE_URL` and the model picker leads with one-tap presets for common vendor ids (DeepSeek, GLM, Kimi, Qwen, MiniMax) alongside a free-form custom id field. Which model an id actually reaches is decided by your gateway.
 
 ## Build from source
 
@@ -153,7 +153,7 @@ If you route Claude Code through an LLM gateway or API relay (`ANTHROPIC_BASE_UR
 | `:protocol` | Shared wire protocol (`pocket/*` frames) — single source of truth | Kotlin Multiplatform + kotlinx.serialization |
 | `:daemon` | Runs on your computer; drives the agent CLI as a subprocess, dials out to the relay | Kotlin/JVM + Ktor |
 | `:relay` | Cloud broker: device-key pairing, ciphertext routing, multi-tenant, rate-limited | Kotlin/JVM + Ktor + SQLite |
-| `:mobile` | The CC Pocket app | Compose Multiplatform — Android · iOS · desktop |
+| `:mobile` | The Pairlet app | Compose Multiplatform — Android · iOS · desktop |
 
 Requires **JDK 17** (any distribution — the Gradle toolchain downloads one if yours differs), the **Android SDK** (`ANDROID_HOME` or `local.properties`; the Android modules are configured even for JVM-only tasks), and at least one installed, logged-in agent CLI. To build the mobile app, copy the committed Firebase placeholder once (a real Firebase project is only needed for push/analytics):
 

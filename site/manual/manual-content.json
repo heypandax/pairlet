@@ -3,16 +3,16 @@
   "verifiedAt": "2026-07-25",
   "home": {
     "en": {
-      "metaTitle": "CC Pocket User Manual — setup, sessions, approvals, agents, and fixes",
-      "metaDescription": "Public, task-based CC Pocket guides for people and AI assistants: install and pair, control sessions, schedule prompts, approve work, review changes, and troubleshoot the daemon.",
+      "metaTitle": "Pairlet User Manual — setup, sessions, approvals, agents, and fixes",
+      "metaDescription": "Public, task-based Pairlet guides for people and AI assistants: install and pair, control sessions, schedule prompts, approve work, review changes, and troubleshoot the daemon.",
       "title": "How can we help?",
       "lede": "Find the exact steps for a task, or fix something that stopped working. Every guide has a stable public URL you can send to an AI assistant.",
-      "searchLabel": "Search the CC Pocket manual",
+      "searchLabel": "Search the Pairlet manual",
       "searchPlaceholder": "Search setup, approvals, agents, changes…",
       "quickSchedule": "Schedule a prompt for later",
       "quickTakeover": "Take over a terminal session",
       "quickOffline": "Fix an offline computer",
-      "startTitle": "Start using CC Pocket",
+      "startTitle": "Start using Pairlet",
       "startMeta": "3 steps · about 6 minutes",
       "startInstall": "Install the daemon",
       "startInstallSub": "One command on the computer that runs your coding agent.",
@@ -28,16 +28,16 @@
       "recentTitle": "Recently updated guides"
     },
     "zh": {
-      "metaTitle": "CC Pocket 用户手册——安装、会话、审批、Agent 与故障排查",
-      "metaDescription": "面向用户与 AI 助手的 CC Pocket 公开任务指南：安装配对、控制会话、预约提示词、远程审批、查看改动与 daemon 故障排查。",
+      "metaTitle": "Pairlet 用户手册——安装、会话、审批、Agent 与故障排查",
+      "metaDescription": "面向用户与 AI 助手的 Pairlet 公开任务指南：安装配对、控制会话、预约提示词、远程审批、查看改动与 daemon 故障排查。",
       "title": "你想解决什么问题？",
       "lede": "按任务找到准确步骤，或排查突然失效的功能。每篇指南都有稳定公开链接，可以直接发给 AI 助手。",
-      "searchLabel": "搜索 CC Pocket 用户手册",
+      "searchLabel": "搜索 Pairlet 用户手册",
       "searchPlaceholder": "搜索安装、审批、Agent、改动…",
       "quickSchedule": "预约稍后发送提示词",
       "quickTakeover": "接管终端会话",
       "quickOffline": "修复离线电脑",
-      "startTitle": "开始使用 CC Pocket",
+      "startTitle": "开始使用 Pairlet",
       "startMeta": "3 步 · 约 6 分钟",
       "startInstall": "安装 daemon",
       "startInstallSub": "在运行编码 Agent 的电脑上执行一条命令。",
@@ -89,10 +89,10 @@
     {
       "slug": "install-and-pair",
       "title": {"en": "Install and pair a computer", "zh": "安装并配对电脑"},
-      "summary": {"en": "Install the CC Pocket daemon, print a one-time QR code, and pair the app without creating an account.", "zh": "安装 CC Pocket daemon，生成一次性二维码，无需注册账号即可完成 App 配对。"},
+      "summary": {"en": "Install the Pairlet daemon, print a one-time QR code, and pair the app without creating an account.", "zh": "安装 Pairlet daemon，生成一次性二维码，无需注册账号即可完成 App 配对。"},
       "shortAnswer": {
-        "en": "Install the daemon on the computer that runs your coding agent, run <code>cc-pocket-daemon pair</code>, then scan the QR code in the CC Pocket app or enter its 6-digit code.",
-        "zh": "在运行编码 Agent 的电脑上安装 daemon，执行 <code>cc-pocket-daemon pair</code>，再用 CC Pocket App 扫描二维码或输入 6 位配对码。"
+        "en": "Install the daemon on the computer that runs your coding agent, run <code>cc-pocket-daemon pair</code>, then scan the QR code in the Pairlet app or enter its 6-digit code.",
+        "zh": "在运行编码 Agent 的电脑上安装 daemon，执行 <code>cc-pocket-daemon pair</code>，再用 Pairlet App 扫描二维码或输入 6 位配对码。"
       },
       "categoryLabel": {"en": "Start here", "zh": "开始使用"},
       "aliases": {"en": ["install", "pair", "qr", "setup", "connect"], "zh": ["安装", "配对", "二维码", "连接电脑", "开始"]},
@@ -128,7 +128,7 @@
             },
             {
               "title": {"en": "Scan or type the code", "zh": "扫码或输入配对码"},
-              "body": {"en": "Open CC Pocket, choose Add computer, and scan the QR. If the camera is unavailable, type the six digits.", "zh": "打开 CC Pocket，选择“添加电脑”并扫描二维码；相机不可用时可输入 6 位数字。"}
+              "body": {"en": "Open CC Pairlet, choose Add computer, and scan the QR. If the camera is unavailable, type the six digits.", "zh": "打开 CC Pairlet，选择“添加电脑”并扫描二维码；相机不可用时可输入 6 位数字。"}
             },
             {
               "title": {"en": "Open a project", "zh": "打开项目"},
@@ -136,8 +136,8 @@
             }
           ],
           "note": {
-            "en": "Pairing is device-to-device. CC Pocket does not create a user account, and the daemon dials out—no inbound internet port is required.",
-            "zh": "配对发生在设备之间。CC Pocket 不创建用户账号；daemon 主动向外连接，无需开放公网入站端口。"
+            "en": "Pairing is device-to-device. Pairlet does not create a user account, and the daemon dials out—no inbound internet port is required.",
+            "zh": "配对发生在设备之间。Pairlet 不创建用户账号；daemon 主动向外连接，无需开放公网入站端口。"
           }
         }
       ],
@@ -321,8 +321,8 @@
       "title": {"en": "Take over a terminal session without forking", "zh": "无分叉接管终端会话"},
       "summary": {"en": "Observe a terminal-owned session read-only, then continue it in place when the terminal is no longer writing.", "zh": "先只读旁观终端会话；终端不再写入后，再原地接管继续。"},
       "shortAnswer": {
-        "en": "Open the terminal session in CC Pocket and tap <strong>Continue here</strong>. It resumes in place when the terminal is idle; it forks only while the terminal is still writing, which prevents two writers from corrupting one transcript.",
-        "zh": "在 CC Pocket 中打开终端会话并点击 <strong>Continue here</strong>。终端空闲时会原地恢复；只有终端仍在写入时才分叉，避免两个写入者破坏同一份记录。"
+        "en": "Open the terminal session in Pairlet and tap <strong>Continue here</strong>. It resumes in place when the terminal is idle; it forks only while the terminal is still writing, which prevents two writers from corrupting one transcript.",
+        "zh": "在 Pairlet 中打开终端会话并点击 <strong>Continue here</strong>。终端空闲时会原地恢复；只有终端仍在写入时才分叉，避免两个写入者破坏同一份记录。"
       },
       "categoryLabel": {"en": "Projects & sessions", "zh": "项目与会话"},
       "aliases": {"en": ["terminal", "continue here", "take over", "fork", "resume"], "zh": ["终端会话", "接管", "继续", "分叉", "恢复"]},
@@ -331,13 +331,13 @@
           "id": "observe",
           "heading": {"en": "Observe first", "zh": "先旁观"},
           "paragraphs": {
-            "en": ["Terminal-owned sessions appear in the project’s session list. Opening one starts in read-only observation, so CC Pocket can stream its output without becoming a second writer."],
-            "zh": ["终端拥有的会话会出现在项目会话列表中。打开后先进入只读旁观，CC Pocket 可以流式显示输出，但不会成为第二个写入者。"]
+            "en": ["Terminal-owned sessions appear in the project’s session list. Opening one starts in read-only observation, so Pairlet can stream its output without becoming a second writer."],
+            "zh": ["终端拥有的会话会出现在项目会话列表中。打开后先进入只读旁观，Pairlet 可以流式显示输出，但不会成为第二个写入者。"]
           }
         },
         {
           "id": "take-over",
-          "heading": {"en": "Continue from CC Pocket", "zh": "从 CC Pocket 继续"},
+          "heading": {"en": "Continue from Pairlet", "zh": "从 Pairlet 继续"},
           "steps": [
             {
               "title": {"en": "Wait for the terminal turn to settle", "zh": "等待终端本轮结束"},
@@ -345,11 +345,11 @@
             },
             {
               "title": {"en": "Tap Continue here", "zh": "点击 Continue here"},
-              "body": {"en": "CC Pocket resumes the same session in place when it is safe to do so.", "zh": "条件安全时，CC Pocket 会在同一个会话中原地接续。"}
+              "body": {"en": "Pairlet resumes the same session in place when it is safe to do so.", "zh": "条件安全时，Pairlet 会在同一个会话中原地接续。"}
             },
             {
               "title": {"en": "Keep working", "zh": "继续工作"},
-              "body": {"en": "Prompts, approvals, interrupts, and live output now behave like any other CC Pocket-controlled session.", "zh": "之后的提示词、审批、打断和实时输出，与普通 CC Pocket 会话一致。"}
+              "body": {"en": "Prompts, approvals, interrupts, and live output now behave like any other Pairlet-controlled session.", "zh": "之后的提示词、审批、打断和实时输出，与普通 Pairlet 会话一致。"}
             }
           ],
           "note": {
@@ -472,8 +472,8 @@
           "id": "isolated",
           "heading": {"en": "What is isolated", "zh": "哪些内容会隔离"},
           "paragraphs": {
-            "en": ["After the daemon successfully prepares its isolated <code>CLAUDE_CONFIG_DIR</code> and reports credential isolation as enabled, only the credential store is private to the daemon. Logging in or out from CC Pocket then changes the daemon’s Claude credentials without replacing the terminal Claude login."],
-            "zh": ["daemon 成功准备独立的 <code>CLAUDE_CONFIG_DIR</code> 并报告凭据隔离已开启后，只有凭据存储归 daemon 独立使用。此时在 CC Pocket 中登录或退出，只会改变 daemon 的 Claude 凭据，不会替换终端中 Claude 的登录状态。"]
+            "en": ["After the daemon successfully prepares its isolated <code>CLAUDE_CONFIG_DIR</code> and reports credential isolation as enabled, only the credential store is private to the daemon. Logging in or out from Pairlet then changes the daemon’s Claude credentials without replacing the terminal Claude login."],
+            "zh": ["daemon 成功准备独立的 <code>CLAUDE_CONFIG_DIR</code> 并报告凭据隔离已开启后，只有凭据存储归 daemon 独立使用。此时在 Pairlet 中登录或退出，只会改变 daemon 的 Claude 凭据，不会替换终端中 Claude 的登录状态。"]
           }
         },
         {
@@ -500,8 +500,8 @@
           "id": "fallback",
           "heading": {"en": "If isolation setup fails", "zh": "如果隔离准备失败"},
           "paragraphs": {
-            "en": ["The daemon prints a warning and continues without credential isolation. In that state, do not assume CC Pocket sign-in or sign-out is independent of the terminal Claude login; fix the daemon setup before switching accounts."],
-            "zh": ["daemon 会输出告警并继续以未隔离模式运行。此时不要假定 CC Pocket 的登录或退出与终端 Claude 登录相互独立；请先修复 daemon 的隔离准备问题，再切换账号。"]
+            "en": ["The daemon prints a warning and continues without credential isolation. In that state, do not assume Pairlet sign-in or sign-out is independent of the terminal Claude login; fix the daemon setup before switching accounts."],
+            "zh": ["daemon 会输出告警并继续以未隔离模式运行。此时不要假定 Pairlet 的登录或退出与终端 Claude 登录相互独立；请先修复 daemon 的隔离准备问题，再切换账号。"]
           }
         }
       ],
@@ -578,7 +578,7 @@
               "body": {"en": "Wake the computer, confirm it has internet access, and let the installed login service restart the daemon.", "zh": "唤醒电脑、确认网络可用，并让已安装的登录服务重新拉起 daemon。"}
             },
             {
-              "title": {"en": "Return to CC Pocket", "zh": "返回 CC Pocket"},
+              "title": {"en": "Return to Pairlet", "zh": "返回 Pairlet"},
               "body": {"en": "The app reconnects automatically when the existing pairing is still valid.", "zh": "只要原有配对仍有效，App 会自动重新连接。"}
             }
           ]
@@ -597,7 +597,7 @@
     {
       "slug": "update-daemon",
       "title": {"en": "Update the daemon", "zh": "更新 daemon"},
-      "summary": {"en": "Use the built-in updater, or the package manager that installed CC Pocket, then confirm the new daemon is online.", "zh": "使用内置更新器或最初安装 CC Pocket 的包管理器，再确认新版 daemon 在线。"},
+      "summary": {"en": "Use the built-in updater, or the package manager that installed Pairlet, then confirm the new daemon is online.", "zh": "使用内置更新器或最初安装 Pairlet 的包管理器，再确认新版 daemon 在线。"},
       "shortAnswer": {
         "en": "Run <code>cc-pocket-daemon update</code>. If the installation is managed by Homebrew or Scoop, use that package manager instead.",
         "zh": "执行 <code>cc-pocket-daemon update</code>。如果安装由 Homebrew 或 Scoop 管理，请改用对应包管理器。"
@@ -630,8 +630,8 @@
           "id": "verify",
           "heading": {"en": "Verify the result", "zh": "确认更新结果"},
           "paragraphs": {
-            "en": ["Run <code>cc-pocket-daemon status</code>, then return to CC Pocket. Existing valid device pairings reconnect automatically after the daemon restarts."],
-            "zh": ["执行 <code>cc-pocket-daemon status</code>，再返回 CC Pocket。daemon 重启后，仍有效的设备配对会自动重新连接。"]
+            "en": ["Run <code>cc-pocket-daemon status</code>, then return to Pairlet. Existing valid device pairings reconnect automatically after the daemon restarts."],
+            "zh": ["执行 <code>cc-pocket-daemon status</code>，再返回 Pairlet。daemon 重启后，仍有效的设备配对会自动重新连接。"]
           }
         }
       ],

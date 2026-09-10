@@ -20,6 +20,7 @@ LOCALES = ("en-US", "zh-Hans")
 IPAD_DIR = "ipadPro129"
 IPAD_SIZE = (2048, 2732)
 LIMITS = {
+    "name.txt": 30,
     "description.txt": 4000,
     "keywords.txt": 100,
     "promotional_text.txt": 170,
@@ -145,7 +146,7 @@ def main() -> None:
             fail(f"public metadata must not promote or expose draft text: {phrase}")
 
     print(
-        "App Store content OK: 2 locales, 8 metadata fields, "
+        "App Store content OK: 2 locales, 10 metadata fields, "
         "12 iPhone 6.5\" + 12 iPad 12.9\" screenshots, 2 previews"
     )
 

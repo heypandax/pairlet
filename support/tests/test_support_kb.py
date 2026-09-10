@@ -60,10 +60,10 @@ class SupportKnowledgeBaseTest(unittest.TestCase):
 
             self.assertEqual(1, index["schemaVersion"])
             self.assertEqual(
-                "https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/",
+                "https://pairlet.org/manual/zh/install-and-pair/",
                 article["locales"]["zh"]["url"],
             )
-            self.assertIn("CC Pocket User Manual", llms.read_text(encoding="utf-8"))
+            self.assertIn("Pairlet User Manual", llms.read_text(encoding="utf-8"))
 
     def test_promoted_candidate_is_retired_from_search(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

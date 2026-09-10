@@ -41,6 +41,13 @@ def make_store(path=":memory:", **overrides):
 
 
 class FakeResponse:
+    def test_pairlet_manual_sources_keep_old_urls_and_reject_lookalikes(self):
+        for host in ("pairlet.org", "pocket.ark-nexus.cc"):
+            self.assertTrue(support_web.is_public_source_url(f"https://{host}/manual/zh/install-and-pair/"))
+            for url in (f"https://{host}/support-api/config", f"https://{host}.evil.example/manual/", f"https://{host}@evil.example/manual/", f"http://{host}/manual/", f"https://{host}:8443/manual/"):
+                self.assertFalse(support_web.is_public_source_url(url))
+        self.assertTrue(support_web.is_public_source_url("https://heypandax.github.io/cc-pocket/manual/en/"))
+
     def __init__(self, payload):
         self.payload = json.dumps(payload).encode("utf-8")
 
