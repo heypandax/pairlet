@@ -46,4 +46,86 @@ class ZCodeLauncherTest {
                 .contains("/home/panda/.zcode/server/agents/glm"),
         )
     }
+
+    @Test
+    fun `registry output yields the recorded install directory once`() {
+        val output = """
+            HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\a1b2c3d4-zcode
+                DisplayName    REG_SZ    ZCode
+                DisplayIcon    REG_SZ    D:\Apps\ZCode\ZCode.exe,0
+                InstallLocation    REG_SZ    D:\Apps\ZCode
+                Publisher    REG_SZ    Z.ai
+
+            End of search: 3 match(es) found.
+        """.trimIndent()
+
+        assertEquals(listOf("D:\\Apps\\ZCode"), ZCodeLauncher.parseRegistryInstallLocations(output))
+    }
+
+    @Test
+    fun `registry lookup is skipped off windows`() {
+        assertTrue(
+            ZCodeLauncher.registryInstallLocations(
+                query = { "    InstallLocation    REG_SZ    D:\\Apps\\ZCode" },
+                osName = "Mac OS X",
+            ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `registry lookup queries the uninstall hives on windows`() {
+        val queried = mutableListOf<List<String>>()
+        val dirs = ZCodeLauncher.registryInstallLocations(
+            query = { argv ->
+                queried += argv
+                "    InstallLocation    REG_SZ    D:\\Apps\\ZCode\n"
+            },
+            osName = "Windows 11",
+        )
+
+        assertEquals(listOf("D:\\Apps\\ZCode"), dirs)
+        assertEquals(3, queried.size)
+        assertTrue(queried.all { it.first() == "reg.exe" && it.containsAll(listOf("query", "/s", "/f", "ZCode", "/d")) })
+        assertTrue(queried.any { it.any { arg -> arg.startsWith("HKCU\\Software\\Microsoft") } })
+        assertTrue(queried.any { it.any { arg -> arg.startsWith("HKLM\\Software\\WOW6432Node") } })
+    }
+
+    @Test
+    fun `custom install directory from the registry becomes a probe candidate`() {
+        val dirs = ZCodeLauncher.fallbackDirs(
+            home = "C:\\Users\\t",
+            osName = "Windows 11",
+            localAppData = "C:\\Users\\t\\AppData\\Local",
+            programFiles = "C:\\Program Files",
+            programFilesX86 = "C:\\Program Files (x86)",
+            appData = "C:\\Users\\t\\AppData\\Roaming",
+            registryDirs = listOf("D:\\Apps\\ZCode"),
+        )
+
+        assertTrue(dirs.contains("D:\\Apps\\ZCode\\resources\\glm"), "missing registry glm dir in $dirs")
+        assertTrue(dirs.contains("C:\\Users\\t\\AppData\\Roaming\\npm"), "missing npm global bin in $dirs")
+        assertTrue(dirs.contains("C:\\Program Files (x86)\\ZCode\\resources\\glm"), "missing x86 dir in $dirs")
+    }
+
+    @Test
+    fun `programs directory scan finds a version flavoured bundle name`() {
+        val localAppData = Files.createTempDirectory("zcode-localappdata")
+        val bundle = localAppData.resolve("Programs").resolve("zcode-desktop")
+        bundle.resolve("resources").resolve("glm").createDirectories()
+
+        val dirs = ZCodeLauncher.fallbackDirs(
+            home = "C:\\Users\\t",
+            osName = "Windows 11",
+            localAppData = localAppData.toString(),
+            programFiles = null,
+            programFilesX86 = null,
+            appData = null,
+            registryDirs = emptyList(),
+        )
+
+        assertTrue(
+            dirs.contains(bundle.resolve("resources").resolve("glm").toString()),
+            "scanned bundle missing from $dirs",
+        )
+    }
 }

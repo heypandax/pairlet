@@ -5,6 +5,8 @@ import dev.ccpocket.daemon.agent.ExecutableResolver
 import dev.ccpocket.daemon.util.logger
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.isExecutable
 import kotlin.io.path.isRegularFile
 
@@ -18,6 +20,8 @@ import kotlin.io.path.isRegularFile
  * agents' sessions.
  */
 object ZCodeLauncher {
+    private const val REG_TIMEOUT_SECONDS = 5L
+
     private val log = logger("ZCodeLauncher")
     private val isWindows: Boolean = System.getProperty("os.name").lowercase().contains("win")
     private val envBin: String? = System.getenv("CC_POCKET_ZCODE_BIN")
@@ -26,28 +30,42 @@ object ZCodeLauncher {
         if (isWindows) listOf("zcode-agent.exe", "zcode.exe", "zcode.cmd", "zcode.bat", "zcode")
         else listOf("zcode-agent", "zcode")
 
+    /** electron-builder's NSIS uninstall entries — the only non-guessing source of a custom install dir. */
+    private val uninstallKeys: List<String> = listOf(
+        "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+        "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+        "HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+    )
+
+    private val regValueLine =
+        Regex("^(InstallLocation|DisplayIcon)\\s+REG_(?:SZ|EXPAND_SZ)\\s+(.+)$", RegexOption.IGNORE_CASE)
+
     /** Official-bundle locations plus the conventional user/global CLI bins for each platform. */
     internal fun fallbackDirs(
         home: String = System.getProperty("user.home"),
         osName: String = System.getProperty("os.name"),
         localAppData: String? = System.getenv("LOCALAPPDATA"),
         programFiles: String? = System.getenv("ProgramFiles"),
+        programFilesX86: String? = System.getenv("ProgramFiles(x86)"),
+        appData: String? = System.getenv("APPDATA"),
+        registryDirs: List<String> = registryInstallLocations(osName = osName),
     ): List<String> = buildList {
         val windows = osName.lowercase().contains("win")
         if (windows) {
+            // Evidence before guesses: the installer records where it actually landed, so a custom
+            // directory such as D:\Apps\ZCode becomes discoverable instead of unguessable (issue #353).
+            registryDirs.forEach { addAll(windowsBundleDirs(it)) }
             localAppData?.let {
-                add(Path.of(it, "Programs", "ZCode", "bin").toString())
-                add(Path.of(it, "Programs", "ZCode", "resources", "app", "bin").toString())
-                add(Path.of(it, "Programs", "ZCode", "resources", "glm").toString())
+                addAll(windowsBundleDirs(winJoin(it, "Programs", "ZCode")))
+                addAll(scannedProgramsBundles(Path.of(it, "Programs")))
             }
-            programFiles?.let {
-                add(Path.of(it, "ZCode", "bin").toString())
-                add(Path.of(it, "ZCode", "resources", "app", "bin").toString())
-                add(Path.of(it, "ZCode", "resources", "glm").toString())
-            }
-            add(Path.of(home, "AppData", "Local", "Programs", "ZCode", "bin").toString())
-            add(Path.of(home, "AppData", "Local", "Programs", "ZCode", "resources", "app", "bin").toString())
-            add(Path.of(home, "AppData", "Local", "Programs", "ZCode", "resources", "glm").toString())
+            programFiles?.let { addAll(windowsBundleDirs(winJoin(it, "ZCode"))) }
+            programFilesX86?.let { addAll(windowsBundleDirs(winJoin(it, "ZCode"))) }
+            addAll(windowsBundleDirs(winJoin(home, "AppData", "Local", "Programs", "ZCode")))
+            addAll(scannedProgramsBundles(Path.of(home, "AppData", "Local", "Programs")))
+            // npm's global bin on Windows, matching DshLauncher: a service-started daemon inherits a
+            // sanitized PATH and would otherwise never see a user-global CLI install.
+            appData?.let { add(winJoin(it, "npm")) }
         } else {
             // macOS official DMG (system- and user-local installs). Keep both layouts: ZCode 3.x ships
             // the VS Code-style app/bin entry, while earlier bundles exposed a Resources/bin wrapper.
@@ -75,6 +93,88 @@ object ZCodeLauncher {
         }
     }
 
+    /** The three layouts an electron-builder ZCode install can expose under one install directory. */
+    private fun windowsBundleDirs(base: String): List<String> = listOf(
+        winJoin(base, "resources", "glm"),
+        winJoin(base, "resources", "app", "bin"),
+        winJoin(base, "bin"),
+    )
+
+    /** `%LOCALAPPDATA%\Programs` holds one directory per per-user install; its name is release-flavoured. */
+    private fun scannedProgramsBundles(programs: Path): List<String> = runCatching {
+        if (!Files.isDirectory(programs)) return emptyList()
+        val bundles = Files.list(programs).use { stream ->
+            stream.filter { Files.isDirectory(it) }
+                .filter { it.fileName.toString().lowercase().startsWith("zcode") }
+                .toList()
+        }
+        bundles.flatMap { dir ->
+            listOf(
+                dir.resolve("resources").resolve("glm").toString(),
+                dir.resolve("resources").resolve("app").resolve("bin").toString(),
+                dir.resolve("bin").toString(),
+            )
+        }
+    }.getOrElse { emptyList() }
+
+    /** Windows paths stay backslash-joined even when this code is exercised on a POSIX host (tests). */
+    private fun winJoin(base: String, vararg parts: String): String =
+        (listOf(base.trimEnd('\\', '/')) + parts).joinToString("\\")
+
+    /**
+     * Install directories recorded by the NSIS uninstall entries. `reg query <key> /s /f ZCode /d`
+     * searches value *data* (not names), so a bundle installed anywhere still surfaces its own path.
+     * Non-Windows hosts short-circuit: there is no registry to ask.
+     */
+    internal fun registryInstallLocations(
+        query: (List<String>) -> String? = ::runReg,
+        osName: String = System.getProperty("os.name"),
+    ): List<String> {
+        if (!osName.lowercase().contains("win")) return emptyList()
+        val found = LinkedHashMap<String, String>()
+        for (key in uninstallKeys) {
+            val output = query(listOf("reg.exe", "query", key, "/s", "/f", "ZCode", "/d")) ?: continue
+            for (dir in parseRegistryInstallLocations(output)) found.putIfAbsent(dir.lowercase(), dir)
+        }
+        return found.values.toList()
+    }
+
+    /**
+     * Pulls install directories out of `reg query` output. `InstallLocation` is taken as-is; `DisplayIcon`
+     * contributes the directory of its executable (electron-builder writes it as `<dir>\ZCode.exe,0`).
+     */
+    internal fun parseRegistryInstallLocations(regOutput: String): List<String> {
+        val found = LinkedHashMap<String, String>()
+        for (raw in regOutput.lineSequence()) {
+            val match = regValueLine.matchEntire(raw.trim()) ?: continue
+            val name = match.groupValues[1]
+            val value = match.groupValues[2].trim().trim('"')
+            if (value.isEmpty() || value.equals("(value not set)", ignoreCase = true)) continue
+            val dir = if (name.equals("InstallLocation", ignoreCase = true)) {
+                value.trimEnd('\\', '/')
+            } else {
+                val exe = value.replace(Regex(",\\s*-?\\d+$"), "").trim().trim('"')
+                exe.substringBeforeLast('\\', "")
+                    .ifEmpty { exe.substringBeforeLast('/', "") }
+                    .trimEnd('\\', '/')
+            }
+            if (dir.isNotEmpty()) found.putIfAbsent(dir.lowercase(), dir)
+        }
+        return found.values.toList()
+    }
+
+    /** Any failure is answered with null: a missing/blocked reg.exe must never break resolution. */
+    private fun runReg(argv: List<String>): String? = runCatching {
+        val proc = ProcessBuilder(argv).redirectErrorStream(true).start()
+        proc.outputStream.close()
+        val reader = CompletableFuture.supplyAsync { proc.inputStream.bufferedReader().use { it.readText() } }
+        if (!proc.waitFor(REG_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            proc.destroyForcibly()
+            return@runCatching null
+        }
+        reader.get(REG_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+    }.getOrNull()
+
     fun resolveExecutable(explicit: String? = null): Path {
         explicit?.let { return Path.of(it).toRealPath() }
         // The official 3.7.6 bundle's Resources/glm/zcode.cjs has a /usr/bin/env node shebang. Never
@@ -86,20 +186,26 @@ object ZCodeLauncher {
                 return path.toRealPath()
             }
         }
+        val registryDirs = registryInstallLocations()
+        val dirs = fallbackDirs(registryDirs = registryDirs)
         runCatching {
             ExecutableResolver.resolve(
                 explicit = null,
                 envBin = null,
                 exeNames = exeNames,
-                fallbackDirs = fallbackDirs(),
+                fallbackDirs = dirs,
                 notFound = "zcode wrapper not found",
             )
         }.getOrNull()?.let { return it }
-        fallbackDirs().asSequence().map { Path.of(it, "zcode.cjs") }
+        dirs.asSequence().map { Path.of(it, "zcode.cjs") }
             .firstOrNull { it.isRegularFile() }?.let { return it.toRealPath() }
+        // Ship the evidence with the failure: a pasted-back error then states exactly where we looked.
+        val registryNote =
+            if (isWindows) " registry: ${registryDirs.ifEmpty { listOf("none") }.joinToString(", ")}" else ""
         error(
             "zcode executable not found. Install the official ZCode desktop app, " +
-                "or set CC_POCKET_ZCODE_BIN / pass --zcode-bin.",
+                "or set CC_POCKET_ZCODE_BIN / pass --zcode-bin. " +
+                "Probed: ${dirs.joinToString(", ")}" + registryNote,
         )
     }
 
@@ -139,10 +245,32 @@ object ZCodeLauncher {
         val resources = cjs.parent?.parent ?: return null
         val contents = resources.parent ?: return null
         val candidates = if (isWindows) {
-            listOf(contents.resolve("ZCode.exe"), resources.parent?.parent?.resolve("ZCode.exe"))
+            // NTFS is case-insensitive but Files.isExecutable matches the exact name handed to it, so list
+            // both spellings; the sole-exe scan then covers renamed/rebranded installers (issue #353).
+            listOfNotNull(
+                contents.resolve("ZCode.exe"),
+                contents.resolve("zcode.exe"),
+                contents.parent?.resolve("ZCode.exe"),
+                contents.parent?.resolve("zcode.exe"),
+                soleWindowsExe(contents),
+            )
         } else {
             listOf(contents.resolve("MacOS").resolve("ZCode"), contents.resolve("zcode"))
         }
-        return candidates.filterNotNull().firstOrNull { Files.isExecutable(it) }
+        return candidates.firstOrNull { Files.isExecutable(it) }
     }
+
+    /** Only adopted when the install directory holds exactly one plausible launcher — never a guess. */
+    private fun soleWindowsExe(dir: Path): Path? = runCatching {
+        if (!Files.isDirectory(dir)) return null
+        val exes = Files.list(dir).use { stream ->
+            stream.filter { Files.isRegularFile(it) }
+                .filter { path ->
+                    val name = path.fileName.toString().lowercase()
+                    name.endsWith(".exe") && !name.startsWith("uninstall") && name != "elevate.exe"
+                }
+                .toList()
+        }
+        exes.singleOrNull()
+    }.getOrNull()
 }
