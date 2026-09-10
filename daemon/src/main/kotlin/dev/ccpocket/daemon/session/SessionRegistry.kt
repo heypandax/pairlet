@@ -542,9 +542,15 @@ class SessionRegistry(
         val takeOverTranscript = resume?.let { transcriptResolver(effectiveAgent, open.workdir, it) }
         val forkForTakeOver = open.takeOver && resume != null && takeOverTranscript != null &&
             externallyActive(resume, open.workdir, takeOverTranscript, effectiveAgent)
+        // issue #363: the requested launch shape rides in the open log — a "full auto didn't apply" report
+        // used to be diagnosable only by `ps` on the child's argv, which says nothing about what the
+        // client actually asked for (a client that never sent BYPASS vs a daemon that dropped it).
         log.info(
             "open ${resume?.take(8) ?: "new"}${if (open.takeOver) " (take-over)" else ""} → " +
-                "convo ${convoId.take(8)}… agent=$effectiveAgent${if (forkForTakeOver) " FORK" else ""}",
+                "convo ${convoId.take(8)}… agent=$effectiveAgent${if (forkForTakeOver) " FORK" else ""}" +
+                " mode=${open.mode}${open.permissionMode?.let { "/$it" } ?: ""}" +
+                " model=${open.model ?: "-"} effort=${open.effort ?: "-"}" +
+                "${if (origin != null) " origin=$origin" else ""}",
         )
         // takeOver → Conversation.open spawns EAGERLY (seize the session now); a plain open starts lazily on the
         // first prompt (issue #61) so merely previewing a session never holds/occupies it for the desktop.
