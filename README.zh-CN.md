@@ -10,9 +10,9 @@ Pairlet 是一个开源的本地优先控制面，用来遥控命令行编码 ag
 
 **v1.9.4** 支持六个 agent 后端：Claude Code、OpenAI Codex、OpenCode、Kimi Code（Preview）、ZCode 和 DeepSeek。它们的能力**并不等价**，选之前先看[能力矩阵](#agent-支持)。
 
-**🌐 [官网](https://heypandax.github.io/cc-pocket/)** · **📖 [用户手册](https://pocket.ark-nexus.cc/manual/zh/)** · **💬 [帮助与客服（免登录）](https://pocket.ark-nexus.cc/support/)** · **📦 [最新 Release](https://github.com/heypandax/cc-pocket/releases/latest)**
+**🌐 [官网](https://pairlet.org/)** · **📖 [用户手册](https://pairlet.org/manual/zh/)** · **💬 [帮助与客服（免登录）](https://pairlet.org/support/)** · **📦 [最新 Release](https://github.com/heypandax/cc-pocket/releases/latest)**
 
-<p align="center"><a href="https://heypandax.github.io/cc-pocket/"><img src="site/assets/product/overview.png" alt="Pairlet：左边是桌面控制台的已配对电脑与运行中会话，右边是手机上的会话列表和一次授权决策。" width="900"></a></p>
+<p align="center"><a href="https://pairlet.org/"><img src="site/assets/product/overview.png" alt="Pairlet：左边是桌面控制台的已配对电脑与运行中会话，右边是手机上的会话列表和一次授权决策。" width="900"></a></p>
 
 <sub>真实产品界面，演示数据由脚本生成——重跑 `bash marketing/site/generate-assets.sh` 即可重现。出处见 [`site/assets/product/manifest.json`](site/assets/product/manifest.json)。</sub>
 
@@ -59,7 +59,7 @@ irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.p
 - **OpenCode 没有可执法的交互审批。** `opencode run` 本身就没有审批协议，所以这类会话恒为 **Full access**——App 会直接说明，而不是摆出一排它根本管不住的模式。
 - **Kimi Code 是 Preview。** DeepSeek 已支持，但很窄：审批与选择题已桥接到 App，但 sandbox 模式在启动时定死（改模式会重启会话）；另外没有改动文件与 diff、没有用量统计、不支持切换模型。
 - **DeepSeek Harness 自己没有超时。** 放着不管，一条没人回答的审批或提问会让这一回合**一直挂着**——它不会自动拒绝。Pairlet 把这类请求接到 daemon 统一的审批时限上：审批超时按**拒绝**回，提问超时按**跳过**回，让「没人回答」有个结果而不是永远等下去。DeepSeek 也没有「总是允许」——每次都是一次性决定。
-- 能力边界跟随正式 Release。完整说明见[能力页](https://heypandax.github.io/cc-pocket/features.html)与[用户手册](https://pocket.ark-nexus.cc/manual/zh/)。
+- 能力边界跟随正式 Release。完整说明见[能力页](https://pairlet.org/features.html)与[用户手册](https://pairlet.org/manual/zh/)。
 
 ## 架构与信任边界
 
@@ -82,7 +82,7 @@ flowchart LR
 | **桌面 App** | macOS [Apple 芯片](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg)（已签名 `.dmg`）· Windows x86_64 [`.msi`](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)。**Linux 没有正式桌面安装包——只能[从源码构建](#从源码构建)。** |
 | **本机 daemon** | macOS Apple 芯片 · macOS Intel · Linux x86_64 · Linux arm64 · Windows x86_64 |
 | **鸿蒙** | 签名 HAP，**Preview**——能力受限 |
-| **中继** | 默认走托管的零知识中继，也支持[自托管](https://heypandax.github.io/cc-pocket/guides/self-hosting.html) |
+| **中继** | 默认走托管的零知识中继，也支持[自托管](https://pairlet.org/guides/self-hosting.html) |
 
 桌面 App 和本机 daemon 是**两个不同的安装包**：前者是客户端，后者才是真正跑 agent 的那一端。
 
@@ -181,8 +181,8 @@ daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair    # 另开一�
 
 ## 文档
 
-- [官网](https://heypandax.github.io/cc-pocket/) · [完整能力列表](https://heypandax.github.io/cc-pocket/features.html)
-- [用户手册](https://pocket.ark-nexus.cc/manual/zh/) · [帮助与客服（免登录）](https://pocket.ark-nexus.cc/support/)
+- [官网](https://pairlet.org/) · [完整能力列表](https://pairlet.org/features.html)
+- [用户手册](https://pairlet.org/manual/zh/) · [帮助与客服（免登录）](https://pairlet.org/support/)
 - 安全模型与威胁分析 —— [`docs/SECURITY.md`](docs/SECURITY.md)
 - 运行 / 运维 daemon —— [`docs/RUN.md`](docs/RUN.md) · 中文使用文档 —— [`docs/USAGE.md`](docs/USAGE.md)
 - 中继部署（Caddy + Cloudflare + systemd）—— [`deploy/README.md`](deploy/README.md)

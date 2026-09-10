@@ -85,7 +85,7 @@ Screenshots and the control-loop videos on the website are generated from the re
 - [Website](https://pairlet.org/)
 - [Public capability contract — JSON](https://pairlet.org/public-capabilities.json)
 - [Product media manifest — JSON](https://pairlet.org/assets/product/manifest.json)
-- [Public smart support — no sign-in required](https://pocket.ark-nexus.cc/support/)
+- [Public smart support — no sign-in required](https://pairlet.org/support/)
 - [User manual — English](https://pairlet.org/manual/en/)
 - [用户手册 — 中文](https://pairlet.org/manual/zh/)
 - [Manual AI index — structured JSON](https://pairlet.org/manual/ai-index.json)

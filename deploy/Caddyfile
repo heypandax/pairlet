@@ -88,3 +88,85 @@ pocket.ark-nexus.cc {
 		}
 	}
 }
+
+# Pairlet website on the HK origin. Keep the legacy relay block above unchanged.
+www.pairlet.org {
+    redir https://pairlet.org{uri} 308
+}
+
+pairlet.org {
+	handle_path /support-api/* {
+		request_body {
+			max_size 8KB
+		}
+		reverse_proxy 127.0.0.1:10966 {
+			# Never forward a caller-supplied address. The API trusts this header only from
+			# its loopback SSH-tunnel peer and parses it as one canonical IP address.
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Real-IP {remote_host}
+			# The support agent can need more than a minute for cold or complex queries.
+			# Flush its JSON-stream heartbeats immediately so every proxy hop stays live.
+			flush_interval -1
+			transport http {
+				read_timeout 150s
+				response_header_timeout 135s
+			}
+		}
+	}
+	handle /support/* {
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://pocket.ark-nexus.cc https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+			Referrer-Policy "no-referrer"
+			X-Frame-Options "DENY"
+			X-Content-Type-Options "nosniff"
+			Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		}
+		root * /var/www/pairlet-site/current
+		file_server
+	}
+	# Release mirror for mainland-China installs/updates (GitHub's CDN crawls there). The tree is
+	# maintained by cc-pocket-mirror-sync.{service,timer} (deploy/mirror-sync.sh); clients try
+	# /dl/latest.json first and fall back to GitHub, so this path may lag but must never lie —
+	# latest.json is swapped in atomically only after assets verify against the release SHA256SUMS.
+	handle_path /dl/* {
+		root * /var/www/cc-pocket-dl
+		header /latest.json Cache-Control "no-cache"
+		file_server
+	}
+	handle /manual/* {
+		root * /var/www/pairlet-site/current
+		file_server
+	}
+	handle /styles.css {
+		root * /var/www/pairlet-site/current
+		file_server
+	}
+	handle /app.js {
+		root * /var/www/pairlet-site/current
+		file_server
+	}
+	handle /favicon.svg {
+		root * /var/www/pairlet-site/current
+		file_server
+	}
+	handle /favicon-32.png {
+		root * /var/www/pairlet-site/current
+		file_server
+	}
+	handle /apple-touch-icon.png {
+		root * /var/www/pairlet-site/current
+		file_server
+	}
+    handle {
+        root * /var/www/pairlet-site/current
+        file_server
+    }
+}
+
+# Same relay process and database as the legacy host; never redirect WebSocket/API traffic.
+relay.pairlet.org {
+    reverse_proxy 127.0.0.1:9000 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP {remote_host}
+    }
+}

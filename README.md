@@ -10,9 +10,9 @@ Pairlet is an open-source, local-first control plane for command-line coding age
 
 **v1.9.4** drives six agent backends — Claude Code, OpenAI Codex, OpenCode, Kimi Code (Preview), ZCode and DeepSeek. They are not equivalent: see [the capability matrix](#agent-support) before you pick one.
 
-**🌐 [Website](https://heypandax.github.io/cc-pocket/)** · **📖 [User manual](https://pocket.ark-nexus.cc/manual/en/)** · **💬 [Support, no sign-in](https://pocket.ark-nexus.cc/support/)** · **📦 [Latest release](https://github.com/heypandax/cc-pocket/releases/latest)**
+**🌐 [Website](https://pairlet.org/)** · **📖 [User manual](https://pairlet.org/manual/en/)** · **💬 [Support, no sign-in](https://pairlet.org/support/)** · **📦 [Latest release](https://github.com/heypandax/cc-pocket/releases/latest)**
 
-<p align="center"><a href="https://heypandax.github.io/cc-pocket/"><img src="site/assets/product/overview.png" alt="Pairlet: the desktop console showing paired machines and a live session, beside the phone app showing a session list and an approval decision." width="900"></a></p>
+<p align="center"><a href="https://pairlet.org/"><img src="site/assets/product/overview.png" alt="Pairlet: the desktop console showing paired machines and a live session, beside the phone app showing a session list and an approval decision." width="900"></a></p>
 
 <sub>Real product UI with scripted demo data — regenerate with `bash marketing/site/generate-assets.sh`. Provenance: [`site/assets/product/manifest.json`](site/assets/product/manifest.json).</sub>
 
@@ -59,7 +59,7 @@ Public capability claims for **v1.9.4**, audited against commit [`e9ee816f`](htt
 - **OpenCode has no enforceable interactive approval.** `opencode run` has no approval protocol, so those sessions run at **Full access** and the app says so up front instead of offering modes it cannot enforce.
 - **Kimi Code is Preview.** DeepSeek is supported, but narrow: approvals and multiple-choice questions are bridged to the app, but the sandbox mode is fixed at launch (changing it relaunches the session), and there is no Changed-files/diff view, no usage accounting and no model switching.
 - **DeepSeek Harness has no timeout of its own.** Left alone, an unanswered approval or question blocks its turn indefinitely — it does not deny. Pairlet puts the request on the daemon's normal approval window instead: an approval that expires is answered *reject*, and a question that expires is answered *skipped*, so an unanswered request ends the wait rather than hanging it. DeepSeek also has no "always allow" — every request is a one-off decision.
-- Boundaries follow the release. Full detail: [Features](https://heypandax.github.io/cc-pocket/features.html) and the [User manual](https://pocket.ark-nexus.cc/manual/en/).
+- Boundaries follow the release. Full detail: [Features](https://pairlet.org/features.html) and the [User manual](https://pairlet.org/manual/en/).
 
 ## Architecture & trust boundary
 
@@ -82,7 +82,7 @@ Honest limits: the agent still executes with your own operating-system permissio
 | **Desktop app** | macOS [Apple Silicon](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg) (signed `.dmg`) · Windows x86_64 [`.msi`](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi). **No official Linux desktop package — [build from source](#build-from-source).** |
 | **Local daemon** | macOS Apple Silicon · macOS Intel · Linux x86_64 · Linux arm64 · Windows x86_64 |
 | **HarmonyOS** | Signed HAP, **Preview** — limited capability |
-| **Relay** | Hosted zero-knowledge relay by default; [self-hosting](https://heypandax.github.io/cc-pocket/guides/self-hosting.html) supported |
+| **Relay** | Hosted zero-knowledge relay by default; [self-hosting](https://pairlet.org/guides/self-hosting.html) supported |
 
 The desktop app and the local daemon are **different packages**: the app is a client, the daemon is what actually runs the agent.
 
@@ -181,8 +181,8 @@ Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via
 
 ## Docs
 
-- [Website](https://heypandax.github.io/cc-pocket/) · [Full feature list](https://heypandax.github.io/cc-pocket/features.html)
-- [User manual](https://pocket.ark-nexus.cc/manual/en/) · [Smart support, no sign-in](https://pocket.ark-nexus.cc/support/)
+- [Website](https://pairlet.org/) · [Full feature list](https://pairlet.org/features.html)
+- [User manual](https://pairlet.org/manual/en/) · [Smart support, no sign-in](https://pairlet.org/support/)
 - Security model & threat analysis — [`docs/SECURITY.md`](docs/SECURITY.md)
 - Run / operate the daemon — [`docs/RUN.md`](docs/RUN.md) · User guide (中文) — [`docs/USAGE.md`](docs/USAGE.md)
 - Relay deployment (Caddy + Cloudflare + systemd) — [`deploy/README.md`](deploy/README.md)

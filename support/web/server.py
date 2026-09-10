@@ -72,7 +72,7 @@ TURNSTILE_ACTION = "support_chat"
 TURNSTILE_ALLOWED_HOSTNAMES = {
     item.strip().lower()
     for item in os.environ.get(
-        "CC_SUPPORT_TURNSTILE_HOSTNAMES", "pocket.ark-nexus.cc,heypandax.github.io"
+        "CC_SUPPORT_TURNSTILE_HOSTNAMES", "pocket.ark-nexus.cc,heypandax.github.io,pairlet.org"
     ).split(",")
     if item.strip()
 }
