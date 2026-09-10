@@ -19,6 +19,15 @@ permissions:
   contents: read
 
 jobs:
+  windows-msi-branding:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check MSI branding against native Windows Installer fixtures
+        shell: powershell
+        run: scripts/test-brand-windows-msi.ps1
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 40

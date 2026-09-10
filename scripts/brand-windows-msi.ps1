@@ -10,24 +10,26 @@ $installer = New-Object -ComObject WindowsInstaller.Installer
 $database = $installer.OpenDatabase($msiPath, 1) # transacted: commit only after invariants pass
 function Read-Rows([string]$sql) {
     $view = $database.OpenView($sql)
-    $view.Execute()
+    # COM methods can emit return values into PowerShell's success stream. Only the row array
+    # belongs in this function's output; extra values make a single property look ambiguous.
+    [void]$view.Execute()
     $rows = @()
     while ($null -ne ($record = $view.Fetch())) {
         $row = @()
         for ($i = 1; $i -le $record.FieldCount; $i++) { $row += $record.StringData($i) }
         $rows += ,$row
     }
-    $view.Close()
+    [void]$view.Close()
     return ,$rows
 }
 function Execute-Sql([string]$sql) {
     $view = $database.OpenView($sql)
-    $view.Execute()
-    $view.Close()
+    [void]$view.Execute()
+    [void]$view.Close()
 }
 function Property-Value([string]$name) {
     $rows = Read-Rows "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = '$name'"
-    if ($rows.Count -ne 1) { throw "Missing/ambiguous MSI property $name" }
+    if ($rows.Count -ne 1) { throw "Missing/ambiguous MSI property $name (rows: $($rows.Count))" }
     return $rows[0][0]
 }
 # Read from the SHA-256-verified v1.9.8 MSI, not generated from the new product name.
