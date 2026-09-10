@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -98,6 +99,13 @@ object PocketContextMenuRepresentation : ContextMenuRepresentation {
             onDismissRequest = close,
             properties = PopupProperties(focusable = true), // the popup owns the keyboard — Esc must close from inside
         ) {
+            // issue #361: the menu is a Popup — its own layout hierarchy — but composition locals cross
+            // into it, so a menu raised INSIDE the chat stream's SelectionContainer handed these rows the
+            // stream's LocalSelectionRegistrar and they registered as selectables. The registrar's next
+            // sort then asked for a row's position relative to the stream and threw
+            // "layouts are not part of the same hierarchy" (desktop.err.log CCP-WIN-01, 2026-09-09).
+            // Menu rows are never selectable text: cut the registrar here, once, for every menu.
+            DisableSelection {
             val shape = RoundedCornerShape(10.dp)
             Column(
                 Modifier
@@ -120,6 +128,7 @@ object PocketContextMenuRepresentation : ContextMenuRepresentation {
                         MenuRow(item) { close(); item.onClick() }
                     }
                 }
+            }
             }
         }
     }

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Check
@@ -124,14 +125,16 @@ private fun Bubble(value: String, done: Boolean, doneLabel: String, onAct: () ->
 private fun Pill(label: String) {
     val gap = with(LocalDensity.current) { 64.dp.roundToPx() }
     Popup(popupPositionProvider = BottomPP(gap), properties = PopupProperties(focusable = false)) {
-        Row(
+        // issue #361: a Popup raised inside the chat's SelectionContainer must not register its text as a
+        // selectable (separate hierarchy → the registrar's sort throws). Same guard as the hover bubble.
+        DisableSelection { Row(
             Modifier.height(40.dp).background(Tok.raised, RoundedCornerShape(999.dp))
                 .border(1.dp, Tok.hair, RoundedCornerShape(999.dp)).padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(16.dp))
             Text(label, color = Tok.ok, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        }
+        } }
     }
 }
 
@@ -254,7 +257,8 @@ fun LinkifiedText(
             if (box != null) {
                 val g = with(LocalDensity.current) { 8.dp.roundToPx() }
                 Popup(AbovePP(box.left.toInt(), box.top.toInt(), box.bottom.toInt(), g), properties = PopupProperties(focusable = false)) {
-                    Bubble(cur.copyValue, done, stringResource(Res.string.path_copied), { take(cur) }, { overChip = it })
+                    // issue #361: see Pill — the bubble sits over the stream's SelectionContainer
+                    DisableSelection { Bubble(cur.copyValue, done, stringResource(Res.string.path_copied), { take(cur) }, { overChip = it }) }
                 }
             }
         }
