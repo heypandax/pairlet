@@ -134,6 +134,14 @@ GitHub 在国内下载很慢，所以安装脚本和 Release 产物都在中继�
 用一键脚本装的 daemon 会自己保持最新：每天检查，后台装好。不想要就 `cc-pocket-daemon config --auto-update off`，改成只给手机推一条通知。Homebrew、Scoop 和 Windows 装的永远不会自升级，走各自的包管理器：`brew upgrade --cask heypandax/tap/cc-pocket`、`scoop update cc-pocket-daemon`。桌面 App 检查更新失败时会明说失败，不会装作「已是最新」。
 </details>
 
+### 使用 OpenCode
+
+在**运行 daemon 的电脑**上安装 [OpenCode CLI](https://opencode.ai/docs/)，并在 OpenCode 中配置模型提供商。先确认该电脑上的 `opencode --version` 和一次 OpenCode 对话能够正常完成。
+
+daemon 会查找独立安装目录 `~/.opencode/bin`，以及 PATH 和包管理器目录，让后台服务也能发现标准安装，无需用户手动创建链接。这项路径修复在 **v1.9.8 之后**加入；现有 v1.9.8 用户需要升级到包含此修复的 daemon 版本。
+
+自定义 CLI 路径或仍使用旧版 daemon 时，可用 `cc-pocket-daemon service-install --apply --opencode-bin /absolute/path/to/opencode` 持久保存绝对路径。该命令会重启服务，应先结束活跃会话，并带上已有的自定义服务选项，例如 `--relay`。仅在终端里导出环境变量，不会改变已运行的后台服务环境。
+
 ### 走第三方网关也能用
 
 如果你把 Claude Code 接在 LLM 网关或 API 中转上（`ANTHROPIC_BASE_URL`），官方 Remote Control [从 v2.1.196 起会被禁用](https://code.claude.com/docs/en/remote-control)——它要求直连 `api.anthropic.com`。CC Pocket 是在你本机用 stdio 驱动 CLI，端点是什么无所谓。daemon 会识别出网关型 `ANTHROPIC_BASE_URL`，模型选择器把常见厂商 id（DeepSeek、GLM、Kimi、Qwen、MiniMax）做成一键预设，旁边还留了自定义 id 输入框。某个 id 最终打到哪个模型，由你的网关决定。

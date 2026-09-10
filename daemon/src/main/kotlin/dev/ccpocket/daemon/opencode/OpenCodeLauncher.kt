@@ -20,8 +20,9 @@ object OpenCodeLauncher {
     private val exeNames: List<String> =
         if (isWindows) listOf("opencode.exe", "opencode.cmd", "opencode.bat", "opencode") else listOf("opencode")
 
-    private val fallbackDirs: List<String> = buildList {
-        val home = System.getProperty("user.home")
+    internal fun fallbackDirs(home: String = System.getProperty("user.home")): List<String> = buildList {
+        // Standalone installs live here even when the service PATH predates the installation.
+        add(home + File.separator + ".opencode" + File.separator + "bin")
         add(home + File.separator + ".local" + File.separator + "bin")
         add(home + File.separator + ".npm-global" + File.separator + "bin")
         add(home + File.separator + ".volta" + File.separator + "bin")
@@ -32,8 +33,10 @@ object OpenCodeLauncher {
     }
 
     fun resolveExecutable(explicit: String? = null): Path =
-        ExecutableResolver.resolve(explicit, envBin, exeNames, fallbackDirs,
-            "opencode executable not found. Install OpenCode, or set CC_POCKET_OPENCODE_BIN / pass --opencode-bin.")
+        ExecutableResolver.resolve(explicit, envBin, exeNames, fallbackDirs(),
+            "opencode executable not found on the daemon computer. Install the OpenCode CLI, " +
+                "or set CC_POCKET_OPENCODE_BIN / pass --opencode-bin. " +
+                "For a background service, pass --opencode-bin to service-install --apply.")
 
     fun processBuilder(exe: Path, spec: AgentSpec): ProcessBuilder {
         val argv = buildList {

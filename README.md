@@ -134,6 +134,14 @@ GitHub downloads crawl there, so the installer and release artifacts are mirrore
 A daemon installed by the one-liner keeps itself current: it checks daily and applies the update in the background. Turn that off with `cc-pocket-daemon config --auto-update off` and you get a phone notification instead. Homebrew, Scoop and Windows installs never self-apply — update them through their own package manager (`brew upgrade --cask heypandax/tap/cc-pocket`, `scoop update cc-pocket-daemon`). The desktop app states it plainly when an update check fails, rather than showing "up to date".
 </details>
 
+### Using OpenCode
+
+Install the [OpenCode CLI](https://opencode.ai/docs/) on the **computer running the daemon** and configure a model provider in OpenCode. Confirm that `opencode --version` and an OpenCode conversation work there first.
+
+The daemon probes the standalone install directory `~/.opencode/bin` as well as PATH and package-manager locations, so a background service can find a standard installation without a manually created symlink. This lookup fix is newer than **v1.9.8**; existing v1.9.8 installations need a daemon release containing the fix.
+
+For a custom CLI location or an older daemon, persist its absolute path with `cc-pocket-daemon service-install --apply --opencode-bin /absolute/path/to/opencode`. This restarts the service; finish active sessions first and include any existing custom service options, such as `--relay`. Exporting a variable in a terminal does not change the environment of an already running background service.
+
 ### Works with third-party gateways
 
 If you route Claude Code through an LLM gateway or API relay (`ANTHROPIC_BASE_URL`), the official Remote Control [is disabled as of v2.1.196](https://code.claude.com/docs/en/remote-control) — it requires talking to `api.anthropic.com` directly. CC Pocket drives the CLI over stdio on your machine, so the endpoint does not matter. The daemon detects a gateway `ANTHROPIC_BASE_URL` and the model picker leads with one-tap presets for common vendor ids (DeepSeek, GLM, Kimi, Qwen, MiniMax) alongside a free-form custom id field. Which model an id actually reaches is decided by your gateway.
