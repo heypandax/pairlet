@@ -60,10 +60,11 @@ object DshLauncher {
                 // issue #365: `npx @deepseek-ai/dsh` installs no `dsh` file at all, so there is nothing for
                 // any search to find — the fix is to create the missing file, or to pin a path that persists.
                 "Only ever run dsh through npx? Then no `dsh` file exists to find: create one at " +
-                "~/.local/bin/dsh containing `#!/bin/sh` and `exec /absolute/path/to/npx --yes " +
-                "@deepseek-ai/dsh@latest \"$@\"`, chmod +x it (the npx path must be the absolute one from " +
-                "`which npx` — a service cannot see your shell's PATH), or pin any path permanently with " +
-                "`cc-pocket-daemon config --dsh-bin <path>`.",
+                "~/.local/bin/dsh containing `#!/bin/sh`, `export PATH=\"/absolute/node/bin:\$PATH\"` and " +
+                "`exec npx --yes @deepseek-ai/dsh@latest \"$@\"`, then chmod +x it. The node bin dir is " +
+                "`dirname $(which node)` — a service cannot see your shell's PATH, and npx itself is a " +
+                "`#!/usr/bin/env node` script, so node must be reachable too. Or pin any path permanently " +
+                "with `cc-pocket-daemon config --dsh-bin <path>`.",
         )
 
     /**

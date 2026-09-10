@@ -83,16 +83,17 @@ dsh 自己写明：「session deletion、fork、`session/load`、modes、command
 **（A）补一个 launcher 文件**——把 npx 这条命令固化成一个真实可执行文件：
 
 ```sh
-which npx                       # 先拿到绝对路径，下一步必须用它
-mkdir -p ~/.local/bin
+dirname "$(which node)"          # 先拿到 node 的 bin 目录，下一步必须用它
+
 cat > ~/.local/bin/dsh <<'EOF'
 #!/bin/sh
-exec /absolute/path/to/npx --yes @deepseek-ai/dsh@latest "$@"
+export PATH="/absolute/node/bin:$PATH"
+exec npx --yes @deepseek-ai/dsh@latest "$@"
 EOF
 chmod +x ~/.local/bin/dsh
 ```
 
-`npx` 必须写 `which npx` 得到的**绝对路径**：daemon 以后台服务身份运行，拿到的是被清洗过的 PATH，看不到你 shell 里的 Node 环境，写 `exec npx` 会在服务上下文里找不到 npx。`~/.local/bin` 本身已经在 `DshLauncher.fallbackDirs` 里，放好即可被找到。
+第二行必须把 node 的 bin 目录（`dirname "$(which node)"` 的输出，fnm 下形如 `~/Library/Application Support/fnm/node-versions/v24.x.x/installation/bin`）写成**绝对路径**塞进 PATH：daemon 以后台服务身份运行，拿到的是被清洗过的 PATH，看不到你 shell 里的 Node 环境；而且 `npx` 自己就是一个 `#!/usr/bin/env node` 脚本，光写 npx 的绝对路径还是会在 `env node` 这一步失败。`~/.local/bin` 本身已经在 `DshLauncher.fallbackDirs` 里，放好即可被找到。
 
 **（B）固定一个路径到 prefs**——不想在 `~/.local/bin` 放文件，或者 dsh 在别的地方：
 
