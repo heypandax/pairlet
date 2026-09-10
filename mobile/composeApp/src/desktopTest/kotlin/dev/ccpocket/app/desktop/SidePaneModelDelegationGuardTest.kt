@@ -43,6 +43,7 @@ class SidePaneModelDelegationGuardTest {
      *  pane-taking verb on the base model (`sendSidePrompt` / `stopSideTurn` / `resolvePane…`). */
     private val PANE_SCOPED = setOf(
         "hasChat", "opening", "openFailed", "retryOpen",
+        "historyLayoutToken", "onHistoryLaidOut",
         "chatTitle", "chatAgent", "chatWorkdir",
         "messages", "streaming", "selectedSessionId",
         // this column's OWN delivery receipt + stall cues and its per-pane resend (issue #329): read off
@@ -109,6 +110,7 @@ class SidePaneModelDelegationGuardTest {
     /** The window, the machine, the app. None of these is reachable holding a [SidePaneModel] — see the
      *  class doc's litmus — and every one of them means the same thing in a column as anywhere else. */
     private val WINDOW_DELEGATED = setOf(
+        "exposeFeature", "sideContentLayoutToken", "onSideContentLaidOut",
         // window chrome (desktop chrome v2): whether the sidebar is collapsed, and the session back/forward
         // history behind ⌘[ / ⌘]. Both describe the WINDOW — one trail per window, not per column — and both
         // are read by the chrome cluster the leftmost column's sub-header adopts while the sidebar is hidden.

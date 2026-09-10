@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.update
 
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.DEFAULT_RELAY
 import dev.ccpocket.daemon.SingleInstance
 import dev.ccpocket.daemon.service.ServiceInstaller
@@ -157,16 +159,29 @@ object UpdateService {
      * [restartService] registers). Throws with a human message on any failure.
      */
     fun apply(release: Release, install: ManagedInstall): Path {
-        val asset = assetNameFor(release.version) ?: error("no prebuilt artifact for this platform")
-        val url = release.assetUrls[asset] ?: error("release v${release.version} has no asset $asset")
-        val tmp = Files.createTempDirectory("cc-pocket-update")
+        val trace = Diagnostics.begin(ErrorPath.UPDATE)
+        var stage = Stage.CONFIGURE
+        trace?.stage(stage)
+        var cleanup: Path? = null
         try {
+            val asset = assetNameFor(release.version) ?: error("no prebuilt artifact for this platform")
+            val url = release.assetUrls[asset] ?: error("release v${release.version} has no asset $asset")
+            val tmp = Files.createTempDirectory("cc-pocket-update").also { cleanup = it }
             val file = tmp.resolve(asset)
+            stage = Stage.DOWNLOAD; trace?.stage(stage)
             log.info("downloading $asset")
             ReleaseClient.download(url, file)
-            if (ReleaseClient.verifyAgainstSums(release, asset, file, onSkip = { log.warn(it) })) log.info("checksum OK ($asset)")
+            stage = Stage.VERIFY; trace?.stage(stage)
+            val verified = ReleaseClient.verifyAgainstSums(release, asset, file, onSkip = { log.warn(it) })
+            if (verified) log.info("checksum OK ($asset)")
+            else {
+                trace?.stage(Stage.VERIFY, ErrorCode.FALLBACK_USED)
+                Diagnostics.report(ErrorPath.UPDATE, Stage.VERIFY, ErrorCode.FALLBACK_USED,
+                    metrics = SafeMetrics(resultQuality = ResultQuality.UNKNOWN))
+            }
 
             val extracted = tmp.resolve("x").also { Files.createDirectories(it) }
+            stage = Stage.EXTRACT; trace?.stage(stage)
             extract(file, extracted)
             // one rule everywhere: versions/<ver>/ holds the archive's top-level entry UNCHANGED —
             // macOS ships a signed cc-pocket-daemon.app bundle, Windows/Linux a cc-pocket-daemon/ dir
@@ -174,6 +189,7 @@ object UpdateService {
                 .map(extracted::resolve).firstOrNull { it.isDirectory() }
                 ?: error("unexpected archive layout (no cc-pocket-daemon[.app] top-level entry)")
 
+            stage = Stage.COMMIT; trace?.stage(stage)
             val target = install.versionsDir.resolve(release.version)
             if (target.exists()) target.toFile().deleteRecursively()
             Files.createDirectories(target)
@@ -198,9 +214,21 @@ object UpdateService {
                 Files.move(tmpLink, install.launcher, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
             }
             prune(install.versionsDir, keep = setOf(release.version, currentVersion()))
+            // Artifact switched, but the new process has not yet proven health.
+            trace?.finish(Outcome.SUCCESS, Stage.COMMIT, metrics = SafeMetrics(resultQuality = ResultQuality.PARTIAL))
+            dev.ccpocket.daemon.diagnostics.UpgradeReceipt.switched(release.version)
             return newLauncher
+        } catch (error: Exception) {
+            trace?.finish(Outcome.FAILURE, stage, when (stage) {
+                Stage.CONFIGURE -> ErrorCode.UNAVAILABLE
+                Stage.DOWNLOAD -> ErrorCode.IO_FAILED
+                Stage.VERIFY -> ErrorCode.REJECTED
+                Stage.EXTRACT -> ErrorCode.DECODE_FAILED
+                else -> ErrorCode.COMMIT_FAILED
+            }, error)
+            throw error
         } finally {
-            runCatching { tmp.toFile().deleteRecursively() }
+            runCatching { cleanup?.toFile()?.deleteRecursively() }
         }
     }
 

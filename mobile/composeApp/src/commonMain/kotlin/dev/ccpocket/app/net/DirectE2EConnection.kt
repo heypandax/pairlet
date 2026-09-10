@@ -1,5 +1,11 @@
 package dev.ccpocket.app.net
 
+import dev.ccpocket.observability.Diagnostics
+import dev.ccpocket.observability.ErrorPath
+import dev.ccpocket.observability.ErrorCode
+import dev.ccpocket.observability.Stage as DiagnosticStage
+import dev.ccpocket.observability.SafeMetrics
+
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.util.B64Url
 import dev.ccpocket.protocol.Attached
@@ -129,7 +135,8 @@ class DirectE2EConnection {
                                 continue
                             }
                             deafRun = 0
-                            runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }.getOrNull()?.let { inbound.emit(it.body) }
+                            runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }
+                                .onFailure { Diagnostics.protocolDecodeFailed(it, pt.size.toLong()) }.getOrNull()?.let { inbound.emit(it.body) }
                         }
                     }
                 } finally {
@@ -142,6 +149,8 @@ class DirectE2EConnection {
             // pre-handshake plumbing failures (connection refused, DNS, TLS, abrupt close) all mean the
             // SAME thing to the caller: this address doesn't work right now — fall back, don't error out
             if (!handshaken && t !is CancellationException && t !is DirectUnreachableException) {
+                Diagnostics.report(ErrorPath.CONNECTION, DiagnosticStage.CONNECT, ErrorCode.FALLBACK_USED, t,
+                    metrics = SafeMetrics(transport = dev.ccpocket.observability.Transport.DIRECT), isError = false)
                 throw DirectUnreachableException(t.message ?: "connect failed")
             }
             throw t

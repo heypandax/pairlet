@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.conversation
 
+import dev.ccpocket.observability.*
 import dev.ccpocket.protocol.BackgroundJob
 import dev.ccpocket.protocol.JobKind
 import dev.ccpocket.protocol.JobStatus
@@ -32,7 +33,7 @@ class BackgroundJobRegistry {
         // launched with run_in_background (bg Bash always; a sub-agent can be too): its tool_result is
         // only the launch ack — completion arrives via the system task_* events instead
         val background: Boolean = false,
-    )
+    ) { val diagnostic = Diagnostics.begin(ErrorPath.BACKGROUND)?.also { it.stage(Stage.EXECUTE) } }
 
     private val jobs = LinkedHashMap<String, Job>()    // keyed by tool_use id (insertion-ordered)
     private val taskToKey = HashMap<String, String>()  // system task_id -> job key
@@ -84,11 +85,12 @@ class BackgroundJobRegistry {
             // a backgrounded job reports "started" here and finishes later via a system task_* event — so a
             // success result is NOT terminal. But an ERROR result means the launch never backgrounded: that
             // later task_* event will never come, so settle it now instead of leaking a forever-RUNNING job.
-            if (isError && job.status == JobStatus.RUNNING) { job.status = JobStatus.FAILED; return true }
+            if (isError && job.status == JobStatus.RUNNING) { job.status = JobStatus.FAILED; finishDiagnostic(job); return true }
             return false
         }
         if (job.status != JobStatus.RUNNING) return false
         job.status = if (isError) JobStatus.FAILED else JobStatus.DONE
+        finishDiagnostic(job)
         return true
     }
 
@@ -119,6 +121,7 @@ class BackgroundJobRegistry {
         }
         if (job.status == next || next == JobStatus.RUNNING) return false // never resurrect a finished job
         job.status = next
+        finishDiagnostic(job)
         return true
     }
 
@@ -134,7 +137,9 @@ class BackgroundJobRegistry {
         var changed = false
         for (job in jobs.values) {
             if (job.background && job.status == JobStatus.RUNNING && now - job.lastUpdate > staleMs) {
+                job.diagnostic?.finish(Outcome.FAILURE, Stage.RECONCILE, ErrorCode.INCOMPLETE, metrics = SafeMetrics(resultQuality = ResultQuality.UNKNOWN))
                 job.status = JobStatus.KILLED
+        finishDiagnostic(job)
                 job.lastUpdate = now
                 changed = true
             }
@@ -152,6 +157,7 @@ class BackgroundJobRegistry {
         val job = jobs[jobId] ?: return false
         if (job.status != JobStatus.RUNNING) return false
         job.status = JobStatus.KILLED
+        finishDiagnostic(job)
         job.lastUpdate = now
         return true
     }
@@ -175,6 +181,14 @@ class BackgroundJobRegistry {
         // a foreground command's task_started lands when the command COMPLETES — a long build's id must
         // survive the sub-agent tool traffic that can interleave meanwhile, hence a roomy cap
         while (foregroundBash.size > MAX_FOREGROUND_IDS) foregroundBash.iterator().run { next(); remove() }
+    }
+
+    private fun finishDiagnostic(job: Job) {
+        job.diagnostic?.finish(when (job.status) {
+            JobStatus.DONE -> Outcome.SUCCESS
+            JobStatus.KILLED -> Outcome.CANCELLED
+            else -> Outcome.FAILURE
+        }, Stage.COMPLETE, if (job.status == JobStatus.FAILED) ErrorCode.PROCESS_EXITED else ErrorCode.OK)
     }
 
     private fun putNew(key: String, kind: JobKind, label: String, now: Long, background: Boolean = false) {

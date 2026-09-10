@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.agent
 
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.util.logger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
@@ -87,6 +89,7 @@ class AgentProcess private constructor(
     /** Every write (prompt / allow / deny / rpc) funnels through this one writer -> no interleaving. */
     private val stdin: Channel<String> = Channel(capacity = 64)
     private val shutdownLock = Mutex()
+    @Volatile private var shuttingDown = false
 
     // completed when the stderr pump has read its pipe to EOF — the OS exit alone does NOT imply
     // lastStderr is populated yet (the reader coroutine may not have been scheduled), and a startup
@@ -103,8 +106,8 @@ class AgentProcess private constructor(
                         stdout.send(line)
                     }
                 }
-            } catch (_: Throwable) {
-                // reader interrupted during shutdown
+            } catch (error: Throwable) {
+                if (!shuttingDown) Diagnostics.report(ErrorPath.AGENT_PROTOCOL, Stage.READ, ErrorCode.IO_FAILED, error)
             } finally {
                 stdout.close()
             }
@@ -123,6 +126,7 @@ class AgentProcess private constructor(
                     }
                 }
             }
+            .onFailure { if (!shuttingDown) Diagnostics.report(ErrorPath.AGENT_PROTOCOL, Stage.RECEIVE, ErrorCode.IO_FAILED, it) }
             stderrDrained.complete(Unit)
         }
         scope.launch(Dispatchers.IO + CoroutineName("agent-stdin-$pid")) {
@@ -132,6 +136,7 @@ class AgentProcess private constructor(
                     w.write(msg); w.write("\n"); w.flush()
                 }
             } catch (t: Throwable) {
+                if (!shuttingDown) Diagnostics.report(ErrorPath.AGENT_PROTOCOL, Stage.WRITE, ErrorCode.WRITE_FAILED, t)
                 // broken pipe: the process died under us — say so instead of dying silently (issue #122)
                 log.warn("agent $pid stdin writer ended: ${t.message}")
             } finally {
@@ -193,6 +198,7 @@ class AgentProcess private constructor(
         termGraceMs: Long = TERM_GRACE_MS,
         forceGraceMs: Long = FORCE_GRACE_MS,
     ) = shutdownLock.withLock {
+        shuttingDown = true
         stdin.close()
         runCatching { process.outputStream.close() } // EOF — the CLI's stream-json shutdown signal
         var exited = withContext(Dispatchers.IO) { process.waitFor(eofGraceMs, TimeUnit.MILLISECONDS) }
@@ -247,7 +253,11 @@ class AgentProcess private constructor(
             RegexOption.IGNORE_CASE,
         )
 
-        fun start(pb: ProcessBuilder, scope: CoroutineScope): AgentProcess =
+        fun start(pb: ProcessBuilder, scope: CoroutineScope): AgentProcess = try {
             AgentProcess(pb.start(), scope).also { it.launchPumps() }
+        } catch (error: Exception) {
+            Diagnostics.report(ErrorPath.AGENT_START, Stage.SPAWN, ErrorCode.SPAWN_FAILED, error)
+            throw error
+        }
     }
 }

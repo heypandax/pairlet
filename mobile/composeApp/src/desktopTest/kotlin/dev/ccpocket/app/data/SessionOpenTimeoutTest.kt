@@ -1,5 +1,10 @@
 package dev.ccpocket.app.data
 
+import dev.ccpocket.observability.*
+import kotlin.test.BeforeTest
+import kotlin.test.AfterTest
+import kotlin.test.assertNotNull
+
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.OpenSession
@@ -33,6 +38,11 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SessionOpenTimeoutTest {
+    private val diagnostics = mutableListOf<DiagnosticRecord>()
+    @BeforeTest fun installDiagnostics() {
+        Diagnostics.install(DiagnosticReporter(Component.DESKTOP, Environment.STAGING, "test", DiagnosticSink { diagnostics.add(it) }, successSamplePercent = 100))
+    }
+    @AfterTest fun closeDiagnostics() { Diagnostics.install(null) }
 
     private class Harness {
         val scheduler = TestCoroutineScheduler()
@@ -83,6 +93,12 @@ class SessionOpenTimeoutTest {
             assertEquals("convo-a", h.repo.convoId.value, "the answer lands and the session opens")
             assertFalse(h.repo.openTimedOut.value, "a repaired open must never show the failure banner")
             assertFalse(h.repo.opening.value)
+            val record = diagnostics.single { it.path == ErrorPath.SESSION_OPEN }
+            // A legacy Live receipt confirms binding, but carries no history/layout completion proof.
+            assertEquals(Outcome.UNKNOWN, record.outcome)
+            assertEquals(ResultQuality.UNKNOWN, record.metrics.resultQuality)
+            assertEquals(1, record.attempt)
+            assertNotNull(record.traceId)
             assertEquals(2, h.opens().size, "and the second budget must not fire a third open")
         } finally {
             h.scope.cancel()
@@ -105,6 +121,11 @@ class SessionOpenTimeoutTest {
             assertTrue(h.repo.openTimedOut.value)
             assertEquals(OpenFailure.COMPUTER, h.repo.openTimedOutReason.value)
             assertEquals(2, h.opens().size, "one resend, and only one")
+            val record = diagnostics.single { it.path == ErrorPath.SESSION_OPEN }
+            assertEquals(Outcome.TIMEOUT, record.outcome)
+            assertEquals(Stage.ATTACH, record.stage)
+            assertEquals(1, record.attempt)
+            assertNotNull(record.traceId)
             assertFalse(h.repo.opening.value)
             assertFalse(h.repo.switchingSession.value, "#165: a switch that never landed releases the router")
         } finally {
@@ -125,6 +146,7 @@ class SessionOpenTimeoutTest {
             assertTrue(h.repo.openTimedOut.value, "a down link is decided at the FIRST deadline")
             assertEquals(OpenFailure.LINK, h.repo.openTimedOutReason.value)
             assertEquals(1, h.opens().size, "nothing may be resent into a link that cannot carry it")
+            assertEquals(Stage.CONNECT, diagnostics.single { it.path == ErrorPath.SESSION_OPEN }.stage)
         } finally {
             h.scope.cancel()
         }

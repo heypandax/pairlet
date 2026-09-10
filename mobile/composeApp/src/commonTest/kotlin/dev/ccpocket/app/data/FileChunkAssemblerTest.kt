@@ -1,6 +1,7 @@
 package dev.ccpocket.app.data
 
 import dev.ccpocket.protocol.FileContentChunk
+import dev.ccpocket.protocol.DiagnosticContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -13,6 +14,21 @@ import kotlin.test.assertTrue
  * makes the join valid base64); anything non-contiguous or cross-identity is a dead stream and resets.
  */
 class FileChunkAssemblerTest {
+
+    @Test fun matchingMetadataSurvivesButMixedOrLegacyMetadataDoesNotMisattributeTheFile() {
+        val first = DiagnosticContext("1234567890abcdef1234567890abcdef")
+        val other = DiagnosticContext("abcdef1234567890abcdef1234567890")
+        for (lastContext in listOf(first, other, null, DiagnosticContext("invalid"))) {
+            val assembler = FileChunkAssembler()
+            assertNull(assembler.add(chunk(0, false, "AAAA").copy(diagnostic = first)))
+            val done = assembler.add(chunk(1, true, "BBBB").copy(diagnostic = lastContext))!!
+            assertEquals("AAAABBBB", done.base64) // optional metadata never changes business assembly
+            assertEquals(if (lastContext == first) first else null, done.diagnostic)
+        }
+        val legacyFirst = FileChunkAssembler()
+        legacyFirst.add(chunk(0, false, "AAAA"))
+        assertNull(legacyFirst.add(chunk(1, true, "BBBB").copy(diagnostic = first))!!.diagnostic)
+    }
 
     private fun chunk(idx: Int, last: Boolean, b64: String, path: String = "/w/report.xlsx") =
         FileContentChunk("/w", "sid", path, idx, last, b64, mediaType = "application/zip", totalBytes = 9)

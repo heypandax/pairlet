@@ -1,5 +1,8 @@
 package dev.ccpocket.daemon.dsh
 
+import dev.ccpocket.daemon.disk.ReplayRead
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.agent.ToolMetadata
 import dev.ccpocket.daemon.disk.ReplayBudget
 import dev.ccpocket.daemon.disk.ReplaySlice
@@ -56,8 +59,9 @@ object DshTranscriptReplay {
         maxMessages: Int = 100,
         maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES,
     ): ReplaySlice {
-        val (rows, cursor) = parse(file)
-        return ReplaySlicer.slice(rows, cursor, sinceSeq, maxMessages, maxFrameTextBytes)
+        val parsed = parse(file)
+        return ReplaySlicer.slice(parsed.first, parsed.second, sinceSeq, maxMessages, maxFrameTextBytes)
+            .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows)
     }
 
     fun page(
@@ -66,8 +70,9 @@ object DshTranscriptReplay {
         limit: Int = 100,
         maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES,
     ): ReplaySlice {
-        val (rows, _) = parse(file)
-        return ReplaySlicer.page(rows, beforeSeq, limit, maxFrameTextBytes)
+        val parsed = parse(file)
+        return ReplaySlicer.page(parsed.first, beforeSeq, limit, maxFrameTextBytes)
+            .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows)
     }
 
     /**
@@ -78,8 +83,13 @@ object DshTranscriptReplay {
      * (one line covers a whole range via `seq0`/`dt`), so using it would make "everything past cursor N"
      * ambiguous at exactly the lines where a live tail is most likely to land.
      */
-    private fun parse(file: Path): Pair<List<ReplaySlicer.Row>, Long> {
-        val lines = runCatching { DshTranscript.lines(file) }.getOrDefault(emptyList())
+    private fun parse(file: Path): ReplayRead<ReplaySlicer.Row> {
+        val status = DshTranscript.ReadStatus()
+        val lines = runCatching { DshTranscript.lines(file, status = status) }.onFailure {
+            status.unavailable = true
+            Diagnostics.report(ErrorPath.HISTORY_READ, Stage.READ, ErrorCode.READ_FAILED, it)
+        }.getOrDefault(emptyList())
+        var malformed = 0L
         val out = ArrayList<MutableRow>()
         // issue #291: the two "a human decided something" cards are patched in place when their second
         // record scrolls past, exactly like the Claude replay's sub-agent/question cards. Keyed
@@ -93,7 +103,8 @@ object DshTranscriptReplay {
         var lineNo = 0L
         for (raw in lines) {
             lineNo += 1
-            val root = DshTranscript.parseLine(raw) ?: continue
+            val root = DshTranscript.parseLine(raw)
+            if (root == null) { malformed++; continue }
             // `ignorable` is dsh's own "this record carries no user-visible meaning" marker — respect it
             // rather than re-deriving the same judgement from the type.
             if (root["ignorable"]?.toString() == "true") continue
@@ -187,7 +198,10 @@ object DshTranscriptReplay {
                 else -> {}
             }
         }
-        return out.map { ReplaySlicer.Row(it.msg, it.line, it.patchLine) } to lineNo
+        if (malformed > 0) Diagnostics.report(ErrorPath.HISTORY_READ, Stage.PARSE, ErrorCode.PARTIAL_RESULT,
+            metrics = SafeMetrics(totalCount = lineNo, failedCount = malformed, returnedCount = out.size.toLong(), resultQuality = ResultQuality.PARTIAL))
+        return ReplayRead(out.map { ReplaySlicer.Row(it.msg, it.line, it.patchLine) }, lineNo,
+            when { status.unavailable -> "unavailable"; status.partial || malformed > 0 -> "partial"; else -> "complete" }, malformed)
     }
 
     /** A row while it can still be patched by a later record (the answer / the decision). */

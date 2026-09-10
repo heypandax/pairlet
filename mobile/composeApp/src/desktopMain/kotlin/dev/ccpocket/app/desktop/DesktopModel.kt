@@ -775,6 +775,11 @@ interface DesktopModel {
     val messages: List<ChatItem>
     // ── older-history lazy load (issue #147) — defaults keep Seed/test fakes compiling ──
     /** Rows older than the loaded window exist on the daemon — the top-of-list loader shows. */
+    fun exposeFeature(feature: dev.ccpocket.app.telemetry.ProductFeature) {}
+    fun sideContentLayoutToken(pane: SidePane): String? = null
+    fun onSideContentLaidOut(pane: SidePane, token: String, hasVisibleContent: Boolean, lastVisibleContent: Int) {}
+    val historyLayoutToken: String? get() = null
+    fun onHistoryLaidOut(token: String, hasVisibleContent: Boolean, lastVisibleContent: Int) {}
     val historyHasMore: Boolean get() = false
     /** True while a page request is in flight (the loader row pulses). */
     val historyLoadingOlder: Boolean get() = false

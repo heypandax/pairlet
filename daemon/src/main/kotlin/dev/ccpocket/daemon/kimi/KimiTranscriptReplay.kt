@@ -1,5 +1,8 @@
 package dev.ccpocket.daemon.kimi
 
+import dev.ccpocket.daemon.disk.ReplayRead
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.disk.ReplayBudget
 import dev.ccpocket.daemon.disk.ReplaySlice
 import dev.ccpocket.daemon.disk.ReplaySlicer
@@ -51,8 +54,9 @@ object KimiTranscriptReplay {
         maxMessages: Int = 100,
         maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES,
     ): ReplaySlice {
-        val (rows, cursor) = parse(file)
-        return ReplaySlicer.slice(rows, cursor, sinceSeq, maxMessages, maxFrameTextBytes)
+        val parsed = parse(file)
+        return ReplaySlicer.slice(parsed.first, parsed.second, sinceSeq, maxMessages, maxFrameTextBytes)
+            .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows)
     }
 
     fun page(
@@ -61,24 +65,36 @@ object KimiTranscriptReplay {
         limit: Int = 100,
         maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES,
     ): ReplaySlice {
-        val (rows, _) = parse(file)
-        return ReplaySlicer.page(rows, beforeSeq, limit, maxFrameTextBytes)
+        val parsed = parse(file)
+        return ReplaySlicer.page(parsed.first, beforeSeq, limit, maxFrameTextBytes)
+            .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows)
     }
 
     /** Parse wire.jsonl into replay rows tagged with source line (#147 seq) + total line count (cursor). */
-    private fun parse(file: Path): Pair<List<ReplaySlicer.Row>, Long> {
-        if (!file.exists()) return emptyList<ReplaySlicer.Row>() to 0L
+    private fun parse(file: Path): ReplayRead<ReplaySlicer.Row> {
+        if (!file.exists()) return ReplayRead(emptyList(), 0L, "unavailable")
         val out = ArrayList<ReplaySlicer.Row>()
         val toolRowIndex = HashMap<String, Int>() // toolCallId → index in `out`, to merge its tool.result
         var lineNo = 0L
+        var malformed = 0L
+        var limited = 0L
+        var lastMalformed = -1L
+        var firstError: Throwable? = null
+        var readFailed = false
         runCatching {
             file.bufferedReader().useLines { lines ->
                 for (raw in lines) {
                     lineNo += 1
                     val line = raw.trim()
                     if (line.isEmpty()) continue
+                    if (line.length > MAX_LINE_CHARS) limited++
                     val clipped = if (line.length > MAX_LINE_CHARS) line.take(MAX_LINE_CHARS) else line
-                    val root = runCatching { json.parseToJsonElement(clipped) }.getOrNull() as? JsonObject
+                    val root = runCatching { json.parseToJsonElement(clipped) }.onFailure {
+                        if (line.length <= MAX_LINE_CHARS) {
+                            malformed++; lastMalformed = lineNo
+                            if (firstError == null) firstError = it
+                        }
+                    }.getOrNull() as? JsonObject
                         ?: continue // unparseable — no row, never a crash
                     when (root.str("type")) {
                         // a real user prompt entering a turn (context.append_message also logs role:user
@@ -131,6 +147,15 @@ object KimiTranscriptReplay {
                 }
             }
         }
-        return out to lineNo
+        .onFailure { readFailed = true; Diagnostics.report(ErrorPath.HISTORY_READ, Stage.READ, ErrorCode.READ_FAILED, it,
+            SafeMetrics(totalCount = lineNo, returnedCount = out.size.toLong(), resultQuality = ResultQuality.PARTIAL)) }
+        if (malformed > 0 || limited > 0) {
+            val corrupt = malformed > 1 || malformed > 0 && lastMalformed != lineNo
+            Diagnostics.report(ErrorPath.HISTORY_READ, Stage.PARSE,
+                if (corrupt) ErrorCode.DECODE_FAILED else if (limited > 0) ErrorCode.SIZE_LIMIT else ErrorCode.INCOMPLETE,
+                if (corrupt) firstError else null,
+                SafeMetrics(totalCount = lineNo, failedCount = malformed + limited, returnedCount = out.size.toLong(), resultQuality = ResultQuality.PARTIAL))
+        }
+        return ReplayRead(out, lineNo, if (readFailed || malformed > 0 || limited > 0) "partial" else "complete", malformed + limited)
     }
 }

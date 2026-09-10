@@ -14,8 +14,14 @@ import java.sql.Connection
 class SqliteRelayStore(private val conn: Connection) : RelayStore {
     private val lock = Mutex()
 
-    private suspend fun <T> tx(block: (Connection) -> T): T =
+    private suspend fun <T> tx(block: (Connection) -> T): T = try {
         lock.withLock { withContext(Dispatchers.IO) { block(conn) } }
+    } catch (error: java.sql.SQLException) {
+        // Report after releasing the DB lock. Never serialize SQL, bound parameters or credentials.
+        dev.ccpocket.observability.Diagnostics.report(dev.ccpocket.observability.ErrorPath.STORAGE,
+            dev.ccpocket.observability.Stage.EXECUTE, dev.ccpocket.observability.ErrorCode.IO_FAILED, error)
+        throw error
+    }
 
     override suspend fun getAccount(accountId: String): Account? = tx { c ->
         c.prepareStatement("SELECT static_pubkey, created_at, last_seen FROM accounts WHERE account_id=?").use { ps ->

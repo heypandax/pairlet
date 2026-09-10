@@ -26,6 +26,7 @@ class Conn(
     // remote client ip (via Caddy's X-Forwarded-For; see net/clientIp) — carried purely so a
     // disconnect/supersede/revoke can log WHO was dropped (issue #141). Advisory, never a capability.
     val ip: String = "",
+    val diagnosticId: String = dev.ccpocket.observability.Diagnostics.newId(),
 )
 
 /**
@@ -91,13 +92,17 @@ class Broker {
     /** device -> the account's daemon (data plane, opaque), tagged with the source deviceId. */
     suspend fun toDaemonFrom(account: String, deviceId: String, data: ByteArray) {
         val d = mutex.withLock { daemons[account] }
-        d?.let { runCatching { it.sendBinary(Wire.wrapDevice(deviceId, data)) } }
+        d?.let { runCatching { it.sendBinary(Wire.wrapDevice(deviceId, data)) }.onFailure {
+            dev.ccpocket.observability.Diagnostics.connection(d.diagnosticId, code = dev.ccpocket.observability.ErrorCode.SEND_FAILED)
+        } }
     }
 
     /** daemon -> a specific device (data plane, opaque); the deviceId is the relay's routing key only. */
     suspend fun toDevice(account: String, deviceId: String, payload: ByteArray) {
         val ds = mutex.withLock { devices[account]?.filter { it.deviceId == deviceId }.orEmpty() }
-        ds.forEach { runCatching { it.sendBinary(payload) } }
+        ds.forEach { target -> runCatching { target.sendBinary(payload) }.onFailure {
+            dev.ccpocket.observability.Diagnostics.connection(target.diagnosticId, code = dev.ccpocket.observability.ErrorCode.SEND_FAILED)
+        } }
     }
 
     /** relay -> daemon control frame (e.g. DevicePaired, PeerPresence). */

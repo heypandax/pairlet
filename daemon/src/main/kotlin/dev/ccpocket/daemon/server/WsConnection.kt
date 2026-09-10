@@ -178,7 +178,8 @@ class WsConnection(
                                 gate.lanUrl(), gate.hostname(), gate.gatewayBaseUrl(), bridgeControl = true,
                                 supportedAgents = DAEMON_SUPPORTED_AGENT_WIRES,
                                 supportsUsageAgentFilter = true, // issue #258: this build honors FetchUsage.agent
-                                supportsPromptRecovery = true, // #122: acked prompts stay ledgered until agent consumption
+                                supportsPromptRecovery = true,
+                                supportsDiagnostics = true, // #122: acked prompts stay ledgered until agent consumption
                                 // #348: which backends' SUBSCRIPTION allowance this daemon can read. The
                                 // router owns the answer because it owns the readers; absent (an older
                                 // daemon) decodes to empty = "Claude only, legacy behaviour".
@@ -245,6 +246,11 @@ class WsConnection(
                     // (--local) socket received a client mid-probe — drop rather than route (the client falls
                     // back to the relay on its own). Keeps the router transport-agnostic.
                     if (env.body is LanHello) continue
+                    // Apply connection vocabulary in receive order before spawning business work.
+                    if (env.body is dev.ccpocket.protocol.ClientCaps) {
+                        router.handle(env.body, sink, caps = caps, deviceId = gatedDeviceId) { owned.add(it) }
+                        continue
+                    }
                     log.info("recv ${env.body::class.simpleName}")
                     launch {
                         try {

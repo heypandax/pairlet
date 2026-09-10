@@ -1,5 +1,7 @@
 package dev.ccpocket.app.data
 
+import dev.ccpocket.observability.*
+
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import dev.ccpocket.app.epochMillis
@@ -169,7 +171,15 @@ class ChatTranscript {
     fun mergeHistory(
         f: ConvoHistory,
         onMerged: (before: List<ChatItem>, after: List<ChatItem>) -> Unit = { _, _ -> },
-    ): Long? {
+    ): Long? = try {
+        mergeHistoryUnchecked(f, onMerged)
+    } catch (error: Throwable) {
+        Diagnostics.report(ErrorPath.HISTORY_APPLY, Stage.APPLY, ErrorCode.APPLY_FAILED, error,
+            SafeMetrics(returnedCount = f.messages.size.toLong()))
+        throw error
+    }
+
+    private fun mergeHistoryUnchecked(f: ConvoHistory, onMerged: (List<ChatItem>, List<ChatItem>) -> Unit): Long? {
         val local = messages.toList()
         val merged = if (f.delta) {
             if (f.messages.isEmpty()) return f.lastSeq

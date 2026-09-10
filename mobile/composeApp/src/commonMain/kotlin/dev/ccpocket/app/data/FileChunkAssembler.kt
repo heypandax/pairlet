@@ -20,6 +20,8 @@ import dev.ccpocket.protocol.FileContentChunk
  */
 class FileChunkAssembler {
     private var key: Triple<String, String, String>? = null
+    private var diagnostic: dev.ccpocket.protocol.DiagnosticContext? = null
+    private var diagnosticComplete = true
     private var nextIdx = 0
     private var totalBytes = 0L
     private val base64 = StringBuilder()
@@ -33,6 +35,9 @@ class FileChunkAssembler {
             if (c.idx != 0) return null // mid-stream stray of a dead read — nothing to start from
             key = k
         }
+        val incoming = c.diagnostic?.validated()
+        if (nextIdx == 0) diagnostic = incoming
+        if (incoming == null || incoming != diagnostic) diagnosticComplete = false
         base64.append(c.base64)
         nextIdx = c.idx + 1
         totalBytes = c.totalBytes
@@ -40,7 +45,7 @@ class FileChunkAssembler {
         val whole = base64.toString()
         val done = FileContent(
             c.workdir, c.sessionId, c.path,
-            base64 = whole, mediaType = c.mediaType, totalBytes = c.totalBytes,
+            base64 = whole, mediaType = c.mediaType, totalBytes = c.totalBytes, diagnostic = diagnostic.takeIf { diagnosticComplete },
         )
         reset()
         return done
@@ -59,6 +64,7 @@ class FileChunkAssembler {
     /** Drop any partial state — a fresh read, a final [FileContent] reply, or a closed viewer. */
     fun reset() {
         key = null
+        diagnostic = null; diagnosticComplete = true
         nextIdx = 0
         totalBytes = 0
         base64.setLength(0)

@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.review
 
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ListReviewRequests
@@ -181,10 +183,12 @@ class PeerInboxClient(
         val mirrored = store.mirror(link.id, request, clock()) // ATOMIC PERSIST — happens before any ACK
         when (mirrored) {
             PeerInboxStore.MirrorResult.FULL -> {
+                Diagnostics.report(ErrorPath.PEER_DELIVERY, Stage.COMMIT, ErrorCode.SIZE_LIMIT)
                 log.warn("peer \"${link.label}\" sent more open requests than this inbox can store — left unacknowledged")
                 return
             }
             PeerInboxStore.MirrorResult.PERSIST_FAILED -> {
+                Diagnostics.report(ErrorPath.PEER_DELIVERY, Stage.COMMIT, ErrorCode.WRITE_FAILED, isError = true)
                 log.warn("peer \"${link.label}\" review could not be persisted — left unacknowledged")
                 return
             }
@@ -192,11 +196,13 @@ class PeerInboxClient(
         }
         // From this point on use only the row we know is durable. An older replay must not cause an
         // ACK or outbox reconciliation based on a stale incoming status.
+        Diagnostics.report(ErrorPath.PEER_DELIVERY, Stage.COMMIT, ErrorCode.OK)
         val durable = store.row(link.id, request.id)?.request ?: return
         // reconcile our outbox against the authoritative row: anything the sender has already applied
         // (or made moot by going terminal) stops being retried
         val settled = store.pendingFor(link.id, request.id)
             .filter { PeerInboxStore.satisfied(it.expect, durable.status) }
+        if (settled.isNotEmpty()) Diagnostics.report(ErrorPath.PEER_DELIVERY, Stage.RECONCILE, ErrorCode.OK, metrics = SafeMetrics(returnedCount = settled.size.toLong()))
         if (!store.dropOutbox(settled.mapTo(HashSet()) { it.id })) {
             log.warn("peer \"${link.label}\": confirmed review actions could not be cleared from the outbox")
         }
@@ -263,14 +269,17 @@ class PeerInboxClient(
                 continue
             }
             if (item.attempts == RETRY_WARN_AT) {
+                Diagnostics.report(ErrorPath.PEER_DELIVERY, Stage.ACK, ErrorCode.INCOMPLETE)
                 log.warn("peer \"${link.label}\": review ${item.requestId} still unconfirmed after ${item.attempts} attempts")
             }
             try {
                 channel.send(frame)
+                Diagnostics.report(ErrorPath.PEER_DELIVERY, Stage.WRITE, ErrorCode.OK, metrics = SafeMetrics(resultQuality = ResultQuality.PARTIAL))
                 attempted += item.id
             } catch (c: CancellationException) {
                 throw c
             } catch (t: Throwable) {
+                Diagnostics.report(ErrorPath.PEER_DELIVERY, Stage.WRITE, ErrorCode.SEND_FAILED, t)
                 break
             }
         }

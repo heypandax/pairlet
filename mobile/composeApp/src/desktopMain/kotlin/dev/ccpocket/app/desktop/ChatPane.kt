@@ -1,5 +1,7 @@
 package dev.ccpocket.app.desktop
 
+import dev.ccpocket.app.ui.observeHistoryLayout
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
@@ -269,6 +271,10 @@ import dev.ccpocket.protocol.SlashCommand
 
 @Composable
 fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolean = false) {
+    LaunchedEffect(model, model.hasChat, model.observing) {
+        if (model.hasChat) model.exposeFeature(dev.ccpocket.app.telemetry.ProductFeature.SESSION_VIEW)
+        if (model.hasChat && !model.observing) model.exposeFeature(dev.ccpocket.app.telemetry.ProductFeature.PROMPT_TASK)
+    }
     if (!model.hasChat) {
         // During an open (messages already cleared, convoId nulled, awaiting SessionLive) show a loading
         // transition for the TARGET session instead of the blank "No session open" state: that empty state
@@ -396,7 +402,16 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             SelectionContainer {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().observeHistoryLayout({ model.historyLayoutToken }) { token ->
+                        val offset = if (historyLoaderVisible) 1 else 0
+                        val visible = listState.layoutInfo.visibleItemsInfo.any { row ->
+                            model.messages.getOrNull(row.index - offset)?.let { it is ChatItem.User || it is ChatItem.Assistant || it is ChatItem.Tool } == true
+                        }
+                        val lastOutput = listState.layoutInfo.visibleItemsInfo.map { it.index - offset }.filter {
+                            model.messages.getOrNull(it)?.let { m -> m is ChatItem.Assistant || m is ChatItem.Tool } == true
+                        }.maxOrNull() ?: -1
+                        model.onHistoryLaidOut(token, visible, lastOutput)
+                    },
                     contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {

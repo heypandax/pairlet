@@ -1,5 +1,7 @@
 package dev.ccpocket.relay
 
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.AuthError
 import dev.ccpocket.protocol.DaemonAuth
@@ -19,6 +21,7 @@ import dev.ccpocket.protocol.PairCodeResolve
 import dev.ccpocket.protocol.PairCredential
 import dev.ccpocket.protocol.PairRedeem
 import dev.ccpocket.protocol.PairTicket
+import dev.ccpocket.protocol.DiagnosticId
 import dev.ccpocket.protocol.PeerPresence
 import dev.ccpocket.protocol.Ping
 import dev.ccpocket.protocol.PocketJson
@@ -185,13 +188,14 @@ class RelayServer(
 
         val conn = conn(account, Role.DAEMON, null, daemonProtoV = hello.protoV)
         broker.attachDaemon(conn)?.let { old ->
+            Diagnostics.connection(old.diagnosticId, conn.diagnosticId, ErrorCode.SUPERSEDED)
             logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
             runCatching { old.close("superseded") }
         }
         // relayProtoV is OUR capability level, the mirror of DaemonHello.protoV (§3.4): the daemon gates its
         // targeted offer push on it, because an older relay would silently ignore NotifyPush.deviceId and
         // fan the alert out to the OWNER's phones instead of the addressed contact.
-        sendControl(Attached(Role.DAEMON, account, relayProtoV = PROTO_V_ATTACH_REPLAY_COMPLETE))
+        sendControl(Attached(Role.DAEMON, account, relayProtoV = PROTO_V_ATTACH_REPLAY_COMPLETE, connectionId = DiagnosticId(conn.diagnosticId)))
         // re-announce known devices so a daemon that missed a DevicePaired (e.g. offline at redeem)
         // re-learns them. HEADLESS rows only go to daemons that understand bridges (issue #91): an
         // older daemon would file the announced key into its FULL-POWER devices.json — a bridge
@@ -204,7 +208,8 @@ class RelayServer(
         // reconnecting relay may be serving a durable snapshot while the socket is under backpressure.
         // Sending it through the same control writer after every DevicePaired preserves ordering.
         broker.controlToDaemon(conn, controlText(DeviceReplayComplete))
-        broker.controlToDevices(account, controlText(PeerPresence(true)))
+        Diagnostics.connection(conn.diagnosticId)
+        broker.controlToDevices(account, controlText(PeerPresence(true, DiagnosticId(conn.diagnosticId))))
         try {
             for (frame in incoming) when (frame) {
                 // daemon addresses a specific device: [deviceId][payload] -> route payload to it
@@ -212,7 +217,12 @@ class RelayServer(
                 is Frame.Text -> handleDaemonControl(account, frame.readText())
                 else -> {}
             }
+        } catch (error: Exception) {
+            Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
+            reportReceiveFailure(error)
+            throw error
         } finally {
+            Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
             // "daemon offline" only when THIS socket was still the account's daemon — a superseded socket's
             // late exit (the daemon reconnected before we noticed the old link die, e.g. after sleep/wake)
             // arrives AFTER the successor's PeerPresence(true); broadcasting false then would flip every
@@ -354,18 +364,26 @@ class RelayServer(
         // (reconnect overlap, machine-switch race) would otherwise fight this one over the daemon's single
         // per-device E2E session and deafen it
         broker.attachDevice(conn)?.let { old ->
+            Diagnostics.connection(old.diagnosticId, conn.diagnosticId, ErrorCode.SUPERSEDED)
             logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
             runCatching { old.close("superseded") }
         }
-        sendControl(Attached(Role.DEVICE, account, relayProtoV = PROTO_V_TARGETED_PUSH))
-        if (!headless) broker.controlToDaemon(account, controlText(PeerPresence(true)))
+        val peerId = broker.daemonConn(account)?.diagnosticId
+        Diagnostics.connection(conn.diagnosticId, peerId)
+        sendControl(Attached(Role.DEVICE, account, relayProtoV = PROTO_V_TARGETED_PUSH, connectionId = DiagnosticId(conn.diagnosticId), peerConnectionId = peerId?.let(::DiagnosticId)))
+        if (!headless) broker.controlToDaemon(account, controlText(PeerPresence(true, DiagnosticId(conn.diagnosticId))))
         try {
             for (frame in incoming) when (frame) {
                 is Frame.Binary -> broker.toDaemonFrom(account, hello.deviceId, frame.data)
                 is Frame.Text -> handleDeviceControl(conn, frame.readText())
                 else -> {}
             }
+        } catch (error: Exception) {
+            Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
+            reportReceiveFailure(error)
+            throw error
         } finally {
+            Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
             broker.detachDevice(conn)
             logConn("detached", conn.ip, account = account, deviceId = hello.deviceId, headless = headless)
             // "peer offline" only when the LAST INTERACTIVE socket left — a superseded/overlapping socket's
@@ -416,6 +434,14 @@ class RelayServer(
     // supersede "互踢" from a pinger-timeout drop (the ping-timeout close surfaces here as a "detached" line).
     // One greppable structured line per close/reject point. IDs are truncated to the first 8 chars like the
     // [push] logs; NEVER emit tokens / keys / nonces / signatures / opaque payload.
+    private fun reportReceiveFailure(error: Exception) {
+        val tooBig = error as? io.ktor.websocket.FrameTooBigException
+        val closed = error is java.io.IOException || error is kotlinx.coroutines.channels.ClosedReceiveChannelException
+        Diagnostics.report(ErrorPath.RELAY, Stage.RECEIVE,
+            when { tooBig != null -> ErrorCode.SIZE_LIMIT; closed -> ErrorCode.CONNECTION_CLOSED; else -> ErrorCode.UNEXPECTED },
+            error, SafeMetrics(byteCount = tooBig?.frameSize), isError = !closed)
+    }
+
     private fun logConn(
         reason: String,
         ip: String,
@@ -423,6 +449,16 @@ class RelayServer(
         deviceId: String? = null,
         headless: Boolean? = null,
     ) {
+        val code = when {
+            reason == "superseded" -> ErrorCode.SUPERSEDED
+            reason == "rate_limited" || reason == "push_rate_limited" -> ErrorCode.RATE_LIMITED
+            reason == "too_many_connections" -> ErrorCode.SIZE_LIMIT
+            reason == "detached" -> ErrorCode.CONNECTION_CLOSED
+            reason == "revoked" || reason.startsWith("auth_failed:") -> ErrorCode.REJECTED
+            else -> ErrorCode.UNSUPPORTED
+        }
+        // The cloud record is a fixed category. ip/account/deviceId remain exclusively in local logs.
+        Diagnostics.report(ErrorPath.RELAY, Stage.CONNECT, code)
         val acct = account?.take(8) ?: "-"
         val dev = deviceId?.take(8) ?: "-"
         val hl = if (headless != null) " headless=$headless" else ""

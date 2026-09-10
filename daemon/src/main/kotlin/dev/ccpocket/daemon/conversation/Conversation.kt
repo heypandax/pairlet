@@ -1,5 +1,9 @@
 package dev.ccpocket.daemon.conversation
 
+import dev.ccpocket.daemon.diagnostics.completeInitialHistory
+
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
@@ -253,7 +257,13 @@ class Conversation(
     }
 
     // every existing emit site goes through this fan-out; one failing transport must not break the rest
-    private val sink: OutboundSink = OutboundSink { f -> sinks.values.forEach { s -> runCatching { s.emit(f) } } }
+    private val sink: OutboundSink = OutboundSink { f ->
+        if (f is PromptAck) promptDiagnostics.ack(f.promptId)
+        sinks.values.forEach { s -> runCatching { s.emit(f) }.onFailure {
+            Diagnostics.report(ErrorPath.PAYLOAD_SEND, Stage.WRITE, ErrorCode.SEND_FAILED, it)
+        } }
+    }
+    private val promptDiagnostics by lazy { dev.ccpocket.daemon.diagnostics.PromptDiagnostics(convoId, scope) { sink.emit(it) } }
 
     // issue #190: approval belongs to the exact externally submitted request, before the agent sees it.
     // The synthetic ask shares this conversation so the normal phone verdict/resurface paths can resolve it.
@@ -617,6 +627,8 @@ class Conversation(
                         queuedWork = countsAsQueued,
                     ),
                 )
+                promptDiagnostics.written(promptId, generation)
+                if (countsAsQueued && promptId != null) promptDiagnostics.queued(promptId)
                 while (promptLedger.size > LEDGER_MAX) promptLedger.removeFirst()
                 turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
             }
@@ -634,6 +646,7 @@ class Conversation(
                     val entry = iter.next()
                     if (entry.generation == generation && entry.text == text) {
                         iter.remove()
+                        promptDiagnostics.consumed(entry.key, generation)
                         markPromptConsumed(entry.key) // 同锁内原子迁移：账本→消费记录（issue #285）
                         turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
                         return@inner entry
@@ -661,6 +674,7 @@ class Conversation(
                 val entry = iter.next()
                 if (entry.generation == generation) {
                     iter.remove()
+                    promptDiagnostics.consumed(entry.key, generation)
                     markPromptConsumed(entry.key) // 同锁内原子迁移（issue #285），与 stdin replay 的 settle 同规
                     turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
                     return@inner entry
@@ -731,6 +745,7 @@ class Conversation(
             promptLedger.removeAll { it.redeliveries >= MAX_REDELIVERIES }
             promptLedger.forEachIndexed { index, entry ->
                 entry.generation = gen
+                promptDiagnostics.written(entry.key, gen)
                 entry.redeliveries++
                 entry.queuedWork = index > 0
             }
@@ -969,8 +984,9 @@ class Conversation(
                 // sink only (it continues that client's cursor); the full window keeps the fan-out.
                 val slice = clipToRewind(backend.replaySlice(workdir.toString(), resumeId, sinceSeq))
                 if (slice.messages.isNotEmpty()) (if (slice.delta) openerSink else sink).emit(historyFrame(slice))
+                openerSink.completeInitialHistory(convoId, slice.messages.size, slice.messages.isNotEmpty(), slice.quality, slice.sourceRows, slice.failedRows)
                 replayWorkflowRuns(resumeId, sink)
-            }
+            } else openerSink.completeInitialHistory(convoId, quality = "not_required")
             emitCommands()
         }
     }
@@ -1520,7 +1536,13 @@ class Conversation(
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
         processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
         val launchGeneration = processGeneration
-        val p = AgentProcess.start(backend.processBuilder(spec), scope)
+        val backendLabel = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name } ?: AgentBackendLabel.UNKNOWN
+        val builder = try { backend.processBuilder(spec) } catch (error: Exception) {
+            Diagnostics.report(ErrorPath.AGENT_START, Stage.CONFIGURE, ErrorCode.UNAVAILABLE, error,
+                SafeMetrics(backend = backendLabel))
+            throw error
+        }
+        val p = AgentProcess.start(builder, scope)
         val io = AgentIo(
             writeLine = p::writeLine,
             emit = { sink.emit(it) }, // read sink dynamically (reattach)
@@ -1636,7 +1658,11 @@ class Conversation(
         // (as before) let that first sendPrompt race ahead of it and silently drop the opening turn. attach only
         // KICKS OFF the handshake — its writes buffer on the process's stdin channel — so this can't block on the
         // agent; the pump below reads the replies (stdout is buffered until it starts).
-        backend.attach(io, spec)
+        try { backend.attach(io, spec) } catch (error: Exception) {
+            Diagnostics.report(ErrorPath.AGENT_START, Stage.INITIALIZE, ErrorCode.UNEXPECTED, error,
+                SafeMetrics(backend = backendLabel))
+            throw error
+        }
         // RE-INJECTION (issue #122 ③): whatever the LAST process took to its grave — prompts written to
         // its stdin (or its internal mid-turn queue) that never produced a consumption replay — is
         // re-handed to this fresh process, oldest first, before anything else rides it. This is the old
@@ -1814,6 +1840,7 @@ class Conversation(
                     // speaking — its activity reaches the phone as parent-tagged tool events the client
                     // folds into the Task card instead (issue #77)
                     is AgentEvent.AssistantText -> {
+                        if (ev.parentId == null && ev.text.isNotBlank()) promptDiagnostics.output(generation)
                         markExecuting()
                         if (ev.parentId == null) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
                     }
@@ -1822,6 +1849,7 @@ class Conversation(
                         if (ev.parentId == null) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
                     }
                     is AgentEvent.AssistantToolUse -> {
+                        if (ev.parentId == null) promptDiagnostics.output(generation)
                         markExecuting()
                         val subagent = ev.parentId == null && isSubagentTool(ev.name)
                         // ExitPlanMode's input IS the proposed plan (input["plan"]) — surface it in full via the
@@ -1956,6 +1984,9 @@ class Conversation(
                             settleInitialArgPrompt(generation)
                         }
                         val interrupted = interruptRequested
+                        if (ev.isError && !interrupted) Diagnostics.report(ErrorPath.TURN, Stage.COMPLETE,
+                            ErrorCode.UNEXPECTED, metrics = SafeMetrics(backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }),
+                            isError = true)
                         interruptRequested = false
                         // Publish the WORKING -> grace/SETTLED hand-off as ONE state replacement before
                         // any suspend below. A concurrent project poll can never observe both flags false.
@@ -2010,6 +2041,12 @@ class Conversation(
                         }
                         // usage-limit reset moment (issue #137): parsed daemon-side so the phone can
                         // offer one-tap "auto-continue when the limit resets"; null for ordinary errors
+                        if (!interrupted && !synthetic && !ev.isError && !ev.finalText.isNullOrBlank()) promptDiagnostics.output(generation)
+                        promptDiagnostics.complete(generation, when {
+                            interrupted -> "cancelled"
+                            synthetic || ev.isError -> "failure"
+                            else -> "success"
+                        })
                         sink.emit(
                             TurnDone(
                                 convoId, ev.finalText, usage, error = error,
@@ -2048,7 +2085,10 @@ class Conversation(
                         settlePromptReplay(ev.text, generation)?.let { activateBridgeGrant(it) }
                     }
                     is AgentEvent.Ignored -> {}
-                    is AgentEvent.Unparseable -> {}
+                    // Some CLIs print harmless banners on stdout: retain a bounded parse log, not an issue.
+                    is AgentEvent.Unparseable -> Diagnostics.report(ErrorPath.AGENT_PROTOCOL, Stage.PARSE,
+                        ErrorCode.DECODE_FAILED, metrics = SafeMetrics(byteCount = ev.raw.encodeToByteArray().size.toLong(),
+                            backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }))
                 }
             }
         }
@@ -2147,6 +2187,9 @@ class Conversation(
             // and a multi-line runtime crash used to surface as only its version footer (issue #328)
             val why = p.stderrDiagnostic()?.let { " — $it" } ?: ""
             val summary = "agent process ended (exit ${p.exitCode() ?: "?"})$why".take(MAX_EXIT_SUMMARY_CHARS)
+            Diagnostics.report(ErrorPath.TURN, Stage.EXIT, ErrorCode.PROCESS_EXITED,
+                metrics = SafeMetrics(exitCode = p.exitCode(), backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }), isError = true)
+            promptDiagnostics.processExited(generation)
             sink.emit(PocketError("process_exited", summary, convoId))
             // an UNEXPECTED death is exactly what a locked phone must hear about (issue #138): the
             // session died with no TurnDone push coming. Same hook + presence gate as a failed turn;
@@ -2230,7 +2273,8 @@ class Conversation(
         if (sid != null) {
             val slice = backend.replaySlice(workdir.toString(), sid, sinceSeq)
             if (slice.messages.isNotEmpty()) newSink.emit(historyFrame(slice))
-        }
+            newSink.completeInitialHistory(convoId, slice.messages.size, slice.messages.isNotEmpty(), slice.quality, slice.sourceRows, slice.failedRows)
+        } else newSink.completeInitialHistory(convoId, quality = "not_required")
         emitCommands()
         newSink.emit(BackgroundJobs(convoId, jobs.snapshot())) // a re-opened live session re-shows its running jobs
         // re-show workflow runs: live (in-memory) ones first, then finished manifests off disk (#106)
@@ -2350,7 +2394,12 @@ class Conversation(
         text: String,
         images: List<ImageData> = emptyList(),
         promptId: String? = null,
-    ) = sendPromptInternal(text, images, promptId)
+        diagnostic: dev.ccpocket.protocol.DiagnosticContext? = null,
+    ) {
+        promptDiagnostics.register(promptId, diagnostic)
+        try { sendPromptInternal(text, images, promptId) }
+        catch (error: Exception) { promptDiagnostics.failed(promptId, error); throw error }
+    }
 
     /** [bridgeGrantToken] is intentionally private: only trusted in-process bridge hand-off code may bind
      *  a staged authority lease to a prompt-ledger entry; wire callers can never supply this correlation. */
@@ -2373,6 +2422,7 @@ class Conversation(
             // fall through: promptId stays in seenPromptIds — it is being run for real right now
         }
         if (tryIntercept(text, promptId)) {
+            promptDiagnostics.handled(promptId)
             promptId?.let { sink.emit(PromptAck(convoId, it)) } // handled by the daemon = delivered
             return
         }
@@ -2464,6 +2514,7 @@ class Conversation(
                 )
             }
             if (launched.isFailure) {
+                promptDiagnostics.failed(promptId, launched.exceptionOrNull())
                 clearTurnWork() // the spawn never started a turn
                 // no ack: the prompt did NOT reach an agent — forget the id so the client's retry can run
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
@@ -2943,6 +2994,7 @@ class Conversation(
         grants.endSession(convoId) // approval design M2: no task grant survives its session
         riskEngine?.forget(convoId) // M3: the sequence ledger dies with the conversation
         stopProcess()
+        promptDiagnostics.close()
         scope.cancel()
     }
 

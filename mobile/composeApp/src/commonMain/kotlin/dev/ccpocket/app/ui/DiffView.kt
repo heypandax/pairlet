@@ -1,5 +1,8 @@
 package dev.ccpocket.app.ui
 
+import dev.ccpocket.app.telemetry.ProductResult
+import dev.ccpocket.observability.ErrorCode
+
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -589,8 +592,29 @@ fun FileTabBody(
     wrap: Boolean,
     progress: Pair<Long, Long>? = null,
     exportSlot: (@Composable () -> Unit)? = null,
+    diagnosticToken: String? = null,
+    onRendered: (ProductResult, ErrorCode, Boolean) -> Unit = { _, _, _ -> },
 ) {
-    Box(Modifier.fillMaxSize()) {
+    val encoded = content?.takeIf { it.ok }?.base64
+    val bytes = remember(encoded) { encoded?.let { runCatching { Base64.Default.decode(it) }.getOrNull() } }
+    val bmp = bytes?.let { rememberImageBitmap(it) }
+    val result = when {
+        content == null -> ProductResult.UNKNOWN
+        !content.ok || (encoded != null && bytes == null) -> ProductResult.FAILURE
+        encoded != null && bmp == null -> ProductResult.UNKNOWN // export card is not a document view
+        isHtmlExtension(ext) -> ProductResult.UNKNOWN // embedded browser has no load receipt yet
+        else -> ProductResult.SUCCESS
+    }
+    val code = when {
+        content?.ok == false -> ErrorCode.REJECTED
+        encoded != null && bytes == null -> ErrorCode.DECODE_FAILED
+        result == ProductResult.UNKNOWN -> ErrorCode.FALLBACK_USED
+        else -> ErrorCode.OK
+    }
+    Box(Modifier.fillMaxSize().observeHistoryLayout(
+        token = { diagnosticToken?.takeIf { content != null } },
+        onPlaced = { onRendered(result, code, content?.truncated == true || result == ProductResult.UNKNOWN) },
+    )) {
         when {
             // documents ride the binary channel whole-or-nothing — while the bytes are in flight the
             // card skeleton stands in (chat-cards handoff, loading); other types keep the spinner
@@ -613,8 +637,6 @@ fun FileTabBody(
                 }
             }
             content.base64 != null -> {
-                val bytes = remember(content.base64) { runCatching { Base64.Default.decode(content.base64!!) }.getOrNull() }
-                val bmp = bytes?.let { rememberImageBitmap(it) }
                 when {
                     bmp != null -> FileImagePreview(bmp, content.path)
                     // documents & other binaries (issues #67/#79): no inline rendering — hand the

@@ -796,6 +796,9 @@ private fun SupportPage(repo: PocketRepository, onHelp: () -> Unit, onExit: () -
 
     VersionsGroup(repo.versionStatus.value)
 
+    SectionLabel(stringResource(Res.string.diagnostic_sharing_title))
+    DiagnosticSharingSetting()
+
     SectionLabel(stringResource(Res.string.about_section))
     Text(stringResource(Res.string.brand_former_name), color = Tok.tx2, modifier = Modifier.padding(bottom = 8.dp))
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
@@ -814,6 +817,35 @@ private fun SupportPage(repo: PocketRepository, onHelp: () -> Unit, onExit: () -
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(stringResource(Res.string.exit), color = Tok.danger, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+internal fun DiagnosticSharingSetting() {
+    val diagnosticClipboard = LocalClipboardManager.current
+    val diagnosticId = dev.ccpocket.observability.Diagnostics.latestId()
+    var sharing by remember { mutableStateOf(dev.ccpocket.app.telemetry.Telemetry.isEnabled()) }
+    var sharingSaveFailed by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+        .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(Res.string.diagnostic_sharing_title), Modifier.weight(1f),
+                color = Tok.tx, fontSize = 14.sp)
+            val label = stringResource(Res.string.diagnostic_sharing_title)
+            Switch(checked = sharing, onCheckedChange = {
+                sharingSaveFailed = runCatching { dev.ccpocket.app.telemetry.Telemetry.setEnabled(it) }.isFailure
+                sharing = dev.ccpocket.app.telemetry.Telemetry.isEnabled()
+            }, modifier = Modifier.semantics { contentDescription = label })
+        }
+        Text(stringResource(Res.string.diagnostic_sharing_description), color = Tok.tx2,
+            fontSize = 12.sp, lineHeight = 18.sp)
+        if (diagnosticId != null) {
+            androidx.compose.material3.TextButton(onClick = {
+                diagnosticClipboard.setText(androidx.compose.ui.text.AnnotatedString(diagnosticId))
+            }) { Text(stringResource(Res.string.diagnostic_copy_id)) }
+        }
+        if (sharingSaveFailed) Text(stringResource(Res.string.diagnostic_sharing_save_failed),
+            color = Tok.danger, fontSize = 12.sp, lineHeight = 18.sp)
     }
 }
 

@@ -1,5 +1,11 @@
 package dev.ccpocket.daemon.relay
 
+import dev.ccpocket.observability.Diagnostics
+import dev.ccpocket.observability.ErrorPath
+import dev.ccpocket.observability.ErrorCode
+import dev.ccpocket.observability.Stage as DiagnosticStage
+import dev.ccpocket.observability.SafeMetrics
+
 import dev.ccpocket.daemon.DaemonCore
 import dev.ccpocket.daemon.bridge.BridgeCaps
 import dev.ccpocket.daemon.bridge.BridgeRegistry
@@ -301,6 +307,8 @@ class DeviceSessions(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            Diagnostics.report(ErrorPath.HANDSHAKE, DiagnosticStage.HANDSHAKE, ErrorCode.REJECTED,
+                metrics = SafeMetrics(byteCount = deviceEphPub.size.toLong()))
             log.warn("malformed handshake from ${deviceId.take(8)}… (${e::class.simpleName}) — dropped")
             return
         }
@@ -347,7 +355,8 @@ class DeviceSessions(
                 lanUrl(), hostname(), gatewayBaseUrl(), bridgeControl = true,
                 supportedAgents = DAEMON_SUPPORTED_AGENT_WIRES,
                 supportsUsageAgentFilter = true, // issue #258: this build honors FetchUsage.agent
-                supportsPromptRecovery = true, // #122: acked prompts stay ledgered until agent consumption
+                supportsPromptRecovery = true,
+                                supportsDiagnostics = true, // #122: acked prompts stay ledgered until agent consumption
                 // #348: the backends whose subscription allowance this daemon can read. Same source as the
                 // LAN transport's copy (WsConnection) — the router owns the readers, so it owns the answer.
                 quotaAgents = core.router.quotaAgentWires(),
@@ -476,7 +485,8 @@ class DeviceSessions(
             bridges.dropProvisional(deviceId)
             return
         }
-        val env = runCatching { PocketJson.decodeFromString<Envelope>(plaintext.decodeToString()) }.getOrNull() ?: return
+        val env = runCatching { PocketJson.decodeFromString<Envelope>(plaintext.decodeToString()) }
+            .onFailure { Diagnostics.protocolDecodeFailed(it, plaintext.size.toLong()) }.getOrNull() ?: return
         log.info("← ${env.body::class.simpleName} from ${deviceId.take(8)}…")
 
         // keyed: relay sinks are minted per frame — the deviceId key makes every frame from this device
@@ -694,7 +704,12 @@ class DeviceSessions(
             }
             if (!allowed) return
         }
-        val json = PocketJson.encodeToString(Envelope(nextId.getAndIncrement().toString(), 0L, body = frame))
+        val json = try {
+            PocketJson.encodeToString(Envelope(nextId.getAndIncrement().toString(), 0L, body = frame))
+        } catch (error: Exception) {
+            Diagnostics.report(ErrorPath.PAYLOAD_SEND, DiagnosticStage.ENCODE, ErrorCode.UNEXPECTED, error)
+            throw error
+        }
         // serialize seals per session (the GCM counter must advance atomically). Resolve the live session
         // at seal time rather than capturing one in the sink: conversation sinks outlive a phone reconnect,
         // and a re-handshake re-keys — a stale session would seal frames the device can't decrypt. No link
@@ -703,7 +718,11 @@ class DeviceSessions(
             val live = sessions[deviceId]?.active ?: return
             Wire.payload(Wire.TRANSPORT, live.seal(json.encodeToByteArray()))
         }
-        send(deviceId, payload)
+        try { send(deviceId, payload) } catch (error: Exception) {
+            Diagnostics.report(ErrorPath.PAYLOAD_SEND, DiagnosticStage.WRITE, ErrorCode.SEND_FAILED, error,
+                SafeMetrics(byteCount = payload.size.toLong()))
+            throw error
+        }
     }
 
     /**

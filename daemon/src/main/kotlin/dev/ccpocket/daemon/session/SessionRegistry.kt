@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.session
 
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.agent.AgentBackendFactory
 import dev.ccpocket.daemon.conversation.AskPushHook
 import dev.ccpocket.daemon.conversation.Conversation
@@ -571,6 +573,7 @@ class SessionRegistry(
             )
         }
         if (started.isFailure) {
+            Diagnostics.report(ErrorPath.SESSION_OPEN, Stage.INITIALIZE, ErrorCode.UNAVAILABLE, started.exceptionOrNull())
             mutex.withLock { convos.remove(convoId) }
             runCatching { c.close() }
             sink.emit(PocketError("agent_unavailable", "$effectiveAgent CLI not found — is it installed? (${started.exceptionOrNull()?.message})"))
@@ -731,6 +734,7 @@ class SessionRegistry(
             )
         }
         if (started.isFailure) {
+            Diagnostics.report(ErrorPath.SESSION_OPEN, Stage.INITIALIZE, ErrorCode.UNAVAILABLE, started.exceptionOrNull())
             mutex.withLock { convos.remove(newConvoId) }
             runCatching { branch.close() }
             log.warn("rewind ${req.convoId.take(8)}… branch failed to open: ${started.exceptionOrNull()?.message}")
@@ -762,7 +766,9 @@ class SessionRegistry(
     /** Resumable sessions for [workdir] across every agent backend (each tags its summaries with its kind),
      *  newest-first, each stamped with its [SessionGroup] membership (issue #119; null = ungrouped). */
     fun listSessions(workdir: String): List<SessionSummary> =
-        backends.values.flatMap { runCatching { it.create().listSessions(workdir) }.getOrDefault(emptyList()) }
+        backends.values.flatMap { runCatching { it.create().listSessions(workdir) }
+            .onFailure { Diagnostics.report(ErrorPath.SESSION_LIST, Stage.SCAN, ErrorCode.READ_FAILED, it,
+                SafeMetrics(resultQuality = ResultQuality.PARTIAL)) }.getOrDefault(emptyList()) }
             .map { it.copy(group = SessionGroups.groupOf(workdir, it.sessionId)) }
             .sortedByDescending { it.lastModified }
 
@@ -997,7 +1003,7 @@ class SessionRegistry(
      *  the prompt vanishing into silence (the root of "sent a message, nothing happened"). */
     suspend fun sendPrompt(p: SendPrompt): Boolean {
         val convo = get(p.convoId) ?: return false
-        convo.sendPrompt(p.text, p.images, p.promptId)
+        convo.sendPrompt(p.text, p.images, p.promptId, p.diagnostic)
         return true
     }
 

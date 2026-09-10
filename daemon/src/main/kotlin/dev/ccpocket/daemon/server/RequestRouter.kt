@@ -1,6 +1,8 @@
 package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.DaemonPrefs
+import dev.ccpocket.daemon.diagnostics.FileReadDiagnostics
+import dev.ccpocket.daemon.diagnostics.SessionOpenDiagnostics
 import dev.ccpocket.daemon.agent.ApprovalTimeout
 import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.bridge.PathScope
@@ -257,6 +259,7 @@ class RequestRouter(
          *  drop [AuthorizedActionRecorded]/[PermissionRiskUpdated] for undeclared peers — old clients
          *  would drop the unknown types anyway, but gating keeps the wire quiet and the contract real. */
         @Volatile var supportsApprovalV2: Boolean = false
+        @Volatile var supportsDiagnostics: Boolean = false
 
         /** Whether this peer can decode [agent]. CLAUDE/CODEX are the baseline vocabulary every shipped
          *  client understands; OPENCODE/KIMI are post-baseline additions each guarded by its own cap. */
@@ -306,6 +309,7 @@ class RequestRouter(
 
         /** Per-connection/device gate: one modern client must never opt a sibling legacy client in. */
         fun allowedForCaps(frame: Frame, caps: ClientCapsHolder?): Boolean = when {
+            frame is dev.ccpocket.protocol.HistoryComplete || frame is dev.ccpocket.protocol.PromptProgress || frame is dev.ccpocket.protocol.ApprovalProgress -> caps?.supportsDiagnostics == true
             approvalV2Only(frame) -> caps?.supportsApprovalV2 == true
             // issue #228: fan-out is daemon-wide, but AgentKind vocabulary is per connection. A
             // modern ZCode phone must never opt a legacy sibling into a HandoffUpdated it cannot
@@ -435,6 +439,7 @@ class RequestRouter(
                 caps?.supportsKimi = AGENT_WIRE_KIMI in frame.supportsAgents // issue #206: gates KIMI rows
                 caps?.supportsZcode = AGENT_WIRE_ZCODE in frame.supportsAgents // issue #228: gates ZCODE rows
                 caps?.supportsDsh = AGENT_WIRE_DSH in frame.supportsAgents // issue #255: gates DSH rows
+                caps?.supportsDiagnostics = frame.supportsDiagnostics
                 caps?.supportsApprovalV2 = frame.supportsApprovalV2 // P2-3: gates the V2 approval frames
             }
 
@@ -579,7 +584,11 @@ class RequestRouter(
             // serves any path canonically inside the workdir (issue #133) and, for a client that opted in,
             // streams over-cap binaries as FileContentChunk frames (issue #134)
             is ReadFile -> scope.launch {
-                SessionFilesService.streamFile(frame.agent, frame.workdir, frame.sessionId, frame.path, frame.allowChunks, sink::emit)
+                val observation = FileReadDiagnostics(frame.diagnostic?.validated()?.takeIf {
+                    caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null
+                }, sink::emit)
+                try { SessionFilesService.streamFile(frame.agent, frame.workdir, frame.sessionId, frame.path, frame.allowChunks, observation::send) }
+                catch (error: Exception) { observation.failed(error); throw error }
             }
             is ReadFileDiff -> scope.launch {
                 sink.emit(SessionFilesService.fileDiff(frame.agent, frame.workdir, frame.sessionId, frame.path))
@@ -588,7 +597,11 @@ class RequestRouter(
             // not await — like RunShellCommand below, it suspends on the human approval gate, and the mode
             // comes from the daemon's own registry so the gate can't be spoofed client-side.
             is ExportFile -> scope.launch {
-                exports.run(frame, registry.modeOf(frame.convoId), sink::emit)
+                val observation = FileReadDiagnostics(frame.diagnostic?.validated()?.takeIf {
+                    caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null
+                }, sink::emit)
+                try { exports.run(frame, registry.modeOf(frame.convoId), observation::send) }
+                catch (error: Exception) { observation.failed(error); throw error }
             }
             // ---- Git panel (issue #280) + worktree management (issue #281) ----
             // OWNER-ONLY, and deliberately guarded HERE as well as by the caps allow-lists. GuestCaps /
@@ -703,7 +716,11 @@ class RequestRouter(
                         // workdir+allowedRoots (SESSION-HANDOFF.md §8.3) → the conversation's
                         // PermissionBridge denies any Read/Write/Edit outside them. Null for an owner.
                         val convoId = registry.open(
-                            frame.copy(workdir = wd.toString()), sink, origin,
+                            frame.copy(workdir = wd.toString()),
+                            frame.diagnostic?.validated()?.takeIf {
+                                caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null
+                            }?.let { SessionOpenDiagnostics(sink, it) } ?: sink,
+                            origin,
                             pathScope = guestScope?.roots ?: collabScope?.pathScope?.takeIf { it.isNotEmpty() },
                             // non-null exactly for a COLLABORATOR open: the grant's operation ceiling.
                             // Keys BOTH crypto MUST-FIX halves in registry.open — the hot→cold rebuild
@@ -729,8 +746,14 @@ class RequestRouter(
             // handoff drive gate (SESSION-HANDOFF.md §5.3 items 2/3): every input-shaped frame checks the
             // controller lease FIRST — WAITING denies everyone, IN_PROGRESS only the lease-holding
             // recipient drives. A Deny maps to a PocketError so the client can show why (never silence).
+            is dev.ccpocket.protocol.HistoryApplied -> {
+                if (caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null)
+                    SessionOpenDiagnostics.applied(frame, sink)
+            }
             is SendPrompt -> when (val deny = registry.driveDenied(frame.convoId, dev)) {
-                null -> if (!registry.sendPrompt(frame)) sink.emit(SessionGone(frame.convoId))
+                null -> if (!registry.sendPrompt(frame.copy(diagnostic = frame.diagnostic?.validated()?.takeIf {
+                    caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null
+                }))) sink.emit(SessionGone(frame.convoId))
                 else -> sink.emit(handoffDenied(deny, frame.convoId))
             }
             // Verdicts pass the handoff drive gate first (question answers ride this same frame, so the
@@ -740,7 +763,9 @@ class RequestRouter(
             // An unknown/expired askId answers the TAPPING device honestly (issue #100): its optimistic
             // card-clear must not read as success.
             is PermissionVerdict -> when (val deny = registry.driveDenied(frame.convoId, dev)) {
-                null -> if (!approvals.onVerdict(frame)) {
+                null -> if (!approvals.onVerdict(frame.copy(diagnostic = frame.diagnostic?.validated()?.takeIf {
+                    caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null
+                }), diagnosticEmit = sink::emit)) {
                     sink.emit(PocketError("ask_expired", "That approval expired before it reached your computer — ask the agent to try the action again.", frame.convoId))
                 }
                 else -> sink.emit(handoffDenied(deny, frame.convoId))

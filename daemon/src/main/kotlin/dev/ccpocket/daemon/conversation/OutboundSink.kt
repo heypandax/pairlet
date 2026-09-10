@@ -19,7 +19,7 @@ fun interface OutboundSink {
  * extension property) on this functional interface makes the Kotlin compiler emit an illegal `<get-key>`
  * accessor into every `OutboundSink { … }` SAM lambda, which the JVM rejects at class-load time.
  */
-class KeyedSink(val key: Any, private val delegate: OutboundSink, val watching: Boolean = true) : OutboundSink {
+open class KeyedSink(val key: Any, private val delegate: OutboundSink, val watching: Boolean = true) : OutboundSink {
     override suspend fun emit(frame: Frame) = delegate.emit(frame)
 }
 

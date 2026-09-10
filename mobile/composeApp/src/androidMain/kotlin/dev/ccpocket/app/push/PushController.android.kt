@@ -16,6 +16,10 @@ actual object PushController {
         // MULTI-VENDOR SEAM: choose the channel here (by Build.MANUFACTURER / build flavor) and tag the
         // token's platform accordingly ("xiaomi"/"huawei"/…) once a vendor SDK is integrated; FCM today.
         FirebaseMessaging.getInstance().token.addOnSuccessListener { t -> deliver(PushToken("fcm", t)) }
+            .addOnFailureListener { error ->
+                dev.ccpocket.observability.Diagnostics.report(dev.ccpocket.observability.ErrorPath.PUSH,
+                    dev.ccpocket.observability.Stage.REQUEST, dev.ccpocket.observability.ErrorCode.UNAVAILABLE, error)
+            }
     }
 
     /** Fed by the initial token fetch and by [CcPocketMessagingService.onNewToken] on refresh. */

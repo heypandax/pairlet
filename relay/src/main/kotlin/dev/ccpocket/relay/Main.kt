@@ -6,6 +6,11 @@ import dev.ccpocket.relay.store.InMemoryRelayStore
 import dev.ccpocket.relay.store.SqliteRelayStore
 
 fun main(args: Array<String>) {
+    dev.ccpocket.observability.sentry.SentryRuntime.configure(
+        dev.ccpocket.observability.Component.RELAY,
+        System.getenv("CCPOCKET_RELAY_VERSION") ?: "dev",
+        System.getenv("CCPOCKET_DIAGNOSTICS_ENABLED") == "true",
+    )
     val a = args.toList()
     fun opt(name: String): String? = a.indexOf(name).let { if (it >= 0 && it + 1 < a.size) a[it + 1] else null }
     val host = opt("--host") ?: "127.0.0.1"

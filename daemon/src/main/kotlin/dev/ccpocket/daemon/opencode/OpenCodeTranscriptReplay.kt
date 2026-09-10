@@ -1,5 +1,9 @@
 package dev.ccpocket.daemon.opencode
 
+import dev.ccpocket.daemon.disk.ReplayReadStats
+import dev.ccpocket.daemon.disk.ReplaySlice
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.disk.ReplayBudget
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
@@ -38,11 +42,16 @@ object OpenCodeTranscriptReplay {
     // Reply-body text is deliberately NOT per-row capped (issue #81 parity with the Claude/Codex replays).
     private const val MAX_TOOL_OUTPUT = 4000
 
-    fun read(sessionId: String, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> {
+    fun read(sessionId: String, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> =
+        slice(sessionId, maxMessages, maxFrameTextBytes).messages
+
+    fun slice(sessionId: String, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): ReplaySlice {
+        val stats = ReplayReadStats()
         return runCatching {
-            val conn = OpenCodePaths.connectReadOnly() ?: return emptyList()
-            conn.use { readFrom(it, sessionId, maxMessages, maxFrameTextBytes) }
-        }.getOrDefault(emptyList())
+            val conn = OpenCodePaths.connectReadOnly() ?: return ReplaySlice(emptyList(), quality = "unavailable")
+            conn.use { stats.slice(readFrom(it, sessionId, maxMessages, maxFrameTextBytes, stats)) }
+        }.onFailure { Diagnostics.report(ErrorPath.HISTORY_READ, Stage.READ, ErrorCode.READ_FAILED, it) }
+            .getOrElse { ReplaySlice(emptyList(), quality = "unavailable") }
     }
 
     /**
@@ -52,7 +61,7 @@ object OpenCodeTranscriptReplay {
      * into text+card+text counts as its rows, exactly like the Claude/Codex slicers) and [ReplayBudget]
      * bounds the total frame bytes.
      */
-    internal fun readFrom(conn: Connection, sessionId: String, maxMessages: Int, maxFrameTextBytes: Long): List<HistoryMessage> {
+    internal fun readFrom(conn: Connection, sessionId: String, maxMessages: Int, maxFrameTextBytes: Long, stats: ReplayReadStats = ReplayReadStats()): List<HistoryMessage> {
         val msgStmt = conn.prepareStatement(
             "SELECT id, data FROM message WHERE session_id = ? ORDER BY time_created ASC",
         )
@@ -63,13 +72,13 @@ object OpenCodeTranscriptReplay {
         while (msgRs.next()) {
             val messageId = msgRs.getString("id") ?: continue
             val dataStr = msgRs.getString("data") ?: continue
-            val msgData = runCatching { json.parseToJsonElement(dataStr) }.getOrNull() as? JsonObject ?: continue
+            val msgData = stats.parse(json, dataStr) ?: continue
             val role = when (msgData["role"]?.jsonPrimitive?.contentOrNull) {
                 "user" -> ChatRole.USER
                 "assistant" -> ChatRole.ASSISTANT
                 else -> continue
             }
-            out += messageRows(conn, sessionId, messageId, role)
+            out += messageRows(conn, sessionId, messageId, role, stats)
         }
         val capped = if (out.size > maxMessages) out.takeLast(maxMessages) else out
         return ReplayBudget.fit(capped, maxFrameTextBytes)
@@ -82,7 +91,7 @@ object OpenCodeTranscriptReplay {
      * an in-flight or malformed part degrades to a bare preview card, it never throws. Text is folded
      * whole: a long reply replays intact ([ReplayBudget] bounds the frame total), matching Claude/Codex.
      */
-    private fun messageRows(conn: Connection, sessionId: String, messageId: String, role: ChatRole): List<HistoryMessage> {
+    private fun messageRows(conn: Connection, sessionId: String, messageId: String, role: ChatRole, stats: ReplayReadStats): List<HistoryMessage> {
         val partStmt = conn.prepareStatement(
             "SELECT data FROM part WHERE session_id = ? AND message_id = ? ORDER BY time_created ASC",
         )
@@ -98,7 +107,7 @@ object OpenCodeTranscriptReplay {
         }
         while (partRs.next()) {
             val dataStr = partRs.getString("data") ?: continue
-            val partData = runCatching { json.parseToJsonElement(dataStr) }.getOrNull() as? JsonObject ?: continue
+            val partData = stats.parse(json, dataStr) ?: continue
             when (partData["type"]?.jsonPrimitive?.contentOrNull) {
                 "text" -> partData["text"]?.jsonPrimitive?.contentOrNull?.let {
                     if (textRun.isNotEmpty()) textRun.append('\n')

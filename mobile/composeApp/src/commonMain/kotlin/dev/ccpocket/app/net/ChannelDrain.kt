@@ -51,5 +51,12 @@ internal fun dedupeReconnectBacklog(frames: List<Frame>): List<Frame> {
 internal fun Channel<Frame>.dedupeBacklog() {
     val all = drainAll()
     if (all.isEmpty()) return
-    dedupeReconnectBacklog(all).forEach { trySend(it) }
+    val retained = dedupeReconnectBacklog(all)
+    var dropped = 0L
+    retained.forEach { if (trySend(it).isFailure) dropped++ }
+    if (dropped > 0) dev.ccpocket.observability.Diagnostics.report(
+        dev.ccpocket.observability.ErrorPath.OUTBOX, dev.ccpocket.observability.Stage.QUEUE,
+        dev.ccpocket.observability.ErrorCode.QUEUE_CLOSED,
+        metrics = dev.ccpocket.observability.SafeMetrics(totalCount = retained.size.toLong(), failedCount = dropped),
+    )
 }

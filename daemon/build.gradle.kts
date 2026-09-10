@@ -23,6 +23,8 @@ tasks.processResources {
 
 dependencies {
     implementation(project(":protocol"))
+    implementation(project(":observability"))
+    implementation(project(":observability-sentry"))
 
     // Windows-only external-process cwd read (issue #302). Already on the runtime classpath transitively
     // via mordant; declared explicitly so it's visible at compile time. Pinned to the transitive version
@@ -52,6 +54,7 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotlinx.coroutines.core)
+    testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.ktor.network.tls.certificates) // builds test X.509 chains for RelayTrust
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

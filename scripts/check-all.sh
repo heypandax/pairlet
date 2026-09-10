@@ -23,7 +23,7 @@ python3 scripts/check-brand-compatibility.py
 # :protocol:allTests 含 iOS Simulator target，本机 Xcode 缺对应 SDK 时在**配置期**即失败
 # （Xcode does not support simulator tests for ios_simulator_arm64）——与代码无关。默认只跑
 # JVM 侧；iOS 侧统一归 CHECK_IOS=1 开关（下面会一并追加 protocol 的模拟器测试）。
-tasks=(:protocol:jvmTest :daemon:test :relay:test :mobile:composeApp:desktopTest)
+tasks=(:observability:jvmTest :observability-sentry:jvmTest :protocol:jvmTest :daemon:test :relay:test :mobile:composeApp:desktopTest)
 
 # --affected [基线]：按 git 改动（工作区+暂存+基线以来的提交）圈定受影响模块。
 # protocol 是所有模块的依赖，动它 = 全量；脚本/文档等模块外改动不触发任何测试模块。
@@ -32,8 +32,8 @@ if [[ "${1:-}" == "--affected" ]]; then
   base="HEAD"
   if [[ $# -gt 0 && "$1" != -* && "$1" != :* ]]; then base="$1"; shift; fi
   changed="$( { git diff --name-only "$base" 2>/dev/null; git diff --name-only --cached; git status --porcelain | awk '{print $2}'; } | sort -u )"
-  if echo "$changed" | grep -q '^protocol/'; then
-    echo "── --affected：protocol 有改动 → 全量 ──"
+  if echo "$changed" | grep -Eq '^(protocol/|observability/|observability-sentry/|gradle/|settings.gradle.kts|build.gradle.kts)' ; then
+    echo "── --affected：公共模块或依赖有改动 → 全量 ──"
   else
     tasks=()
     echo "$changed" | grep -q '^daemon/'  && tasks+=(:daemon:test)
@@ -57,7 +57,7 @@ if [[ "${CHECK_IOS:-0}" == "1" ]]; then
     echo "ERROR: iOS tests require a booted Simulator (open Simulator, then rerun)." >&2
     exit 1
   fi
-  tasks+=(:protocol:iosSimulatorArm64Test :mobile:composeApp:iosSimulatorArm64Test)
+  tasks+=(:observability:iosSimulatorArm64Test :protocol:iosSimulatorArm64Test :mobile:composeApp:iosSimulatorArm64Test)
   mobile_targets="Desktop + iOS Simulator"
 fi
 ./gradlew "${tasks[@]}" "$@"

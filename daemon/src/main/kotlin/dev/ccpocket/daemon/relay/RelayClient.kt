@@ -93,6 +93,7 @@ class RelayClient(
     // every reconnect: a relay rollback must immediately re-close the features gated on it, and the daemon
     // reconnects to whatever is answering NOW — the previous link's answer proves nothing about this one.
     @Volatile private var relayProtoV = 0
+    @Volatile private var diagnosticConnectionId: String? = null
     @Volatile private var peerOnline = false
     @Volatile private var lastPongAt = 0L  // last app-level Pong from the relay (heartbeat liveness; baselined at attach)
     @Volatile private var sawPong = false  // logging only: notes when this relay first proves it speaks Pong
@@ -403,6 +404,7 @@ class RelayClient(
                     }
                 } finally {
                     relayProtoV = 0 // no link, no capability — and the next link re-answers for itself
+                    diagnosticConnectionId = null
                 }
             }
         }
@@ -425,10 +427,11 @@ class RelayClient(
         val challenge = nextControl() as? Challenge ?: error("expected challenge")
         outgoing.send(WsFrame.Text(controlText(DaemonAuth(identity.signChallenge(challenge.nonce)))))
         relayProtoV = 0 // fail closed until THIS link says otherwise
+        diagnosticConnectionId = null
         when (val r = nextControl()) {
             // §3.4: the relay announces its own capability level here (0 from a relay that predates the
             // field). Everything gated on it is decided per-connection, never remembered across a reconnect.
-            is Attached -> relayProtoV = r.relayProtoV
+            is Attached -> { dev.ccpocket.daemon.diagnostics.UpgradeReceipt.authenticated(dev.ccpocket.daemon.update.UpdateService.currentVersion()); relayProtoV = r.relayProtoV; diagnosticConnectionId = r.connectionId?.validated(); dev.ccpocket.observability.Diagnostics.connection(diagnosticConnectionId, r.peerConnectionId?.validated()) }
             is AuthError -> error("relay rejected auth: ${r.code}")
             else -> error("expected attached, got ${r?.let { it::class.simpleName }}")
         }
@@ -456,7 +459,7 @@ class RelayClient(
                 }
             }
             is DeviceRevoked -> sessions.onDeviceRevoked(body.deviceId)
-            is PeerPresence -> { peerOnline = body.online; log.info("peer ${if (body.online) "online" else "offline"}") }
+            is PeerPresence -> { dev.ccpocket.observability.Diagnostics.connection(diagnosticConnectionId, body.connectionId?.validated()); peerOnline = body.online; log.info("peer ${if (body.online) "online" else "offline"}") }
             is Pong -> { if (!sawPong) log.info("relay heartbeat armed (pong received)"); sawPong = true; lastPongAt = System.currentTimeMillis() }
             else -> {}
         }

@@ -1,5 +1,9 @@
 package dev.ccpocket.daemon.zcode
 
+import dev.ccpocket.daemon.disk.ReplayReadStats
+import dev.ccpocket.daemon.disk.ReplaySlice
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.daemon.disk.ReplayBudget
 import dev.ccpocket.daemon.disk.TranscriptNoise
 import dev.ccpocket.daemon.opencode.ToolNameMapper
@@ -14,16 +18,22 @@ import java.sql.Connection
 /** Replays official ZCode 3.7.6 SQLite message/part rows; never writes the desktop store. */
 object ZCodeTranscriptReplay {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-    fun read(sessionId: String, maxMessages: Int = 100): List<HistoryMessage> = runCatching {
-        ZCodePaths.connectReadOnly()?.use { readFrom(it, sessionId, maxMessages) }.orEmpty()
-    }.getOrDefault(emptyList())
+    fun read(sessionId: String, maxMessages: Int = 100): List<HistoryMessage> = slice(sessionId, maxMessages).messages
+    fun slice(sessionId: String, maxMessages: Int = 100): ReplaySlice {
+        val stats = ReplayReadStats()
+        return runCatching {
+            val conn = ZCodePaths.connectReadOnly() ?: return ReplaySlice(emptyList(), quality = "unavailable")
+            conn.use { stats.slice(readFrom(it, sessionId, maxMessages, stats)) }
+        }.onFailure { Diagnostics.report(ErrorPath.HISTORY_READ, Stage.READ, ErrorCode.READ_FAILED, it) }
+            .getOrElse { ReplaySlice(emptyList(), quality = "unavailable") }
+    }
 
-    internal fun readFrom(conn: Connection, sid: String, maxMessages: Int = 100): List<HistoryMessage> {
+    internal fun readFrom(conn: Connection, sid: String, maxMessages: Int = 100, stats: ReplayReadStats = ReplayReadStats()): List<HistoryMessage> {
         val out = mutableListOf<HistoryMessage>()
         conn.prepareStatement("SELECT id,data FROM message WHERE session_id=? ORDER BY sequence,time_created,id").use { ms ->
             ms.setString(1, sid)
             ms.executeQuery().use { mr -> while (mr.next()) {
-                val msg = parse(mr.getString("data")) ?: continue
+                val msg = stats.parse(json, mr.getString("data")) ?: continue
                 val role = when (msg.str("role")) { "user" -> ChatRole.USER; "assistant" -> ChatRole.ASSISTANT; else -> continue }
                 if (role == ChatRole.USER && !ZCodeTranscriptProjection.isVisibleUserRow(msg)) continue
                 val text = StringBuilder()
@@ -39,7 +49,7 @@ object ZCodeTranscriptReplay {
                 conn.prepareStatement("SELECT data FROM part WHERE session_id=? AND message_id=? ORDER BY sequence,time_created,id").use { ps ->
                     ps.setString(1, sid); ps.setString(2, mr.getString("id"))
                     ps.executeQuery().use { pr -> while (pr.next()) {
-                        val p = parse(pr.getString(1)) ?: continue
+                        val p = stats.parse(json, pr.getString(1)) ?: continue
                         when (p.str("type")) {
                             "text" -> p.str("text")?.let { if (text.isNotEmpty()) text.append('\n'); text.append(it) }
                             "tool" -> { flush(); out += toolRow(p) }

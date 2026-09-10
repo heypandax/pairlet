@@ -53,6 +53,34 @@ private data class OldToolEvent(
 )
 
 class SerializationRoundTripTest {
+    @Test fun diagnosticTailFieldsKeepEveryOldEnvelopeAndUnknownNestedSkipPath() {
+        val context = DiagnosticContext("1234567890abcdef1234567890abcdef", 1, "1234567890abcdef")
+        val cases = listOf<Triple<String, Frame, Frame>>(
+            Triple("""{"t":"pocket/session.open","workdir":"/w"}""", OpenSession("/w"), OpenSession("/w", diagnostic = context)),
+            Triple("""{"t":"pocket/prompt","convoId":"c","text":"fixture"}""", SendPrompt("c", "fixture"), SendPrompt("c", "fixture", diagnostic = context)),
+            Triple("""{"t":"pocket/verdict","convoId":"c","askId":"a","decision":"allow"}""", PermissionVerdict("c", "a", Decision.ALLOW), PermissionVerdict("c", "a", Decision.ALLOW, diagnostic = context)),
+            Triple("""{"t":"pocket/file.read","workdir":"/w","sessionId":"s","path":"f"}""", ReadFile("/w", "s", "f"), ReadFile("/w", "s", "f", diagnostic = context)),
+            Triple("""{"t":"pocket/file.export","convoId":"c","workdir":"/w","sessionId":"s","path":"f"}""", ExportFile("c", "/w", "s", "f"), ExportFile("c", "/w", "s", "f", diagnostic = context)),
+            Triple("""{"t":"pocket/session.live","convoId":"c","workdir":"/w"}""", SessionLive("c", "/w"), SessionLive("c", "/w", diagnostic = context)),
+            Triple("""{"t":"pocket/history","convoId":"c","messages":[]}""", ConvoHistory("c", emptyList()), ConvoHistory("c", emptyList(), diagnostic = context)),
+            Triple("""{"t":"pocket/file.content","workdir":"/w","sessionId":"s","path":"f"}""", FileContent("/w", "s", "f"), FileContent("/w", "s", "f", diagnostic = context)),
+            Triple("""{"t":"pocket/file.content.chunk","workdir":"/w","sessionId":"s","path":"f","idx":0,"last":true,"base64":"AAAA"}""", FileContentChunk("/w", "s", "f", 0, true, "AAAA"), FileContentChunk("/w", "s", "f", 0, true, "AAAA", diagnostic = context)),
+        )
+        for ((body, legacy, populated) in cases) {
+            val raw = """{"id":"fixture","ts":0,"body":$body}"""
+            assertEquals(legacy, PocketJson.decodeFromString<Envelope>(raw).body, body)
+            assertFalse("\"diagnostic\"" in PocketJson.encodeToString(Envelope("fixture", 0, body = legacy)), body)
+            val encoded = PocketJson.encodeToString(Envelope("fixture", 0, body = populated))
+            assertEquals(populated, PocketJson.decodeFromString<Envelope>(encoded).body)
+            val futureBody = body.dropLast(1) + """, "futureRows":[{"items":[1,{"nested":true}]}],"futureMap":{"key":{"values":[1,2]}}}"""
+            assertEquals(legacy, PocketJson.decodeFromString<Envelope>("""{"id":"fixture","ts":0,"body":$futureBody}""").body)
+        }
+        val attached = PocketJson.encodeToString<Frame>(Attached(Role.DAEMON, "a"))
+        assertFalse("connectionId" in attached)
+        assertFalse("peerConnectionId" in attached)
+        assertFalse("connectionId" in PocketJson.encodeToString<Frame>(PeerPresence(true)))
+    }
+
 
     @Test
     fun openSession_discriminator_defaults_and_null_omission() {

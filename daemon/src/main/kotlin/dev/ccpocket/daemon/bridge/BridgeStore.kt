@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.bridge
 
+import dev.ccpocket.daemon.diagnostics.storageReadFailed
+import dev.ccpocket.daemon.diagnostics.storageWriteFailed
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.PocketJson
 import kotlinx.serialization.Serializable
@@ -256,7 +258,7 @@ private fun credentialFile(name: String): File {
 private fun loadCredentials(store: File): Map<String, BridgeEntry> = runCatching {
     if (!store.exists()) return emptyMap()
     PocketJson.decodeFromString<Map<String, BridgeEntry>>(store.readText())
-}.getOrDefault(emptyMap())
+}.onFailure(::storageReadFailed).getOrDefault(emptyMap())
 
 private fun saveCredentials(map: Map<String, BridgeEntry>, store: File) {
     runCatching {
@@ -265,5 +267,5 @@ private fun saveCredentials(map: Map<String, BridgeEntry>, store: File) {
         runCatching { // best-effort 0600 (POSIX only; Windows ACLs inherit the profile dir)
             Files.setPosixFilePermissions(store.toPath(), PosixFilePermissions.fromString("rw-------"))
         }
-    }
+    }.onFailure(::storageWriteFailed)
 }

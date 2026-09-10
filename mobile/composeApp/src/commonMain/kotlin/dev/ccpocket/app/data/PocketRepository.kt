@@ -1,5 +1,22 @@
 package dev.ccpocket.app.data
 
+import dev.ccpocket.app.telemetry.ProductFeature
+import dev.ccpocket.app.telemetry.ProductFeatures
+import dev.ccpocket.app.telemetry.Coverage
+import dev.ccpocket.app.telemetry.ProductOutcome
+import dev.ccpocket.app.telemetry.ProductResult
+import dev.ccpocket.protocol.HistoryComplete
+import dev.ccpocket.protocol.HistoryApplied
+
+import dev.ccpocket.observability.OperationTrace
+import dev.ccpocket.observability.Outcome
+import dev.ccpocket.observability.ResultQuality
+import dev.ccpocket.observability.Diagnostics
+import dev.ccpocket.observability.ErrorPath
+import dev.ccpocket.observability.ErrorCode
+import dev.ccpocket.observability.Stage as DiagnosticStage
+import dev.ccpocket.observability.SafeMetrics
+
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.MutableState
@@ -613,6 +630,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var handoffListingRev = 0       // the inbox-mode counterpart: bumped on every HandoffListing reply
     // per-session connection bookkeeping (plain vars; [phase]/[directoriesLoaded] hold the observable truth)
     private var attachedThisSession = false // relay Attached seen (or, direct mode, socket + first Directories)
+    private var diagnosticConnectionId: String? = null
     private var daemonOffline = false       // explicit: got PeerPresence(false), or the post-attach list-wait elapsed
     private var pairingInvalid = false      // relay AuthError -> needs re-pair, never auto-retry
     private var hadReadyThisSession = false // reached Ready at least once -> a later drop shows Reconnecting
@@ -1153,7 +1171,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  phone opens no panes — which is what makes [SidePanes.route] below a no-op on mobile. */
     // the 4th arg reads the live #122 capability (issue #329): a supportsPromptRecovery daemon owns prompt
     // redelivery, so a column must not arm its ack→turn watchdog and misreport a slow large-context turn.
-    val sidePanes = SidePanes(scope, ::send, ::newPromptId, daemonOwnsPromptRecovery = { daemonOwnsPromptRecovery })
+    val sidePanes = SidePanes(scope, ::send, ::newPromptId, daemonOwnsPromptRecovery = { daemonOwnsPromptRecovery },
+        diagnosticsSupported = { daemonDiagnostics && paired.value?.role == BindingRole.OWNER && !demoMode.value },
+        productDimensions = ::productDimensions,
+        receiptExpired = { cid, pid -> promptOutcomes.receiptExpired(cid, pid, appIsForeground.value) },
+        responseExpired = { cid, pid, queued -> promptOutcomes.responseExpired(cid, pid, appIsForeground.value, queued) })
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
     val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
     private var fileUploadJob: Job? = null                 // the chunk-send loop of the ONE Uploading file
@@ -1340,6 +1362,50 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val openTimedOutReason = mutableStateOf(OpenFailure.COMPUTER)
     private var openGen = 0                                  // generation counter matching each openSession call to its own safety-net timer
     private var openDispatchedGen = 0                        // current generation has reached its OpenSession send (#235 identity handoff)
+    private val appIsForeground = mutableStateOf(true)
+    private var connectionRecovery: ProductOutcome? = null
+    private var connectionDiagnostic: OperationTrace? = null
+    private var connectionDiagnosticEnded = false
+    private val approvalOutcomes = ApprovalOutcomeTracker()
+    private val promptOutcomes = PromptOutcomeTracker(scope, { appIsForeground.value }, { promptTurnTimeoutMs })
+    private val backgroundOutcomes = BackgroundOutcomeTracker()
+    fun exposeFeature(feature: ProductFeature) = ProductFeatures.expose(feature, productDimensions())
+    private var daemonDiagnostics = false
+    private var openObservation: SessionOpenObservation? = null
+    private var historyDiagnosticDeadline: Job? = null
+    val historyLayoutToken = mutableStateOf<String?>(null)
+    val latestDiagnosticId = mutableStateOf<String?>(null)
+    private fun productDimensions() = demoTag() + mapOf<TelKey, Any>(
+        TelKey.UsageMode to if (demoMode.value) "demo" else if (isCollaboratorInbox || paired.value?.role?.let { it != BindingRole.OWNER } == true) "shared" else "own",
+        TelKey.Backend to (sessionAgent.value ?: AgentKind.CLAUDE).name.lowercase(),
+    )
+    val contentLayoutToken: String? get() = if (!appIsForeground.value) null else historyLayoutToken.value ?: promptOutcomes.layoutToken(convoId.value)
+    fun sideContentLayoutToken(pane: SidePane): String? = if (!appIsForeground.value) null else pane.historyLayoutToken.value ?: promptOutcomes.layoutToken(pane.convoId.value)
+    fun onSideContentLaidOut(pane: SidePane, token: String, hasVisibleContent: Boolean, lastVisibleContent: Int) {
+        if (!appIsForeground.value) return
+        if (pane.historyLayoutToken.value == token) pane.onHistoryLaidOut(token, hasVisibleContent)
+        else pane.convoId.value?.let { promptOutcomes.visible(it, token, pane.messages, lastVisibleContent) }
+    }
+    fun onHistoryLaidOut(token: String, hasVisibleContent: Boolean, lastVisibleContent: Int = -1) {
+        if (historyLayoutToken.value != token) {
+            convoId.value?.let { promptOutcomes.visible(it, token, messages, lastVisibleContent) }
+            return
+        }
+        val observation = openObservation ?: return
+        if (historyLayoutToken.value != token || observation.context.traceId != token || observation.convoId != convoId.value) return
+        observation.laidOut(hasVisibleContent)
+        historyDiagnosticDeadline?.cancel(); historyDiagnosticDeadline = null
+        historyLayoutToken.value = null
+    }
+    private var openDiagnostic: OperationTrace? = null
+    private fun cancelOpenDiagnostic() {
+        openObservation?.fail(ProductResult.CANCELLED, ErrorCode.CANCELLED)
+        openObservation = null
+        historyDiagnosticDeadline?.cancel(); historyDiagnosticDeadline = null
+        historyLayoutToken.value = null
+        openDiagnostic?.finish(Outcome.CANCELLED)
+        openDiagnostic = null
+    }
     private var openJob: Job? = null                         // owns both the state-switch worker and its 8s deadline
     /**
      * Explicit navigation fence (issue #226). [sessionKey] intentionally survives [backToBrowse] so a
@@ -1456,6 +1522,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         historyPageDeadline?.cancel()
         historyPageDeadline = scope.launch {
             delay(10_000)
+            if (historyLoadingOlder.value && !demoMode.value) Diagnostics.report(ErrorPath.HISTORY_PAGE,
+                DiagnosticStage.WAIT, ErrorCode.TIMEOUT, isError = true)
             if (historyLoadingOlder.value) historyLoadingOlder.value = false // stop the spinner; keep the affordance + the outstanding request
         }
     }
@@ -1745,6 +1813,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      * so the screen's actionable card and the funnel's category can never describe the same failure
      * differently. The strings are unchanged by construction; `PairFailureTest` pins that.
      */
+    private fun reportPairDiagnostic(error: Throwable) {
+        when (classifyPairFailure(error)) {
+            PairFailure.PARSE, PairFailure.CODE, PairFailure.REDEEM ->
+                Diagnostics.report(ErrorPath.PAIRING, DiagnosticStage.REQUEST, ErrorCode.REJECTED)
+            PairFailure.NETWORK -> Diagnostics.report(ErrorPath.PAIRING, DiagnosticStage.CONNECT,
+                ErrorCode.UNAVAILABLE, error, isError = false)
+            PairFailure.OTHER -> Diagnostics.report(ErrorPath.PAIRING, DiagnosticStage.REQUEST,
+                ErrorCode.UNEXPECTED, error)
+        }
+    }
+
     private fun pairFailReason(t: Throwable): String = classifyPairFailure(t).wireReason(t)
 
     /**
@@ -1788,6 +1867,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // Incremented FIRST so every event of this attempt — started, paired, failed — carries the same
         // ordinal: without it a user's fourth try and a user's first try are indistinguishable (issue #342).
         val attempt = ++pairAttempt
+        val pairTrace = Diagnostics.begin(ErrorPath.PAIRING)
+        pairTrace?.stage(DiagnosticStage.CONNECT)
         Telemetry.track(TelEvent.PairStarted, mapOf(TelKey.Source to source, TelKey.Attempt to attempt))
         setPairFailure(null)          // this attempt's outcome is not known yet; the last one's card must go
         pairVerifying.value = true
@@ -1797,6 +1878,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         try {
             client = HttpClient()
             val info = getInfo(client)
+            pairTrace?.stage(DiagnosticStage.REQUEST)
             val keys = Pairing.deviceKeys()
             paired.value = Pairing.redeem(info, keys, client!!) // upserts the list + pins this as the active account
             // a FRESH pairing (e.g. a guest redeeming a new invite for the same daemon/accountId) supersedes
@@ -1806,7 +1888,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             replace(pairedList, Pairing.loadAll())
             addingDevice.value = false
             firstTicket = info.ticket
-            Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to source, TelKey.Attempt to attempt))
+            Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to source, TelKey.Attempt to attempt) + productDimensions())
+            pairTrace?.finish(Outcome.SUCCESS, DiagnosticStage.COMMIT)
             startRelay()
         } catch (t: Throwable) {
             status.value = StatusMsg(Res.string.status_pair_failed, t.message ?: t::class.simpleName ?: "error")
@@ -1818,7 +1901,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 TelEvent.PairFailed,
                 mapOf(TelKey.Reason to pairFailReason(t), TelKey.Source to source, TelKey.Attempt to attempt),
             )
-            Telemetry.recordError(t.message ?: "pair failed", "pairing")
+            val code = when (classifyPairFailure(t)) {
+                PairFailure.PARSE, PairFailure.CODE, PairFailure.REDEEM -> ErrorCode.REJECTED
+                PairFailure.NETWORK -> ErrorCode.UNAVAILABLE
+                PairFailure.OTHER -> ErrorCode.UNEXPECTED
+            }
+            pairTrace?.finish(if (t is CancellationException) Outcome.CANCELLED else Outcome.FAILURE, DiagnosticStage.REQUEST, code, t)
         } finally {
             if (attempt == pairAttempt) pairVerifying.value = false
             client?.close()
@@ -1872,7 +1960,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             phase.value = next
             Telemetry.track(TelEvent.ConnPhase, mapOf(TelKey.Phase to next.name, TelKey.Transport to transportName()))
         }
+        if (ready) {
+            if (connectionDiagnosticEnded) connectionDiagnostic?.recovered()
+            else connectionDiagnostic?.finish(Outcome.SUCCESS, DiagnosticStage.COMPLETE)
+            connectionDiagnostic = null; connectionDiagnosticEnded = false
+            connectionRecovery?.finish(ProductResult.SUCCESS)
+            connectionRecovery = null
+        }
         if (ready) { reconnectGraceJob?.cancel(); reconnectGraceJob = null; reconnectGracePassed = false; listWaitRetried = false } // truly back — reset for the next blip
+        if (!ready && next in listOf(ConnPhase.PairingInvalid, ConnPhase.RelayUnreachable, ConnPhase.ComputerOffline) && !connectionDiagnosticEnded) {
+            connectionDiagnostic?.finish(Outcome.FAILURE, DiagnosticStage.CONNECT, if (next == ConnPhase.PairingInvalid) ErrorCode.REJECTED else ErrorCode.UNAVAILABLE)
+            connectionDiagnosticEnded = connectionDiagnostic != null
+        }
         consumePendingOpenIfReady() // a push-tap target waits here until the link is actually Ready
     }
 
@@ -1907,11 +2006,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Relay control-plane events (not E2E daemon traffic) drive the honest connection phase. */
     private fun handleControl(f: Frame) {
         when (f) {
-            is Attached -> { attachedThisSession = true; connected.value = true; connGen.value++; relayDeadlinePassed = false; armLinkStableReset(); ensurePushStarted(); registerPush(); startListWait(); recomputePhase() }
+            is Attached -> { diagnosticConnectionId = f.connectionId?.validated(); Diagnostics.connection(diagnosticConnectionId, f.peerConnectionId?.validated()); attachedThisSession = true; connected.value = true; connGen.value++; relayDeadlinePassed = false; armLinkStableReset(); ensurePushStarted(); registerPush(); startListWait(); recomputePhase() }
             // Only re-handshake on a genuine offline->online transition. The relay re-broadcasts
             // PeerPresence(true) on every daemon (re)attach; a redundant true must NOT tear down a healthy
             // transport (that surfaced as a spurious Reconnecting banner when opening a session).
-            is PeerPresence -> { val wasOffline = daemonOffline; daemonOffline = !f.online; if (f.online && wasOffline) onComputerBackOnline(); recomputePhase() }
+            is PeerPresence -> { Diagnostics.connection(diagnosticConnectionId, f.connectionId?.validated()); val wasOffline = daemonOffline; daemonOffline = !f.online; if (f.online && wasOffline) onComputerBackOnline(); recomputePhase() }
             is AuthError -> { pairingInvalid = true; retryJob?.cancel(); recomputePhase() }
             else -> {}
         }
@@ -2263,11 +2362,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // flight, later triggers inside the window merge into it instead of stacking another socket +
         // reattach volley into the cross-reconnect outbox.
         if (shouldCoalesceReconnect(force, reconnect, connectJob?.isActive == true, epochMillis() - lastTransportLaunchAt)) return
+        if (connectionDiagnostic == null) {
+            connectionDiagnostic = Diagnostics.begin(ErrorPath.CONNECTION)
+            connectionDiagnosticEnded = false
+        } else connectionDiagnostic?.retry()
+        connectionDiagnostic?.stage(DiagnosticStage.CONNECT)
+        daemonDiagnostics = false
         lastTransportLaunchAt = epochMillis()
         transportLaunches++
         presenceProbeJob?.cancel(); presenceProbeJob = null // a full relaunch moots the #145 probe
         connected.value = true // internal "attempt active/attached" guard for retry/foreground — NOT the UI
         attachedThisSession = false; daemonOffline = false; relayDeadlinePassed = false; listWaitJob?.cancel()
+        diagnosticConnectionId = null
         if (!reconnect) { pairingInvalid = false; hadReadyThisSession = false; directoriesLoaded.value = false; handoffsLoaded.value = false }
         recomputePhase() // Connecting, or Reconnecting if we were Ready before — recomputePhase is the sole writer of phase
         status.value = StatusMsg(if (reconnect) Res.string.status_reconnecting else Res.string.status_connecting)
@@ -2354,7 +2460,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // offers addressed to THIS device. Sending the ordinary volley here would be three refusals.
                 send(ListHandoffs())
             } else {
-                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true))
+                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true))
                 send(ListDirectories())
                 send(ListPendingApprovals)
             }
@@ -2392,12 +2498,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 ?: StatusMsg(Res.string.status_disconnected)
             return
         }
+        if (appIsForeground.value && connectionRecovery == null)
+            connectionRecovery = ProductOutcome(TelEvent.ConnectionRecoveryResult, productDimensions())
         val reason = when (err) {
             null -> "closed"
             is RelayAuthException -> "auth"
             is ConnectWedgedException -> "wedged"
             else -> err::class.simpleName ?: "error"
         }
+        if (!demoMode.value) Diagnostics.report(ErrorPath.CONNECTION, DiagnosticStage.CONNECT,
+            when (err) {
+                is ConnectWedgedException -> ErrorCode.TIMEOUT
+                is RelayAuthException -> ErrorCode.REJECTED
+                else -> ErrorCode.CONNECTION_CLOSED
+            }, err, isError = err is ConnectWedgedException)
         Telemetry.track(TelEvent.ConnFailed, mapOf(TelKey.Transport to transportName(), TelKey.Reason to reason, TelKey.Attempt to retryAttempts))
         if (err is RelayAuthException || pairingInvalid) { // expired/invalid pairing — re-pair, never auto-retry
             pairingInvalid = true; recomputePhase(); return
@@ -2434,7 +2548,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** App came to the foreground (iOS suspends sockets in background) — reconnect NOW; the backoff
      *  ladder deliberately survives the return (#144 — resetting it here let a flapping link hammer). */
+    fun onAppBackground() {
+        promptOutcomes.background()
+        connectionDiagnostic?.finish(Outcome.CANCELLED, DiagnosticStage.WAIT, ErrorCode.CANCELLED)
+        connectionDiagnostic = null; connectionDiagnosticEnded = false
+        fileViewObservation?.cancel(background = true)
+        appIsForeground.value = false
+        historyDiagnosticDeadline?.cancel(); historyDiagnosticDeadline = null
+        openObservation?.background()
+        sidePanes.panes.forEach { it.openObservation?.background() }
+        connectionRecovery?.finish(ProductResult.WAITING, coverage = Coverage.PARTIAL)
+        connectionRecovery = null
+    }
+
     fun onAppForeground() {
+        appIsForeground.value = true
         if (demoMode.value || pairingInvalid) return
         if (sessionActive.value && !connected.value) {
             retryJob?.cancel()
@@ -2494,6 +2622,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // An OpenSession worker belongs to the link/computer that accepted the click. It may still be
         // queued (or suspended on a full reconnect outbox), so invalidating only the claim is insufficient:
         // the worker could wake after drainPending() and enqueue the old machine's open into the next link.
+        cancelOpenDiagnostic()
         openGen++
         openJob?.cancel(); openJob = null
         retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); deafJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel(); linkStableJob?.cancel(); presenceProbeJob?.cancel()
@@ -2512,6 +2641,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         opening.value = false; switchingSession.value = false; openTimedOut.value = false
         sessionNavigationFenced = true
         attachedThisSession = false; daemonOffline = false; pairingInvalid = false
+        diagnosticConnectionId = null
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
         handoffsLoaded.value = false // inbox mode's readiness proof dies with the link, same as the list
         clearReviewState() // a review ledger belongs to one machine — never show the last daemon's inbox
@@ -2538,6 +2668,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         quotaDeadlines.values.forEach { it.cancel() }; quotaDeadlines.clear(); quotaOutstanding.clear()
         quotaByAgent.clear(); quotaLoadingByAgent.clear(); quotaStatusByAgent.clear()
         daemonQuotaAgents.value = emptyList() // #348 capability: the next machine re-advertises its own
+        connectionDiagnostic?.finish(Outcome.CANCELLED, DiagnosticStage.COMPLETE, ErrorCode.CANCELLED)
+        connectionDiagnostic = null; connectionDiagnosticEnded = false
+        connectionRecovery?.finish(ProductResult.CANCELLED, ErrorCode.CANCELLED)
+        connectionRecovery = null
+        approvalOutcomes.reset()
+        promptOutcomes.reset()
+        daemonDiagnostics = false
         daemonOwnsPromptRecovery = false // ditto: an older next daemon still needs the legacy fallback
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
@@ -2582,10 +2719,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             val client = HttpClient()
             try {
                 val info = Pairing.resolveCode(code.trim(), client)
-                Pairing.redeem(info, Pairing.deviceKeys(), client) // upserts the list + pins the NEW account active…
+                val newBinding = Pairing.redeem(info, Pairing.deviceKeys(), client) // upserts the list + pins the NEW account active…
                 keepActive?.let { Pairing.setActive(it) }          // …undo that pin so the live session stays put
                 replace(pairedList, Pairing.loadAll())
-                Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to "code-add"))
+                Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to "code-add", TelKey.UsageMode to if (newBinding.role == BindingRole.OWNER) "own" else "shared"))
                 onDone(true)
             } catch (t: Throwable) {
                 status.value = StatusMsg(Res.string.status_pair_failed, t.message ?: t::class.simpleName ?: "error")
@@ -2683,6 +2820,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sidePanes.clear() // #311: a column's conversation must not stay mounted on a headless satellite link
         // The UI open worker is not a transport job and therefore survives the fleet swap unless it is
         // explicitly retired. A headless satellite must never execute a click queued by the old primary.
+        cancelOpenDiagnostic()
         openGen++
         openJob?.cancel(); openJob = null
         pendingNewOpenWd = null
@@ -2769,7 +2907,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private suspend fun send(request: Frame) {
         // Reconnect, SessionGone recovery and split panes also resume through this seam. Restore the
         // session's choice here so none of those OpenSession paths silently falls back to CLI default.
-        val frame = if (request is OpenSession && request.thinking == null) {
+        var frame = if (request is OpenSession && request.thinking == null) {
             request.copy(thinking = thinkingForSession(request.resumeId, request.agent))
         } else request
         // Reverse capability guard (#275/#276): an old daemon coerces the unknown `zcode` enum to the Claude
@@ -2781,6 +2919,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // proper channel. The new-session picker is already gated upstream in openSession(), so this seam
         // backstops every lower-level session, schedule, model, file, handoff, and usage path.
         agentCarried(frame)?.let { if (daemonAgentsKnown && !supportsAgent(it)) return }
+        if (frame is SendPrompt) {
+            val prompt = frame
+            val backend = sidePanes.panes.firstOrNull { it.convoId.value == prompt.convoId }?.agent ?: sessionAgent.value
+            frame = promptOutcomes.request(prompt, daemonDiagnostics && paired.value?.role == BindingRole.OWNER && !demoMode.value,
+                productDimensions() + mapOf(TelKey.Backend to (backend ?: AgentKind.CLAUDE).name.lowercase()))
+        }
+        if (frame is PermissionVerdict) frame = approvalOutcomes.request(frame,
+            daemonDiagnostics && paired.value?.role == BindingRole.OWNER && !demoMode.value, productDimensions())
         onSendForTest?.invoke(frame)
         if (demoMode.value) { demoRespond(frame); return } // no network: synthesize the daemon's reply locally
         try {
@@ -2797,6 +2943,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
+            if (frame is SendPrompt) promptOutcomes.sendFailed(frame)
+            Diagnostics.report(ErrorPath.OUTBOX, DiagnosticStage.WRITE, ErrorCode.SEND_FAILED, t)
             onTransportDown(t)
         }
     }
@@ -3056,6 +3204,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // quota refresh triggers. Counted HERE rather than inside the `is TurnDone` branch below, because
         // that branch is filtered to the currently-open conversation (chat-state bookkeeping) and would
         // miss a turn finishing in another session/window on the same machine.
+        if (f is PromptAck) promptOutcomes.acknowledged(f.convoId, f.promptId)
         if (f is TurnDone) turnCompletions.value++
         // #311: a split pane's conversation is not this repository's conversation, so every branch below
         // filters it out. Mirror it into its pane FIRST, then let the branches run exactly as they always
@@ -3076,7 +3225,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 if (!useRelay && linkStableJob?.isActive != true) armLinkStableReset()
                 if (!hadReadyThisSession) {
                     hadReadyThisSession = true
-                    Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()) + demoTag())
+                    Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()) + productDimensions())
                 }
                 recomputePhase()
             }
@@ -3282,6 +3431,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     val wire = a.name.lowercase()
                     if (a != AgentKind.CLAUDE && wire !in previouslyAdvertised && quotaByAgent[a] == null && (quotaOutstanding[a] ?: 0) == 0) fetchQuota(a)
                 }
+                daemonDiagnostics = f.supportsDiagnostics
                 daemonOwnsPromptRecovery = f.supportsPromptRecovery
                 if (daemonOwnsPromptRecovery) clearTurnWatchdogState()
                 // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
@@ -3300,6 +3450,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // conversation's AssistantChunk/ToolEvent frames then passed the guards and spliced another
             // session's live turn into the open transcript. Not our view's session → no state touched.
             is SessionLive -> if (acceptsSessionLive(f)) {
+                // This is attachment acknowledgement only. Old peers do not send a history-complete
+                // marker; never label its later history/render result complete from this acknowledgement.
+                openObservation?.let { observation ->
+                    if (f.diagnostic?.validated() == null || observation.matches(f.diagnostic)) observation.live(f.convoId, f.diagnostic)
+                }
                 // Reattach is an authoritative lifecycle snapshot. A local 45s deadline may have fired while
                 // the phone was suspended and missed both output + TurnDone; never carry that stale inference
                 // over the daemon's fresh executing/idle truth (the screenshot bug).
@@ -3542,6 +3697,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 upgradeWindowIfProven()
             }
             is BackgroundJobs -> if (f.convoId == convoId.value) {
+                f.jobs.forEach { backgroundOutcomes.observe(f.convoId, "agent_job", it.id, it.status.name, productDimensions()) }
                 replace(backgroundJobs, f.jobs)
                 if (!streaming.value && f.jobs.none { it.status == JobStatus.RUNNING }) {
                     noteCurrentSettledSeen(sessionKey.value ?: currentSessionId)
@@ -3551,6 +3707,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // same run reconciles in place. finalResult arrives only on the explicit terminal patch —
             // never let a later plain snapshot blank an already-received final return.
             is WorkflowUpdate -> if (f.convoId == convoId.value) {
+                backgroundOutcomes.observe(f.convoId, "workflow", f.run.runId, f.run.status.name, productDimensions())
                 val prev = workflowRuns[f.run.runId]
                 workflowRuns[f.run.runId] = if (f.run.finalResult == null && prev?.finalResult != null) {
                     f.run.copy(finalResult = prev.finalResult)
@@ -3578,6 +3735,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // different in-flight open. OpenSession failures have no conversation yet and therefore
                 // arrive with convoId == null; the current view's own errors still pass below.
             } else {
+                if (opening.value) {
+                    openObservation?.fail(ProductResult.FAILURE, ErrorCode.REJECTED, DiagnosticStage.ATTACH)
+                    openDiagnostic?.finish(Outcome.FAILURE, DiagnosticStage.ATTACH, ErrorCode.REJECTED)
+                    openDiagnostic = null
+                }
                 // …and a failed switch must release the router, or the chat would hold an empty screen
                 openJob?.cancel(); openJob = null
                 opening.value = false; switchingSession.value = false // a failed open re-enables the one-tap entries right away
@@ -3618,6 +3780,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // the link was down, but the app may hold rows the transcript doesn't (pending bubbles, dividers,
             // scrollback past the replay window, a bubble ahead of a lagging disk read) — TranscriptMerge
             // reconciles without flashing, duplicating, or reordering.
+            is dev.ccpocket.protocol.ApprovalProgress -> approvalOutcomes.progress(f)
+            is dev.ccpocket.protocol.PromptProgress -> promptOutcomes.progress(f)
+            is HistoryComplete -> if (f.convoId == convoId.value) {
+                val observation = openObservation
+                if (observation?.completed(f) == true) {
+                    historyLayoutToken.value = observation.context.traceId
+                    scope.launch {
+                        if (openObservation === observation && convoId.value == f.convoId)
+                            send(HistoryApplied(f.convoId, observation.context))
+                    }
+                }
+            }
             is ConvoHistory -> if (f.convoId == convoId.value) {
                 // an EMPTY full replay is only ever the daemon's explicit /clear wipe (every other emit
                 // site guards isNotEmpty) — the fresh session's window is empty, so the "Context NN%"
@@ -3629,7 +3803,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // the merge itself (full or #147 delta) + the #107 echo arming is [ChatTranscript.mergeHistory],
                 // shared with the split columns. Only the bookkeeping AROUND it is this conversation's:
                 // the receipt reconciliation and the session-keyed cursor / paging anchors.
-                val lastSeq = transcript.mergeHistory(f, ::reconcilePromptReceiptFromHistory)
+                val lastSeq = try { transcript.mergeHistory(f, ::reconcilePromptReceiptFromHistory) }
+                catch (error: Exception) {
+                    openObservation?.takeIf { it.convoId == f.convoId }?.fail(ProductResult.FAILURE, ErrorCode.APPLY_FAILED, DiagnosticStage.APPLY)
+                    throw error
+                }
+                openObservation?.takeIf { it.convoId == f.convoId }?.historyApplied(f.diagnostic)
                 if (f.delta) {
                     lastSeq?.let { historySeq = it; historySeqSession = currentSessionId }
                 } else {
@@ -3682,6 +3861,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is FileContent -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
                 dropChunkStream() // a whole-frame reply (incl. a mid-stream failure) supersedes any partial stream
                 viewedFile.value = f
+                fileViewObservation?.received(f)
                 // an ExportFile reply rides the same channel + identity — settle the waiting state either way
                 if (exportWaiting.value) { exportWaiting.value = false; exportDeadline?.cancel() }
             }
@@ -3692,7 +3872,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     // the deadline is NOT cancelled on completion: it still owes the FileDiff side its
                     // honest fallback (same one-deadline-serves-both rule as the FileContent path)
                     armViewedFileDeadline(f.path, f.workdir, f.sessionId, wantDiff = !isImageFile(f.path))
-                    fileChunks.add(f)?.let { whole -> viewedFile.value = whole }
+                    fileChunks.add(f)?.let { whole -> viewedFile.value = whole; fileViewObservation?.received(whole) }
                     // one read after add: mid-stream it advances the loading card's determinate bar,
                     // the final piece resets the assembler → null clears the bar with it (0714 A1)
                     viewedFileProgress.value = fileChunks.progress
@@ -3815,7 +3995,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     connected.value = true; relayDeadlinePassed = false
                     if (!hadReadyThisSession) {
                         hadReadyThisSession = true
-                        Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()) + demoTag())
+                        Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()) + productDimensions())
                     }
                     recomputePhase()
                 }
@@ -3912,6 +4092,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     private fun clearBackgroundJobs() {
+        backgroundOutcomes.reset()
         replace(backgroundJobs, emptyList())
         // workflow state is per-conversation, cleared at the same session boundaries (#106)
         workflowRuns.clear()
@@ -4539,6 +4720,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     ): Boolean {
         val wd = workdir ?: this.workdir.value ?: return false
         if (prompt.isBlank()) return false
+        ProductFeatures.used(ProductFeature.BACKGROUND_TASK, productDimensions())
         val sid = resumeId ?: sessionKey.value ?: currentSessionId
         armScheduleDeadline()
         scope.launch {
@@ -5129,12 +5311,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 val link = Pairing.redeemCollaboratorLink(invite.toCollabPairingInfo(), Pairing.deviceKeys(), client)
                 replace(collaboratorLinks, Pairing.collaboratorLinks())
                 pendingCollabInvite.value = null
-                Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to "collaborator"))
+                Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to "collaborator", TelKey.UsageMode to "shared"))
                 onCollaboratorLinkAdded?.invoke(link, invite.ticket)
             } catch (t: Throwable) {
                 collabRedeemError.value = t.message ?: t::class.simpleName ?: "error"
                 Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t), TelKey.Source to "collaborator"))
-                Telemetry.recordError(t.message ?: "collaborator redeem failed", "pairing")
+                reportPairDiagnostic(t)
             } finally {
                 collabRedeeming.value = false
                 client.close()
@@ -5423,6 +5605,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         lastOpenAttempt = attempt
         opening.value = true // held until the daemon answers (SessionLive/PocketError) — 8s net below
         openTimedOut.value = false
+        cancelOpenDiagnostic()
+        ProductFeatures.used(ProductFeature.SESSION_VIEW, productDimensions())
+        openObservation = SessionOpenObservation(productDimensions())
+        openDiagnostic = openObservation?.trace
+        latestDiagnosticId.value = openObservation?.context?.traceId
         val gen = ++openGen // ties the 8s safety net below to THIS open — a quick second open isn't cleared by the first one's timer
         openJob?.cancel() // a different target supersedes even a worker suspended before dispatch
         val job = scope.launch(start = CoroutineStart.LAZY) { runOpen(attempt, gen) }
@@ -5558,8 +5745,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // change it is a request that can only be refused. Gating it HERE (rather than at the picker)
             // means every caller — deep link, push tap, retry replay — inherits the same rule.
             agentPreset = startAgentPreset?.takeIf { resumeId == null },
+            diagnostic = openObservation?.takeIf { daemonDiagnostics && !isCollaboratorInbox && paired.value?.role == BindingRole.OWNER && !demoMode.value }
+                ?.also { it.requested = true }?.context,
         )
+        openDiagnostic?.stage(DiagnosticStage.QUEUE)
         send(request)
+        openObservation?.takeIf { it.requested }?.let { observation ->
+            historyDiagnosticDeadline = scope.launch {
+                delay(15_000)
+                if (openObservation === observation && observation.negotiated) observation.fail(ProductResult.TIMEOUT, ErrorCode.TIMEOUT,
+                    if (observation.awaitingLayout) DiagnosticStage.LAYOUT else DiagnosticStage.WAIT)
+            }
+        }
+        openDiagnostic?.stage(DiagnosticStage.WAIT)
         delay(SESSION_OPEN_TIMEOUT_MS) // safety: clear if the daemon never answers (matches `switching`)
         // Answered, superseded or abandoned — the terminal path that did it already released everything.
         // (A landing SessionLive cancels openJob outright, so this is belt-and-braces.)
@@ -5584,6 +5782,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         //     a silent auto-resend would rebuild it by hand. #340's own boundary is "opening an EXISTING
         //     session" anyway, so a new open fails straight through with retried=0.
         if (resumeId == null) return failOpen(OpenFailure.COMPUTER, retried = false)
+        openDiagnostic?.retry()
+        openDiagnostic?.stage(DiagnosticStage.QUEUE)
         send(request)
         delay(SESSION_OPEN_RETRY_TIMEOUT_MS)
         if (gen != openGen || !opening.value) return
@@ -5594,6 +5794,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  the single telemetry event (issue #340). Callers re-check generation/`opening` first, so this only
      *  ever runs for an open that nothing answered. */
     private fun failOpen(reason: OpenFailure, retried: Boolean) {
+        openObservation?.fail(ProductResult.TIMEOUT, ErrorCode.TIMEOUT,
+            if (reason == OpenFailure.LINK) DiagnosticStage.CONNECT else DiagnosticStage.ATTACH)
+        openDiagnostic?.finish(Outcome.TIMEOUT,
+            if (reason == OpenFailure.LINK) DiagnosticStage.CONNECT else DiagnosticStage.ATTACH,
+            ErrorCode.TIMEOUT, metrics = SafeMetrics(resultQuality = ResultQuality.UNKNOWN))
+        openDiagnostic = null
         openJob = null
         opening.value = false
         // …and release the router too (issue #165): a switch that never landed must fall back to the
@@ -5867,6 +6073,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         promptWatchdog = scope.launch {
             delay(promptReceiptTimeoutMs)
             if (!promptPending || activePromptId != promptId) return@launch
+            promptOutcomes.receiptExpired(convoId.value, promptId, appIsForeground.value)
+            if (!demoMode.value && appIsForeground.value) Diagnostics.report(ErrorPath.PROMPT, DiagnosticStage.ACK, ErrorCode.TIMEOUT, isError = true)
             sendStalled.value = true
             // non-Ready phases already have the retry/backoff machinery (and the UI banner) on the case
             if (!demoMode.value && sessionActive.value && phase.value == ConnPhase.Ready) launchTransport(reconnect = true)
@@ -5886,11 +6094,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         turnWatchdog = scope.launch {
             delay(promptTurnTimeoutMs)
             if (!awaitingTurn || activePromptId != promptId || convoId.value != c || !streaming.value) return@launch
+            promptOutcomes.responseExpired(c, promptId, appIsForeground.value, queued)
             if (queued) {
                 turnQueued.value = true
                 Telemetry.track(TelEvent.PromptTurnQueued, mapOf(TelKey.Phase to phase.value.name))
                 return@launch
             }
+            if (!demoMode.value && appIsForeground.value) Diagnostics.report(ErrorPath.PROMPT, DiagnosticStage.EXECUTE, ErrorCode.TIMEOUT, isError = true)
             turnStalled.value = true
             // this fires ONLY after a PromptAck, so it inherently means "daemon delivered, agent produced
             // nothing" (candidate 3) — distinct from the no-ack stall (issue #78). Phase tags the link state.
@@ -5947,6 +6157,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // requests carry a client-side deadline: better an honest "update the daemon" than an eternal spinner.
     private var changedFilesDeadline: Job? = null
     private var viewedFileDeadline: Job? = null
+    private var fileViewObservation: FileViewObservation? = null
+    val fileViewToken: String? get() = if (appIsForeground.value) fileViewObservation?.token else null
+    fun onFileDisplayed(token: String, result: ProductResult, code: ErrorCode = ErrorCode.OK, partial: Boolean = false) {
+        fileViewObservation?.takeIf { it.token == token }?.displayed(result, code, partial)
+    }
     private var exportDeadline: Job? = null // separate: approval can take the daemon's whole 30s window
     private val fileChunks = FileChunkAssembler() // reassembles a chunked ReadFile reply (issue #134)
 
@@ -5983,6 +6198,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val wd = workdir.value ?: return
         val sid = sessionKey.value ?: currentSessionId ?: return
         val wantDiff = !isImageFile(path)
+        fileViewObservation?.cancel()
+        val observation = FileViewObservation(productDimensions()).also { fileViewObservation = it }
         viewedFilePath.value = path
         viewedFile.value = null // show the loading state, not the previous file
         viewedFileDiff.value = null
@@ -5991,7 +6208,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         armViewedFileDeadline(path, wd, sid, wantDiff)
         val agent = sessionAgent.value ?: AgentKind.CLAUDE
         scope.launch {
-            send(ReadFile(wd, sid, path, agent, allowChunks = true)) // we can reassemble chunked binaries (issue #134)
+            send(ReadFile(wd, sid, path, agent, allowChunks = true, diagnostic = observation.context.takeIf { daemonDiagnostics && paired.value?.role == BindingRole.OWNER && !demoMode.value })) // we can reassemble chunked binaries (issue #134)
             if (wantDiff) send(ReadFileDiff(wd, sid, path, agent))
         }
     }
@@ -6006,6 +6223,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(ms)
             if (viewedFilePath.value != path) return@launch
             if (viewedFile.value == null) {
+                fileViewObservation?.timeout()
                 dropChunkStream() // a stalled chunk stream is dead — don't let a late stray revive it
                 viewedFile.value = FileContent(wd, sid, path, ok = false, error = "no reply from the computer — the daemon may be too old for this")
             }
@@ -6193,6 +6411,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     fun closeFileViewer() {
+        fileViewObservation?.cancel(); fileViewObservation = null
         viewedFileDeadline?.cancel()
         exportDeadline?.cancel(); exportWaiting.value = false
         dropChunkStream()
@@ -6211,16 +6430,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val wd = workdir.value ?: return
         val sid = sessionKey.value ?: currentSessionId ?: return
         val cid = convoId.value ?: return
+        fileViewObservation?.cancel()
+        val observation = FileViewObservation(productDimensions()).also { fileViewObservation = it }
         exportWaiting.value = true
         exportDeadline?.cancel()
         exportDeadline = scope.launch {
             delay(45_000)
             if (viewedFilePath.value == path && exportWaiting.value) {
+                observation.timeout()
                 exportWaiting.value = false
                 viewedFile.value = FileContent(wd, sid, path, ok = false, error = "no reply from the computer — the daemon may be too old for this")
             }
         }
-        scope.launch { send(ExportFile(cid, wd, sid, path, sessionAgent.value ?: AgentKind.CLAUDE)) }
+        scope.launch { send(ExportFile(cid, wd, sid, path, sessionAgent.value ?: AgentKind.CLAUDE, diagnostic = observation.context.takeIf { daemonDiagnostics && paired.value?.role == BindingRole.OWNER && !demoMode.value })) }
     }
 
     /** Ask the daemon for the children under the open session's cwd + [subPath] (relative, daemon-native
@@ -6623,6 +6845,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  Only for asks a grant-aware daemon opted in via [PermissionAsk.grantOptions] — an old daemon never
      *  sees the frame. Pauses ONLY the reading budget; the daemon's absolute deadline still rules. */
     fun sendAskHeartbeat(visible: Boolean) {
+        if (visible) exposeFeature(ProductFeature.APPROVAL)
         val a = pendingAsk.value ?: return
         val c = convoId.value ?: return
         if (a.grantOptions == null) return
@@ -7071,6 +7294,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private fun fenceSessionNavigation() {
         sessionNavigationFenced = true
         if (openInFlight != null || opening.value || switchingSession.value) {
+            cancelOpenDiagnostic()
             openGen++ // invalidates the abandoned request's 8s safety-net coroutine
             openJob?.cancel(); openJob = null
             openInFlight = null

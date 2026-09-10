@@ -185,6 +185,7 @@ private class RunCmd : CliktCommand(name = "run") {
         // Flag beats pref beats the env/PATH search — the same precedence every other --*-bin follows,
         // with the persisted pin slotted in just under the explicit command line.
         val dshBinEffective = dshBin ?: prefs.dshBin
+        dev.ccpocket.daemon.diagnostics.DaemonDiagnostics.start(dev.ccpocket.daemon.update.UpdateState.current)
         // Both agent CLIs are optional individually (issue #130): probe each for the banner, but resolve
         // lazily per session so a missing one never blocks startup — codex-only machines used to crash-loop
         // under launchd because claude was a hard dependency. An open on a missing backend fails with a
@@ -275,7 +276,11 @@ private class RunCmd : CliktCommand(name = "run") {
                 val gate = LanE2E(identity, directUrl, hostName, gatewayUrl, firstContactPending = relayClient::deviceFirstContactPending)
                 runCatching { DaemonServer(core, directBind, port, gate).run(wait = false) }
                     .onSuccess { echo("direct listener on ws://$directBind:$port/v1/ws (E2E, paired devices only)") }
-                    .onFailure { echo("direct listener failed to bind $directBind:$port (${it.message}) — relay only") }
+                    .onFailure {
+                        dev.ccpocket.observability.Diagnostics.report(dev.ccpocket.observability.ErrorPath.STARTUP,
+                            dev.ccpocket.observability.Stage.CONNECT, dev.ccpocket.observability.ErrorCode.UNAVAILABLE, it,
+                            dev.ccpocket.observability.SafeMetrics(resultQuality = dev.ccpocket.observability.ResultQuality.FALLBACK))
+                        echo("direct listener failed to bind $directBind:$port (${it.message}) — relay only") }
             }
             // Windows: if we're not yet registered as a logon background service, self-install so closing this
             // window no longer takes the daemon offline (issue #16). No-op on macOS/Linux and when already set up.
@@ -882,7 +887,7 @@ fun main(args: Array<String>) {
     System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "MM-dd HH:mm:ss.SSS")
     Root().subcommands(
         RunCmd(), TestClientCmd(), PairCmd(), BridgesCmd(), ShareCmd(), StatusCmd(), VersionCmd(),
-        UpdateCmd(), ConfigCmd(), ServiceInstallCmd(),
+        UpdateCmd(), ConfigCmd(), ServiceInstallCmd(), dev.ccpocket.daemon.diagnostics.DiagnosticsCommand(),
         // ReviewRequest M1 (REVIEW-REQUEST.md §4): the daemon-only collaboration loop — establish a
         // contact, send a task, answer one. Both talk to the ALREADY-RUNNING daemon over its
         // token-authenticated local control API; neither can start a second daemon.

@@ -2076,4 +2076,8 @@
     <string name="brand_former_name">Pairlet, formerly CC Pocket</string>
     <string name="brand_renamed">CC Pocket is now Pairlet. Look for CC Pairlet on your device.</string>
     <string name="brand_dismiss">Got it</string>
+    <string name="diagnostic_sharing_title">Share usage and diagnostics</string>
+    <string name="diagnostic_sharing_save_failed">This choice could not be saved for the next launch. Please try again.</string>
+    <string name="diagnostic_sharing_description">Firebase receives usage events and crash reports; Sentry receives diagnostic errors and logs to help improve reliability and features. Conversation content, prompts and file content are excluded from diagnostics. Turning this off stops new collection and clears pending reports where supported; reports already received are retained. This setting applies to this app; computer diagnostics are controlled separately.</string>
+    <string name="diagnostic_copy_id">Copy latest diagnostic ID</string>
 </resources>

@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.conversation
 
+import dev.ccpocket.observability.*
 import dev.ccpocket.daemon.claude.WorkflowProgressParser
 import dev.ccpocket.protocol.WorkflowAgentSnap
 import dev.ccpocket.protocol.WorkflowAgentState
@@ -40,7 +41,7 @@ class WorkflowTracker {
         var error: String? = null,
         val phases: LinkedHashMap<Int, String> = LinkedHashMap(),
         val agents: LinkedHashMap<Int, WorkflowAgentSnap> = LinkedHashMap(),
-    )
+    ) { val diagnostic = Diagnostics.begin(ErrorPath.BACKGROUND)?.also { it.stage(Stage.EXECUTE) } }
 
     private val runs = ArrayList<Run>()
 
@@ -102,6 +103,11 @@ class WorkflowTracker {
             "killed", "cancelled", "canceled", "interrupted" -> WorkflowRunStatus.KILLED
             else -> return false // an in-flight patch (e.g. paused) — keep RUNNING rather than invent states
         }
+        run.diagnostic?.finish(when (next) {
+            WorkflowRunStatus.COMPLETED -> Outcome.SUCCESS
+            WorkflowRunStatus.KILLED -> Outcome.CANCELLED
+            else -> Outcome.FAILURE
+        }, Stage.COMPLETE, if (next == WorkflowRunStatus.FAILED) ErrorCode.PROCESS_EXITED else ErrorCode.OK)
         run.status = next
         run.durationMs = now - run.startedAt
         // agents the CLI never settled (process killed mid-fanout) must not pulse forever

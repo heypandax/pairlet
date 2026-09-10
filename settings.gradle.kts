@@ -30,6 +30,8 @@ dependencyResolutionManagement {
 }
 
 include(":protocol")
+include(":observability")
+include(":observability-sentry")
 include(":daemon")
 include(":relay")
 include(":mobile:composeApp")

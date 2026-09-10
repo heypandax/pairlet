@@ -1240,6 +1240,11 @@ class RepoDesktopModel(
         get() = repo.agentModels[dev.ccpocket.protocol.AgentKind.CLAUDE]?.gatewayModels.orEmpty()
     override val messages: List<ChatItem> get() = repo.messages
     // older-history lazy load (issue #147) — straight delegation to the shared repository
+    override fun exposeFeature(feature: dev.ccpocket.app.telemetry.ProductFeature) = repo.exposeFeature(feature)
+    override fun sideContentLayoutToken(pane: SidePane): String? = repo.sideContentLayoutToken(pane)
+    override fun onSideContentLaidOut(pane: SidePane, token: String, hasVisibleContent: Boolean, lastVisibleContent: Int) = repo.onSideContentLaidOut(pane, token, hasVisibleContent, lastVisibleContent)
+    override val historyLayoutToken: String? get() = repo.contentLayoutToken
+    override fun onHistoryLaidOut(token: String, hasVisibleContent: Boolean, lastVisibleContent: Int) = repo.onHistoryLaidOut(token, hasVisibleContent, lastVisibleContent)
     override val historyHasMore: Boolean get() = repo.historyHasMore.value
     override val historyLoadingOlder: Boolean get() = repo.historyLoadingOlder.value
     override val historyPrependGen: Int get() = repo.historyPrependGen.value

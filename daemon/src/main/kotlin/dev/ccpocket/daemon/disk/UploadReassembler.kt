@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.disk
 
+import dev.ccpocket.observability.*
+
 import dev.ccpocket.protocol.FileChunk
 import dev.ccpocket.protocol.MAX_UPLOAD_BYTES
 import java.io.OutputStream
@@ -140,6 +142,7 @@ class UploadReassembler(
             val rel = p.workdir.relativize(p.dir).resolve(p.name).toString()
             Result.Complete(p.captureId, p.name, rel, p.written) as Result
         }.getOrElse {
+            Diagnostics.report(ErrorPath.FILE_UPLOAD, Stage.WRITE, ErrorCode.WRITE_FAILED, it)
             cleanup(p)
             Result.Refused(p.captureId, "could not write the file to the workspace")
         }
@@ -202,7 +205,7 @@ class UploadReassembler(
             Files.deleteIfExists(part)
             val out = Files.newOutputStream(part, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
             Opened.Ok(Pending(c.convoId, c.captureId, name, realWorkdir, real, part, out, nowMs())) as Opened
-        }.getOrElse { Opened.Refuse("could not open the workspace inbox for writing") }
+        }.getOrElse { Diagnostics.report(ErrorPath.FILE_UPLOAD, Stage.WRITE, ErrorCode.WRITE_FAILED, it); Opened.Refuse("could not open the workspace inbox for writing") }
     }
 
     private fun write(p: Pending, bytes: ByteArray): Boolean {
