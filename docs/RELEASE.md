@@ -1,4 +1,17 @@
-# cc-pocket 发布手册
+# Pairlet 发布手册
+
+## 首个改名版本
+
+设备显示名为 **CC Pairlet**，应用内名称为 **Pairlet**。原 `CC Pocket.app`、启动器、
+`cc-pocket-*` 发布资产、CLI、应用身份与服务名继续保留，详见
+[改名兼容清单](PAIRLET-COMPATIBILITY.md) 和 [候选状态及发布顺序](PAIRLET-ROLLOUT.md)。
+本地品牌候选沿用基线版本以便审阅；正式升级试用及发布前必须统一提高版本和平台构建号。
+
+macOS `createDistributable` 自动写入名称本地化并沿用配置的签名身份重封外层 bundle，
+随后 `packageDmg` 使用该已校验的 image。Windows `packageMsi` 自动运行
+`scripts/brand-windows-msi.ps1`，固定旧 UpgradeCode，仅改变产品与快捷方式显示名。
+所有钩子必须在签名、checksum 和上传之前成功；失败留下的 MSI 不得发布。
+源与包兼容门禁不能替代原签名升级、系统搜索、Dock/快捷方式或图标实际尺寸验收。
 
 ## 当前全平台主流程
 

@@ -1,0 +1,40 @@
+# Pairlet 发布准备与回退
+
+本地候选已完成实现和可执行的本机验证，未部署、未提交商店、未改名仓库或包管理器。版本仍为 1.9.8 开发候选；发布前重新核实最新稳定版本并统一提高版本与构建号。兼容身份见 [兼容清单](PAIRLET-COMPATIBILITY.md)，已完成检查与验收限制见 [验证记录](PAIRLET-VALIDATION.md)。
+
+## 渠道基线（2026-09-10）
+
+| 渠道 | 读取结果 | 限制 |
+| --- | --- | --- |
+| GitHub Release | v1.9.8，2026-09-09 19:12:21 UTC，13 个资产 | 不是所有渠道完成证据 |
+| 下载镜像 | `/dl/latest.json` HTTP 200，v1.9.8 | 各大包实际 SHA-256 仍需逐项下载核实 |
+| Homebrew heypandax/tap/cc-pocket | 1.9.7 | 不擅自同步为 GitHub 版本 |
+| Scoop heypandax/scoop-bucket | 1.9.8 | manifest 查询不替代 Windows 安装 |
+| 中国 App Store 公开查询 | 1.9.7，原 bundle ID 与旧商店名 | 当前公开状态；不能以 CI 成功覆盖 |
+| iOS v1.9.8 流水线 34393847882 | build 55，日志显示 App Review 已提交、Beta 等待审核 | 这是 9 月 9 日日志，不是当前 ASC 后台查询；后台状态待核实 |
+| Pages | 实际站点来自 heypandax/heypandax.github.io，main `/`，HTTPS 开启 | cc-pocket 的 site/ 修改不会自动更新实际站点 |
+| pairlet.org | NS 为 Cloudflare；主域、www、relay 的本机 HTTPS 均失败 | DNS 管理权限、TLS、中国网络、Turnstile 待验收 |
+| 旧 relay | `/healthz` HTTP 200 | 不是新旧端到端配对验收 |
+
+## 网站与路由候选
+
+- `site/` 是可本地预览的候选：根页面中文优先，`/en/` 英文；`/zh/` 保留路径、query、hash 的跳转页。旧手册 `/manual/zh/` 与 `/manual/en/` 及每篇 slug 不变。
+- canonical、sitemap、robots、manifest、手册生成源与支持 AI 索引使用 pairlet.org。旧 repo/安装文件/CLI URL 继续服务下载与更新。
+- `deploy/Caddyfile.pairlet-candidate` 包含原 Caddy 配置和追加的新域站点。原 `deploy/Caddyfile` 未修改，可作为回退；新官网兜底静态站点，relay.pairlet.org 指向同一个 relay，www 308 保留完整 URI。
+- 新站支持页使用同源 `/support-api`；新旧文档 host 只允许 `/manual/`，旧 Pages/repo allowlist 保留。部署前配置 Turnstile 对应 hostname，并核对运行服务的 `CC_SUPPORT_ALLOWED_ORIGINS` 环境覆盖项。
+- 旧 pocket.ark-nexus.cc 保留 WS、配对、API、下载；不能整站重定向。客户端默认 relay/镜像暂不切换。
+- 旧 `heypandax.github.io/cc-pocket/<path>` 迁移需要实际 Pages 仓库的对应变更；本分支不自动推送另一仓库，不能靠仓库改名期待 Pages 跳转。
+
+## 发布前必须完成
+
+1. 冻结更高版本，构建目标平台原签名候选；Windows 执行 MSI 品牌钩子及旧版→候选升级，macOS 验证两种安装方式、两个架构和 Dock；iPhone/iPad/Android/Harmony 原安装升级。
+2. 升级后尚未打开时验证原快捷入口与新旧词搜索；首次提示关闭后不再出现；身份指纹、配对、偏好、自托管地址保持不变。
+3. 审阅已重新生成的真实 Compose 截图、中英预览及图标 v2，完成设备实际尺寸检查。素材来自脚本演示数据，尺寸检查不等于本次 UI 设备验收。
+4. 新域名静态站点、下载、支持链与中国网络验证；新旧 relay 地址组合及旧二维码/六位码验证通过后才考虑新默认地址。
+5. 所有旧命名资产齐全，SHA256SUMS 覆盖每一个实际下载文件。镜像清单在全量文件验证后原子切换，不在试用期间更新稳定 latest.json。
+6. App Store 在原记录管理 `name.txt=Pairlet`；不创建新 App。iPhone/iPad 双语素材同时检查，发布按实际审核状态标记。
+7. 按 `packaging/pairlet-candidates/` 审阅 Homebrew/Scoop 草案；Pages 跳转由 `scripts/build-legacy-pages-redirects.py` 生成。仓库改名独立验收；旧命令始终转发原服务，不发布两套并行安装。发布前不执行外部迁移。
+
+## 回退
+
+新网站有问题只回退站点与新域配置，旧 relay/下载不动。客户端有升级问题暂停分发并以更高版本修复，不重置应用身份。已发版本/资产不覆盖。包管理器迁移失败保持旧入口，不恢复第二个 daemon 服务。

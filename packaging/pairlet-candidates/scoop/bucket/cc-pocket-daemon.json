@@ -1,0 +1,36 @@
+{
+  "version": "1.9.8",
+  "description": "Pairlet companion daemon for AI coding agents on your computer.",
+  "homepage": "https://github.com/heypandax/cc-pocket",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/heypandax/cc-pocket/releases/download/v1.9.8/cc-pocket-daemon-1.9.8-windows-x86_64.zip",
+      "hash": "f75340fab9d00a7501b5abb9ddfd249bc002f888530b5b8670605c0344553c24"
+    }
+  },
+  "extract_dir": "cc-pocket-daemon",
+  "bin": [
+    "cc-pocket-daemon.exe",
+    [
+      "cc-pocket-daemon.exe",
+      "pairlet-daemon"
+    ]
+  ],
+  "post_install": [
+    "try { & \"$dir\\cc-pocket-daemon.exe\" service-install --apply | Write-Host } catch { Write-Host \"service-install skipped (you can run it by hand): $_\" }"
+  ],
+  "notes": [
+    "The daemon now runs in the background (a logon Scheduled Task was registered).",
+    "Pair your phone:   cc-pocket-daemon pair",
+    "Requires the Claude Code CLI on PATH or at ~\\.local\\bin\\claude.exe \u2014 the daemon drives it."
+  ],
+  "checkver": "github",
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/heypandax/cc-pocket/releases/download/v$version/cc-pocket-daemon-$version-windows-x86_64.zip"
+      }
+    }
+  }
+}
