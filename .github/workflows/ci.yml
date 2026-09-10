@@ -63,8 +63,8 @@ jobs:
       - name: Use the placeholder google-services.json
         run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
 
-      - name: Test protocol · daemon · relay, compile mobile (desktop target)
-        run: ./gradlew --no-daemon :protocol:jvmTest :daemon:test :relay:test :mobile:composeApp:compileKotlinDesktop
+      - name: Test observability · protocol · daemon · relay, compile mobile (desktop target)
+        run: ./gradlew --no-daemon :observability:jvmTest :observability-sentry:jvmTest :protocol:jvmTest :daemon:test :relay:test :mobile:composeApp:compileKotlinDesktop
 
       - name: Upload test reports on failure
         if: failure()

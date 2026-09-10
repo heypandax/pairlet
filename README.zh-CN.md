@@ -18,6 +18,8 @@ Pairlet 是一个开源的本地优先控制面，用来遥控命令行编码 ag
 
 <sub>真实产品界面，演示数据由脚本生成——重跑 `bash marketing/site/generate-assets.sh` 即可重现。出处见 [`site/assets/product/manifest.json`](site/assets/product/manifest.json)。</sub>
 
+开发版本已接入 Firebase/GA4 产品结果事件与 Sentry 诊断，并提供使用与诊断数据的共享开关。配置、隐私边界、已验证结果及剩余发行要求见[可观测性说明](docs/observability/README.md)。
+
 ## 三步上手
 
 **1 · 装 App** —— [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969)（iPhone · iPad）· [TestFlight 测试版](https://testflight.apple.com/join/8z26MWWr) · [Android APK](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-android.apk)。想用电脑？见[桌面 App](#平台与分发)。
