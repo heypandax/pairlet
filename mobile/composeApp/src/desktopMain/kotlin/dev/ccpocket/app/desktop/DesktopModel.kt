@@ -24,6 +24,7 @@ import dev.ccpocket.app.data.SidePane
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.ui.ComposerState
+import dev.ccpocket.app.ui.sameDirPath
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
@@ -172,6 +173,16 @@ data class DkMachine(
     val pending: Int = 0,             // approvals waiting on this machine (AttentionBadge)
     val projects: List<DkProject> = emptyList(), // a non-active machine's live directory list (its satellite link)
 )
+
+/**
+ * One row of the sidebar's RUNNING zone (issue #358).
+ *
+ * [session] names the live session the row stands for whenever this shell can resolve one from facts it
+ * already holds; null = the fallback row that stands for the whole PROJECT, which is all a machine can
+ * offer when its link reports [DkProject.running] with no session list behind it. Two turns running in
+ * one project used to collapse into that single project row, with nothing to tell them apart.
+ */
+data class DkRunningRow(val machine: DkMachine, val project: DkProject, val session: DkSession? = null)
 
 /** One approval waiting somewhere in the fleet — a bell-popover / palette row. */
 data class DkAttention(
@@ -455,6 +466,35 @@ interface DesktopModel {
     val runningVisible: List<Pair<DkMachine, DkProject>>
         get() = running.filterNot { (m, p) ->
             pins.any { it.accountId == m.computer.accountId && it.cwd == p.path && liveSession(it.sessionId)?.running == true }
+        }
+
+    /**
+     * The live sessions this shell can NAME inside [p] on [m] (issue #358) — the RUNNING zone's per-session
+     * rows are built from these.
+     *
+     * Local facts only, no new wire: the listed project's [sessions] and RECENT's group snapshots, both of
+     * which describe the machine currently being driven. Another machine reaches us through its satellite
+     * link, which carries [DkProject.running] and no session list at all — hence the `active` gate and the
+     * empty answer that sends [runningRows] back to one row per project.
+     *
+     * Path equality goes through [sameDirPath] (issue #58), never string ==: a tilde row (`~/P`) and an
+     * absolute one (`/Users/x/P`) name the same project and must match.
+     */
+    fun runningSessionsIn(m: DkMachine, p: DkProject): List<DkSession> {
+        if (!m.active) return emptyList()
+        val known = (sessionGroups.firstOrNull { sameDirPath(it.path, p.path) }?.sessions ?: emptyList()) + sessions
+        return known.filter { it.running && it.cwd.isNotBlank() && sameDirPath(it.cwd, p.path) }
+            .distinctBy { it.sessionId }
+    }
+
+    /**
+     * [runningVisible] expanded to one row per running SESSION wherever the sessions are knowable (#358),
+     * else the project row it has always been — the degrade path, not a special case.
+     */
+    val runningRows: List<DkRunningRow>
+        get() = runningVisible.flatMap { (m, p) ->
+            runningSessionsIn(m, p).takeIf { it.isNotEmpty() }?.map { DkRunningRow(m, p, it) }
+                ?: listOf(DkRunningRow(m, p))
         }
 
     /** Open a RUNNING row: the focused machine opens in place; another machine switches over then opens. */

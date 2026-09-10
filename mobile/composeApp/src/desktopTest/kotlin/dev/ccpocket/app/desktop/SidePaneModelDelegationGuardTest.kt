@@ -152,7 +152,7 @@ class SidePaneModelDelegationGuardTest {
         "browseListing", "browseRoots", "browseDirectories", "requestBrowse",
         // fleet
         "machines", "attention", "watch", "resolveAttention", "jumpMachine",
-        "running", "runningVisible", "openRunning", "browseRunning",
+        "running", "runningVisible", "runningSessionsIn", "runningRows", "openRunning", "browseRunning",
         // split-pane plumbing itself: these take the pane as an argument, so they are already explicit
         // (splitFocusedSlot is window layout — WHERE the focused chat renders — not conversation state)
         "sidePanes", "canSplit", "splitFocusedSlot", "openInSplit", "closeSplit", "promoteSplit", "retrySplitOpen",

@@ -542,37 +542,62 @@ private fun NewSessionHere(onClick: () -> Unit) {
 
 @Composable
 private fun RunningZone(model: DesktopModel) {
-    val running = model.runningVisible
-    if (running.isEmpty()) return
+    val rows = model.runningRows
+    if (rows.isEmpty()) return
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(stringResource(Res.string.running))
-        running.forEach { (m, p) -> RunningRow(m, p, onBrowse = { model.browseRunning(m, p) }) { model.openRunning(m, p) } }
+        rows.forEach { r ->
+            RunningRow(
+                r,
+                onBrowse = { model.browseRunning(r.machine, r.project) },
+                // a named session opens itself — the SAME verb the RECENT rows send (issue #358). Only the
+                // project fallback still goes through openRunning, which lists and resumes whatever is live.
+                onClick = { r.session?.let { model.selectSession(it) } ?: model.openRunning(r.machine, r.project) },
+            )
+        }
     }
 }
 
-/** One cross-machine RUNNING row: accent pulse · project (mono) · which machine, right-aligned muted.
- *  Click = jump to the live session; the hover ≡ = the project's session LIST instead (issue #49 —
- *  the direct jump made the dir's other/historical sessions look unreachable). */
+/** One cross-machine RUNNING row: accent pulse · the running SESSION's title (mono) · its project as a
+ *  muted second fact · which machine, right-aligned muted.
+ *
+ *  Issue #358 moved the title into the lead: the project name alone left two turns in one folder as two
+ *  identical rows. The project keeps the SessionRow model-label shape — muted mono 10sp, bounded, and
+ *  handed back to the hover affordances the moment the pointer arrives, so nothing fights over 30dp.
+ *  Rows we cannot name a session for (a satellite machine's project flag) still lead with the project.
+ *
+ *  Click = open that session (or, on a project row, jump to the live one); the hover ≡ = the project's
+ *  session LIST instead (issue #49 — the direct jump made the dir's other sessions look unreachable). */
 @Composable
-private fun RunningRow(m: DkMachine, p: DkProject, onBrowse: () -> Unit, onClick: () -> Unit) {
+private fun RunningRow(r: DkRunningRow, onBrowse: () -> Unit, onClick: () -> Unit) {
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
+    val p = r.project
+    val s = r.session
     Row(
-        Modifier.fillMaxWidth().height(30.dp).hoverable(src).hoverFill().clickable(onClick = onClick).padding(horizontal = 12.dp),
+        Modifier.fillMaxWidth().height(30.dp).hoverable(src).hoverFill().clickable(onClick = onClick)
+            .testTag("running:${s?.sessionId ?: p.path}").padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         PulseDot(Tok.accent, 5.dp)
+        // an untitled session (a brand-new one whose first turn hasn't named it) has nothing to lead with —
+        // the project name is still the truest thing we can say about it
         Text(
-            p.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, style = tightCenter(12.sp),
+            s?.title?.takeIf { it.isNotBlank() } ?: p.name,
+            color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, style = tightCenter(12.sp),
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+        )
+        if (s != null && !hovered) Text(
+            p.name, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp),
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 72.dp),
         )
         if (p.sharedBy != null) SharedPill() // a guest's shared folder (issue #115) — provenance at a glance
         if (hovered) Text(
             "≡", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp),
             modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable(onClick = onBrowse).padding(horizontal = 3.dp),
         ) else Text(
-            m.computer.name, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp),
+            r.machine.computer.name, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp),
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
         )
     }
