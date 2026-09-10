@@ -21,6 +21,7 @@ cask "cc-pocket" do
 
   # the launcher lives in a self-contained .app (bundled JRE); symlink it onto PATH
   binary "cc-pocket-daemon.app/Contents/MacOS/cc-pocket-daemon"
+  binary "cc-pocket-daemon.app/Contents/MacOS/cc-pocket-daemon", target: "pairlet"
 
   # Install the login service right away so the daemon auto-starts on every boot and auto-reconnects
   # with no extra command. service-install writes ~/Library/LaunchAgents/dev.ccpocket.daemon.plist
@@ -46,7 +47,8 @@ cask "cc-pocket" do
 
     The daemon was installed as a login service — it auto-starts on boot and reconnects.
     Just pair your phone:
-      cc-pocket-daemon pair                        # shows a QR + 6-digit code
+      pairlet pair                                # shows a QR + 6-digit code
+      # cc-pocket-daemon remains available with the same subcommands.
 
     Logs:  ~/Library/Logs/cc-pocket/daemon.err.log
 

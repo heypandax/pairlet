@@ -19,7 +19,8 @@
     },
     {
       "path": "daemon/src/main/kotlin/dev/ccpocket/daemon/update/UpdateService.kt",
-      "sha256": "c03e3fd4df0610737a09fba2aa10de185c68191cac5c05976948e8599ca156ce"
+      "sha256": "7dd2d16d574324f7ff3d38143e49693a8dce14583856a0271e11c846e6ad9b01",
+      "note": "2026-09-10 CLI compatibility: selfExe resolves symlinks before ownership detection; asset names, version switching and services stay unchanged."
     },
     {
       "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/Pairing.kt",

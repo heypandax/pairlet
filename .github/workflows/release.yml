@@ -137,6 +137,9 @@ jobs:
           chmod +x scripts/release-macos.sh gradlew
           scripts/release-macos.sh "${{ inputs.version }}"
 
+      - name: Verify native CLI aliases without starting a daemon
+        run: python3 scripts/smoke-daemon-cli.py daemon/build/jpackage/cc-pocket-daemon.app
+
       - name: Upload tarball to release v${{ inputs.version }}
         env:
           GH_TOKEN: ${{ github.token }}

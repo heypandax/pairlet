@@ -97,14 +97,19 @@ internal fun missingAgentsMessage(claudeExe: java.nio.file.Path?, codexExe: java
         null
     }
 
-private class Root : CliktCommand(name = "cc-pocket-daemon") {
+private class Root : CliktCommand(name = "pairlet") {
     // `--version` is where everyone reaches first when asked "which build are you on?" (issue #200);
     // `version` below answers the same question with the install layout and the upgrade command.
     init {
         versionOption(dev.ccpocket.daemon.update.UpdateState.current, names = setOf("--version", "-V"))
     }
 
-    override fun run() = Unit
+    override fun run() {
+        runCatching { CliAliases.ensureForManagedInstall() }.onFailure {
+            // An optional CLI alias must never prevent the existing daemon from starting.
+            System.err.println("pairlet alias: ${it.message}")
+        }
+    }
 }
 
 /**
@@ -119,7 +124,7 @@ private class VersionCmd : CliktCommand(name = "version") {
     override fun run() {
         val exe = dev.ccpocket.daemon.update.UpdateService.selfExe()
         val kind = dev.ccpocket.daemon.update.UpdateService.installKind(exe)
-        echo("cc-pocket-daemon ${dev.ccpocket.daemon.update.UpdateState.current}")
+        echo("pairlet ${dev.ccpocket.daemon.update.UpdateState.current} (cc-pocket-daemon)")
         echo("  install:  ${installLabel(kind)}")
         exe?.let { echo("  path:     $it") }
         echo("  update:   ${dev.ccpocket.daemon.update.UpdateService.updateCommand(kind)}")

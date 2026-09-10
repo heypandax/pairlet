@@ -21,7 +21,7 @@ $repo = "heypandax/cc-pocket"
 $root = Join-Path $env:LOCALAPPDATA "cc-pocket"
 $mirror = if ($env:CC_POCKET_MIRROR) { $env:CC_POCKET_MIRROR } else { "https://pocket.ark-nexus.cc/dl" }
 
-Write-Host "-- cc-pocket daemon installer --"
+Write-Host "-- Pairlet installer --"
 # resolve: mirror manifest first (kept in sync + checksum-verified by the relay box, see
 # deploy/mirror-sync.sh), GitHub as fallback and authority. latest.json carries the release's
 # complete asset map, so both paths yield the same shape: $ver / $assetName / $assetUrl / $sumsUrl.
@@ -103,7 +103,29 @@ New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 $shim = Join-Path $binDir "cc-pocket-daemon.cmd"
 Set-Content -Path $shim -Value @('@echo off', "`"$exe`" %*") -Encoding Oem
 # Forward to the old stable shim: self-update rewrites that file on every version.
-Set-Content -Path (Join-Path $binDir "pairlet-daemon.cmd") -Value @('@echo off', '@"%~dp0cc-pocket-daemon.cmd" %*') -Encoding Oem
+# Keep an unrelated existing command intact.
+$aliasShim = Join-Path $binDir "pairlet.cmd"
+$aliasText = "@echo off`r`n@`"%~dp0cc-pocket-daemon.cmd`" %*`r`n"
+$cli = "pairlet"
+$aliasItem = Get-Item -LiteralPath $aliasShim -Force -ErrorAction SilentlyContinue
+if ($aliasItem) {
+    if (($aliasItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $aliasItem.PSIsContainer -or
+        (Get-Content -LiteralPath $aliasShim -Raw) -ne $aliasText) {
+        Write-Warning "$aliasShim already exists - keeping it; use cc-pocket-daemon instead"
+        $cli = "cc-pocket-daemon"
+    }
+} else {
+    try {
+        $aliasFile = [IO.File]::Open($aliasShim, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
+        try {
+            $aliasBytes = [Text.Encoding]::ASCII.GetBytes($aliasText)
+            $aliasFile.Write($aliasBytes, 0, $aliasBytes.Length)
+        } finally { $aliasFile.Dispose() }
+    } catch {
+        Write-Warning "could not create $aliasShim - use cc-pocket-daemon instead: $_"
+        $cli = "cc-pocket-daemon"
+    }
+}
 
 # add $binDir to the USER Path, idempotently (case-insensitive; tolerate a trailing '\')
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -111,7 +133,7 @@ $already = $userPath -and (($userPath -split ';') | Where-Object { $_.TrimEnd('\
 if (-not $already) {
     $newPath = if ([string]::IsNullOrEmpty($userPath)) { $binDir } else { "$($userPath.TrimEnd(';'));$binDir" }
     [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-    Write-Host "added $binDir to your PATH (open a NEW terminal, then just: cc-pocket-daemon update)"
+    Write-Host "added $binDir to your PATH (open a NEW terminal, then just: $cli update)"
 }
 # make it resolve in THIS session too, so an immediate retry in the same window already works
 if (-not (($env:Path -split ';') | Where-Object { $_.TrimEnd('\') -ieq $binDir.TrimEnd('\') })) {
@@ -128,8 +150,8 @@ Get-ChildItem (Join-Path $root "versions") -Directory |
 
 Write-Host ""
 Write-Host "installed: $exe"
-Write-Host "on PATH as:  cc-pocket-daemon   (open a NEW terminal to use the short name)"
-Write-Host "upgrade later with:  cc-pocket-daemon update   (the daemon also checks daily)"
+Write-Host "on PATH as:  $cli   (legacy command: cc-pocket-daemon; open a NEW terminal)"
+Write-Host "upgrade later with:  $cli update   (the daemon also checks daily)"
 Write-Host ""
-Write-Host "opening pairing now - scan the QR with the CC Pocket app:"
+Write-Host "opening pairing now - scan the QR with the Pairlet app:"
 & $exe pair

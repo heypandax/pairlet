@@ -94,7 +94,12 @@ object UpdateService {
 
     // ── effectful ────────────────────────────────────────────────────────────────────────────────
 
-    fun selfExe(): Path? = ProcessHandle.current().info().command().orElse(null)?.let { runCatching { Path.of(it) }.getOrNull() }
+    /** jpackage can report the invoked symlink (pairlet or cc-pocket-daemon). Ownership and managed
+     *  updates depend on the real versioned executable, not the spelling of the command on PATH. */
+    fun selfExe(command: String? = ProcessHandle.current().info().command().orElse(null)): Path? {
+        val path = command?.let { runCatching { Path.of(it) }.getOrNull() } ?: return null
+        return runCatching { path.toRealPath() }.getOrDefault(path)
+    }
 
     /** Which package manager (if any) owns this binary — for the "not ours to update" hint. */
     fun ownerHint(exe: Path?): String = when (packageManagerOf(exe)) {

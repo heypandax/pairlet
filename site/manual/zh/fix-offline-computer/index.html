@@ -65,13 +65,13 @@
     <div class="breadcrumbs"><a href="../">用户手册</a><span>/</span><span>故障排查</span></div>
     <div class="platform-tags"><span>全平台</span></div>
     <h1>修复离线电脑</h1>
-    <div class="short-answer"><span>简短答案</span><p>在离线电脑上执行 <code>cc-pocket-daemon status</code>。如果 daemon 已停止或无法连接中继，先恢复服务或网络；只有 App 明确提示配对失效时才重新配对。</p></div>
+    <div class="short-answer"><span>简短答案</span><p>在离线电脑上执行 <code>pairlet status</code>。如果 daemon 已停止或无法连接中继，先恢复服务或网络；只有 App 明确提示配对失效时才重新配对。</p></div>
     <div class="article-meta"><span>最近核验 2026-07-25</span><span>·</span><span>公开链接 · 无需登录</span></div>
     <div class="article-actions">
       <button class="manual-button secondary" type="button" data-copy-url="https://pairlet.org/manual/zh/fix-offline-computer/">复制链接</button>
       <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://pairlet.org/manual/zh/fix-offline-computer/" data-copy-prompt="打开这篇公开的 Pairlet 用户手册，只依据页面中已核验的步骤回答我的问题。">复制给 AI</button>
     </div>
-    <section id="status"><h2>检查 daemon</h2><ol class="article-steps"><li><span class="step-number">1</span><div><h3>查看状态</h3><p>状态命令会检查本机 daemon 进程以及它与中继的连接。</p><pre><code>cc-pocket-daemon status</code><button type="button" data-copy-code="cc-pocket-daemon status">复制</button></pre></div></li><li><span class="step-number">2</span><div><h3>恢复服务或网络</h3><p>唤醒电脑、确认网络可用，并让已安装的登录服务重新拉起 daemon。</p></div></li><li><span class="step-number">3</span><div><h3>返回 Pairlet</h3><p>只要原有配对仍有效，App 会自动重新连接。</p></div></li></ol></section><section id="pairing"><h2>仅在必要时重新配对</h2><p>如果 App 明确提示配对无效或设备已被撤销，执行 <code>cc-pocket-daemon pair</code> 并重新添加电脑。普通的暂时离线不需要重新配对。</p></section>
+    <section id="status"><h2>检查 daemon</h2><ol class="article-steps"><li><span class="step-number">1</span><div><h3>查看状态</h3><p>状态命令会检查本机 daemon 进程以及它与中继的连接。</p><pre><code>pairlet status</code><button type="button" data-copy-code="pairlet status">复制</button></pre></div></li><li><span class="step-number">2</span><div><h3>恢复服务或网络</h3><p>唤醒电脑、确认网络可用，并让已安装的登录服务重新拉起 daemon。</p></div></li><li><span class="step-number">3</span><div><h3>返回 Pairlet</h3><p>只要原有配对仍有效，App 会自动重新连接。</p></div></li></ol></section><section id="pairing"><h2>仅在必要时重新配对</h2><p>如果 App 明确提示配对无效或设备已被撤销，执行 <code>pairlet pair</code> 并重新添加电脑。普通的暂时离线不需要重新配对。</p></section>
     <section class="related-articles"><h2>相关指南</h2><div><a href="../update-daemon/"><strong>更新 daemon</strong><span>使用内置更新器或最初安装 Pairlet 的包管理器，再确认新版 daemon 在线。</span></a><a href="../install-and-pair/"><strong>安装并配对电脑</strong><span>安装 Pairlet daemon，生成一次性二维码，无需注册账号即可完成 App 配对。</span></a></div></section>
     <section class="article-feedback"><strong>问题还没解决？</strong><span>把你尝试过的步骤写进 GitHub issue。</span><a href="https://github.com/heypandax/cc-pocket/issues/new">新建 issue →</a></section>
   </article>

@@ -1,6 +1,6 @@
 {
   "version": "1.8.0",
-  "description": "Drive Claude Code from your phone — the cc-pocket daemon.",
+  "description": "Pairlet (formerly CC Pocket) daemon.",
   "homepage": "https://github.com/heypandax/cc-pocket",
   "license": "MIT",
   "architecture": {
@@ -10,13 +10,19 @@
     }
   },
   "extract_dir": "cc-pocket-daemon",
-  "bin": "cc-pocket-daemon.exe",
+  "bin": [
+    "cc-pocket-daemon.exe",
+    [
+      "cc-pocket-daemon.exe",
+      "pairlet"
+    ]
+  ],
   "post_install": [
     "try { & \"$dir\\cc-pocket-daemon.exe\" service-install --apply | Write-Host } catch { Write-Host \"service-install skipped (you can run it by hand): $_\" }"
   ],
   "notes": [
     "The daemon now runs in the background (a logon Scheduled Task was registered).",
-    "Pair your phone:   cc-pocket-daemon pair",
+    "Pair your phone:   pairlet pair (cc-pocket-daemon is also supported)",
     "Requires the Claude Code CLI on PATH or at ~\\.local\\bin\\claude.exe — the daemon drives it."
   ],
   "checkver": "github",

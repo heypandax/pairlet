@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-shot installer for the cc-pocket daemon — macOS (arm64/x86_64) and Linux (x86_64/arm64):
+# One-shot installer for Pairlet — macOS (arm64/x86_64) and Linux (x86_64/arm64):
 #
 #   curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
 #
@@ -120,8 +120,26 @@ else
 fi
 [ -x "$launcher" ] || err "unexpected layout: $launcher not found after extraction"
 ln -sfn "$launcher" "$BINDIR/$BIN"
-# Relative alias follows every future atomic switch of the legacy launcher.
-ln -sfn "$BIN" "$BINDIR/pairlet-daemon"
+# jpackage on macOS can misresolve nested relative symlinks. A tiny script executes the original
+# stable launcher instead, preserving its native name and following all future updates.
+cat > "$tmp/pairlet" <<'PAIRLET_CLI'
+#!/bin/sh
+exec "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/cc-pocket-daemon" "$@"
+PAIRLET_CLI
+CLI="pairlet"
+if [ -e "$BINDIR/pairlet" ] || [ -L "$BINDIR/pairlet" ]; then
+  if [ -L "$BINDIR/pairlet" ] || ! cmp -s "$tmp/pairlet" "$BINDIR/pairlet"; then
+    warn "$BINDIR/pairlet already exists — keeping it; use $BIN instead"
+    CLI="$BIN"
+  fi
+elif ! (set -o noclobber; cat "$tmp/pairlet" > "$BINDIR/pairlet"); then
+  warn "could not create pairlet alias — use $BIN instead"
+  CLI="$BIN"
+fi
+if [ "$CLI" = "pairlet" ] && ! chmod +x "$BINDIR/pairlet"; then
+  warn "could not make pairlet executable — use $BIN instead"
+  CLI="$BIN"
+fi
 
 # --- background service, anchored at the SYMLINK (stable across upgrades/self-update) ---
 if [ "${CC_POCKET_NO_SERVICE:-}" = "1" ]; then
@@ -170,14 +188,14 @@ logs="journalctl --user -u $BIN -f"
 [ "$plat" = "macos" ] && logs="tail -f ~/Library/Logs/cc-pocket/daemon.err.log"
 cat <<EOF
 
-  ✅ Installed $BIN $VERSION
+  ✅ Installed Pairlet $VERSION (legacy command: $BIN)
 
   Next — pair your phone:
 
-      $BIN pair
+      $CLI pair
 
-  (prints a QR + 6-digit code; scan it in the CC Pocket app)
+  (prints a QR + 6-digit code; scan it in the Pairlet app)
 
   Logs:    $logs
-  Upgrade: $BIN update   (the daemon also checks daily and notifies your phone)
+  Upgrade: $CLI update   (the daemon also checks daily and notifies your phone)
 EOF

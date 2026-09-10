@@ -3,8 +3,8 @@
 # so it needs no Command Line Tools). The cask file lives in the tap repo
 # (heypandax/homebrew-tap → Casks/cc-pocket.rb); the artifact (.tar.gz) is hosted on the MAIN repo's
 # Releases (heypandax/cc-pocket) — the url below points there. The tap holds only this description.
-# After acceptance: brew install --cask heypandax/tap/pairlet-daemon
-cask "pairlet-daemon" do
+# After acceptance: brew install --cask heypandax/tap/pairlet
+cask "pairlet" do
   # Apple Silicon and Intel each get their own notarized build (jpackage bundles an arch-specific
   # JRE — see .github/workflows/release.yml). `arch` maps the running CPU to the asset suffix; the
   # sha256 differs per arch. Refresh BOTH after each release run (notarized tarballs aren't
@@ -22,7 +22,7 @@ cask "pairlet-daemon" do
 
   # the launcher lives in a self-contained .app (bundled JRE); symlink it onto PATH
   binary "cc-pocket-daemon.app/Contents/MacOS/cc-pocket-daemon"
-  binary "cc-pocket-daemon.app/Contents/MacOS/cc-pocket-daemon", target: "pairlet-daemon"
+  binary "cc-pocket-daemon.app/Contents/MacOS/cc-pocket-daemon", target: "pairlet"
 
   # Install the login service right away so the daemon auto-starts on every boot and auto-reconnects
   # with no extra command. service-install writes ~/Library/LaunchAgents/dev.ccpocket.daemon.plist
@@ -48,7 +48,7 @@ cask "pairlet-daemon" do
 
     The daemon was installed as a login service — it auto-starts on boot and reconnects.
     Just pair your phone:
-      cc-pocket-daemon pair                        # shows a QR + 6-digit code
+      pairlet pair                        # shows a QR + 6-digit code
 
     Logs:  ~/Library/Logs/cc-pocket/daemon.err.log
 

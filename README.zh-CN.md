@@ -29,7 +29,9 @@ curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/inst
 irm https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.ps1 | iex          # Windows
 ```
 
-**3 · 配对** —— 跑 `cc-pocket-daemon pair`，用 App 扫终端里打出的二维码（或敲那 6 位码）。连上了，端到端加密。
+**3 · 配对** —— 跑 `pairlet pair`，用 App 扫终端里打出的二维码（或敲那 6 位码）。连上了，端到端加密。
+
+`pairlet` 是简短命令，原来的 `cc-pocket-daemon` 及全部子命令仍可使用。旧安装尚无 `pairlet` 时，继续使用旧命令，并通过原安装脚本或包管理器升级。
 
 包管理器、国内镜像、升级和各平台细节：见[安装细节](#安装细节)。
 
@@ -95,7 +97,7 @@ flowchart LR
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.sh | bash
-cc-pocket-daemon pair
+pairlet pair
 ```
 
 下载会对着 Release 的 `SHA256SUMS` 校验，装进 `~/.local`（一个版本一个目录），并注册 launchd 服务：开机自启、断线自己重连。想用 Homebrew：`brew install --cask heypandax/tap/cc-pocket`（必须写全名，另有一个不相干的 cask 也叫 `cc-pocket`）。
@@ -106,7 +108,7 @@ cc-pocket-daemon pair
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.sh | bash
-cc-pocket-daemon pair
+pairlet pair
 ```
 
 拉一个自带 JRE 的独立包（不依赖系统 Java），装进 `~/.local`，注册 `systemd --user` 服务。语音转写用 `ffmpeg`，不是 macOS 的 `afconvert`。Linux **桌面 App** 没有正式安装包，只能自己从源码构建。
@@ -131,9 +133,9 @@ GitHub 在国内下载很慢，所以安装脚本和 Release 产物都在中继�
 <details>
 <summary><b>升级</b></summary>
 
-`cc-pocket-daemon version` 会告诉你：现在跑的是哪个版本、当初怎么装的、以及升级**这一份**安装该用哪条命令——离线可用，daemon 没起来也能问。App 里在**设置 ▸ 版本**看到的是同一份信息。
+`pairlet version` 会告诉你：现在跑的是哪个版本、当初怎么装的、以及升级**这一份**安装该用哪条命令——离线可用，daemon 没起来也能问。App 里在**设置 ▸ 版本**看到的是同一份信息。
 
-用一键脚本装的 daemon 会自己保持最新：每天检查，后台装好。不想要就 `cc-pocket-daemon config --auto-update off`，改成只给手机推一条通知。Homebrew、Scoop 和 Windows 装的永远不会自升级，走各自的包管理器：`brew upgrade --cask heypandax/tap/cc-pocket`、`scoop update cc-pocket-daemon`。桌面 App 检查更新失败时会明说失败，不会装作「已是最新」。
+用一键脚本装的 daemon 会自己保持最新：每天检查，后台装好。不想要就 `pairlet config --auto-update off`，改成只给手机推一条通知。Homebrew、Scoop 和 Windows 装的永远不会自升级，走各自的包管理器：`brew upgrade --cask heypandax/tap/cc-pocket`、`scoop update cc-pocket-daemon`。桌面 App 检查更新失败时会明说失败，不会装作「已是最新」。
 </details>
 
 ### 使用 OpenCode
@@ -176,7 +178,7 @@ cp mobile/composeApp/google-services.json.template mobile/composeApp/google-serv
 ```bash
 ./gradlew :daemon:installDist
 daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon run --relay wss://<你的中继>
-daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair    # 另开一个终端
+daemon/build/install/cc-pocket-daemon/bin/pairlet pair    # 另开一个终端
 ```
 
 构建 App：Android 用 `./gradlew :mobile:composeApp:assembleDebug`；iOS 用 `iosApp/iosApp.xcodeproj`（Xcode——先把 `iosApp/iosApp/GoogleService-Info.plist.template` 复制成同目录的 `GoogleService-Info.plist`）；桌面端（含 Linux）用 `./gradlew :mobile:composeApp:packageDistributionForCurrentOS`。iOS 真机安装见 [`docs/ios-device.md`](docs/ios-device.md)。

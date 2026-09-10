@@ -29,6 +29,7 @@ jobs:
         run: |
           python3 scripts/check-firebase-placeholders.py
           python3 scripts/check-brand-compatibility.py
+          python3 -m unittest discover -s scripts/tests -v
           python3 -m unittest discover -s support/tests -v
           node --test support/openclaw/plugins/cc-pocket-support-guard/index.test.js
           bash -n scripts/activate-openclaw-support-channel.sh
@@ -78,5 +79,11 @@ jobs:
           distribution: temurin
           java-version: "17"
           cache: gradle
-      - name: Daemon Windows cwd-probe self-check
-        run: ./gradlew --no-daemon :daemon:test --tests "*WinCwd*"
+      - name: Parse the Windows installer
+        shell: pwsh
+        run: |
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/install.ps1", [ref]$null, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
+      - name: Daemon Windows cwd probe and CLI compatibility
+        run: ./gradlew --no-daemon :daemon:test --tests "*WinCwd*" --tests "*CliAliasesTest"

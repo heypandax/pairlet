@@ -25,7 +25,7 @@
 | 用户保存的 relay、自托管 URL、设备密钥 | Pairing/SecureStore；Harmony Store | 不迁移、不覆盖；新旧组合实测待验收 | 禁止因改名重置 |
 | `cc-pocket-daemon-*` 资产与包内 `cc-pocket-daemon[.app]` 布局 | `UpdateService.kt`、发布脚本 | 旧选择器冻结、manifest/SHA256 校验、正式包待验收 | 兼容副本永久按旧客户端需求保留 |
 | `cc-pocket-desktop-macos-<arch>.dmg`、`cc-pocket-desktop-windows-x86_64.msi` | `DesktopUpdater.kt`、发布 workflows | 旧资产选择器冻结；本次不增加资产别名 | 以后别名必须同字节并列 checksum |
-| `cc-pocket-daemon` 命令 | `scripts/install.sh`、`install.ps1` | 新 `pairlet-daemon` 只转发旧稳定 symlink/shim；服务仍用原命令 | 可增加别名，不可第二套服务 |
+| `cc-pocket-daemon` 命令 | `scripts/install.sh`、`install.ps1`、`CliAliases.kt`、packaging 配方 | 新 `pairlet` 只转发旧稳定 symlink/shim；旧 managed 安装启动补齐；服务仍用原命令 | 可增加别名，不可第二套服务；见 [命令兼容](PAIRLET-CLI-COMPATIBILITY.md) |
 | 旧仓库、tap、bucket、Pages、relay、下载源 | README、release client、packaging、deploy | 当前保持线上入口；新 Caddy 配置单独候选 | 需部署后独立验证 |
 
 `packaging/brand-compatibility.json` 冻结本次不能改动的具体实现文件，`scripts/check-brand-compatibility.py` 检查平台标识与实际 macOS 包。它是针对本次候选的保护门，不是所有旧字符串的白名单；文案仍需人工核对。

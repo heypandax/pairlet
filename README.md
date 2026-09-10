@@ -29,7 +29,9 @@ curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/inst
 irm https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.ps1 | iex          # Windows
 ```
 
-**3 · Pair** — run `cc-pocket-daemon pair`, then scan the QR it prints (or type the 6-digit code) in the app. You are connected end-to-end.
+**3 · Pair** — run `pairlet pair`, then scan the QR it prints (or type the 6-digit code) in the app. You are connected end-to-end.
+
+`pairlet` is the short command; `cc-pocket-daemon` still supports the same subcommands. If an older installation has no `pairlet` command yet, keep using `cc-pocket-daemon` until you update through its original installer or package manager.
 
 Package managers, mirrors, updates and per-platform notes: [Install details](#install-details).
 
@@ -95,7 +97,7 @@ The desktop app and the local daemon are **different packages**: the app is a cl
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.sh | bash
-cc-pocket-daemon pair
+pairlet pair
 ```
 
 Verifies the download against the release's `SHA256SUMS`, installs under `~/.local` (one directory per version), and registers the launchd service so it runs on login and reconnects itself. Homebrew: `brew install --cask heypandax/tap/cc-pocket` (use the full name; an unrelated cask is also called `cc-pocket`).
@@ -106,7 +108,7 @@ Verifies the download against the release's `SHA256SUMS`, installs under `~/.loc
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.sh | bash
-cc-pocket-daemon pair
+pairlet pair
 ```
 
 Pulls a self-contained tarball (bundled JRE, no system Java), installs under `~/.local` and registers a `systemd --user` service. Voice transcription uses `ffmpeg` instead of macOS's `afconvert`. There is no official Linux **desktop app** package — build it from source.
@@ -131,9 +133,9 @@ GitHub downloads crawl there, so the installer and release artifacts are mirrore
 <details>
 <summary><b>Updating</b></summary>
 
-`cc-pocket-daemon version` reports what is running, how it was installed, and the single command that updates *this* install — offline, and whether or not the daemon is up. The app shows the same under **Settings ▸ Versions**.
+`pairlet version` reports what is running, how it was installed, and the single command that updates *this* install — offline, and whether or not the daemon is up. The app shows the same under **Settings ▸ Versions**.
 
-A daemon installed by the one-liner keeps itself current: it checks daily and applies the update in the background. Turn that off with `cc-pocket-daemon config --auto-update off` and you get a phone notification instead. Homebrew, Scoop and Windows installs never self-apply — update them through their own package manager (`brew upgrade --cask heypandax/tap/cc-pocket`, `scoop update cc-pocket-daemon`). The desktop app states it plainly when an update check fails, rather than showing "up to date".
+A daemon installed by the one-liner keeps itself current: it checks daily and applies the update in the background. Turn that off with `pairlet config --auto-update off` and you get a phone notification instead. Homebrew, Scoop and Windows installs never self-apply — update them through their own package manager (`brew upgrade --cask heypandax/tap/cc-pocket`, `scoop update cc-pocket-daemon`). The desktop app states it plainly when an update check fails, rather than showing "up to date".
 </details>
 
 ### Using OpenCode
@@ -176,7 +178,7 @@ Through the relay (off-LAN), the real product path:
 ```bash
 ./gradlew :daemon:installDist
 daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon run --relay wss://<your-relay>
-daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair    # in another terminal
+daemon/build/install/cc-pocket-daemon/bin/pairlet pair    # in another terminal
 ```
 
 Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via `iosApp/iosApp.xcodeproj` (Xcode — first copy `iosApp/iosApp/GoogleService-Info.plist.template` to `GoogleService-Info.plist` next to it). Desktop (including Linux) via `./gradlew :mobile:composeApp:packageDistributionForCurrentOS`. On-device iOS install: [`docs/ios-device.md`](docs/ios-device.md).

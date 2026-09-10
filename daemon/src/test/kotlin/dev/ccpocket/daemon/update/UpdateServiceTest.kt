@@ -2,14 +2,35 @@ package dev.ccpocket.daemon.update
 
 import dev.ccpocket.daemon.update.UpdateService.InstallKind
 import java.nio.file.Path
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Assumptions.assumeFalse
+import org.junit.jupiter.api.io.TempDir
 
 class UpdateServiceTest {
+    @TempDir lateinit var temp: Path
+
+    @Test
+    fun both_cli_links_resolve_to_the_same_managed_install() {
+        assumeFalse(System.getProperty("os.name").lowercase().contains("win"))
+        val executable = temp.resolve(".local/share/cc-pocket/versions/1.9.8/cc-pocket-daemon/bin/cc-pocket-daemon")
+        Files.createDirectories(executable.parent)
+        Files.writeString(executable, "launcher")
+        val bin = Files.createDirectories(temp.resolve(".local/bin"))
+        val legacy = Files.createSymbolicLink(bin.resolve("cc-pocket-daemon"), executable)
+        val short = Files.createSymbolicLink(bin.resolve("pairlet"), Path.of("cc-pocket-daemon"))
+        for (command in listOf(legacy, short)) {
+            val resolved = UpdateService.selfExe(command.toString())
+            assertEquals(executable.toRealPath(), resolved)
+            assertEquals(InstallKind.MANAGED, UpdateService.installKind(resolved, temp))
+            assertEquals(bin.toRealPath().resolve("cc-pocket-daemon"), UpdateService.managedInstallOf(resolved, temp.toRealPath())?.launcher)
+        }
+    }
 
     @Test
     fun is_newer_compares_dotted_numerics() {
