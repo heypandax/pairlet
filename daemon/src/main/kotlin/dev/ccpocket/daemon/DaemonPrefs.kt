@@ -20,6 +20,7 @@ class DaemonPrefs private constructor(private val path: File) {
         val askNoAutoDeny: Boolean = false,
         val fullControlExpiryMs: Long = 0L,
         val autoUpdate: Boolean? = null,
+        val dshBin: String? = null,
     )
 
     @Volatile
@@ -62,8 +63,22 @@ class DaemonPrefs private constructor(private val path: File) {
     var autoUpdate: Boolean? = null
         private set
 
+    /** Issue #365: a pinned path to the `dsh` executable. The npx-only install shape (`npx
+     *  @deepseek-ai/dsh`) leaves NO `dsh` file anywhere the resolver can find, and the `--dsh-bin` flag
+     *  only helps a daemon someone starts by hand — a service-managed one would need `service-install`
+     *  re-run to carry it. Persisting it here makes the pin survive both restarts and daemon updates.
+     *  null = not pinned (the flag / $CC_POCKET_DSH_BIN / the PATH search decide, in that order). */
+    @Volatile
+    var dshBin: String? = null
+        private set
+
     fun setAutoUpdate(v: Boolean?) {
         autoUpdate = v
+        persist()
+    }
+
+    fun setDshBin(v: String?) {
+        dshBin = v?.takeIf { it.isNotBlank() }
         persist()
     }
 
@@ -85,7 +100,7 @@ class DaemonPrefs private constructor(private val path: File) {
     private fun persist() {
         runCatching {
             path.parentFile?.mkdirs()
-            path.writeText(JSON.encodeToString(Stored(pushEnabled, isolatedClaudeAuth, askNoAutoDeny, fullControlExpiryMs, autoUpdate)))
+            path.writeText(JSON.encodeToString(Stored(pushEnabled, isolatedClaudeAuth, askNoAutoDeny, fullControlExpiryMs, autoUpdate, dshBin)))
         }
     }
 
@@ -102,6 +117,7 @@ class DaemonPrefs private constructor(private val path: File) {
                 askNoAutoDeny = s.askNoAutoDeny
                 fullControlExpiryMs = s.fullControlExpiryMs
                 autoUpdate = s.autoUpdate
+                dshBin = s.dshBin
             }
         }
     }

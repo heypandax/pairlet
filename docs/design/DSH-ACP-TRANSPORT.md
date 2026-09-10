@@ -73,3 +73,35 @@ dsh 自己写明：「session deletion、fork、`session/load`、modes、command
 - **修复随 daemon 发版生效**：手机／桌面 App 不需要同版；但用户机器上的 daemon 必须升到含本次改动的版本。
 - **未升级 daemon 的过渡办法**：把 dsh 钉回最后一个旧版 `npm i -g @deepseek-ai/dsh@0.1.1-rc.2`。
 - **升级 daemon 后，dsh 必须 ≥ 0.1.2-rc.1**：旧版没有 acp profile，`--profile acp` 会组出一个没有 app 的 profile，谁也不占 stdio，握手永不回应。为此 backend 有一道 30s 握手看门狗，超时就直说「需要 dsh 0.1.2-rc.1 或更新」。
+
+## 7. 只用 npx 装 dsh 的情况（issue #365）
+
+官方文档给的是 `npx @deepseek-ai/dsh`。这条命令**不会在磁盘上留下任何 `dsh` 可执行文件**——它每次临时解包到 npm 缓存里跑。于是 daemon 的解析链（显式路径 → `$CC_POCKET_DSH_BIN` → PATH ＋ 各种 npm 全局目录）根本没有东西可找，直接报 `dsh executable not found`。这不是漏搜目录，是文件真的不存在。
+
+两条修法，任选其一：
+
+**（A）补一个 launcher 文件**——把 npx 这条命令固化成一个真实可执行文件：
+
+```sh
+which npx                       # 先拿到绝对路径，下一步必须用它
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/dsh <<'EOF'
+#!/bin/sh
+exec /absolute/path/to/npx --yes @deepseek-ai/dsh@latest "$@"
+EOF
+chmod +x ~/.local/bin/dsh
+```
+
+`npx` 必须写 `which npx` 得到的**绝对路径**：daemon 以后台服务身份运行，拿到的是被清洗过的 PATH，看不到你 shell 里的 Node 环境，写 `exec npx` 会在服务上下文里找不到 npx。`~/.local/bin` 本身已经在 `DshLauncher.fallbackDirs` 里，放好即可被找到。
+
+**（B）固定一个路径到 prefs**——不想在 `~/.local/bin` 放文件，或者 dsh 在别的地方：
+
+```sh
+cc-pocket-daemon config --dsh-bin /absolute/path/to/dsh
+cc-pocket-daemon config --clear-dsh-bin    # 取消固定，回到自动探测
+```
+
+写进 `~/.cc-pocket/prefs.json`，**跨重启与 daemon 自更新都在**——这正是它相对 `run --dsh-bin` 的价值：后者只对手工前台启动的 daemon 有效，服务托管的 daemon 由 launchd/systemd 按 `service-install` 烤进去的 argv 拉起，不会带上你临时敲的 flag。优先级是 `run --dsh-bin` 旗标 ＞ prefs ＞ `$CC_POCKET_DSH_BIN`／PATH 搜索。改完要重启 daemon 才生效。
+
+顺带在同一批修了另一个相邻盲点：解析器原本只认 nvm 的 `~/.nvm/versions/node/vX.Y.Z/bin`（#287），现在也认 fnm 的 `<state>/aliases/default/bin`（`$FNM_DIR`、macOS 的 `~/Library/Application Support/fnm`、Linux 的 `~/.local/share/fnm`、旧版的 `~/.fnm`）。这条对**所有** agent 后端生效，不只 dsh。
+

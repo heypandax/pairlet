@@ -56,7 +56,14 @@ object DshLauncher {
                 "re-run `cc-pocket-daemon service-install --apply` from the terminal where `which dsh` works, " +
                 "or pass --dsh-bin / set CC_POCKET_DSH_BIN where the service can see it " +
                 "(a plain `export` in your shell won't reach it). " +
-                "Desktop-app builds of dsh bundle a private copy the daemon can't drive — keep the npm install.",
+                "Desktop-app builds of dsh bundle a private copy the daemon can't drive — keep the npm install. " +
+                // issue #365: `npx @deepseek-ai/dsh` installs no `dsh` file at all, so there is nothing for
+                // any search to find — the fix is to create the missing file, or to pin a path that persists.
+                "Only ever run dsh through npx? Then no `dsh` file exists to find: create one at " +
+                "~/.local/bin/dsh containing `#!/bin/sh` and `exec /absolute/path/to/npx --yes " +
+                "@deepseek-ai/dsh@latest \"$@\"`, chmod +x it (the npx path must be the absolute one from " +
+                "`which npx` — a service cannot see your shell's PATH), or pin any path permanently with " +
+                "`cc-pocket-daemon config --dsh-bin <path>`.",
         )
 
     /**

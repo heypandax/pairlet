@@ -132,6 +132,38 @@ class ExecutableResolverTest {
     }
 
     @Test
+    fun fnm_default_bins_are_listed_only_when_they_exist_and_FNM_DIR_wins() {
+        // issue #365: fnm has the same blind spot as nvm — its globals sit under
+        // <state>/aliases/default/bin, which no launchd/systemd PATH contains. Only the DEFAULT alias is
+        // searched, and only directories that actually exist may be handed to the resolver (a bogus dir
+        // would just add candidate paths that can never match).
+        val home = Files.createTempDirectory("ccp-fnmhome")
+        val macos = Files.createDirectories(home.resolve("Library/Application Support/fnm/aliases/default/bin"))
+        // ~/.local/share/fnm exists but has no default alias → not a bin dir, must not be offered
+        Files.createDirectories(home.resolve(".local/share/fnm/aliases"))
+        assertEquals(listOf(macos.toString()), ExecutableResolver.fnmDefaultBins(home, fnmDir = null))
+
+        // $FNM_DIR is fnm's own override, so it leads the list when it resolves to a real default alias
+        val custom = Files.createTempDirectory("ccp-fnmdir")
+        val customBin = Files.createDirectories(custom.resolve("aliases/default/bin"))
+        assertEquals(
+            listOf(customBin.toString(), macos.toString()),
+            ExecutableResolver.fnmDefaultBins(home, fnmDir = custom.toString()),
+        )
+        // a stale/blank FNM_DIR is simply skipped, never an error
+        assertEquals(
+            listOf(macos.toString()),
+            ExecutableResolver.fnmDefaultBins(home, fnmDir = "  "),
+        )
+        assertEquals(
+            listOf(macos.toString()),
+            ExecutableResolver.fnmDefaultBins(home, fnmDir = home.resolve("gone").toString()),
+        )
+        // no fnm at all → empty (the common case on CI and non-fnm machines)
+        assertEquals(emptyList(), ExecutableResolver.fnmDefaultBins(Files.createTempDirectory("ccp-nofnm"), null))
+    }
+
+    @Test
     fun batch_shims_are_recognised_by_extension_case_insensitively() {
         // the launchers use this to decide to go through cmd.exe, and the Feishu reviewer to refuse to run
         // at all — so a `.CMD` from a Windows PATH entry must not read as native

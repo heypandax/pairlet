@@ -28,6 +28,7 @@ object ExecutableResolver {
             System.getenv("PATH")?.split(File.pathSeparator)?.forEach { if (it.isNotBlank()) add(it) }
             addAll(fallbackDirs)
             addAll(nvmVersionBins()) // issue #287: `npm i -g` under nvm is invisible to a service PATH
+            addAll(fnmDefaultBins()) // issue #365: same blind spot, fnm's layout
         }
         dirs.forEach { dir -> exeNames.forEach { name -> candidates.add(Path.of(dir, name)) } }
         val valid = candidates.filter { it.isRunnableFile() }
@@ -54,6 +55,30 @@ object ExecutableResolver {
                 .sortedByDescending { versionKey(it.fileName.toString()) }
                 .map { it.resolve("bin").toString() }
         }.getOrDefault(emptyList())
+
+    /**
+     * fnm — the other popular Node version manager — keeps its globals under
+     * `<state>/aliases/default/bin`, a path no service PATH contains either (same class of blind spot as
+     * nvm's, issue #365: an npm-global `dsh` is simply invisible to a launchd/systemd daemon). Only the
+     * DEFAULT alias is searched: it is the version an interactive shell would pick, so it is the one the
+     * user meant when they ran `npm i -g`. `$FNM_DIR` wins when set — it is fnm's own override — then the
+     * per-platform defaults, of which at most one normally exists.
+     */
+    internal fun fnmDefaultBins(
+        home: Path = Path.of(System.getProperty("user.home")),
+        fnmDir: String? = System.getenv("FNM_DIR"),
+    ): List<String> = runCatching {
+        val roots = buildList {
+            fnmDir?.takeIf { it.isNotBlank() }?.let { add(Path.of(it)) }
+            add(home.resolve("Library").resolve("Application Support").resolve("fnm")) // macOS default
+            add(home.resolve(".local").resolve("share").resolve("fnm")) // Linux/XDG default
+            add(home.resolve(".fnm")) // older installs / FNM_DIR convention
+        }
+        roots.map { it.resolve("aliases").resolve("default").resolve("bin") }
+            .filter { runCatching { it.isDirectory() }.getOrDefault(false) }
+            .map { it.toString() }
+            .distinct()
+    }.getOrDefault(emptyList())
 
     /** `v24.3.0` → 24_003_000. Malformed segments read as 0 so odd directory names sort last, never throw. */
     private fun versionKey(name: String): Long {

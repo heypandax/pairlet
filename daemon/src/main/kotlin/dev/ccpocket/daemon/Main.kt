@@ -178,6 +178,13 @@ private class RunCmd : CliktCommand(name = "run") {
     ).flag()
 
     override fun run() {
+        // Loaded FIRST because the agent probes below already need it: `config --dsh-bin` is the pinned
+        // path a service-managed daemon carries across restarts (issue #365), so it has to be in hand
+        // before the first resolveExecutable call, not after.
+        val prefs = DaemonPrefs.load()
+        // Flag beats pref beats the env/PATH search — the same precedence every other --*-bin follows,
+        // with the persisted pin slotted in just under the explicit command line.
+        val dshBinEffective = dshBin ?: prefs.dshBin
         // Both agent CLIs are optional individually (issue #130): probe each for the banner, but resolve
         // lazily per session so a missing one never blocks startup — codex-only machines used to crash-loop
         // under launchd because claude was a hard dependency. An open on a missing backend fails with a
@@ -187,12 +194,11 @@ private class RunCmd : CliktCommand(name = "run") {
         val opencodeExe = runCatching { dev.ccpocket.daemon.opencode.OpenCodeLauncher.resolveExecutable(opencodeBin) }.getOrNull()
         val kimiExe = runCatching { dev.ccpocket.daemon.kimi.KimiLauncher.resolveExecutable(kimiBin) }.getOrNull()
         val zcodeExe = runCatching { dev.ccpocket.daemon.zcode.ZCodeLauncher.resolveExecutable(zcodeBin) }.getOrNull()
-        val dshExe = runCatching { dev.ccpocket.daemon.dsh.DshLauncher.resolveExecutable(dshBin) }.getOrNull()
+        val dshExe = runCatching { dev.ccpocket.daemon.dsh.DshLauncher.resolveExecutable(dshBinEffective) }.getOrNull()
         missingAgentsMessage(exe, codexExe, opencodeExe, kimiExe, zcodeExe, dshExe)?.let { throw com.github.ajalt.clikt.core.CliktError(it) }
         // credential isolation (issue #69, opt-in via `config --isolated-claude-auth on` or the env
         // toggle): the daemon's claude gets its own CLAUDE_CONFIG_DIR — its OAuth token refreshes can't
         // log out a terminal claude sharing the machine. History/settings stay shared (symlinks).
-        val prefs = DaemonPrefs.load()
         val wantIsolation = prefs.isolatedClaudeAuth || System.getenv("CC_POCKET_ISOLATED_CLAUDE_AUTH") == "1"
         val claudeHome = if (wantIsolation) dev.ccpocket.daemon.claude.ClaudeHome.prepare() else null
         if (wantIsolation && claudeHome == null) {
@@ -208,7 +214,7 @@ private class RunCmd : CliktCommand(name = "run") {
                 AgentKind.OPENCODE to AgentBackendFactory { dev.ccpocket.daemon.opencode.OpenCodeBackend(opencodeBin) }, // resolves the binary lazily on first launch
                 AgentKind.KIMI to AgentBackendFactory { dev.ccpocket.daemon.kimi.KimiBackend(kimiBin) }, // resolves the binary lazily on first launch
                 AgentKind.ZCODE to AgentBackendFactory { dev.ccpocket.daemon.zcode.ZCodeBackend(zcodeBin) },
-                AgentKind.DSH to AgentBackendFactory { dev.ccpocket.daemon.dsh.DshBackend(dshBin) }, // resolves the binary lazily on first launch
+                AgentKind.DSH to AgentBackendFactory { dev.ccpocket.daemon.dsh.DshBackend(dshBinEffective) }, // resolves the binary lazily on first launch
             ),
             prefs = prefs,
             claudeConfigDir = claudeHome,
@@ -218,7 +224,7 @@ private class RunCmd : CliktCommand(name = "run") {
             openCodeModels = dev.ccpocket.daemon.opencode.OpenCodeModelService(opencodeBin),
             kimiModels = dev.ccpocket.daemon.kimi.KimiModelService(kimiBin),
             zcodeModels = dev.ccpocket.daemon.zcode.ZCodeModelService(),
-            dshModels = dev.ccpocket.daemon.dsh.DshModelService(dshBin),
+            dshModels = dev.ccpocket.daemon.dsh.DshModelService(dshBinEffective),
             reviews = dev.ccpocket.daemon.review.ReviewService(),
             peerInboxFactory = { dev.ccpocket.daemon.review.PeerInboxService(it) },
         )
@@ -775,6 +781,20 @@ private class ConfigCmd : CliktCommand(name = "config") {
             "builds and Windows never auto-apply regardless. Takes effect on daemon restart.",
     )
 
+    private val dshBin by option(
+        "--dsh-bin",
+        help = "PATH — pin the `dsh` executable the DeepSeek Harness backend launches (issue #365). Use this " +
+            "when dsh is only ever run through `npx` (no `dsh` file exists to find) or lives somewhere a " +
+            "background service's PATH never reaches. Unlike the `run --dsh-bin` flag this survives restarts " +
+            "and daemon updates. Clear it with --clear-dsh-bin. Takes effect on daemon restart.",
+        metavar = "PATH",
+    )
+
+    private val clearDshBin by option(
+        "--clear-dsh-bin",
+        help = "forget the pinned dsh path and go back to auto-detection",
+    ).flag()
+
     override fun run() {
         val prefs = DaemonPrefs.load()
         when (isolatedClaudeAuth?.lowercase()) {
@@ -790,6 +810,11 @@ private class ConfigCmd : CliktCommand(name = "config") {
             "default", "unset" -> prefs.setAutoUpdate(null)
             else -> throw com.github.ajalt.clikt.core.CliktError("--auto-update takes on|off")
         }
+        if (clearDshBin && dshBin != null) {
+            throw com.github.ajalt.clikt.core.CliktError("pass either --dsh-bin or --clear-dsh-bin, not both")
+        }
+        if (clearDshBin) prefs.setDshBin(null)
+        dshBin?.let { prefs.setDshBin(it) }
         echo("isolated-claude-auth: ${if (prefs.isolatedClaudeAuth) "on" else "off"}")
         val autoEffective = dev.ccpocket.daemon.update.UpdateChecker.resolveAutoApply(
             flag = false, // the `run` flag isn't in scope here; show what a plain `run` would resolve to
@@ -797,7 +822,8 @@ private class ConfigCmd : CliktCommand(name = "config") {
             pref = prefs.autoUpdate,
         )
         echo("auto-update: ${if (autoEffective) "on" else "off"}${if (prefs.autoUpdate == null) " (default)" else ""}")
-        if (isolatedClaudeAuth != null || autoUpdate != null) {
+        echo("dsh-bin: ${prefs.dshBin ?: "(auto-detect)"}")
+        if (isolatedClaudeAuth != null || autoUpdate != null || dshBin != null || clearDshBin) {
             echo("restart the daemon for this to take effect — e.g.:")
             echo("  ${daemonStartHint().substringAfter("start it:  ")}")
         }
