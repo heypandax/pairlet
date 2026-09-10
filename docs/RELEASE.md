@@ -33,6 +33,10 @@ gh workflow run release-preview.yml --ref main \
 不更新 Homebrew/Scoop、镜像和生产服务。移动端使用 Firebase 占位配置；无签名 APK/archive
 仅用于构建验证。预演通过后仍需正式签名、公证及旧版本升级验收；其他模块合并后应重新预演。
 
+daemon 自动更新只查询镜像 `latest.json` 和 GitHub `/releases/latest`，不会查询 `main`
+或 Actions 产物。安装脚本本身从 `main` 获取，镜像任务也会同步脚本，因此推送会让新脚本
+对外可见；重新安装时下载的程序仍由正式 Release 决定，不会自动取得预演版。
+
 ## 当前全平台主流程
 
 协调发布使用同一个 `x.y.z` 版本，覆盖 daemon（macOS 双架构、Windows、Linux 双架构）、

@@ -2,7 +2,7 @@ name: release-preview
 run-name: Preview ${{ inputs.version }} · ${{ inputs.scope }} · ${{ github.sha }}
 
 # Build from the dispatch snapshot, without release/signing credentials or publishing jobs.
-# Artifacts are temporary, unsigned test candidates; production workflows remain tag-only.
+# Artifacts are temporary, unsigned test candidates; publishing stays in separate manual workflows.
 on:
   workflow_dispatch:
     inputs:
