@@ -484,6 +484,8 @@ https://analytics.google.com/analytics/web/#/p540841272/realtime/overview
 
 （若之后要让自动化能截图，Dia 需带 `--remote-debugging-port=9222` 启动。）
 
+> **后续更正（18:00 补做）**：9222 后来是通的，本项已在 §7.8 补完，三张截图均已生成。本小节保留原始记录，不要按这里的「未生成」下结论。
+
 ### 7.7 本节结论
 
 | 层 | 数字 | 结论 |
@@ -497,6 +499,100 @@ https://analytics.google.com/analytics/web/#/p540841272/realtime/overview
 标准聚合层仍未覆盖：本次包 `app_version=2.0.0`，需 24～48 小时后用 `runReport` 按 `customEvent:app_version=2.0.0` 过滤做最终核对。
 
 第 7 步（关闭采集／重开）**证据不足，仍判未覆盖**：日志末尾是连续 3 次 202 后直接结束，没有出现「一段无 `attempt` 的空窗后重新出现 `attempt`」的形态。这与代码行为一致——关闭采集只是取消在飞请求并清空队列，本身不产生任何探针记录；若用户是在 17:31:30 之后、没有新事件要发的窗口里做的这一步，日志就必然什么都看不到。要活体验证这一项，需要在关闭期间刻意制造一个事件（例如切一次屏），确认它没有被补发。
+
+### 7.8 Dia 目视核对（18:00—18:14 CST 补做）
+
+§7.6 记的「Dia 没开 CDP 9222，B 项跳过」已不成立：18:00 复查时本机 CDP 调试端口 9222 可连，于是把目视核对补上。全程只读，未输入任何凭据，未保存任何 GA4 配置（比较对象只「应用」未「保存」，页面事后已关闭）。
+
+**先说时效，这决定了这一节能证明什么**。旅程发生在 17:29—17:31，GA4 Realtime 只保留最近 30 分钟：
+
+| 目视时刻 | Realtime 覆盖窗口 | 旅程三桶是否还在 |
+|---|---|---|
+| 18:00（截图 1） | 约 17:30—18:00 | 勉强在窗口末尾，17:29 桶已滑出 |
+| 18:05（抄事件名） | 约 17:35—18:05 | 已滑出 |
+| 18:14（截图 2／3） | 约 17:44—18:14 | 已滑出 |
+
+所以本节**只能佐证「事件名与量级」与「桌面流可分离」**，无法复核 §7.4 的逐分钟桶归因。§7.4 的 24 条／15 个事件名仍以当时（17:37 查询）的 Realtime API 结果为准。
+
+#### 三张截图
+
+| 路径 | 内容 | 截取时刻 |
+|---|---|---|
+| `/tmp/pairlet-journey-ga4-realtime.png` | 实时概览全页（无比较对象） | 18:00 |
+| `/tmp/pairlet-journey-ga4-events.png` | 「按事件名称划分的事件数」卡片，三列并排：所有用户／`app_platform` 比较（失败态）／网站流量 | 18:14 |
+| `/tmp/pairlet-journey-ga4-user.png` | 「查看用户概况」单用户事件流 | 18:14 |
+
+#### 页面读数
+
+**18:00 实时概览（截图 1）**：过去 30 分钟活跃用户 8、过去 5 分钟 2；「带来用户首次互动的来源」`(direct)` 6；事件卡片 #1 是 `conn_failed` 56（14.93%）。
+
+这个 `conn_failed` 56 正好印证了任务前提：**事件卡片默认混了所有平台**。§7.5 里桌面流的 `conn_failed` 判「未见（0）」，页面上却是全属性第一名——这 56 条来自手机 Firebase 流，与桌面无关。
+
+**18:05 全属性事件名（共 18 个，翻 3 页抄全，含手机流）**：
+
+```text
+session_opened 29   feature_used 25          value_reached 22
+user_engagement 21  conn_phase 19            session_open_result 17
+app_launch 15       connected 14             conn_failed 11
+prompt_sent 10      session_start 8          screen_view 7
+background_task_result 6                     prompt_response_result 5
+turn_result 5       app_update 1             file_view_result 1
+onboarding_shown 1
+```
+
+#### 桌面流分离：一次失败、一次成功
+
+**失败路径 —— 自定义维度**。按 `app_platform` 建比较对象是可以建出来的（值域实测只有 `ios`／`desktop`／`android` 三个），条件摘要显示 `app_platform 完全匹配 'desktop'`，但一「应用」，每张卡片这一列都返回：
+
+```text
+此比较对象无法应用于实时数据。
+```
+
+即 **Realtime 不支持自定义维度比较对象**，这与 §7.4 记录的 `customEvent:app_environment` 在 Realtime API 报「not a valid dimension」是同一个限制的 UI 表现。截图 2 中间那一列保留了这个失败态，留作判例。
+
+**成功路径 —— 内置预设「网站流量」**（定义为 `设备类别 完全匹配 'desktop'`）。这个比较对象在 Realtime 下**可用**，桌面流被干净切出来：18:05 同期只有 9 个事件名：
+
+```text
+feature_used 19            value_reached 17          session_open_result 14
+session_opened 14          prompt_response_result 4  prompt_sent 4
+turn_result 4              background_task_result 3  file_view_result 1
+```
+
+对照全属性的 18 个，桌面列里**完全没有** `user_engagement`／`conn_phase`／`app_launch`／`connected`／`conn_failed`／`session_start`／`screen_view`／`app_update`／`onboarding_shown`——这些在该窗口内全部来自手机流。到 18:14 截图那一刻，「所有用户」已涨到 21 个事件名（#1 `feature_used` 20），「网站流量」仍是 9 个（#1 `feature_used` 20），两列的 `feature_used` 相等，说明该窗口的 `feature_used` 100% 是桌面的。
+
+**口径提醒**：「网站流量」用的是**设备类别**而不是**数据流**，与 §7.4 用的 `streamName`＋`platform` 不是同一把尺子。它会把「任何桌面设备上的访问」都算进来，只是本属性里除了桌面 App 的 MP 打点之外没有别的桌面来源，才恰好等价。写结论时不要把这两个口径混用。
+
+#### 与 Realtime API 结果是否一致
+
+**不一致，且这是预期内的**。§7.4 的「24 条、15 个事件名」是 17:29—17:31 三个分钟桶的桌面流切片；本节看到的是 17:35—18:14 滑动窗口的全部流量（含手机流与用户日常直连 GA4 的 production 桌面 App，见 §7.4 的同流噪声说明）。两者窗口不同、口径不同，数字本就不该相等。
+
+可以对上的是**定性关系**：
+
+- §7.4 判「见」的桌面事件里，`session_opened`／`session_open_result`／`prompt_sent`／`prompt_response_result`／`turn_result`／`value_reached`／`feature_used` 七个，在本节的桌面流列里**全部仍在**，说明这些事件名确实从桌面流持续到达 GA4。
+- §7.4 判「未见」的 `conn_failed`，在本节桌面流列里**依然是 0**（全属性的 11 条全在手机流），与 F9「断网期上报丢失」的结论不冲突。
+- 配对类事件（`pair_started`／`paired`／`pair_failed`／`onboarding_shown`）在本节窗口里桌面列为 0，符合预期——它们只在全新未配对身份首启时发出，18:00 之后没有再做配对。
+
+#### 「查看用户概况」：进去了，但拿不到本次旅程的直接证据
+
+右上角「查看用户概况」可以进（URL 落到 `.../realtime/usersnapshot`），截图已存 `/tmp/pairlet-journey-ga4-user.png`。**但没能找到 17:29—17:31 的 web 用户**，原因有三：
+
+1. **时间已滑出**。18:14 时窗口是 17:44—18:14，旅程用户根本不在候选集里。
+2. **筛不了平台**。页面自己写着「用户概况只能按地理位置和应用版本缩小范围」——没有按平台／数据流筛选的入口，比较对象也不作用于这个视图。
+3. **翻页拿不到新用户**。用「下一位用户」箭头连翻 10 次，稳定落在同一个用户上：过去 30 分钟总计 4 个事件，`app_launch`／`screen_view`／`session_start`／`user_engagement` 各 1，用户属性带 `first_open_time`——这是**手机 Firebase 流**的典型形态，不是桌面 MP 流。
+
+截图里那位用户的事件流时间轴显示 `02:49`—`03:11`「上午」，这是**属性时区（美西）**下的显示，对应北京时间 17:49—18:11。后续任何人比对这张图的时间戳，记得换算，不要当成 CST。
+
+**结论**：本项**未取得**目视级的单用户旅程证据，且以 Realtime 现有能力**无法补取**（窗口已过，且不支持按平台筛用户概况）。要拿到这类单用户证据，只能在旅程发生的 30 分钟内实时截图，或改用 BigQuery Export／`runReport` 的用户级查询。
+
+#### 本节小结
+
+| 项 | 结果 |
+|---|---|
+| 截图 | 3 张全部生成 |
+| 桌面流分离 | **成功**（内置「网站流量」＝设备类别 desktop）；自定义维度 `app_platform` 路径**失败**（Realtime 不支持） |
+| 事件名核对 | 全属性 18 个、桌面流 9 个，已全部抄录 |
+| 与 §7.4 的 24 条／15 个事件名 | **数字不一致，属预期**（窗口与口径均不同）；定性关系可对上 |
+| 单用户旅程目视证据 | **未取得**，且无法补取 |
 
 ## 8. 结论
 
