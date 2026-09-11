@@ -97,6 +97,7 @@ Content-Type: application/json
 ## 8. 桌面端配置与优先级
 
 - 官方包资源 `cc-pocket-analytics.properties`：`endpoint=https://<入口主机>`（只含 scheme＋host，无路径／查询），客户端拼接 `/v1/analytics/register`、`/v1/analytics/collect`。生产默认入口是 relay 的 HTTPS 源站（当前 `https://pocket.ark-nexus.cc`）。
+- **入口主机必须是灰云直连（源站看到真实客户端 IP）**。安全评审实测 `relay.pairlet.org` 目前是橙云（Cloudflare 代理），源站看到的是边缘节点 IP：所有按 IP 的限流键（含 register 的锁定限流和既有配对限流）会把整个 PoP 的用户合并进一个桶，攻击者每分钟 11 次 register 就能让一个地区的采集全部 429。在 Caddy 配 Cloudflare `trusted_proxies`＋`CF-Connecting-IP` 或把该域名改灰云之前，`PAIRLET_ANALYTICS_ENDPOINT` 只能指向 `https://pocket.ark-nexus.cc`。
 - 环境变量 `CCPOCKET_ANALYTICS_ENDPOINT` 覆盖资源。
 - 优先级：入口（env > 资源）> 直连 MP（仅当**没有**入口配置且环境 ≠ production；即本机私测用 `ga4.properties`／`CCPOCKET_GA4_*`）> 关闭。官方包由门禁保证只含入口资源、不含 `ga4.properties`，所以不可能绕回直连。
 - 事件触发点、`TelemetryDelivery` 队列／开关／代际语义、`ga4_client_id` 种子与 `ga4ClientId()` 转换、首次价值标记、`sessionId`：**全部不变**，只换出口。

@@ -20,7 +20,8 @@ class HttpGa4Forwarder(
     private val client = HttpClient.newBuilder().connectTimeout(connectTimeout).build()
 
     override suspend fun post(stream: Ga4Stream, body: String): Int {
-        val req = HttpRequest.newBuilder(URI("$base?measurement_id=${stream.measurementId}&api_secret=${stream.apiSecret}"))
+        val secret = java.net.URLEncoder.encode(stream.apiSecret, Charsets.UTF_8)
+        val req = HttpRequest.newBuilder(URI("$base?measurement_id=${stream.measurementId}&api_secret=$secret"))
             .timeout(requestTimeout)
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(body))

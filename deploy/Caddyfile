@@ -171,6 +171,11 @@ pairlet.org {
 
 # Same relay process and database as the legacy host; never redirect WebSocket/API traffic.
 relay.pairlet.org {
+    # ⚠ This hostname is currently orange-clouded (Cloudflare proxies it), so {remote_host} is an edge
+    # IP and every per-IP limiter (pairing, auth, analytics register lockout) collapses onto one bucket
+    # per PoP. Either grey-cloud it like pocket.ark-nexus.cc, or add Cloudflare ranges as
+    # trusted_proxies with client_ip_headers CF-Connecting-IP and forward {client_ip} instead. Until
+    # then do not point PAIRLET_ANALYTICS_ENDPOINT here (DESKTOP-GA4-INGRESS.md §8).
     # Same analytics body cap as the legacy host (docs/observability/DESKTOP-GA4-INGRESS.md §1).
     @analytics path /v1/analytics/*
     request_body @analytics {

@@ -40,9 +40,15 @@ data class AnalyticsConfig(
                 Ga4Stream.parse(env("CCPOCKET_ANALYTICS_STREAM_PRODUCTION"))?.let { put("production", it) }
                 Ga4Stream.parse(env("CCPOCKET_ANALYTICS_STREAM_STAGING"))?.let { put("staging", it) }
             }
-            val key = env("CCPOCKET_ANALYTICS_TOKEN_KEY")?.trim()?.takeIf { it.length >= 64 && Regex("[0-9a-fA-F]+").matches(it) }
+            val rawKey = env("CCPOCKET_ANALYTICS_TOKEN_KEY")?.trim()
+            val key = rawKey?.takeIf { it.length >= 64 && it.length % 2 == 0 && Regex("[0-9a-fA-F]+").matches(it) }
                 ?.chunked(2)?.map { it.toInt(16).toByte() }?.toByteArray()
-                ?: ByteArray(32).also { SecureRandom().nextBytes(it) } // per-boot key: old tokens simply re-register
+                ?: run {
+                    // per-boot key: old tokens simply re-register. Say so when a configured key was rejected,
+                    // otherwise an operator typo silently turns "stable key" into "restart voids all tokens".
+                    if (!rawKey.isNullOrEmpty()) println("analytics: CCPOCKET_ANALYTICS_TOKEN_KEY rejected (need >= 64 hex chars); using a per-boot random key")
+                    ByteArray(32).also { SecureRandom().nextBytes(it) }
+                }
             return AnalyticsConfig(
                 enabled = env("CCPOCKET_ANALYTICS_ENABLED") == "true",
                 streams = streams,

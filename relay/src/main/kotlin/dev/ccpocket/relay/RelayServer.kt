@@ -38,6 +38,9 @@ import dev.ccpocket.relay.analytics.HttpGa4Forwarder
 import dev.ccpocket.relay.analytics.IngressReply
 import dev.ccpocket.observability.AnalyticsCatalog
 import io.ktor.server.request.contentLength
+import io.ktor.server.request.receiveChannel
+import io.ktor.utils.io.readRemaining
+import kotlinx.io.readByteArray
 import io.ktor.server.response.respond
 import dev.ccpocket.relay.push.LoggingPushService
 import dev.ccpocket.relay.push.NotifyGate
@@ -449,8 +452,11 @@ class RelayServer(
     /** Analytics bodies are capped BEFORE they are read (Caddy caps them too); null = too large. */
     private suspend fun ApplicationCall.receiveBounded(): String? {
         if ((request.contentLength() ?: 0) > AnalyticsCatalog.MAX_BODY_BYTES) return null
-        val text = runCatching { receiveText() }.getOrNull() ?: return ""
-        return text.takeIf { it.toByteArray().size <= AnalyticsCatalog.MAX_BODY_BYTES }
+        // Chunked bodies carry no Content-Length, so read at most cap+1 bytes from the channel instead of
+        // buffering whatever arrives: one byte over the cap is enough to reject without holding the rest.
+        val bytes = runCatching { receiveChannel().readRemaining(AnalyticsCatalog.MAX_BODY_BYTES + 1L).readByteArray() }
+            .getOrNull() ?: return ""
+        return if (bytes.size > AnalyticsCatalog.MAX_BODY_BYTES) null else String(bytes)
     }
 
     private suspend fun ApplicationCall.reply(r: IngressReply) =

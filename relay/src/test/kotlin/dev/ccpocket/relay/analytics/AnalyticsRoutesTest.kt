@@ -66,3 +66,24 @@ class AnalyticsRoutesTest {
         assertEquals("ok", health.body())
     }
 }
+
+class AnalyticsChunkedBodyTest {
+    @Test fun chunked_bodies_without_content_length_are_still_capped() {
+        val calls = mutableListOf<String>()
+        val server = RelayServer("127.0.0.1", 0, InMemoryRelayStore(),
+            analyticsConfig = AnalyticsConfig(true, mapOf("production" to Ga4Stream("G-PROD1234", "prod-secret-value")), ByteArray(32), false),
+            ga4Forwarder = { _, body -> calls += body; 204 }).server()
+        server.start(wait = false)
+        try {
+            val port = runBlocking { server.engine.resolvedConnectors().single().port }
+            val big = ("{" + " ".repeat(20_000) + "}").toByteArray()
+            // ofInputStream has no known length → Transfer-Encoding: chunked, no Content-Length header
+            val req = HttpRequest.newBuilder(URI("http://127.0.0.1:$port/v1/analytics/register"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofInputStream { big.inputStream() }).build()
+            val r = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString())
+            assertEquals(413, r.statusCode())
+            assertTrue(calls.isEmpty())
+        } finally { server.stop(100, 500) }
+    }
+}
