@@ -29,5 +29,7 @@ fun main(args: Array<String>) {
     println("cc-pocket relay — http://$host:$port  (ws: /v1/daemon /v1/device · rest: /v1/pair/redeem · /healthz · store: $where)")
     println("zero-knowledge: forwards opaque end-to-end-encrypted frames; stores only fingerprints, pubkeys, and hashes.")
     val pushService = PushConfig.load(store)
-    RelayServer(host, port, store, pushService).run()
+    val analytics = dev.ccpocket.relay.analytics.AnalyticsConfig.fromEnv()
+    println("analytics ingress: " + if (analytics.active) "on (streams: ${analytics.streams.keys.sorted()})" else "off (204)")
+    RelayServer(host, port, store, pushService, analyticsConfig = analytics).run()
 }

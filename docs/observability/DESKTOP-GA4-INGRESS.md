@@ -69,7 +69,7 @@ Content-Type: application/json
 
 - 服务端配置每个环境一条数据流：`CCPOCKET_ANALYTICS_STREAM_PRODUCTION=G-XXXX:<api_secret>`、`CCPOCKET_ANALYTICS_STREAM_STAGING=G-YYYY:<api_secret>`。事件按其 `app_environment` 选流；`development`、`unknown` 或未配置的环境**丢弃并计数**（响应 204），正式流永远收不到开发探针。
 - 客户端自报环境只决定落哪条流，是统计字段不是鉴权；防污染靠限流、`internal_traffic` 维度与报表口径，不靠环境字段。
-- `CCPOCKET_ANALYTICS_ENABLED=true` 是总开关；关闭或一条流都没配时两个端点均回 204。关闭后 relay、Sentry、桌面核心功能不受影响。
+- `CCPOCKET_ANALYTICS_ENABLED=true` 是总开关；关闭或一条流都没配时两个端点均回 204。开关与流配置在 relay 启动时读取，改动后 `systemctl restart cc-pocket-relay` 生效（连接会短暂断开并自动重连）。关闭后 relay、Sentry、桌面核心功能不受影响。
 - secret 只存在于 `/etc/cc-pocket-relay/analytics.env`（systemd `EnvironmentFile`），不进仓库、构建日志、artifact，不进客户端。
 
 ## 6. 配额、超时与保存期限

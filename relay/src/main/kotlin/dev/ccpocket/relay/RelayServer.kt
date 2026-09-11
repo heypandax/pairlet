@@ -31,6 +31,14 @@ import dev.ccpocket.protocol.RevokeDevice
 import dev.ccpocket.protocol.Role
 import dev.ccpocket.protocol.Route
 import dev.ccpocket.protocol.e2e.Wire
+import dev.ccpocket.relay.analytics.AnalyticsConfig
+import dev.ccpocket.relay.analytics.AnalyticsIngress
+import dev.ccpocket.relay.analytics.Ga4Forwarder
+import dev.ccpocket.relay.analytics.HttpGa4Forwarder
+import dev.ccpocket.relay.analytics.IngressReply
+import dev.ccpocket.observability.AnalyticsCatalog
+import io.ktor.server.request.contentLength
+import io.ktor.server.response.respond
 import dev.ccpocket.relay.push.LoggingPushService
 import dev.ccpocket.relay.push.NotifyGate
 import dev.ccpocket.relay.push.PushService
@@ -83,9 +91,14 @@ class RelayServer(
     private val store: RelayStore,
     private val pushService: PushService = LoggingPushService(),
     private val clock: () -> Long = System::currentTimeMillis,
+    analyticsConfig: AnalyticsConfig = AnalyticsConfig.disabled(),
+    ga4Forwarder: Ga4Forwarder = HttpGa4Forwarder(),
 ) {
     private val broker = Broker()
     private val limiter = RateLimiter(clock)
+    // Desktop analytics ingress (docs/observability/DESKTOP-GA4-INGRESS.md): shares the limiter instance
+    // (own key namespace) but nothing else — no broker, no store, no frames.
+    internal val analytics = AnalyticsIngress(analyticsConfig, limiter, ga4Forwarder, clock)
     // off-loop fan-out: a slow APNs/FCM round-trip must not block the daemon socket's control loop
     private val pushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val daemonAuth = DaemonAuthenticator(store, clock)
@@ -93,7 +106,10 @@ class RelayServer(
     private val pairing = PairingService(store, clock)
     private val codeStore = CodeStore(clock)
 
-    fun run() {
+    fun run() { server().start(wait = true) }
+
+    /** The configured engine, unstarted — tests start it on port 0 and resolve the bound port. */
+    internal fun server() =
         embeddedServer(CIO, host = host, port = port) {
             install(WebSockets) {
                 maxFrameSize = MAX_FRAME
@@ -103,9 +119,12 @@ class RelayServer(
             installRelayForwardedHeaders() // Caddy's X-Forwarded-For, pinned to the LAST hop — see the doc there
 
             launch {
+                var tick = 0
                 while (isActive) {
                     delay(60_000)
                     daemonAuth.sweep(); limiter.sweep(); codeStore.sweep(); runCatching { store.sweepExpired(clock()) }
+                    // one fixed-size counters line every 5 min; never bodies, tokens or addresses
+                    if (++tick % 5 == 0 && analytics.config.active) println("analytics ${analytics.stats.summaryLine()}")
                 }
             }
 
@@ -158,11 +177,19 @@ class RelayServer(
                         else -> call.respondText(PocketJson.encodeToString(payload), ContentType.Application.Json)
                     }
                 }
+                post("/v1/analytics/register") {
+                    val body = call.receiveBounded() ?: return@post call.reply(IngressReply.error(413, "too_large"))
+                    call.reply(analytics.register(call.clientIp(), body))
+                }
+                post("/v1/analytics/collect") {
+                    val body = call.receiveBounded() ?: return@post call.reply(IngressReply.error(413, "too_large"))
+                    val bearer = call.request.headers["Authorization"]?.trim()?.takeIf { it.startsWith("Bearer ") }?.removePrefix("Bearer ")?.trim()
+                    call.reply(analytics.collect(call.clientIp(), bearer, body))
+                }
                 webSocket("/v1/daemon") { handleDaemon() }
                 webSocket("/v1/device") { handleDevice() }
             }
-        }.start(wait = true)
-    }
+        }
 
     // ---- daemon socket: signed-challenge login, then control TEXT + opaque BINARY ----
 
@@ -418,6 +445,17 @@ class RelayServer(
 
     private suspend fun ApplicationCall.respondError(status: HttpStatusCode, code: String) =
         respondText("""{"error":"$code"}""", ContentType.Application.Json, status)
+
+    /** Analytics bodies are capped BEFORE they are read (Caddy caps them too); null = too large. */
+    private suspend fun ApplicationCall.receiveBounded(): String? {
+        if ((request.contentLength() ?: 0) > AnalyticsCatalog.MAX_BODY_BYTES) return null
+        val text = runCatching { receiveText() }.getOrNull() ?: return ""
+        return text.takeIf { it.toByteArray().size <= AnalyticsCatalog.MAX_BODY_BYTES }
+    }
+
+    private suspend fun ApplicationCall.reply(r: IngressReply) =
+        if (r.status == 204) respond(HttpStatusCode.NoContent)
+        else respondText(r.body, ContentType.Application.Json, HttpStatusCode.fromValue(r.status))
 
     private suspend fun DefaultWebSocketServerSession.sendControl(frame: PocketFrame) =
         outgoing.send(Frame.Text(controlText(frame)))
