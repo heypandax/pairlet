@@ -4,9 +4,12 @@ import dev.ccpocket.observability.*
 import kotlin.test.BeforeTest
 import kotlin.test.AfterTest
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.DaemonInfo
+import dev.ccpocket.protocol.HistoryComplete
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.SessionLive
 import kotlinx.coroutines.CoroutineScope
@@ -65,6 +68,37 @@ class SessionOpenTimeoutTest {
             scheduler.runCurrent()
             scheduler.advanceTimeBy(ms)
             scheduler.runCurrent()
+        }
+    }
+
+    @Test
+    fun lateVisibleHistoryRecoversOnceWithoutRewritingTheLayoutTimeout() {
+        val h = Harness()
+        try {
+            h.ready()
+            h.repo.receiveForTest(DaemonInfo(supportedAgents = listOf("claude"), supportsDiagnostics = true))
+            h.repo.openSession("/w/proj", resumeId = "sid-a")
+            h.elapse(1)
+            val context = assertNotNull(h.opens().single().diagnostic)
+            h.repo.receiveForTest(SessionLive("convo-a", "/w/proj", "sid-a", diagnostic = context))
+            h.repo.receiveForTest(HistoryComplete("convo-a", context, quality = "not_required"))
+            val token = assertNotNull(h.repo.historyLayoutToken.value)
+
+            // Server completion alone cannot claim that the foreground UI displayed the history.
+            h.elapse(15_000)
+            val timeout = diagnostics.single { it.path == ErrorPath.SESSION_OPEN }
+            assertEquals(Outcome.TIMEOUT, timeout.outcome)
+            assertEquals(Stage.LAYOUT, timeout.stage)
+
+            h.repo.onHistoryLaidOut(token, hasVisibleContent = true)
+            h.repo.onHistoryLaidOut(token, hasVisibleContent = true)
+            assertNull(h.repo.historyLayoutToken.value)
+            val records = diagnostics.filter { it.path == ErrorPath.SESSION_OPEN }
+            assertEquals(listOf(Outcome.TIMEOUT, Outcome.RECOVERED), records.map { it.outcome })
+            assertEquals(timeout.traceId, records.last().traceId)
+            assertEquals(1, h.opens().size, "layout recovery must not restart the agent")
+        } finally {
+            h.scope.cancel()
         }
     }
 

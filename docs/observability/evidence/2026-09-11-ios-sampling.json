@@ -1,0 +1,131 @@
+{
+  "app": "2.0.0/19",
+  "environment": "staging",
+  "device": "iPhone 12",
+  "binarySha256": "4f5615f8ae1934b9fde5df78eaa9714b479f9688ced29d143189100f6e98bffb",
+  "dateInReportTimezone": "2026-09-11",
+  "source": "GA4 DebugView expanded parameters",
+  "userRecoveryObservation": "History visible; normal use",
+  "events": [
+    {
+      "event": "prompt_response_result",
+      "diaTime": "20:34:28",
+      "parameters": {
+        "result": "success",
+        "coverage": "complete",
+        "duration_ms": "9937",
+        "app_platform": "ios",
+        "app_version": "2.0.0",
+        "app_environment": "staging",
+        "backend": "claude",
+        "usage_mode": "own"
+      }
+    },
+    {
+      "event": "turn_result",
+      "diaTime": "20:34:28",
+      "parameters": {
+        "result": "success",
+        "coverage": "complete",
+        "duration_ms": "10037",
+        "app_platform": "ios",
+        "app_version": "2.0.0",
+        "app_environment": "staging",
+        "backend": "claude",
+        "usage_mode": "own"
+      }
+    },
+    {
+      "event": "session_open_result",
+      "diaTime": "20:34:43",
+      "parameters": {
+        "result": "success",
+        "coverage": "complete",
+        "duration_ms": "833",
+        "app_platform": "ios",
+        "app_version": "2.0.0",
+        "app_environment": "staging",
+        "backend": "claude",
+        "usage_mode": "own"
+      }
+    },
+    {
+      "event": "session_open_result",
+      "diaTime": "20:33:27",
+      "parameters": {
+        "result": "success",
+        "coverage": "complete",
+        "duration_ms": "1332",
+        "app_platform": "ios",
+        "app_version": "2.0.0",
+        "app_environment": "staging",
+        "backend": "claude",
+        "usage_mode": "own"
+      }
+    },
+    {
+      "event": "first_value_observed",
+      "diaTime": "20:34:28",
+      "parameters": {
+        "coverage": "complete",
+        "app_platform": "ios",
+        "app_version": "2.0.0",
+        "app_environment": "staging",
+        "backend": "claude",
+        "usage_mode": "own",
+        "feature": "prompt_task"
+      }
+    },
+    {
+      "event": "connection_recovery_result",
+      "diaTime": "20:40:38",
+      "parameters": {
+        "result": "success",
+        "coverage": "complete",
+        "duration_ms": "72639",
+        "app_platform": "ios",
+        "app_version": "2.0.0",
+        "app_environment": "staging",
+        "backend": "claude",
+        "usage_mode": "own",
+        "reason": "ok"
+      }
+    },
+    {
+      "event": "connection_recovery_result",
+      "diaTime": "20:39:24",
+      "parameters": {
+        "result": "success",
+        "coverage": "complete",
+        "duration_ms": "17",
+        "app_platform": "ios",
+        "app_version": "2.0.0",
+        "app_environment": "staging",
+        "backend": "claude",
+        "usage_mode": "own",
+        "reason": "ok"
+      }
+    },
+    {
+      "event": "session_open_result",
+      "diaTime": "20:40:44",
+      "parameters": {
+        "result": "unknown",
+        "coverage": "partial",
+        "duration_ms": "11583",
+        "app_platform": "ios",
+        "app_version": "2.0.0",
+        "app_environment": "staging",
+        "backend": "claude",
+        "usage_mode": "own",
+        "reason": "unsupported"
+      }
+    }
+  ],
+  "limitations": [
+    "The 72639ms recovery includes the deliberate network-off wait.",
+    "The final session-open result is unknown/partial, not a success or failure verdict.",
+    "No Crashlytics crash was requested or generated.",
+    "Actual iPhone source line information remains unverified."
+  ]
+}

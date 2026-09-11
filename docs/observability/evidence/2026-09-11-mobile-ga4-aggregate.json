@@ -1,0 +1,1352 @@
+{
+  "observed_at_utc": "2026-09-11T04:24:28.033Z",
+  "property_id": "540841272",
+  "property_timezone": "UTC+08:00",
+  "source": "GA4 ordinary exploration reporting backend (Venus), not Realtime or DebugView",
+  "mobile_query_date_range": {
+    "start": "2026-09-11",
+    "end": "2026-09-11"
+  },
+  "strict_staging_comparison_date_range": {
+    "start": "2026-09-01",
+    "end": "2026-09-11"
+  },
+  "event_scope": "core operation results, recovery, feature exposure/use and value events; event-name allowlist retained",
+  "tables": [
+    {
+      "name": "mobile_scope",
+      "overall_row_count": 29,
+      "totals": {
+        "event_count": 98,
+        "total_users": 5
+      },
+      "rows": [
+        {
+          "event_name": "connection_recovery_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 17,
+          "total_users": 2
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 11,
+          "total_users": 2
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 9,
+          "total_users": 2
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "",
+          "coverage": "",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 6,
+          "total_users": 1
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 5,
+          "total_users": 2
+        },
+        {
+          "event_name": "connection_recovery_result",
+          "app_platform": "ios",
+          "app_version": "1.9.8",
+          "result": "success",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 4,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "",
+          "coverage": "",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 4,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 4,
+          "total_users": 1
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "success",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 4,
+          "total_users": 1
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 4,
+          "total_users": 2
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 4,
+          "total_users": 1
+        },
+        {
+          "event_name": "connection_recovery_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "file_view_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "success",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "file_view_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 2
+        },
+        {
+          "event_name": "first_value_observed",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 2
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "timeout",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "connection_recovery_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "success",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "file_view_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "cancelled",
+          "coverage": "partial",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "file_view_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "partial",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "first_value_observed",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "prompt_response_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "session_open_recovered",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "success",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "timeout",
+          "coverage": "partial",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "unknown",
+          "coverage": "partial",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "turn_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "partial",
+          "analytics_schema": "",
+          "app_environment": "staging",
+          "internal_traffic": "1",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        }
+      ],
+      "data_truncation_reasons": [],
+      "data_processing_status": {
+        "latestQueriedDailyCompletionDateStatus": 3
+      },
+      "samples_read": [],
+      "sampling_space_size": []
+    },
+    {
+      "name": "mobile_reason_backend",
+      "overall_row_count": 32,
+      "totals": {
+        "event_count": 98,
+        "total_users": 5,
+        "custom_metrics_group1_slot_01": 332110000000
+      },
+      "rows": [
+        {
+          "event_name": "connection_recovery_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "ok",
+          "event_count": 17,
+          "total_users": 2,
+          "custom_metrics_group1_slot_01": 57000000
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "",
+          "backend": "claude",
+          "reason": "",
+          "event_count": 11,
+          "total_users": 2,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "",
+          "backend": "claude",
+          "reason": "",
+          "event_count": 9,
+          "total_users": 2,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "",
+          "event_count": 5,
+          "total_users": 2,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "connection_recovery_result",
+          "app_platform": "ios",
+          "app_version": "1.9.8",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "ok",
+          "event_count": 4,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 68458000000
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "",
+          "coverage": "",
+          "backend": "claude",
+          "reason": "",
+          "event_count": 4,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "",
+          "coverage": "",
+          "backend": "claude",
+          "reason": "",
+          "event_count": 4,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "",
+          "backend": "claude",
+          "reason": "",
+          "event_count": 4,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "ok",
+          "event_count": 4,
+          "total_users": 2,
+          "custom_metrics_group1_slot_01": 5514000000
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "ok",
+          "event_count": 3,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 5000000000
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "",
+          "event_count": 3,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "connection_recovery_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "ok",
+          "event_count": 2,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 72656000000
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "",
+          "backend": "claude",
+          "reason": "",
+          "event_count": 2,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "",
+          "coverage": "",
+          "backend": "codex",
+          "reason": "",
+          "event_count": 2,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "file_view_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "ok",
+          "event_count": 2,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 5729000000
+        },
+        {
+          "event_name": "file_view_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "ok",
+          "event_count": 2,
+          "total_users": 2,
+          "custom_metrics_group1_slot_01": 2737000000
+        },
+        {
+          "event_name": "first_value_observed",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "",
+          "event_count": 2,
+          "total_users": 2,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "timeout",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "timeout",
+          "event_count": 2,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 30022000000
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "ok",
+          "event_count": 2,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 2165000000
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "",
+          "event_count": 2,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "connection_recovery_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "codex",
+          "reason": "ok",
+          "event_count": 1,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 8000000
+        },
+        {
+          "event_name": "file_view_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "cancelled",
+          "coverage": "partial",
+          "backend": "claude",
+          "reason": "cancelled",
+          "event_count": 1,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 63840000000
+        },
+        {
+          "event_name": "file_view_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "partial",
+          "backend": "claude",
+          "reason": "ok",
+          "event_count": 1,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 1009000000
+        },
+        {
+          "event_name": "first_value_observed",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "",
+          "event_count": 1,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "prompt_response_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "ok",
+          "event_count": 1,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 9937000000
+        },
+        {
+          "event_name": "session_open_recovered",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "codex",
+          "reason": "recovered",
+          "event_count": 1,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 30392000000
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "codex",
+          "reason": "ok",
+          "event_count": 1,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 959000000
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "timeout",
+          "coverage": "partial",
+          "backend": "codex",
+          "reason": "timeout",
+          "event_count": 1,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 12007000000
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "unknown",
+          "coverage": "partial",
+          "backend": "claude",
+          "reason": "unsupported",
+          "event_count": 1,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 11583000000
+        },
+        {
+          "event_name": "turn_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "result": "success",
+          "coverage": "complete",
+          "backend": "claude",
+          "reason": "ok",
+          "event_count": 1,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 10037000000
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "result": "",
+          "coverage": "complete",
+          "backend": "codex",
+          "reason": "",
+          "event_count": 1,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 0
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "result": "",
+          "coverage": "partial",
+          "backend": "claude",
+          "reason": "",
+          "event_count": 1,
+          "total_users": 1,
+          "custom_metrics_group1_slot_01": 0
+        }
+      ],
+      "data_truncation_reasons": [],
+      "data_processing_status": {
+        "latestQueriedDailyCompletionDateStatus": 3
+      },
+      "samples_read": [],
+      "sampling_space_size": []
+    },
+    {
+      "name": "mobile_feature",
+      "overall_row_count": 40,
+      "totals": {
+        "event_count": 98,
+        "total_users": 5
+      },
+      "rows": [
+        {
+          "event_name": "connection_recovery_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 17,
+          "total_users": 2
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 6,
+          "total_users": 2
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "session_view",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 5,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "session_view",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 5,
+          "total_users": 2
+        },
+        {
+          "event_name": "connection_recovery_result",
+          "app_platform": "ios",
+          "app_version": "1.9.8",
+          "feature": "",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 4,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "prompt_task",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 4,
+          "total_users": 2
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "session_view",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 4,
+          "total_users": 2
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "file_view",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 4,
+          "total_users": 2
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 4,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "file_view",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 3,
+          "total_users": 2
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "feature": "session_view",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 3,
+          "total_users": 1
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "session_view",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 3,
+          "total_users": 1
+        },
+        {
+          "event_name": "connection_recovery_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "feature": "",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "file_view_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "file_view_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 2
+        },
+        {
+          "event_name": "file_view_result",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "",
+          "coverage": "partial",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "feature": "",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "file_view",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "session_view",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "file_view",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 2,
+          "total_users": 2
+        },
+        {
+          "event_name": "connection_recovery_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "approval",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "file_view",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "prompt_task",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "session_view",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "feature": "prompt_task",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_exposed",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "feature": "session_view",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "file_view",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_used",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "feature": "prompt_task",
+          "coverage": "",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "first_value_observed",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "file_view",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "first_value_observed",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "session_view",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "first_value_observed",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "feature": "prompt_task",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "prompt_response_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "feature": "",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "session_open_recovered",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "android",
+          "app_version": "1.9.8",
+          "feature": "",
+          "coverage": "partial",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "session_open_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "feature": "",
+          "coverage": "partial",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "turn_result",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "feature": "",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "android",
+          "app_version": "2.0.0",
+          "feature": "file_view",
+          "coverage": "partial",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "feature": "prompt_task",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        },
+        {
+          "event_name": "value_reached",
+          "app_platform": "ios",
+          "app_version": "2.0.0",
+          "feature": "session_view",
+          "coverage": "complete",
+          "usage_mode": "own",
+          "event_count": 1,
+          "total_users": 1
+        }
+      ],
+      "data_truncation_reasons": [],
+      "data_processing_status": {
+        "latestQueriedDailyCompletionDateStatus": 3
+      },
+      "samples_read": [],
+      "sampling_space_size": []
+    },
+    {
+      "name": "strict_staging_before_fix",
+      "overall_row_count": 10,
+      "totals": {
+        "event_count": 35,
+        "total_users": 1
+      },
+      "rows": [
+        {
+          "event_name": "feature_used",
+          "result": "",
+          "coverage": "",
+          "app_platform": "desktop",
+          "app_version": "1.9.8",
+          "event_count": 7,
+          "total_users": 1
+        },
+        {
+          "event_name": "value_reached",
+          "result": "",
+          "coverage": "complete",
+          "app_platform": "desktop",
+          "app_version": "1.9.8",
+          "event_count": 6,
+          "total_users": 1
+        },
+        {
+          "event_name": "prompt_response_result",
+          "result": "success",
+          "coverage": "complete",
+          "app_platform": "desktop",
+          "app_version": "1.9.8",
+          "event_count": 5,
+          "total_users": 1
+        },
+        {
+          "event_name": "connection_recovery_result",
+          "result": "success",
+          "coverage": "complete",
+          "app_platform": "desktop",
+          "app_version": "1.9.8",
+          "event_count": 4,
+          "total_users": 1
+        },
+        {
+          "event_name": "turn_result",
+          "result": "success",
+          "coverage": "complete",
+          "app_platform": "desktop",
+          "app_version": "1.9.8",
+          "event_count": 4,
+          "total_users": 1
+        },
+        {
+          "event_name": "background_task_result",
+          "result": "success",
+          "coverage": "partial",
+          "app_platform": "desktop",
+          "app_version": "1.9.8",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "feature_exposed",
+          "result": "",
+          "coverage": "",
+          "app_platform": "desktop",
+          "app_version": "1.9.8",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "session_open_result",
+          "result": "success",
+          "coverage": "complete",
+          "app_platform": "desktop",
+          "app_version": "1.9.8",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "turn_result",
+          "result": "cancelled",
+          "coverage": "complete",
+          "app_platform": "desktop",
+          "app_version": "1.9.8",
+          "event_count": 2,
+          "total_users": 1
+        },
+        {
+          "event_name": "first_value_observed",
+          "result": "",
+          "coverage": "complete",
+          "app_platform": "desktop",
+          "app_version": "1.9.8",
+          "event_count": 1,
+          "total_users": 1
+        }
+      ],
+      "data_truncation_reasons": [],
+      "data_processing_status": {
+        "latestQueriedDailyCompletionDateStatus": 1,
+        "latestQueriedDailyCompletionDate": 20260910
+      },
+      "samples_read": [
+        67011
+      ],
+      "sampling_space_size": [
+        67011
+      ]
+    }
+  ],
+  "finding": {
+    "mobile_schema_dimension": "empty on all 98 sampled mobile events",
+    "code_before": "TelemetryMetadata.prepare put analytics_schema as integer 1",
+    "official_behavior": "GA4 does not parse integer app event parameters for event-scoped custom dimensions; web events differ",
+    "source": "https://support.google.com/analytics/answer/14239696?hl=en",
+    "fix": "categorical string v1; normal schema filters accept 1 or v1; legacy mobile events remain separate and are not relabeled"
+  },
+  "limitations": [
+    "Counts describe this date/event scope and collected installation identities, not distinct people or production reliability.",
+    "Android 2.0.0 includes builds before and after the lifecycle fix; app_version alone does not identify a build.",
+    "New v1 code passed five local metadata tests; it has not been installed or verified in a new cloud sample.",
+    "The dedicated history view was saved and its filters read back, but UI reloading clamped the date to local Sep 10. Data evidence uses the explicit Sep 11 backend query; the view itself was not observed displaying 98. Dia remote debugging became unavailable during final UI verification.",
+    "Custom metric values are preserved in Venus response representation without claiming they are directly displayed milliseconds."
+  ]
+}

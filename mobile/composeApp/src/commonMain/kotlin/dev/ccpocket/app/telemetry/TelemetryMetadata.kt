@@ -13,7 +13,8 @@ internal data class TelemetryMetadata(
         putAll(params)
         // Agent/MCP tool names are dynamic. Keep only known built-in names; do not upload custom names.
         params[TelKey.Tool]?.let { put(TelKey.Tool, if (it is String && it in tools) it else "other") }
-        put(TelKey.AnalyticsSchema, 1)
+        // GA4 app custom dimensions ignore integer parameters. Keep this categorical on every SDK.
+        put(TelKey.AnalyticsSchema, "v1")
         put(TelKey.AppVersion, dev.ccpocket.app.APP_VERSION.takeIf { Regex("[A-Za-z0-9][A-Za-z0-9_.+-]{0,95}").matches(it) } ?: "unknown")
         put(TelKey.AppPlatform, platform.name.lowercase())
         put(TelKey.Environment, environment?.name?.lowercase() ?: "unknown")

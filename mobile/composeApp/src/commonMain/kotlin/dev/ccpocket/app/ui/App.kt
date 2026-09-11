@@ -280,7 +280,7 @@ fun App(scope: CoroutineScope) {
     val repo = remember { PocketRepository(scope) }
     // one live link per paired computer: the primary repo keeps its exact semantics; the coordinator
     // maintains pinned satellites for the other bindings so the whole fleet is live at once
-    remember { dev.ccpocket.app.data.FleetCoordinator(scope, repo).also { dev.ccpocket.app.data.FleetRuntime.coordinator = it; it.start() } }
+    val fleet = remember { dev.ccpocket.app.data.FleetCoordinator(scope, repo).also { dev.ccpocket.app.data.FleetRuntime.coordinator = it; it.start() } }
     // fleet surfaces (machine-first triage) overlay the content stack from anywhere: header machine
     // name → Fleet home; attention banner / cross-machine banner → inbox. UI-local like the sheets.
     var fleetOpen by remember { mutableStateOf(false) }
@@ -320,17 +320,18 @@ fun App(scope: CoroutineScope) {
     val appLock = repo.appLock
     dev.ccpocket.app.OnAppForeground { // iOS kills sockets in background — reconnect the whole fleet on return
         appForeground = true
-        repo.onAppForeground()
-        dev.ccpocket.app.data.FleetRuntime.coordinator?.onAppForeground()
+        fleet.onAppForeground()
         collabInbox.onAppForeground() // §3.2.3: and re-pull each contact's offers (a missed push heals here)
-        (dev.ccpocket.app.data.FleetRuntime.coordinator?.repos() ?: listOf(repo)).forEach { it.refreshPendingApprovals() }
+        fleet.repos().forEach { it.refreshPendingApprovals() }
         appLock.onForeground() // App Lock (issue #109): re-lock per policy / drop the cover on return
     }
     // App Lock: arm auto-lock when fully backgrounded; draw the opaque privacy cover the instant the app is
     // obscured (before the OS app-switcher snapshot) so a session is never visible in the task switcher.
     dev.ccpocket.app.OnAppBackground {
         appForeground = false; appLock.onBackground()
-        (dev.ccpocket.app.data.FleetRuntime.coordinator?.repos() ?: listOf(repo)).forEach { it.onAppBackground() }
+        // A retiring Activity can stop after its replacement has installed a new global fleet.
+        // Its lifecycle belongs to this root; it must never background the replacement's links.
+        fleet.onAppBackground()
         collabInbox.repos().forEach { it.onAppBackground() }
     }
     dev.ccpocket.app.OnAppObscured { appLock.onWillObscure() }
@@ -343,7 +344,7 @@ fun App(scope: CoroutineScope) {
     LaunchedEffect(appForeground, repo.sessionActive.value) {
         if (!appForeground || !repo.sessionActive.value) return@LaunchedEffect
         while (true) {
-            (dev.ccpocket.app.data.FleetRuntime.coordinator?.repos() ?: listOf(repo)).forEach { it.refreshPendingApprovals() }
+            fleet.repos().forEach { it.refreshPendingApprovals() }
             delay(3_000)
         }
     }

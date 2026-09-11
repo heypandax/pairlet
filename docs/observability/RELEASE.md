@@ -1,5 +1,7 @@
 # Pairlet 观测发布与验收
 
+**收尾范围确认（2026-09-11）**：用户要求整理待提交内容，其他验证暂缓至上线后观察。本批只整理代码、现有证据和 CI 配置，不再装机、跑补充测试、重新操作手机或回读云端页面。现有 CI 的正常构建、配置校验及符号上传步骤保留。未验证事项仍如实记录，但不再作为本次提交的前置条件。提交范围与 GitHub 配置见 [收尾清单](CLOSEOUT.md)。
+
 2026-09-10 实施与验收稿。集中本地回归、SDK 出口及脚本替身测试已通过，详见 [ACCEPTANCE](ACCEPTANCE.md)；本页不构成实际部署、正式发版或自动 fatal 切换回执。
 
 ## 官方包配置门禁（2026-09-11 增量）
@@ -14,6 +16,45 @@
 这些门禁只保证官方构建配置与符号上传流程，仍尊重已有采集关闭偏好。桌面生产 GA4 还需服务端接收/转发边界，不能将本机 Measurement Protocol secret 复制到公开客户端。本机测试凭据保持本机用途。没有触发公开发行、App Store 上传、fatal 切换或服务重启。
 
 `release-preview.yml` 同样使用此 action，但明确传入 `environment: staging`，校验预演 APK、daemon/desktop jar 和 iOS archive；缺失配置不会生成可下载的预演 artifact。iOS 只核对本地 dSYM，不携带符号上传 token、不上传符号。正式工作流省略该参数时仍为 production，staging 包无法通过正式环境门禁。详见 [发布预演](../RELEASE.md#只预演不正式发布)。
+
+## GitHub Actions 配置与维护
+
+2026-09-11 已通过 GitHub API 核对仓库 `heypandax/pairlet`：以下配置都存在，5 个 DSN 符合公开 DSN 格式。正式工作流和脚本已在 main；最新 main `67a610ce` 还包含预览包 staging 注入。此次仅核对配置与源码，没有触发打包、上传、发布或重新校验 token 权限；Secret API 不返回明文，存在不等于本次发布已成功。
+
+| GitHub 类型 | 名称 | 用途 / 注入位置 | 当前状态 |
+|---|---|---|---|
+| Repository Variable | `PAIRLET_SENTRY_DSN_ANDROID` | release / release-preview 的 Android 包 | 已配置 |
+| Repository Variable | `PAIRLET_SENTRY_DSN_DESKTOP` | release / release-preview 的桌面包 | 已配置 |
+| Repository Variable | `PAIRLET_SENTRY_DSN_DAEMON` | release / release-preview 的 daemon 包 | 已配置 |
+| Repository Variable | `PAIRLET_SENTRY_DSN_IOS` | ios-release / release-preview 的 iOS archive | 已配置 |
+| Repository Variable | `PAIRLET_SENTRY_DSN_RELAY` | 保留给 relay 构建；不自动部署服务器 | 已配置 |
+| Repository Secret | `PAIRLET_SENTRY_AUTH_TOKEN` | ios-release 的凭据存在性检查及 dSYM 上传步骤；映射为 `SENTRY_AUTH_TOKEN` | 已配置 |
+| Repository Secret | `GOOGLE_SERVICES_JSON` | Android 正式构建恢复 Firebase 客户端配置（base64） | 已配置 |
+| Repository Secret | `GOOGLE_SERVICE_INFO_PLIST` | iOS 正式构建恢复 Firebase 客户端配置（base64 或原始 plist） | 已配置 |
+
+Sentry DSN 是客户端写入配置，可以进入安装包；符号上传 token 是 CI 凭据，只作为步骤环境变量。当前 token 按既有接入记录为组织 CI token / `org:ci`，用途与 [Sentry CI 权限](https://docs.sentry.io/api/permissions/) 对应；无需把 Sentry 管理员 token、Firebase 服务账号或本机 `.env` 整份复制到 GitHub。
+
+管理入口：仓库 **Settings → Secrets and variables → Actions**，分别使用 [Variables](https://github.com/heypandax/pairlet/settings/variables/actions) 与 [Secrets](https://github.com/heypandax/pairlet/settings/secrets/actions)。现有值无需重填；后续轮换时更新同名项即可，workflow 不写入明文。GitHub 的环境注入方式见 [官方说明](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets)。
+
+现有 workflow 的两处配置摘录（中间的 archive/校验步骤保持原顺序）：
+
+```yaml
+- name: Stage production Sentry config
+  uses: ./.github/actions/observability-config
+  with:
+    component: ios
+    dsn: ${{ vars.PAIRLET_SENTRY_DSN_IOS }}
+
+# Archive and verify this build before uploading its symbols.
+- name: Verify archive symbols and wait for Sentry processing
+  env:
+    SENTRY_AUTH_TOKEN: ${{ secrets.PAIRLET_SENTRY_AUTH_TOKEN }}
+  run: bash scripts/observability-symbols.sh "$RUNNER_TEMP/CCPocket.xcarchive" --upload
+```
+
+`ios-release.yml` 在 archive 前检查 token 非空；archive 后校验配置、上传匹配的 dSYM 并等待处理，成功后才进入 App Store Connect 上传。Android 当前不启用 R8，不需要给它额外增加 Sentry mapping 上传 token。一般 PR 的 `ci.yml` 使用 Firebase 占位配置，不需要 Sentry 上传密钥；统一 `release-preview.yml` 注入 staging DSN、使用 Firebase 占位配置且不上传 iOS 符号，也不需要此 token。历史 `build-windows.yml` 仅作独立编译测试、未注入 Sentry DSN；需要可观测预览包时使用统一 release-preview，不把它的产物当成已配置诊断的发行包。
+
+**桌面 GA4 独立限制**：Measurement Protocol 的 API secret 不是 Sentry DSN。当前正式桌面包不会携带本机 GA4 secret；生产桌面采集仍需安全的服务端接收/转发方案，不能靠把 secret 放进 GitHub 再打包到公开客户端解决。这是后续能力需求，不是等待留存数据后会自动消失的问题；不影响本次 Sentry 配置准备。
 
 ## 构建身份和符号
 
@@ -37,13 +78,13 @@ bash scripts/observability-symbols.sh /absolute/path/Pairlet.xcarchive --upload
 
 Xcode 26.2 实测会将已静态链接 framework 的嵌入副本替换为 `/dev/null` 生成的 dylib，占位文件本身没有可符号化代码。脚本仅在每个架构都只有零长度 `__text`、`nsyms=0` 且 `minos=100.0` 时允许缺省 framework dSYM；真实动态库、混合架构有代码或未知输出均继续阻断。App dSYM 始终必须存在且 UUID 完全匹配，不使用供应商名称白名单。静态库符号归入最终 App 的原则见 [Apple DTS 说明](https://developer.apple.com/forums/thread/761589)。如果未来 Xcode 改变占位格式，先检查实际二进制和构建日志再更新识别器，不关闭门禁。
 
-## 自动崩溃迁移门槛
+## 既有崩溃采集的范围边界
 
-当前 Crashlytics 保留自动 fatal，Sentry 自动 fatal 关闭。不能只改 enableCrashHandler：现有 Cocoa beforeSend 只接受显式安全记录，且私有缓存会在重启时清理，尚不能安全支持重启后的 native crash。
+用户已于 2026-09-11 确认不迁移自动崩溃采集器：Android/iOS 继续由 Crashlytics 负责自动 fatal，Sentry 自动 fatal 保持关闭，仅承接显式安全错误与日志。供应商切换不再是本期验收门槛。
 
-已核对实际锁定的 Cocoa 8.58.2 源码：`Sources/SentryCrash/Recording/SentryCrashReport.c` 的 `writeError` 会把 `crashReason`、NSException name/userInfo 写入崩溃文件；`sentrycrashreport_writeStandardReport` 在调用上传前过滤器之前落盘。关闭内存 introspection 也不移除这些字段。因此仅用 `beforeSend` 重建安全 envelope 不能满足磁盘哨兵检查，公开 options 尚未找到崩溃写入前的字段白名单接口。iOS 原生 fatal 迁移保留为未完成，需要可在写入前控制敏感字段的受支持实现，再进行真实崩溃与符号测试。Android 自动 fatal 也尚未迁移；当前构建保留 Crashlytics，不能用 JVM handled 事件代替验收。
+用户随后明确：Crashlytics 链路未改动，本批不制造原生崩溃，不把其回执、缓存和符号重新列为强制验收。以后确实改动崩溃采集或符号发布链路时，再针对改动验证，不能由 Sentry 白名单测试推定 Crashlytics 通过。iOS Sentry 安全 handled 栈的函数定位与条件性 basename/行号保留独立记录；向 Sentry 上传 dSYM 不代表历史事件具备原生地址可供符号化。
 
-每个平台切换前需在隔离 staging 构建实现并验收：单一采集器选择、初始化前关闭、崩溃后下次启动上传、运行时关闭/重开缓存处理、有限崩溃记录保留、原生栈与 image metadata 白名单、最终 envelope/磁盘哨兵检查、符号化报告。通过后同一构建关闭 Crashlytics fatal 并启用 Sentry，Analytics/FCM 保持原职责。没有通过的平台仍明确为未迁移，不能双开后相加统计。
+历史技术评估保留供未来另行决策：锁定的 Cocoa 8.58.2 在 `Sources/SentryCrash/Recording/SentryCrashReport.c` 的 `writeError` 中将 `crashReason`、NSException name/userInfo 写入崩溃文件，早于上传前过滤；仅靠 `beforeSend` 不能满足原迁移方案的写入前白名单要求。现有 Sentry 桥接也只接受显式安全记录并清理重启缓存，不能直接开启 `enableCrashHandler`。这些限制不再要求本期解决；本期不切换、不双重自动上报，Firebase Analytics/FCM 继续原职责。
 
 ## 集中验证顺序
 

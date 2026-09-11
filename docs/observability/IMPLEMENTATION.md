@@ -1,14 +1,20 @@
 # Sentry 实施进度
 
+**收尾范围确认（2026-09-11）**：用户要求整理待提交内容，其他验证暂缓至上线后观察。本批只整理代码、现有证据和 CI 配置，不再装机、跑补充测试、重新操作手机或回读云端页面。现有 CI 的正常构建、配置校验及符号上传步骤保留。未验证事项仍如实记录，但不再作为本次提交的前置条件。提交范围与 GitHub 配置见 [收尾清单](CLOSEOUT.md)。
+
+**手机普通聚合核对增量（2026-09-11）**：明确查询报告时区 9 月 11 日，普通后端已返回 98 条手机核心/价值事件及平台、版本、结果、覆盖、环境、内部流量、角色、后端/原因/功能组合。发现 analytics_schema 为整数，导致 App 自定义维度为空并被 schema=1 排除；公共出口改为字符串 v1，5 项元数据定向测试通过，后台 schema 条件兼容 1/v1，并独立保存历史手机核对页。未重新操作手机、未安装新包；v1 新值云端回执待正常构建更新。页面日期截断与 UI 验证边界见 [本轮验收](ACCEPTANCE.md)。
+
+**当前抽样增量（2026-09-11）**：iPhone 12 新包正常会话、提示首响应、执行结束均在 GA4 DebugView 确认 success/complete；人工断网后连接恢复成功，重开会话正常但观测为 unknown/partial，明确保留覆盖缺口。iOS 安全栈解析可保留运行时提供的 basename/行号；JVM 27、Native 26、Cocoa 6 项通过，真机行号仍未证实。用户明确不抽验未改动的 Crashlytics。GA4 五视角与两个 staging 验证页已回读；实际查询有 34 条历史桌面事件，正式群组暂无符合条件样本，成熟留存仍待观察；下文为历史检查点。
+
 **main 合并后增量（2026-09-11）**：在 `08f01dad` 上补官方发行配置门禁，所有发布客户端/daemon 在构建前注入组件 DSN，发布前读取产物验证；iOS 增加匹配 archive 的符号上传顺序及 CI 凭据门禁。GitHub DSN 变量与 `org:ci` secret 已配置并认证，14 项相关 Python 用例和四类 JVM/Android 产物验证通过。iOS 实际 Release archive 的 App dSYM 已上传，后台按 UUID 回读确认；补齐 XcodeGen 的 Sentry 依赖/scheme，修复空 framework 占位库阻断符号检查的问题。Android 真实 handled 事件已验到源码行号，iOS 旧安全栈仍仅到函数。两个现场超时补到 daemon 时间窗和手机对照证据，尚未定位修复；GA4 手机结果/第五留存视角仍缺后台条件。详见 [本轮验收](ACCEPTANCE.md)。
 
 开始：2026-09-09；基线 `6ca60173`；分支 `codex/sentry-observability`。
 
 依据：[实施方案](../design/OBSERVABILITY.md)、[核心路径和任务](ERROR-PATHS.md)。用户已授权启动开发，按顺序推进代码、测试和集成；云端 DSN/真实事件、设备与发布证据分别记录，不能由本地测试替代。
 
-**最新执行状态（2026-09-11）**：A–D 主体实现与集中回归已有证据，当前按 [夜间抽样计划](NIGHT-PLAN.md) 收尾。Android 与 iPhone 12 已实际配对；Codex/Claude 基本旅程、跨设备历史查看、两端开关重启、Android 离线恢复与文件显示取得新增证据。新 Android Errors/Logs 和 iOS Logs 已在 Sentry 核实；GA4 已看到 desktop 启动及连接恢复结果，手机结果仍需后台回执。三条新增布局 Compose 回归通过，但 Android 的一次 layout 超时尚未定位，不标已修复。完整发布、原生 fatal、符号和成熟观察仍未验收，详见 [ACCEPTANCE](ACCEPTANCE.md) 首节。
+**历史执行检查点（2026-09-11，已由首节更新）**：A–D 主体实现与集中回归已有证据，当前按 [夜间抽样计划](NIGHT-PLAN.md) 收尾。Android 与 iPhone 12 已实际配对；Codex/Claude 基本旅程、跨设备历史查看、两端开关重启、Android 离线恢复与文件显示取得新增证据。新 Android Errors/Logs 和 iOS Logs 已在 Sentry 核实；GA4 已看到 desktop 启动及连接恢复结果，手机结果仍需后台回执。三条新增布局 Compose 回归通过，但 Android 的一次 layout 超时尚未定位，不标已修复。完整发布、原生 fatal、符号和成熟观察仍未验收，详见 [ACCEPTANCE](ACCEPTANCE.md) 首节。
 
-## 当前检查点
+## 早期检查点（保留历史证据）
 
 夜间增量没有修改产品运行代码，仅补布局回归与计划/证据文档。实际手机继续使用前次已签名并核对哈希的包；首次使用、配对和采集开关通过 ADB / Xcode WDA 操作，测试后的采集偏好已恢复。下列 OBS 历史范围不因抽样自动整行关闭。
 
@@ -242,3 +248,11 @@ GA4 已回读并比对密钥、数据流与安装包配置，排除不一致；�
 01:16 CST 续记：用户改用当前插线手机。USB iPhone 12 已连通开发通道，构建/签名/设备 profile/Pairlet staging 配置核实后安装并启动 1.9.8 (19)，PID 1886 后续仍存在；iOS 不再等待 Pandaa 可达。华为 VCE-AL00 Android 10 满足 minSdk，ADB 已授权，新 APK 构建通过，安装请求停在手机系统安装界面，等待用户完成提示。未清设备数据、未发布 OTA、未重启服务。iOS 云端及业务验收与 Android 实际安装/启动继续独立取证，见 ACCEPTANCE 首节。
 
 01:23 CST 续记：用户明确使用 ADB/Appium 操作。已用 ADB 读取并完成华为两层安装提示，安装后打开 App；实际 UI 出现首次使用说明页，进程 7286 存活，手机 APK 与本次构建 SHA 一致，版本 1.9.8/30。Android 安装不再等待人工处理。两台当前 USB 手机均可继续验收；本次没有创建 Appium 会话，没有把本地启动/计数文件视为云端成功。
+
+### Android 根实例与布局结果修复（2026-09-11 02:47 UTC）
+
+真机发现 3 个 MainActivity 根实例，旧 Repository 已后台却仍等待布局，新根会覆盖全局 FleetRuntime。改为 MainActivity singleTask；App 捕获自己的 FleetCoordinator，生命周期与审批刷新不再动态访问全局；foreground/background 对 primary 和 satellites 对称转发。布局判定和超时预算保持原实现。
+
+新增 FleetLifecycle 两项、Repository 迟到布局超时/单次恢复一项，合计 23 项定向测试通过；Android 构建与覆盖安装通过，已安装哈希与本地产物一致。修复包两次真实会话 success 为 1501/1066ms，文件正文 success 为 1410ms。GA4 DebugView 已逐项回读 1501ms 会话、1410ms 文件及文件价值事件的 Android/2.0.0/staging/complete 参数。重复启动和前后台往返保持 1 个主页面、1 个 Repository，历史等待 token 正常清除。详情和恢复证据见 ACCEPTANCE 首节。
+
+本次改动保留在 codex/observability-followup 工作区，尚未合并或公开发布。历史 attach 超时、其他平台原生栈/崩溃、正式 GA4 查询/留存和真实观察仍按原计划跟踪；不把本轮单实例缺陷推广为所有历史超时的根因。

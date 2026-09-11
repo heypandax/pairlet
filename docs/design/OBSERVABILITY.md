@@ -1,10 +1,10 @@
 # cc-pocket 日志与故障追踪实施方案
 
-状态：首批已接入并部署，完整方案仍在开发中。更新：2026-09-10。方案核查基线：`c6bf15ab`；开发基线：`6ca60173`。
+状态：主体实现与代表性抽样已有证据，本轮进入提交收尾。更新：2026-09-11。原方案核查基线：`c6bf15ab`；开发基线：`6ca60173`。
 
-后续执行范围与顺序见 [后续计划](../observability/FOLLOW-UP-PLAN.md)；用户已于 2026-09-10 确认“开始下一批开发”，当前继续 A 批。本文保留既定总体设计。
+本页保留总体设计；当前提交范围与 CI 配置以 [收尾清单](../observability/CLOSEOUT.md) 为准。用户已明确额外验证暂缓至上线后观察，不再把本文的完整验收目标自动当成本次提交前置条件；未覆盖事项也不改记通过。
 
-用户已选择按 Sentry 免费版设计；本文明确开发范围与验收。Pairlet 五个项目已创建，首批 SDK 与核心入口已接入；实际 iOS、桌面端、daemon、relay 已部署，iOS staging 和 relay production 日志已有后台回执。跨端关联、其余核心路径、可靠性与全平台验收仍未完成；实际进度与缺口见 [实施记录](../observability/IMPLEMENTATION.md)。本文是后续实施主文档，替代 [历史供应商评估](OBSERVABILITY-EVALUATING.md) 中的架构和实施批次。[会话打开场景](SESSION-OPEN-DIAGNOSTICS-EVALUATING.md) 保留业务细节，进入对应批次前按当前代码复核。
+Pairlet 五组件 Sentry 接入、跨端诊断、核心结果事件及查询已有实现与代表性证据；最新事实见 [验收记录](../observability/ACCEPTANCE.md)。[历史供应商评估](OBSERVABILITY-EVALUATING.md) 和 [会话打开场景](SESSION-OPEN-DIAGNOSTICS-EVALUATING.md) 保留评估与业务背景，后续按真实问题补验证。
 
 ## 1. 方案与完成目标
 
@@ -14,7 +14,7 @@
 
 本期交付：统一诊断契约、各平台 Sentry 适配、EP-01–30 核心路径的分支观测、daemon 与 relay 独立上报、跨端关联、免费额度控制、诊断开关、查询手册、故障注入与正常对照验收。30 类路径由 OBS-01–10 任务承接，编号完整不代表已实现覆盖。
 
-Firebase Analytics 继续保留原有事件名和统计口径。Firebase Crashlytics 在迁移验证期保留；移动端自动崩溃采集在 Sentry 验证通过后切换为单一负责人，见第 4 节。
+Firebase Analytics 继续保留原有事件名和统计口径。按用户最新确认，移动端自动崩溃继续由 Firebase Crashlytics 负责，Sentry 负责显式安全错误与日志；本期不迁移自动崩溃采集器，见第 4 节。
 
 本期不建设 Cloud Run 接收器、诊断 grant 服务、Cloud Logging 导出或 OpenTelemetry Collector；不把 BigQuery、付费 API、Seer AI 调试、Replay、持续 Profiling 和完整日志附件设为依赖。用户现在看到的历史失败事件不能补回当时未采集的堆栈。
 
@@ -71,18 +71,18 @@ interface Diagnostics {
 
 参考相邻项目的有限 breadcrumb、单次快照、限频和 CancellationException 过滤模式；保留原始 Throwable 的栈，不复制它们的账号、网络或业务内容字段。[iOS NonFatalReporter](../../../ios/HelloLibs/HelloTrack/HelloTrack/Classes/NonFatalReporting/NonFatalReporter.swift)、[Android FirebaseCrashUtils](../../../android/feature/common/src/main/java/com/hellotalk/feature/common/business/firebase/FirebaseCrashUtils.kt)。
 
-## 4. 平台接入与崩溃迁移
+## 4. 平台接入与崩溃采集职责
 
 首批实现使用 Java SDK 8.41.0（Android/desktop/daemon/relay）和 Cocoa SDK 8.58.2（iOS），两者对应所核查的 KMP SDK 0.27.0 版本组合。公共诊断契约仍是 KMP；因为包装层的公开异常模型不能填入经过过滤的原始栈，平台出口直接构造 Java/Cocoa 的安全事件，未引入 KMP SDK 包装依赖。项目 Kotlin 2.1.21、JVM 17、Ktor 3.1.3 的本地编译与 SDK 最终 envelope 测试已通过，云端、Android 真机和原生符号仍需 P0/P3 验证。版本升级必须重复出口与兼容验证。[KMP 源码版本](https://github.com/getsentry/sentry-kotlin-multiplatform/tree/0.27.0)、[Java Logs](https://docs.sentry.io/platforms/java/logs/)。
 
-每进程只初始化一个诊断 SDK 实例。Java 使用独立 SentryClient，清空自动 processors/integrations，业务不使用全局 scope；iOS 沿用 Swift Package Manager，固定 Cocoa 8.58.2，用受控 Swift 桥接连接 KMP 契约。Cocoa 最终事件按原始安全记录重新构造，Logs 采用字段白名单过滤；测试会主动污染 SDK scope 并检查真正发送的 envelope。自动 fatal 迁移仍按后面的分期规则执行。
+每进程只初始化一个 Sentry 诊断 SDK 实例。Java 使用独立 SentryClient，清空自动 processors/integrations，业务不使用全局 scope；iOS 沿用 Swift Package Manager，固定 Cocoa 8.58.2，用受控 Swift 桥接连接 KMP 契约。Cocoa 最终事件按原始安全记录重新构造，Logs 采用字段白名单过滤；测试会主动污染 SDK scope 并检查真正发送的 envelope。
 
-移动端迁移分两步：
+移动端维持以下职责，不将供应商迁移作为完成条件：
 
-1. 验证期 Crashlytics 继续负责现有自动 fatal；Sentry 只开启明确调用的 handled errors、日志及受控测试链路。按实际平台关闭 Sentry 自动 fatal、ANR/hang 等重复采集源，并验证最终 envelope。
-2. Sentry 真机 fatal、Kotlin/原生栈、符号、关闭采集全部通过后，在同一构建内关闭 Crashlytics 收集，再启用 Sentry 自动崩溃。Firebase Analytics/FCM 继续运行，保留 Crashlytics 历史查询。不能声称双平台计数天然去重；不将两者相加。
+1. Crashlytics 继续负责自动 fatal；Sentry 只开启明确调用的 handled errors、日志及受控测试链路。按实际平台关闭 Sentry 自动 fatal、ANR/hang 等重复采集源，并验证最终 envelope。Firebase Analytics/FCM 继续运行。
+2. 本批不抽验未改动的 Crashlytics，不制造原生崩溃；未来改动该链路时再针对性验证回执、符号与开关。Sentry 的 iOS 安全错误栈可定位性独立验收。Sentry handled 事件或 dSYM 上传成功不能替代 Crashlytics 崩溃回执，也不将两处计数相加。
 
-自动初始化的 Android provider、Manifest 和 iOS 启动配置也要纳入控制，开关必须早于 SDK 自动采集生效；迁移时检查旧采集器待发报告，防止下一次启动重新产生双重上传。若某平台无法可靠关闭重复自动采集或过滤原生报告，先仅在内部构建验证该平台；不把已验证的其他平台接入一起阻塞，也不将它标为完成。
+自动初始化的 Android provider、Manifest 和 iOS 启动配置也要纳入控制，开关必须早于 SDK 自动采集生效；检查关闭/重开和待发报告处理，避免重复上传或违背采集偏好。真实崩溃的隐私与符号检查针对实际使用的 Crashlytics 通道执行，不能由 Sentry 出口测试代替。Sentry Cocoa 自动 fatal 的历史限制保存在 RELEASE.md，不再列作本期迁移阻塞。
 
 Android 发布构建验证混淆 mapping；iOS 验证 App 与 Kotlin framework 的 dSYM/UUID 和实际栈；JVM 保留行号与版本标识。release 建议 `cc-pocket-<component>@<version>+<build>`，peer_version 单独记录。只有拿到符号化报告才算通过，不能用“上传命令成功”替代。
 
@@ -230,7 +230,7 @@ relay_connection_id:<CONNECTION_ID>
 | P0：SDK 与云端小范围验证 | 五项目配置清单、兼容版本锁定、每平台最小集成、开关/脱敏/缓存/符号记录 | Android、iOS、desktop、daemon、relay 各有真实安全错误和日志可查询；捕获栈可定位；免费能力查询、网络、关闭与离线边界验证 |
 | P1：通用基础与核心端内故障 | OBS-01–04：公共 SDK/预算、启动/连接/协议/outbox、项目扫描与会话历史、Agent 运行；现有四类 Analytics 失败补证据 | 对应 EP 故障分支和正常对照通过；静默丢弃/回退有原因；手机关闭 daemon 仍上传；不开新协议也能按组件诊断 |
 | P2：跨端与其余核心路径 | OBS-02–04 关联增强及 OBS-05–09：DiagnosticContext、连接编号、完成标记、审批、文件/展示/生命周期、存储/后台、协作/推送、Git/升级 | EP-01–30 按任务完成适用分支；症状与原因可关联，relay 只标连接关系；新旧版本、正常等待/回退/拒绝不误报；专项评审通过 |
-| P3：发布与运行闭环 | OBS-10：移动端 fatal 单一负责人切换、发布符号检查、路径验收索引、查询/邮件规则、7 天用量观察、回滚说明 | 真机与实际发行 JVM 包完成验收；每条路径有分支证据和正常对照，标出平台/后端未覆盖项；实际用量预测及缺报/迟到边界可解释 |
+| P3：发布与运行闭环 | OBS-10：Sentry 安全出口与开关验收、发布符号检查、路径验收索引、查询/邮件规则、7 天用量观察、回滚说明 | 真机与实际发行 JVM 包完成验收；每条路径有分支证据和正常对照，标出平台/后端未覆盖项；实际用量预测及缺报/迟到边界可解释 |
 
 P0/P1 可以先实现本地代码和测试，不依赖业务协议变更。真实云端联调需要组织及 DSN、符号上传凭据和测试设备/网络；这些是实施依赖，不妨碍先完成公共契约。云端联调具体是“本项目实际构建触发测试故障，后台找到对应记录并核对字段/栈/关联”，不是只看 SDK 文档或本地输出。
 
@@ -249,6 +249,8 @@ P0/P1 可以先实现本地代码和测试，不依赖业务协议变更。真�
 本机 daemon 验证只能用仓库规定的 `update-local-daemon.sh`，daemon 驱动任务使用 detached 版本；禁止 `:daemon:run` 制造第二实例。用户已授权并完成首批 relay、iOS/桌面端和本机 daemon 部署，具体证据见 [部署记录](../observability/PAIRLET.md)；全平台正式发版仍待验收。回滚按组件关闭诊断、恢复上一构建；后续新增协议字段与能力须保留兼容降级，不能通过诊断失败改变业务会话。
 
 ## 12. 实施记录与恢复入口
+
+最新范围决定（2026-09-11）：用户确认不迁移，也不抽验未改动的 Crashlytics；本批验证 iOS Sentry 安全栈与出口。文中自动 fatal 的完整要求仅在将来改动该通道时适用，不是本批强制测试；以下早期实施状态以 FOLLOW-UP-PLAN.md 和 ACCEPTANCE.md 的最新记录为准。
 
 当前检查点：**首批采集已可用，完整方案未完成。P0/P1 已有实现与验证，P2 跨端关联及多类核心路径、P3 完整发布验收仍待推进。** iOS 与 relay 有实际部署日志；不能以这两条链路替代全部平台、错误路径与可靠性验收。
 

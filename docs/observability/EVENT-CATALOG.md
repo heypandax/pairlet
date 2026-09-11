@@ -10,11 +10,11 @@
 
 ## 2. 本批公共维度
 
-适用于三端通过 `Telemetry.track` 明确发送的自定义事件；不宣称 Firebase 自动事件也带这些字段。以 `analytics_schema=1` 筛选新口径，历史无字段的事件保留旧口径。
+适用于三端通过 `Telemetry.track` 明确发送的自定义事件；不宣称 Firebase 自动事件也带这些字段。以 `analytics_schema IN ("v1", "1")` 筛选新口径：新出口固定发字母数字字符串 `v1`，`1` 只兼容旧桌面已入库维度。旧手机整数参数无法解析为 App 自定义维度，其空 schema 仅在独立历史核对页分析，不补认 schema。
 
 | 字段 | 值与来源 | 使用边界 |
 |---|---|---|
-| `analytics_schema` | 当前 1；平台出口固定写入 | 不等于 Sentry 的 diag_schema，不用于推定结果事件已接入 |
+| `analytics_schema` | 当前字符串 `v1`；三端出口固定写入，不能用整数或纯数字值替代 | 不等于 Sentry 的 diag_schema，不用于推定结果事件已接入 |
 | `app_platform` | ios / android / desktop | 由平台出口决定，业务参数不能覆盖 |
 | `app_environment` | development / staging / production / unknown | 复用显式 Sentry 环境配置；缺失/非法配置按 unknown，不猜成 production |
 | `internal_traffic` | 1 / 0 / unknown | development/staging 和 Android debuggable 标 1；显式 production 默认按发布流量标 0，desktop 可用 CCPOCKET_ANALYTICS_INTERNAL 覆盖为 1/0；缺少环境配置为 unknown。这是构建流量声明，不识别具体人的身份 |

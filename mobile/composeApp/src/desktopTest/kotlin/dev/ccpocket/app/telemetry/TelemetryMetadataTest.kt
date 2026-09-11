@@ -5,6 +5,17 @@ import dev.ccpocket.observability.Environment
 import kotlin.test.*
 
 class TelemetryMetadataTest {
+    @Test fun schemaUsesAnAlphanumericDimensionWithoutConvertingNumericMetrics() {
+        for (platform in listOf(Component.ANDROID, Component.IOS, Component.DESKTOP)) {
+            val result = TelemetryMetadata(platform, Environment.STAGING).prepare(
+                TelEvent.SessionOpenResult,
+                mapOf(TelKey.AnalyticsSchema to 1, TelKey.DurationMs to 1332L),
+            )
+            assertEquals("v1", assertIs<String>(result[TelKey.AnalyticsSchema]))
+            assertEquals(1332L, assertIs<Long>(result[TelKey.DurationMs]))
+        }
+    }
+
     @Test fun productionDeclarationIsReportableAndExplicitInternalBuildWins() {
         assertEquals("0", TelemetryMetadata(Component.IOS, Environment.PRODUCTION)
             .prepare(TelEvent.AppLaunch, emptyMap())[TelKey.InternalTraffic])

@@ -1,0 +1,788 @@
+{
+  "checkedAt": "2026-09-11T04:06:42.770168+00:00",
+  "propertyId": "540841272",
+  "reportTimezone": "GMT+08:00",
+  "analysisId": "33G_k3j-Q4mpRDgdoZt6HA",
+  "title": "Pairlet 产品观察 · 正式分析与验证",
+  "dateRange": [
+    {
+      "startDate": 20260901,
+      "endDate": 20260911
+    }
+  ],
+  "tabs": [
+    {
+      "name": "核心结果 · 事件计数与覆盖",
+      "type": 1,
+      "dimensions": [
+        "eventName",
+        "customDimensionsGroup2Slot14",
+        "customDimensionsGroup2Slot15",
+        "customDimensionsGroup2Slot09",
+        "customDimensionsGroup2Slot13"
+      ],
+      "metrics": [
+        "eventCount",
+        "totalUsers"
+      ],
+      "audiences": [
+        "segment-IEiVKd88g",
+        "segment-pairlet-shared-v1"
+      ],
+      "filters": [
+        {
+          "fieldName": "eventName",
+          "expression": "^(session_open_result|prompt_response_result|turn_result|approval_apply_result|file_view_result|background_task_result)$",
+          "evaluationType": 2,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot08",
+          "expression": "1",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot10",
+          "expression": "production",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot11",
+          "expression": "0",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot12",
+          "expression": "^(own|shared)$",
+          "evaluationType": 2,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        }
+      ],
+      "cohort": null
+    },
+    {
+      "name": "连续使用 · 恢复结果",
+      "type": 1,
+      "dimensions": [
+        "eventName",
+        "customDimensionsGroup2Slot14",
+        "customDimensionsGroup2Slot01",
+        "customDimensionsGroup2Slot09",
+        "customDimensionsGroup2Slot17"
+      ],
+      "metrics": [
+        "eventCount",
+        "totalUsers",
+        "customMetricsGroup1Slot01"
+      ],
+      "audiences": [
+        "segment-IEiVKd88g",
+        "segment-pairlet-shared-v1"
+      ],
+      "filters": [
+        {
+          "fieldName": "customDimensionsGroup2Slot08",
+          "expression": "1",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot10",
+          "expression": "production",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot11",
+          "expression": "0",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot12",
+          "expression": "^(own|shared)$",
+          "evaluationType": 2,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "eventName",
+          "expression": "^(connection_recovery_result|session_open_recovered|prompt_response_recovered)$",
+          "evaluationType": 2,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        }
+      ],
+      "cohort": null
+    },
+    {
+      "name": "功能采用 · 曝光尝试与价值",
+      "type": 1,
+      "dimensions": [
+        "eventName",
+        "customDimensionsGroup2Slot09",
+        "customDimensionsGroup2Slot16",
+        "customDimensionsGroup2Slot12",
+        "customDimensionsGroup2Slot13"
+      ],
+      "metrics": [
+        "eventCount",
+        "totalUsers"
+      ],
+      "audiences": [
+        "segment-IEiVKd88g",
+        "segment-pairlet-shared-v1"
+      ],
+      "filters": [
+        {
+          "fieldName": "customDimensionsGroup2Slot08",
+          "expression": "1",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot10",
+          "expression": "production",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot11",
+          "expression": "0",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot12",
+          "expression": "^(own|shared)$",
+          "evaluationType": 2,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "eventName",
+          "expression": "^(feature_exposed|feature_used|value_reached)$",
+          "evaluationType": 2,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        }
+      ],
+      "cohort": null
+    },
+    {
+      "name": "首次价值 · 配对入口漏斗",
+      "type": 3,
+      "dimensions": [
+        "customDimensionsGroup2Slot09"
+      ],
+      "metrics": [],
+      "audiences": [],
+      "filters": [
+        {
+          "fieldName": "customDimensionsGroup2Slot08",
+          "expression": "1",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot10",
+          "expression": "production",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot11",
+          "expression": "0",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot12",
+          "expression": "^(real|own|shared)$",
+          "evaluationType": 2,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        }
+      ],
+      "cohort": null
+    },
+    {
+      "name": "留存 · 首次有效使用 D1/D7",
+      "type": 2,
+      "dimensions": [],
+      "metrics": [
+        "totalUsers"
+      ],
+      "audiences": [
+        "segment-IEiVKd88g",
+        "segment-pairlet-shared-v1"
+      ],
+      "filters": [],
+      "cohort": {
+        "cohortInclusionCriteria": 1,
+        "cohortReturnCriteria": 1,
+        "cohortGranularity": 1,
+        "metricCalculationType": 1,
+        "rowsPerDimension": 5,
+        "inclusionCriteria": "first_value_observed",
+        "returnCriteria": "value_reached",
+        "metricExpressionType": 1
+      }
+    },
+    {
+      "name": "验证 · 有效留存（staging）",
+      "type": 2,
+      "dimensions": [],
+      "metrics": [
+        "totalUsers"
+      ],
+      "audiences": [
+        "segment-pairlet-staging-v1"
+      ],
+      "filters": [],
+      "cohort": {
+        "cohortInclusionCriteria": 1,
+        "cohortReturnCriteria": 1,
+        "cohortGranularity": 1,
+        "metricCalculationType": 1,
+        "rowsPerDimension": 5,
+        "inclusionCriteria": "first_value_observed",
+        "returnCriteria": "value_reached",
+        "metricExpressionType": 1
+      }
+    },
+    {
+      "name": "验证 · 结果与价值（staging）",
+      "type": 1,
+      "dimensions": [
+        "eventName",
+        "customDimensionsGroup2Slot14",
+        "customDimensionsGroup2Slot15",
+        "customDimensionsGroup2Slot09",
+        "customDimensionsGroup2Slot13"
+      ],
+      "metrics": [
+        "eventCount",
+        "totalUsers"
+      ],
+      "audiences": [
+        "segment-pairlet-staging-v1"
+      ],
+      "filters": [
+        {
+          "fieldName": "eventName",
+          "expression": "^((session_open|prompt_response|turn|approval_apply|file_view|background_task|connection_recovery)_result|(session_open|prompt_response)_recovered|first_value_observed|value_reached|feature_(exposed|used))$",
+          "evaluationType": 2,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot08",
+          "expression": "1",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot10",
+          "expression": "staging",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot11",
+          "expression": "1",
+          "evaluationType": 1,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        },
+        {
+          "fieldName": "customDimensionsGroup2Slot12",
+          "expression": "^(own|shared)$",
+          "evaluationType": 2,
+          "complement": false,
+          "type": 1,
+          "expressionList": []
+        }
+      ],
+      "cohort": null
+    }
+  ],
+  "stagingProcessedRows": [
+    {
+      "event": "feature_used",
+      "result": "",
+      "coverage": "",
+      "platform": "desktop",
+      "version": "1.9.8",
+      "eventCount": 7,
+      "collectionIdentities": 1
+    },
+    {
+      "event": "value_reached",
+      "result": "",
+      "coverage": "complete",
+      "platform": "desktop",
+      "version": "1.9.8",
+      "eventCount": 6,
+      "collectionIdentities": 1
+    },
+    {
+      "event": "connection_recovery_result",
+      "result": "success",
+      "coverage": "complete",
+      "platform": "desktop",
+      "version": "1.9.8",
+      "eventCount": 4,
+      "collectionIdentities": 1
+    },
+    {
+      "event": "prompt_response_result",
+      "result": "success",
+      "coverage": "complete",
+      "platform": "desktop",
+      "version": "1.9.8",
+      "eventCount": 4,
+      "collectionIdentities": 1
+    },
+    {
+      "event": "turn_result",
+      "result": "success",
+      "coverage": "complete",
+      "platform": "desktop",
+      "version": "1.9.8",
+      "eventCount": 4,
+      "collectionIdentities": 1
+    },
+    {
+      "event": "background_task_result",
+      "result": "success",
+      "coverage": "partial",
+      "platform": "desktop",
+      "version": "1.9.8",
+      "eventCount": 2,
+      "collectionIdentities": 1
+    },
+    {
+      "event": "feature_exposed",
+      "result": "",
+      "coverage": "",
+      "platform": "desktop",
+      "version": "1.9.8",
+      "eventCount": 2,
+      "collectionIdentities": 1
+    },
+    {
+      "event": "session_open_result",
+      "result": "success",
+      "coverage": "complete",
+      "platform": "desktop",
+      "version": "1.9.8",
+      "eventCount": 2,
+      "collectionIdentities": 1
+    },
+    {
+      "event": "turn_result",
+      "result": "cancelled",
+      "coverage": "complete",
+      "platform": "desktop",
+      "version": "1.9.8",
+      "eventCount": 2,
+      "collectionIdentities": 1
+    },
+    {
+      "event": "first_value_observed",
+      "result": "",
+      "coverage": "complete",
+      "platform": "desktop",
+      "version": "1.9.8",
+      "eventCount": 1,
+      "collectionIdentities": 1
+    }
+  ],
+  "productionCohortRows": 0,
+  "limits": [
+    "Processed staging rows are historical desktop 1.9.8 data, not this iOS round.",
+    "No eligible production cohort was returned; zero is not a retention or reliability conclusion.",
+    "D1/D7 require mature real cohorts.",
+    "iOS current receipts are DebugView evidence."
+  ],
+  "eventSegments": [
+    {
+      "id": "segment-IEiVKd88g",
+      "analysisSegment": {
+        "name": "正式 · 自有电脑",
+        "filter": {
+          "scope": 1,
+          "expressions": [
+            {
+              "scope": 1,
+              "andGroup": [
+                {
+                  "filterConditions": [
+                    {
+                      "filter": {
+                        "filter": {
+                          "filterType": 1,
+                          "keyFilter": {
+                            "key": "custom_dimensions_group2_slot_08",
+                            "matchType": 5,
+                            "expression": "1",
+                            "caseSensitive": false,
+                            "expressionList": [],
+                            "oper": 0,
+                            "isStepKeyDate": false
+                          },
+                          "complement": false
+                        }
+                      },
+                      "isDynamicFilter": false
+                    }
+                  ]
+                },
+                {
+                  "filterConditions": [
+                    {
+                      "filter": {
+                        "filter": {
+                          "filterType": 1,
+                          "keyFilter": {
+                            "key": "custom_dimensions_group2_slot_10",
+                            "matchType": 5,
+                            "expression": "production",
+                            "caseSensitive": false,
+                            "expressionList": [],
+                            "oper": 0,
+                            "isStepKeyDate": false
+                          },
+                          "complement": false
+                        }
+                      },
+                      "isDynamicFilter": false
+                    }
+                  ]
+                },
+                {
+                  "filterConditions": [
+                    {
+                      "filter": {
+                        "filter": {
+                          "filterType": 1,
+                          "keyFilter": {
+                            "key": "custom_dimensions_group2_slot_11",
+                            "matchType": 5,
+                            "expression": "0",
+                            "caseSensitive": false,
+                            "expressionList": [],
+                            "oper": 0,
+                            "isStepKeyDate": false
+                          },
+                          "complement": false
+                        }
+                      },
+                      "isDynamicFilter": false
+                    }
+                  ]
+                },
+                {
+                  "filterConditions": [
+                    {
+                      "filter": {
+                        "filter": {
+                          "filterType": 1,
+                          "keyFilter": {
+                            "key": "custom_dimensions_group2_slot_12",
+                            "matchType": 5,
+                            "expression": "own",
+                            "caseSensitive": false,
+                            "expressionList": [],
+                            "oper": 0,
+                            "isStepKeyDate": false
+                          },
+                          "complement": false
+                        }
+                      },
+                      "isDynamicFilter": false
+                    }
+                  ]
+                }
+              ],
+              "frequency": 2,
+              "minFrequency": 0,
+              "maxFrequency": -1,
+              "orGroup": []
+            }
+          ],
+          "sequences": [],
+          "isUsingVenusNames": true,
+          "isMigratedFromOldStyle": false
+        }
+      }
+    },
+    {
+      "id": "segment-pairlet-shared-v1",
+      "analysisSegment": {
+        "name": "正式 · 协作电脑",
+        "filter": {
+          "scope": 1,
+          "expressions": [
+            {
+              "scope": 1,
+              "andGroup": [
+                {
+                  "filterConditions": [
+                    {
+                      "filter": {
+                        "filter": {
+                          "filterType": 1,
+                          "keyFilter": {
+                            "key": "custom_dimensions_group2_slot_08",
+                            "matchType": 5,
+                            "expression": "1",
+                            "caseSensitive": false,
+                            "expressionList": [],
+                            "oper": 0,
+                            "isStepKeyDate": false
+                          },
+                          "complement": false
+                        }
+                      },
+                      "isDynamicFilter": false
+                    }
+                  ]
+                },
+                {
+                  "filterConditions": [
+                    {
+                      "filter": {
+                        "filter": {
+                          "filterType": 1,
+                          "keyFilter": {
+                            "key": "custom_dimensions_group2_slot_10",
+                            "matchType": 5,
+                            "expression": "production",
+                            "caseSensitive": false,
+                            "expressionList": [],
+                            "oper": 0,
+                            "isStepKeyDate": false
+                          },
+                          "complement": false
+                        }
+                      },
+                      "isDynamicFilter": false
+                    }
+                  ]
+                },
+                {
+                  "filterConditions": [
+                    {
+                      "filter": {
+                        "filter": {
+                          "filterType": 1,
+                          "keyFilter": {
+                            "key": "custom_dimensions_group2_slot_11",
+                            "matchType": 5,
+                            "expression": "0",
+                            "caseSensitive": false,
+                            "expressionList": [],
+                            "oper": 0,
+                            "isStepKeyDate": false
+                          },
+                          "complement": false
+                        }
+                      },
+                      "isDynamicFilter": false
+                    }
+                  ]
+                },
+                {
+                  "filterConditions": [
+                    {
+                      "filter": {
+                        "filter": {
+                          "filterType": 1,
+                          "keyFilter": {
+                            "key": "custom_dimensions_group2_slot_12",
+                            "matchType": 5,
+                            "expression": "shared",
+                            "caseSensitive": false,
+                            "expressionList": [],
+                            "oper": 0,
+                            "isStepKeyDate": false
+                          },
+                          "complement": false
+                        }
+                      },
+                      "isDynamicFilter": false
+                    }
+                  ]
+                }
+              ],
+              "frequency": 2,
+              "minFrequency": 0,
+              "maxFrequency": -1,
+              "orGroup": []
+            }
+          ],
+          "sequences": [],
+          "isUsingVenusNames": true,
+          "isMigratedFromOldStyle": false
+        }
+      }
+    },
+    {
+      "id": "segment-pairlet-staging-v1",
+      "analysisSegment": {
+        "name": "验证 · staging 内部事件",
+        "filter": {
+          "scope": 1,
+          "expressions": [
+            {
+              "scope": 1,
+              "andGroup": [
+                {
+                  "filterConditions": [
+                    {
+                      "filter": {
+                        "filter": {
+                          "filterType": 1,
+                          "keyFilter": {
+                            "key": "custom_dimensions_group2_slot_08",
+                            "matchType": 5,
+                            "expression": "1",
+                            "caseSensitive": false,
+                            "expressionList": [],
+                            "oper": 0,
+                            "isStepKeyDate": false
+                          },
+                          "complement": false
+                        }
+                      },
+                      "isDynamicFilter": false
+                    }
+                  ]
+                },
+                {
+                  "filterConditions": [
+                    {
+                      "filter": {
+                        "filter": {
+                          "filterType": 1,
+                          "keyFilter": {
+                            "key": "custom_dimensions_group2_slot_10",
+                            "matchType": 5,
+                            "expression": "staging",
+                            "caseSensitive": false,
+                            "expressionList": [],
+                            "oper": 0,
+                            "isStepKeyDate": false
+                          },
+                          "complement": false
+                        }
+                      },
+                      "isDynamicFilter": false
+                    }
+                  ]
+                },
+                {
+                  "filterConditions": [
+                    {
+                      "filter": {
+                        "filter": {
+                          "filterType": 1,
+                          "keyFilter": {
+                            "key": "custom_dimensions_group2_slot_11",
+                            "matchType": 5,
+                            "expression": "1",
+                            "caseSensitive": false,
+                            "expressionList": [],
+                            "oper": 0,
+                            "isStepKeyDate": false
+                          },
+                          "complement": false
+                        }
+                      },
+                      "isDynamicFilter": false
+                    }
+                  ]
+                },
+                {
+                  "filterConditions": [
+                    {
+                      "filter": {
+                        "filter": {
+                          "filterType": 1,
+                          "keyFilter": {
+                            "key": "custom_dimensions_group2_slot_12",
+                            "matchType": 8,
+                            "caseSensitive": false,
+                            "expressionList": [
+                              "own",
+                              "shared"
+                            ],
+                            "oper": 0,
+                            "isStepKeyDate": false
+                          },
+                          "complement": false
+                        }
+                      },
+                      "isDynamicFilter": false
+                    }
+                  ]
+                }
+              ],
+              "frequency": 2,
+              "minFrequency": 0,
+              "maxFrequency": -1,
+              "orGroup": []
+            }
+          ],
+          "sequences": [],
+          "isUsingVenusNames": true,
+          "isMigratedFromOldStyle": false
+        }
+      }
+    }
+  ]
+}

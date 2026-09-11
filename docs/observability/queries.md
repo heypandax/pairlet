@@ -1,15 +1,19 @@
 # Pairlet 查询与证据手册
 
-配置检查点：2026-09-11。区分保存配置、已接收样本与已验证业务旅程；现有新 daemon 日志、Android Errors/Logs、iPhone 12 Logs 和 desktop GA4 staging 启动/连接恢复结果回执，逐组件边界见 [ACCEPTANCE](ACCEPTANCE.md)。字段的业务含义以 [EVENT-CATALOG](EVENT-CATALOG.md) 为准。
+配置检查点：2026-09-11。**当前已保存五个正式视角与两个 staging 验证页，实际分流查询通过，生产样本与成熟留存仍待观察**；详见 [本轮配置和汇总](evidence/2026-09-11-ga4-sampling.json)。区分保存配置、已接收样本与已验证业务旅程；现有新 daemon 日志、Android Errors/Logs、iPhone 12 Logs 和 desktop GA4 staging 启动/连接恢复结果回执，逐组件边界见 [ACCEPTANCE](ACCEPTANCE.md)。字段的业务含义以 [EVENT-CATALOG](EVENT-CATALOG.md) 为准。
+
+历史查询补充：GA4 报告时区实测 GMT+08:00，Dia 为 America/Los_Angeles，必须把测试 UTC 时间换算成报告日期后再选范围。合并前 Android 1.9.8 开发包已经包含新上报；查询 **2026-09-11** 已见会话结果 5 条、文件查看结果 2 条、有效使用 4 条，详情见 ACCEPTANCE 最新节。使用内置“平台”与“应用版本”先核对入库样本；新自定义维度的值选择器不完整时，不把过滤后的空表当成事件未收到，也不直接认定参数链路已通过。原“手机后台尚未确认”的段落属于此前检查点。
 
 ## 入口与已经保存的看板
+
+最新 Android 修复包抽样：在下方 GA4 DebugView 中，9 月 10 日 19:38:07（Dia 时区）的 `session_open_result` 已核实 success / complete / android / 2.0.0 / staging / 1501ms；19:40:55 的 `file_view_result` 为 success / complete / 1410ms，并有 `value_reached` 的 feature=file_view。DebugView 的事件节点可能将时间戳附在事件名后，自动化应按名称文本节点及相邻时间共同选择，避免误点同名旧样本。正式探索与留存仍独立验收；详见 ACCEPTANCE 首节。
 
 - [Sentry：Pairlet 核心诊断 · 样本与证据](https://pairlet.sentry.io/dashboard/10014172/)，四个 widget 已保存并回读。默认跨项目、跨环境、最近 24 小时；排查前选择发生问题的平台项目、环境与时间窗。
 - [Sentry Issues](https://pairlet.sentry.io/issues/) 查询 Errors；[Sentry Logs](https://pairlet.sentry.io/explore/logs/?project=4512060691185664) 查询 Logs。首次进入可能需要选择已上报的具体项目。
 - [GA4 管理](https://analytics.google.com/analytics/web/#/a392220252p540841272/admin)：现有 Firebase 项目 `cc-pocket-1b3ea`，账号 `392220252`，媒体资源 `540841272`；不另建数据孤岛。
-- [GA4 产品观察探索](https://analytics.google.com/analytics/web/?authuser=3&hl=zh-CN#/analysis/a392220252p540841272/edit/33G_k3j-Q4mpRDgdoZt6HA)：核心结果、连续恢复、功能采用、配对入口漏斗已写入配置；留存标签为待配置草稿，夜间回读事件列表仍没有新价值事件。Realtime 已看到 desktop/staging 的 connection_recovery_result，但正式过滤的探索尚未验收，不能把空表视为零故障。
-- 看本次手机效果：[Android 布局超时](https://pairlet.sentry.io/issues/7724619605/?project=4512060708749312)、[Android 连接异常](https://pairlet.sentry.io/issues/7724622744/?project=4512060708749312)、[Android Logs](https://pairlet.sentry.io/explore/logs/?project=4512060708749312&statsPeriod=24h)、[iOS Logs](https://pairlet.sentry.io/explore/logs/?project=4512060701343744&statsPeriod=24h)。选择 staging / 1.9.8；Android 日志编号 ce016d96c1dc45299d988b77a9c11012，iOS 编号 0557d66e911a4695a137e5f5a7cfeec6。布局超时的根因仍待定位。
-- 较长会话抽样另捕获 [attach 超时](https://pairlet.sentry.io/issues/7724675302/?project=4512060708749312)：12012ms，trace `5a3e5390353446b9ba4b9c31b34d5f74`。与 layout 阶段分开分析；会话最终显示内容不等于已定位或修复超时。
+- [GA4 产品观察探索](https://analytics.google.com/analytics/web/?authuser=3&hl=zh-CN#/analysis/a392220252p540841272/edit/33G_k3j-Q4mpRDgdoZt6HA)：五个正式标签与两个验证标签已保存并回读。日常分析用前五个，查看效果先选“验证 · 结果与价值（staging）”：已见 34 条历史桌面事件和完整结果/覆盖/平台/版本字段。留存已改为首次有效使用到再次有效使用；正式群组暂无符合条件的样本，staging 只有 1 个 day 0 身份，不能解释为正式留存或零故障。
+- 看历史手机样本：[Android 布局超时](https://pairlet.sentry.io/issues/7724619605/?project=4512060708749312)、[Android 连接异常](https://pairlet.sentry.io/issues/7724622744/?project=4512060708749312)、[Android Logs](https://pairlet.sentry.io/explore/logs/?project=4512060708749312&statsPeriod=24h)、[iOS Logs](https://pairlet.sentry.io/explore/logs/?project=4512060701343744&statsPeriod=24h)。历史日志选 staging / 1.9.8；Android 日志编号 ce016d96c1dc45299d988b77a9c11012，iOS 编号 0557d66e911a4695a137e5f5a7cfeec6。新布局错误也包含 2.0.0。已定位并修复 Android 多根实例/生命周期串用，不据此自动关闭所有历史布局错误。
+- 较长会话历史样本：[attach 超时](https://pairlet.sentry.io/issues/7724675302/?project=4512060708749312)，12012ms，trace `5a3e5390353446b9ba4b9c31b34d5f74`。最新回读仍为旧 1.9.8 的一条上报，修复包未复现；现为非阻塞观察项，新上报或实际复现才继续分析，不声称已经证明旧根因。
 
 桌面 MP 配置检查发现此前仅有 iOS/Android 数据流，且本机未配置有效 MP 凭据。现已创建并回读 `Pairlet Desktop · Measurement Protocol` 网站类型数据流 `15754516140`，Measurement ID 为 `G-X04707FM0W`，增强型衡量关闭。用户确认后已创建 `Pairlet Desktop · local validation` 密钥，保存至 gitignored 的本机 `ga4.properties`（0600），并安装包含新配置和 client_id 修复的桌面开发包；未向官网安装网页代码。密钥值不写入文档或 Git，当前是本机开发接入，不代表公开发行配置已验收。
 
@@ -43,7 +47,9 @@
 
 ## GA4 的五个视角
 
-新结果报表统一筛选 `analytics_schema=1`、已验收版本、`app_environment=production`、`internal_traffic=0`，再分别看 `app_platform` 和 `usage_mode`。staging/internal/demo 单独做验收页。旧 `real`、缺参数及 `unknown` 单列，不能推成自有电脑。GA4 用户指标按参与采集的安装身份解释，不称去重真人。
+App 的整数事件参数不会解析为事件自定义维度，见 [Google 官方说明](https://support.google.com/analytics/answer/14239696?hl=en)。公共出口已从整数 `1` 修复为字母数字字符串 `v1`；历史空 schema 不能靠等待回填。现有八页中的“核对 · 手机历史（不筛 schema）”独立保留受限 staging 手机样本，不放宽正式生产/留存的 schema 约束。查询日期需包含媒体资源 UTC+08 的事件日期；浏览器本地日期较早时，探索页面可能截断结束日期，必须核对实际发送的日期范围。
+
+新结果报表统一筛选 `analytics_schema IN ("1", "v1")`、已验收版本、`app_environment=production`、`internal_traffic=0`，再分别看 `app_platform` 和 `usage_mode`。staging/internal/demo 单独做验收页。旧 `real`、缺参数及 `unknown` 单列，不能推成自有电脑。GA4 用户指标按参与采集的安装身份解释，不称去重真人。
 
 | 视角 / 查询口径 | 条件和维度 | 分母与观察窗 | 解释限制 |
 |---|---|---|---|
@@ -57,7 +63,7 @@
 
 duration_ms 必须筛选同类结果后再计算。平均操作耗时用总耗时除以该类结果数，不能用固定 engagement_time 表示活跃时长，也不能将累计耗时直接叫 P95。需要分位数时使用真实逐样本数据；不要付费开通 BigQuery 来掩盖当前口径缺口。
 
-留存配置的实际限制：GA4 当前仅允许选择已出现的事件，新事件还不在选择器中。收到受控新版事件后，将纳入/返回分别选为 first_value_observed/value_reached，粒度设为每日、计算设为标准，并以带 production/internal/schema/role 条件的事件细分约束样本；先核对每一步样本再开放日常使用。现有草稿的默认 first-touch/any-event 没有被当作有效使用留存。GA4 会将符合条件的用户分配到所有适用群组，且按设备身份计算，参见 [官方群组说明](https://support.google.com/analytics/answer/9670133?hl=en)。
+留存配置已完成：纳入/返回分别为 first_value_observed/value_reached，每日、标准；通过事件细分同时限制 production、internal=0、schema IN (1,v1)、own/shared。自由表格的统一过滤器不会进入群组查询，不可仅写 unifiedFilters 就认为过滤生效；多条件应在界面显示“并且”，不能是“或”。实际正式群组无符合条件的样本，staging 首日有 1 个身份；未成熟日期不计算留存率。GA4 会将符合条件的用户分配到所有适用群组，且按设备身份计算，参见 [官方群组说明](https://support.google.com/analytics/answer/9670133?hl=en)。
 
 ## 告警配置草案（未启用）
 
