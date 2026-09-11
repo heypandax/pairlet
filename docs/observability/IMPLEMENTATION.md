@@ -1,5 +1,7 @@
 # Sentry 实施进度
 
+**main 合并后增量（2026-09-11）**：在 `08f01dad` 上补官方发行配置门禁，所有发布客户端/daemon 在构建前注入组件 DSN，发布前读取产物验证；iOS 增加匹配 archive 的符号上传顺序及 CI 凭据门禁。GitHub DSN 变量与 `org:ci` secret 已配置并认证，14 项相关 Python 用例和四类 JVM/Android 产物验证通过。iOS 实际 Release archive 的 App dSYM 已上传，后台按 UUID 回读确认；补齐 XcodeGen 的 Sentry 依赖/scheme，修复空 framework 占位库阻断符号检查的问题。Android 真实 handled 事件已验到源码行号，iOS 旧安全栈仍仅到函数。两个现场超时补到 daemon 时间窗和手机对照证据，尚未定位修复；GA4 手机结果/第五留存视角仍缺后台条件。详见 [本轮验收](ACCEPTANCE.md)。
+
 开始：2026-09-09；基线 `6ca60173`；分支 `codex/sentry-observability`。
 
 依据：[实施方案](../design/OBSERVABILITY.md)、[核心路径和任务](ERROR-PATHS.md)。用户已授权启动开发，按顺序推进代码、测试和集成；云端 DSN/真实事件、设备与发布证据分别记录，不能由本地测试替代。

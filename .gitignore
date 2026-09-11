@@ -94,3 +94,6 @@ harmony/release/
 # Local Sentry project configuration (public DSNs, environment-specific)
 **/cc-pocket-sentry.properties
 iosApp/Sentry.local.xcconfig
+
+# Generated public Sentry settings for a single iOS archive
+/iosApp/Observability.generated.xcconfig

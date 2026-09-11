@@ -2,6 +2,40 @@
 
 本页记录当前证据，任务范围和完成标准以 [FOLLOW-UP-PLAN](FOLLOW-UP-PLAN.md) 为准。首批历史云端回执见 [PAIRLET](PAIRLET.md)，不能替代后续改动的验收。
 
+## 2026-09-11：main 合并后的继续收尾
+
+基线是已合并的 main `08f01dad`（PR #369），本轮工作分支 `codex/observability-followup`。保留原工作区 `deploy/Caddyfile` 的未提交改动。本节新增证据不代替下方历史验收，也不表示 A–D 全部通过。
+
+### 发行配置
+
+已增加构建前配置注入、构建后 APK/jar/App Info.plist 验证，以及 iOS archive/dSYM UUID 核对和 Sentry 处理成功后再上传商店的门禁。五个组件的公共 DSN 已写入 GitHub 仓库变量；`Pairlet GitHub release symbols` 的 `org:ci` token 已保存为 Actions secret，Sentry CLI 实际认证通过。没有将令牌或 GA4 MP 私钥写入代码/应用。
+
+- Python 14 项相关用例通过，其中新增 6 项覆盖错 DSN、错误环境/组件、重复资源、私有 GA4 配置混入和 iOS plist 对照，4 项覆盖空占位库、有代码/混合架构及未知格式的符号门禁。
+- 提交前脚本全集 29 项通过（16.8 秒，含既有 relay 恢复替身）；日志 `/tmp/pairlet-followup-all-script-tests.log`。未重复运行无运行时代码变化的全部 Kotlin 测试。
+- `:daemon:jar :relay:jar :mobile:composeApp:desktopJar :mobile:composeApp:assembleDebug` 成功；四个实际产物的 Sentry 配置回读符合各组件/staging。首次命令缺 `ANDROID_HOME` 在依赖解析阶段失败，补齐已知 SDK 后成功。
+- `actionlint 1.7.12` 对两个变更工作流通过；仅忽略已有 self-hosted `harmony` 标签不在其内置标签表的提示。品牌兼容检查、`git diff --check` 通过。
+- iOS 未签名 Release archive 成功（2.0.0/19、staging、运行代码基于 `08f01dad`），实际 Info.plist 的组件 DSN/环境回读通过。App 与 dSYM 的 arm64 UUID 同为 `FA554F1E-DF0D-3316-9B7D-C5E406F1569D`；App SHA-256 `ac6ea7e61584398d70dd88981c76b83d1d0acd8e564782b3e7189e34b01be268`，DWARF SHA-256 `b020b513c9554251de623d0a10c5424d59bb989073f67d7a8ec3920349a028df`。
+- Sentry CLI `--wait` 返回 processing complete / OK；后台 Debug Files API 独立回读到上述 UUID、`cc-pocket/arm64`、file id `1198351926`，创建于 `2026-09-11T00:40:25.053599Z`。上传只包含本次 App dSYM，没有源码 bundle。证据 `/tmp/pairlet-followup-symbol-upload.log`、`/tmp/pairlet-followup-ios-artifact.json`、`/tmp/pairlet-followup-ios-archive.log`。**这证明符号已入库，不代表真实 native crash 已符号化。**
+- 修复两个发行缺口：`project.yml` 补齐与本地工程一致的 Sentry 8.58.2，并显式生成共享归档 scheme；隔离目录的 XcodeGen 实际输出已核对。符号检查识别 Xcode 的无代码 framework 占位库（仅空 `__text`、无符号表、部署标记 100.0，所有架构均须满足），不按 SDK 名称豁免；本次五个嵌入库都由静态库生成占位文件，代码符号归入 App dSYM。有代码的动态库仍要求匹配 dSYM。
+- 未上传 App Store、未发公开版本、未替换实际运行的 daemon/relay。归档来自已提交 Xcode 工程；重新生成工程已核对依赖和 scheme，但未另跑完整签名发行流水线。
+
+### 两种超时的新增定位证据
+
+按发生时间关联本机 daemon 日志（旧日志没有 trace id，因此是时间窗对应，不能当作跨端 trace 的严格关联）：
+
+- layout 样本对应新建 Codex：01:35:45.863 收到 OpenSession，01:35:45.885 已发送早期/seeded live，01:35:46.683 收到手机 HistoryApplied，随后 01:35:46.757 收到首条提示。支持“空新会话已经完成历史应用阶段”，没有历史过大的证据；尚未证明是 UI 布局延迟还是回执漏记。
+- attach 样本对应既有 Claude：02:06:04.214 首次 hot reattach，并应用调用方模式；02:06:11.913 收到重试；02:06:34.072 才收到 HistoryApplied。daemon 同时继续处理其他设备请求，不能据此归为服务完全卡死；具体停在模式广播、传输或客户端接收哪个环节仍未知。
+- 本轮 Android 1.9.8/30 对照：08:29:42.855 新建空 Claude，08:29:43.594 收到 HistoryApplied；保持空页面超过 30 秒后离开。08:30:25.711 再打开原 Claude 历史，08:30:26.664 收到 HistoryApplied。这次走 cold resume，不能替代原 hot reattach 的复现。
+- 08:30:41 后台回读两条原问题均仍为 1 次、unresolved；本轮对照没有复现原故障，但没有产品代码修复，不关闭问题。
+
+### GA4 与原生栈
+
+手机在非 Firebase Debug 模式（`debug.firebase.analytics.app=.none.`）又完成一次已有会话与 Markdown 文件查看。当前 GA4 实时出现 `connection_recovery_result=3`，参数表仍无数据，不能认定属于这台手机或恢复成功。`file_view_result` / `value_reached` 的手机后台回执尚未补齐；留存选择器在包含当天的范围仍无 `first_value_observed` / `value_reached`，第五视角继续待配置。临时日期已恢复为原“过去 28 天”（8 月 13 日至 9 月 9 日）；四个已保存视角和正式过滤条件未改。
+
+**Android 真实源码位置已验到**：[PAIRLET-ANDROID-5](https://pairlet.sentry.io/issues/7725205901/?project=4512060708749312) 的最新事件 `91bd45eb2b4b4147beb17ee36df8feda`，发生于 2026-09-10 23:36:54.726Z，`cc-pocket-android@1.9.8`、staging/connect。后台 frame 是 `PocketRepository$startConnectWatchdog$1.invokeSuspend`、`PocketRepository.kt:2486`，对照实际安装版本源码正是 `onTransportDown(ConnectWedgedException())`。这是应用真实连接错误，非独立 smoke；仅确认 handled 栈链路，不代表原生 fatal 迁移或网络根因解决。
+
+iOS 原事件 `32ba3a2eb1e040919bc92775dd9206d7` API 回读确认有 `PocketRepository.startConnectWatchdog` / `ConnectWedgedException` 函数，但 filename/lineNo 均为空。目前 K/N 安全栈仅保留函数，不包含用于地址符号化的 native frame/image 元数据；**上传 dSYM 不能自动补齐这些历史事件的行号**。自动 fatal 与安全 native 元数据方案仍独立保留待办。
+
 ## 2026-09-11：夜间代表性抽样
 
 按 [NIGHT-PLAN](NIGHT-PLAN.md) 收缩执行粒度，继续使用已安装的 Android 1.9.8/30、iPhone 12 1.9.8/19 与实际 daemon。下面是新增证据；没有把抽样替代完整发布验收。

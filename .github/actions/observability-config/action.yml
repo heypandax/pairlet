@@ -1,0 +1,26 @@
+name: Stage public observability config
+description: Require a component-specific public Sentry DSN before packaging an official build
+inputs:
+  component:
+    required: true
+    description: android, desktop, daemon, relay, or ios
+  dsn:
+    required: true
+    description: Public DSN only; never a Sentry auth token or GA4 API secret
+  artifact:
+    required: false
+    description: When supplied, verify this build artifact instead of staging a config
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PAIRLET_COMPONENT: ${{ inputs.component }}
+        PAIRLET_SENTRY_DSN: ${{ inputs.dsn }}
+        PAIRLET_ARTIFACT: ${{ inputs.artifact }}
+      run: |
+        if [ -n "$PAIRLET_ARTIFACT" ]; then
+          python3 scripts/observability-release-config.py "$PAIRLET_COMPONENT" --verify "$PAIRLET_ARTIFACT"
+        else
+          python3 scripts/observability-release-config.py "$PAIRLET_COMPONENT"
+        fi

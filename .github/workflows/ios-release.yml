@@ -48,6 +48,35 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Stage production Sentry config
+        uses: ./.github/actions/observability-config
+        with:
+          component: ios
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_IOS }}
+
+      - name: Require symbol upload credentials before archiving
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.PAIRLET_SENTRY_AUTH_TOKEN }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+            echo "::error::PAIRLET_SENTRY_AUTH_TOKEN is required for the matching archive's symbols."
+            exit 1
+          fi
+
+      - name: Install verified Sentry CLI 3.7.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sentry-bin"
+          gh release download 3.7.0 --repo getsentry/sentry-cli \
+            --pattern sentry-cli-Darwin-universal --dir "$RUNNER_TEMP/sentry-bin"
+          BIN="$RUNNER_TEMP/sentry-bin/sentry-cli-Darwin-universal"
+          ACTUAL=$(shasum -a 256 "$BIN" | awk '{print $1}')
+          [ "$ACTUAL" = 10ccaaa39e6eee2b52034546f5f617533fdc76c64aa75c3038887045da1a367d ]
+          chmod +x "$BIN"
+          mv "$BIN" "$RUNNER_TEMP/sentry-bin/sentry-cli"
+          echo "$RUNNER_TEMP/sentry-bin" >> "$GITHUB_PATH"
+
       - name: Validate store metadata (fail fast, before the 20-minute archive)
         # ASC rejects certain characters in What's New with "attribute value has invalid characters" —
         # but only at the deliver step, AFTER build+upload. ✕ actually burned a run (1.3.0); extend the
@@ -98,8 +127,8 @@ jobs:
           plutil -lint "$OUT"
 
       - name: Generate Xcode project (+ shared scheme) from project.yml
-        # The committed .xcodeproj has NO shared scheme, so `-scheme iosApp` fails on a fresh checkout.
-        # project.yml is the source of truth; xcodegen regenerates the project with a shared scheme.
+        # Keep package pins and the archive scheme in project.yml as well as the local project.
+        # Generation must preserve Sentry even on a clean runner.
         run: cd iosApp && xcodegen generate
 
       - name: Stamp version & build number
@@ -155,12 +184,25 @@ jobs:
           xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/CCPocket.xcarchive" \
+            -xcconfig iosApp/Observability.generated.xcconfig \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             archive | tee "$RUNNER_TEMP/archive.log"
           grep -q "ARCHIVE SUCCEEDED" "$RUNNER_TEMP/archive.log"
+
+      - name: Verify archived Sentry configuration
+        uses: ./.github/actions/observability-config
+        with:
+          component: ios
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_IOS }}
+          artifact: ${{ runner.temp }}/CCPocket.xcarchive
+
+      - name: Verify archive symbols and wait for Sentry processing
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.PAIRLET_SENTRY_AUTH_TOKEN }}
+        run: bash scripts/observability-symbols.sh "$RUNNER_TEMP/CCPocket.xcarchive" --upload
 
       - name: Export & upload to App Store Connect
         env:
