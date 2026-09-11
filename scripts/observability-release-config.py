@@ -9,6 +9,7 @@ import sys
 import zipfile
 
 RESOURCE = 'cc-pocket-sentry.properties'
+ANALYTICS_RESOURCE = 'cc-pocket-analytics.properties'
 TARGETS = {
     'android': Path('mobile/composeApp/src/androidMain/resources') / RESOURCE,
     'desktop': Path('mobile/composeApp/src/desktopMain/resources') / RESOURCE,
@@ -16,6 +17,16 @@ TARGETS = {
     'relay': Path('relay/src/main/resources') / RESOURCE,
     'ios': Path('iosApp/Observability.generated.xcconfig'),
 }
+# Only the desktop app talks to the analytics ingress (docs/observability/DESKTOP-GA4-INGRESS.md §8).
+ANALYTICS_TARGETS = {
+    'desktop': Path('mobile/composeApp/src/desktopMain/resources') / ANALYTICS_RESOURCE,
+}
+# scheme + host (+ optional port) only: a path, query, fragment or trailing slash would change
+# which endpoint the client builds, and the restricted alphabet also blocks properties-file
+# interpolation. This is a public ingress origin, never a Measurement Protocol API secret.
+ANALYTICS_ENDPOINT = re.compile(
+    r'https://[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?::[0-9]{1,5})?'
+)
 
 
 def render(component, environment, dsn):
@@ -34,8 +45,17 @@ def render(component, environment, dsn):
     return f'environment={environment}\ndsn.{component}={dsn}\n'
 
 
-def stage(root, component, environment, dsn):
+def render_analytics(endpoint):
+    # Same posture as the DSN: an official desktop build must not silently ship without analytics.
+    if not isinstance(endpoint, str) or len(endpoint) > 256 or not ANALYTICS_ENDPOINT.fullmatch(endpoint):
+        raise ValueError('missing or invalid analytics ingress endpoint')
+    return f'endpoint={endpoint}\n'
+
+
+def stage(root, component, environment, dsn, endpoint=None):
     content = render(component, environment, dsn)
+    # Render both before writing either: a missing endpoint must fail before anything lands on disk.
+    analytics = render_analytics(endpoint) if component in ANALYTICS_TARGETS else None
     destination = Path(root) / TARGETS[component]
     destination.parent.mkdir(parents=True, exist_ok=True)
     # Never replace a developer's local config accidentally. CI has a fresh checkout; callers that
@@ -43,11 +63,18 @@ def stage(root, component, environment, dsn):
     with destination.open('x', encoding='utf-8', newline='\n') as out:
         out.write(content)
     destination.chmod(0o600)
+    if analytics is not None:
+        ingress = Path(root) / ANALYTICS_TARGETS[component]
+        ingress.parent.mkdir(parents=True, exist_ok=True)
+        with ingress.open('x', encoding='utf-8', newline='\n') as out:
+            out.write(analytics)
+        ingress.chmod(0o600)
     return destination
 
 
-def verify(artifact, component, environment, dsn):
+def verify(artifact, component, environment, dsn, endpoint=None):
     expected = render(component, environment, dsn)
+    expected_analytics = render_analytics(endpoint) if component in ANALYTICS_TARGETS else None
     artifact = Path(artifact)
     if component == 'ios':
         plists = list(artifact.glob('Products/Applications/*.app/Info.plist'))
@@ -59,6 +86,7 @@ def verify(artifact, component, environment, dsn):
         return
     archives = sorted(artifact.rglob('*.jar')) if artifact.is_dir() else [artifact]
     found = []
+    analytics = []
     for archive in archives:
         with zipfile.ZipFile(archive) as contents:
             # Official desktop analytics still needs a server-side MP credential boundary. An
@@ -66,12 +94,18 @@ def verify(artifact, component, environment, dsn):
             if any(n.rsplit('/', 1)[-1] == 'ga4.properties' for n in contents.namelist()):
                 raise ValueError('private GA4 configuration in public artifact')
             for entry in contents.infolist():
-                if entry.filename.rsplit('/', 1)[-1] == RESOURCE:
+                name = entry.filename.rsplit('/', 1)[-1]
+                if name in (RESOURCE, ANALYTICS_RESOURCE):
                     if entry.file_size > 2048:
                         raise ValueError('unexpected configuration size')
-                    found.append(contents.read(entry).decode('utf-8'))
+                    (found if name == RESOURCE else analytics).append(contents.read(entry).decode('utf-8'))
     if found != [expected]:
         raise ValueError('artifact must contain exactly the expected component configuration')
+    if expected_analytics is None:
+        if analytics:
+            raise ValueError('analytics configuration in non-desktop artifact')
+    elif analytics != [expected_analytics]:
+        raise ValueError('artifact must contain exactly the expected analytics ingress configuration')
 
 
 def main():
@@ -83,16 +117,18 @@ def main():
     try:
         root = Path(__file__).resolve().parents[1]
         dsn = os.environ.get('PAIRLET_SENTRY_DSN', '')
+        endpoint = os.environ.get('PAIRLET_ANALYTICS_ENDPOINT', '')
         if args.verify:
-            verify(args.verify, args.component, args.environment, dsn)
+            verify(args.verify, args.component, args.environment, dsn, endpoint)
         else:
-            stage(root, args.component, args.environment, dsn)
+            stage(root, args.component, args.environment, dsn, endpoint)
     except (ValueError, OSError, zipfile.BadZipFile, plistlib.InvalidFileException):
         # Do not print env, config contents, or exception text (it can echo an input/path).
-        print('Sentry config check failed: verify public DSN, target, environment, and packaged resources', file=sys.stderr)
+        print('Sentry config check failed: verify public DSN, analytics endpoint, target, environment, and packaged resources', file=sys.stderr)
         return 1
     action = 'artifact verified' if args.verify else 'config staged'
-    print(f'Sentry public {action}: {args.component}/{args.environment}; user consent is unchanged')
+    ingress = f"; analytics ingress {'verified' if args.verify else 'staged'}" if args.component in ANALYTICS_TARGETS else ''
+    print(f'Sentry public {action}: {args.component}/{args.environment}{ingress}; user consent is unchanged')
     return 0
 
 

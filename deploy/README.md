@@ -49,6 +49,8 @@ WebSocket endpoints (proxied automatically): `/v1/daemon`, `/v1/device`. REST: `
   `ProtectHome`, runs as `ccpocket`, only `/var/lib/cc-pocket-relay` writable, `JAVA_TOOL_OPTIONS=-Xmx256m`).
 - `Caddyfile` — one site, `reverse_proxy 127.0.0.1:9000`; Caddy auto-provisions Let's Encrypt
   and auto-upgrades WebSocket.
+- `analytics.env.example` — placeholder template for the desktop analytics ingress config
+  (`/etc/cc-pocket-relay/analytics.env`, see "Analytics ingress" below).
 - `mirror-sync.sh` + `cc-pocket-mirror-sync.{service,timer}` — the mainland-China release mirror:
   a 30-min systemd timer on the relay box pulls the latest GitHub release's daemon assets into
   `/var/www/cc-pocket-dl` (checksum-verified against the release SHA256SUMS before anything goes
@@ -57,6 +59,28 @@ WebSocket endpoints (proxied automatically): `/v1/daemon`, `/v1/device`. REST: `
   re-provision with `bash scripts/provision-relay-mirror.sh`; after cutting a release you can kick
   an immediate sync with `systemctl start cc-pocket-mirror-sync.service` instead of waiting for
   the timer.
+
+## Analytics ingress (optional)
+
+The desktop app reports GA4 product events to the relay itself, at `/v1/analytics/register` and
+`/v1/analytics/collect`; the relay forwards them to the Measurement Protocol. The full contract
+(routing, anonymous install tokens, field whitelist, quotas, logging bounds) is
+[`docs/observability/DESKTOP-GA4-INGRESS.md`](../docs/observability/DESKTOP-GA4-INGRESS.md).
+
+Server-side config is a single env file, loaded by `cc-pocket-relay.service`:
+
+```bash
+# from deploy/, after filling in the real stream ids/secrets — never commit the filled copy
+install -m 0600 -o ccpocket -g ccpocket analytics.env /etc/cc-pocket-relay/analytics.env
+systemctl restart cc-pocket-relay
+```
+
+- The MP `api_secret` lives **only** in that file. It is not in this repo, not a GitHub
+  secret/variable, and never inside a client package.
+- The file is optional: without it the relay starts normally and both endpoints answer `204`.
+- `Caddyfile` caps `/v1/analytics/*` request bodies at 8 KB, matching the relay's own check.
+- Desktop packages carry only the public ingress origin (`cc-pocket-analytics.properties`,
+  staged in CI from the `PAIRLET_ANALYTICS_ENDPOINT` repository variable).
 
 ## SSH (non-interactive)
 

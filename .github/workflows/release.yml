@@ -363,6 +363,7 @@ jobs:
         with:
           component: desktop
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_DESKTOP }}
+          analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT }}
 
       - name: Install Rosetta (for the x86_64 JDK)
         if: matrix.arch == 'x86_64'
@@ -413,6 +414,7 @@ jobs:
         with:
           component: desktop
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_DESKTOP }}
+          analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT }}
           artifact: mobile/composeApp/build/compose/binaries/main/app
 
       - name: Upload DMG to release v${{ inputs.version }}
@@ -441,6 +443,7 @@ jobs:
         with:
           component: desktop
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_DESKTOP }}
+          analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT }}
 
       - name: Set up JDK 17 (with jpackage)
         uses: actions/setup-java@v5
@@ -478,6 +481,7 @@ jobs:
         with:
           component: desktop
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_DESKTOP }}
+          analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT }}
           artifact: mobile/composeApp/build/compose/binaries/main/app
 
       - name: Upload MSI to release v${{ inputs.version }}

@@ -73,6 +73,12 @@ pocket.ark-nexus.cc {
 		root * /var/www/cc-pocket-site
 		file_server
 	}
+	# Analytics ingress (docs/observability/DESKTOP-GA4-INGRESS.md §1): cap the body at the proxy
+	# too, so an oversized request never reaches the relay's own 8 KB check.
+	@analytics path /v1/analytics/*
+	request_body @analytics {
+		max_size 8KB
+	}
 	# Caddy auto-provisions a Let's Encrypt cert (needs inbound 80/443 from the
 	# internet for the ACME challenge) and auto-handles the WebSocket upgrade,
 	# so the relay's /v1/daemon and /v1/device WS endpoints just work.

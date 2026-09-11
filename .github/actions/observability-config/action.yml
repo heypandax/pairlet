@@ -7,6 +7,9 @@ inputs:
   dsn:
     required: true
     description: Public DSN only; never a Sentry auth token or GA4 API secret
+  analytics_endpoint:
+    required: false
+    description: Public HTTPS analytics ingress origin for desktop builds; never a GA4 API secret
   environment:
     required: false
     default: production
@@ -21,6 +24,7 @@ runs:
       env:
         PAIRLET_COMPONENT: ${{ inputs.component }}
         PAIRLET_SENTRY_DSN: ${{ inputs.dsn }}
+        PAIRLET_ANALYTICS_ENDPOINT: ${{ inputs.analytics_endpoint }}
         PAIRLET_ENVIRONMENT: ${{ inputs.environment }}
         PAIRLET_ARTIFACT: ${{ inputs.artifact }}
       run: |

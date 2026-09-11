@@ -93,6 +93,8 @@ harmony/release/
 
 # Local Sentry project configuration (public DSNs, environment-specific)
 **/cc-pocket-sentry.properties
+# Local analytics ingress origin (public endpoint only, never an MP API secret)
+**/cc-pocket-analytics.properties
 iosApp/Sentry.local.xcconfig
 
 # Generated public Sentry settings for a single iOS archive
