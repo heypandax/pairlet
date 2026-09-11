@@ -57,6 +57,8 @@ jobs:
           Unsigned build rehearsal only. Artifacts expire after 14 days.
           No tag, Release, store upload, package-manager update or deployment is performed.
           Firebase uses placeholders. Harmony receives static checks only.
+          Sentry uses public component DSNs with environment=staging and existing sharing preferences.
+          Packaged config and local iOS dSYM UUIDs are checked; no symbols are uploaded.
           EOF
 
   daemon:
@@ -98,8 +100,21 @@ jobs:
           distribution: temurin
           java-version: "17"
           architecture: ${{ matrix.jdk_arch }}
+      - name: Stage staging Sentry config
+        uses: ./.github/actions/observability-config
+        with:
+          component: daemon
+          environment: staging
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DAEMON }}
       - name: Build native daemon image
         run: ./gradlew --no-daemon :daemon:packageDaemon -PappVersion="$PREVIEW_VERSION"
+      - name: Verify packaged Sentry configuration
+        uses: ./.github/actions/observability-config
+        with:
+          component: daemon
+          environment: staging
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DAEMON }}
+          artifact: daemon/build/jpackage
       - name: Check packaged version without running a service
         run: |
           python3 - <<'PY'
@@ -165,6 +180,12 @@ jobs:
       - uses: android-actions/setup-android@v4
       - name: Use placeholder Firebase config
         run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+      - name: Stage staging Sentry config
+        uses: ./.github/actions/observability-config
+        with:
+          component: desktop
+          environment: staging
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DESKTOP }}
       - name: Build app and check bundled JVM
         env:
           APP_IMAGE: ${{ runner.os == 'Windows' && 'CC Pocket' || 'CC Pocket.app' }}
@@ -175,6 +196,13 @@ jobs:
         env:
           PACKAGE_TASK: ${{ runner.os == 'Windows' && 'packageMsi' || 'packageDmg' }}
         run: ./gradlew --no-daemon ":mobile:composeApp:$PACKAGE_TASK"
+      - name: Verify packaged Sentry configuration
+        uses: ./.github/actions/observability-config
+        with:
+          component: desktop
+          environment: staging
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DESKTOP }}
+          artifact: mobile/composeApp/build/compose/binaries/main/app
       - name: Collect unsigned installers
         env:
           PLATFORM: ${{ matrix.platform }}
@@ -216,6 +244,12 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v4
+      - name: Stage staging Sentry config
+        uses: ./.github/actions/observability-config
+        with:
+          component: android
+          environment: staging
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_ANDROID }}
       - name: Build unsigned release APK with placeholder Firebase
         run: |
           cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
@@ -223,6 +257,13 @@ jobs:
           mkdir -p out
           cp mobile/composeApp/build/outputs/apk/release/*-unsigned.apk out/
           python3 scripts/preview-manifest.py out
+      - name: Verify packaged Sentry configuration
+        uses: ./.github/actions/observability-config
+        with:
+          component: android
+          environment: staging
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_ANDROID }}
+          artifact: mobile/composeApp/build/outputs/apk/release/composeApp-release-unsigned.apk
       - uses: actions/upload-artifact@v7
         with:
           name: pairlet-preview-${{ inputs.version }}-android-unsigned
@@ -243,6 +284,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - name: Stage staging Sentry config
+        uses: ./.github/actions/observability-config
+        with:
+          component: ios
+          environment: staging
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_IOS }}
       - name: Prepare Xcode project with placeholder Firebase
         run: |
           brew install xcodegen
@@ -255,12 +302,22 @@ jobs:
           xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/Pairlet-preview.xcarchive" \
+            -xcconfig iosApp/Observability.generated.xcconfig \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             archive | tee "$RUNNER_TEMP/preview-archive.log"
           grep -q 'ARCHIVE SUCCEEDED' "$RUNNER_TEMP/preview-archive.log"
           mkdir -p out
           ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/Pairlet-preview.xcarchive" "out/Pairlet-$PREVIEW_VERSION-ios-unsigned.xcarchive.zip"
           python3 scripts/preview-manifest.py out
+      - name: Verify archived Sentry configuration
+        uses: ./.github/actions/observability-config
+        with:
+          component: ios
+          environment: staging
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_IOS }}
+          artifact: ${{ runner.temp }}/Pairlet-preview.xcarchive
+      - name: Check local archive symbols without uploading
+        run: bash scripts/observability-symbols.sh "$RUNNER_TEMP/Pairlet-preview.xcarchive"
       - uses: actions/upload-artifact@v7
         with:
           name: pairlet-preview-${{ inputs.version }}-ios-unsigned

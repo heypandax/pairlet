@@ -4,3 +4,4 @@ What's new in 2.0.0
 • A shorter computer command: use pairlet with the same subcommands as cc-pocket-daemon. The legacy command remains available.
 • Updated website and help links for pairlet.org, with support for both the old and new GitHub repository addresses.
 • Improved discovery of standalone OpenCode CLI installations when the daemon runs in the background.
+• Added a usage and diagnostics sharing setting, plus a recent diagnostic ID you can copy when reporting a problem. Computer diagnostics are controlled separately.

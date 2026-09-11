@@ -28,6 +28,12 @@ gh workflow run release-preview.yml --ref main \
 构建五种 daemon、三种桌面安装包、Android unsigned release APK 和 iOS unsigned archive，
 并检查桌面包内 JVM；macOS daemon 另测新旧命令。Harmony 只执行静态发布契约检查。
 
+观测模块合入后，预演复用正式构建的 Sentry 配置门禁：从各组件 `PAIRLET_SENTRY_DSN_*`
+仓库变量注入公开 DSN，环境固定为 `staging`；上传 Actions 产物前核对真实 APK、jar 或
+归档 Info.plist，拒绝缺失/混错配置及桌面 GA4 私钥资源。iOS 另检查本次 archive 的 dSYM
+架构与 UUID，不上传符号。产物清单注明 staging；实际采集仍遵循已有开关，不能把
+构建检查或 Firebase 占位包当作后台上报验收。
+
 产物仅保存到 Actions，保留 14 天，随包提供提交 SHA、运行链接和 SHA-256。
 流程只有仓库读取权限，不读取发布密钥，不创建 tag/Release，不上传商店或 TestFlight，
 不更新 Homebrew/Scoop、镜像和生产服务。移动端使用 Firebase 占位配置；无签名 APK/archive

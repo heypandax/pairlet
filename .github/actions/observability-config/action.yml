@@ -7,6 +7,10 @@ inputs:
   dsn:
     required: true
     description: Public DSN only; never a Sentry auth token or GA4 API secret
+  environment:
+    required: false
+    default: production
+    description: production for official releases; staging for unsigned previews
   artifact:
     required: false
     description: When supplied, verify this build artifact instead of staging a config
@@ -17,10 +21,11 @@ runs:
       env:
         PAIRLET_COMPONENT: ${{ inputs.component }}
         PAIRLET_SENTRY_DSN: ${{ inputs.dsn }}
+        PAIRLET_ENVIRONMENT: ${{ inputs.environment }}
         PAIRLET_ARTIFACT: ${{ inputs.artifact }}
       run: |
         if [ -n "$PAIRLET_ARTIFACT" ]; then
-          python3 scripts/observability-release-config.py "$PAIRLET_COMPONENT" --verify "$PAIRLET_ARTIFACT"
+          python3 scripts/observability-release-config.py "$PAIRLET_COMPONENT" --environment "$PAIRLET_ENVIRONMENT" --verify "$PAIRLET_ARTIFACT"
         else
-          python3 scripts/observability-release-config.py "$PAIRLET_COMPONENT"
+          python3 scripts/observability-release-config.py "$PAIRLET_COMPONENT" --environment "$PAIRLET_ENVIRONMENT"
         fi

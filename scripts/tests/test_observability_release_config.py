@@ -69,6 +69,26 @@ class ReleaseConfigTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 config.verify(root, 'ios', 'staging', DSN)
 
+    def test_preview_staging_resources_cannot_pass_the_production_gate(self):
+        for component in ('android', 'desktop', 'daemon', 'relay', 'ios'):
+            with self.subTest(component=component), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                if component == 'ios':
+                    info = root / 'Products/Applications/Pairlet.app/Info.plist'
+                    info.parent.mkdir(parents=True)
+                    info.write_bytes(plistlib.dumps({'CCPocketSentryDSN': DSN, 'CCPocketSentryEnvironment': 'staging'}))
+                    artifact = root
+                else:
+                    resource = config.stage(root / 'source', component, 'staging', DSN)
+                    artifact = root / ('app.apk' if component == 'android' else 'image')
+                    archive = artifact if component == 'android' else artifact / 'lib/app.jar'
+                    archive.parent.mkdir(parents=True, exist_ok=True)
+                    with zipfile.ZipFile(archive, 'w') as output:
+                        output.writestr(config.RESOURCE, resource.read_bytes())
+                config.verify(artifact, component, 'staging', DSN)
+                with self.assertRaises(ValueError):
+                    config.verify(artifact, component, 'production', DSN)
+
 
 if __name__ == '__main__':
     unittest.main()

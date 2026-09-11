@@ -22,6 +22,7 @@ def main():
         checksums[package.name] = digest.hexdigest()
     manifest = {
         "kind": "unsigned-release-preview",
+        "sentry_environment": "staging",
         "version": os.environ["PREVIEW_VERSION"],
         "commit": os.environ["GITHUB_SHA"],
         "run": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
@@ -33,6 +34,8 @@ def main():
     (output / "PREVIEW.txt").write_text(
         "Pairlet build rehearsal only. Not a published release.\n"
         "No distribution signing or notarization; mobile Firebase config is a placeholder.\n"
+        "Sentry public component configuration is verified with environment=staging; existing sharing preferences apply.\n"
+        "iOS symbols are checked locally only, without a Sentry symbol upload.\n"
         "Unsigned Android APKs and iOS archives are build evidence, not installable store builds.\n"
         "Do not distribute through stable update channels. Artifacts expire after 14 days.\n",
         encoding="utf-8",

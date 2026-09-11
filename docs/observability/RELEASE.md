@@ -13,6 +13,8 @@
 
 这些门禁只保证官方构建配置与符号上传流程，仍尊重已有采集关闭偏好。桌面生产 GA4 还需服务端接收/转发边界，不能将本机 Measurement Protocol secret 复制到公开客户端。本机测试凭据保持本机用途。没有触发公开发行、App Store 上传、fatal 切换或服务重启。
 
+`release-preview.yml` 同样使用此 action，但明确传入 `environment: staging`，校验预演 APK、daemon/desktop jar 和 iOS archive；缺失配置不会生成可下载的预演 artifact。iOS 只核对本地 dSYM，不携带符号上传 token、不上传符号。正式工作流省略该参数时仍为 production，staging 包无法通过正式环境门禁。详见 [发布预演](../RELEASE.md#只预演不正式发布)。
+
 ## 构建身份和符号
 
 发布记录必须包含 Git SHA、dirty 状态/补丁标识、构建时间、版本、平台、包哈希、实际环境、Sentry 项目和符号标识。沿用当前兼容配置键与包名；Sentry 项目名为 Pairlet。相同版本不同开发包不能仅凭 release 字符串区分，应补实际包哈希。

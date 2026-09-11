@@ -6,4 +6,6 @@ CODING SESSIONS: the app is a remote control for command-line coding tools that 
 
 OPTIONAL HELP: the Help screen can open our website's AI customer support. This is a separate HTTPS service, outside the encrypted coding-session channel. Questions submitted there are processed by the project-operated support server and its configured model provider. App analytics, crash reporting, and push notifications also use separate services, as described in the privacy policy: https://pairlet.org/privacy.html
 
+DIAGNOSTICS IN 2.0: Settings includes "Share usage and diagnostics" and a button to copy the latest diagnostic ID when one is available. Firebase continues to provide usage analytics and crash reports; Sentry receives structured diagnostic errors, logs and timing information. Sentry diagnostics exclude prompts, conversation text, file paths and contents, agent output and pairing credentials. These are separate HTTPS requests, not part of the encrypted coding-session relay channel. The app setting controls this app only; the computer daemon has a separate diagnostic setting.
+
 No Pairlet account or login is required. Coding-session communication with the user's own computer uses standard encryption algorithms only: TLS + Noise/X25519/AES-GCM (ITSAppUsesNonExemptEncryption is false).
