@@ -10,13 +10,15 @@ spec = importlib.util.spec_from_file_location('release_config', Path(__file__).r
 config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(config)
 DSN = 'https://' + 'a' * 32 + '@o123.ingest.us.sentry.io/456'
+# Desktop official builds also carry the public analytics ingress origin (never an MP secret).
+ENDPOINT = 'https://pocket.ark-nexus.cc'
 
 
 class ReleaseConfigTest(unittest.TestCase):
     def test_each_component_only_bundles_its_public_dsn(self):
         with tempfile.TemporaryDirectory() as folder:
             for component in ('android', 'desktop', 'daemon', 'relay'):
-                path = config.stage(folder, component, 'production', DSN)
+                path = config.stage(folder, component, 'production', DSN, ENDPOINT)
                 self.assertEqual(path.read_text().splitlines(), ['environment=production', f'dsn.{component}={DSN}'])
 
     def test_missing_private_or_injectable_values_fail_before_writing(self):
@@ -36,10 +38,10 @@ class ReleaseConfigTest(unittest.TestCase):
 
     def test_existing_private_config_is_never_overwritten(self):
         with tempfile.TemporaryDirectory() as folder:
-            path = config.stage(folder, 'desktop', 'development', DSN)
+            path = config.stage(folder, 'desktop', 'development', DSN, ENDPOINT)
             original = path.read_bytes()
             with self.assertRaises(FileExistsError):
-                config.stage(folder, 'desktop', 'production', DSN)
+                config.stage(folder, 'desktop', 'production', DSN, ENDPOINT)
             self.assertEqual(original, path.read_bytes())
 
     def test_artifact_gate_rejects_missing_duplicate_wrong_env_and_private_resources(self):
@@ -79,15 +81,17 @@ class ReleaseConfigTest(unittest.TestCase):
                     info.write_bytes(plistlib.dumps({'CCPocketSentryDSN': DSN, 'CCPocketSentryEnvironment': 'staging'}))
                     artifact = root
                 else:
-                    resource = config.stage(root / 'source', component, 'staging', DSN)
+                    resource = config.stage(root / 'source', component, 'staging', DSN, ENDPOINT)
                     artifact = root / ('app.apk' if component == 'android' else 'image')
                     archive = artifact if component == 'android' else artifact / 'lib/app.jar'
                     archive.parent.mkdir(parents=True, exist_ok=True)
                     with zipfile.ZipFile(archive, 'w') as output:
                         output.writestr(config.RESOURCE, resource.read_bytes())
-                config.verify(artifact, component, 'staging', DSN)
+                        if component == 'desktop':
+                            output.writestr(config.ANALYTICS_RESOURCE, config.render_analytics(ENDPOINT))
+                config.verify(artifact, component, 'staging', DSN, ENDPOINT)
                 with self.assertRaises(ValueError):
-                    config.verify(artifact, component, 'production', DSN)
+                    config.verify(artifact, component, 'production', DSN, ENDPOINT)
 
 
 if __name__ == '__main__':

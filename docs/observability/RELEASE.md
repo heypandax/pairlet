@@ -11,6 +11,8 @@
 - 仓库变量：`PAIRLET_SENTRY_DSN_ANDROID`、`PAIRLET_SENTRY_DSN_DESKTOP`、`PAIRLET_SENTRY_DSN_DAEMON`、`PAIRLET_SENTRY_DSN_IOS`；另已配置 `PAIRLET_SENTRY_DSN_RELAY` 供 relay 构建复用。值是公开的写入 DSN，授权令牌不能放这里。
 - iOS 仓库 secret：`PAIRLET_SENTRY_AUTH_TOKEN`，来自组织 token `Pairlet GitHub release symbols`，仅 `org:ci`。只在上传步骤注入进程环境；不进入 App、日志、仓库或 artifact。缺失会在 archive 前明确失败。
 - iOS 通过 `-xcconfig iosApp/Observability.generated.xcconfig` 注入，归档后读取处理过的 App Info.plist 对照 DSN/环境，再核对并上传本次 archive 的 dSYM。上传处理未成功时不进入 App Store Connect 上传步骤。CLI 固定 3.7.0、校验官方 asset SHA-256；`project.yml` 同时固定 Cocoa 8.58.2 与归档 scheme，避免 CI 重建工程丢失依赖。
+- 桌面包（macOS／Windows，正式与预演）除 Sentry 资源外，还会 stage／verify 分析入口资源 `cc-pocket-analytics.properties`：正式构建取仓库变量 `PAIRLET_ANALYTICS_ENDPOINT`，`release-preview.yml` 的 staging 构建取 `PAIRLET_ANALYTICS_ENDPOINT_PREVIEW`。值必须是纯 `https://主机[:端口]` 形式的入口源站，不带路径、查询或结尾斜杠，**不是** GA4 Measurement Protocol 的 api_secret。校验要求包内恰好一份该资源、内容等于 `endpoint=<变量>`，非桌面组件的产物里出现该资源即失败，`ga4.properties` 依旧一律拒绝。入口契约见 [桌面端 GA4 分析入口契约](DESKTOP-GA4-INGRESS.md)。
+- **这两个仓库变量尚未创建**（现有仓库配置表里没有它们）。在创建之前，`release.yml` 与 `release-preview.yml` 的桌面任务会在门禁步骤失败——这与 DSN 同一姿态：缺配置宁可失败，也不静默发出没有采集能力的官方桌面包。
 - `scripts/observability-release-config.py` 同时支持本地 staging 和 relay；拒绝覆盖已有配置。relay 当前部署方式未改动，仓库变量也不会自动改写正在运行的服务。
 
 这些门禁只保证官方构建配置与符号上传流程，仍尊重已有采集关闭偏好。桌面生产 GA4 还需服务端接收/转发边界，不能将本机 Measurement Protocol secret 复制到公开客户端。本机测试凭据保持本机用途。没有触发公开发行、App Store 上传、fatal 切换或服务重启。
@@ -54,7 +56,7 @@ Sentry DSN 是客户端写入配置，可以进入安装包；符号上传 token
 
 `ios-release.yml` 在 archive 前检查 token 非空；archive 后校验配置、上传匹配的 dSYM 并等待处理，成功后才进入 App Store Connect 上传。Android 当前不启用 R8，不需要给它额外增加 Sentry mapping 上传 token。一般 PR 的 `ci.yml` 使用 Firebase 占位配置，不需要 Sentry 上传密钥；统一 `release-preview.yml` 注入 staging DSN、使用 Firebase 占位配置且不上传 iOS 符号，也不需要此 token。历史 `build-windows.yml` 仅作独立编译测试、未注入 Sentry DSN；需要可观测预览包时使用统一 release-preview，不把它的产物当成已配置诊断的发行包。
 
-**桌面 GA4 独立限制**：Measurement Protocol 的 API secret 不是 Sentry DSN。当前正式桌面包不会携带本机 GA4 secret；生产桌面采集仍需安全的服务端接收/转发方案，不能靠把 secret 放进 GitHub 再打包到公开客户端解决。这是后续能力需求，不是等待留存数据后会自动消失的问题；不影响本次 Sentry 配置准备。
+**桌面 GA4 服务端边界**：Measurement Protocol 的 api_secret 不是 Sentry DSN，永远不进公开客户端。服务端接收／转发入口已在 [桌面端 GA4 分析入口契约](DESKTOP-GA4-INGRESS.md) 中定稿（relay 同进程、`/v1/analytics/*`、匿名安装令牌、字段白名单与限流），secret 只存在于 relay 机的 `/etc/cc-pocket-relay/analytics.env`（模板 `deploy/analytics.env.example`，0600、属主 ccpocket、不进仓库）。官方桌面包只携带公开的入口源站地址。服务端实现与真实部署验收另行记录，不影响本次 Sentry 配置准备。
 
 ## 构建身份和符号
 

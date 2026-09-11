@@ -186,6 +186,7 @@ jobs:
           component: desktop
           environment: staging
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_DESKTOP }}
+          analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT_PREVIEW }}
       - name: Build app and check bundled JVM
         env:
           APP_IMAGE: ${{ runner.os == 'Windows' && 'CC Pocket' || 'CC Pocket.app' }}
@@ -202,6 +203,7 @@ jobs:
           component: desktop
           environment: staging
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_DESKTOP }}
+          analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT_PREVIEW }}
           artifact: mobile/composeApp/build/compose/binaries/main/app
       - name: Collect unsigned installers
         env:

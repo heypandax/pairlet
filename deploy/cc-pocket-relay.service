@@ -18,6 +18,12 @@ Environment=JAVA_TOOL_OPTIONS=-Xmx256m
 # never committed. See scripts/provision-relay-push.sh.
 EnvironmentFile=-/etc/cc-pocket-relay/push.env
 
+# Analytics ingress config (GA4 Measurement Protocol streams + token key). Optional ("-"): without
+# it the relay starts normally and /v1/analytics/* answers 204 (collection disabled). Provisioned
+# out-of-band to /etc/cc-pocket-relay/analytics.env (0600, owner ccpocket), never committed.
+# Template: deploy/analytics.env.example. Contract: docs/observability/DESKTOP-GA4-INGRESS.md.
+EnvironmentFile=-/etc/cc-pocket-relay/analytics.env
+
 # Binds LOOPBACK only — Caddy reverse-proxies to it. SQLite db lives under /var/lib.
 ExecStart=/opt/cc-pocket-relay/bin/cc-pocket-relay --host 127.0.0.1 --port 9000 --db /var/lib/cc-pocket-relay/relay.db
 
