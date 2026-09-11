@@ -16,7 +16,7 @@
 # 前置：本机 DevEco Studio（Harmony job 会自检）、gh 已登录且对仓库有 admin 权限。
 set -euo pipefail
 
-REPO="${HARMONY_RUNNER_REPO:-heypandax/cc-pocket}"
+REPO="${HARMONY_RUNNER_REPO:-heypandax/pairlet}"
 LABELS='["self-hosted","macOS","ARM64","harmony"]'
 CACHE_DIR="${HOME}/Library/Caches/cc-pocket/actions-runner"
 
