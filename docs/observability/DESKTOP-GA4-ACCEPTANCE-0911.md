@@ -2,7 +2,7 @@
 
 本文是 [DESKTOP-GA4-INGRESS.md](DESKTOP-GA4-INGRESS.md) §10「批次 4 验收」的抽样执行记录。只做验证与记录，**未改动任何产品代码**；过程中发现的问题只登记、不修复。
 
-- 执行分支：`feat/desktop-ga4-ingress`，worktree `/Users/lidapeng/Desktop/Project/app/cc-pocket-worktrees/desktop-ga4-ingress`，HEAD `14a96a99`。
+- 执行分支：`feat/desktop-ga4-ingress`，worktree `/Users/lidapeng/Desktop/Project/app/cc-pocket-worktrees/desktop-ga4-ingress`，HEAD `3c0b8687`（提交日期统一重写后的 SHA，树内容与验收时记录的 `14a96a99` 完全相同）。
 - 环境：macOS 26（Darwin 25.5.0），JDK `/opt/homebrew/opt/openjdk@17`。
 - 所有真实上报均为 **staging** 环境，落 GA4 属性 `540841272` 的 Web 数据流 `G-X04707FM0W`（streamId `15754516140`）。production 流未被触碰。
 
