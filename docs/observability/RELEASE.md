@@ -2,25 +2,38 @@
 
 2026-09-10 实施与验收稿。集中本地回归、SDK 出口及脚本替身测试已通过，详见 [ACCEPTANCE](ACCEPTANCE.md)；本页不构成实际部署、正式发版或自动 fatal 切换回执。
 
+## 官方包配置门禁（2026-09-11 增量）
+
+`release.yml` 的 Android、macOS/Windows desktop、三平台 daemon 构建均调用公共 action `observability-config`：构建前从仓库变量生成 **production** 配置，发布资产前再读取真实 APK / app 内的 jar，要求恰好一份正确组件配置。缺 DSN、错组件/环境、重复配置或夹带本机 `ga4.properties` 都会失败，避免新发行包无诊断能力或将 MP 私钥打包。
+
+- 仓库变量：`PAIRLET_SENTRY_DSN_ANDROID`、`PAIRLET_SENTRY_DSN_DESKTOP`、`PAIRLET_SENTRY_DSN_DAEMON`、`PAIRLET_SENTRY_DSN_IOS`；另已配置 `PAIRLET_SENTRY_DSN_RELAY` 供 relay 构建复用。值是公开的写入 DSN，授权令牌不能放这里。
+- iOS 仓库 secret：`PAIRLET_SENTRY_AUTH_TOKEN`，来自组织 token `Pairlet GitHub release symbols`，仅 `org:ci`。只在上传步骤注入进程环境；不进入 App、日志、仓库或 artifact。缺失会在 archive 前明确失败。
+- iOS 通过 `-xcconfig iosApp/Observability.generated.xcconfig` 注入，归档后读取处理过的 App Info.plist 对照 DSN/环境，再核对并上传本次 archive 的 dSYM。上传处理未成功时不进入 App Store Connect 上传步骤。CLI 固定 3.7.0、校验官方 asset SHA-256；`project.yml` 同时固定 Cocoa 8.58.2 与归档 scheme，避免 CI 重建工程丢失依赖。
+- `scripts/observability-release-config.py` 同时支持本地 staging 和 relay；拒绝覆盖已有配置。relay 当前部署方式未改动，仓库变量也不会自动改写正在运行的服务。
+
+这些门禁只保证官方构建配置与符号上传流程，仍尊重已有采集关闭偏好。桌面生产 GA4 还需服务端接收/转发边界，不能将本机 Measurement Protocol secret 复制到公开客户端。本机测试凭据保持本机用途。没有触发公开发行、App Store 上传、fatal 切换或服务重启。
+
 ## 构建身份和符号
 
 发布记录必须包含 Git SHA、dirty 状态/补丁标识、构建时间、版本、平台、包哈希、实际环境、Sentry 项目和符号标识。沿用当前兼容配置键与包名；Sentry 项目名为 Pairlet。相同版本不同开发包不能仅凭 release 字符串区分，应补实际包哈希。
 
 | 平台 | 当前方式 | 发布核验 |
 |---|---|---|
-| iOS | Cocoa 8.58.2；Kotlin framework 静态链接 | 从本次 archive 提取 App dSYM，核对 App 与各嵌入动态 framework 的架构/UUID；Kotlin 帧还需在后台对照实际故障源函数 |
-| Android | Sentry Java 8.41.0 安全 handled sink；当前 release 未开启 R8 minify | 当前不产生混淆 mapping，记录 `not_minified`；以后启用 minify 必须同一构建注入 mapping UUID 并上传对应 mapping，不能上传任意上次文件 |
+| iOS | Cocoa 8.58.2；Kotlin framework 静态链接 | 从本次 archive 提取 App dSYM，核对 App 与各有代码的嵌入动态 framework 的架构/UUID；无代码占位库见下文。已实测 App 符号入库，Kotlin 原生帧仍需实际故障验收 |
+| Android | Sentry Java 8.41.0 安全 handled sink；当前 release 未开启 R8 minify | 实际 1.9.8 handled 错误已在后台核对 `PocketRepository.kt:2486`（见 ACCEPTANCE）；当前不产生混淆 mapping，记录 `not_minified`；以后启用 minify 必须同一构建注入 mapping UUID 并上传对应 mapping，不能上传任意上次文件 |
 | desktop / daemon / relay | JVM class 行号、安全 Throwable 栈 | 对受控故障检查实际 jar 哈希、release、函数与行号；独立 smoke 的行号不能替代实际应用包 |
 
 iOS 符号检查入口：
 
 ```sh
 bash scripts/observability-symbols.sh /absolute/path/Pairlet.xcarchive
-# 项目范围上传 token 从安全环境注入；不写进命令、仓库、日志或客户端。
+# 仅 org:ci 的上传 token 从安全环境注入；不写进命令、仓库、日志或客户端。
 bash scripts/observability-symbols.sh /absolute/path/Pairlet.xcarchive --upload
 ```
 
 脚本只扫描给定 archive 的 dSYMs，不上传源码 bundle。`--wait` 等待服务端符号处理；之后仍须在真实收到的受控错误/崩溃中核对函数/源码位置。官方依据：[debug-files 与 mapping 上传](https://docs.sentry.io/cli/dif/)。Android 未来 mapping UUID 必须随运行包进入事件 debug metadata，当前独立 Java client 不会自动读取 Android SDK manifest 字段。
+
+Xcode 26.2 实测会将已静态链接 framework 的嵌入副本替换为 `/dev/null` 生成的 dylib，占位文件本身没有可符号化代码。脚本仅在每个架构都只有零长度 `__text`、`nsyms=0` 且 `minos=100.0` 时允许缺省 framework dSYM；真实动态库、混合架构有代码或未知输出均继续阻断。App dSYM 始终必须存在且 UUID 完全匹配，不使用供应商名称白名单。静态库符号归入最终 App 的原则见 [Apple DTS 说明](https://developer.apple.com/forums/thread/761589)。如果未来 Xcode 改变占位格式，先检查实际二进制和构建日志再更新识别器，不关闭门禁。
 
 ## 自动崩溃迁移门槛
 

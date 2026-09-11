@@ -8,6 +8,7 @@ MODE="${2:---check}"
 [[ "$MODE" == --check || "$MODE" == --upload ]] || exit 64
 [[ -d "$ARCHIVE/Products/Applications" && -d "$ARCHIVE/dSYMs" ]] || exit 65
 command -v dwarfdump >/dev/null
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 shopt -s nullglob
 apps=("$ARCHIVE"/Products/Applications/*.app)
 [[ ${#apps[@]} == 1 ]] || { echo 'archive must contain one application'; exit 65; }
@@ -23,14 +24,22 @@ printf 'App UUIDs matched:\n%s\n' "$BINARY_UUIDS"
 for framework in "${apps[0]}"/Frameworks/*.framework; do
     name=$(basename "$framework" .framework)
     symbols="$ARCHIVE/dSYMs/$name.framework.dSYM"
-    [[ -d "$symbols" ]] || { echo "embedded framework missing dSYM: $name"; exit 65; }
+    if [[ ! -d "$symbols" ]]; then
+        # Xcode can replace a statically linked framework's executable with an empty dylib.
+        # Its code belongs to the App dSYM. Identify the actual binary, never exempt an SDK by name.
+        if python3 "$SCRIPT_DIR/observability-codeless-framework.py" "$framework/$name"; then
+            echo "Codeless Xcode framework stub: $name (no separate code to symbolicate)"
+            continue
+        fi
+        echo "embedded framework missing dSYM: $name"; exit 65
+    fi
     a=$(dwarfdump --uuid "$framework/$name" | awk '{print $2, $3}' | sort)
     b=$(dwarfdump --uuid "$symbols" | awk '{print $2, $3}' | sort)
     [[ -n "$a" && "$a" == "$b" ]] || { echo "framework UUID mismatch: $name"; exit 65; }
 done
 echo 'Static Kotlin code may live in the App binary. Verify its source frames in the received event.'
 if [[ "$MODE" == --upload ]]; then
-    : "${SENTRY_AUTH_TOKEN:?set a project-scoped upload token in the environment}"
+    : "${SENTRY_AUTH_TOKEN:?set a scoped CI upload token in the environment}"
     command -v sentry-cli >/dev/null
     sentry-cli debug-files upload -o pairlet -p pairlet-ios --wait "$ARCHIVE/dSYMs"
     echo 'Server symbol processing finished; actual symbolicated crash acceptance is still required.'

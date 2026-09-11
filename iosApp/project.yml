@@ -7,6 +7,18 @@ packages:
   Firebase:
     url: https://github.com/firebase/firebase-ios-sdk.git
     from: "11.0.0"
+  Sentry:
+    url: https://github.com/getsentry/sentry-cocoa
+    exactVersion: "8.58.2"
+schemes:
+  iosApp:
+    build:
+      targets:
+        iosApp: all
+    run:
+      config: Debug
+    archive:
+      config: Release
 targets:
   iosApp:
     type: application
@@ -18,6 +30,8 @@ targets:
         product: FirebaseAnalytics
       - package: Firebase
         product: FirebaseCrashlytics
+      - package: Sentry
+        product: Sentry
     settings:
       base:
         # dev.ccpocket.app 被旧 Apple 账号占用（bundle ID 跨 team 全局唯一），换账号后改用此 ID
