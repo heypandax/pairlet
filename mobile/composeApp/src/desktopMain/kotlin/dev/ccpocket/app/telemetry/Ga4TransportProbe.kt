@@ -23,6 +23,7 @@ internal class Ga4TransportProbe(private val emit: (String) -> Unit) {
         try {
             val status = request()
             val category = when (status) {
+                204 -> "no_content" // ingress off or environment unmapped: counted and DROPPED server-side (INGRESS.md §3)
                 in 200..299 -> "http_2xx" // Transport receipt, NOT proof of GA4 ingestion.
                 429 -> "rate_limited"
                 in 400..499 -> "http_4xx"

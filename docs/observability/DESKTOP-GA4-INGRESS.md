@@ -62,7 +62,7 @@ Content-Type: application/json
 - **参数键**：必须 ∈ `AnalyticsCatalog.params`（`TelKey.id` 全集）∪ 传输键 `edition`、`app_version`、`session_id`。
 - **服务端自置、客户端值被覆盖或拒绝**：`engagement_time_msec` 固定 `"100"`（兼容值，不是活跃时长）；`debug_mode` 客户端**禁止**发送（出现即 `invalid_param`），只有服务端 `CCPOCKET_ANALYTICS_DEBUG=1` 且事件环境为 staging 时由服务端加上。
 - **值规则**：字符串 ≤ 64 字符且匹配 `[A-Za-z0-9_.:+/ -]*`；数字必须为整数且 |n| ≤ 10^12；布尔／对象／数组／null 一律拒绝（客户端已把布尔编码为 1／0）。`app_version` 匹配 `[A-Za-z0-9][A-Za-z0-9_.+-]{0,95}`。
-- **必填与固定值**：`app_platform` 必须为 `desktop`（本入口只服务桌面；其他值 `platform_mismatch`）；`edition` 必须为 `desktop`；`analytics_schema` 必须为 `v1`；`app_environment` ∈ {production, staging, development, unknown}。
+- **必填与固定值**：`app_platform` 必须为 `desktop`（本入口只服务桌面；其他值 `platform_mismatch`）；`edition` 必须为 `desktop`（历史兼容传输键，**未登记为 GA4 维度**，报表切平台一律用 `app_platform`）；`analytics_schema` 必须为 `v1`；`app_environment` ∈ {production, staging, development, unknown}。
 - 不接受任何自由文本键；prompt、路径、会话名、账号、业务会话 ID、诊断 trace ID 没有对应键，无法通过校验。不新增设备指纹字段。
 
 ## 5. 环境路由与数据流凭据
@@ -112,9 +112,13 @@ Content-Type: application/json
 | `CCPOCKET_ANALYTICS_STREAM_*`、`CCPOCKET_ANALYTICS_TOKEN_KEY`、`CCPOCKET_ANALYTICS_ENABLED` | relay 机 `/etc/cc-pocket-relay/analytics.env` | 否 |
 
 - `scripts/observability-release-config.py` 扩展：`desktop` 组件同时 stage／verify 分析入口资源；verify 要求 jar 内**恰好一份** `cc-pocket-analytics.properties`、内容等于 `endpoint=<变量>`、变量匹配 `https://[a-z0-9.-]+`，且仍拒绝 `ga4.properties`。
-- 这两个仓库变量**尚未创建**；创建前桌面发版会在门禁失败。这是刻意的：与 DSN 同一姿态，缺配置宁可失败也不静默发无采集的包。
+- 这两个仓库变量已于 2026-09-11 创建（均为 `https://relay.pairlet.org`）。门禁姿态与 DSN 一致：缺配置宁可失败也不静默发无采集的包。
+- GA4 属性 540841272 已登记的事件维度（09-11 经 Admin API 补齐）：目录 §2 的公共维度全部，加 `result`／`coverage`／`feature`／`backend`／`reuse`／`source`／`transport`／`resume`／`tool`／`decision`／`phase`／`reason`／`attempt`／`link`／`retried`／`version`／`entry_point`／`help_task`／`target`／`value`／`demo`／`app_version`；指标 `duration_ms`。新登记维度约 24–48 小时后可在报表使用，不追溯旧事件。
 
-## 10. 批次 4 验收（未做，留待真实部署）
+## 10. 批次 4 验收
+
+2026-09-11 已做首轮抽样，证据见 [DESKTOP-GA4-ACCEPTANCE-0911.md](DESKTOP-GA4-ACCEPTANCE-0911.md)：14 项 10 通过、5 未覆盖（配对后旅程需人工、开关类抽样、服务端注入、休眠后续帧、GA4 标准聚合）。下列清单保留为后续复验依据。
+
 
 - 服务端部署与 `analytics.env` 提供；relay 重部署（`scripts/redeploy-relay.sh`）。
 - 一个真实桌面包走：未配对启动／引导 → 配对 → 会话成功 → 一次失败或恢复 → 首次价值 → 一个功能采用事件；对照 GA4 普通聚合中的 `desktop`／版本／schema／coverage／环境切片。

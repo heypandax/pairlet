@@ -19,7 +19,7 @@ class Ga4TransportProbeTest {
         val lines = mutableListOf<String>()
         val probe = Ga4TransportProbe(lines::add)
         for (status in listOf(204, 429, 503)) probe.send { status }
-        assertEquals(listOf("[ga4-transport] attempt", "[ga4-transport] http_2xx status=204",
+        assertEquals(listOf("[ga4-transport] attempt", "[ga4-transport] no_content status=204",
             "[ga4-transport] attempt", "[ga4-transport] rate_limited status=429",
             "[ga4-transport] attempt", "[ga4-transport] http_5xx status=503"), lines)
         var requests = 0

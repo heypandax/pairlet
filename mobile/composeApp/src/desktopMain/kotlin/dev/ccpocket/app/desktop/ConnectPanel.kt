@@ -121,6 +121,12 @@ private fun JoinSharedFolder(repo: PocketRepository) {
 @Composable
 private fun PairingForm(repo: PocketRepository) {
     var code by remember { mutableStateOf("") }
+    // install-guide exposure (issue #278): on desktop THIS form is the first-run screen, so it is where
+    // onboarding_shown belongs. Only a genuine first run counts — re-entering the form to add a second
+    // computer is not onboarding. Fires once per entry; pair_started follows from pairWithCode.
+    if (repo.pairedList.isEmpty()) LaunchedEffect(Unit) {
+        dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.OnboardingShown)
+    }
     Text(stringResource(Res.string.connect_computer_header).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
     Spacer(Modifier.height(16.dp))
     CodeField(code, big = true) { v -> code = v; if (v.length == 6) repo.pairWithCode(v) }

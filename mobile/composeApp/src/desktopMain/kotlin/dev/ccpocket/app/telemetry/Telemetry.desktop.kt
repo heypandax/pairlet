@@ -32,7 +32,8 @@ import java.util.UUID
  * Desktop telemetry. There is no Firebase Analytics SDK for the JVM, so instead of the Firebase SDK
  * (Android/iOS) the SAME anonymous events are POSTed over HTTP. Only enum-level metadata ever leaves the
  * machine (see [TelEvent]/[TelKey]) — never prompts, paths, tool inputs, account ids, or any user content.
- * Every event carries `edition=desktop` so reports can split desktop from the mobile app streams.
+ * Reports split platforms on the registered `app_platform` dimension; `edition=desktop` is only kept as a
+ * legacy transport key (it is NOT a registered GA4 dimension, so never build a report on it).
  *
  * Two mutually exclusive routes (docs/observability/DESKTOP-GA4-INGRESS.md §8):
  * - [AnalyticsRoute.Ingress] — official builds. Events go to the relay-hosted `/v1/analytics` ingress, which
