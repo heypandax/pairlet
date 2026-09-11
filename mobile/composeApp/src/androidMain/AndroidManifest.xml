@@ -15,9 +15,12 @@
         <!-- adjustResize (NOT the pan some OEMs pick by default): with edge-to-edge the system
              stops moving the window for the keyboard and instead reports ime insets, which the
              Compose root handles via imePadding() -->
+        <!-- One Compose root owns the device's relay links. Deep links and repeated launches
+             must enter onNewIntent instead of stacking roots with the same device credentials. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

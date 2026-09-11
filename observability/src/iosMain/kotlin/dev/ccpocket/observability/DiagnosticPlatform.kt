@@ -16,11 +16,10 @@ internal actual fun diagnosticId(): String = NSUUID().UUIDString.replace("-", ""
 internal actual fun diagnosticEpochMs(): Long = (NSDate().timeIntervalSince1970 * 1000).toLong()
 @OptIn(kotlin.experimental.ExperimentalNativeApi::class)
 internal actual fun safeException(error: Throwable): SafeException {
-    // K/N frames include native addresses and paths. Extract only our package-qualified symbol;
-    // never retain the exception header, message, cause, or a formatted exception string.
-    val symbols = Regex("dev\\.ccpocket\\.[A-Za-z0-9_.$<>#-]+")
+    // K/N frames include native addresses and paths. Keep only project symbols and, when present,
+    // source basenames/lines; never retain raw frames, exception headers, messages, or causes.
     val frames = error.getStackTrace().asSequence().mapNotNull { raw ->
-        symbols.find(raw)?.value?.let { SafeSymbols.frame(it.replace('#', '.'), null, null) }
+        safeNativeFrame(raw)
     }.take(24).toList()
     return SafeException(SafeSymbols.type(error::class.simpleName), frames)
 }

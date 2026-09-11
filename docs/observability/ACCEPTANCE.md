@@ -1,6 +1,175 @@
 # Pairlet 观测体系验收记录
 
+**收尾范围确认（2026-09-11）**：用户要求整理待提交内容，其他验证暂缓至上线后观察。本批只整理代码、现有证据和 CI 配置，不再装机、跑补充测试、重新操作手机或回读云端页面。现有 CI 的正常构建、配置校验及符号上传步骤保留。未验证事项仍如实记录，但不再作为本次提交的前置条件。提交范围与 GitHub 配置见 [收尾清单](CLOSEOUT.md)。
+
 本页记录当前证据，任务范围和完成标准以 [FOLLOW-UP-PLAN](FOLLOW-UP-PLAN.md) 为准。首批历史云端回执见 [PAIRLET](PAIRLET.md)，不能替代后续改动的验收。
+
+
+## 2026-09-11：已有手机事件的普通报表聚合已核对，发现 schema 类型缺陷
+
+本轮直接查询 GA4 `540841272` 的普通探索报表后端，指定媒体资源 UTC+08 的 **2026-09-11**，不使用实时报告或 DebugView 替代。核心结果、恢复、功能和价值事件共 **98 条 / 5 个采集身份**：Android 2.0.0 为 55 条、Android 1.9.8 为 23 条、iOS 2.0.0 为 16 条、iOS 1.9.8 为 4 条。事件数和安装身份数不等于成功数或去重真人数。
+
+| 代表性事件 | 普通报表返回 | 与已有操作证据的关系 |
+|---|---|---|
+| iOS 2.0.0 session_open_result | success/complete 2；unknown/partial 1 | 对应两次正常打开及断网后历史可见、覆盖降级的记录；unknown 不计故障 |
+| iOS 2.0.0 prompt_response_result / turn_result | 各 success/complete 1 | 首响应与执行完成分别计数 |
+| iOS 2.0.0 connection_recovery_result | success/complete 2，reason=ok | 恢复上报已进入普通聚合 |
+| iOS 2.0.0 first_value_observed / value_reached | complete 1 / complete 2 | 首次价值 feature=prompt_task；有效价值分别为 prompt_task、session_view |
+| Android 2.0.0 session_open_result | success/complete 4；timeout/complete 2 | 该版本号覆盖修复前后构建，不把旧超时算作修复后新复现 |
+| Android 2.0.0 file_view_result | success/complete 2；success/partial 1；cancelled/partial 1 | 结果与覆盖可分别分析，不把 partial 自动提升为完整成功 |
+
+已逐组合确认 `app_platform`、`app_version`、`result`、`coverage`、`app_environment`、`internal_traffic`、`usage_mode`，另表确认 `backend`、`reason` 和适用事件的 `feature`。本批手机行均为 staging/internal=1/own；内置平台/版本与自定义平台/版本的对照一致。普通查询没有截断，读取样本数等于样本空间；当天数据仍可能继续处理。
+
+**关键缺陷**：上述手机行的 `analytics_schema` 全为空；旧严格 `schema=1` staging 查询仅返回 35 条桌面事件。这不是手机没有上报：公共元数据把 schema 写为整数 1，Android 送入 `putLong`，iOS 原样桥接给 Firebase。Google [官方说明](https://support.google.com/analytics/answer/14239696?hl=en) 明确 App 的整数事件参数不会解析为事件自定义维度，Web 则会。因此旧筛选条件排除了手机事件，不能靠继续等待或让用户重复操作解决。
+
+已将公共出口改为字母数字字符串 `v1`，保留耗时等数值指标类型；`TelemetryMetadataTest` 5 项通过。GA4 已保存兼容 `1/v1` 的 schema 筛选（包括三个事件细分），保留 production/internal/usage 的其他约束。新增第八页 **核对 · 手机历史（不筛 schema）**，只查询指定事件、mobile 平台、1.9.8/2.0.0、staging/internal=1、own/shared，单独复用历史数据，不补写历史 schema、不混入正式生产细分。
+
+**验证边界**：这项“已有手机字段/聚合核对”已完成，并查出一项实际缺陷。新 `v1` 代码尚未装机/发布，没有新值的云端回执，随下一次正常版本更新验证，不要求重跑本轮手机旅程。新增页保存与过滤条件已回读，但页面重载把日期截到本机 9 月 10 日；本轮 98 条的证据来自显式 9 月 11 日后端查询，不冒称新增页已显示 98 条。最终 UI 复查时 Dia 9222 调试端口不可用，未重启用户浏览器。复查报表时需确保日期含媒体资源时区的 9 月 11 日。
+
+脱敏数据及查询边界：[手机普通聚合核对](evidence/2026-09-11-mobile-ga4-aggregate.json)。下文保留此前检查点，旧“手机聚合待核对”状态由本节更新。代码/文档增量仍未提交。
+
+## 2026-09-11：GA4 五视角与测试分流配置已回读
+
+当前范围澄清：iOS 真机源码行号作为后续增强，未验证但不阻塞本批；当前不增加手机重复操作。既有手机事件的普通报表字段/聚合核对现已完成，schema 类型缺陷、修复和交付边界见上节。本轮代码/文档增量尚未提交，主体此前已合并 main。
+
+**复用已有手机测试（2026-09-11）**：手机操作与上报已取得代表性证据；Android 已有普通模式实时回执及历史报表聚合，iOS 本轮已有逐参数 DebugView 回执。剩余“手机正式聚合”按后台核对既有事件、日期范围、过滤条件和维度处理，不预设要求用户再跑完整旅程。只有确认既有数据无法覆盖某个必要验收点时，才说明具体缺口并补最小样本；未核实的报表字段仍不标通过。
+
+[现有探索](https://analytics.google.com/analytics/web/?authuser=3&hl=zh-CN#/analysis/a392220252p540841272/edit/33G_k3j-Q4mpRDgdoZt6HA) 已更新为 **Pairlet 产品观察 · 正式分析与验证**，保留五个产品视角，增加两个 staging 验证标签。配置、实际查询、返回数据及页面表格分别核对；没有把保存成功直接记为业务数据通过。
+
+- 核心结果按事件、result、coverage、平台、版本展示，支持 backend 列；事件数与采集身份数分列，按事件数排序。恢复页补 reason/backend/coverage；功能采用保留曝光、尝试与有效使用的区分。
+- 正式事件细分分别为 `schema=1 AND environment=production AND internal=0 AND usage_mode=own/shared`；staging 验证为 `schema=1 AND environment=staging AND internal=1 AND usage_mode IN (own,shared)`。每个 AND 条件独立分组，已检查真实报表请求；同一安装可能参与两种角色，不相加当去重真人。
+- 配对入口漏斗允许尚未绑定角色的 real 入口；paired、connected、value_reached 各阶段必须同时满足事件名及 own/shared。入口池合并，不把它解释为已分别去重的两条角色激活率。
+- 留存为 `first_value_observed → value_reached`、每日、标准、用户总数。群组查询不使用自由表格的 unifiedFilters，必须通过上述事件细分约束纳入与返回样本。旧的 first-touch/any-event 草稿已替换。
+
+当前可查询证据：staging 验证页显示 **34 条事件、1 个采集身份**，10 行均为历史 `desktop / 1.9.8`；其中打开成功 2、首响应成功 4、执行成功 4、执行取消 2、连接恢复成功 4、后台结果 success/partial 2，以及使用/价值事件。页面展开与查询返回一致；正式 own/shared 群组均没有符合条件的样本，staging 群组在 9 月 11 日 day 0 有 1 个身份。这是分流与查询抽样通过，**不是 production 零故障或有效 D1/D7 结论**。
+
+今日 iOS 两轮依然以 DebugView 为云端证据，未将其补写成正式报表记录。正式生产量不足、审批结果无本轮新样本、移动端新字段完成聚合、成熟留存和版本效果继续观察；完整六后端/生命周期矩阵仍不属于本次代表性抽样。保存日期范围为报告时区 GMT+08 的 2026-09-01–11，日常使用时需更新观察窗；当前包 2.0.0 已核验，历史开发包结合 schema/环境解释，未来版本按版本列另行核对，不凭版本号推定代码相同。
+
+可长期复查的脱敏证据：[GA4 配置与汇总](evidence/2026-09-11-ga4-sampling.json)、[iOS 手工操作参数](evidence/2026-09-11-ios-sampling.json)。原始身份、对话、设备日志与认证请求头不写入这些文件。原始浏览器响应仅在本机 `/tmp/pairlet-ga4-final-test-response.json`；临时配置备份仅供本次恢复使用。
+
+## 2026-09-11：iOS 人工断网恢复与采集出口抽样
+
+用户在 iPhone 12 关闭 Wi-Fi/蜂窝网络、等待后恢复网络并重新打开同一测试会话，明确确认“能看到历史消息，使用正常”。GA4 DebugView 对本轮 `ios / 2.0.0 / staging / claude / own` 展开的回执如下（Dia 为 9 月 10 日晚，手机与报告为 9 月 11 日）：
+
+| 回执 | Dia 时间 | 结果 | 解释 |
+|---|---|---|---|
+| connection_recovery_result | 20:39:24 | success / complete / 17ms | 本窗口另一次短连接恢复记录，不与后续长恢复合成一次耗时 |
+| connection_recovery_result | 20:40:38 | success / complete / 72639ms，reason=ok | 整段观测包含人为断网等待，不表示恢复网络后仍等待 73 秒 |
+| session_open_result | 20:40:44 | unknown / partial / 11583ms，reason=unsupported | 用户实际已看到历史；本次缺少匹配的诊断协商上下文，不能从 SessionLive 单独断言历史/布局完整，也不是 timeout/failure |
+
+`SessionOpenObservation.live` 在未协商完整上下文时明确输出 unknown/partial。此证据证明恢复后的结果覆盖会降级，尚未区分能力信息未就绪和无上下文 SessionLive 的具体触发；不据此重开历史 attach 超时根因调查，也不将这条未知记录改成成功。正式故障率排除 unknown，同时显示覆盖情况。
+
+Sentry iOS Logs 同窗已查到 03:39:24–27Z 的 `EP-03:connection_closed`、03:40:32Z 的 `EP-03:fallback_used`、03:40:37Z 的 `EP-08:ok`。普通断网进入结构化 Logs，不要求产生 Errors 栈。脱敏参数证据：`/tmp/pairlet-ios-manual-recovery-cloud.json`；不上传原始设备日志或对话内容。
+
+本地增量验证：公共诊断 JVM 27 项、iOS Simulator 26 项通过；Cocoa `DiagnosticTests` 6 项通过，包含新增的“在途请求取消、关闭拒收、重开不重放旧请求”。URLProtocol 截住实际 SDK 请求，只证明本地出口边界；已到达远端的请求无法由关闭操作撤回。结果 `/tmp/pairlet-native-frame-tests.log`、`/tmp/pairlet-ios-upload-boundary-20260911.xcresult`。
+
+安全栈改动仅保留真实存在的源码 basename 和正整数行号，丢弃路径、地址、偏移、异常正文及非项目符号。解析器新增 4 个场景，覆盖有/无列号、缺源信息及恶意字段。实际 iOS 云端旧错误仍只证明 Kotlin 函数级定位；当前包没有制造新的安全异常，**真机源码行号仍未验证**。未开启 libbacktrace、Sentry fatal、Crashlytics 迁移或强制崩溃。
+
+恢复记录：使用 `-FIRDebugDisabled` 成功重启测试 App，11:57:58 设备日志恢复为“若需调试请启用参数”的普通初始化，采集仍开启；保留配对和用户原有采集偏好。测试模拟器已恢复 Shutdown。本次 syslog 监听、Appium 和 GA4 临时控制服务已停止，仅本次安装的 WDA 已卸载；App 已无调试参数普通启动。GA4 临时时区覆盖及页面临时认证状态已清理，报告本身和入口保留。用于构建的 gitignored Firebase plist 已按备份恢复为本工作区原值，安装包配置不受影响。最终 `git diff --check` 通过；未提交、合并或公开发版本批增量。
+
+## 2026-09-11：iOS 人工配合，正常会话结果云端确认
+
+用户明确本批不抽验未改动的 Crashlytics 真崩溃。当前两项收尾为 GA4 正式分析与 iOS Sentry 安全栈/采集出口验证，不把历史 Crashlytics 验收缺口重新列为必做；只有改动其相关链路时再针对改动补验。
+
+iPhone 12 已安装并启动 2.0.0/19、staging，源码 `2f2dba8b` 加当前工作区改动，二进制 SHA-256 为 `4f5615f8ae1934b9fde5df78eaa9714b479f9688ced29d143189100f6e98bffb`。构建包含 iOS 安全栈解析改动及正确 Firebase 项目配置；未迁移或启用 Sentry 自动 fatal。用户完成配对后，手动新建专用会话、发送仅回复固定文本的提示，等待完成，再返回列表重新打开。
+
+GA4 `540841272` DebugView 已逐项展开核对以下真实事件；全部为 `ios / 2.0.0 / staging / claude / own`。时间列为报告时区 GMT+08，Dia 默认显示前一日 America/Los_Angeles 时间。
+
+| 手机操作 / 事件 | GMT+08 时间 | 实际云端参数 |
+|---|---|---|
+| 初次打开：session_open_result | 11:33:27 | success / complete / 1332ms |
+| 首次响应：prompt_response_result | 11:34:28 | success / complete / 9937ms |
+| 执行终态：turn_result | 11:34:28 | success / complete / 10037ms |
+| 返回后重开：session_open_result | 11:34:43 | success / complete / 833ms |
+| 首次有效使用：first_value_observed | 11:34:28 | complete / feature=prompt_task |
+
+这是正常业务旅程与云端调试回执的抽样通过，不能替代 production 报表、D1/D7 成熟留存或断网恢复验收。只读 syslog 可见 Firebase 启动和采集开启，但没有逐事件参数，故本次结果依据后台展开的参数，不冒称 SDK 明细日志已取得。脱敏回执保存于 `/tmp/pairlet-ios-manual-first-round-cloud.json`；原始设备日志仅留本机。当前正在进行人工配合测试，Firebase 调试启动参数和监听进程尚待本轮结束后恢复。
+
+## 2026-09-11：历史 attach 超时转为非阻塞观察
+
+用户要求先确认问题现在是否还存在，不为已不再复现的旧样本持续追溯根因。重新打开 Sentry [PAIRLET-ANDROID-3](https://pairlet.sentry.io/issues/7724675302/?project=4512060708749312)，All Envs / Since First Seen 下仍只有 1 条旧上报：`86f4fe7b9efc4a46aec25fcfa75365fc`、1.9.8、staging、attach、12012ms；首次/最后出现均显示约 9 小时前，关联区还可见 `EP-10:recovered`。本地修复包两次成功样本为 1501/1066ms，未复现 attach 超时。
+
+当前结论是**没有发现修复后仍发生的证据，转为非阻塞观察项**。保留旧记录，不再把根因定位列为本批必做；只有新版本同类事件或实际再次复现才恢复排查。Sentry 上报受限频/采样影响，一条上报不等于总共只发生一次；本轮也不声称已证明旧故障被 singleTask 修复。不更改云端 issue 状态，不新增定时监控。
+
+## 2026-09-11 02:32–02:47 UTC：Android 单实例修复与成功回执
+
+本轮定位到重复 App 根实例与全局 fleet 生命周期串用的缺陷。修复前，Android 同一任务栈内有 3 个 MainActivity；调试器只读检查对应 3 个 Repository/Coordinator。旧页面已停止，其 Repository 仍连接、`appIsForeground=false`、`awaitingLayout=true`；当前页面属于另一个前台 Repository。`App` 的后台回调原先访问可被新根覆盖的 `FleetRuntime.coordinator`，旧页面的停止事件可能作用于新根。前台状态为 false 会过滤会话和文件的布局 token。
+
+因此，下方“正文可见但超时”的 UI 与事件不能继续假定属于同一个页面实例。该缺陷与本轮复现相符，不证明所有历史 layout/attach 超时均有同一原因，也没有历史过大的证据。先仅 force-stop 再启动一个实例，原包打开同一既有 Claude 测试会话已得到 `1485ms / success / complete`，说明本例布局回调在单实例状态下能完成。
+
+**产品修复**：MainActivity 改为 `singleTask`，重复启动/外部入口交给已有 `onNewIntent`；App 保存自己创建的 fleet，生命周期和审批刷新使用该引用；FleetCoordinator 对自己拥有的 primary/satellites 对称转发前后台事件。没有更改布局成功判定、超时预算或 wire 协议。
+
+华为 VCE-AL00 已覆盖安装修复包，保留配对，版本仍为 2.0.0/31、staging。源码为 `codex/observability-followup` 的 `2f2dba8b` 加本次工作区改动；实际已安装 APK SHA-256 与构建产物均为 `66f0da07a94c7efb8af0602a84e3d134f5a94c55edc0e47a03ca008e83ad75da`。重复启动、Home 后返回仍只有 1 个 MainActivity；只读调试器确认 1 个 Repository、前台=true、`awaitingLayout=false`、历史 token 已清除。未重启 daemon/relay、未向 Agent 发送新提示、未公开发布。
+
+| 修复包抽样 | Firebase SDK 的真实操作记录 | 云端确认 |
+|---|---|---|
+| 既有 Claude 会话首开 | 手机 10:38:07.322，`session_open_result=success`、1501ms、complete，并有 `value_reached/session_view` | GA4 DebugView 展开同一 19:38:07 事件，分别确认 1501、success、android、2.0.0、complete、staging |
+| 返回列表再打开同一会话 | 手机 10:42:43.305，success、1066ms、complete；保持超过 15 秒，无新的会话超时 SDK 记录 | 对应上传批次 HTTP 204；此样本未再逐项展开后台参数 |
+| 历史文件 diff | 手机 10:38:42.831，`file_view_result=success`、1009ms、partial | 仅确认成功显示历史 diff；切到正文的“文件已不存在”不作为新的失败结果通过项 |
+| 浏览项目的 `examples/feishu-bridge/README.md` | 手机 10:40:55.426，正文可见，`file_view_result=success`、1410ms、complete，另有 `value_reached/file_view` | DebugView 的 19:40:55 文件事件确认 1410、success、android、2.0.0、complete、staging；对应价值事件确认 file_view、android、2.0.0、complete、staging |
+
+普通模式 SDK 起初安排约半小时后批量上传。为本轮抽样临时设置 Firebase Android debug 属性，随后批次返回 HTTP 204，Dia DebugView 显示上述已排队及新产生事件。这里记录的是**实际 App 事件的云端调试回执**，不冒充正式报表、留存视图或所有结果组合已验收。浏览器显示 America/Los_Angeles 时间（9 月 10 日 19:38），手机显示 UTC+08（9 月 11 日 10:38）；后台与 SDK 耗时一致，不用跨端墙钟相减计算延迟。调试方法见 [Firebase 官方说明](https://firebase.google.com/docs/analytics/debugview)。
+
+**验证**：Android APK 构建成功；23 项针对性桌面 JVM/Compose 测试全部通过（FleetLifecycle 2、FleetSwitch 9、HistoryLayoutObservation 3、SessionOpenTimeout 6、ProductOutcome 3）。新增受控 Repository 用例让 HistoryComplete 到达但不给布局回执，验证 15 秒真实 layout timeout；迟到的布局回执只追加一次同 trace recovery、清除 token、不重启 Agent。attach 的 8+4 秒超时仍用受控测试覆盖；本轮没有中断生产服务制造超时。上述本地测试不能替代历史 attach 根因的真机复现。
+
+02:47 UTC Sentry 原 layout issue 仍累计 3 条、最新仍为 `4fbd2d0f...`，未关闭历史 issue；有限频和采样，不能仅靠数量未增加证明修复。新包 UI、SDK 与后台参数才是本次成功样本依据。原始记录留本机，证据为 `/tmp/pairlet-single-root-safe-events.json`、`/tmp/pairlet-fixed-cloud-receipts.json`、`/tmp/pairlet-fixed-value-receipt.json`、`/tmp/pairlet-fixed-runtime.txt`、`/tmp/pairlet-fixed-restored.json`；关键结果已写入本节。FA/FA-SVC 恢复为空，Firebase debug 恢复 `.none.`、USB 常亮仍为 0；logcat 与 JDWP 端口已清理。
+
+## 2026-09-11 02:05–02:20 UTC：Android 重测，上报通过但布局结果异常
+
+用户要求重新安装并继续监听实际行为。华为 VCE-AL00 已安装并启动 Android 2.0.0/31；源码基线 `2f2dba8b`，Android/观测实现与当时 main `67a610ce` 一致。`assembleDebug` 成功，APK SHA-256 仍为 `3a4bbc34e39032074cb46f91c8aa0608d2a879427b4af301613139460eda7d8e`，诊断环境 staging。用户已配对；本轮没有向 Agent 发送新提示、修改工作文件或重启 daemon/relay。
+
+验收按用户提出的方向，区分实际行为、结果判定、Firebase SDK 入口、云端回执。两条历史超时的业务根因独立跟踪，不要求为了上报验收制造服务故障；但实际显示与结果不一致不能记作结果口径通过。
+
+| 抽样 | 实际行为 / daemon 证据 | Firebase SDK 记录 | 结论 |
+|---|---|---|---|
+| 打开既有 Claude 测试会话 | 同一手机连接，OpenSession → HistoryApplied 为 800ms；02:07:15.026 UTC 的 UI 快照已有历史正文 | 手机时间 10:07:32.041，`session_open_result`：`result=timeout`、`reason=timeout`、`duration_ms=15014`、`coverage=complete` | 已展示仍报超时；上报入口触发，结果判定未通过 |
+| 返回后再次打开同一会话 | OpenSession → HistoryApplied 为 754ms；02:11:39.317 UTC 的 UI 快照已有历史正文 | 手机时间 10:11:56.347，同事件 `timeout`、`duration_ms=15008`、`coverage=complete` | 再次出现布局结果异常；本轮没有重现 12 秒 attach 超时 |
+| 查看既有测试文件 | 历史 diff 可见；切到文件正文显示原临时文件已不存在 | 关闭时 `file_view_result=cancelled`、`coverage=partial`、63840ms | 只能证明取消事件触发，不作为文件成功/失败显示结果的准确性验收 |
+
+以上 SDK 记录均含 `app_platform=android`、`app_version=2.0.0`、`app_environment=staging`、`internal_traffic=1`、`backend=claude`。Firebase Debug 模式始终为 `.none.`，仅临时开启本地 FA/FA-SVC 日志。首条超时所在上传批次于手机时间 10:07:32.366 返回 HTTP 204；这不是单条 GA4 入库确认。手机时钟比 Mac 约快 3–4 秒，跨端时间不直接相减；800/754ms 均来自同一 daemon 时钟。
+
+**云端抽样已确认**：Dia 的 GA4 实时报告展开 `session_open_result`，事件数为 1；分别回读 `app_platform=android`、`app_version=2.0.0`、`result=timeout`，各为 1。这是实时聚合参数抽样，与本机事件相符，不声称提供单设备/单 trace 的 GA4 明细关联；第二次事件和文件取消尚未逐条确认。
+
+Sentry [PAIRLET-ANDROID-1](https://pairlet.sentry.io/issues/7724619605/?project=4512060708749312) 此时累计 3 条，最新事件 `4fbd2d0f75b844e094f8c76ed12a2c18` 的 JSON 回读为 `cc-pocket-android@2.0.0` / staging / EP-10 / `stage=layout` / timeout，trace `75dad9b4295e43399de33e55f0506f61`。步骤为 attach=729/745ms、apply=749ms，最终 15012ms 超时，印证第二次实际手机样本。不能将这两条布局超时解释成 GA4 同步慢，也不能据此认定会话内容过大；布局信号未被正确接收/记账的具体代码原因仍待定位，未做运行时代码修复。
+
+临时 FA/FA-SVC 属性均恢复为空、USB 常亮仍为原值 0，采集偏好与 GA4 过滤器未变；本轮 logcat 进程已结束，手机保留已配对 App，Dia 停在 `result=timeout` 参数表。证据：`/tmp/pairlet-current-observation-evidence.json`（仅允许字段）、`/tmp/pairlet-current-sentry-event.json`、`/tmp/pairlet-current-ga4-result.json`、`/tmp/pairlet-current-observation-restored.json`。原始 SDK 日志仅留本机权限 0600，不复制到仓库或后台。
+
+## 2026-09-11：保留 Crashlytics 的范围确认
+
+用户确认不迁移自动崩溃采集器。本期维持 Crashlytics 自动崩溃、Sentry 显式安全错误/日志、Firebase/GA4 产品结果的职责，历史记录中的 Sentry fatal 迁移限制不再是本期必做项。既有 Crashlytics 真机崩溃回执/符号/开关验收，以及 iOS Sentry 安全错误栈定位缺口继续保留；没有将未验收项目改记为通过。本次仅同步方案与任务文档，没有改 SDK 配置或触发崩溃测试。两种会话超时的含义及 GA4 基础口径优先级见 FOLLOW-UP-PLAN.md 首节，五视角与成熟留存任务未取消。
+
+## 2026-09-11：历史 GA4 回执与版本归属更正
+
+**合并前的 1.9.8 测试包已经包含本批新增上报。** 它与商店中同版本号的旧实现不能仅按 `app_version` 区分。原 Android 装机记录为 2026-09-10 17:23:39 UTC（北京时间 9 月 11 日 01:23），版本 1.9.8/30，APK SHA-256 `9e698479ffd06bcc69be30bfda46dc4c9c850794dd2c3eafb7e434489ca5f31e`；同批 SDK 日志明确包含 `session_open_result`、`file_view_result`、`value_reached`。开发分支最终提交 `561e6508` 也仍为 1.9.8/30，已有这些事件；合并前工作树的实际装机身份以 APK 哈希和日志为准。
+
+GitHub 回读：PR #369 于北京时间 9 月 11 日 07:59:17 合并，PR #370 于 08:46:43 合并。此后重装的 main `2f2dba8b` 包才是 2.0.0/31，设备 `firstInstallTime` / `lastUpdateTime` 均为 09:04:01。不能把“合并到 main”当成开发包第一次具备上报能力的时间。
+
+此前历史查询存在日期覆盖错误：媒体资源 `540841272` 的报告时区实测为 GMT+08:00，Dia 浏览器为 America/Los_Angeles；默认“过去 30 天”止于 9 月 9 日，浏览器“今天”是 9 月 10 日。手机 SDK 18:00–18:03 UTC 的上传，在报告时区已是 **9 月 11 日 02:00–02:03**。只查到 9 月 10 日仍会漏掉这批记录。最终明确指定报告日期 9 月 11 日，01:34–01:37 UTC 后台回读得到：
+
+| 事件 | 内置平台为 Android 的事件数 | 内置应用版本回读 |
+|---|---:|---|
+| `session_open_result` | 5 | 1.9.8，共 5 条 |
+| `file_view_result` | 2 | 1.9.8，共 2 条 |
+| `value_reached` | 4 | 1.9.8，共 4 条 |
+| `feature_used` | 6 | 1.9.8，共 6 条 |
+| `feature_exposed` | 4 | 1.9.8，共 4 条 |
+
+因此“手机新结果/价值事件没有后台回执”的笼统状态已被上述证据更新；这些不是旧点击事件或单纯 HTTP 204。分平台/版本表为同一日期的聚合回读，不声称每条均已关联到特定设备或具体操作。事件数不等于成功数，`result` / `coverage` / `feature` 等参数组合与留存仍待补验。自定义 `app_platform` 的值选择器此时只列 ios/desktop，不能因此忽略内置平台明确为 Android 的已入库事件；未确认参数缺项原因。2.0.0 的 `app_launch` / `onboarding_shown` 亦已出现各 1 条，但其核心结果未在此检查点确认。
+
+数据过滤器实测仅有 Internal Traffic，状态为“测试”，没有启用的开发流量排除规则；未改任何过滤器、报告时区或采集配置。当前发现证明此前查询日期漏查，不证明所有历史延迟/参数缺项均由时区造成。证据 `/tmp/pairlet-android-install-artifact.json`、`/tmp/pairlet-history-sep10-11-confirmed.json`、`/tmp/pairlet-history-sep11-app-version.json`、`/tmp/pairlet-history-ga4-{property-details,data-filters}.json`。后续按构建哈希、安装时间、事件结构和环境综合认定开发样本，不因版本号未变化而弃用验收证据。
+
+## 2026-09-11 01:22 UTC：Android 重装与 GA4 可见抽样
+
+用户卸载旧包后明确允许重装，并亲自完成配对。本次安装来自 main `2f2dba8b`（PR #370）的 Android 2.0.0/31，华为 VCE-AL00、包名 `com.panda.ccpocket`。Debug 构建与安装成功，安装后 APK SHA-256 与本地产物一致：`3a4bbc34e39032074cb46f91c8aa0608d2a879427b4af301613139460eda7d8e`。实际 APK 资源确认 Firebase 项目 `cc-pocket-1b3ea`、非占位配置，Sentry 为 staging；没有公开发布。
+
+- 实际打开既有 Claude 会话和 `examples/feishu-bridge/README.md`，手机显示历史与 Markdown 正文。daemon 日志 09:07:48.348 收到 OpenSession、09:07:49.483 收到 HistoryApplied，约 1.135 秒；这是历史应用回执，不能当成首屏布局耗时。没有向原会话发送新提示，也没有修复两条历史超时。
+- Dia 的 GA4 实时报告中，`session_open_result` 的平台参数表曾显示 android=3、desktop=1；同一事件的版本参数表只有 1.9.8=1。不同参数的聚合不能直接拼成新 Android 2.0.0 的单条成功回执。
+- 01:14:57Z 实时列表出现 `first_value_observed=1`；01:19–01:22Z 展开参数确认 **desktop / 1.9.8 / staging**。这是桌面首次价值的新增后台证据，不能归到本次手机重装。留存选择器未在此检查点重验，D1/D7 仍待真实时间与样本。
+- 新手机包的 `file_view_result` / `value_reached` 后台回执尚未确认。Firebase 普通模式存在批量上传，官方说明通常约一小时合并上传；GA4 实时处理也非即时。短时未出现不能直接定为上报失败，也不能仅凭此解释所有缺报。见 [Firebase DebugView](https://firebase.google.com/docs/analytics/debugview) 与 [GA4 数据新鲜度](https://support.google.com/analytics/answer/11198161?hl=en)。
+
+**增量验收口径**：按用户提出的复用建议，对比此前 1.9.8 基线 `561e6508` 与当前 `2f2dba8b`，Android/common telemetry 实现、事件定义、初始化入口及 Firebase 依赖无差异；本包继续使用同一 Firebase 项目。上报机制和已通过样本可以沿用，只补新包配置、实际操作与代表性回执。此前只有 SDK 上传证据的项目仍按原边界记录，不因代码相同自动变成云端通过；新增结果/价值事件也不能由更早的旧点击事件替代。
+
+已恢复 Android USB 常亮设置为原值 `0`、`log.tag.FA` 为空；`FA-SVC` 未改，Firebase Debug 模式始终为 `.none.`。未重启 daemon/relay。证据 `/tmp/pairlet-retry-android-artifact.json`、`/tmp/pairlet-retry-android-restored.json`、`/tmp/pairlet-retry-android-{history-settled,readme}.jsonl`、`/tmp/pairlet-retry-ga4-first-value-{platform,version,environment}.json`；临时文件可能被系统清理，关键结果保留于本节。
 
 ## 2026-09-11：main 合并后的继续收尾
 

@@ -134,6 +134,39 @@ final class PocketDiagnosticsTests: XCTestCase {
         XCTAssertTrue(EnvelopeProtocol.payloads().isEmpty)
     }
 
+    func testOptOutCancelsPendingUploadAndReopenDoesNotReplayIt() async throws {
+        EnvelopeProtocol.reset()
+        let started = expectation(description: "transport started")
+        let cancelled = expectation(description: "transport cancelled")
+        EnvelopeProtocol.holdRequests(onStart: { started.fulfill() }, onCancel: { cancelled.fulfill() })
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [EnvelopeProtocol.self]
+        await PocketDiagnostics.shared.configureForTesting(
+            dsn: "https://0123456789abcdef0123456789abcdef@diagnostic.invalid/1",
+            session: URLSession(configuration: configuration))
+        let old = """
+        {"eventId":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","path":"DIAGNOSTICS","kind":"ERROR","stage":"START","code":"UNEXPECTED","release":"ios@test","environment":"STAGING","occurredAtMs":1800000000000}
+        """
+        XCTAssertTrue(PocketDiagnostics.shared.enqueue(old))
+        await fulfillment(of: [started], timeout: 5)
+        PocketDiagnostics.shared.stopForTesting()
+        XCTAssertFalse(PocketDiagnostics.shared.enqueue(old))
+        await fulfillment(of: [cancelled], timeout: 5)
+        // A request already started before opt-out cannot be retracted from a server. Verify that
+        // closing cancels it and that the SDK's isolated cache is not replayed by the next generation.
+        EnvelopeProtocol.reset()
+        await PocketDiagnostics.shared.configureForTesting(
+            dsn: "https://0123456789abcdef0123456789abcdef@diagnostic.invalid/1",
+            session: URLSession(configuration: configuration))
+        let fresh = old.replacingOccurrences(of: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                                            with: "ffffffffffffffffffffffffffffffff")
+        XCTAssertTrue(PocketDiagnostics.shared.enqueue(fresh))
+        PocketDiagnostics.shared.flushForTesting()
+        let body = try EnvelopeProtocol.payloads().map(Self.decodeBody).joined(separator: "\n")
+        XCTAssertTrue(body.contains("ffffffffffffffffffffffffffffffff"), body)
+        XCTAssertFalse(body.contains("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"), body)
+    }
+
     private static func decodeBody(_ data: Data) throws -> String {
         guard data.starts(with: [0x1f, 0x8b]) else { return String(decoding: data, as: UTF8.self) }
         var stream = z_stream()
@@ -163,7 +196,17 @@ final class PocketDiagnosticsTests: XCTestCase {
 private final class EnvelopeProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var bodies: [Data] = []
-    static func reset() { lock.lock(); defer { lock.unlock() }; bodies = [] }
+    private static var onStart: (() -> Void)?
+    private static var onCancel: (() -> Void)?
+    private var cancellation: (() -> Void)?
+    static func reset() {
+        lock.lock(); defer { lock.unlock() }
+        bodies = []; onStart = nil; onCancel = nil
+    }
+    static func holdRequests(onStart: @escaping () -> Void, onCancel: @escaping () -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        self.onStart = onStart; self.onCancel = onCancel
+    }
     static func payloads() -> [Data] { lock.lock(); defer { lock.unlock() }; return bodies }
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "diagnostic.invalid" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -178,11 +221,17 @@ private final class EnvelopeProtocol: URLProtocol {
                 data.append(buffer, count: count)
             }
         }
-        Self.lock.lock(); Self.bodies.append(data); Self.lock.unlock()
+        Self.lock.lock()
+        Self.bodies.append(data)
+        let start = Self.onStart
+        cancellation = Self.onCancel
+        Self.onStart = nil; Self.onCancel = nil
+        Self.lock.unlock()
+        if let start { start(); return }
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data("{}".utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
-    override func stopLoading() {}
+    override func stopLoading() { cancellation?(); cancellation = nil }
 }

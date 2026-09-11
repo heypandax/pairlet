@@ -166,9 +166,13 @@ class FleetCoordinator(private val scope: CoroutineScope, initialPrimary: Pocket
         }
     }
 
-    /** iOS suspends every socket in the background — fan the foreground reconnect out to the fleet. */
+    /** Restore visibility and reconnect every link owned by this app root, including its primary. */
     fun onAppForeground() {
-        satellites.values.forEach { it.onAppForeground() }
+        repos().forEach { it.onAppForeground() }
+    }
+
+    fun onAppBackground() {
+        repos().forEach { it.onAppBackground() }
     }
 
     /**

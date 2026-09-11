@@ -1,14 +1,12 @@
 # 诊断开发与本地验证
 
-后续任务入口：[Pairlet 日志系统后续计划](FOLLOW-UP-PLAN.md)。A–D 主体已集中回归，当前补实际包、云端和平台专项验收；最新进度见 [IMPLEMENTATION](IMPLEMENTATION.md)，当前证据见 [ACCEPTANCE](ACCEPTANCE.md)。
+当前执行入口：[提交收尾清单](CLOSEOUT.md)。主体实现已在 main；本轮修复、测试代码和脱敏验收记录整理待提交。用户于 2026-09-11 明确额外验证暂缓，待上线后观察；本次不再装机或补跑设备/云端验收，正常发行 CI 门禁保留。
 
-当前执行入口：[夜间收尾计划](NIGHT-PLAN.md)。按用户最新要求，用五组任务做代表性抽样，复用已有证据，发现问题再扩大验证。
+已有证据见 [ACCEPTANCE](ACCEPTANCE.md)：Android 生命周期问题已修复并有真机成功回执；iOS 正常使用、断网恢复及采集出口有代表性证据；98 条手机核心/价值事件在 GA4 普通聚合中已核对。整数 analytics_schema 导致筛选遗漏已修复为 v1，5 项测试通过，新包新值尚未云端验收。
 
-2026-09-11：OBS-01–10 / EP-01–30 与五个产品分析视角统一纳入总计划。desktop/daemon/relay 最终开发包已部署；实际新 daemon 的 Sentry 日志和 desktop GA4 staging 启动事件已有云端回执。完整核心结果、真机、符号和观察期仍未整体验收。
+[产品分析方案](PRODUCT-INSIGHTS.md) 保留首次价值、核心完成、连续稳定、功能采用/复用、留存/版本五个视角。旧计划和实施过程分别见 [FOLLOW-UP-PLAN](FOLLOW-UP-PLAN.md)、[IMPLEMENTATION](IMPLEMENTATION.md)，不把历史待验状态重新当成当前提交门禁。
 
-产品分析入口：[用户使用与问题分析方案](PRODUCT-INSIGHTS.md)。按首次价值、核心完成、连续稳定、功能采用/复用、留存/版本五个视角组织；Firebase/GA4 负责产品口径，Sentry 负责技术原因。结果埋点已有实现，GA4 四个探索配置已保存；留存配置、业务结果回执和成熟样本仍待验收。
-
-实现依据：[方案](../design/OBSERVABILITY.md)、[路径清单](ERROR-PATHS.md)、[进度与剩余工作](IMPLEMENTATION.md)。跨端诊断上下文、历史完成/应用/布局信号已实现并通过本地回归，真实混合版本旅程继续补验。历史 iOS/relay 及独立 JVM 探针回执不能替代当前包验收；自动 fatal 切换、符号、其余平台证据和完整发布验收仍待完成。
+GitHub 打包与配置见 [RELEASE](RELEASE.md#github-actions-配置与维护)。Sentry 五个公开 DSN Variables、iOS 符号上传 Secret 及既有 Firebase 配置 Secrets 已核对存在；正式与预览工作流已在 main 接入。Crashlytics 保持原职责，本批不迁移、不新增 fatal 抽验。
 
 云端使用 [Pairlet](https://pairlet.sentry.io/) 组织（美国区），项目名统一为 `pairlet-ios`、`pairlet-android`、`pairlet-desktop`、`pairlet-daemon`、`pairlet-relay`。已有代码中的命令、配置键及包名仍沿用当前仓库；改名时按用途逐项处理，公开命令可增加兼容入口，现有配置键和内部包名不做全量替换。计划中的设备过渡显示名 `CC Pairlet` 不改变这些 Sentry 组织或项目名称。
 
@@ -51,7 +49,7 @@ Errors 和 Logs 都有 `diag_schema`、`diag_event_id`、`error_path`、`operati
 - 历史 JSONL 最后一行未写完作为 INCOMPLETE 日志；更早的损坏行、读失败以及部分扫描失败保留错误和 PARTIAL 计数。
 - 成功操作按诊断编号进行 1% 采样，失败与恢复独立于成功采样；同路径/阶段/码及安全异常类型/首帧指纹 6 小时最多两个 handled error，按进程还设日上限。`submitted` 是进入自有队列，不是后台收到；SDK 限流/离线/停机仍可能使其丢失。
 
-不采集异常 message/cause、prompt、会话正文、路径、token、密钥、account/device/session 标识、HTTP URL 或原始 stderr。原始栈只保留 `dev.ccpocket` 的安全符号；JVM 另有源码 basename 与行号，iOS 当前只保留 Kotlin 函数名。没有匹配栈时保留类型。原生符号完整性仍须真实包验证。
+不采集异常 message/cause、prompt、会话正文、路径、token、密钥、account/device/session 标识、HTTP URL 或原始 stderr。原始栈只保留 `dev.ccpocket` 的安全符号；JVM 另有源码 basename 与行号，iOS 保留 Kotlin 函数名，并在运行时确实提供位置时保留源码 basename/行号；没有源信息的帧仍只到函数。没有匹配栈时保留类型。原生符号完整性仍须真实包验证。
 
 ## 验证命令
 
