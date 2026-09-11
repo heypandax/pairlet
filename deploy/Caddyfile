@@ -171,6 +171,11 @@ pairlet.org {
 
 # Same relay process and database as the legacy host; never redirect WebSocket/API traffic.
 relay.pairlet.org {
+    # Same analytics body cap as the legacy host (docs/observability/DESKTOP-GA4-INGRESS.md §1).
+    @analytics path /v1/analytics/*
+    request_body @analytics {
+        max_size 8KB
+    }
     reverse_proxy 127.0.0.1:9000 {
         header_up X-Forwarded-For {remote_host}
         header_up X-Real-IP {remote_host}
