@@ -17,7 +17,7 @@
 
 站点目录：
 
-- 当前链接：`/var/www/pairlet-site/current` → `releases/website-20260910-r2`。
+- 当前链接：`/var/www/pairlet-site/current` → `releases/website-20260912-bdfab268`（2026-09-12 同步到 main `bdfab268`；上一版 `releases/website-20260910-r2` 保留用于回退）。
 - 最初部署：`/var/www/pairlet-site/releases/e92ba5cf-20260910`，保留用于内容回退。
 - 旧站点：`/var/www/cc-pocket-site`，未覆盖。
 - 站点文件共 66 个；最终包 SHA-256 为 `4735b8a2953a75718973a66f290954b4fa362b8e825f40deb07186d46b95523a`。
@@ -44,6 +44,21 @@
 详细证据保存在当前 worktree 被忽略的 `docs/plans/pairlet-implementation/deploy-20260910/`，包括 DNS/SSL 页面回读、HTTP/TLS 回执、浏览器截图、站点清单及测试日志。凭据未写入记录或提交。
 
 ## 备份与回退
+
+### 2026-09-12 00:08 CST：官网内容同步到 main（bdfab268）
+
+2.0.0 发版前核对发现线上站点仍是 `website-20260910-r2`：`privacy.html` 缺少 Sentry 段落（App Store 审核备注链接到它），`index.html` 也与 main 不一致。从 main `bdfab268` 打包 `site/` 全部 66 个文件，单次 SSH 会话上传到 `/var/www/pairlet-site/releases/website-20260912-bdfab268`，远端按 `LC_ALL=C` 排序生成 SHA-256 清单，与本地清单哈希 `3ddd1da9a3d8ae3b5a5377960536ee054873c0cbaed3a4eb086600e53bb056df` 比对一致后才原子切换 `current`；上一版目录保留。
+
+公网回读：`/`、`/en/`、`/manual/zh/`、`/manual/en/`、`/support/`、`/privacy.html`、`/dl/latest.json` 均 200，`www` 308 保留完整 URI；`privacy.html`、`index.html`、`en/index.html`、`styles.css`、`app.js` 与仓库逐字节一致，隐私页已含 Sentry 段落。未动 Caddyfile、relay、下载镜像与稳定版本清单。
+
+两处坑：清单两端都要用 `LC_ALL=C sort`，macOS 默认排序规则与 Linux 不同，同一批文件会得出不同的清单哈希（首次上传因此被远端校验拒绝切换，属预期保护）；macOS `tar` 要加 `--no-xattrs`，否则 GNU tar 会对每个文件打印 `LIBARCHIVE.xattr.com.apple.provenance` 警告。香港机有 SSH 防暴破限速，两次连接之间至少间隔 20 秒，上传与切换合并在一次会话里完成。
+
+回退到上一版：
+
+```bash
+ln -sfn releases/website-20260910-r2 /var/www/pairlet-site/current.new
+mv -Tf /var/www/pairlet-site/current.new /var/www/pairlet-site/current
+```
 
 ### 2026-09-11 07:36 CST：再次恢复被旧部署配置覆盖的新域路由
 
