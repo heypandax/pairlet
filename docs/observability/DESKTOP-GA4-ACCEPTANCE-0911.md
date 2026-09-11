@@ -17,7 +17,7 @@
 
 ### 不覆盖（本次明确不做）
 
-- 配对后旅程（会话打开、发提示、断网重连）——需要人工操作 GUI，步骤见第 6 节。
+- 配对后旅程（会话打开、发提示、断网重连）——需要人工操作 GUI，步骤见第 6 节。**（补记：已于 2026-09-11 17:28—17:31 由用户亲手补做，结果见第 7 节。）**
 - 关闭采集、在飞取消、重开不重放的**活体**验证（仅有单测覆盖，见 4.5）。
 - 服务端侧的未知字段／超大请求／错误凭据注入测试（属 relay 侧验收，本次未做）。
 - GA4 普通聚合中的最终核对——我的事件在验收窗口内尚未进入标准报表，见 5.3。
@@ -328,11 +328,181 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 - 服务端侧的未知字段、超大请求（>8 KB）、错误令牌、超额请求注入测试。
 - 客户端包与服务端日志中「无 secret／无请求体／无越权字段」的系统性审查（本次只确认了包内无 `ga4.properties`）。
 
-## 7. 结论
+## 7. 配对后旅程实测（2026-09-11 用户亲手）
+
+§6.1 列为「未覆盖、需人工」的配对后旅程，由用户于 **17:28:41—17:31:58（北京时间）** 亲手走完一遍。本节只做核对与记录，未改动任何产品代码，也未改动服务器配置。
+
+### 7.1 旅程步骤与实际口径
+
+用的是本 worktree 打出的 staging 包，独立 home（`-Duser.home=/tmp/pairlet-journey-home-0911`）、全新未配对身份、`CCPOCKET_GA4_DEBUG=1`，stderr 落 `/tmp/pairlet-journey.log`。
+
+| # | 步骤 | 时间（北京） |
+|---|---|---|
+| 1 | 启动 staging 包，停 10 秒 | 17:28:41 |
+| 2 | 用 6 位码配对本机 daemon，等到已连接 | 17:29 |
+| 3 | 选项目目录、新建会话、等就绪 | 17:30 |
+| 4 | 发第一条提示，等回复结束 | 17:30 |
+| 5 | 关 Wi-Fi 约 20 秒再开，等自动重连 | 17:30—17:31 |
+| 6 | 再发一条提示，等回复结束 | 17:31 |
+| 7 | （可能）设置 → 关于 → 关闭「共享使用与诊断数据」，5 秒后重开 | 无证据 |
+| 8 | 退出 App | 17:31:58 |
+
+### 7.2 第一层：客户端传输日志
+
+`/tmp/pairlet-journey.log` 共 60 行，其中 27 组探针记录。**分类统计**：
+
+| 分类 | 次数 |
+|---|---|
+| `attempt` | 27 |
+| `http_2xx status=202` | 24 |
+| `io_failed` | 3 |
+| `no_content status=204` | 0 |
+| `http_other status=0` | 0 |
+| `[telemetry]` 告警 | 0 |
+| 其他非预期分类 | 0 |
+
+**分类序列**（前 40 行的原始顺序，`A`＝`attempt`）：
+
+```text
+A → 202 → A → 202 → A → 202 → A → 202 → A → 202 → A → 202 → A → 202 →
+A → 202 → A → 202 → A → 202 → A → 202 → A → 202 → A → 202 → A → 202 →
+A → 202 → A → 202 → A → 202 → A → 202 → A → 202 →              ← 日志第 6—48 行（21 组）
+A → io_failed → A → io_failed → A → io_failed →                ← 第 49—54 行（断网窗口）
+A → 202 → A → 202 → A → 202                                    ← 第 55—60 行（恢复后）
+```
+
+三次 `io_failed` 位于日志第 50／52／54 行，**恰好连续、恰好 3 次、恰好夹在 21 次 202 与 3 次 202 之间**，与第 5 步「关 Wi-Fi 约 20 秒」的位置完全吻合。全程没有 `[telemetry]` 告警，也没有出现 204／`http_other`／`timeout`／`dns_failed`／`tls_failed` 等其他分类。
+
+**关键推论**：`TelemetryDelivery.kt:26` 对发送异常是 `catch (_: Exception) { /* No retry or recursive diagnostics. */ }`，即**失败即丢、不重投、不排队补发**。因此这 3 个事件被永久丢弃，它们正是描述这次断网的那几个事件（见 §7.5 的 F9）。
+
+另外 `Telemetry.desktop.kt` 的 `sendToIngress` 是**一包一请求**（`AnalyticsPacket` 单条成体），所以「202 次数 ＝ 成功投递的事件条数」这一换算成立，这是下面三层对账能逐条对齐的前提。
+
+### 7.3 第二层：relay 计数
+
+只读查询（`journalctl -u cc-pocket-relay`，每 5 分钟一行累计值）：
+
+```text
+Sep 11 17:27:30  analytics accepted=3  dropped:no_stream:development=1 received=5  register=3 registered=3 rejected:unauthorized=1 upstream:2xx=3  upstream_ms:lt100=2  upstream_ms:lt500=1
+Sep 11 17:32:30  analytics accepted=27 dropped:no_stream:development=1 received=29 register=4 registered=4 rejected:unauthorized=1 upstream:2xx=27 upstream_ms:lt100=24 upstream_ms:lt500=3
+Sep 11 17:37:30  analytics accepted=27 dropped:no_stream:development=1 received=29 register=4 registered=4 rejected:unauthorized=1 upstream:2xx=27 upstream_ms:lt100=24 upstream_ms:lt500=3
+```
+
+取 17:27:30 → 17:32:30 的增量：
+
+| 计数器 | 增量 | 对照 |
+|---|---|---|
+| `received` | ＋24 | ＝ 客户端 24 次 202 |
+| `accepted` | ＋24 | ＝ 客户端 24 次 202 |
+| `upstream:2xx` | ＋24 | ＝ 客户端 24 次 202 |
+| `register` / `registered` | ＋1 | 新的 staging 匿名身份首次注册流，各 1 次 |
+| `upstream_ms:lt100` / `lt500` | ＋22 / ＋2 | 上游耗时分布 |
+| `rejected:unauthorized` / `dropped:no_stream:development` | ＋0 | 无越权、无环境未映射 |
+
+任务要求核对的「增量 ≥ 本次 202 次数」**成立，且是精确相等（24 ＝ 24）**：客户端报成功的每一次上报，入口都收到、都接受、上游都回 2xx，一条不多一条不少。三次 `io_failed` 如预期**没有**在 relay 留下任何痕迹——它们根本没出网。
+
+17:37:30 那行仍是 27，说明 17:32 之后**再没有经 relay 的桌面上报**，这一点在 §7.4 归因噪声时要用到。
+
+### 7.4 第三层：GA4 Realtime
+
+查询时刻 17:37:34，属性 `540841272`，窗口「最近 29 分钟」。
+
+**A. 只按 `eventName`（全属性）**：24 个事件名、全部流混在一起，无法直接归因。**改用 `streamName` ＋ `platform` 拆分**后，桌面流 `Pairlet Desktop · Measurement Protocol`（`platform=web`，即 `streamId=15754516140`）可以单独切出来，另两条 `com.panda.ccpocket`（Android／iOS）是手机 App 流，与本次无关。
+
+**按 `eventName` × `customEvent:app_environment` 的查询按预期报错**，原文照录（复现 §5.3 的 F6）：
+
+```text
+Field customEvent:app_environment is not a valid dimension. For a list of valid dimensions and
+metrics, see https://developers.google.com/analytics/devguides/reporting/data/v1/realtime-api-schema
+```
+
+退回只按 `eventName`（并按 `streamName` 过滤）。另外尝试用 `appVersion` 维度按 §6.1 建议的「`2.0.0` 干净归因钥匙」切分，**同样不可用**：Web／Measurement Protocol 流在 Realtime 下 `appVersion` 全为空串（见 §7.5 的 F10）。
+
+**最终归因口径**：桌面流 ＋ `minutesAgo` 分钟桶。旅程占 17:29／17:30／17:31 三个桶（查询时刻的 8m／7m／6m ago）：
+
+```text
+ 8m ago（17:29）：app_launch×1, conn_phase×3, connected×1, onboarding_shown×1,
+                  pair_failed×1, pair_started×2, paired×1                              = 10
+ 7m ago（17:30）：feature_exposed×2, feature_used×2, first_value_observed×1,
+                  prompt_response_result×1, prompt_sent×1, session_open_result×1,
+                  session_opened×1, turn_result×1, value_reached×1                     = 11
+ 6m ago（17:31）：feature_used×1, prompt_sent×1, turn_result×1                          =  3
+                                                                             合计       = 24
+```
+
+**24 条，与客户端 24 次 202、relay ＋24 精确相等。**
+
+关于同流噪声（重要口径说明）：桌面流在 17:32 之后以及 17:08—17:25 之间仍有事件（`feature_used`／`value_reached`／`session_opened` 等），但同期 relay 计数**完全没动**。原因是用户日常在跑的 production 桌面 App 仍是**直连 GA4 MP**（本分支的「改走 relay 入口」尚未合 main 发版），它和 staging 包共用同一条 Web 流。所以桌面流里同时混着日常 App 的直连流量与本次 staging 的过 relay 流量；三个旅程分钟桶之所以可以干净归因，靠的是 ①总数与 relay 增量精确相等、②配对类事件（`app_launch`／`onboarding_shown`／`pair_started`／`paired`／`pair_failed`／`connected`）只有全新未配对身份才可能发出。
+
+### 7.5 逐事件「见／未见」
+
+| 事件 | 预期 | 结论 | 计数与分钟桶 |
+|---|---|---|---|
+| `app_launch` | 步骤 1 | **见** | 1（17:29） |
+| `onboarding_shown` | 步骤 1—2（本批次新增） | **见** | 1（17:29） |
+| `pair_started` | 步骤 2 | **见** | 2（17:29） |
+| `paired` | 步骤 2 | **见** | 1（17:29） |
+| `connected` | 步骤 2 | **见** | 1（17:29） |
+| `conn_phase` | 步骤 2 | **见** | 3（17:29） |
+| `session_opened` | 步骤 3 | **见** | 1（17:30） |
+| `session_open_result` | 步骤 3 | **见** | 1（17:30） |
+| `prompt_sent` | 步骤 4、6 | **见** | 2（17:30、17:31 各 1） |
+| `prompt_response_result` | 步骤 4、6 | **见（只 1 条）** | 1（17:30） |
+| `turn_result` | 步骤 4、6 | **见** | 2（17:30、17:31 各 1） |
+| `value_reached` | 步骤 4 | **见** | 1（17:30） |
+| `first_value_observed` | 步骤 4 | **见** | 1（17:30） |
+| `feature_exposed` | 非清单内 | **见** | 2（17:30） |
+| `feature_used` | 非清单内 | **见** | 3（17:30×2、17:31×1） |
+| `disconnected` | 步骤 5 | **未见** | 0 |
+| `conn_failed` | 步骤 5 | **未见** | 0 |
+| `connection_recovery_result` | 步骤 5 | **未见** | 0 |
+
+**三个「未见」有唯一自洽解释**：缺的正好 3 个，丢的也正好 3 个（`io_failed`×3），而且位置就在断网窗口。`disconnected`（`PocketRepository.kt:2698`）、`conn_failed`（`:2515`）、`connection_recovery_result`（`:2502`）这三个事件**只会在网络断掉/刚恢复的那几百毫秒内发出**，而那正是上报链路唯一不通的时刻——加上 `TelemetryDelivery` 不重投，它们必然丢失。这不是埋点没打，是传输层设计把「最需要被观测的那一刻」的数据丢掉了。
+
+两条需要记一笔但不影响结论的观察：
+
+- `pair_failed×1`：17:29 桶里出现了 1 条配对失败。与 `pair_started×2` 一致，合理解释是第一次 6 位码输错或已过期、第二次成功。**待用户确认**是否确实试了两次；若不是，需要单独查。
+- `prompt_response_result` 只有 1 条而 `prompt_sent`／`turn_result` 各 2 条：第二条提示的 `turn_result` 在 17:31 桶里在（回复确实结束了），但没有配对的 `prompt_response_result`。17:32 桶里有 1 条 `prompt_response_result`，但那个时刻 relay 计数已停在 27 不再增长，所以它是日常 App 的噪声、不是我们的。这条差异**待复核**（可能是两个事件的触发条件本就不对称，也可能是第 7／8 步在它发出前把进程关了）。
+
+### 7.6 Dia 浏览器截图（B 项，未完成）
+
+用户要求「在 Dia 看效果」。Dia 主进程在跑（pid 44123），但**没有开 CDP 端口**：
+
+```text
+$ curl -sv http://127.0.0.1:9222/json/version
+*   Trying 127.0.0.1:9222...
+* connect to 127.0.0.1 port 9222 from 127.0.0.1 port 50031 failed: Connection refused
+* Failed to connect to 127.0.0.1 port 9222 after 0 ms: Couldn't connect to server
+```
+
+补充核实：`lsof -nP -iTCP -a -p 44123` 对 Dia 主进程**没有任何 LISTEN**，9223／9333／8315 也都不通；`~/.claude/skills/design-run/` 目录在本机不存在，拿不到现成连接代码。按任务约定「若 9222 连不上，记录错误原文并跳过 B」，本项**跳过**，没有尝试重启 Dia（会打断用户正在用的浏览器），也没有输入任何凭据。
+
+截图路径 `/tmp/pairlet-journey-ga4-realtime.png` 与 `/tmp/pairlet-journey-ga4-events.png` **未生成**。需要目视时，请在 Dia 里直接打开：
+
+```text
+https://analytics.google.com/analytics/web/#/p540841272/realtime/overview
+```
+
+（若之后要让自动化能截图，Dia 需带 `--remote-debugging-port=9222` 启动。）
+
+### 7.7 本节结论
+
+| 层 | 数字 | 结论 |
+|---|---|---|
+| 第一层 客户端 | 27 次 attempt ＝ 24×202 ＋ 3×`io_failed` | **通过**，无告警、无非预期分类 |
+| 第二层 relay | `received`／`accepted`／`upstream:2xx` 各 ＋24 | **通过**，与第一层精确相等 |
+| 第三层 GA4 Realtime | 桌面流旅程三桶合计 24 条、15 个事件名 | **通过**，与前两层精确相等 |
+
+配对后旅程整体判 **部分通过**：配对 → 连接 → 开会话 → 发提示 → 拿回复 → 断网重连 → 再发提示这条完整链路，三层回执逐条对齐，**清单内 13 个事件见到 10 个**；缺的 `disconnected`／`conn_failed`／`connection_recovery_result` 三个是断网期上报丢失所致（F9），属真实缺口而非验收失误。另外本批次新增的桌面 `onboarding_shown` **实测可达**，§5 记录的 F1（「桌面端没有任何引导曝光事件」）**已被本批次修复**。
+
+标准聚合层仍未覆盖：本次包 `app_version=2.0.0`，需 24～48 小时后用 `runReport` 按 `customEvent:app_version=2.0.0` 过滤做最终核对。
+
+第 7 步（关闭采集／重开）**证据不足，仍判未覆盖**：日志末尾是连续 3 次 202 后直接结束，没有出现「一段无 `attempt` 的空窗后重新出现 `attempt`」的形态。这与代码行为一致——关闭采集只是取消在飞请求并清空队列，本身不产生任何探针记录；若用户是在 17:31:30 之后、没有新事件要发的窗口里做的这一步，日志就必然什么都看不到。要活体验证这一项，需要在关闭期间刻意制造一个事件（例如切一次屏），确认它没有被补发。
+
+## 8. 结论
 
 | 项 | 结论 | 依据 |
 |---|---|---|
-| 未配对首启事件清单与预期一致 | **通过（但预期需修正）** | 桌面只发 `app_launch`；`onboarding_shown` 桌面不可达（F1），§2 |
+| 未配对首启事件清单与预期一致 | **通过（F1 已被本批次修复）** | §2 当时桌面只发 `app_launch`；本批次新增的桌面 `onboarding_shown` 已在 §7.5 实测可达 |
 | 官方形态 staging 包能构建并含公开入口资源 | **通过** | §3.2，jar 内 `endpoint=https://relay.pairlet.org` |
 | 门禁正向放行 | **通过** | `verify_exit=0`，§3.2 |
 | 门禁反向拒绝含 `ga4.properties` 的包 | **通过** | `verify_exit=1`，§3.3 |
@@ -345,9 +515,9 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 | 休眠后续帧出现 `http_other status=0` | **未覆盖** | 场景只产生 1 个事件；仅单测覆盖，§4.6 |
 | 入口收到（第一层） | **通过** | relay `received`／`register` 各 ＋1 两次，§5.1 |
 | 上游 2xx（第二层） | **通过** | relay `accepted`／`upstream:2xx` 各 ＋1 两次，§5.1 |
-| GA4 已处理（第三层） | **未覆盖（Realtime 已见，聚合未见）** | Realtime 两个分钟桶各 1 条且流正确；标准报表无 `2.0.0` 行，§5.3 |
-| 配对后旅程 | **未覆盖** | 需人工，步骤见 §6.1 |
-| 关闭采集／在飞取消／重开不重放 | **未覆盖** | §6.2 |
+| GA4 已处理（第三层） | **Realtime 通过，标准聚合仍未覆盖** | 旅程 24 条事件在桌面流三个分钟桶内全部见到、15 个事件名，与 relay ＋24 精确相等（§7.4）；标准聚合仍无 `2.0.0` 行，待 24～48 小时后用 `runReport` 复核（§5.3、§7.7） |
+| 配对后旅程 | **部分通过** | 三层回执精确对齐（24 ＝ 24 ＝ 24）；缺 `disconnected`／`conn_failed`／`connection_recovery_result` 三个断网期事件，§7 |
+| 关闭采集／在飞取消／重开不重放 | **未覆盖（旅程第 7 步佐证不足）** | 日志无「空窗后重新出现 `attempt`」形态；关闭采集本身不产生探针记录，需刻意在关闭期制造事件才可验，§7.7 |
 | 服务端字段／超限／凭据注入测试 | **未覆盖** | §6.2 |
 
 ### 登记的发现（只记录，未修）
@@ -362,3 +532,5 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 | F6 | Realtime API 不支持 `customEvent:*` 维度，只能按 `streamId`＋`minutesAgo` 归因；排查手册里应写明这一限制 | 工具限制 |
 | F7 | 本机 Homebrew JDK 会让 `createDistributable` 在 `checkRuntime` 直接失败，需命令行传 `-Pcompose.desktop.packaging.checkJdkVendor=false` | 本机构建环境 |
 | F8 | 桌面 `SecureStore` 是 `~/.cc-pocket-app/store.properties` 而非系统 keychain；两个 App 实例会互相覆盖写同一文件 | 事实澄清 |
+| F9 | 断网期间的上报**永久丢失**：`TelemetryDelivery.kt:26` 对发送异常是 `catch (_: Exception)`，不重投也不排队补发。后果是 `disconnected`／`conn_failed`／`connection_recovery_result` 这三个**只在断网那一刻发出**的事件，恰好是唯一发不出去的事件——「连接可靠性」这条漏斗在客户端侧结构性缺数（§7.2、§7.5） | 观测盲区 |
+| F10 | Realtime 下 Web／Measurement Protocol 流的 `appVersion` 维度**全为空串**，§6.1 建议的「用 `app_version=2.0.0` 做干净归因钥匙」在 Realtime 层不可用；叠加日常 production 桌面 App 仍直连 MP、与 staging 共用同一条 Web 流，桌面流天然混着两路流量。目前只能靠 `minutesAgo` 分钟桶 ＋ relay 计数交叉归因 | 工具限制 ＋ 归因口径 |
