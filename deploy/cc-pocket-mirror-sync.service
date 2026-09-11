@@ -6,8 +6,9 @@ After=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/opt/cc-pocket-mirror/mirror-sync.sh
-# a cold sync moves ~400MB from GitHub; give it room but never let a wedged download run forever
-TimeoutStartSec=30min
+# a cold sync moves ~550MB from GitHub and this box has seen ~100KB/s to it; downloads resume across
+# runs (mirror-sync.sh keeps partials), so this only bounds one run, never the whole sync
+TimeoutStartSec=90min
 # background hygiene: the relay's data plane on this box always wins over a mirror refresh
 Nice=10
 IOSchedulingClass=idle

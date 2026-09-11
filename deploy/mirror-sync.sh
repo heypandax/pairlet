@@ -49,10 +49,17 @@ while IFS=$'\t' read -r name url; do
     continue  # already mirrored and still matches the (possibly refreshed) sums
   fi
   echo "fetching $name"
-  curl -fSL --max-time 900 "$url" -o "$tmp/$name"
-  actual="$(sha256sum "$tmp/$name" | awk '{print tolower($1)}')"
-  [ "$actual" = "$expected" ] || { echo "checksum mismatch for $name (expected $expected got $actual)"; exit 1; }
-  mv -f "$tmp/$name" "$vdir/$name"
+  # Resume across runs: GitHub from this box can crawl at ~100KB/s, so a ~110MB asset does not fit in
+  # one attempt. The partial lives OUTSIDE $tmp (which the EXIT trap wipes) so the next timer run
+  # continues where this one stopped instead of starting over; it is verified before going live.
+  mkdir -p "$DEST/.partial"; part="$DEST/.partial/$tag-$name"
+  if ! curl -fSL -C - --retry 3 --retry-delay 5 --retry-all-errors \
+       --speed-limit 10240 --speed-time 120 --max-time 1500 "$url" -o "$part"; then
+    echo "download interrupted for $name — partial kept at $part for the next run"; exit 28
+  fi
+  actual="$(sha256sum "$part" | awk '{print tolower($1)}')"
+  [ "$actual" = "$expected" ] || { echo "checksum mismatch for $name (expected $expected got $actual)"; rm -f "$part"; exit 1; }
+  mv -f "$part" "$vdir/$name"
 done < <(jq -r '.assets[] | [.name, .browser_download_url] | @tsv' <<<"$api")
 mv -f "$tmp/SHA256SUMS" "$vdir/SHA256SUMS"
 
