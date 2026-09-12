@@ -291,7 +291,7 @@ jobs:
             echo "::error::GOOGLE_SERVICES_JSON secret is not set — the Firebase plugin can't build without it."
             exit 1
           fi
-          echo "$GOOGLE_SERVICES_JSON" | base64 --decode > mobile/composeApp/google-services.json
+          echo "$GOOGLE_SERVICES_JSON" | base64 --decode > mobile/androidApp/google-services.json
 
       - name: Build signed release APK
         env:
@@ -307,26 +307,26 @@ jobs:
           # The repo's gradle.properties pins org.gradle.java.home to the Mac dev box's Homebrew
           # JDK, which doesn't exist on Linux — override it with the runner's JDK (same trick the
           # daemon release scripts use).
-          ./gradlew :mobile:composeApp:assembleRelease -Dorg.gradle.java.home="$JAVA_HOME"
+          ./gradlew :mobile:androidApp:assembleRelease -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Verify packaged Sentry configuration
         uses: ./.github/actions/observability-config
         with:
           component: android
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_ANDROID }}
-          artifact: mobile/composeApp/build/outputs/apk/release/composeApp-release.apk
+          artifact: mobile/androidApp/build/outputs/apk/release/androidApp-release.apk
 
       - name: Verify signature & upload APK to release v${{ inputs.version }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          SRC=$(ls mobile/composeApp/build/outputs/apk/release/*-release.apk 2>/dev/null | grep -v unsigned | head -1)
+          SRC=$(ls mobile/androidApp/build/outputs/apk/release/*-release.apk 2>/dev/null | grep -v unsigned | head -1)
           if [ -z "$SRC" ]; then echo "::error::no release APK produced"; exit 1; fi
           # Gate: a missing/incorrect signing config yields an unsigned APK — apksigner verify
           # exits non-zero on that, failing the job before we publish a non-installable build.
           APKSIGNER=$(ls "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -1)
           "$APKSIGNER" verify --print-certs "$SRC"
-          VN=$(grep -E '^[[:space:]]*versionName' mobile/composeApp/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          VN=$(grep -E '^val appVersionName' mobile/composeApp/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
           echo "app versionName: $VN"
           # Stable, version-less name so https://github.com/.../releases/latest/download/cc-pocket-android.apk
           # is a permanent "always newest" link the README and site can hard-code (the per-release
@@ -380,7 +380,7 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
-        run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+        run: cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
 
       - name: Import Developer ID signing certificate
         env:
@@ -456,7 +456,7 @@ jobs:
 
       - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
         shell: bash
-        run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+        run: cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
 
       - name: Unpin the macOS-only JDK path (gradle.properties pins it for local dev; CI uses the runner JDK)
         shell: bash

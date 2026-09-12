@@ -154,6 +154,8 @@ daemon 会查找独立安装目录 `~/.opencode/bin`，以及 PATH 和包管理�
 
 ## 从源码构建
 
+构建固定使用 Gradle 9.4.1、Kotlin 2.4.20、Compose Multiplatform 1.12.0 与 AGP 9.2.1（Android compile SDK 37），请使用 `./gradlew`。`:mobile:composeApp` 保留跨平台与各平台代码，Android 应用由 `:mobile:androidApp` 打包。
+
 | 模块 | 做什么 | 技术栈 |
 |---|---|---|
 | `:protocol` | 共享 wire 协议（`pocket/*` 帧）——唯一事实源 | Kotlin Multiplatform + kotlinx.serialization |
@@ -164,7 +166,7 @@ daemon 会查找独立安装目录 `~/.opencode/bin`，以及 PATH 和包管理�
 需要 **JDK 17**（任意发行版——版本对不上时 Gradle toolchain 会自己下）、**Android SDK**（`ANDROID_HOME` 或 `local.properties`；纯 JVM 任务也需要 Android 模块的配置），以及至少一个装好并登录的 agent CLI。要构建移动端，先把提交在仓库里的 Firebase 占位文件复制一份（真的 Firebase 项目只有推送 / 统计才需要）：
 
 ```bash
-cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
 ```
 
 本机单机跑（不走中继，开发用）：
@@ -183,7 +185,7 @@ daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon run --relay wss://<�
 daemon/build/install/cc-pocket-daemon/bin/pairlet pair    # 另开一个终端
 ```
 
-构建 App：Android 用 `./gradlew :mobile:composeApp:assembleDebug`；iOS 用 `iosApp/iosApp.xcodeproj`（Xcode——先把 `iosApp/iosApp/GoogleService-Info.plist.template` 复制成同目录的 `GoogleService-Info.plist`）；桌面端（含 Linux）用 `./gradlew :mobile:composeApp:packageDistributionForCurrentOS`。iOS 真机安装见 [`docs/ios-device.md`](docs/ios-device.md)。
+构建 App：Android 用 `./gradlew :mobile:androidApp:assembleDebug`；iOS 用 `iosApp/iosApp.xcodeproj`（Xcode——先把 `iosApp/iosApp/GoogleService-Info.plist.template` 复制成同目录的 `GoogleService-Info.plist`）；桌面端（含 Linux）用 `./gradlew :mobile:composeApp:packageDistributionForCurrentOS`。iOS 真机安装见 [`docs/ios-device.md`](docs/ios-device.md)。
 
 ## 文档
 

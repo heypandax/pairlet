@@ -928,12 +928,16 @@ private fun GroupHeaderBody(
             }
         }
         NewSessionHere(onNewSession)
-        if (hovered) Icon(
-            if (pinned) PinSlashIcon else PinIcon,
-            stringResource(if (pinned) Res.string.unpin_project else Res.string.pin_project),
-            tint = if (pinned) Tok.tx2 else Tok.accent,
-            modifier = Modifier.size(13.dp).clickable(onClick = onTogglePin),
-        ) else if (pinned) Icon(PinIcon, null, tint = Tok.muted, modifier = Modifier.size(11.dp))
+        // Keep hover actions' slots stable: otherwise entering the row moves the ＋ out from
+        // under the pointer before its click is dispatched (Compose 1.12 mouse input).
+        Box(Modifier.size(13.dp), contentAlignment = Alignment.Center) {
+            if (hovered) Icon(
+                if (pinned) PinSlashIcon else PinIcon,
+                stringResource(if (pinned) Res.string.unpin_project else Res.string.pin_project),
+                tint = if (pinned) Tok.tx2 else Tok.accent,
+                modifier = Modifier.size(13.dp).clickable(onClick = onTogglePin),
+            ) else if (pinned) Icon(PinIcon, null, tint = Tok.muted, modifier = Modifier.size(11.dp))
+        }
         if (g.sharedBy != null) {
             // a guest's shared folder (issue #115): the same neutral hairline pill as mobile — provenance,
             // not attention — plus "who · how long" at rest. Hover hands that space to the refresh icon
@@ -948,18 +952,20 @@ private fun GroupHeaderBody(
                 )
             }
         }
-        when {
-            refreshing -> {
-                val angle by rememberInfiniteTransition().animateFloat(
-                    initialValue = 0f, targetValue = 360f,
-                    animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
+        Box(Modifier.size(13.dp), contentAlignment = Alignment.Center) {
+            when {
+                refreshing -> {
+                    val angle by rememberInfiniteTransition().animateFloat(
+                        initialValue = 0f, targetValue = 360f,
+                        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
+                    )
+                    Icon(Icons.Rounded.Refresh, null, tint = Tok.tx2, modifier = Modifier.size(13.dp).rotate(angle))
+                }
+                hovered -> Icon(
+                    Icons.Rounded.Refresh, null, tint = Tok.tx2,
+                    modifier = Modifier.size(13.dp).clickable(onClick = onRefresh),
                 )
-                Icon(Icons.Rounded.Refresh, null, tint = Tok.tx2, modifier = Modifier.size(13.dp).rotate(angle))
             }
-            hovered -> Icon(
-                Icons.Rounded.Refresh, null, tint = Tok.tx2,
-                modifier = Modifier.size(13.dp).clickable(onClick = onRefresh),
-            )
         }
         if (closed && g.sessions.any { it.running }) PulseDot(Tok.ok, 5.dp) // running stays visible when folded
         Icon(

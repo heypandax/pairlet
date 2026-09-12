@@ -1,7 +1,7 @@
 package dev.ccpocket.app.desktop
 
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.FileUpState

@@ -3,6 +3,7 @@ package dev.ccpocket.app.telemetry
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.test.*
+import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.secure.SecureStore

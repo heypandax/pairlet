@@ -22,7 +22,7 @@ def main():
     for entry in contract["frozenFiles"]:
         path = ROOT / entry["path"]
         assert hashlib.sha256(path.read_bytes()).hexdigest() == entry["sha256"], f"Frozen compatibility file changed: {path}"
-    gradle = (ROOT / "mobile/composeApp/build.gradle.kts").read_text()
+    gradle = (ROOT / "mobile/composeApp/build.gradle.kts").read_text() + (ROOT / "mobile/androidApp/build.gradle.kts").read_text()
     for value in ['applicationId = "com.panda.ccpocket"', 'bundleID = "dev.ccpocket.app"',
                   'packageName = "CC Pocket"', f'upgradeUuid = "{contract["windowsUpgradeCode"]}"']:
         assert value in gradle, f"Packaging identity missing: {value}"
@@ -43,7 +43,7 @@ def main():
         else:
             app_ids.add(identifier.group(1))
     assert app_ids == {"com.panda.ccpocket"}, "Production iOS bundle identity changed"
-    android = ET.parse(ROOT / "mobile/composeApp/src/androidMain/AndroidManifest.xml").getroot()
+    android = ET.parse(ROOT / "mobile/androidApp/src/main/AndroidManifest.xml").getroot()
     ns = "{http://schemas.android.com/apk/res/android}"
     assert android.find("application").get(ns + "label") == "CC Pairlet"
     assert any(item.get(ns + "scheme") == "ccpocket" for item in android.iter("data"))

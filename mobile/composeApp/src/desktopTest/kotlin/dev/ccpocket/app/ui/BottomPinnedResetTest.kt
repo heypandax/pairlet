@@ -4,7 +4,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import kotlin.test.Test
 import kotlin.test.assertTrue
 

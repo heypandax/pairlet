@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.desktop.ConnectPanel

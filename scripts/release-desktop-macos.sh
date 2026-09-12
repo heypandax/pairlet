@@ -10,8 +10,6 @@
 #   - JDK 17 with jpackage (JAVA_HOME); on a Homebrew JDK we pass checkJdkVendor=false
 #   - Xcode Command Line Tools (codesign, xcrun, stapler)
 #   - a "Developer ID Application" certificate in the keychain        (only for a signed build)
-#   - a real mobile/composeApp/google-services.json — composeApp applies the Android plugin at
-#     configure time; the desktop target never touches Firebase, so CI writes a placeholder.
 #
 # Env (auto-loaded from .env if present, gitignored):
 #   DEVELOPER_ID                                   "Developer ID Application: … (TEAMID)".
@@ -41,9 +39,6 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-cc-pocket}"
 if [ -z "${JAVA_HOME:-}" ] && [ -d /opt/homebrew/opt/openjdk@17 ]; then
   export JAVA_HOME=/opt/homebrew/opt/openjdk@17
 fi
-
-[ -f mobile/composeApp/google-services.json ] || \
-  echo "WARN: mobile/composeApp/google-services.json missing — composeApp configure may fail (CI writes a placeholder)."
 
 SIGN_ARGS=()
 if [ -n "${DEVELOPER_ID:-}" ]; then

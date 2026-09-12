@@ -4,8 +4,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.platform.ClipboardManager
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.Clipboard
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.asAwtTransferable
+import androidx.compose.ui.ExperimentalComposeUiApi
+import java.awt.datatransfer.DataFlavor
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.TextToolbar
 import androidx.compose.ui.platform.TextToolbarStatus
@@ -19,7 +23,7 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import dev.ccpocket.app.data.parseUnifiedDiff
 import dev.ccpocket.app.theme.PocketTheme
@@ -36,7 +40,7 @@ import kotlin.test.assertTrue
  * around the list — mouse drag must select even though each line also carries the shared
  * horizontalScroll. Re-check on any CMP upgrade.
  */
-@OptIn(ExperimentalTestApi::class)
+@OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
 class DiffSelectionContractTest {
 
     private class RecordingToolbar : TextToolbar {
@@ -56,16 +60,22 @@ class DiffSelectionContractTest {
         }
     }
 
-    private class RecordingClipboard : ClipboardManager {
+    private class RecordingClipboard : Clipboard {
+        private var entry: ClipEntry? = null
         var stored: AnnotatedString? = null
-        override fun getText(): AnnotatedString? = stored
-        override fun setText(annotatedString: AnnotatedString) { stored = annotatedString }
+        override suspend fun getClipEntry(): ClipEntry? = entry
+        override suspend fun setClipEntry(clipEntry: ClipEntry?) {
+            entry = clipEntry
+            stored = clipEntry?.asAwtTransferable?.let {
+                AnnotatedString(it.getTransferData(DataFlavor.stringFlavor) as String)
+            }
+        }
     }
 
     private val addedLine = "charlie"
 
     @Composable
-    private fun diffUnderTest(tb: TextToolbar, cb: ClipboardManager, dense: Boolean) {
+    private fun diffUnderTest(tb: TextToolbar, cb: Clipboard, dense: Boolean, blankLines: Boolean = false, wrap: Boolean = false) {
         val hunks = parseUnifiedDiff(
             """
             @@ -1,2 +1,2 @@
@@ -74,8 +84,9 @@ class DiffSelectionContractTest {
             +$addedLine
             """.trimIndent(),
         )
-        CompositionLocalProvider(LocalTextToolbar provides tb, LocalClipboardManager provides cb) {
-            PocketTheme { DiffView(hunks, ext = null, dense = dense, wrap = false) }
+        val displayed = if (blankLines) parseUnifiedDiff("@@ -1,3 +1,4 @@\n alpha context\n \n \n+$addedLine") else hunks
+        CompositionLocalProvider(LocalTextToolbar provides tb, LocalClipboard provides cb) {
+            PocketTheme { DiffView(displayed, ext = null, dense = dense, wrap = wrap) }
         }
     }
 
@@ -133,6 +144,26 @@ class DiffSelectionContractTest {
             "alpha context\nbravo removed\n$addedLine", cb.stored?.text?.trimEnd('\n'),
             "select-all in a block must yield every code line of the hunk, line-per-line, nothing else",
         )
+    }
+
+    @Test
+    fun mobile_selection_preserves_empty_source_lines() = checkEmptyLines(wrap = false)
+
+    @Test
+    fun mobile_wrapped_selection_preserves_empty_source_lines() = checkEmptyLines(wrap = true)
+
+    private fun checkEmptyLines(wrap: Boolean) = runComposeUiTest {
+        val tb = RecordingToolbar()
+        val cb = RecordingClipboard()
+        setContent { diffUnderTest(tb, cb, dense = false, blankLines = true, wrap = wrap) }
+        onNode(hasText(addedLine, substring = true)).performTouchInput { longClick(center) }
+        waitForIdle()
+        tb.selectAllCb!!.invoke()
+        waitForIdle()
+        tb.copyCb!!.invoke()
+        waitForIdle()
+        assertEquals("alpha context\n\n\n$addedLine", cb.stored?.text,
+            "copy preserves real blank lines without adding separators of its own")
     }
 
     @Test

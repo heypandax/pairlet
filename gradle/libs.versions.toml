@@ -1,34 +1,39 @@
 [versions]
-kotlin = "2.1.21"
+kotlin = "2.4.20"
 ktor = "3.1.3"
-kotlinxSerialization = "1.7.3"
-kotlinxCoroutines = "1.9.0"
+kotlinxSerialization = "1.11.0"
+kotlinxCoroutines = "1.11.0"
 clikt = "5.0.1"
 slf4j = "2.0.13"
 logback = "1.5.6"
 junit = "5.11.3"
 sqliteJdbc = "3.46.1.3"
-# 0.4.0 is the last release whose Kotlin/Native klib (Kotlin 2.0.20, ABI 1.8.0) is consumable by
-# this project's Kotlin 2.1.21; 0.5.0+ klibs (ABI 2.2.0+) require a newer Kotlin compiler.
+# Keep the existing crypto provider version during the build-toolchain migration.
 cryptographyKotlin = "0.4.0"
-composeMultiplatform = "1.7.3"
-agp = "8.7.3"
+composeMultiplatform = "1.12.0"
+composeMaterial3 = "1.9.0"
+agp = "9.2.1"
 androidActivityCompose = "1.9.3"
 androidxBiometric = "1.1.0"
 androidMinSdk = "26"
-androidCompileSdk = "35"
+androidCompileSdk = "37"
 androidTargetSdk = "35"
-googleServices = "4.4.2"
-firebaseCrashlyticsPlugin = "3.0.2"
+googleServices = "4.5.0"
+firebaseCrashlyticsPlugin = "3.0.8"
 firebaseBom = "33.7.0"
 sentryJava = "8.41.0"
-# Embedded terminal engine (issue #153, desktop only). 3.72 is the newest JediTerm built with
-# Kotlin 2.1.21 — this project's exact compiler; 3.73+ jumps to kotlin-stdlib 2.4.0, whose klib
-# metadata a 2.1 compiler can't read. pty4j 0.13.12 is likewise 2.1.21 and shares our jna 5.14.0.
+# Embedded terminal libraries remain pinned during the build-toolchain migration.
 jediterm = "3.72"
 pty4j = "0.13.12"
 
 [libraries]
+compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "composeMultiplatform" }
+compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "composeMultiplatform" }
+compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "composeMultiplatform" }
+compose-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "composeMultiplatform" }
+compose-ui-test = { module = "org.jetbrains.compose.ui:ui-test", version.ref = "composeMultiplatform" }
+compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "composeMaterial3" }
+compose-material-icons-extended = { module = "org.jetbrains.compose.material:material-icons-extended", version = "1.7.3" }
 sentry-java = { module = "io.sentry:sentry", version.ref = "sentryJava" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
@@ -77,8 +82,7 @@ zstd-jni = { module = "com.github.luben:zstd-jni", version = "1.5.7-13" }
 # okhttp (com.lark.oapi.okhttp), so it can't fight ktor; external deps are just gson/commons-codec/slf4j.
 lark-oapi-sdk = { module = "com.larksuite.oapi:oapi-sdk", version = "2.4.19" }
 qrkit = { module = "network.chaintech:qr-kit", version = "3.0.6" }
-# KMP syntax highlighting for chat code blocks (issue #51). Built with Kotlin 2.0.20 — its klibs are
-# consumable by this project's 2.1.21 (unlike cryptography-kotlin 0.5.0+, see note above).
+# KMP syntax highlighting for chat code blocks (issue #51); retained during the build-chain migration.
 highlights = { module = "dev.snipme:highlights", version = "1.0.0" }
 peekaboo = { module = "io.github.onseok:peekaboo-image-picker", version = "0.5.2" }
 cryptography-core = { module = "dev.whyoleg.cryptography:cryptography-core", version.ref = "cryptographyKotlin" }
@@ -99,6 +103,6 @@ kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", versio
 composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 androidApplication = { id = "com.android.application", version.ref = "agp" }
-androidLibrary = { id = "com.android.library", version.ref = "agp" }
+androidMultiplatformLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
 googleServices = { id = "com.google.gms.google-services", version.ref = "googleServices" }
 firebaseCrashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebaseCrashlyticsPlugin" }

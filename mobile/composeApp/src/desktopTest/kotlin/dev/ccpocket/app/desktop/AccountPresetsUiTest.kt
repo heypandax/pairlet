@@ -9,7 +9,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
@@ -146,8 +146,9 @@ class AccountPresetsUiTest {
         val m = SeedDesktopModel()
         m.seedPresets(null) // a pre-presets daemon silently drops the fetch — no reply ever comes
         openAccount(m)
-        // the virtual clock auto-advances past the 4s fetch timeout during waitForIdle,
-        // so the settled "update the daemon" line is what's observable here
+        // Advance the fetch deadline explicitly; idleness does not execute future delayed work.
+        mainClock.advanceTimeBy(4_001)
+        waitForIdle()
         assertPresent(str(Res.string.settings_presets_stale))
         // the create/edit entry point is GONE: a plaintext token can never be fired at an old daemon
         assertTrue(!present(str(Res.string.settings_preset_new)), "form entry must be hidden for a pre-presets daemon")

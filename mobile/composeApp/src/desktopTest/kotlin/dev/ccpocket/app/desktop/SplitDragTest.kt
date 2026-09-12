@@ -10,7 +10,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.ccpocket.app.data.SidePanes
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.protocol.AgentKind

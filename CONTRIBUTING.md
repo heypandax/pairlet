@@ -10,15 +10,18 @@ Issues and PRs are welcome, in English or Chinese. This file collects everything
 | `:daemon` | Drives `claude` / `codex` as subprocesses, dials out to the relay | Your computer (JVM) |
 | `:relay` | Zero-knowledge broker: pairing, ciphertext routing, rate limiting | Cloud (JVM) |
 | `:mobile:composeApp` | The app (phone + desktop), Compose Multiplatform | Android · iOS · desktop |
+| `:mobile:androidApp` | Android application packaging, manifest, Firebase and signing | Android |
 | `iosApp/` | Xcode shell around the KMP framework (xcodegen from `project.yml`) | iOS |
 
 ## Build prerequisites
 
+Use the checked-in `./gradlew`: Gradle 9.4.1, Kotlin 2.4.20, Compose Multiplatform 1.12.0 and AGP 9.2.1. The shared app is a KMP library; Android APK tasks run in `:mobile:androidApp`.
+
 1. **JDK 17** — any distribution. The build resolves the exact toolchain itself (foojay resolver in `settings.gradle.kts`); you just need *a* JDK on `PATH`/`JAVA_HOME` to launch `./gradlew`.
-2. **Android SDK** — set `ANDROID_HOME` or `local.properties` with `sdk.dir=...`. Needed even for JVM-only tasks: the Android modules are configured at Gradle configuration time.
+2. **Android SDK, platform 37 and build-tools 36.0.0** (`sdkmanager "platforms;android-37.0" "build-tools;36.0.0"`) — set `ANDROID_HOME` or `local.properties` with `sdk.dir=...`. Needed even for JVM-only tasks: the Android modules are configured at Gradle configuration time.
 3. **Firebase placeholder** — the real client configs are gitignored; copy the committed template once:
    ```bash
-   cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+   cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
    ```
    For iOS additionally: `cp iosApp/iosApp/GoogleService-Info.plist.template iosApp/iosApp/GoogleService-Info.plist` (see `docs/ios-device.md`, step 0).
 4. For daemon end-to-end runs: an installed, logged-in `claude` CLI ([Claude Code](https://claude.com/claude-code)).
@@ -32,7 +35,7 @@ bash scripts/relay-smoke.sh    # optional: in-memory relay E2E smoke (fake claud
 ./gradlew :protocol:jvmTest --tests "dev.ccpocket.protocol.e2e.*"   # crypto channel proofs
 ```
 
-CI (`.github/workflows/ci.yml`) runs the protocol/daemon/relay suites and compiles the desktop target on every PR. The mobile UI/screenshot tests only run locally — they need a real Skia renderer.
+CI (`.github/workflows/ci.yml`) runs the protocol/daemon/relay suites and compiles the desktop target and assembles the Android debug APK on every PR. The mobile UI/screenshot tests only run locally — they need a real Skia renderer.
 
 Manual smoke of the daemon against a real `claude`: `./gradlew :daemon:run --args="test-client"` (see `docs/RUN.md`).
 

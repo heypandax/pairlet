@@ -1,5 +1,7 @@
 package dev.ccpocket.app.ui
 
+import dev.ccpocket.app.advanceFrameAndWait
+
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,7 +61,7 @@ class WideLayoutUiTest {
             repo = remember { PocketRepository(scope).also { it.enterDemo(); it.seed() } }
             PocketTheme { WideLayoutScope(Modifier.fillMaxSize()) { ContentRouter(repo) } }
         }
-        waitForIdle()
+        advanceFrameAndWait()
         assertions(repo)
     }
 
@@ -78,14 +80,14 @@ class WideLayoutUiTest {
 
         // opening a session fills the RIGHT pane and must not cost the left one — the whole point of #334
         repo.receiveForTest(live())
-        waitForIdle()
+        advanceFrameAndWait()
         assertNotNull(repo.convoId.value, "the seeded SessionLive must have opened the conversation")
         assertTrue(sessionsListShowing(), "opening a session must NOT hide the wide left pane")
         assertFalse(placeholderShowing(), "…and the right pane is the chat now, not the placeholder")
 
         // the chat's own Back closes the chat only: right pane → placeholder, left pane untouched
         repo.backToBrowse()
-        waitForIdle()
+        advanceFrameAndWait()
         assertNull(repo.convoId.value)
         assertNotNull(repo.sessionsDir.value, "leaving the chat must not leave the project")
         assertTrue(placeholderShowing(), "back from the chat empties the right pane")
@@ -93,7 +95,7 @@ class WideLayoutUiTest {
 
         // the sessions list's Back walks the left pane out to Projects; the right pane stays empty
         repo.backToDirectories()
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(projectsShowing(), "back from the sessions list returns the left pane to Projects")
         assertTrue(placeholderShowing(), "…with the right pane still on the placeholder")
     }
@@ -108,13 +110,13 @@ class WideLayoutUiTest {
 
         // the chat REPLACES the list on a phone — the narrow branch is untouched by #334
         repo.receiveForTest(live())
-        waitForIdle()
+        advanceFrameAndWait()
         assertNotNull(repo.convoId.value)
         assertFalse(sessionsListShowing(), "a phone chat replaces the list rather than sitting beside it")
         assertFalse(placeholderShowing(), "…and still has no placeholder anywhere")
 
         repo.backToBrowse()
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(sessionsListShowing(), "back returns the phone to the list it came from")
         assertFalse(placeholderShowing())
     }

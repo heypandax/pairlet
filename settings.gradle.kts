@@ -11,7 +11,7 @@ pluginManagement {
 plugins {
     // Fresh clones rarely have the exact JDK: let Gradle auto-download the jvmToolchain(17)
     // the modules declare instead of failing on a machine-specific JAVA_HOME pin.
-    id("org.gradle.toolchains.foojay-resolver-convention") version "0.9.0"
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
 rootProject.name = "cc-pocket"
@@ -35,3 +35,5 @@ include(":observability-sentry")
 include(":daemon")
 include(":relay")
 include(":mobile:composeApp")
+
+include(":mobile:androidApp")

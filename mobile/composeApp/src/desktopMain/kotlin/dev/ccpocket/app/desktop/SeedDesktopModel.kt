@@ -26,7 +26,7 @@ open class SeedDesktopModel : DesktopModel {
         DkComputer("acct-linux", "devbox-linux", DkOs.LINUX, online = true, meta = "online · just now"),
         DkComputer("acct-win", "win-desktop", DkOs.WIN, online = false, meta = "offline · 2d ago"),
     )
-    override var activeComputer: DkComputer? by mutableStateOf(computers.first())
+    final override var activeComputer: DkComputer? by mutableStateOf(computers.first())
         private set
 
     override val projects = listOf(

@@ -8,7 +8,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.settings_tab_about

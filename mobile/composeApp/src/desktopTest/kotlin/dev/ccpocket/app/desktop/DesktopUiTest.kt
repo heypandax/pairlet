@@ -19,7 +19,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.test.withKeyDown
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.present

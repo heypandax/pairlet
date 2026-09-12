@@ -13,7 +13,7 @@ import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height

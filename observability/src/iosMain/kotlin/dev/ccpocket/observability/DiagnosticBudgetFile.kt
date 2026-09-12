@@ -24,7 +24,7 @@ actual fun diagnosticBudgetStore(component: Component, environment: Environment,
                 }
                 val next = transform(raw)
                 check(next.encodeToByteArray().size <= 4096)
-                (next as NSString).writeToFile(path, atomically = true, encoding = NSUTF8StringEncoding, error = null)
+                NSString.create(string = next).writeToFile(path, atomically = true, encoding = NSUTF8StringEncoding, error = null)
             }.getOrDefault(false)
         }
     }

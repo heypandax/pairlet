@@ -24,11 +24,11 @@ def main():
         "mobile/composeApp/src/desktopMain/resources/app-icon.png": 256,
         "harmony/AppScope/resources/base/media/app_icon.png": 1024,
         "harmony/entry/src/main/resources/base/media/icon.png": 1024,
-        "mobile/composeApp/src/androidMain/res/drawable/ic_launcher_fg.png": 1024,
+        "mobile/androidApp/src/main/res/drawable/ic_launcher_fg.png": 1024,
         "site/apple-touch-icon.png": 180,
     }
     for density, size in {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}.items():
-        targets[f"mobile/composeApp/src/androidMain/res/mipmap-{density}/ic_launcher.png"] = size
+        targets[f"mobile/androidApp/src/main/res/mipmap-{density}/ic_launcher.png"] = size
     for path, size in targets.items():
         resize(size, ROOT / path)
     with tempfile.TemporaryDirectory(prefix="pairlet-icon-") as directory:

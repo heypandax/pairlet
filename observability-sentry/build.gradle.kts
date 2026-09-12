@@ -1,11 +1,16 @@
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.androidMultiplatformLibrary)
 }
 kotlin {
     jvmToolchain(17)
     jvm()
-    androidTarget()
+    android {
+        namespace = "dev.ccpocket.observability.sentry"
+        compileSdk = libs.versions.androidCompileSdk.get().toInt()
+        minSdk = libs.versions.androidMinSdk.get().toInt()
+        withHostTest {}
+    }
     applyDefaultHierarchyTemplate()
     sourceSets {
         commonMain.dependencies { api(project(":observability")) }
@@ -20,11 +25,6 @@ kotlin {
         androidMain.get().dependsOn(jvmAndAndroidMain)
         jvmTest.dependencies { implementation(kotlin("test")); implementation(libs.sentry.java) }
     }
-}
-android {
-    namespace = "dev.ccpocket.observability.sentry"
-    compileSdk = libs.versions.androidCompileSdk.get().toInt()
-    defaultConfig { minSdk = libs.versions.androidMinSdk.get().toInt() }
 }
 
 tasks.withType<Test>().configureEach {

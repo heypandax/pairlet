@@ -1,7 +1,7 @@
 name: ci
 
 # PR gate: one cheap ubuntu job — run the protocol / daemon / relay test suites and
-# compile the mobile app's desktop target. Mobile UI tests (desktopTest) stay local
+# compile the desktop target and assemble the Android APK. Mobile UI tests (desktopTest) stay local
 # (scripts/check-all.sh): they exercise a real Skia renderer and are not stable on
 # headless CI runners. Release pipelines are separate dispatch-only workflows
 # (release.yml / ios-release.yml / build-windows.yml).
@@ -55,16 +55,15 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      # composeApp applies the Android + google-services plugins at configuration time,
-      # so even JVM-only tasks need an Android SDK and a (placeholder) Firebase config.
+      # The KMP Android targets need an SDK; the Android host APK uses a placeholder Firebase config.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
       - name: Use the placeholder google-services.json
-        run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+        run: cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
 
-      - name: Test observability · protocol · daemon · relay, compile mobile (desktop target)
-        run: ./gradlew --no-daemon :observability:jvmTest :observability-sentry:jvmTest :protocol:jvmTest :daemon:test :relay:test :mobile:composeApp:compileKotlinDesktop
+      - name: Test observability · protocol · daemon · relay, compile mobile (desktop and Android)
+        run: ./gradlew --no-daemon :observability:jvmTest :observability-sentry:jvmTest :protocol:jvmTest :daemon:test :relay:test :mobile:composeApp:compileKotlinDesktop :mobile:androidApp:assembleDebug
 
       - name: Upload test reports on failure
         if: failure()

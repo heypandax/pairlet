@@ -1,5 +1,7 @@
 package dev.ccpocket.app.ui
 
+import dev.ccpocket.app.advanceFrameAndWait
+
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
@@ -72,7 +74,7 @@ class UsageCacheScopeUiTest {
     fun unfilteredCacheCardNamesTheAggregateAndItsRawTokens() = runDesktopComposeUiTest(402, 874) {
         mainClock.autoAdvance = false
         setContent(harness(snapshot(), filterable = true))
-        waitForIdle()
+        advanceFrameAndWait()
 
         assertPresent(str(Res.string.usage_scope_all_agents), substring = true)
         assertPresent(str(Res.string.usage_cache_ratio, "1.2M", "1.3M"), substring = true)
@@ -92,10 +94,10 @@ class UsageCacheScopeUiTest {
         mainClock.autoAdvance = false
         val repo = repoWith(snapshot(), filterable = true)
         setContent(harness(repo))
-        waitForIdle()
+        advanceFrameAndWait()
 
         onAllNodes(hasText(agentName(AgentKind.CODEX))).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
 
         // fetch in flight: the numbers on screen are still the aggregate, so the label still is too
         assertPresent(str(Res.string.usage_scope_all_agents), substring = true)
@@ -103,7 +105,7 @@ class UsageCacheScopeUiTest {
 
         // …and once Codex's own reply lands, the card is relabelled with it
         repo.receiveForTest(snapshot())
-        waitForIdle()
+        advanceFrameAndWait()
 
         assertPresent("${str(Res.string.usage_cache)} · today · ${agentName(AgentKind.CODEX)}", substring = true)
         assertFalse(present(str(Res.string.usage_scope_all_agents), substring = true))
@@ -115,7 +117,7 @@ class UsageCacheScopeUiTest {
     fun aDaemonThatCannotFilterSaysSoUnderTheCard() = runDesktopComposeUiTest(402, 874) {
         mainClock.autoAdvance = false
         setContent(harness(snapshot(), filterable = false))
-        waitForIdle()
+        advanceFrameAndWait()
 
         assertPresent(str(Res.string.usage_scope_no_filter), substring = true)
         assertPresent(str(Res.string.usage_scope_all_agents), substring = true)
@@ -127,7 +129,7 @@ class UsageCacheScopeUiTest {
     fun anOldDaemonWithoutRawTokensDrawsNoRatioLine() = runDesktopComposeUiTest(402, 874) {
         mainClock.autoAdvance = false
         setContent(harness(snapshot(rawTokens = false, windowFields = false), filterable = true))
-        waitForIdle()
+        advanceFrameAndWait()
 
         assertPresent("92%", substring = true) // the percentage itself still renders, from the today fields
         assertFalse(present(str(Res.string.usage_cache_ratio, "1.2M", "1.3M"), substring = true))

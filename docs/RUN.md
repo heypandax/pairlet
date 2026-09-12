@@ -157,9 +157,9 @@ emulator -avd ccpocket &
 daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon run --claude-bin ~/.local/bin/claude
 
 # 3) 构建并安装 APK 到运行中的模拟器/真机
-./gradlew :mobile:composeApp:installDebug
-#   或手动：./gradlew :mobile:composeApp:assembleDebug
-#           adb install -r mobile/composeApp/build/outputs/apk/debug/composeApp-debug.apk
+./gradlew :mobile:androidApp:installDebug
+#   或手动：./gradlew :mobile:androidApp:assembleDebug
+#           adb install -r mobile/androidApp/build/outputs/apk/debug/androidApp-debug.apk
 
 # 4) App 里点 Connect → 看到目录列表 → 点目录 → 选/建会话 → Chat 发消息
 ```

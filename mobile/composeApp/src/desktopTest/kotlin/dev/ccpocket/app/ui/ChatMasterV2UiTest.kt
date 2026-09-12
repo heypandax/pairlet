@@ -1,5 +1,7 @@
 package dev.ccpocket.app.ui
 
+import dev.ccpocket.app.advanceFrameAndWait
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -114,7 +116,7 @@ class ChatMasterV2UiTest {
                 PocketTheme { Box(Modifier.fillMaxSize()) { content(repo) } }
             }
         }
-        waitForIdle()
+        advanceFrameAndWait()
         assertions()
     }
 
@@ -239,7 +241,7 @@ class ChatMasterV2UiTest {
         assertEquals(2, collapsed.lineCount, "the preview wraps within two lines")
 
         onAllNodes(hasText(LONG_COMMAND) and hasClickAction()).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         val expanded = layout()
         assertFalse(expanded.hasVisualOverflow, "expanding reveals the literal payload with no horizontal clip")
         assertTrue(expanded.lineCount > 2, "the complete command wraps onto ${expanded.lineCount} lines")
@@ -294,7 +296,7 @@ class ChatMasterV2UiTest {
         seed = { receiveForTest(live(executing = true)) },
     ) {
         onAllNodes(hasSetTextAction()).onFirst().performTextInput("also update the changelog")
-        waitForIdle()
+        advanceFrameAndWait()
         assertEquals(1, controlCount(str(Res.string.stop)), "the interrupt stays put")
         assertEquals(1, controlCount(str(Res.string.send)), "…and Send joins it rather than replacing it")
         assertEquals(1, controlCount(str(Res.string.dictate)), "…while Mic remains independently reachable for an appended phrase")
@@ -310,7 +312,7 @@ class ChatMasterV2UiTest {
         listOf(W, 375, 320).forEach { viewport ->
             baseline(seed = { receiveForTest(live()) }, width = viewport) {
                 onAllNodes(hasSetTextAction()).onFirst().performTextInput("keep this draft")
-                waitForIdle()
+                advanceFrameAndWait()
                 assertEquals(1, controlCount(str(Res.string.dictate)), "$viewport pt keeps one Mic")
                 assertEquals(1, controlCount(str(Res.string.send)), "$viewport pt keeps one Send")
                 assertFullTarget(str(Res.string.dictate), viewportWidth = viewport, minimum = 48f)
@@ -333,8 +335,11 @@ class ChatMasterV2UiTest {
             content = { repo -> mountedRepo = repo; ChatScreen(repo) },
         ) {
             onAllNodes(hasSetTextAction()).onFirst().performTextInput("keep this draft")
+            advanceFrameAndWait()
             runOnIdle { mountedRepo.pendingVoiceText.value = "add a regression test" }
-            waitForIdle()
+            advanceFrameAndWait()
+            // pendingVoiceText launches an effect which updates the draft on the following frame.
+            advanceFrameAndWait()
             assertTrue(present("keep this draft add a regression test"), "the transcript appends instead of replacing the draft")
             assertEquals(1, controlCount(str(Res.string.dictate)), "the result may be extended with another voice phrase")
             assertEquals(1, controlCount(str(Res.string.send)), "the combined text still waits for explicit Send")
@@ -366,7 +371,7 @@ class ChatMasterV2UiTest {
                 width = viewport,
             ) {
                 onAllNodes(hasSetTextAction()).onFirst().performTextInput("queue this after dictation")
-                waitForIdle()
+                advanceFrameAndWait()
                 val labels = listOf(
                     Res.string.attach_menu,
                     Res.string.dictate,
@@ -427,7 +432,7 @@ class ChatMasterV2UiTest {
         fontScale = 2f,
     ) {
         onAllNodes(hasSetTextAction()).onFirst().performTextInput("queue this")
-        waitForIdle()
+        advanceFrameAndWait()
         listOf(
             Res.string.attach_menu, Res.string.dictate, Res.string.switcher_open,
             Res.string.qa_context_gauge,
@@ -653,7 +658,7 @@ class ChatMasterV2UiTest {
         width = 320,
     ) {
         onAllNodes(hasSetTextAction()).onFirst().performTextInput("keep this draft")
-        waitForIdle()
+        advanceFrameAndWait()
         assertFullTarget(str(Res.string.retry_voice_input), viewportWidth = 320, minimum = 48f)
         assertEquals(0, controlCount(str(Res.string.dictate)), "the failed action no longer masquerades as Dictate")
         assertEquals(1, controlCount(str(Res.string.send)), "retry remains independent from the staged draft's Send")
@@ -738,7 +743,7 @@ class ChatMasterV2UiTest {
         seed = { receiveForTest(live(executing = true, contextUsed = 84_000)) },
     ) {
         onAllNodes(hasSetTextAction()).onFirst().performTextInput("also update the changelog")
-        waitForIdle()
+        advanceFrameAndWait()
         assertLaneAction(str(Res.string.stop))
         assertLaneAction(str(Res.string.send))
         assertFullTarget(str(Res.string.dictate))
@@ -776,7 +781,7 @@ class ChatMasterV2UiTest {
         assertEquals(0, stateNodes(expanded))
 
         onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, collapsed)).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         assertEquals(1, stateNodes(expanded), "…and expanding updates the spoken state, not only the chevron")
         assertEquals(0, stateNodes(collapsed))
     }

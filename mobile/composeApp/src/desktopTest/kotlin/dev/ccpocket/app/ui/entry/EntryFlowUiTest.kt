@@ -1,5 +1,7 @@
 package dev.ccpocket.app.ui.entry
 
+import dev.ccpocket.app.advanceFrameAndWait
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -116,7 +118,7 @@ class EntryFlowUiTest {
                 PocketTheme(dark = dark) { Box(Modifier.fillMaxSize()) { content(repo) } }
             }
         }
-        waitForIdle()
+        advanceFrameAndWait()
         assertions()
     }
 
@@ -159,16 +161,16 @@ class EntryFlowUiTest {
     ) {
         // type two digits, then take the explicit scan route
         onAllNodes(hasContentDescription(str(Res.string.pair_code_label))).onFirst().performTextInput("42")
-        waitForIdle()
+        advanceFrameAndWait()
         onAllNodes(hasText(str(Res.string.pair_route_scan))).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present(str(Res.string.scan_without_camera)), "the scanner is entered on purpose")
         // …and the scanner is not a dead end: it states that the digits survived and repeats both routes
         assertTrue(present(str(Res.string.scan_kept_many, 2)), "the entered digits are preserved and said so")
         assertTrue(present(str(Res.string.scan_use_code)), "the code route is repeated here, not linked away")
 
         onAllNodes(hasText(str(Res.string.scan_use_code))).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present(str(Res.string.pair_cta)), "back on the pairing surface")
         assertTrue(present("4") && present("2"), "the digits are still in the field")
     }
@@ -183,7 +185,7 @@ class EntryFlowUiTest {
                 PairScanRoute(digitsEntered = 3, onBack = {}, onScanned = {}, onUseCode = { usedCode++ }, onPasteLink = { pasted++ })
             }
         }
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present(str(Res.string.scan_kept_many, 3)))
         onAllNodes(hasText(str(Res.string.scan_use_code))).onFirst().performClick()
         assertEquals(1, usedCode, "the code route completes pairing on its own")
@@ -245,7 +247,7 @@ class EntryFlowUiTest {
         assertTrue(present(str(Res.string.dir_projects)), "the title owns row 1 while search is collapsed")
 
         onAllNodes(hasContentDescription(str(Res.string.proj_search))).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
 
         assertEquals(
             1,
@@ -260,7 +262,7 @@ class EntryFlowUiTest {
         )
 
         onAllNodes(hasText(str(Res.string.proj_search_cancel))).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
 
         assertEquals(
             0,
@@ -293,7 +295,7 @@ class EntryFlowUiTest {
             }
             // and the doorway still reaches the SAME fleet route the machine line used to
             onAllNodes(hasContentDescription(str(Res.string.proj_open_computers))).onFirst().performClick()
-            waitForIdle()
+            advanceFrameAndWait()
             assertEquals(1, fleet, "the computer control opens the existing fleet surface")
         }
     }
@@ -320,7 +322,7 @@ class EntryFlowUiTest {
         assertFalse(present(str(Res.string.proj_settings)), "…and so is Settings")
 
         onAllNodes(hasContentDescription(str(Res.string.proj_more))).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present(str(Res.string.proj_help)), "opening the overflow reveals Help")
         assertTrue(present(str(Res.string.proj_settings)), "…and Settings")
         val help = onAllNodes(hasText(str(Res.string.proj_help))).onFirst().getUnclippedBoundsInRoot()
@@ -329,7 +331,7 @@ class EntryFlowUiTest {
 
         // choosing a row closes the menu AND opens the existing full-screen route
         onAllNodes(hasText(str(Res.string.proj_help))).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present(str(Res.string.support_title)), "Help still opens the Help centre")
     }
 
@@ -339,21 +341,21 @@ class EntryFlowUiTest {
         content = { DirectoryScreen(it) },
     ) {
         onAllNodes(hasContentDescription(str(Res.string.proj_more))).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         // An outside tap is a dismissal, not a decision. The target is the screen TITLE: it has no action of
         // its own, and it is the one thing in the header that sits ABOVE the menu panel — the panel hangs
         // from below the title row and reaches ~280dp back across the frame, so a target on row 2 (the
         // machine sentence, Review) can land on a menu row instead of the scrim depending on text metrics.
         onAllNodes(hasText(str(Res.string.dir_projects))).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         assertFalse(present(str(Res.string.proj_settings)), "an outside tap closes the overflow")
         // a category row of the Settings LANDING — unique to that screen, so it proves a route opened
         assertFalse(present(str(Res.string.settings_cat_connections)), "…and opens nothing")
 
         onAllNodes(hasContentDescription(str(Res.string.proj_more))).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         onAllNodes(hasText(str(Res.string.proj_settings))).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present(str(Res.string.settings_cat_connections)), "Settings still opens Settings")
     }
 
@@ -418,18 +420,18 @@ class EntryFlowUiTest {
                 )
             }
         }
-        waitForIdle()
+        advanceFrameAndWait()
         // Options opens configuration and starts NOTHING
         onAllNodes(hasText(str(Res.string.dir_picker_options))).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         assertEquals(1, options)
         assertEquals(0, starts, "Options must not start a session")
         assertNull(repo.convoId.value)
 
         // Start here starts exactly once, however many times it is tapped
         val startHere = onAllNodes(hasText(str(Res.string.dir_picker_use_here), substring = true)).onFirst()
-        startHere.performClick(); waitForIdle()
-        startHere.performClick(); waitForIdle()
+        startHere.performClick(); advanceFrameAndWait()
+        startHere.performClick(); advanceFrameAndWait()
         assertEquals(1, starts, "a repeated tap on Start here must not start a second session")
     }
 
@@ -459,7 +461,7 @@ class EntryFlowUiTest {
                 }
             }
         }
-        waitForIdle()
+        advanceFrameAndWait()
         assertions()
     }
 
@@ -469,12 +471,12 @@ class EntryFlowUiTest {
         configure(onPicked = { _, _, _, _, _ -> picks++ }) {
             onAllNodes(hasText(str(Res.string.cfg_mode_plan))).onFirst()
                 .performSemanticsAction(SemanticsActions.OnClick)
-            waitForIdle()
+            advanceFrameAndWait()
             assertEquals(0, picks, "a mode row selects — it never commits the session")
             // …and Start then commits THAT selection, exactly once
             val start = onAllNodes(hasText(str(Res.string.cfg_start), substring = true)).onFirst()
-            start.performClick(); waitForIdle()
-            start.performClick(); waitForIdle()
+            start.performClick(); advanceFrameAndWait()
+            start.performClick(); advanceFrameAndWait()
             assertEquals(1, picks, "Start commits once; a second tap has nothing left to start")
         }
     }
@@ -486,15 +488,15 @@ class EntryFlowUiTest {
             // choose a non-default Claude rung, then switch backends
             onAllNodes(hasText(str(Res.string.cfg_mode_plan))).onFirst()
                 .performSemanticsAction(SemanticsActions.OnClick)
-            waitForIdle()
+            advanceFrameAndWait()
             onAllNodes(hasText("Codex")).onFirst().performSemanticsAction(SemanticsActions.OnClick)
-            waitForIdle()
+            advanceFrameAndWait()
             // Codex's own ladder is on screen, seeded at its recommended preset
             assertTrue(present(str(Res.string.codex_preset_balanced)), "the Codex ladder replaces Claude's")
             assertFalse(present(str(Res.string.cfg_mode_plan)), "a Claude rung must not survive the switch")
 
             onAllNodes(hasText(str(Res.string.cfg_start), substring = true)).onFirst().performClick()
-            waitForIdle()
+            advanceFrameAndWait()
             val p = picked
             assertTrue(p != null && p.second == AgentKind.CODEX)
             assertEquals(agentDefaultMode(AgentKind.CODEX), p!!.first, "the mode reset to Codex's default")
@@ -557,9 +559,9 @@ class EntryFlowUiTest {
         configure(agent = AgentKind.CODEX, codexPresets = advertised, onPicked = { _, _, _, _, _ -> picks++ }) {
             onAllNodes(hasText(str(Res.string.cfg_mode_full))).onFirst()
                 .performSemanticsAction(SemanticsActions.OnClick)
-            waitForIdle()
+            advanceFrameAndWait()
             onAllNodes(hasText(str(Res.string.cfg_start), substring = true)).onFirst().performClick()
-            waitForIdle()
+            advanceFrameAndWait()
             assertTrue(present(str(Res.string.cfm_title)), "Full access confirms first, whatever the wire said about danger")
             assertEquals(0, picks, "…and nothing has started yet")
         }
@@ -586,10 +588,10 @@ class EntryFlowUiTest {
         configure(onPicked = { _, _, _, _, _ -> picks++ }) {
             onAllNodes(hasText(str(Res.string.cfg_mode_full))).onFirst()
                 .performSemanticsAction(SemanticsActions.OnClick)
-            waitForIdle()
+            advanceFrameAndWait()
             assertEquals(0, picks)
             onAllNodes(hasText(str(Res.string.cfg_start), substring = true)).onFirst().performClick()
-            waitForIdle()
+            advanceFrameAndWait()
             // the confirmation names the agent, the workdir and the computer — all real
             assertTrue(present(str(Res.string.cfm_title)), "Start on Full access opens the confirmation")
             assertTrue(present(str(Res.string.cfm_workdir)))
@@ -597,15 +599,15 @@ class EntryFlowUiTest {
             assertEquals(0, picks, "the confirmation has not started anything yet")
 
             onAllNodes(hasText(str(Res.string.cancel))).onFirst().performClick()
-            waitForIdle()
+            advanceFrameAndWait()
             assertEquals(0, picks, "Cancel starts nothing")
             assertTrue(present(str(Res.string.cfg_mode_full)), "…and returns to configuration")
             // the selection survived: Start opens the SAME confirmation again
             onAllNodes(hasText(str(Res.string.cfg_start), substring = true)).onFirst().performClick()
-            waitForIdle()
+            advanceFrameAndWait()
             assertTrue(present(str(Res.string.cfm_title)), "Full access is still the selected mode")
             onAllNodes(hasText(str(Res.string.cfm_cta))).onFirst().performClick()
-            waitForIdle()
+            advanceFrameAndWait()
             assertEquals(1, picks, "confirming starts exactly one session")
         }
     }

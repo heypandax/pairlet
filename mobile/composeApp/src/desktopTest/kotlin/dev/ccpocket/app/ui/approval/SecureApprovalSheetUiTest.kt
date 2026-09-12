@@ -1,5 +1,7 @@
 package dev.ccpocket.app.ui.approval
 
+import dev.ccpocket.app.advanceFrameAndWait
+
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
@@ -11,7 +13,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -150,6 +152,7 @@ class SecureApprovalSheetUiTest {
         )
 
         onAllNodes(hasText(str(Res.string.ap_more_options))).onFirst().performClick()
+        advanceFrameAndWait()
         assertPresent(str(Res.string.allow_session_option))
         assertEquals(0, session, "revealing the option is not taking it")
         onAllNodes(hasText(str(Res.string.allow_session_option))).onFirst().performClick()

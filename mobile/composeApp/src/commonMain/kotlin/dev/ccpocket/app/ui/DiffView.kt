@@ -65,7 +65,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -469,14 +468,9 @@ private fun DiffLineRow(line: DiffLine, dense: Boolean, wrap: Boolean, hScroll: 
             }
         }
         // Selectable through the ambient container: the per-block one on mobile, the whole-list one
-        // on desktop (see DiffView). Rows are separate Texts, and a copied multi-Text selection is
-        // concatenated with NO separator — so each row carries its own trailing \n: invisible under
-        // maxLines=1+Clip, and it's what makes a multi-line copy paste as lines. Not in wrap mode
-        // (a trailing newline renders an empty extra line there).
-        val body = remember(line.text, highlight, wrap) {
-            if (wrap) highlight(line.text)
-            else buildAnnotatedString { append(highlight(line.text)); append('\n') }
-        }
+        // on desktop (see DiffView). Compose now inserts a newline between selectable Text rows;
+        // appending our own separator would put a spurious blank line between every copied row.
+        val body = remember(line.text, highlight) { highlight(line.text) }
         Text(
             body, color = codeColor, fontFamily = FontFamily.Monospace, fontSize = fontSize, lineHeight = lineHeight,
             softWrap = wrap, maxLines = if (wrap) Int.MAX_VALUE else 1, overflow = TextOverflow.Clip,

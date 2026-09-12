@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 IOS_TEMPLATE = ROOT / "iosApp/iosApp/GoogleService-Info.plist.template"
-ANDROID_TEMPLATE = ROOT / "mobile/composeApp/google-services.json.template"
+ANDROID_TEMPLATE = ROOT / "mobile/androidApp/google-services.json.template"
 API_KEY_PATTERN = re.compile(r"AIza[A-Za-z0-9_-]{35}")
 
 

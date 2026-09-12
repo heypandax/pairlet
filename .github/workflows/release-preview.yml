@@ -179,7 +179,7 @@ jobs:
           architecture: ${{ matrix.platform == 'macos-arm64' && 'aarch64' || 'x64' }}
       - uses: android-actions/setup-android@v4
       - name: Use placeholder Firebase config
-        run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+        run: cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
       - name: Stage staging Sentry config
         uses: ./.github/actions/observability-config
         with:
@@ -254,10 +254,10 @@ jobs:
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_ANDROID }}
       - name: Build unsigned release APK with placeholder Firebase
         run: |
-          cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
-          ./gradlew --no-daemon :mobile:composeApp:assembleRelease
+          cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
+          ./gradlew --no-daemon :mobile:androidApp:assembleRelease
           mkdir -p out
-          cp mobile/composeApp/build/outputs/apk/release/*-unsigned.apk out/
+          cp mobile/androidApp/build/outputs/apk/release/*-unsigned.apk out/
           python3 scripts/preview-manifest.py out
       - name: Verify packaged Sentry configuration
         uses: ./.github/actions/observability-config
@@ -265,7 +265,7 @@ jobs:
           component: android
           environment: staging
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_ANDROID }}
-          artifact: mobile/composeApp/build/outputs/apk/release/composeApp-release-unsigned.apk
+          artifact: mobile/androidApp/build/outputs/apk/release/androidApp-release-unsigned.apk
       - uses: actions/upload-artifact@v7
         with:
           name: pairlet-preview-${{ inputs.version }}-android-unsigned

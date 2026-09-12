@@ -9,7 +9,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
 import dev.ccpocket.app.assertPresent

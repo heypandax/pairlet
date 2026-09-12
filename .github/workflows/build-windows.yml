@@ -62,7 +62,7 @@ jobs:
 
       - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
         shell: bash
-        run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+        run: cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
 
       - name: Unpin the macOS-only JDK path (gradle.properties pins it for local dev; CI uses the runner JDK via JAVA_HOME)
         shell: bash

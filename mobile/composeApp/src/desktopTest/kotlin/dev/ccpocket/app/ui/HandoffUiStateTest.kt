@@ -6,7 +6,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.agent_needs_permission

@@ -154,6 +154,8 @@ If you route Claude Code through an LLM gateway or API relay (`ANTHROPIC_BASE_UR
 
 ## Build from source
 
+The build pins Gradle 9.4.1, Kotlin 2.4.20, Compose Multiplatform 1.12.0 and AGP 9.2.1 (Android compile SDK 37). Always use `./gradlew`. `:mobile:composeApp` contains shared and platform code; `:mobile:androidApp` packages the Android application.
+
 | Module | What | Stack |
 |---|---|---|
 | `:protocol` | Shared wire protocol (`pocket/*` frames) — single source of truth | Kotlin Multiplatform + kotlinx.serialization |
@@ -164,7 +166,7 @@ If you route Claude Code through an LLM gateway or API relay (`ANTHROPIC_BASE_UR
 Requires **JDK 17** (any distribution — the Gradle toolchain downloads one if yours differs), the **Android SDK** (`ANDROID_HOME` or `local.properties`; the Android modules are configured even for JVM-only tasks), and at least one installed, logged-in agent CLI. To build the mobile app, copy the committed Firebase placeholder once (a real Firebase project is only needed for push/analytics):
 
 ```bash
-cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
 ```
 
 Local single-machine (no relay), for development:
@@ -183,7 +185,7 @@ daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon run --relay wss://<yo
 daemon/build/install/cc-pocket-daemon/bin/pairlet pair    # in another terminal
 ```
 
-Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via `iosApp/iosApp.xcodeproj` (Xcode — first copy `iosApp/iosApp/GoogleService-Info.plist.template` to `GoogleService-Info.plist` next to it). Desktop (including Linux) via `./gradlew :mobile:composeApp:packageDistributionForCurrentOS`. On-device iOS install: [`docs/ios-device.md`](docs/ios-device.md).
+Build the app: Android via `./gradlew :mobile:androidApp:assembleDebug`; iOS via `iosApp/iosApp.xcodeproj` (Xcode — first copy `iosApp/iosApp/GoogleService-Info.plist.template` to `GoogleService-Info.plist` next to it). Desktop (including Linux) via `./gradlew :mobile:composeApp:packageDistributionForCurrentOS`. On-device iOS install: [`docs/ios-device.md`](docs/ios-device.md).
 
 ## Docs
 

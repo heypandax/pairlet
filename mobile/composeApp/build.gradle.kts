@@ -1,19 +1,25 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.gradle.process.ExecOperations
+import javax.inject.Inject
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidApplication)
+    alias(libs.plugins.androidMultiplatformLibrary)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
-    alias(libs.plugins.googleServices)
-    alias(libs.plugins.firebaseCrashlytics)
 }
+
+interface PackagingServices {
+    @get:Inject val execOperations: ExecOperations
+}
+val packagingExec = objects.newInstance<PackagingServices>().execOperations
 
 // Single source of truth for the app version: the Android versionName AND the in-app "About" version both
 // derive from this (the latter via the generated constant below, so it can never drift — which is how it
 // got stuck at 0.1.0). Keep in lockstep with the iOS CFBundleShortVersionString in iosApp/iosApp/Info.plist.
 val appVersionName = "2.0.0"
+extra["appVersionName"] = appVersionName
 
 // Emit a commonMain constant from [appVersionName] so the displayed version always matches the build.
 val generateAppVersion by tasks.registering {
@@ -31,7 +37,13 @@ val generateAppVersion by tasks.registering {
 kotlin {
     jvmToolchain(17)
     compilerOptions { freeCompilerArgs.add("-Xexpect-actual-classes") } // SecureStore is an expect object (Beta API, stable enough)
-    androidTarget()
+    android {
+        namespace = "dev.ccpocket.app.shared"
+        compileSdk = libs.versions.androidCompileSdk.get().toInt()
+        minSdk = libs.versions.androidMinSdk.get().toInt()
+        androidResources.enable = true
+        withHostTest {}
+    }
     jvm("desktop")
     listOf(iosArm64(), iosSimulatorArm64()).forEach { iosTarget ->
         iosTarget.binaries.framework {
@@ -44,12 +56,12 @@ kotlin {
         val desktopMain by getting
 
         commonMain.dependencies {
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-            implementation(compose.materialIconsExtended)
-            implementation(compose.ui)
-            implementation(compose.components.resources) // localized strings (en default, values-zh)
+            implementation(libs.compose.runtime)
+            implementation(libs.compose.foundation)
+            implementation(libs.compose.material3)
+            implementation(libs.compose.material.icons.extended)
+            implementation(libs.compose.ui)
+            implementation(libs.compose.resources) // localized strings (en default, values-zh)
             implementation(project(":protocol"))
             implementation(project(":observability"))
             implementation(libs.kotlinx.coroutines.core)
@@ -112,8 +124,7 @@ kotlin {
         val desktopTest by getting
         desktopTest.dependencies {
             implementation(compose.desktop.currentOs) // skiko runtime for headless ui-test rendering
-            @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
-            implementation(compose.uiTest)
+            implementation(libs.compose.ui.test)
             implementation(kotlin("test"))
             implementation(libs.zxing.core) // independent decode oracle for the desktop QR matrix test
         }
@@ -123,33 +134,6 @@ kotlin {
 // wire the generated version constant into commonMain (drives the in-app About row)
 kotlin.sourceSets.getByName("commonMain").kotlin.srcDir(generateAppVersion)
 
-android {
-    namespace = "dev.ccpocket.app"
-    compileSdk = libs.versions.androidCompileSdk.get().toInt()
-    defaultConfig {
-        applicationId = "com.panda.ccpocket" // matches the iOS bundle id + the Firebase google-services.json client
-        minSdk = libs.versions.androidMinSdk.get().toInt()
-        targetSdk = libs.versions.androidTargetSdk.get().toInt()
-        versionCode = 31
-        versionName = appVersionName // single source of truth (see top); lockstep with iOS CFBundleShortVersionString
-    }
-    // release signing comes from ~/.gradle/gradle.properties (CCPOCKET_KEYSTORE*) — keys never
-    // live in the repo; on machines without them the release build falls back to unsigned
-    val releaseKeystore = providers.gradleProperty("CCPOCKET_KEYSTORE").orNull?.let(::File)
-    if (releaseKeystore?.exists() == true) {
-        signingConfigs.create("release") {
-            storeFile = releaseKeystore
-            storePassword = providers.gradleProperty("CCPOCKET_KEYSTORE_PASSWORD").get()
-            keyAlias = providers.gradleProperty("CCPOCKET_KEY_ALIAS").get()
-            keyPassword = providers.gradleProperty("CCPOCKET_KEY_PASSWORD").get()
-        }
-        buildTypes.getByName("release") { signingConfig = signingConfigs.getByName("release") }
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-}
 
 compose.resources {
     packageOfResClass = "dev.ccpocket.app.resources"
@@ -241,7 +225,7 @@ if (System.getProperty("os.name").lowercase().contains("win")) {
             val packages = layout.buildDirectory.dir("compose/binaries/main/msi").get().asFile
                 .listFiles { file -> file.extension == "msi" }.orEmpty()
             check(packages.size == 1) { "Expected exactly one candidate MSI, found ${packages.size}" }
-            project.exec {
+            packagingExec.exec {
                 commandLine("powershell", "-NoProfile", "-File", rootProject.file("scripts/brand-windows-msi.ps1"),
                     "-Path", packages.single().absolutePath)
             }
@@ -249,13 +233,13 @@ if (System.getProperty("os.name").lowercase().contains("win")) {
     }
 }
 
-// Compose 1.7.3 hardcodes CFBundleName from packageName. Finish the private image and re-seal its
+// jpackage derives CFBundleName from packageName. Finish the private image and re-seal its
 // outer signature using the same identity BEFORE packageDmg consumes it; never mutate an installed app.
 if (System.getProperty("os.name").lowercase().contains("mac")) {
     tasks.matching { it.name == "createDistributable" }.configureEach {
         inputs.file(rootProject.file("scripts/brand-macos-image.py"))
         doLast {
-            project.exec {
+            packagingExec.exec {
                 commandLine("python3", rootProject.file("scripts/brand-macos-image.py"),
                     "--app", layout.buildDirectory.dir("compose/binaries/main/app/CC Pocket.app").get().asFile,
                     "--identity", (findProperty("ccpocketSignId") as String?)?.takeIf { it.isNotBlank() } ?: "-")

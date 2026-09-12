@@ -1,7 +1,7 @@
 package dev.ccpocket.app.ui
 
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.codex_preset_cautious
 import dev.ccpocket.app.theme.PocketTheme

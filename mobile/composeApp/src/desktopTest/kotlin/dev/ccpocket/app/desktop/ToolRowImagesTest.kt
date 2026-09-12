@@ -6,7 +6,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.ui.TOOL_IMAGES_TAG
 import dev.ccpocket.app.ui.TOOL_IMAGE_TILE_TAG

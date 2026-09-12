@@ -1,5 +1,7 @@
 package dev.ccpocket.app.ui
 
+import dev.ccpocket.app.advanceFrameAndWait
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -168,7 +170,7 @@ class MobileUi20ChromeTest {
                 PocketTheme(dark = dark) { Box(Modifier.fillMaxSize()) { content(repo) } }
             }
         }
-        waitForIdle()
+        advanceFrameAndWait()
         assertions()
     }
 
@@ -376,7 +378,7 @@ class MobileUi20ChromeTest {
                 )
             }
         }
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present(str(Res.string.ap_required), substring = true), "the state is written, never colour-only")
         onAllNodes(hasText(str(Res.string.st_act_review))).onFirst().performClick()
         assertEquals(1, opened, "Review opens the session — the decision still belongs to Secure Approval")
@@ -392,7 +394,7 @@ class MobileUi20ChromeTest {
                 )
             }
         }
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present(str(Res.string.st_answer), substring = true))
         assertTrue(present(str(Res.string.st_act_answer)))
         assertFalse(present(str(Res.string.ap_required), substring = true), "a question is not a permission gate")
@@ -457,20 +459,20 @@ class MobileUi20ChromeTest {
                 )
             }
         }
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present("Claude · default · alex-macbook"), "collapsed, the summary is one line of real facts")
         assertFalse(present(str(Res.string.chat_session_info)), "and the expanded-only controls stay away")
         assertFalse(present("⌄"), "the disclosure uses an optically centered drawn chevron, not a font glyph")
 
         onAllNodes(hasText("Claude · default · alex-macbook")).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present("~/code/cc-pocket-android-client/app/src/main/kotlin"), "expanded reveals the FULL path")
         assertTrue(described(str(Res.string.copy_path)), "…beside its own copy affordance")
         assertTrue(present(str(Res.string.chat_session_info)), "…and session info stays explicitly reachable")
         assertFalse(present("⌃"), "the expanded mark is the same chevron rotated, not another font glyph")
 
         onAllNodes(hasText(str(Res.string.chat_context).uppercase())).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         assertFalse(present(str(Res.string.chat_session_info)), "collapsing gives the region back to the stream")
         assertTrue(present("Claude · default · alex-macbook"), "…and restores the summary")
     }
@@ -486,7 +488,7 @@ class MobileUi20ChromeTest {
         // collapsed: one dot-separated statement of every fact that exists, and only those
         assertTrue(present(collapsedRow), "collapsed, the summary states the real facts on one line")
         onAllNodes(hasText(collapsedRow)).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
 
         // expanded: the same facts as two compact rows, the full path, and the action — in ONE frame
         assertTrue(present(identityRow), "agent, permission mode and model share the identity row")
@@ -505,7 +507,7 @@ class MobileUi20ChromeTest {
         content = { ChatScreen(it) },
     ) {
         onAllNodes(hasText(collapsedRow)).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present(placeRow), "the folder rides the location row…")
         assertTrue(present("~/Desktop/Project/app/cc-pocket"), "…and the full path still spells it out")
         assertEquals(
@@ -521,7 +523,7 @@ class MobileUi20ChromeTest {
         content = { ChatScreen(it) },
     ) {
         onAllNodes(hasText(collapsedRow)).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         val row = onAllNodes(hasText(placeRow)).onFirst()
         row.assertHasClickAction()
         assertEquals(
@@ -530,7 +532,7 @@ class MobileUi20ChromeTest {
             "grouping the folder into the row must not cost the machine its accessibility label",
         )
         row.performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present(str(Res.string.fl_switch_computer), substring = true), "…and it still opens the switcher")
     }
 
@@ -542,7 +544,7 @@ class MobileUi20ChromeTest {
         content = { ChatScreen(it) },
     ) {
         onAllNodes(hasText(identityRow, substring = true)).onFirst().performClick()
-        waitForIdle()
+        advanceFrameAndWait()
         val path = "~/Desktop/Project/app/cc-pocket-android-client/app/src/main/kotlin"
         assertTrue(present(path), "the path is still rendered whole, never shrunk or truncated")
         assertFalse(fullyVisible(hasText(path)), "the facts+path body is what overflows, so it is what scrolls")
@@ -605,7 +607,7 @@ class MobileUi20ChromeTest {
     @Test
     fun aToolWithNoRecordedOutcomeClaimsNone() = runDesktopComposeUiTest(W, H) {
         setContent { PocketTheme { ToolTurnBand(tool = "Bash", preview = "./gradlew :protocol:test", status = null) } }
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present("./gradlew :protocol:test"))
         assertFalse(present(str(Res.string.done)), "ok == null is running-or-unknown; it must not read as success")
         assertFalse(present(str(Res.string.chat_tool_failed)), "…nor as failure")
@@ -619,7 +621,7 @@ class MobileUi20ChromeTest {
                 ChatStateBlock(chatStateUi(approvalAsk("Upload coverage to Codecov"), sessionDegraded = false, streaming = true)!!)
             }
         }
-        waitForIdle()
+        advanceFrameAndWait()
         assertTrue(present(str(Res.string.ap_required), substring = true), "the intervention leads")
         assertTrue(present("Upload coverage to Codecov"), "quoting the ask's own title")
         assertTrue(present(str(Res.string.st_also_running)), "and Running is only the qualifying line")

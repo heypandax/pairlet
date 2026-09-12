@@ -6,7 +6,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.data.DemoData
 import dev.ccpocket.app.data.PocketRepository
