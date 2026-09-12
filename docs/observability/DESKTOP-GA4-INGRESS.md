@@ -117,7 +117,7 @@ Content-Type: application/json
 
 ## 10. 批次 4 验收
 
-2026-09-11 已做首轮抽样，证据见 [DESKTOP-GA4-ACCEPTANCE-0911.md](DESKTOP-GA4-ACCEPTANCE-0911.md)：14 项 10 通过、5 未覆盖（配对后旅程需人工、开关类抽样、服务端注入、休眠后续帧、GA4 标准聚合）。下列清单保留为后续复验依据。
+2026-09-11 已做首轮抽样，证据见 [DESKTOP-GA4-ACCEPTANCE-0911.md](../archive/observability-2026-09/DESKTOP-GA4-ACCEPTANCE-0911.md)：14 项 10 通过、5 未覆盖（配对后旅程需人工、开关类抽样、服务端注入、休眠后续帧、GA4 标准聚合）。下列清单保留为后续复验依据。
 
 
 - 服务端部署与 `analytics.env` 提供；relay 重部署（`scripts/redeploy-relay.sh`）。

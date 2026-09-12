@@ -1,6 +1,8 @@
 # 路径复制微交互 — 桌面 hover chip + 手机长按 sheet（设计 handoff）
 
-- **在线设计板**（登录 pandaleeng@gmail.com 即看）：
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/path-copy)，需从存档恢复后使用。实现状态以当前源码为准。
+
+- **在线设计板**（登录 有项目访问权限的账号 即看）：
   - 桌面 hover→copy chip（5 demos + 浅色）：<https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FCopy+Chip.html>
   - 手机长按→action sheet + 三实体对照表：<https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FLong-press+Sheet.html>
 - **生成**：2026-07-11，claude.ai/design 主号正典项目 `93b56700`，模型 Opus 4.8 Medium，两个 Prompt 顺序追加，均一次通过（0 撞限、0 重试）

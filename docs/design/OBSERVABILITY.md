@@ -2,9 +2,9 @@
 
 状态：主体实现与代表性抽样已有证据，本轮进入提交收尾。更新：2026-09-11。原方案核查基线：`c6bf15ab`；开发基线：`6ca60173`。
 
-本页保留总体设计；当前提交范围与 CI 配置以 [收尾清单](../observability/CLOSEOUT.md) 为准。用户已明确额外验证暂缓至上线后观察，不再把本文的完整验收目标自动当成本次提交前置条件；未覆盖事项也不改记通过。
+本页保留总体设计。2026 年 9 月任务的提交范围与暂停决定见[历史收尾清单](../archive/observability-2026-09/CLOSEOUT.md)，仅适用于当时的任务；维护入口与 CI 配置见[观测文档](../observability/README.md)。未覆盖事项不因归档改记通过。
 
-Pairlet 五组件 Sentry 接入、跨端诊断、核心结果事件及查询已有实现与代表性证据；最新事实见 [验收记录](../observability/ACCEPTANCE.md)。[历史供应商评估](OBSERVABILITY-EVALUATING.md) 和 [会话打开场景](SESSION-OPEN-DIAGNOSTICS-EVALUATING.md) 保留评估与业务背景，后续按真实问题补验证。
+Pairlet 五组件 Sentry 接入、跨端诊断、核心结果事件及查询已有实现与代表性证据；最新事实见 [验收记录](../archive/observability-2026-09/ACCEPTANCE.md)。[历史供应商评估](OBSERVABILITY-EVALUATING.md) 和 [会话打开场景](SESSION-OPEN-DIAGNOSTICS-EVALUATING.md) 保留评估与业务背景，后续按真实问题补验证。
 
 ## 1. 方案与完成目标
 
@@ -69,7 +69,7 @@ interface Diagnostics {
 
 方案基线发现的接缝（首批已修复）：Android `recordError(message)` 新建 RuntimeException，iOS 桥接统一 NSError code 0，均会丢失捕获处的错误信息；iOS `Telemetry.setEnabled` 原来只改 Kotlin sink 的布尔值；现已同步原生 SDK；desktop 的 GA4 是否实际发送取决于构建配置。以上是源码证据，不代表当前所有已发布安装包的状态。
 
-参考相邻项目的有限 breadcrumb、单次快照、限频和 CancellationException 过滤模式；保留原始 Throwable 的栈，不复制它们的账号、网络或业务内容字段。[iOS NonFatalReporter](../../../ios/HelloLibs/HelloTrack/HelloTrack/Classes/NonFatalReporting/NonFatalReporter.swift)、[Android FirebaseCrashUtils](../../../android/feature/common/src/main/java/com/hellotalk/feature/common/business/firebase/FirebaseCrashUtils.kt)。
+参考有限 breadcrumb、单次快照、限频和 CancellationException 过滤模式；保留原始 Throwable 的栈，不复制其他项目的账号、网络或业务内容字段。原调研引用的外部项目实现未随本仓库发布，不作为新 clone 的依赖。
 
 ## 4. 平台接入与崩溃采集职责
 
@@ -246,7 +246,7 @@ P0/P1 可以先实现本地代码和测试，不依赖业务协议变更。真�
 
 代码验证按变更运行模块测试与编译：公共契约/状态机/脱敏/预算测试；protocol fixtures；daemon/relay 聚焦测试；移动端 desktop 编译；Android 发布构建与 iOS 真机构建/符号检查。通过后仅因新变更或未解决风险扩大测试。
 
-本机 daemon 验证只能用仓库规定的 `update-local-daemon.sh`，daemon 驱动任务使用 detached 版本；禁止 `:daemon:run` 制造第二实例。用户已授权并完成首批 relay、iOS/桌面端和本机 daemon 部署，具体证据见 [部署记录](../observability/PAIRLET.md)；全平台正式发版仍待验收。回滚按组件关闭诊断、恢复上一构建；后续新增协议字段与能力须保留兼容降级，不能通过诊断失败改变业务会话。
+本机 daemon 验证只能用仓库规定的 `update-local-daemon.sh`，daemon 驱动任务使用 detached 版本；禁止 `:daemon:run` 制造第二实例。用户已授权并完成首批 relay、iOS/桌面端和本机 daemon 部署，具体证据见 [部署记录](../archive/observability-2026-09/PAIRLET.md)；全平台正式发版仍待验收。回滚按组件关闭诊断、恢复上一构建；后续新增协议字段与能力须保留兼容降级，不能通过诊断失败改变业务会话。
 
 ## 12. 实施记录与恢复入口
 
@@ -254,7 +254,7 @@ P0/P1 可以先实现本地代码和测试，不依赖业务协议变更。真�
 
 当前检查点：**首批采集已可用，完整方案未完成。P0/P1 已有实现与验证，P2 跨端关联及多类核心路径、P3 完整发布验收仍待推进。** iOS 与 relay 有实际部署日志；不能以这两条链路替代全部平台、错误路径与可靠性验收。
 
-后续从 [实施记录](../observability/IMPLEMENTATION.md) 的最新检查点继续，每批追加一条记录：日期、Git SHA、SDK/平台版本、实际命令、Sentry 项目与事件 ID、通过/失败、未覆盖范围、下一检查点。凭据不写文档。会话恢复先读最新记录和 Git 状态，已通过项不重复执行，失败项不跳过或改写为通过。
+后续工作先核实当前源码与 Git 状态，再参考[历史实施记录](../archive/observability-2026-09/IMPLEMENTATION.md)中相关的证据和缺口。新运行回执先放本地，必要的脱敏结论再更新到维护文档；不向归档追加新任务指令。记录日期、Git SHA、平台、验证范围及限制，不写凭据，失败项不改写为通过。
 
 - 2026-09-09：用户选择按免费版制定 Sentry 方案；复核当前代码与官方平台/Logs/配额文档，明确直传、单一崩溃采集、关联边界和验收。仅文档变更。Brain 路由目录在当前环境不存在，方案保存在当前仓库，未写入知识库。
 - 2026-09-09：用户要求扩大核心出错路径。新增 EP-01–30 与 OBS-01–10，扩充 P1/P2 和逐分支验收；核查了解码丢弃、扫描跳过、存储回退、分片重置、Agent 管道、调度等实际入口。仅文档补充，全部开发任务仍待开始。

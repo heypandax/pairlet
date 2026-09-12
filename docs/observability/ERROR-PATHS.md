@@ -1,10 +1,10 @@
 # 核心出错路径与开发任务
 
-状态：开发中，首批入口与本地验证见 [实施进度](IMPLEMENTATION.md)；2026-09-09。方案核查基线：`c6bf15ab`，开发基线：`6ca60173`。[实施主方案](../design/OBSERVABILITY.md) 的字段、隐私、预算和协议边界继续适用。
+状态：开发中，首批入口与本地验证见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md)；2026-09-09。方案核查基线：`c6bf15ab`，开发基线：`6ca60173`。[实施主方案](../design/OBSERVABILITY.md) 的字段、隐私、预算和协议边界继续适用。
 
 本文将原先“四类 Analytics 失败”扩展为 **30 类核心路径、10 个开发任务**。路径编号是设计范围，不是已覆盖数量；每条路径内仍须逐个验证故障分支和正常对照。正文中的错误码为拟新增诊断码，不代表代码或 Sentry 已存在。
 
-启动后的任务总入口为 [后续计划](FOLLOW-UP-PLAN.md)：技术范围沿用本目录，另将 [产品分析稿](PRODUCT-INSIGHTS.md) 的五视角、结果事件、事件字典、GA4 视图与 Sentry 查询纳入 A–D 交付。执行顺序与完整完成标准以该总计划为准；只完成本目录的技术捕获点不能视为产品分析已交付。
+启动后的任务总入口为 [后续计划](../archive/observability-2026-09/FOLLOW-UP-PLAN.md)：技术范围沿用本目录，另将 [产品分析稿](PRODUCT-INSIGHTS.md) 的五视角、结果事件、事件字典、GA4 视图与 Sentry 查询纳入 A–D 交付。执行顺序与完整完成标准以该总计划为准；只完成本目录的技术捕获点不能视为产品分析已交付。
 
 ## 1. 当前代码暴露出的诊断缺口
 
@@ -100,16 +100,16 @@
 
 | 任务 | 责任范围 / 路径 | 批次与依赖 | 明确交付 | 当前状态 |
 |---|---|---|---|---|
-| OBS-01 公共诊断与 SDK | observability、平台 sink；EP-30 | P0→P1；起点 | schema 中加入 error_path/result_quality；隐私、预算、scope 并发、SDK 实际 envelope 与云端证据 | 开发中，详见 [实施进度](IMPLEMENTATION.md) |
-| OBS-02 启动与传输边界 | daemon Main/Core、service、连接、relay；EP-01–08 | P1，依赖 OBS-01；P2 增强连接关联 | 异步失败/网络/鉴权/E2E/解码/outbox/relay 的分类和正常对照；安全/协议变更专项评审 | 开发中，详见 [实施进度](IMPLEMENTATION.md) |
-| OBS-03 项目和会话完整路径 | App data、router、registry、disk history；EP-09–14 | P1 端内证据→P2 跨端与完成标记，依赖 OBS-01/02 | 从列表扫描到历史应用；部分结果、空结果、首屏/分页、fan-out 和分屏；复用会话场景附录 | 开发中，详见 [实施进度](IMPLEMENTATION.md) |
-| OBS-04 Agent 运行边界 | AgentProcess、全部已支持 Backend/Launcher、Conversation；EP-16–19 | P1，依赖 OBS-01；P2 关联请求 | 启动、stdin/ACK、RPC/pumps、turn 终态的测试；逐后端记录支持矩阵，不能以 Codex 通过代表全部后端 | 开发中，详见 [实施进度](IMPLEMENTATION.md) |
-| OBS-05 审批闭环 | ApprovalCoordinator、PermissionBridge、App approval；EP-20 | P2，依赖 OBS-01/02/04 | 送达/呈现/裁决/应用分阶段，等待语义与幂等/撤销不变，专项安全验收 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](IMPLEMENTATION.md) |
-| OBS-06 内容、文件与前后台 | App media/UI/data、文件服务；EP-15、21、22、29 | P2，依赖 OBS-01/03 | 展示回退/读取/上传下载分片/落盘/恢复的证据；正常回退/取消不形成错误风暴 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](IMPLEMENTATION.md) |
-| OBS-07 存储与后台执行 | daemon/relay stores、schedule、background/workflow；EP-23、24 | P2，依赖 OBS-01/04 | 读失败回退/写失败/调度派发/执行终态区分，隔离存储故障与重启恢复测试 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](IMPLEMENTATION.md) |
-| OBS-08 协作与推送 | review/handoff、peer transport、App/relay push；EP-25、28 | P2，依赖 OBS-01/02/07 | 本地持久化、传输 ACK、业务 ACK 分开；撤销/失效 token/重试与手机关闭场景 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](IMPLEMENTATION.md) |
-| OBS-09 Git 与升级 | GitService、update、service；EP-26、27 | P2，依赖 OBS-01/02 | 操作/冲突/退出码、升级阶段与重启后版本证据；临时仓库/工件/服务替身验收 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](IMPLEMENTATION.md) |
-| OBS-10 发布和排障验收 | 文档、查询、发布配置；全 EP-01–30 | P3，依赖 OBS-01–09 | 每条路径真实证据与正常对照索引、平台缺口、符号、配额/迟到/丢弃、7 天运行观察、回滚 | 进行中：首批实际部署及 iOS/relay 日志有回执，完整验收未完成，见 [实施进度](IMPLEMENTATION.md) |
+| OBS-01 公共诊断与 SDK | observability、平台 sink；EP-30 | P0→P1；起点 | schema 中加入 error_path/result_quality；隐私、预算、scope 并发、SDK 实际 envelope 与云端证据 | 开发中，详见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
+| OBS-02 启动与传输边界 | daemon Main/Core、service、连接、relay；EP-01–08 | P1，依赖 OBS-01；P2 增强连接关联 | 异步失败/网络/鉴权/E2E/解码/outbox/relay 的分类和正常对照；安全/协议变更专项评审 | 开发中，详见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
+| OBS-03 项目和会话完整路径 | App data、router、registry、disk history；EP-09–14 | P1 端内证据→P2 跨端与完成标记，依赖 OBS-01/02 | 从列表扫描到历史应用；部分结果、空结果、首屏/分页、fan-out 和分屏；复用会话场景附录 | 开发中，详见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
+| OBS-04 Agent 运行边界 | AgentProcess、全部已支持 Backend/Launcher、Conversation；EP-16–19 | P1，依赖 OBS-01；P2 关联请求 | 启动、stdin/ACK、RPC/pumps、turn 终态的测试；逐后端记录支持矩阵，不能以 Codex 通过代表全部后端 | 开发中，详见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
+| OBS-05 审批闭环 | ApprovalCoordinator、PermissionBridge、App approval；EP-20 | P2，依赖 OBS-01/02/04 | 送达/呈现/裁决/应用分阶段，等待语义与幂等/撤销不变，专项安全验收 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
+| OBS-06 内容、文件与前后台 | App media/UI/data、文件服务；EP-15、21、22、29 | P2，依赖 OBS-01/03 | 展示回退/读取/上传下载分片/落盘/恢复的证据；正常回退/取消不形成错误风暴 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
+| OBS-07 存储与后台执行 | daemon/relay stores、schedule、background/workflow；EP-23、24 | P2，依赖 OBS-01/04 | 读失败回退/写失败/调度派发/执行终态区分，隔离存储故障与重启恢复测试 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
+| OBS-08 协作与推送 | review/handoff、peer transport、App/relay push；EP-25、28 | P2，依赖 OBS-01/02/07 | 本地持久化、传输 ACK、业务 ACK 分开；撤销/失效 token/重试与手机关闭场景 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
+| OBS-09 Git 与升级 | GitService、update、service；EP-26、27 | P2，依赖 OBS-01/02 | 操作/冲突/退出码、升级阶段与重启后版本证据；临时仓库/工件/服务替身验收 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
+| OBS-10 发布和排障验收 | 文档、查询、发布配置；全 EP-01–30 | P3，依赖 OBS-01–09 | 每条路径真实证据与正常对照索引、平台缺口、符号、配额/迟到/丢弃、7 天运行观察、回滚 | 进行中：首批实际部署及 iOS/relay 日志有回执，完整验收未完成，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
 
 最低开发顺序：OBS-01 → OBS-02/03/04 的端内观测 → P2 关联及 OBS-05–09 → OBS-10。只有本地代码/测试已完成但尚无后台事件时标“本地通过，云端待验”，不能直接关闭整条路径。
 

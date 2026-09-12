@@ -1,5 +1,7 @@
 # site-mobile —— 官网移动端整页设计（Site 1.5）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/site-mobile)，需从存档恢复后使用。实现状态以当前源码为准。
+
 2026-07-12 经 claude.ai/design 主项目（`93b56700-…`）生成并导出。在线板：
 `https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2Fsite%2FSite+1.5+-+Mobile.html`
 
@@ -25,4 +27,4 @@
 
 **未实现**（按用户要求本轮只出稿）。实现时注意：现 `site/styles.css` 移动断点是「手机图在上」，与本板 mfeat「文案在上」相反，需按本板改。
 
-来源 brief：`~/Desktop/Brain/60_Outbox/2026-07-12-cc-pocket-官网移动端设计提示词.md`
+来源 brief：（原始 brief 已保存在本地设计归档）

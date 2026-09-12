@@ -1,5 +1,7 @@
 # CC Pocket 智能客服直达入口与公开帮助 IA v2
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/help-support-direct-entry-v2)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - 在线设计：[Help Support Direct Entry v2](https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=Help+Support+Direct+Entry+v2.html)
 - 生成日期：2026-07-26
 - 来源：Claude Design 项目归档，仅提取本轮新增设计与必要的共用依赖

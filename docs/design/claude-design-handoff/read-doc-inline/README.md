@@ -1,5 +1,7 @@
 # Read the doc, right here — 文档直达阅读（handoff）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/read-doc-inline)，需从存档恢复后使用。实现状态以当前源码为准。
+
 移动端「文档直达阅读」的设计交付：把「电脑上 Claude 生成的 md 文档」在手机端变成可点、可读的入口链路。中等偏小的入口打通单，不是文件管理器。
 
 ## 在线设计板

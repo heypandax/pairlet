@@ -1,5 +1,7 @@
 # Desktop Chrome Redesign——顶栏拆除＋侧栏直通窗顶（2026-09-02）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/desktop-chrome-redesign)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - 在线设计板：`https://claude.ai/design/p/eb401868-d618-47f7-b8d4-4641117d566d?file=Desktop+Chrome+Redesign+v2.dc.html`
 - 像素规格：本目录 `Desktop Chrome Redesign v2.dc.html`（定稿，四帧：默认／侧栏收起／2× 细节／分屏＋4b 收起分屏条）。`v1` 仅历史留档（保留全宽标题栏的旧方案，已被否）。
 - 需求来源：机主参考 Codex 桌面端顶栏的五点调整＋补充（顶行四操作、分屏状态）。

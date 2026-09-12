@@ -1,5 +1,7 @@
 # 桥接卡片操作区语义重整（issue #259）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/bridge-actions-259)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - 在线设计板：https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FBridge+Actions.html
 - 文件：`bridge-actions.jsx`（像素规格源码）、`Bridge Actions.html`（画布壳）
 - 生成：2026-08-15，Opus 5 Max，追加模式（未重喂设计系统）

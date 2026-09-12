@@ -1,7 +1,9 @@
 # API-key 预设管理 — Settings ▸ Account pane（设计 handoff）
 
-- **在线设计板**（登录 b01099485423@gmail.com 即看）：<https://claude.ai/design/p/c41b194b-c78d-4280-bc92-48148e6b5429?file=Settings+Account.dc.html>（单文档 11 帧，画布可平移缩放；三段自上而下＝Prompt 3 切换反馈 / Prompt 2 表单 / Prompt 1 总览）
-- **生成**：2026-07-11，claude.ai/design 新正典项目（b01099485423 账号），模型 Opus 4.8 Medium，三个 Prompt 顺序追加进同一 `Settings Account.dc.html`，均一次通过（0 重试）
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/presets)，需从存档恢复后使用。实现状态以当前源码为准。
+
+- **在线设计板**（登录 有项目访问权限的账号 即看）：<https://claude.ai/design/p/c41b194b-c78d-4280-bc92-48148e6b5429?file=Settings+Account.dc.html>（单文档 11 帧，画布可平移缩放；三段自上而下＝Prompt 3 切换反馈 / Prompt 2 表单 / Prompt 1 总览）
+- **生成**：2026-07-11，claude.ai/design 新正典项目（原设计账号），模型 Opus 4.8 Medium，三个 Prompt 顺序追加进同一 `Settings Account.dc.html`，均一次通过（0 重试）
 - **项目沿革**：本项目 `c41b194b-…` 为设计线正典（自 Workflow 批次账号迁移后，见 `../workflow-view/README.md`）；旧 pandaleeng 项目 `93b56700-…` 存史
 - **对应 issue／任务**：#113 —— daemon（预设存储 + 会话启动 env 注入 + 协议）+ desktop（Settings UI）。**UI 实现等本设计定稿、且 daemon 侧预设协议（掩码回传形状 / 切换语义 / 拒切 blockers 复用）确定后再派发**，手机端后续跟进
 - **本地打开**：目录下 `python3 -m http.server` 后访问 `Settings Account.dc.html`（仅依赖同目录 `./support.js`，自洽）

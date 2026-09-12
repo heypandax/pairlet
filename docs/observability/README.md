@@ -1,14 +1,16 @@
-# 诊断开发与本地验证
+# 观测开发与维护
 
-当前执行入口：[提交收尾清单](CLOSEOUT.md)。主体实现已在 main；本轮修复、测试代码和脱敏验收记录整理待提交。用户于 2026-09-11 明确额外验证暂缓，待上线后观察；本次不再装机或补跑设备/云端验收，正常发行 CI 门禁保留。
+本目录维护诊断配置、事件口径、可靠性和发布方法。2026 年 9 月的实施过程、任务计划及验收回执已移到[历史归档](../archive/observability-2026-09/README.md)；旧任务的暂停与授权不作为当前任务指令。
 
-已有证据见 [ACCEPTANCE](ACCEPTANCE.md)：Android 生命周期问题已修复并有真机成功回执；iOS 正常使用、断网恢复及采集出口有代表性证据；98 条手机核心/价值事件在 GA4 普通聚合中已核对。整数 analytics_schema 导致筛选遗漏已修复为 v1，5 项测试通过，新包新值尚未云端验收。
+| 任务 | 入口 |
+|---|---|
+| 理解设计与采集边界 | [总体方案](../design/OBSERVABILITY.md)、[核心错误路径](ERROR-PATHS.md)、[可靠性](RELIABILITY.md) |
+| 查询产品事件与使用口径 | [事件字典](EVENT-CATALOG.md)、[产品分析方案](PRODUCT-INSIGHTS.md)、[查询手册](queries.md) |
+| 构建官方包与配置 CI | [发布配置](RELEASE.md) |
+| 桌面端 GA4 入口 | [需求](DESKTOP-GA4-REQUIREMENTS.md)、[入口契约](DESKTOP-GA4-INGRESS.md) |
+| 查询已做验证与当时缺口 | [移动及公共观测验收](../archive/observability-2026-09/ACCEPTANCE.md)、[桌面 GA4 验收](../archive/observability-2026-09/DESKTOP-GA4-ACCEPTANCE-0911.md) |
 
-[产品分析方案](PRODUCT-INSIGHTS.md) 保留首次价值、核心完成、连续稳定、功能采用/复用、留存/版本五个视角。旧计划和实施过程分别见 [FOLLOW-UP-PLAN](FOLLOW-UP-PLAN.md)、[IMPLEMENTATION](IMPLEMENTATION.md)，不把历史待验状态重新当成当前提交门禁。
-
-GitHub 打包与配置见 [RELEASE](RELEASE.md#github-actions-配置与维护)。Sentry 五个公开 DSN Variables、iOS 符号上传 Secret 及既有 Firebase 配置 Secrets 已核对存在；正式与预览工作流已在 main 接入。Crashlytics 保持原职责，本批不迁移、不新增 fatal 抽验。
-
-云端使用 [Pairlet](https://pairlet.sentry.io/) 组织（美国区），项目名统一为 `pairlet-ios`、`pairlet-android`、`pairlet-desktop`、`pairlet-daemon`、`pairlet-relay`。已有代码中的命令、配置键及包名仍沿用当前仓库；改名时按用途逐项处理，公开命令可增加兼容入口，现有配置键和内部包名不做全量替换。计划中的设备过渡显示名 `CC Pairlet` 不改变这些 Sentry 组织或项目名称。
+截至 2026-09-11 的归档记录有 Android 生命周期修复、iOS 正常使用与断网恢复、手机 GA4 普通聚合及桌面入口的代表性证据；仍有新 schema 回执、真实源码行号、完整矩阵、桌面普通聚合与断网观测等缺口。本次仅整理文档，未重新验证后台、设备、配置或线上状态。后续按具体任务核实，不能用归档替代新版本验收。
 
 ## 配置与开启
 
@@ -55,7 +57,7 @@ Errors 和 Logs 都有 `diag_schema`、`diag_event_id`、`error_path`、`operati
 
 ```bash
 JAVA_HOME=/opt/homebrew/opt/openjdk@17 bash scripts/check-all.sh
-JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :mobile:composeApp:compileDebugKotlinAndroid
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :mobile:androidApp:assembleDebug
 JAVA_HOME=/opt/homebrew/opt/openjdk@17 xcodebuild \
   -project iosApp/iosApp.xcodeproj -scheme DiagnosticTests \
   -destination 'platform=iOS Simulator,id=SIMULATOR_UDID' \
@@ -66,7 +68,7 @@ Gradle 测试统一设置 `ccpocket.test=true`，阻止自动 Sentry Runtime 与
 
 `SentryDiagnosticSinkTest` 检查真实 Java SDK envelope、429、有限队列与关闭；`DiagnosticPathsTest` 检查真实 wire 解码和历史部分读取分类；`SessionOpenTimeoutTest` 检查重试/打开确认的实际诊断。iOS `PocketDiagnosticsTests` 使用 URLProtocol 捕获 Cocoa SDK 的实际上传请求，主动污染 SDK scope 来验证最后的字段过滤，不访问 Sentry 云端。
 
-云端已验证 desktop/daemon/relay 的合成 Errors/Logs 查询，以及实际 iOS staging、relay production 日志，回执见 [Pairlet](PAIRLET.md)。仍需验证 Android 真机、iOS 错误栈、实际 desktop/daemon 新事件、符号、关闭/离线、时延与配额。测试里的 `.invalid` 和 loopback 只供测试替身使用，生产 DSN 校验要求 HTTPS。
+各阶段云端回执与未覆盖项见[历史验收](../archive/observability-2026-09/README.md)，按记录日期与组件区分，不能将早期待验清单当作最新状态。测试里的 `.invalid` 和 loopback 只供测试替身使用，生产 DSN 校验要求 HTTPS。
 
 ## 一次性云端测试
 
@@ -80,4 +82,4 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :observability-sentry:smoke -Pd
 
 探针最多调用五次有界 flush，使批量日志有时间发送；生产退出与离线丢失边界仍待独立验收。仅排查这个合成探针时可设置 `CCPOCKET_SMOKE_DEBUG=1`，SDK 调试输出写到本地终端，不开启应用日志转发。后台 Logs 如停在未上报项目的安装引导，先选择具体的已验证项目。
 
-本机各组件的 staging properties 以及 `iosApp/Sentry.local.xcconfig` 已准备，均由 Git 忽略。iOS 构建时使用 `-xcconfig iosApp/Sentry.local.xcconfig`；使用前述 DiagnosticTests scheme 仍会隔离真实云端上传。
+各组件的 staging properties 以及 `iosApp/Sentry.local.xcconfig` 由维护者在本机准备，均由 Git 忽略。iOS 构建时使用 `-xcconfig iosApp/Sentry.local.xcconfig`；使用前述 DiagnosticTests scheme 仍会隔离真实云端上传。

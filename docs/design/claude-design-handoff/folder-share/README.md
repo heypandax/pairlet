@@ -1,11 +1,13 @@
 # 文件夹级共享 — owner 邀请 / 管理 / guest 加入 / 终态（设计 handoff）
 
-- **在线设计板**（登录 b01099485423@gmail.com 即看）：
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/folder-share)，需从存档恢复后使用。实现状态以当前源码为准。
+
+- **在线设计板**（登录 有项目访问权限的账号 即看）：
   - Owner 邀请流：<https://claude.ai/design/p/c41b194b-c78d-4280-bc92-48148e6b5429?file=Share+Folder.dc.html>
   - Owner 管理页：<https://claude.ai/design/p/c41b194b-c78d-4280-bc92-48148e6b5429?file=Shared+Folders.dc.html>
   - Guest 加入流：<https://claude.ai/design/p/c41b194b-c78d-4280-bc92-48148e6b5429?file=Join+Folder.dc.html>
   - 共享终态：<https://claude.ai/design/p/c41b194b-c78d-4280-bc92-48148e6b5429?file=Share+Endings.dc.html>
-- **生成**：2026-07-11，claude.ai/design 正典项目（b01099485423 账号 `c41b194b-…`），模型 Opus 4.8 Medium，四个 Prompt 顺序追加，各自建独立 `.dc.html`；Prompt 1 曾在收尾自查阶段撞一次会话限额（5 帧已全建完，Resume 后收尾，无内容损失），其余 3 段一次通过
+- **生成**：2026-07-11，claude.ai/design 正典项目（原设计账号 `c41b194b-…`），模型 Opus 4.8 Medium，四个 Prompt 顺序追加，各自建独立 `.dc.html`；Prompt 1 曾在收尾自查阶段撞一次会话限额（5 帧已全建完，Resume 后收尾，无内容损失），其余 3 段一次通过
 - **对应 issue／任务**：#115 文件夹级共享——本 brief 只解 UI/UX；协议（scope ticket）、daemon（路径守卫 + 净室 profile + 审批路由）、relay（范围化 ticket）另拆。**实现等设计定稿 + 最终安全模型/crypto review 结论后派发**
 - **本地打开**：目录下 `python3 -m http.server` 后访问四个 `.dc.html`（各自包含帧内联，仅依赖同目录 `./support.js`）
 

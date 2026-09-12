@@ -1,5 +1,7 @@
 # 跨项目会话切换器（issue #165）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/session-switcher)，需从存档恢复后使用。实现状态以当前源码为准。
+
 claude.ai/design 生成，2026-07-19。设计对话：cc-pocket 项目 ▸「Cross-project Session Switcher」。
 
 `frames.png` 是三帧交付稿：

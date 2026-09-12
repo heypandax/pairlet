@@ -1,13 +1,15 @@
 # 审批系统 V2 界面（结构化 Grant 审批卡）— 设计 handoff
 
-- **在线设计板**（登录 b01099485423@gmail.com 即看）：
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/approval-v2)，需从存档恢复后使用。实现状态以当前源码为准。
+
+- **在线设计板**（登录 有项目访问权限的账号 即看）：
   <https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=Approvals+V2.html>
 - **生成**：2026-08-02，cc-pocket 正典项目追加，Opus 5 Medium 一次通过（自查修了两处：
   桌面紧凑按钮不再收缩换行、组件帧高度容下末行 caption）。
 - **依据**：`docs/design/APPROVAL-SYSTEM.md` V2——审批从一次 Allow/Deny 升级为结构化
   Grant（本次／本任务／本 Session 三档）＋「换种安全方式」反提案＋Grant 覆盖内自动执行留痕
   ＋风险评估徽标。双形态：手机 PermissionSheet 底部弹层／桌面 ChatPane 内联卡。
-- **Brief 存档**：`~/Desktop/Brain/60_Outbox/2026-08-02-cc-pocket-审批系统V2界面设计提示词.md`。
+- **Brief 存档**：（原始 brief 已保存在本地设计归档）。
 - **本地打开**：本目录 `python3 -m http.server` 后访问 `Approvals V2.html`
   （基础样式共享 `./session-handoff/handoff.css` 副本，增量样式在 `./session-approvals/approvals.css`）。
 

@@ -1,10 +1,12 @@
 # 会话归档（Session Archive）— 设计 handoff
 
-- **在线设计板**（登录 b01099485423@gmail.com 即看）：
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/session-archive)，需从存档恢复后使用。实现状态以当前源码为准。
+
+- **在线设计板**（登录 有项目访问权限的账号 即看）：
   <https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=Session+Archive.html>
 - **生成**：2026-08-03，cc-pocket 正典项目追加对话，Opus 5 Medium，一段 brief 一次通过（无自查返工）。
 - **依据**：GitHub issue [#202「会话归档」](https://github.com/heypandax/cc-pocket/issues/202)；
-  brief 存档 `~/Desktop/Brain/60_Outbox/2026-08-03-cc-pocket-会话归档设计提示词.md`。
+  brief 存档 （原始 brief 已保存在本地设计归档）。
 - **本地打开**：本目录 `python3 -m http.server` 后访问 `Session Archive.html`
   （基础样式共享 `./session-handoff/handoff.css` 副本，增量样式在 `./session-archive/archive.css`）；
   或直接双击 `Session Archive (standalone).html`（单文件内联版，离线可开）。

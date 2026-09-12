@@ -1,5 +1,7 @@
 # Defaults + Voice + Results UI 2.1 — Design Brief
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/defaults-voice-results-ui-2.1)，需从存档恢复后使用。实现状态以当前源码为准。
+
 ## Objective
 
 Refine three already-implemented mobile surfaces without changing their product semantics:

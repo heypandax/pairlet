@@ -34,6 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Verify repository content boundaries
+        run: python3 scripts/check-repository-content.py
+
       - name: Verify support knowledge and generated manual
         run: |
           python3 scripts/check-firebase-placeholders.py

@@ -2,6 +2,7 @@
 """Validate App Store metadata and deterministic screenshot deliverables."""
 
 from pathlib import Path
+import argparse
 import json
 import shutil
 import subprocess
@@ -35,6 +36,8 @@ FORBIDDEN = (
     "Stronger version if you decide",
     "若上架时主打",
 )
+# 2.0.0 (56) was rejected under Guideline 2.3.10 for an Android-only release note.
+OTHER_MOBILE_PLATFORMS = ("Android", "安卓")
 
 
 def fail(message: str) -> None:
@@ -63,6 +66,13 @@ def preview_properties(path: Path) -> dict:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--metadata-only",
+        action="store_true",
+        help="Validate text without requiring screenshots, previews, or ffprobe",
+    )
+    args = parser.parse_args()
     public_text: list[str] = []
     for locale in LOCALES:
         directory = METADATA / locale
@@ -75,6 +85,9 @@ def main() -> None:
                 fail(f"empty metadata: {path}")
             if len(value) > limit:
                 fail(f"{path} is {len(value)} characters; limit is {limit}")
+            for platform in OTHER_MOBILE_PLATFORMS:
+                if platform.casefold() in value.casefold():
+                    fail(f"{path}: remove {platform} references from App Store metadata (Guideline 2.3.10)")
             public_text.append(value)
 
         for filename in URL_FIELDS:
@@ -85,6 +98,9 @@ def main() -> None:
             url = urlsplit(value)
             if url.scheme != "https" or not url.netloc or any(c.isspace() for c in value):
                 fail(f"{path} must contain one HTTPS URL")
+
+        if args.metadata_only:
+            continue
 
         # 6.5-inch iPhone set — TOP-LEVEL pngs only. glob("*.png") does not recurse, which is exactly
         # what keeps the iPad subfolder checked below out of this set; do not make it "**/*.png".
@@ -157,10 +173,14 @@ def main() -> None:
         if phrase.casefold() in joined.casefold():
             fail(f"public metadata must not promote or expose draft text: {phrase}")
 
+    media_summary = (
+        "media not checked" if args.metadata_only
+        else "12 iPhone 6.5\" + 12 iPad 12.9\" screenshots, 2 previews"
+    )
     print(
         f"App Store content OK: {len(LOCALES)} locales, "
         f"{len(LOCALES) * (len(LIMITS) + len(URL_FIELDS))} metadata fields, "
-        "12 iPhone 6.5\" + 12 iPad 12.9\" screenshots, 2 previews"
+        f"{media_summary}"
     )
 
 

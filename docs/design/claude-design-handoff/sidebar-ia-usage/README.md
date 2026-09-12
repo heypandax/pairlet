@@ -1,7 +1,9 @@
 # 桌面端侧栏信息架构 v2＋订阅用量展示 —— claude design 交付（2026-08-24）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/sidebar-ia-usage)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - 在线画板：https://claude.ai/design/p/eb401868-d618-47f7-b8d4-4641117d566d?file=Desktop+Sidebar+IA+%2B+Usage+v1.dc.html（登录即看，45 页画板）
-- 生成模型：Fable 5（Max effort）；brief 见 `~/Desktop/Brain/60_Outbox/2026-08-24-cc-pocket-侧栏信息架构与用量展示设计提示词.md`
+- 生成模型：Fable 5（Max effort）；brief 见 （原始 brief 已保存在本地设计归档）
 
 ## 文件清单
 

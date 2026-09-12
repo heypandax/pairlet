@@ -1,7 +1,9 @@
 # Changed files v2 — git-grade diff review（设计 handoff）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/changed-files-diff)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - **在线设计板**：<https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2Fsite%2FChanged+Files+v2.html>（登录即看，工具栏可切每屏状态变体）
-- **设计 brief**：`~/Desktop/Brain/60_Outbox/2026-07-07-cc-pocket-变更文件Diff设计提示词.md`
+- **设计 brief**：（原始 brief 已保存在本地设计归档）
 - **生成**：2026-07-07，claude.ai/design（Opus 4.8 Max），cc-pocket 设计项目追加模式
 
 ## 文件清单

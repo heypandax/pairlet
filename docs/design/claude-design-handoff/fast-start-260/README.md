@@ -1,5 +1,7 @@
 # 新任务创建链路（issue #260）——Fast Start
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/fast-start-260)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - 在线设计板（2.0 项目）：https://claude.ai/design/p/eb401868-d618-47f7-b8d4-4641117d566d?file=Fast+Start+Direction+v1.dc.html
 - 文件：`FastStartDevice.dc.html`（活组件，像素规格源）、`Fast Start Direction v1.dc.html`（board 壳）
 - 生成：2026-08-15/16，Opus 5 Max，「cc-pocket Design System 2.0」项目（主题以 2.0 为准；旧 1.0 项目稿仅作交互参照）

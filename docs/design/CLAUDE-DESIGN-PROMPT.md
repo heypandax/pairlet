@@ -64,7 +64,6 @@ Settings — a grouped list. Group "DEFAULT PERMISSION MODE": six selectable row
 
 ---
 
-## 已落地
+## 历史来源
 
-- 用上面这份 prompt 在 **claude.ai/design** 生成了 7 屏，经 **Handoff to Code** 导出到 [`claude-design-handoff/`](./claude-design-handoff/)（各屏 `.html/.jsx` + 设计对话）——项目保留的设计版本。
-- 与 Stitch 的历史选型对比已归档到 Obsidian `~/Desktop/Brain/20_Projects/cc-pocket-设计工具评估/`。
+这份 prompt 用于早期七屏探索，不是 Mobile UI 2.0 的当前视觉规范。后续整理后的设计记录见 [UI 设计说明](claude-design-handoff/README.md)。完整原型与对话已停止跟踪，恢复方法见[仓库内容规则](../REPOSITORY-CONTENT.md)；不依赖旧个人知识库路径。

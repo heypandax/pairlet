@@ -1,5 +1,7 @@
 # First Run · Connect + Pair handoff（#278 批次 2 A＋B）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/first-run-connect-pair)，需从存档恢复后使用。实现状态以当前源码为准。
+
 新用户首启「连接你的电脑」引导流＋配对屏 2.0 的设计交付。目标：把「先在电脑上装 daemon」翻到首启正面，把配对期每个失败态变成可行动的错误卡。
 
 ## Source of truth

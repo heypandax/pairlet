@@ -92,4 +92,4 @@ MP 的 `api_secret` 是私密上报凭据，不能随客户端分发；泄露后
 - 分别记录“入口收到”“上游请求成功”“GA4 已处理入报表”。MP 返回 2xx 不保证数据有效或已处理；验证端点也不会将测试事件写入报表。依据：[MP 响应说明](https://developers.google.com/analytics/devguides/collection/protocol/ga4/reference)、[验证事件说明](https://developers.google.com/analytics/devguides/collection/protocol/ga4/validating-events)。
 - GA4 DebugView/Realtime 用于排查链路，最终用普通聚合核对 `desktop`、版本、schema、结果/coverage 及环境切片，说明可能的丢失和处理延迟。D1/D7 等真实数据成熟后再观察，不用测试回放代替留存。
 
-当前手机/iOS 验收、Sentry 接入和历史超时的收尾边界仍以 [CLOSEOUT](CLOSEOUT.md) 为准，不因本需求重新开启。
+当前手机/iOS 验收、Sentry 接入和历史超时的收尾边界仍以 [CLOSEOUT](../archive/observability-2026-09/CLOSEOUT.md) 为准，不因本需求重新开启。

@@ -1,6 +1,6 @@
 # Pairlet 查询与证据手册
 
-配置检查点：2026-09-11。**当前已保存五个正式视角与两个 staging 验证页，实际分流查询通过，生产样本与成熟留存仍待观察**；详见 [本轮配置和汇总](evidence/2026-09-11-ga4-sampling.json)。区分保存配置、已接收样本与已验证业务旅程；现有新 daemon 日志、Android Errors/Logs、iPhone 12 Logs 和 desktop GA4 staging 启动/连接恢复结果回执，逐组件边界见 [ACCEPTANCE](ACCEPTANCE.md)。字段的业务含义以 [EVENT-CATALOG](EVENT-CATALOG.md) 为准。
+配置检查点：2026-09-11。**当前已保存五个正式视角与两个 staging 验证页，实际分流查询通过，生产样本与成熟留存仍待观察**；详见 [本轮配置和汇总](../archive/observability-2026-09/evidence/2026-09-11-ga4-sampling.json)。区分保存配置、已接收样本与已验证业务旅程；现有新 daemon 日志、Android Errors/Logs、iPhone 12 Logs 和 desktop GA4 staging 启动/连接恢复结果回执，逐组件边界见 [ACCEPTANCE](../archive/observability-2026-09/ACCEPTANCE.md)。字段的业务含义以 [EVENT-CATALOG](EVENT-CATALOG.md) 为准。
 
 历史查询补充：GA4 报告时区实测 GMT+08:00，Dia 为 America/Los_Angeles，必须把测试 UTC 时间换算成报告日期后再选范围。合并前 Android 1.9.8 开发包已经包含新上报；查询 **2026-09-11** 已见会话结果 5 条、文件查看结果 2 条、有效使用 4 条，详情见 ACCEPTANCE 最新节。使用内置“平台”与“应用版本”先核对入库样本；新自定义维度的值选择器不完整时，不把过滤后的空表当成事件未收到，也不直接认定参数链路已通过。原“手机后台尚未确认”的段落属于此前检查点。
 

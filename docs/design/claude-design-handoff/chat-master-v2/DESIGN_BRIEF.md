@@ -1,5 +1,7 @@
 # Chat Master v2 — design brief
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/chat-master-v2)，需从存档恢复后使用。实现状态以当前源码为准。
+
 ## Task and primary problem
 
 Create the missing final, implementation-ready Chat master for cc-pocket Mobile UI 2.0. The current Claude Design project contains a normal Chat frame inside `A Master Core v1`, a 200% proof inside `A Master Proofs v1`, and a separate `Chat Quick Actions Master v1`, but no single current source of truth. Later production fixes to the context disclosure are not represented in those original frames.

@@ -1,5 +1,7 @@
 # Per-model context window（issue #171）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/per-model-context-window)，需从存档恢复后使用。实现状态以当前源码为准。
+
 设计稿在线地址（登录 claude.ai 即看）：
 <https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FPer-model+Context+Window.html>
 

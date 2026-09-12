@@ -1,5 +1,7 @@
 # 附件体系 — composer 附件流／消息流呈现／桌面拖拽（设计 handoff）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/attachments)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - **在线设计板**（登录即看）：
   - 手机 composer 附件流：<https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FFile+Attachment.html>
   - 消息流附件 + 播放器 + 浅色：<https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FSent+Attachments.html>

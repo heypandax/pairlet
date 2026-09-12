@@ -1,8 +1,9 @@
 # Pairlet 观测发布与验收
 
-**收尾范围确认（2026-09-11）**：用户要求整理待提交内容，其他验证暂缓至上线后观察。本批只整理代码、现有证据和 CI 配置，不再装机、跑补充测试、重新操作手机或回读云端页面。现有 CI 的正常构建、配置校验及符号上传步骤保留。未验证事项仍如实记录，但不再作为本次提交的前置条件。提交范围与 GitHub 配置见 [收尾清单](CLOSEOUT.md)。
+> 2026 年 9 月实施时的范围与回执见[历史归档](../archive/observability-2026-09/README.md)；本页维护方法与口径，旧任务的授权和暂停不自动适用于新任务。
 
-2026-09-10 实施与验收稿。集中本地回归、SDK 出口及脚本替身测试已通过，详见 [ACCEPTANCE](ACCEPTANCE.md)；本页不构成实际部署、正式发版或自动 fatal 切换回执。
+
+2026-09-10 实施与验收稿。集中本地回归、SDK 出口及脚本替身测试已通过，详见 [ACCEPTANCE](../archive/observability-2026-09/ACCEPTANCE.md)；本页不构成实际部署、正式发版或自动 fatal 切换回执。
 
 ## 官方包配置门禁（2026-09-11 增量）
 
@@ -114,7 +115,7 @@ GA4 MP 预校验：从私有配置载入 `GA4_MEASUREMENT_ID` 和 `GA4_API_SECRE
 
 集中故障演练需覆盖传输中止、校验不符、替换失败、新服务启动失败、健康失败、切换时 SSH 断开，以及恢复自身失败。检查旧服务是否持续/恢复、备份完整和 Caddy 状态，不能仅查看返回码。回滚失败保留备份与结果，不继续删除；人工选择准确备份恢复后再次核对包与健康。
 
-已知历史备份仅作为线索，实际使用前重查：[PAIRLET](PAIRLET.md)、[ACCEPTANCE](ACCEPTANCE.md)。诊断预算与采集关闭偏好不随二进制回滚重置。
+已知历史备份仅作为线索，实际使用前重查：[PAIRLET](../archive/observability-2026-09/PAIRLET.md)、[ACCEPTANCE](../archive/observability-2026-09/ACCEPTANCE.md)。诊断预算与采集关闭偏好不随二进制回滚重置。
 
 ## 独立失联检查
 
@@ -128,4 +129,4 @@ GA4 MP 预校验：从私有配置载入 `GA4_MEASUREMENT_ID` 和 `GA4_API_SECRE
 
 `python3 scripts/observability-latency.py receipts.csv` 对每组按 nearest-rank 计算 P95，缺报保留在分母并阻止通过；不足样本返回 insufficient_samples。visible_at 必须来自后台首次可查观察，不能填 SDK 返回或 flush 时间。时钟有偏差先校准，不产生负时延样本。该脚本不生成测试数据，也不访问或上传业务内容。
 
-七天观察从已验收实际版本上线后真实经过的时间起算。每日记录参与采集安装覆盖、Events/Logs/Spans 用量、有限本地 suppressed/dropped、迟到/缺报、故障阶段与正常对照。D1/D7 仅纳入成熟群组；产品结论写入 [PRODUCT-REVIEW](PRODUCT-REVIEW.md)。不足七天保留待观察，不将 smoke 或旧版本日志补成新版本七天结论。
+七天观察从已验收实际版本上线后真实经过的时间起算。每日记录参与采集安装覆盖、Events/Logs/Spans 用量、有限本地 suppressed/dropped、迟到/缺报、故障阶段与正常对照。D1/D7 仅纳入成熟群组；产品结论写入 [PRODUCT-REVIEW](../archive/observability-2026-09/PRODUCT-REVIEW.md)。不足七天保留待观察，不将 smoke 或旧版本日志补成新版本七天结论。

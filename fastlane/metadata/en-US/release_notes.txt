@@ -1,16 +1,6 @@
 What's new in 2.0.0
 
 • CC Pocket is transitioning to Pairlet. Look for CC Pairlet in the App Store and on your device during the transition, with a one-time notice explaining the change.
-• A shorter computer command: use pairlet with the same subcommands as cc-pocket-daemon. The legacy command remains available.
-• Updated website and help links for pairlet.org, with support for both the old and new GitHub repository addresses.
-• Improved discovery of standalone OpenCode CLI installations when the daemon runs in the background.
-• Added a usage and diagnostics sharing setting, plus a recent diagnostic ID you can copy when reporting a problem. Computer diagnostics are controlled separately.
-• Windows: ZCode sessions start when the CLI is installed outside PATH. The daemon now finds it through the registry and the Programs folder, and a failed lookup lists every path it tried.
-• Windows: right-clicking the tray icon opens the same styled flyout as a left click, with session and status details, replacing the native menu that ignored display scaling.
-• Windows: text in the update prompt row and the paired-computer cards is vertically centered again.
-• Desktop: right-clicking a file path in the conversation no longer crashes the app.
-• Desktop: the Running list shows each session's title with its project underneath, and a project can be removed from Recent via its right-click menu.
-• Lines such as "#5 fixed" are no longer styled as headings; only "# " Markdown headings are.
-• Android: long gateway model lists scroll instead of running off the screen.
-• DeepSeek Harness: works with the npx-only install; a custom binary path can be pinned with cc-pocket-daemon config --dsh-bin.
-• macOS: daemons installed with the one-line installer are recognized as managed installs again, so automatic updates apply.
+• Updated website and help links in the app for easier access to guides and support.
+• Added a usage and diagnostics sharing setting. When a diagnostic record is available, you can copy its ID in Settings to help report a problem.
+• Fixed conversation text sometimes appearing as an oversized heading, improving readability.

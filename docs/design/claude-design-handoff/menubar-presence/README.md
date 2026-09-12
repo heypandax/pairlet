@@ -1,8 +1,10 @@
 # 菜单栏状态胶囊（issue #151 方向 1）设计交付
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/menubar-presence)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - **在线设计板**：<https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FMenu+Bar.html>
 - **生成日期**：2026-07-16，追加模式（复用 desktop token 与 TrayPopover 节语法）
-- **brief 源**：`~/Desktop/Brain/60_Outbox/2026-07-16-cc-pocket-菜单栏状态胶囊设计提示词.md`
+- **brief 源**：（原始 brief 已保存在本地设计归档）
 
 ## 文件清单
 

@@ -41,7 +41,7 @@ main 已合入观测模块及发行配置跟进（PR #369、#370）；`2f2dba8b`
 
 - 预演补齐各组件 staging Sentry 配置、真实包回读与 iOS 本地符号校验；需在所有待合模块结束后冻结同一 SHA，重新跑 `release-preview.yml`。正式版本仍为 v1.9.8，预演不更新用户的 daemon。
 - 本地 2.0 中英更新说明和审核备注补充采集开关、复制诊断编号与 App/daemon 独立控制；官网隐私说明补充 Sentry 数据去向。新增文案尚未同步到 App Store，需先对照人工修改再同步。已同步的旧草稿回执为 [34515999937](https://github.com/heypandax/pairlet/actions/runs/34515999937)，不能将其当作新文案回执。
-- 后续按 [最新观测验收](observability/ACCEPTANCE.md) 处理两种会话超时、手机 GA4 后台回执、iOS 真实错误源码行号等剩余项。Sentry 自动 fatal 尚未迁移，继续保留 Crashlytics；不作为本次更新的已完成功能宣传。
+- 后续按 [最新观测验收](archive/observability-2026-09/ACCEPTANCE.md) 处理两种会话超时、手机 GA4 后台回执、iOS 真实错误源码行号等剩余项。Sentry 自动 fatal 尚未迁移，继续保留 Crashlytics；不作为本次更新的已完成功能宣传。
 - 2.0 正式候选仍需原签名旧版升级、旧名称搜索及新旧命令安装渠道验收。网站源文件、App Store 草稿和实际安装包分别记录同步状态。
 
 ## 回退

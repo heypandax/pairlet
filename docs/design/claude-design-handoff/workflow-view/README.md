@@ -1,11 +1,13 @@
 # Workflow 编排视图 — 运行卡片／进度树／journal 回看／桌面停靠面板（设计 handoff）
 
-- **在线设计板**（登录 b01099485423@gmail.com 即看）：
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/workflow-view)，需从存档恢复后使用。实现状态以当前源码为准。
+
+- **在线设计板**（登录 有项目访问权限的账号 即看）：
   - 手机卡片 + 进度树：<https://claude.ai/design/p/c41b194b-c78d-4280-bc92-48148e6b5429?file=Workflow+Run.dc.html>
   - agent 详情 sheet + journal：<https://claude.ai/design/p/c41b194b-c78d-4280-bc92-48148e6b5429?file=Workflow+Journal.dc.html>
   - 桌面停靠面板：<https://claude.ai/design/p/c41b194b-c78d-4280-bc92-48148e6b5429?file=Workflow+Desktop.dc.html>
 - **生成**：2026-07-11，claude.ai/design，模型 Opus 4.8 Medium，三个 Prompt 顺序投递，均一次通过（agent 自查含渲染空白修复、`const T` 拼接冲突 IIFE 隔离等，未消耗重试名额）
-- **⚠️ 项目迁移事实**：旧 cc-pocket 设计项目（pandaleeng@gmail.com 账号，`93b56700-…`）当日撞两次会话限额且共享功能缺失，改走「本地导出→新账号导入」迁移：**b01099485423@gmail.com 下的新 cc-pocket 项目（`c41b194b-…`）自本轮起为设计线正典**；旧项目保留存史（附件体系及更早各屏都在那边，源码已归档 `../attachments/` 等目录）。新项目以 9 个种子文件（ia-core / ia-parts / ios-frame / desktop-core / workflow-core / chat-cards.css / file-attach / sent-attach / desktop-attach）+ §10.1 摘要重建了设计系统上下文。
+- **⚠️ 项目迁移事实**：旧 cc-pocket 设计项目（有项目访问权限的账号 账号，`93b56700-…`）当日撞两次会话限额且共享功能缺失，改走「本地导出→新账号导入」迁移：**有项目访问权限的账号 下的新 cc-pocket 项目（`c41b194b-…`）自本轮起为设计线正典**；旧项目保留存史（附件体系及更早各屏都在那边，源码已归档 `../attachments/` 等目录）。新项目以 9 个种子文件（ia-core / ia-parts / ios-frame / desktop-core / workflow-core / chat-cards.css / file-attach / sent-attach / desktop-attach）+ §10.1 摘要重建了设计系统上下文。
 - **对应 issue／任务**：#106 多 agent 运行整体进度（daemon 解析/跟踪 + 协议字段 + 双端 UI）——**实现尚未开始**，等主会话派发；probe wire 形态的前置探测与本设计并行不阻塞
 - **本地打开**：目录下起 `python3 -m http.server`，访问三个 `.dc.html`（各自引 `./support.js` 与 `workflow-scene.jsx`，本目录已自洽）
 

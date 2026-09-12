@@ -1,10 +1,12 @@
 # 生物识别锁定门 — App Lock gate + Settings 开关 + 快照遮罩（设计 handoff）
 
-- **在线设计板**（登录 pandaleeng@gmail.com 即看）：
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/biometric-lock)，需从存档恢复后使用。实现状态以当前源码为准。
+
+- **在线设计板**（登录 有项目访问权限的账号 即看）：
   - 锁定 gate 页（5 态 + 浅色）：<https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FApp+Lock.html>
   - Settings 开关 + auto-lock + 快照遮罩：<https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FSettings+App+Lock.html>
 - **生成**：2026-07-11，claude.ai/design，模型 Opus 4.8 Medium，两个 Prompt 顺序追加，均一次通过（0 撞限、0 重试）
-- **⚠️ 项目已迁回主号**：本设计生成在**主号 pandaleeng@gmail.com 的原始项目 `93b56700`**——它自会话初就持有完整原生设计系统（ia-core / ios-frame / desktop-core 等）+ attachments 批成品，本轮起**恢复为设计线正典**（此前 Workflow/presets/folder-share 三批因主号限额临时借道 b01099485423 的 `c41b194b`，那些成品已各自归档在 `../workflow-view/`、`../presets/`、`../folder-share/`）。FaceID 直接复用 93b56700 原生 `ios-frame.jsx`，无需再喂种子
+- **⚠️ 项目已迁回主号**：本设计生成在**主号 有项目访问权限的账号 的原始项目 `93b56700`**——它自会话初就持有完整原生设计系统（ia-core / ios-frame / desktop-core 等）+ attachments 批成品，本轮起**恢复为设计线正典**（此前 Workflow/presets/folder-share 三批因主号限额临时借道 b01099485423 的 `c41b194b`，那些成品已各自归档在 `../workflow-view/`、`../presets/`、`../folder-share/`）。FaceID 直接复用 93b56700 原生 `ios-frame.jsx`，无需再喂种子
 - **对应 issue／任务**：#109 Face ID / App Lock。**实现待定稿派发**：iOS 走 `LAContext`（`deviceOwnerAuthentication` 带密码回退），Android 走 `BiometricPrompt`（`BIOMETRIC_STRONG or DEVICE_CREDENTIAL`）；开关/阈值存 Keychain / EncryptedSharedPrefs；gate 组件与状态机放 `commonMain`，生物识别与快照遮罩走 expect/actual 薄壳
 - **本地打开**：目录下 `python3 -m http.server` 后访问两个 HTML（各引 `ios-frame.jsx` + 自身 app jsx；调色板内联在 app jsx，不依赖 ia-core）
 

@@ -1,5 +1,7 @@
 # site 1.3 — Desktop + Fleet 官网板块设计交付
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/site-1.3-desktop-fleet)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - 在线设计板：https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2Fsite%2F1.3+Desktop+%2B+Fleet.html（登录即看）
 - 生成时间：2026-07-05，模型 Opus 4.8 Max（Fable 周配额已满时的常规回退）
 

@@ -371,10 +371,8 @@ Screen: Settings, a grouped list. Group "Default permission mode" (six options: 
 
 ---
 
-## 12. 落地（本文档之后）
+## 12. 历史规格与后续设计
 
-- **本文档** `cc-pocket/docs/design/UI-DESIGN.md` 是正式设计输入与规格。
-- **已采用 claude.ai/design**：用 §10 的 brief 在 claude.ai/design 生成 7 屏，经 Handoff to Code 导出到 [`claude-design-handoff/`](./claude-design-handoff/)（各屏 `.html/.jsx` + 设计对话）——这是项目唯一保留的设计版本，后续 Compose 实现以它为像素级参照。
-- **历史选型对比**（Stitch ⟷ Claude Design）已归档到 Obsidian `~/Desktop/Brain/20_Projects/cc-pocket-设计工具评估/`，项目内不再保留 Stitch 产物。
-- **与实现的关系**：这份只管界面；daemon↔claude 技术实现（M0）单独走，互不阻塞。
-```
+本文记录最初的七屏设计输入。当前界面方向、状态和取代关系从 [UI 设计说明](claude-design-handoff/README.md) 及 [Mobile UI 2.0 supersession map](claude-design-handoff/mobile-ui-2.0/supersession-map.md) 查询，再结合实现核实。
+
+原始 HTML/JSX 与对话已停止跟踪，说明文件保留原路径；完整原型恢复见[仓库内容规则](../REPOSITORY-CONTENT.md)。旧个人知识库路径不作为新 clone 的依赖。

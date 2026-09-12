@@ -1,5 +1,7 @@
 # Chat cards — SubagentCard 与 DocumentCard（设计 handoff）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/chat-cards)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - **在线设计板**：<https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2Fsite%2FChat+Cards.html>（登录即看，工具栏可切 running 处理方案／动效冻结／hover 态）
 - **生成**：2026-07-08，claude.ai/design，cc-pocket 设计项目追加模式
 

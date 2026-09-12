@@ -1074,7 +1074,7 @@ private fun NewTaskFab(onClick: () -> Unit) {
 
 /**
  * The wait, and the landing (issue #261) — transcribed from the design's board H
- * (`docs/design/claude-design-handoff/fast-start-260/FastStartDevice.dc.html`).
+ * (`docs/design/claude-design-handoff/fast-start-260/README.md`).
  *
  * Two decisions are worth keeping stated, because both are easy to "improve" back into what they replaced:
  *  · the skeleton BREATHES (alpha), it does not sweep. A shimmer sweep on a mono/rectangle skeleton reads

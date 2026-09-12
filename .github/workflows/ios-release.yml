@@ -83,6 +83,7 @@ jobs:
         # blocklist when ASC teaches us a new one.
         run: |
           bash scripts/check-release-version.sh
+          python3 scripts/check-appstore-content.py --metadata-only
           BAD='✕'
           if grep -rn "[$BAD]" fastlane/metadata/*/release_notes.txt; then
             echo "::error::release_notes.txt contains characters App Store Connect rejects ($BAD) — fix fastlane/metadata before dispatching."

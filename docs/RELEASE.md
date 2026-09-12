@@ -247,6 +247,8 @@ MSI 在 `windows-latest` runner 上构建（jpackage 不能跨平台出包，且
 
 # 发布 iOS App（App Store）
 
+准备提审或处理拒审前，先读 [App Store 拒审案例与提审前检查](APP-STORE-REJECTIONS.md)。该文档集中维护历史条款、修复证据和防复发要求。
+
 移动端 iOS app（`com.panda.ccpocket`）走 **App Store**，由独立的 `ios-release.yml` 构建，
 但协调发布仍与 daemon 使用同一 marketing version。CI 使用 App Store Connect API key 做
 cloud-managed signing、上传、提交审核及 TestFlight 公测；本机 Xcode 登录流程只作为兜底。
@@ -306,11 +308,11 @@ TestFlight 公测链接。只有要把新 build 附到另一个仍开放的版�
 
 4. **等 Apple 处理**：约 10–30 分钟，构建在 App Store Connect 从 “Processing” 变为可选。
 
-5. **网页操作（无 API，只能手动）**：
+5. **网页兜底与审核沟通**：
    - 进对应 version → Build 区选中刚上传的构建。
    - 回答出口合规（Export Compliance）等问询。
    - **首次提交**：填完信息 → Submit for Review。
-   - **被拒后重新提交**（如 Guideline 2.1a）：同一 version 选新构建 → **Resolution Center** 回复审核员 → 重新提交。Resolution Center 回复**没有 API，只能网页手动**。
+   - **被拒后处理**：先依据[拒审案例文档](APP-STORE-REJECTIONS.md)区分产品代码与元数据问题。改了二进制才上传并选择新构建；仅修元数据可复用原 build。通过 ASC 网页回复审核员，并按该次审核信决定是否重新提交；若明确允许回复后继续处理原提交，不重复创建审核草稿。每个动作单独回读确认。
 
 ## 注意事项 / 坑
 

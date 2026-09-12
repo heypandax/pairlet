@@ -1,8 +1,7 @@
 # marketing/site —— 官网与 README 的产品素材管线
 
 一条命令，把**真实 Compose UI + 脚本化演示数据**渲成官网和 README 用的全部素材。
-和 `marketing/video/` 的区别：那条管线出的是有口播、有品牌舞台的宣传片；**这条只出产品证据**——
-无声、无字幕、无 TTS、无网络，画面就是产品本身。
+生成内容无声、无字幕、无 TTS、无网络，画面就是产品本身。旧宣传活动管线已停止跟踪，来源与目录边界见[素材工具入口](../README.md)。
 
 ```bash
 bash marketing/site/generate-assets.sh            # 完整重跑（约 4 分钟）

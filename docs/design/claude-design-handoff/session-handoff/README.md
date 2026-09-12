@@ -1,9 +1,11 @@
 # Session Handoff（协作接力）— 设计 handoff
 
-- **在线设计板**（登录 b01099485423@gmail.com 即看）：
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/session-handoff)，需从存档恢复后使用。实现状态以当前源码为准。
+
+- **在线设计板**（登录 有项目访问权限的账号 即看）：
   <https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=Session+Handoff.html>
 - **生成**：2026-08-02，claude.ai/design cc-pocket 正典项目，模型 Opus 5 Medium，一段 brief 一次通过（含自查两轮 Screenshot 修帧）。
-- **依据**：`docs/design/SESSION-HANDOFF.md`（已定稿方案），覆盖 §9.4 的 10 个 UI 面；brief 存档 `~/Desktop/Brain/60_Outbox/2026-08-02-cc-pocket-协作接力SessionHandoff设计提示词.md`。
+- **依据**：`docs/design/SESSION-HANDOFF.md`（已定稿方案），覆盖 §9.4 的 10 个 UI 面；brief 存档 （原始 brief 已保存在本地设计归档）。
 - **本地打开**：本目录 `python3 -m http.server` 后访问 `Session Handoff.html`（样式与 QR 脚本在 `./session-handoff/` 子目录）。
 
 ## 文件清单

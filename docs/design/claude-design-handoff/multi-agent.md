@@ -1,5 +1,7 @@
 # Multi-Agent（Claude · Codex）设计落地记录
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff)，需从存档恢复后使用。实现状态以当前源码为准。
+
 > 设计源：claude.ai/design 项目 `cc-pocket`（projectId `93b56700-6ed2-46c9-bf81-3fd0b1a6340b`），文件 `cc-pocket/Multi-Agent.html` + `agents-core.jsx` + `agents-app.jsx`（壳 + 组件，存云端，可用 DesignSync get_file 取回）。
 > 落地日期：2026-06-24。对应需求见 [`../CODEX-MULTI-AGENT.md`](../CODEX-MULTI-AGENT.md)。
 

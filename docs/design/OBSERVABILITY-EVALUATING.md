@@ -2,7 +2,7 @@
 
 状态：历史供应商评估，已由 [Sentry 实施方案](OBSERVABILITY.md) 替代。日期：2026-09-09。以下保留早期 Firebase/GCP 基线和比选过程，不再作为实施入口；当前方案采用 Firebase Analytics + Sentry，且不建设本文的 Cloud Run 接收器、诊断 grant 和 Cloud Logging 写入器。历史代码核查基线：`8613b3b3`。
 
-本文是项目级主方案，覆盖移动端、桌面端、daemon、relay 及 Agent 适配边界。会话打开失败是首批应用场景之一，细节见 [会话打开场景](/Users/lidapeng/Desktop/Project/app/cc-pocket/docs/design/SESSION-OPEN-DIAGNOSTICS-EVALUATING.md)。本文替代该场景旧稿中的全局架构、上传策略和实施优先级。
+本文是项目级主方案，覆盖移动端、桌面端、daemon、relay 及 Agent 适配边界。会话打开失败是首批应用场景之一，细节见 [会话打开场景](SESSION-OPEN-DIAGNOSTICS-EVALUATING.md)。本文替代该场景旧稿中的全局架构、上传策略和实施优先级。
 
 ## 1. 目标：从 Analytics 异常找到可解释的证据
 
@@ -64,11 +64,11 @@ Sentry 支持 SDK 直传，首版有机会省去本方案自建 Cloud Run 接收
 
 | 层 | 已有证据 | 缺口 |
 |---|---|---|
-| App | [Telemetry](/Users/lidapeng/Desktop/Project/app/cc-pocket/mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/telemetry/Telemetry.kt) 有 `pair_failed`、`conn_failed`、`session_open_timeout`、`prompt_turn_stalled` 等事件 | 多数只带类别，缺操作编号、上下文和终态关联 |
+| App | [Telemetry](../../mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/telemetry/Telemetry.kt) 有 `pair_failed`、`conn_failed`、`session_open_timeout`、`prompt_turn_stalled` 等事件 | 多数只带类别，缺操作编号、上下文和终态关联 |
 | Android / iOS | 已接 Firebase；`recordError` 接收字符串；Android 新建 RuntimeException，iOS 统一 NSError code 0 | 原始栈与分组信息损失；普通业务失败未系统接入 |
 | 桌面 | 有 GA4 Measurement Protocol、本地崩溃日志 | 没有云端结构化栈管道；实际发送受构建配置影响 |
-| daemon | [RelayClient](/Users/lidapeng/Desktop/Project/app/cc-pocket/daemon/src/main/kotlin/dev/ccpocket/daemon/relay/RelayClient.kt)、业务层使用本地日志；运行时是 slf4j-simple | 远端电脑上的日志不可集中检索；异步异常和请求阶段缺统一关联 |
-| relay | [RelayServer](/Users/lidapeng/Desktop/Project/app/cc-pocket/relay/src/main/kotlin/dev/ccpocket/relay/RelayServer.kt) 有 auth、superseded、rate_limited、detached；stdout/journal 路径可排查 | 文本日志带账号片段/IP，不能整体上传；缺连接编号、明确关闭原因和跨版本统计 |
+| daemon | [RelayClient](../../daemon/src/main/kotlin/dev/ccpocket/daemon/relay/RelayClient.kt)、业务层使用本地日志；运行时是 slf4j-simple | 远端电脑上的日志不可集中检索；异步异常和请求阶段缺统一关联 |
+| relay | [RelayServer](../../relay/src/main/kotlin/dev/ccpocket/relay/RelayServer.kt) 有 auth、superseded、rate_limited、detached；stdout/journal 路径可排查 | 文本日志带账号片段/IP，不能整体上传；缺连接编号、明确关闭原因和跨版本统计 |
 | 推送 | relay Firebase 相关代码是 FCM 发送链路 | FCM 接入不代表已接入 Firebase 错误分析 |
 
 首批从现有 Analytics 事件向下补证据，顺序为：
@@ -179,8 +179,8 @@ Analytics 保留旧事件名/口径，增加 `diag_schema`、`error_code`、`ope
 
 堆栈与日志参考相邻项目的封装方式：
 
-- [iOS NonFatalReporter](/Users/lidapeng/Desktop/Project/app/ios/HelloLibs/HelloTrack/HelloTrack/Classes/NonFatalReporting/NonFatalReporter.swift)：错误与业务 issue 分开、单次快照、限频；[LogBreadcrumbBridge](/Users/lidapeng/Desktop/Project/app/ios/HelloLibs/HelloTrack/HelloTrack/Classes/NonFatalReporting/LogBreadcrumbBridge.swift)：有限近期日志。
-- [Android FirebaseCrashUtils](/Users/lidapeng/Desktop/Project/app/android/feature/common/src/main/java/com/hellotalk/feature/common/business/firebase/FirebaseCrashUtils.kt)：捕获处保留 Throwable，搭配 breadcrumb，过滤协程取消。
+- `iOS NonFatalReporter`（外部项目调研，未随库发布）：错误与业务 issue 分开、单次快照、限频；`LogBreadcrumbBridge`（外部项目调研，未随库发布）：有限近期日志。
+- `Android FirebaseCrashUtils`（外部项目调研，未随库发布）：捕获处保留 Throwable，搭配 breadcrumb，过滤协程取消。
 
 Android 保留安全原始栈，危险 message/cause 转为固定代码后复制栈；iOS 原生 `record(error:userInfo:)` 记录现场原生栈和单事件字段，Kotlin 异常原始栈先捕获后随事件附加。若使用 ExceptionModel 显示 Kotlin 自定义栈，要单独验证符号和上下文归属。SDK 上报线程栈、原始 throw 栈、watchdog 栈必须显式区分，不能用新建包装异常掩盖缺失。
 
@@ -190,7 +190,7 @@ Android 保留安全原始栈，危险 message/cause 转为固定代码后复制
 
 ### 6.2 daemon：独立采集，不依赖手机
 
-优先接入 [DaemonCore](/Users/lidapeng/Desktop/Project/app/cc-pocket/daemon/src/main/kotlin/dev/ccpocket/daemon/DaemonCore.kt)、[RelayClient](/Users/lidapeng/Desktop/Project/app/cc-pocket/daemon/src/main/kotlin/dev/ccpocket/daemon/relay/RelayClient.kt)、[DeviceSessions](/Users/lidapeng/Desktop/Project/app/cc-pocket/daemon/src/main/kotlin/dev/ccpocket/daemon/relay/DeviceSessions.kt)、[RequestRouter](/Users/lidapeng/Desktop/Project/app/cc-pocket/daemon/src/main/kotlin/dev/ccpocket/daemon/server/RequestRouter.kt) 及各 AgentBackend 边界。
+优先接入 [DaemonCore](../../daemon/src/main/kotlin/dev/ccpocket/daemon/DaemonCore.kt)、[RelayClient](../../daemon/src/main/kotlin/dev/ccpocket/daemon/relay/RelayClient.kt)、[DeviceSessions](../../daemon/src/main/kotlin/dev/ccpocket/daemon/relay/DeviceSessions.kt)、[RequestRouter](../../daemon/src/main/kotlin/dev/ccpocket/daemon/server/RequestRouter.kt) 及各 AgentBackend 边界。
 
 采集范围：启动/正常退出、未处理异常、relay 建联/心跳/重试、请求接收与执行结果、Agent 进程退出/协议解析、文件读取与序列化错误、后台任务失败。记录退出码、耗时、字节数和结构化代码，不上传 CLI stdout/stderr、提示词或工具结果。
 
@@ -202,7 +202,7 @@ Agent CLI 是第三方进程，首版只观察我们拥有的适配边界；不�
 
 ### 6.3 relay：服务器自身的证据
 
-在 [RelayServer](/Users/lidapeng/Desktop/Project/app/cc-pocket/relay/src/main/kotlin/dev/ccpocket/relay/RelayServer.kt)、[Broker](/Users/lidapeng/Desktop/Project/app/cc-pocket/relay/src/main/kotlin/dev/ccpocket/relay/Broker.kt)、auth/pairing/net 与 push 边界生成独立安全记录。现有本地审计日志可保留，云端采集器只消费新增的诊断流。
+在 [RelayServer](../../relay/src/main/kotlin/dev/ccpocket/relay/RelayServer.kt)、[Broker](../../relay/src/main/kotlin/dev/ccpocket/relay/Broker.kt)、auth/pairing/net 与 push 边界生成独立安全记录。现有本地审计日志可保留，云端采集器只消费新增的诊断流。
 
 | 类别 | 记录内容 |
 |---|---|

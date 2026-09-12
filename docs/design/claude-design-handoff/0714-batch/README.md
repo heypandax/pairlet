@@ -1,12 +1,14 @@
 # 0714-batch —— 07-14 issue 批次新界面设计
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/0714-batch)，需从存档恢复后使用。实现状态以当前源码为准。
+
 > 在线设计板（登录 claude.ai 可看）：
 > - 预约发送三件套：https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FScheduled+Prompts.html
 > - skills/插件浏览页：https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FSkills+%26+Plugins+Browser.html
 > - 网关模型预设：https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FGateway+Model+Presets.html
 > - 聊天小状态件：https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FChat+Components.html
 
-对应 brief：`~/Desktop/Brain/60_Outbox/2026-07-14-cc-pocket-0714批次新界面设计提示词.md`。
+对应 brief：（原始 brief 已保存在本地设计归档）。
 
 ## 文件清单
 

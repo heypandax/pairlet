@@ -1,8 +1,10 @@
 # 占用环视觉节奏修正设计交付
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/gauge-rhythm)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - **在线设计板**：<https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FGauge+Vertical+Rhythm.html>
 - **生成日期**：2026-07-20，追加模式（同一对话延续 `context-statusline/` 与 `per-model-context-window/`，Opus 4.8 Medium）
-- **brief 源**：`~/Desktop/Brain/60_Outbox/2026-07-20-cc-pocket-占用环视觉节奏设计提示词.md`
+- **brief 源**：（原始 brief 已保存在本地设计归档）
 - **背景**：#170 的 Option C（无外框裸环）落地后，占用环成了 accessory 行里唯一没有外框的元素。两枚 30dp 药丸 + 三个 44dp 圆钮之间，一枚 15dp 裸环视觉高度只有邻居一半；平静态（<80%，绝大多数时间）读成「掉进控件带的散点」。反而 ≥80% 长出琥珀数字后才正常——因为数字给了它质量。
 
 ## 文件清单

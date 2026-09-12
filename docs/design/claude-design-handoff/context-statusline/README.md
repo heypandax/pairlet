@@ -1,8 +1,10 @@
 # 上下文占用指示器入驻 composer 设计交付
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/context-statusline)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - **在线设计板**：<https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2FContext+Occupancy+Placement.html>
 - **生成日期**：2026-07-20，追加模式（复用 Model Chip / Mobile Composer / Session Switcher 三稿的 pill 语法与 iOS 机框），Opus 4.8 Medium 生成
-- **brief 源**：`~/Desktop/Brain/60_Outbox/2026-07-20-cc-pocket-上下文指示器入驻composer设计提示词.md`
+- **brief 源**：（原始 brief 已保存在本地设计归档）
 - **背景**：上下文占用一直是悬浮在消息流右下角的 `Context 42%` 药丸（issue #15，#81 又给它打过 gutter 补丁）。三宗罪——压内容、不可点、气质像 debug overlay。`490e039` 的 composer 双层重排 + `e8dc42c` 的切换器下沉，已经把 accessory 行做成常驻控件带，占用理应入驻。
 
 ## 文件清单

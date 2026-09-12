@@ -1,5 +1,7 @@
 # CC Pocket README 与官网 2.0：跨设备 Agent 控制面
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/readme-site-control-plane-20260816)，需从存档恢复后使用。实现状态以当前源码为准。
+
 ## 任务与首要问题
 
 重做 CC Pocket 的公开第一印象，让第一次访问官网或 GitHub 的人能在 10 秒内回答：

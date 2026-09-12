@@ -1,5 +1,7 @@
 # cc-pocket Mobile UI 2.0 — Claude Design handoff
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/mobile-ui-2.0)，需从存档恢复后使用。实现状态以当前源码为准。
+
 This directory is the production design handoff for the approved mobile UI direction. The online project remains the visual source of truth during review; these exports are immutable implementation evidence, not production code.
 
 ## Online project

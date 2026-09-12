@@ -11,12 +11,43 @@ captures/
 .cc-connect
 .VSCodeCounter
 
-# 内部工作产物：会话交接计划、设计运行草稿、营销素材——不进公开库
+# 本地工作产物：会话、原始证据、设计导出；长期规则见 docs/REPOSITORY-CONTENT.md
+/_local/
 docs/plans/
 docs/design/app-design-runs/
 docs/design/image2-concepts/
 docs/design/APP-DESIGN-AUTOPILOT.md
-marketing/
+
+# Design handoffs retain reviewed Markdown only, not tool exports or chat transcripts.
+/docs/design/claude-design-handoff/**/*
+!/docs/design/claude-design-handoff/**/
+!/docs/design/claude-design-handoff/**/*.md
+/docs/design/claude-design-handoff/chats/
+/docs/design/claude-design-handoff/project/
+/docs/design/claude-design-handoff/project-refresh-*/
+/docs/design/claude-design-handoff/video-stage/
+
+# Keep only the reproducible site / App Store pipelines public.
+# The promotional video campaign, provider probes and generation receipts stay local.
+/marketing/*
+!/marketing/README.md
+!/marketing/appstore/
+!/marketing/preview/
+!/marketing/site/
+/marketing/appstore/*
+!/marketing/appstore/generate-assets.sh
+/marketing/preview/*
+!/marketing/preview/README.md
+!/marketing/preview/assemble-compose.sh
+!/marketing/preview/assemble.sh
+!/marketing/preview/make-preview.sh
+!/marketing/preview/record.sh
+!/marketing/preview/render_assets.py
+/marketing/site/*
+!/marketing/site/README.md
+!/marketing/site/generate-assets.sh
+!/marketing/site/smoke.py
+!/marketing/site/write-manifest.py
 
 # local agent / IDE state
 .claude/

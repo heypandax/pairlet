@@ -1,12 +1,14 @@
 # Issue #228 ZCode backend — Claude implementation handoff
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/zcode-issue-228)，需从存档恢复后使用。实现状态以当前源码为准。
+
 Updated: 2026-08-12 (America/Los_Angeles)
 
 ## Read this first
 
 Continue the in-progress implementation of [issue #228](https://github.com/heypandax/cc-pocket/issues/228) in the current worktree. Do not start over, create another worktree, or discard any dirty files.
 
-- Worktree: `/Users/lidapeng/.codex/worktrees/a2f1/cc-pocket`
+- Worktree: 原任务的隔离 worktree（本机路径不作为项目依赖）
 - Baseline commit: `b6024adc1d6574f919fab71c4340fbac0125a422`
 - Git state: detached HEAD, no branch, no commit, no staging, no push.
 - The worktree was clean when this task began. The current tracked and untracked changes are the issue #228 implementation and its tests/probe.
@@ -51,7 +53,7 @@ The implementation was derived from the official ZCode 3.7.6 bundle and CLI 0.16
 - Model configuration observed in 0.16.3 is `model.main = {provider, model, ...}` and is projected on the cc-pocket wire as `provider/model`.
 - The official desktop host handles `interaction/requestProviderRuntimeHeaders` for built-in Start Plan credentials by mutating private runtime headers. cc-pocket cannot access those desktop-owned credentials. The backend deliberately returns `{headersApplied:false,errorMessage:...}` so this fails explicitly instead of hanging.
 
-The repeatable evidence tool is `scripts/probe-zcode-app-server.py`. The unpacked 3.7.6 CJS used during this task currently exists at `/tmp/cc-pocket-zcode-3.7.6/zcode.cjs`; Node 24 is `/Users/lidapeng/.nvm/versions/node/v24.3.0/bin/node`. Treat `/tmp` as disposable and rediscover/re-download if absent.
+The repeatable evidence tool is `scripts/probe-zcode-app-server.py`. The unpacked 3.7.6 CJS used during this task currently exists at `/tmp/cc-pocket-zcode-3.7.6/zcode.cjs`; Node 24 is `/path/to/node-v24.3.0/bin/node`. Treat `/tmp` as disposable and rediscover/re-download if absent.
 
 ## What is implemented
 
@@ -202,7 +204,7 @@ python3 scripts/probe-zcode-app-server.py --self-test
 
 python3 scripts/probe-zcode-app-server.py \
   --zcode-bin /tmp/cc-pocket-zcode-3.7.6/zcode.cjs \
-  --node-bin /Users/lidapeng/.nvm/versions/node/v24.3.0/bin/node
+  --node-bin /path/to/node-v24.3.0/bin/node
 ```
 
 The passive official-bundle probe passed CLI/envelope/method checks and did not create a session or call a model. A bounded active probe with a local fake Anthropic SSE provider proved the official runtime's session/event/permission/cancel chain. It did not prove a real Z.ai provider request.

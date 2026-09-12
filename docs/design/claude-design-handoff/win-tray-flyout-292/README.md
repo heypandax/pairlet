@@ -1,5 +1,7 @@
 # Windows 托盘浮层（Tray Flyout）· issue #292
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/win-tray-flyout-292)，需从存档恢复后使用。实现状态以当前源码为准。
+
 > 来源：claude.ai/design「cc-pocket Design System 2.0」项目，2026-08-22 生成（Opus 5 Max）。
 > 在线板：https://claude.ai/design/p/eb401868-d618-47f7-b8d4-4641117d566d?file=Windows+Tray+Flyout+v1.dc.html
 

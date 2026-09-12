@@ -1,5 +1,7 @@
 # Settings + Bridges UI 2.1 — Design brief
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/settings-bridges-ui-2.1)，需从存档恢复后使用。实现状态以当前源码为准。
+
 ## Why this pass exists
 
 Two mobile supporting surfaces visibly drifted after the UI 2.0 redesign:

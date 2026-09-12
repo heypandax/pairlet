@@ -1,5 +1,7 @@
 # 帮助、学习与功能发现：实现交接
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/help-learning-discovery)，需从存档恢复后使用。实现状态以当前源码为准。
+
 > 状态：移动端帮助、官网任务首页与 App 智能客服直达均已实现；官网与 GitHub Pages 镜像已部署，桌面端与 Pandaa 已同步
 > 更新：2026-07-26
 > 用途：新会话开始实现前的唯一基础上下文。先读本文，再核验业务和代码，不要把完整设计稿直接当作开发清单。
@@ -9,7 +11,7 @@
 1. 仓库根目录的 [`AGENTS.md`](../../../../AGENTS.md)。
 2. 本文。
 3. 同目录的 [`README.md`](README.md)，了解设计结论和已完成的设计验收。
-4. [Claude Design 在线项目](https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=CC+Pocket+Help+Center.html)；本地归档入口为 [`CC Pocket Help Center.html`](CC%20Pocket%20Help%20Center.html)。
+4. [Claude Design 在线项目](https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=CC+Pocket+Help+Center.html)；本地归档入口为 [`CC Pocket Help Center.html`](https://github.com/heypandax/pairlet/blob/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/help-learning-discovery/CC%20Pocket%20Help%20Center.html)。
 
 Claude Design 是交互与信息结构参考，不是已经确认的完整业务范围。不要按 36 个画板逐一实现，也不要直接照抄其中的数量、命令、版本号、指标或状态规则。
 

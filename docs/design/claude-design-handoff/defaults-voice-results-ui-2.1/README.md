@@ -1,5 +1,7 @@
 # Defaults + Voice + Results UI 2.1 — Claude Design handoff
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/defaults-voice-results-ui-2.1)，需从存档恢复后使用。实现状态以当前源码为准。
+
 ## Receipt
 
 - Claude Design project: <https://claude.ai/design/p/eb401868-d618-47f7-b8d4-4641117d566d>
@@ -12,10 +14,10 @@
 ## Canonical artifacts
 
 - [Design brief](DESIGN_BRIEF.md) — production truth, state inventory, constraints, and acceptance criteria supplied to Claude Design.
-- [Direction study](<Defaults + Voice + Results Direction v1.dc.html>) — compares the bounded S/V/R alternatives and selects S3 + V3 + R3.
-- [Implementation master](<Defaults + Voice + Results Master v1.dc.html>) — canonical live HTML with responsive frames, state tables, measurements, accessibility guidance, and the implementation checklist.
-- [Shared live component](DVRDevice.dc.html) — the real component imported by every proof frame in the direction and master files.
-- [Design runtime](support.js) — the archived Claude Design runtime required to open the HTML bundle outside the hosted project.
+- [Direction study](https://github.com/heypandax/pairlet/blob/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/defaults-voice-results-ui-2.1/Defaults%20%2B%20Voice%20%2B%20Results%20Direction%20v1.dc.html) — compares the bounded S/V/R alternatives and selects S3 + V3 + R3.
+- [Implementation master](https://github.com/heypandax/pairlet/blob/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/defaults-voice-results-ui-2.1/Defaults%20%2B%20Voice%20%2B%20Results%20Master%20v1.dc.html) — canonical live HTML with responsive frames, state tables, measurements, accessibility guidance, and the implementation checklist.
+- [Shared live component](https://github.com/heypandax/pairlet/blob/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/defaults-voice-results-ui-2.1/DVRDevice.dc.html) — the real component imported by every proof frame in the direction and master files.
+- [Design runtime](https://github.com/heypandax/pairlet/blob/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/defaults-voice-results-ui-2.1/support.js) — the archived Claude Design runtime required to open the HTML bundle outside the hosted project.
 
 Together these four files form the self-contained live design bundle; keep them in one directory when opening it outside the hosted project. Google Fonts are an optional visual enhancement; the artifacts fall back to system sans and monospace fonts. The Claude Design project remains the editable source.
 

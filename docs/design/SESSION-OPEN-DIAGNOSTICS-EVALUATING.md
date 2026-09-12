@@ -14,7 +14,7 @@
 
 ## 2. 一次打开的状态与超时
 
-主会话和 [SidePanes](/Users/lidapeng/Desktop/Project/app/cc-pocket/mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/data/SplitPanes.kt) 使用同一个 `SessionOpenTracker`。追踪与现有业务状态分开，不能因接入诊断破坏会话身份检查、分屏归属或新建会话的重试限制。
+主会话和 [SidePanes](../../mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/data/SplitPanes.kt) 使用同一个 `SessionOpenTracker`。追踪与现有业务状态分开，不能因接入诊断破坏会话身份检查、分屏归属或新建会话的重试限制。
 
 | 阶段 | 观测点 | 能证明什么 |
 |---|---|---|
@@ -45,7 +45,7 @@
 
 ### 3.1 增量协议
 
-在 [Messages.kt](/Users/lidapeng/Desktop/Project/app/cc-pocket/protocol/src/commonMain/kotlin/dev/ccpocket/protocol/Messages.kt) 增加以下字段/帧，名称为提案：
+在 [Messages.kt](../../protocol/src/commonMain/kotlin/dev/ccpocket/protocol/Messages.kt) 增加以下字段/帧，名称为提案：
 
 | 消息 | 新增内容 |
 |---|---|
@@ -64,12 +64,12 @@
 
 | 路径 | 落点与要求 |
 |---|---|
-| 请求接收 | [RequestRouter](/Users/lidapeng/Desktop/Project/app/cc-pocket/daemon/src/main/kotlin/dev/ccpocket/daemon/server/RequestRouter.kt) 在原有鉴权后创建请求级 `OpenTraceContext`，记录接收；请求之前的拒绝只沿用现有安全错误路径 |
-| 冷恢复/新建 | [SessionRegistry](/Users/lidapeng/Desktop/Project/app/cc-pocket/daemon/src/main/kotlin/dev/ccpocket/daemon/session/SessionRegistry.kt) 传入上下文；Conversation 的异步 open 子协程内捕获异常并记录阶段，外层 router 的 try/catch 不能代替它 |
+| 请求接收 | [RequestRouter](../../daemon/src/main/kotlin/dev/ccpocket/daemon/server/RequestRouter.kt) 在原有鉴权后创建请求级 `OpenTraceContext`，记录接收；请求之前的拒绝只沿用现有安全错误路径 |
+| 冷恢复/新建 | [SessionRegistry](../../daemon/src/main/kotlin/dev/ccpocket/daemon/session/SessionRegistry.kt) 传入上下文；Conversation 的异步 open 子协程内捕获异常并记录阶段，外层 router 的 try/catch 不能代替它 |
 | 热会话重连 | `Conversation.replayReattach(newSink, sinceSeq)` 包裹当前请求的回放，不把 trace 存为 Conversation 全局可变字段 |
 | 外部会话观察 | ObserveSession 首次扫描与回放记录本次打开；后续 1.5 秒尾读循环不重复报打开成功，后续失败归为独立观察错误 |
 | 文件读取 | 复用现有读取过程统计 file bytes、扫描行数、跳过/损坏行数、回放行数及截断情况；避免为了诊断额外再解析整份文件。已有吞错分支须产生安全原因计数，不能把“吞错后空结果”一概称为成功 |
-| 编码/发送 | [DeviceSessions](/Users/lidapeng/Desktop/Project/app/cc-pocket/daemon/src/main/kotlin/dev/ccpocket/daemon/relay/DeviceSessions.kt) 在已有序列化结果上记录 JSON UTF-8 bytes、密文帧 bytes、发送耗时，避免重复序列化；加密锁内不调用上报 SDK/执行网络诊断上传 |
+| 编码/发送 | [DeviceSessions](../../daemon/src/main/kotlin/dev/ccpocket/daemon/relay/DeviceSessions.kt) 在已有序列化结果上记录 JSON UTF-8 bytes、密文帧 bytes、发送耗时，避免重复序列化；加密锁内不调用上报 SDK/执行网络诊断上传 |
 
 所有耗时用各自进程的单调时钟计算；不拿手机时间减电脑时间算网络延迟。文件大小取当前读取的文件/句柄元信息，若并发追加导致变化则记录观测值，不宣称精确快照。
 

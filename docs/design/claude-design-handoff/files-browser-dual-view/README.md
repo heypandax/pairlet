@@ -1,8 +1,10 @@
 # 文件浏览双视角（变更 / 全部）设计 handoff
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/files-browser-dual-view)，需从存档恢复后使用。实现状态以当前源码为准。
+
 - 在线设计板：https://claude.ai/design/p/eb401868-d618-47f7-b8d4-4641117d566d?file=Files+Browser+v1.dc.html（登录 claude.ai 即看）
 - 生成日期：2026-09-03，模型 Opus 5（claude.ai/design「cc-pocket Design System 2.0」项目）
-- 设计 brief：`~/Desktop/Brain/.personal-vault/60_Outbox/2026-09-03-cc-pocket-文件浏览双视角设计提示词.md`
+- 设计 brief：（原始 brief 已保存在本地设计归档）
 
 ## 文件清单
 

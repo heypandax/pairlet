@@ -225,7 +225,7 @@ internal fun middleTruncatedPath(path: String, maxChars: Int = 44): String {
 }
 
 // ═══════════════════════════ dock composables ═══════════════════════════
-// Pixel spec: docs/design/claude-design-handoff/embedded-terminal/embedded-terminal.jsx.
+// Pixel spec: docs/design/claude-design-handoff/embedded-terminal/README.md.
 
 /** The terminal's own ink — deliberately the same near-black in BOTH themes (terminals stay dark). */
 private val TermInk = Color(0xFF0B0C0D)

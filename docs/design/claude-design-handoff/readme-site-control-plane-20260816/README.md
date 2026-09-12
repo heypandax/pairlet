@@ -1,5 +1,7 @@
 # CC Pocket README 与官网 2.0：跨设备 Agent 控制面（设计交付归档）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/readme-site-control-plane-20260816)，需从存档恢复后使用。实现状态以当前源码为准。
+
 本目录是一次 Claude Design 迭代的完整归档：冻结 brief、云端生成并经两轮机主裁决修正过的自包含原型、按稿截图、可复现校验脚本，以及本文件的验收证据。
 
 > **本文件是内部归档。** 下文「排除边界」一节会点名两项被移出公开口径的功能——这是记录**排除项**所必需，**它们不得以任何形式出现在原型、官网、README、SEO、结构化数据或对外素材中**。

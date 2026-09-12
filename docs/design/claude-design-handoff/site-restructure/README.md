@@ -1,5 +1,7 @@
 # site-restructure —— 官网 IA 重构 section 设计（Site 1.4）
 
+> 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/site-restructure)，需从存档恢复后使用。实现状态以当前源码为准。
+
 2026-07-12 经 claude.ai/design 主项目（`93b56700-…`）生成并导出。在线板：
 `https://claude.ai/design/p/93b56700-6ed2-46c9-bf81-3fd0b1a6340b?file=cc-pocket%2Fsite%2FSite+1.4+-+IA+Refresh.html`
 
@@ -19,5 +21,5 @@
 A/B/C/D 四屏全部落地；`site-14.css` 的分子样式（.fr/.st/.mdiff/.pushb/.sdiv/.usagestrip/.boundary/.wfcard 族）
 已并入 `site/styles.css`「Site 1.4 IA Refresh board」注释块，board 专属的评审 chrome（.frame/.place/.mob/.themeframe）未搬。
 
-来源 brief：`~/Desktop/Brain/60_Outbox/2026-07-12-cc-pocket-官网重构section设计提示词.md`
+来源 brief：（原始 brief 已保存在本地设计归档）
 （其模块清单经四视角 Agent 评审定稿：转化 / 竞品差异化 / 视觉可演示性 / 信息架构）。
