@@ -1,8 +1,10 @@
 package dev.ccpocket.daemon.dsh
 
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -12,6 +14,38 @@ import kotlin.test.assertTrue
  * looking in the wrong place.
  */
 class DshPathsTest {
+
+    @Test
+    fun highest_generation_wins_across_compressions_and_old_mtimes() {
+        val dir = Files.createTempDirectory("dsh-generations")
+        try {
+            Files.writeString(dir.resolve("session.jsonl.zstd"), "legacy")
+            Files.writeString(dir.resolve("session.v2.jsonl.zstd"), "v2")
+            val current = Files.writeString(dir.resolve("session.v3.jsonl"), "v3")
+            Files.setLastModifiedTime(current, java.nio.file.attribute.FileTime.fromMillis(1))
+            assertEquals(current, DshPaths.transcriptFile(dir))
+            val compressed = Files.writeString(dir.resolve("session.v3.jsonl.zstd"), "v3 compressed")
+            assertEquals(compressed, DshPaths.transcriptFile(dir))
+            // Numeric, not lexicographic, and never capped to the reader's supported generation.
+            val future = Files.writeString(dir.resolve("session.v10.jsonl"), "future")
+            assertEquals(future, DshPaths.transcriptFile(dir))
+        } finally { dir.toFile().deleteRecursively() }
+    }
+
+    @Test
+    fun canonical_selection_ignores_sidecars_lookalikes_and_directories() {
+        val dir = Files.createTempDirectory("dsh-generations")
+        try {
+            for (name in listOf("session.v0.jsonl", "session.v03.jsonl", "session.V4.jsonl",
+                "session.v4.jsonl.tmp", "session.v4.jsonl.zstd.lock", "session.v9007199254740992.jsonl")) {
+                Files.writeString(dir.resolve(name), "not canonical")
+            }
+            Files.createDirectory(dir.resolve("session.v9.jsonl"))
+            assertNull(DshPaths.transcriptFile(dir))
+            val plain = Files.writeString(dir.resolve("session.jsonl"), "legacy")
+            assertEquals(plain, DshPaths.transcriptFile(dir))
+        } finally { dir.toFile().deleteRecursively() }
+    }
 
     @Test
     fun ordinary_posix_path_normalizes_to_the_wrapped_dashed_form() {

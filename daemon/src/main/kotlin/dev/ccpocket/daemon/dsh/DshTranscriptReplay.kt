@@ -1,6 +1,5 @@
 package dev.ccpocket.daemon.dsh
 
-import dev.ccpocket.daemon.disk.ReplayRead
 import dev.ccpocket.observability.*
 
 import dev.ccpocket.daemon.agent.ToolMetadata
@@ -37,10 +36,9 @@ import java.nio.file.Path
  * assembled from deltas and once whole. `assistant/message` is the durable record, so it wins and the
  * deltas are skipped. (`reasoning-chunks` would be wrong to show regardless: thinking is not a chat row.)
  *
- * KNOWN v1 LIMITATION: dsh's surface events can carry `surfaceOp = {op:'replace', start, end}`, meaning a
- * later event REWRITES a range of earlier surface content. We treat every event as an append. In practice
- * that only shows up where dsh rewrites a streamed message in place; a replaced range would render as
- * both versions rather than just the final one. Honouring `surfaceOp` belongs with the tool-card work.
+ * Human history uses append-origin messages, as upstream's session/surface.isAppendSurfaceEvent does.
+ * Compaction replacement copies only change the model's context: they neither erase the original human
+ * conversation nor add duplicate user messages or overwrite a tool card's original output.
  *
  * DEFENSIVE BY CONSTRUCTION: an unrecognized shape yields NO row rather than an exception. A missing row
  * costs a gap in the replay; a throw would cost the whole session.
@@ -60,8 +58,15 @@ object DshTranscriptReplay {
         maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES,
     ): ReplaySlice {
         val parsed = parse(file)
-        return ReplaySlicer.slice(parsed.first, parsed.second, sinceSeq, maxMessages, maxFrameTextBytes)
-            .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows)
+        if (parsed.quality == "unavailable") {
+            return ReplaySlice(emptyList(), delta = true, quality = parsed.quality,
+                sourceRows = parsed.lineCount, failedRows = parsed.failedRows, readError = parsed.readError)
+        }
+        val compatibleCursor = sinceSeq?.takeIf {
+            cursorVersion(it) == parsed.version
+        }
+        return ReplaySlicer.slice(parsed.rows, parsed.cursor, compatibleCursor, maxMessages, maxFrameTextBytes)
+            .copy(quality = parsed.quality, sourceRows = parsed.lineCount, failedRows = parsed.failedRows)
     }
 
     fun page(
@@ -71,19 +76,36 @@ object DshTranscriptReplay {
         maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES,
     ): ReplaySlice {
         val parsed = parse(file)
-        return ReplaySlicer.page(parsed.first, beforeSeq, limit, maxFrameTextBytes)
-            .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows)
+        if (parsed.quality == "unavailable") {
+            return ReplaySlice(emptyList(), delta = true, quality = parsed.quality,
+                sourceRows = parsed.lineCount, failedRows = parsed.failedRows, readError = parsed.readError)
+        }
+        if (cursorVersion(beforeSeq) != parsed.version) {
+            return ReplaySlice(emptyList(), delta = true, quality = "unavailable", sourceRows = parsed.lineCount,
+                readError = "DSH history changed format. Reopen this session to load its current history.")
+        }
+        return ReplaySlicer.page(parsed.rows, beforeSeq, limit, maxFrameTextBytes)
+            .copy(quality = parsed.quality, sourceRows = parsed.lineCount, failedRows = parsed.failedRows)
     }
 
     /**
-     * Parse a transcript into replay rows tagged with their source LINE NUMBER (the #147 cursor `seq`).
+     * Parse a transcript into replay rows tagged with their generation and source LINE NUMBER.
      *
      * NOTE the deliberate choice of cursor: dsh events carry their own `seq` field, but we index by line
      * number like every other backend. The packed `*-chunks` lines make the event `seq` non-contiguous
      * (one line covers a whole range via `seq0`/`dt`), so using it would make "everything past cursor N"
      * ambiguous at exactly the lines where a live tail is most likely to land.
      */
-    private fun parse(file: Path): ReplayRead<ReplaySlicer.Row> {
+    private fun parse(file: Path): Parsed {
+        val header = DshTranscript.header(file)
+        val formatProblem = DshTranscript.formatProblem(file, header)
+        if (formatProblem != null) {
+            Diagnostics.report(ErrorPath.HISTORY_READ, Stage.PARSE, ErrorCode.UNSUPPORTED)
+            // A read failure is separate from history. Encoding it as a full assistant/error replay
+            // would replace already-loaded client messages and misattribute it to an API failure.
+            return Parsed(emptyList(), 0L, 0L, "unavailable", readError = formatProblem)
+        }
+        val version = header!!.version
         val status = DshTranscript.ReadStatus()
         val lines = runCatching { DshTranscript.lines(file, status = status) }.onFailure {
             status.unavailable = true
@@ -103,12 +125,19 @@ object DshTranscriptReplay {
         var lineNo = 0L
         for (raw in lines) {
             lineNo += 1
-            val root = DshTranscript.parseLine(raw)
+            val root = DshTranscript.parseRecord(raw, version)
             if (root == null) { malformed++; continue }
             // `ignorable` is dsh's own "this record carries no user-visible meaning" marker — respect it
             // rather than re-deriving the same judgement from the type.
             if (root["ignorable"]?.toString() == "true") continue
             val data = root.obj("data")
+            if (root.str("type") in MESSAGE_EVENTS) {
+                when (DshTranscript.messagePlacement(root, version)) {
+                    DshTranscript.MessagePlacement.REPLACEMENT -> continue
+                    DshTranscript.MessagePlacement.INVALID -> { malformed++; continue }
+                    DshTranscript.MessagePlacement.APPEND -> {}
+                }
+            }
             when (root.str("type")) {
                 DshTranscript.EVENT_USER ->
                     DshTranscript.messageText(data)
@@ -200,9 +229,34 @@ object DshTranscriptReplay {
         }
         if (malformed > 0) Diagnostics.report(ErrorPath.HISTORY_READ, Stage.PARSE, ErrorCode.PARTIAL_RESULT,
             metrics = SafeMetrics(totalCount = lineNo, failedCount = malformed, returnedCount = out.size.toLong(), resultQuality = ResultQuality.PARTIAL))
-        return ReplayRead(out.map { ReplaySlicer.Row(it.msg, it.line, it.patchLine) }, lineNo,
+        return Parsed(out.map {
+            ReplaySlicer.Row(it.msg, cursor(version, it.line),
+                if (it.patchLine == 0L) 0L else cursor(version, it.patchLine))
+        }, lineNo, version,
             when { status.unavailable -> "unavailable"; status.partial || malformed > 0 -> "partial"; else -> "complete" }, malformed)
     }
+
+    private data class Parsed(
+        val rows: List<ReplaySlicer.Row>,
+        val lineCount: Long,
+        val version: Long,
+        val quality: String,
+        val failedRows: Long = 0L,
+        val readError: String? = null,
+    ) {
+        val cursor: Long get() = cursor(version, lineCount)
+    }
+
+    /**
+     * Migration changes physical line counts (v1 packs deltas; v2 embeds them; v3 inserts system rows).
+     * The existing Long cursor is opaque to clients, so reserve its high bits for the generation and
+     * preserve legacy v0 line cursors exactly. A v0/v1/v2 cursor can never skip rows in a v3 read. The
+     * 64 MiB read bound keeps line numbers below 2^32, and v0–v3 cursors remain JS-safe integers.
+     */
+    private const val CURSOR_STRIDE = 1L shl 32
+    private fun cursor(version: Long, line: Long): Long = version * CURSOR_STRIDE + line
+    private fun cursorVersion(value: Long): Long = value / CURSOR_STRIDE
+    private val MESSAGE_EVENTS = setOf(DshTranscript.EVENT_USER, DshTranscript.EVENT_ASSISTANT, DshTranscript.EVENT_TOOL_RESULT)
 
     /** A row while it can still be patched by a later record (the answer / the decision). */
     private class MutableRow(var msg: HistoryMessage, val line: Long, var patchLine: Long = 0L)
