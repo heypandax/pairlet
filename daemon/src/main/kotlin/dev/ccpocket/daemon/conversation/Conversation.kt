@@ -223,6 +223,8 @@ class Conversation(
     /** Transcript/index truth for the chat header. Null only for a genuinely unnamed fresh session. */
     @Volatile
     private var sessionTitle: String? = null
+    /** Non-terminal backend limitation carried only on existing session announcements. */
+    @Volatile private var sessionNotice: String? = null
 
     // mutable: a phone can switch reasoning effort mid-session via `/effort <level>`
     @Volatile
@@ -807,6 +809,7 @@ class Conversation(
             // `?: agentPreset`: announcing the REQUEST would tell the user a locked/refused preset is in
             // force, which is the one thing this row must never do.
             agentPreset = runtimeAgentPreset,
+            notice = sessionNotice,
         )
 
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
@@ -1039,8 +1042,8 @@ class Conversation(
         val sid = sessionId ?: openedResumeId ?: return
         val slice = backend.replayPage(workdir.toString(), sid, beforeSeq, limit.coerceIn(1, 200))
         slice.readError?.let {
-            // Complete the outstanding page request without replacing/prepending any chat rows.
-            to.emit(ConvoHistoryPage(convoId, emptyList(), hasMore = false))
+            // Complete the request without changing rows or retiring its retry cursor.
+            to.emit(ConvoHistoryPage(convoId, emptyList(), firstSeq = beforeSeq, hasMore = true))
             to.emit(PocketError("history_unavailable", it, convoId))
             return
         }
@@ -1801,6 +1804,8 @@ class Conversation(
             for (ev in backend.parse(line)) {
                 when (ev) {
                     is AgentEvent.SessionInit -> {
+                        if (ev.sessionId != null && ev.sessionId != sessionId) sessionNotice = ev.notice
+                        else ev.notice?.let { sessionNotice = it }
                         // Claude's unprompted continuation announces a fresh init before its first assistant
                         // token. Convert the grace to a real executing turn now so a long first-token delay is
                         // still visible, while ordinary init leaves the caller-armed state untouched.
@@ -2728,6 +2733,7 @@ class Conversation(
         openedWithFork = false
         backfilledModel = null
         sessionTitle = null
+        sessionNotice = null
         failedTurnStreak = 0 // a fresh session starts healthy — the degraded warning belongs to the old transcript
         sawSyntheticThisTurn = false
         lastSyntheticText = null
@@ -2823,6 +2829,7 @@ class Conversation(
         openedWithFork = false
         backfilledModel = null
         sessionTitle = null
+        sessionNotice = null
         // #333: same rule as the /clear path — the preset belongs to the session that just died. The new
         // one gets its own from `session.create`, and carrying the old value over would label the fresh
         // session with a persona it was never created under.

@@ -201,6 +201,55 @@ class DshGenerationReplayTest {
     }
 
     @Test
+    fun known_session_header_failure_is_visible_through_backend_and_recovers_without_fake_discovery() {
+        val backend = DshBackend(null, sessionsRoot = { root })
+        val transcript = file(3, false, user(0, "Existing history") + assistant(1, "Existing reply"))
+        val good = Files.readString(transcript)
+        val initial = backend.replaySlice(cwd, id, null)
+        assertEquals(2, initial.messages.size)
+        for (bad in listOf("", "not a session header\n")) {
+            Files.writeString(transcript, bad)
+            assertTrue(DshTranscriptScanner.scan(cwd, root).isEmpty())
+            assertTrue(DshTranscriptScanner.cwdsByNewest(root).isEmpty(), "never infer cwd from the lossy directory")
+            for (failed in listOf(backend.replaySlice(cwd, id, initial.lastSeq),
+                backend.replayPage(cwd, id, initial.lastSeq!!, 50))) {
+                assertEquals("unavailable", failed.quality)
+                assertNotNull(failed.readError)
+                assertTrue(failed.messages.isEmpty())
+                assertTrue(failed.delta)
+                assertNull(failed.lastSeq)
+            }
+        }
+        Files.writeString(transcript, good)
+        assertEquals(initial.messages, backend.replaySlice(cwd, id, null).messages)
+        assertNull(backend.replayPage(cwd, id, initial.lastSeq!!, 50).readError)
+        Files.delete(transcript)
+        assertNotNull(backend.replaySlice(cwd, id, null).readError, "a missing known transcript is not an empty history")
+    }
+
+    @Test
+    fun corrupt_body_after_readable_header_is_visible_and_retry_restores_history() {
+        val transcript = file(3, true, user(0, "Existing history") + assistant(1, "Existing reply"))
+        // Get beyond the header reader's 256 KiB bound before the bad frame. A supported/readable
+        // header must not mask failure later in the full-body decompression pass.
+        append(transcript, event("text-chunks", 2, "{}") .repeat(8_000))
+        val intact = Files.readAllBytes(transcript)
+        val initial = DshTranscriptReplay.slice(transcript, null)
+        Files.write(transcript, byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8), StandardOpenOption.APPEND)
+        assertNotNull(DshTranscript.header(transcript))
+        for (failed in listOf(DshTranscriptReplay.slice(transcript, initial.lastSeq),
+            DshTranscriptReplay.page(transcript, initial.lastSeq!!))) {
+            assertEquals("unavailable", failed.quality)
+            assertTrue(assertNotNull(failed.readError).contains("read or decompressed"))
+            assertTrue(failed.messages.isEmpty())
+            assertNull(failed.lastSeq)
+        }
+        Files.write(transcript, intact)
+        assertEquals(initial.messages, DshTranscriptReplay.slice(transcript, null).messages)
+        assertNull(DshTranscriptReplay.page(transcript, initial.lastSeq!!).readError)
+    }
+
+    @Test
     fun v3_embedded_stream_larger_than_the_old_row_limit_keeps_the_assembled_reply() {
         val stream = """[{"type":"chunk","time":1,"chunk":{"type":"reasoning-delta","index":0,"text":"${"x".repeat(230_000)}"}}]"""
         val transcript = file(3, true, user(0, "Question") + assistant(1, "Visible answer", stream))

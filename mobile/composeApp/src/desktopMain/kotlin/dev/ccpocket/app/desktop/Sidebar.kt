@@ -58,6 +58,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -127,6 +128,8 @@ import dev.ccpocket.app.resources.sidebar_no_computer
 import dev.ccpocket.app.resources.sidebar_no_sessions_here
 import dev.ccpocket.app.resources.sidebar_pins_full
 import dev.ccpocket.app.resources.sidebar_recent_empty
+import dev.ccpocket.app.resources.sidebar_recent_show_all
+import dev.ccpocket.app.resources.sidebar_recent_show_less
 import dev.ccpocket.app.resources.status_reconnecting
 import dev.ccpocket.app.resources.switcher_all_projects
 import dev.ccpocket.app.resources.switcher_recent
@@ -606,8 +609,8 @@ private fun RunningRow(r: DkRunningRow, onBrowse: () -> Unit, onClick: () -> Uni
 
 // ── zone 4: RECENT — the visited projects' sessions, grouped, one scroll ────────────────────────
 
-// THE render predicate for RECENT groups — the reveal effect's recentRowIndex mirrors the LazyColumn
-// layout exactly, so every consumer must filter through this one definition or the scroll index drifts
+// THE render predicate for RECENT groups — [recentRows] and the reveal effects both filter through this one
+// definition, so the row a reveal resolves is a row the list actually draws
 private fun renderedGroups(model: DesktopModel) = model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() }
 
 /** RECENT's section label with the hover clear-all affordance (issue #102): "clear" arms to "sure?",
@@ -650,6 +653,11 @@ private fun RecentHeader(model: DesktopModel) {
 private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth()) {
         RecentHeader(model)
+        // #373: the reveal request (see below) an effect last took up. Remembered ABOVE the empty-list return, so it
+        // outlives everything under it: a machine switch or an emptied list restarts that effect, and the restart must
+        // neither finish an old request on the next machine nor replay one on the way back. Seeded with the request
+        // already there, which belongs to an earlier sidebar — from before this one was on screen.
+        val taken = remember { TakenReveal(model.projectListReveal) }
         val groups = renderedGroups(model)
         if (groups.isEmpty()) {
             Text(
@@ -664,40 +672,77 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
         val collapsed = remember { mutableStateListOf<String>() }
         // #282: the rewound bucket's fold, collapsed by default (that default IS the feature's promise)
         var rewoundOpen by remember { mutableStateOf(false) }
+        // #373: the project-count fold. Lives as long as this UI does (no stored preference) and is keyed on
+        // the machine, so switching computers starts folded again. The reveal effects below are keyed on it too:
+        // one still waiting when the machine changes ends there, instead of unfolding the next machine's list.
+        val machine = model.activeComputer?.accountId
+        val limit = remember(machine) { RecentLimit() }
         val listState = rememberLazyListState()
         // which header's refresh icon spins: the clicked group's; ⌘R has no click, so the current one's
         var refreshTarget by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(model.sessionsRefreshing) { if (!model.sessionsRefreshing) refreshTarget = null }
         val spinningPath = if (model.sessionsRefreshing) refreshTarget ?: groups.firstOrNull { it.current }?.path else null
         val selectedId = model.selectedSessionId // resolved by scanning the session list — once, not per row
-        val projectReveal = model.projectListReveal
-        // A project pin represents the LIST, not a single session. Re-listing it updates the model but
-        // cannot touch this composable-local fold state, which made a folded project's pin look inert.
-        // Observe an explicit, repeatable request, wait until the target group exists, then unfold it and
-        // bring its header into view. Other groups keep their current fold state.
-        LaunchedEffect(projectReveal) {
-            val request = projectReveal ?: return@LaunchedEffect
+        val rows = recentRows(model, groups, collapsed, limit.expanded, rewoundOpen)
+        val shownRows by rememberUpdatedState(rows)
+        // Unfold [path]'s group — lifting the #373 fold first when the group sits past it — and scroll the row
+        // [revealIndex] picks into view, unless that row is already on screen. Only the effects keyed on [limit] call
+        // this, so the fold it lifts is always the one of the machine that asked.
+        suspend fun reveal(path: String, sessionId: String?) {
+            if (renderedGroups(model).indexOfFirst { it.path == path } >= RECENT_VISIBLE_LIMIT) limit.expanded = true
+            collapsed.remove(path) // a no-op when the group is already open
+            // Both changes land on a later composition, and its layout after that. Wait until the list holds the
+            // target group open AND has measured exactly those rows: the index and the on-screen test below have
+            // to describe what is drawn, not the rows from before the unfold.
+            val laidOut = withTimeoutOrNull(1_000) {
+                snapshotFlow {
+                    shownRows.takeIf { r ->
+                        listState.layoutInfo.totalItemsCount == r.size &&
+                            r.any { it is RecentRow.Header && it.group.path == path && !it.closed }
+                    }
+                }.filterNotNull().first()
+            } ?: return
+            val index = laidOut.revealIndex(path, sessionId)
+            if (index < 0) return
+            val key = laidOut[index].key
+            if (listState.layoutInfo.visibleItemsInfo.none { it.key == key }) listState.animateScrollToItem(index)
+        }
+        val request = model.projectListReveal
+        // An explicit navigation's reveal. A project pin represents the LIST, not a single session; a session
+        // row, pin or history step (#373) one row in it. Re-listing updates the model but cannot touch this
+        // composable-local fold state, which made a folded target look inert — and the session the user goes
+        // back to can still be the selected one, a click the selection effect below cannot see. Observe the
+        // explicit, repeatable request, wait until its target is listed, then unfold it and bring it into view.
+        // Other groups keep their current fold state.
+        LaunchedEffect(limit, request) {
+            // Taken up once, on the machine it names: a request for another machine's list is left to the restart
+            // that machine's arrival brings, and one already taken up is never taken again — see [taken].
+            val r = request?.takeIf { it != taken.request && (it.accountId == null || it.accountId == machine) }
+                ?: return@LaunchedEffect
+            taken.request = r
             val targetPath = withTimeoutOrNull(5_000) {
                 snapshotFlow {
-                    renderedGroups(model).firstOrNull { sameDirPath(it.path, request.path) }?.path
+                    val listed = renderedGroups(model)
+                    val session = r.sessionId
+                    if (session == null) listed.firstOrNull { sameDirPath(it.path, r.path) }?.path
+                    else listed.firstOrNull { g -> g.sessions.any { it.sessionId == session } }?.path
                 }.filterNotNull().first()
             } ?: return@LaunchedEffect
-            collapsed.remove(targetPath)
-            val headerKey = "h:$targetPath"
-            if (listState.layoutInfo.visibleItemsInfo.none { it.key == headerKey }) {
-                // openProject makes the requested project the most-recent (first) group in the live model.
-                // recentRowIndex remains the safe fallback for deterministic preview/test models that keep
-                // a fixed group order.
-                val index = recentRowIndex(renderedGroups(model), collapsed, targetPath, "")
-                if (index >= 0) listState.animateScrollToItem(index)
-            }
+            // openProject makes a pinned project the most-recent (first) group in the live model, but a session
+            // navigation leaves its project where it is, and a fixed-order model (preview/test) moves nothing —
+            // either can sit past the #373 fold, which reveal lifts
+            if (r.sessionId != null) limit.revealedSelection = r.sessionId
+            reveal(targetPath, r.sessionId)
         }
         // Reveal the selected session's group when the selection changes — e.g. clicking a RUNNING project
         // resumes its live session (#83). Expand that group if the user had folded it and scroll it into
         // view, but only the TARGET group is touched (multi-expand is intentional) and only when the row
         // isn't already on screen, so we never refold others or yank a session the user can already see.
-        LaunchedEffect(selectedId) {
-            if (selectedId == null) return@LaunchedEffect
+        LaunchedEffect(limit, selectedId) {
+            // #373: only a selection no reveal has acted on yet. The id blinks (null while an open settles, then
+            // the same id again), and re-revealing on that would undo the user's own "Show less" with no
+            // navigation behind it. Going back to a session on purpose is a navigation: its request reveals it.
+            if (selectedId == null || selectedId == limit.revealedSelection) return@LaunchedEffect
             // openRunning lists then resumes asynchronously, so the target group can land a beat after the
             // id resolves — observe the groups until the selected session surfaces, then act exactly once.
             // Time-boxed: an unlisted session (cross-machine resume, hidden row) never surfaces, and an
@@ -708,92 +753,41 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                     renderedGroups(model).firstOrNull { g -> g.sessions.any { it.sessionId == selectedId } }?.path
                 }.filterNotNull().first()
             } ?: return@LaunchedEffect
-            collapsed.remove(targetPath) // expand a folded target; a no-op otherwise — others left as-is
-            val rowKey = "s:$targetPath:$selectedId"
-            if (listState.layoutInfo.visibleItemsInfo.none { it.key == rowKey }) {
-                val index = recentRowIndex(renderedGroups(model), collapsed, targetPath, selectedId)
-                if (index >= 0) listState.animateScrollToItem(index)
-            }
+            limit.revealedSelection = selectedId
+            reveal(targetPath, selectedId)
         }
         // testTag: the RECENT list overflows the default test viewport (it grows with every seed
         // session) — UI tests scroll it to their target instead of assuming everything fits
         LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().testTag("sidebar-list")) { // lazy: a visited project can hold hundreds of sessions
-            groups.forEach { g ->
-                val closed = g.path in collapsed
-                item(key = "h:${g.path}") {
-                    GroupHeader(
-                        g, closed,
-                        current = g.current,
-                        refreshing = g.path == spinningPath,
-                        pinned = model.isProjectPinned(g.path),
-                        onRefresh = { refreshTarget = g.path; model.refresh(g) },
-                        onTogglePin = { if (model.isProjectPinned(g.path)) model.unpinProject(g.path) else model.pinProject(g.path, g.name) },
-                        onNewSession = { model.openNewSession(tilde(g.path)) },
-                        onForget = { model.forgetProject(g) },
-                        onToggle = { if (closed) collapsed.remove(g.path) else collapsed.add(g.path) },
-                    )
-                }
-                if (!closed) {
-                    // issue #119: only the live-listed project carries custom-group data (the daemon lists
-                    // groups per dir) — a RECENT snapshot has none and renders FLAT, which is also the
-                    // degrade path for an older daemon that omits groups entirely.
-                    // #282: the rewound originals leave the visible list before anything else groups it,
-                    // so the fold holds across custom groups and the flat fallback alike.
-                    val shown = visibleSessions(g.sessions)
-                    val custom = if (g.current) model.customGroups else emptyList()
-                    // sessions the current project can be moved between (owner + has groups) — drives the row
-                    // right-click "move to group" menu; empty everywhere else so no menu appears.
-                    val menuGroups = if (g.current && model.canEditGroups) custom else emptyList()
-                    // right-click "Rename session" (issue #158) — EVERY group's rows now: the row hands its
-                    // own dir to the rename, so the frame resolves against the right project wherever the
-                    // listing points (the old current-only gate existed because the UI defaulted the dir).
-                    // A guest's shared project stays out — its rename would be refused daemon-side anyway.
-                    val renameable = model.canRenameSessions && g.sharedBy == null
-                    // Archive too (#202's gate lifted): the verb always carried the row's own cwd, and its
-                    // Sessions(thatProject) echo repointing the listing now MATCHES the convention that the
-                    // listed project follows wherever the user acts, instead of contradicting it.
-                    // guest-shared rows keep archive off too (same asymmetry rename already closed): a
-                    // guest's SetSessionArchived is a silent daemon-side no-op with no error surface.
-                    val canArchive = model.canArchiveSessions && g.sharedBy == null
-                    // "+ New group" sits at the TOP of the project's sessions (matches mobile) — a bottom
-                    // entry forces scrolling past a long session list to create a group. Current + group-aware
-                    // + owner only (canEditGroups folds in groupsSupported), so it also creates the FIRST group
-                    // from a still-flat list; an older daemon / guest / RECENT snapshot shows nothing.
-                    if (g.current && model.canEditGroups) item(key = "ng:${g.path}") { NewGroupRow(model) }
-                    if (custom.isEmpty()) {
-                        if (shown.isEmpty()) {
-                            item(key = "e:${g.path}") {
-                                Text(
-                                    stringResource(Res.string.sidebar_no_sessions_here),
-                                    color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
-                                    modifier = Modifier.padding(start = 32.dp, top = 2.dp, bottom = 6.dp),
-                                )
-                            }
-                        }
-                        items(shown, key = { "s:${g.path}:${it.sessionId}" }) { s ->
-                            SessionRow(model, s, selected = s.sessionId == selectedId, menuGroups = menuGroups, renameable = renameable, canArchive = canArchive) { model.selectSession(s) }
-                        }
-                    } else {
-                        sessionSections(shown, custom).forEach { sec ->
-                            item(key = "gh:${g.path}:${sec.id}") { CustomGroupHeader(model, g.path, sec) }
-                            if (!model.groupCollapsed(g.path, sec.id)) {
-                                items(sec.sessions, key = { "s:${g.path}:${it.sessionId}" }) { s ->
-                                    SessionRow(model, s, selected = s.sessionId == selectedId, indented = true, menuGroups = menuGroups, renameable = renameable, canArchive = canArchive) { model.selectSession(s) }
-                                }
-                            }
-                        }
+            items(rows, key = { it.key }) { row ->
+                when (row) {
+                    is RecentRow.Header -> {
+                        val g = row.group
+                        GroupHeader(
+                            g, row.closed,
+                            current = g.current,
+                            refreshing = g.path == spinningPath,
+                            pinned = model.isProjectPinned(g.path),
+                            onRefresh = { refreshTarget = g.path; model.refresh(g) },
+                            onTogglePin = { if (model.isProjectPinned(g.path)) model.unpinProject(g.path) else model.pinProject(g.path, g.name) },
+                            onNewSession = { model.openNewSession(tilde(g.path)) },
+                            onForget = { model.forgetProject(g) },
+                            onToggle = { if (row.closed) collapsed.remove(g.path) else collapsed.add(g.path) },
+                        )
                     }
-                }
-            }
-            // ── Rewound sessions (issue #282, design frame D) ──────────────────────────────────────
-            // Emitted AFTER every project group, never inside one: [recentRowIndex] mirrors the layout
-            // group by group to scroll a selected row into view, and a bucket nested in the middle would
-            // silently shift every index after it. Collapsed by default — the whole point of the group is
-            // that a rewind leaves the visible list the length it was.
-            val rewound = groups.flatMap { g -> g.sessions.filter { it.sessionId in supersededIds(g.sessions) } }
-            if (rewound.isNotEmpty()) {
-                item(key = "rewound-header") {
-                    Row(
+                    is RecentRow.NewGroup -> NewGroupRow(model)
+                    is RecentRow.Empty -> Text(
+                        stringResource(Res.string.sidebar_no_sessions_here),
+                        color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                        modifier = Modifier.padding(start = 32.dp, top = 2.dp, bottom = 6.dp),
+                    )
+                    is RecentRow.Section -> CustomGroupHeader(model, row.path, row.section)
+                    is RecentRow.Session -> SessionRow(
+                        model, row.session, selected = row.session.sessionId == selectedId, indented = row.indented,
+                        menuGroups = row.menuGroups, renameable = row.renameable, canArchive = row.canArchive,
+                    ) { model.selectSession(row.session) }
+                    is RecentRow.LimitToggle -> RecentLimitToggle(row.expanded) { limit.expanded = !row.expanded }
+                    is RecentRow.RewoundHeader -> Row(
                         Modifier.fillMaxWidth().height(26.dp).hoverFill()
                             .clickable { rewoundOpen = !rewoundOpen }
                             .padding(start = 14.dp, end = 12.dp),
@@ -804,14 +798,12 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                             modifier = Modifier.size(12.dp).rotate(if (rewoundOpen) 0f else -90f),
                         )
                         Text(
-                            stringResource(Res.string.rewind_group_rewound, rewound.size),
+                            stringResource(Res.string.rewind_group_rewound, row.count),
                             color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                         )
                     }
-                }
-                if (rewoundOpen) {
-                    items(rewound, key = { "rw:${it.sessionId}" }) { s ->
-                        SessionRow(model, s, selected = s.sessionId == selectedId, indented = true) { model.selectSession(s) }
+                    is RecentRow.Rewound -> SessionRow(model, row.session, selected = row.session.sessionId == selectedId, indented = true) {
+                        model.selectSession(row.session)
                     }
                 }
             }
@@ -819,31 +811,184 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
     }
 }
 
-/** Flat LazyColumn index of a RECENT session row, honoring which groups are collapsed — so the reveal
- *  effect (#83) can scroll a just-selected session into view. Mirrors the LazyColumn's own layout: one
- *  header per group, then (when open) either the empty placeholder or one item per session. Falls back
- *  to the group's header index when the row itself isn't laid out (collapsed / empty group); -1 = absent. */
-private fun recentRowIndex(
+/** How many RECENT projects show before the rest fold behind "Show all" (#373). */
+private const val RECENT_VISIBLE_LIMIT = 5
+
+/**
+ * RECENT's project-count fold (#373) for one machine's list — see [RecentZone].
+ *
+ * [revealedSelection] is the selection a reveal last acted on, so the selection effect restarting on that same id
+ * is recognised as no navigation at all; going back to that session on purpose arrives as a reveal request
+ * instead. Plain, not state: nothing is drawn from it.
+ */
+private class RecentLimit {
+    var expanded by mutableStateOf(false)
+    var revealedSelection: String? = null
+}
+
+/** The RECENT reveal request an effect last took up (#373) — see [RecentZone]. Plain, not state, for the same reason. */
+private class TakenReveal(var request: DkProjectListReveal?)
+
+/**
+ * One row of the RECENT list, keyed exactly as the LazyColumn keys it.
+ *
+ * [recentRows] is THE definition of what RECENT emits and in which order: the list draws these rows, and the
+ * reveals (#83, #373) look their target up in the very same list. The index it replaced was counted by hand and
+ * missed "+ New group" and the custom-group sections, so a reveal below the current project scrolled short.
+ */
+private sealed interface RecentRow {
+    val key: String
+
+    data class Header(val group: DkSessionGroup, val closed: Boolean) : RecentRow {
+        override val key = "h:${group.path}"
+    }
+
+    data class NewGroup(val path: String) : RecentRow {
+        override val key = "ng:$path"
+    }
+
+    data class Empty(val path: String) : RecentRow {
+        override val key = "e:$path"
+    }
+
+    data class Section(val path: String, val section: SessionSection) : RecentRow {
+        override val key = "gh:$path:${section.id}"
+    }
+
+    data class Session(
+        val path: String,
+        val session: DkSession,
+        val indented: Boolean,
+        val menuGroups: List<DkGroup>,
+        val renameable: Boolean,
+        val canArchive: Boolean,
+    ) : RecentRow {
+        override val key = "s:$path:${session.sessionId}"
+    }
+
+    /** "Show all" / "Show less" (#373): after the last listed project, ahead of the rewound bucket. */
+    data class LimitToggle(val expanded: Boolean) : RecentRow {
+        override val key = "recent-limit"
+    }
+
+    data class RewoundHeader(val count: Int) : RecentRow {
+        override val key = "rewound-header"
+    }
+
+    data class Rewound(val path: String, val session: DkSession) : RecentRow {
+        override val key = "rw:${session.sessionId}"
+    }
+}
+
+/** Every row RECENT emits, in order — see [RecentRow]. [expanded] lifts the [RECENT_VISIBLE_LIMIT] fold. */
+private fun recentRows(
+    model: DesktopModel,
     groups: List<DkSessionGroup>,
     collapsed: List<String>,
-    path: String,
-    sessionId: String,
-): Int {
-    var idx = 0
-    for (g in groups) {
-        val header = idx
-        idx++ // the group header is always emitted
+    expanded: Boolean,
+    rewoundOpen: Boolean,
+): List<RecentRow> = buildList {
+    // #373: past the limit the rest wait behind "Show all" — a cut of the list as it stands, never a re-sort
+    val listed = if (expanded) groups else groups.take(RECENT_VISIBLE_LIMIT)
+    for (g in listed) {
         val closed = g.path in collapsed
-        // #282: the renderer folds rewound originals out, so the index has to count the same rows
-        val rows = visibleSessions(g.sessions)
-        if (g.path == path) {
-            if (closed || rows.isEmpty()) return header
-            val pos = rows.indexOfFirst { it.sessionId == sessionId }
-            return if (pos >= 0) header + 1 + pos else header
+        add(RecentRow.Header(g, closed))
+        if (closed) continue
+        // issue #119: only the live-listed project carries custom-group data (the daemon lists
+        // groups per dir) — a RECENT snapshot has none and renders FLAT, which is also the
+        // degrade path for an older daemon that omits groups entirely.
+        // #282: the rewound originals leave the visible list before anything else groups it,
+        // so the fold holds across custom groups and the flat fallback alike.
+        val shown = visibleSessions(g.sessions)
+        val custom = if (g.current) model.customGroups else emptyList()
+        // sessions the current project can be moved between (owner + has groups) — drives the row
+        // right-click "move to group" menu; empty everywhere else so no menu appears.
+        val menuGroups = if (g.current && model.canEditGroups) custom else emptyList()
+        // right-click "Rename session" (issue #158) — EVERY group's rows now: the row hands its
+        // own dir to the rename, so the frame resolves against the right project wherever the
+        // listing points (the old current-only gate existed because the UI defaulted the dir).
+        // A guest's shared project stays out — its rename would be refused daemon-side anyway.
+        val renameable = model.canRenameSessions && g.sharedBy == null
+        // Archive too (#202's gate lifted): the verb always carried the row's own cwd, and its
+        // Sessions(thatProject) echo repointing the listing now MATCHES the convention that the
+        // listed project follows wherever the user acts, instead of contradicting it.
+        // guest-shared rows keep archive off too (same asymmetry rename already closed): a
+        // guest's SetSessionArchived is a silent daemon-side no-op with no error surface.
+        val canArchive = model.canArchiveSessions && g.sharedBy == null
+        // "+ New group" sits at the TOP of the project's sessions (matches mobile) — a bottom
+        // entry forces scrolling past a long session list to create a group. Current + group-aware
+        // + owner only (canEditGroups folds in groupsSupported), so it also creates the FIRST group
+        // from a still-flat list; an older daemon / guest / RECENT snapshot shows nothing.
+        if (g.current && model.canEditGroups) add(RecentRow.NewGroup(g.path))
+        if (custom.isEmpty()) {
+            if (shown.isEmpty()) add(RecentRow.Empty(g.path))
+            shown.forEach { add(RecentRow.Session(g.path, it, indented = false, menuGroups, renameable, canArchive)) }
+        } else {
+            sessionSections(shown, custom).forEach { sec ->
+                add(RecentRow.Section(g.path, sec))
+                if (!model.groupCollapsed(g.path, sec.id)) {
+                    sec.sessions.forEach { add(RecentRow.Session(g.path, it, indented = true, menuGroups, renameable, canArchive)) }
+                }
+            }
         }
-        if (!closed) idx += if (rows.isEmpty()) 1 else rows.size
     }
-    return -1
+    if (groups.size > RECENT_VISIBLE_LIMIT) add(RecentRow.LimitToggle(expanded))
+    // ── Rewound sessions (issue #282, design frame D) ──────────────────────────────────────
+    // After every project group and the fold, never inside a group. Collapsed by default — the whole point of
+    // the group is that a rewind leaves the visible list the length it was. Gathered from EVERY group, folded-away
+    // projects included: the #373 fold hides projects, it must not take their rewound originals out of reach.
+    val rewound = groups.flatMap { g ->
+        val gone = supersededIds(g.sessions)
+        g.sessions.filter { it.sessionId in gone }.map { RecentRow.Rewound(g.path, it) }
+    }
+    if (rewound.isNotEmpty()) {
+        add(RecentRow.RewoundHeader(rewound.size))
+        if (rewoundOpen) addAll(rewound)
+    }
+}
+
+/**
+ * The row a reveal lands on (#83, #373): the selected session's own row wherever the list emits it — under its
+ * project, or in the open rewound bucket — else the custom-group header folding it, else its project's header,
+ * which is also where a project reveal ([sessionId] null) lands. -1 when the project isn't listed.
+ */
+private fun List<RecentRow>.revealIndex(path: String, sessionId: String?): Int {
+    if (sessionId != null) {
+        val own = indexOfFirst {
+            it is RecentRow.Session && it.path == path && it.session.sessionId == sessionId ||
+                it is RecentRow.Rewound && it.path == path && it.session.sessionId == sessionId
+        }
+        if (own >= 0) return own
+        val section = indexOfFirst { r ->
+            r is RecentRow.Section && r.path == path && r.section.sessions.any { it.sessionId == sessionId }
+        }
+        if (section >= 0) return section
+    }
+    return indexOfFirst { it is RecentRow.Header && it.group.path == path }
+}
+
+/**
+ * RECENT's project-count fold (#373): "Show all" while more than [RECENT_VISIBLE_LIMIT] projects wait, "Show less"
+ * once they all show. It wears the rewound bucket's quiet 26dp row, so the list's own controls read as one family.
+ */
+@Composable
+private fun RecentLimitToggle(expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(26.dp).hoverFill().clickable(onClick = onToggle)
+            .testTag("recent-limit").padding(start = 14.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        // points where the list goes next: down to bring the rest in, up to fold them away again
+        Icon(
+            Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted,
+            modifier = Modifier.size(12.dp).rotate(if (expanded) 180f else 0f),
+        )
+        Text(
+            stringResource(if (expanded) Res.string.sidebar_recent_show_less else Res.string.sidebar_recent_show_all),
+            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            style = tightCenter(11.sp), maxLines = 1,
+        )
+    }
 }
 
 /**
@@ -995,8 +1140,8 @@ private data class SessionSection(val id: String, val name: String?, val editabl
 private fun supersededIds(sessions: List<DkSession>): Set<String> =
     sessions.mapNotNullTo(HashSet()) { s -> s.rewindOf?.takeIf { it != s.sessionId } }
 
-/** The rows the default list shows — everything a peer has not rewound. Applied to BOTH the renderer and
- *  [recentRowIndex], because the reveal-scroll index has to mirror the layout exactly. */
+/** The rows the default list shows — everything a peer has not rewound. Applied once, in [recentRows], which
+ *  the list and its reveals both read. */
 private fun visibleSessions(sessions: List<DkSession>): List<DkSession> {
     val gone = supersededIds(sessions)
     return if (gone.isEmpty()) sessions else sessions.filter { it.sessionId !in gone }

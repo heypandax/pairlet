@@ -34,6 +34,24 @@ class HistoryPagingTest {
     private fun a(text: String) = HistoryMessage(ChatRole.ASSISTANT, text)
 
     @Test
+    fun failedHistoryReadKeepsRowsAndTheSamePageCanBeRetried() {
+        val r = repo()
+        r.receiveForTest(ConvoHistory("c1", listOf(u("q5"), a("a5")), lastSeq = 40, firstSeq = 20, hasMore = true))
+        r.loadOlderHistory()
+        r.receiveForTest(ConvoHistoryPage("c1", emptyList(), firstSeq = 20, hasMore = true))
+        r.receiveForTest(dev.ccpocket.protocol.PocketError("history_unavailable", "DSH history unavailable", "c1"))
+        assertFalse(r.historyLoadingOlder.value)
+        assertTrue(r.historyHasMore.value)
+        assertEquals(listOf("q5", "a5"), texts(r).filter { it != "?" })
+        r.loadOlderHistory()
+        assertTrue(r.historyLoadingOlder.value, "retry uses the retained page cursor")
+        r.receiveForTest(ConvoHistoryPage("c1", listOf(u("q1"), a("a1")), firstSeq = 1, hasMore = false))
+        assertEquals(listOf("q1", "a1", "q5", "a5"), texts(r).filter { it != "?" })
+        assertFalse(r.historyLoadingOlder.value)
+        assertFalse(r.historyHasMore.value)
+    }
+
+    @Test
     fun deltaHistoryAppendsAtTheTailInsteadOfReplacing() {
         val r = repo()
         r.receiveForTest(ConvoHistory("c1", listOf(u("q1"), a("a1")), lastSeq = 10, firstSeq = 1))

@@ -30,6 +30,24 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 class ChatTranscript {
     val messages = mutableStateListOf<ChatItem>()
 
+    // Session metadata has an explicit owner; never rescue arbitrary Sys rows during replay.
+    // Keep its display row at the head so a metadata update cannot split streamed text at the tail.
+    private var sessionNotice: ChatItem.Sys? = null
+
+    fun setSessionNotice(text: String?) {
+        val next = text?.takeIf { it.isNotBlank() }
+        if (sessionNotice?.text == next) return
+        sessionNotice?.let { previous -> messages.removeAll { it === previous } }
+        sessionNotice = next?.let { ChatItem.Sys(it, isError = false) }
+        sessionNotice?.let { messages.add(0, it) }
+    }
+
+    /** Clear rows and their metadata together, including callers that preserve other turn state. */
+    fun clearMessages() {
+        sessionNotice = null
+        messages.clear()
+    }
+
     /** Mid-turn right now. Kept here because [appendChunk] is what flips it on. */
     val streaming = mutableStateOf(false)
 
@@ -41,7 +59,7 @@ class ChatTranscript {
 
     /** Drop everything — a conversation boundary (open/close/clear). */
     fun reset() {
-        messages.clear()
+        clearMessages()
         replayEcho = false
         thinkStartMs = null
         streaming.value = false
@@ -180,16 +198,18 @@ class ChatTranscript {
     }
 
     private fun mergeHistoryUnchecked(f: ConvoHistory, onMerged: (List<ChatItem>, List<ChatItem>) -> Unit): Long? {
-        val local = messages.toList()
+        // Metadata is neither a history anchor nor evidence that a pending prompt was delivered.
+        val local = messages.filterNot { it === sessionNotice }
         val merged = if (f.delta) {
             if (f.messages.isEmpty()) return f.lastSeq
             TranscriptMerge.mergeDelta(local, f.messages.map(::historyItem))
         } else {
             TranscriptMerge.merge(local, f.messages.map(::historyItem))
         }
-        if (merged != local) {
+        val displayed = sessionNotice?.let { listOf(it) + merged } ?: merged
+        if (displayed != messages) {
             messages.clear()
-            messages.addAll(merged)
+            messages.addAll(displayed)
         }
         onMerged(local, merged)
         replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race

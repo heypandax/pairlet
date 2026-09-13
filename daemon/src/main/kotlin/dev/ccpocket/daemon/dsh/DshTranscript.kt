@@ -148,10 +148,11 @@ object DshTranscript {
                 }
             }
         }.onFailure {
-            status?.partial = true
-            Diagnostics.report(ErrorPath.HISTORY_READ, Stage.READ, ErrorCode.INCOMPLETE,
+            status?.unavailable = true
+            Diagnostics.report(ErrorPath.HISTORY_READ, Stage.READ, ErrorCode.READ_FAILED,
                 metrics = SafeMetrics(byteCount = out.size().toLong(), resultQuality = ResultQuality.PARTIAL))
-            // Not an error path worth surfacing: a live writer lands here routinely.
+            // Continuous mode already accepts an incomplete final frame. A thrown decode/I/O
+            // error is different: keep the prefix for scanners, but replay must surface the failure.
             log.debug("dsh transcript $file decode stopped early (${it.javaClass.simpleName}); using ${out.size()}B prefix")
         }
         return out.toByteArray()

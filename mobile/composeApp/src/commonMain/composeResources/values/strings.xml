@@ -1152,6 +1152,8 @@
     <string name="sidebar_clear_confirm">sure?</string>
     <string name="sidebar_recent_empty">No sessions yet — open a project from All projects below, or start a new session.</string>
     <string name="sidebar_no_sessions_here">No sessions here yet</string>
+    <string name="sidebar_recent_show_all">Show all</string>
+    <string name="sidebar_recent_show_less">Show less</string>
     <string name="open_folder">Open Folder…</string>
 
     <!-- command palette -->

@@ -71,6 +71,35 @@ class SplitPanesTest {
         questions = listOf(AskQuestion("Which parser?", options = listOf(AskOption("recursive descent"), AskOption("PEG")))),
     )
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun sessionNoticeStaysInItsPaneWithoutSettlingWaitAndErrorStillSettlesTheTurn() = runTest {
+        val p = panes(backgroundScope)
+        p.receiptTimeoutMs = 50
+        val pane = open(p)
+        val other = open(p, "sid-b")
+        p.route(live("convo-a", "sid-a"))
+        p.route(live("convo-b", "sid-b"))
+        assertTrue(p.sendPrompt(pane, "hello"))
+        val notice = live("convo-a", "sid-a").copy(executing = true, notice = "Ungrouped in DSH Web")
+        p.route(notice)
+        p.route(notice)
+        assertEquals(listOf(ChatItem.Sys(notice.notice!!, isError = false)), pane.messages.filterIsInstance<ChatItem.Sys>())
+        assertTrue(other.messages.isEmpty())
+        assertTrue(pane.messages.filterIsInstance<ChatItem.User>().single().pending)
+        assertTrue(pane.messages.none { it is ChatItem.Assistant })
+        p.route(ConvoHistory("convo-a", listOf(HistoryMessage(ChatRole.USER, "older turn"))))
+        assertEquals(1, pane.messages.count { it == ChatItem.Sys(notice.notice!!, isError = false) })
+        assertTrue(pane.messages.filterIsInstance<ChatItem.User>().last().pending)
+        advanceTimeBy(60)
+        assertTrue(pane.sendStalled.value, "metadata must not cancel the receipt deadline")
+        p.route(TurnDone("convo-a", error = "real model failure"))
+        assertFalse(pane.sendStalled.value)
+        assertFalse(pane.streaming.value)
+        assertFalse(pane.messages.filterIsInstance<ChatItem.User>().last().pending)
+        assertEquals(ChatItem.Sys("real model failure"), pane.messages.last())
+    }
+
     @Test
     fun openSendsAResumeAndBindsItsOwnSessionLive() {
         val p = panes()

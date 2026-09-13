@@ -15,6 +15,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
 import java.util.Base64
 import kotlin.io.path.bufferedReader
@@ -44,6 +46,7 @@ import kotlin.io.path.isRegularFile
  */
 object SessionFilesService {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val backendSources = BackendSessionFiles()
 
     /** Keep one FileContent/FileDiff frame well under the 4 MiB relay cap (base64 + JSON + E2E headroom). */
     const val TEXT_CAP_BYTES = 256_000
@@ -70,7 +73,16 @@ object SessionFilesService {
     )
 
     /** Newest-touched first. Empty when the transcript is missing/unreadable. */
-    fun changedFiles(agent: AgentKind, workdir: String, sessionId: String): List<ChangedFile> {
+    fun changedFiles(agent: AgentKind, workdir: String, sessionId: String): List<ChangedFile> =
+        changedFilesWithSources(agent, workdir, sessionId, backendSources)
+
+    internal fun changedFilesWithSources(agent: AgentKind, workdir: String, sessionId: String, sources: BackendSessionFiles): List<ChangedFile> {
+        if (BackendSessionFiles.supports(agent)) {
+            val evidence = sources.load(agent, workdir, sessionId).getOrNull() ?: return emptyList()
+            return scanEvidence(evidence, workdir, null).map { (path, acc) ->
+                ChangedFile(path, op = acc.op, edits = acc.edits, adds = acc.adds, dels = acc.dels)
+            }.asReversed()
+        }
         val file = transcriptFor(agent, workdir, sessionId) ?: return emptyList()
         return changedFilesIn(agent, file, workdir)
     }
@@ -84,7 +96,19 @@ object SessionFilesService {
 
     /** One capped read of a project file (see the serve rule in the class doc — issue #133). Never
      *  throws; failures ride FileContent.error. */
-    fun readFile(agent: AgentKind, workdir: String, sessionId: String, path: String): FileContent {
+    fun readFile(agent: AgentKind, workdir: String, sessionId: String, path: String): FileContent =
+        readFileWithSources(agent, workdir, sessionId, path, backendSources)
+
+    internal fun readFileWithSources(agent: AgentKind, workdir: String, sessionId: String, path: String, sources: BackendSessionFiles): FileContent {
+        if (BackendSessionFiles.supports(agent)) {
+            val evidence = sources.load(agent, workdir, sessionId, requireChanges = containedForExport(workdir, path) !is ExportGate.Allowed).getOrElse {
+                return FileContent(workdir, sessionId, path, ok = false, error = "session file evidence unavailable: ${it.message}")
+            }
+            return when (val gate = evidenceReadGate(evidence, workdir, path)) {
+                is ReadGate.Serve -> serveAt(gate.file, workdir, sessionId, path)
+                is ReadGate.Refuse -> FileContent(workdir, sessionId, path, ok = false, error = gate.error)
+            }
+        }
         val transcript = transcriptFor(agent, workdir, sessionId)
             ?: return FileContent(workdir, sessionId, path, ok = false, error = "session transcript not found")
         return readFileIn(agent, transcript, workdir, sessionId, path)
@@ -111,7 +135,24 @@ object SessionFilesService {
         path: String,
         allowChunks: Boolean,
         emit: suspend (Frame) -> Unit,
+    ) = streamFileWithSources(agent, workdir, sessionId, path, allowChunks, backendSources, emit)
+
+    internal suspend fun streamFileWithSources(
+        agent: AgentKind, workdir: String, sessionId: String, path: String, allowChunks: Boolean,
+        sources: BackendSessionFiles, emit: suspend (Frame) -> Unit,
     ) {
+        if (BackendSessionFiles.supports(agent)) {
+            val evidence = sources.load(agent, workdir, sessionId, requireChanges = containedForExport(workdir, path) !is ExportGate.Allowed).getOrElse {
+                emit(FileContent(workdir, sessionId, path, ok = false, error = "session file evidence unavailable: ${it.message}"))
+                return
+            }
+            when (val gate = evidenceReadGate(evidence, workdir, path)) {
+                is ReadGate.Refuse -> emit(FileContent(workdir, sessionId, path, ok = false, error = gate.error))
+                is ReadGate.Serve -> streamAuthorizedFile(gate.file, workdir, sessionId, path, allowChunks,
+                    READ_CHUNK_RAW_BYTES, MAX_CHUNKED_READ_BYTES, emit)
+            }
+            return
+        }
         val transcript = transcriptFor(agent, workdir, sessionId)
         if (transcript == null) {
             emit(FileContent(workdir, sessionId, path, ok = false, error = "session transcript not found"))
@@ -140,6 +181,13 @@ object SessionFilesService {
                 return
             }
         }
+        streamAuthorizedFile(file, workdir, sessionId, path, allowChunks, chunkRawBytes, maxChunkedBytes, emit)
+    }
+
+    private suspend fun streamAuthorizedFile(
+        file: Path, workdir: String, sessionId: String, path: String, allowChunks: Boolean,
+        chunkRawBytes: Int, maxChunkedBytes: Long, emit: suspend (Frame) -> Unit,
+    ) {
         if (allowChunks && file.isRegularFile()) {
             val total = runCatching { file.fileSize() }.getOrDefault(0L)
             if (total > BINARY_CAP_BYTES) {
@@ -284,7 +332,16 @@ object SessionFilesService {
 
     /** True iff [path] is in this session's changed-set (the [readFile] allow-set). Lets the gated export
      *  serve a changed file WITHOUT prompting (ReadFile already would) and prompt ONLY for the widening. */
-    fun isChanged(agent: AgentKind, workdir: String, sessionId: String, path: String): Boolean {
+    fun isChanged(agent: AgentKind, workdir: String, sessionId: String, path: String): Boolean =
+        isChangedWithSources(agent, workdir, sessionId, path, backendSources)
+
+    internal fun isChangedWithSources(agent: AgentKind, workdir: String, sessionId: String, path: String, sources: BackendSessionFiles): Boolean {
+        if (BackendSessionFiles.supports(agent)) {
+            val evidence = sources.load(agent, workdir, sessionId).getOrNull() ?: return false
+            val abs = resolveEvidencePath(path, workdir) ?: return false
+            return evidence.changes.any { resolveEvidencePath(it.path, workdir) == abs } &&
+                evidenceReadGate(evidence, workdir, path) is ReadGate.Serve
+        }
         val transcript = transcriptFor(agent, workdir, sessionId) ?: return false
         val abs = resolve(path, workdir) ?: return false
         return abs in scan(agent, transcript, workdir, diffFor = null).keys
@@ -337,7 +394,22 @@ object SessionFilesService {
     }
 
     /** The unified diff of one file [changedFiles] listed. Never throws; failures ride FileDiff.error. */
-    fun fileDiff(agent: AgentKind, workdir: String, sessionId: String, path: String): FileDiff {
+    fun fileDiff(agent: AgentKind, workdir: String, sessionId: String, path: String): FileDiff =
+        fileDiffWithSources(agent, workdir, sessionId, path, backendSources)
+
+    internal fun fileDiffWithSources(agent: AgentKind, workdir: String, sessionId: String, path: String, sources: BackendSessionFiles): FileDiff {
+        if (BackendSessionFiles.supports(agent)) {
+            val evidence = sources.load(agent, workdir, sessionId).getOrElse {
+                return FileDiff(workdir, sessionId, path, ok = false, error = "session file evidence unavailable: ${it.message}")
+            }
+            val abs = resolveEvidencePath(path, workdir)
+            val acc = scanEvidence(evidence, workdir, abs)[abs]
+                ?: return FileDiff(workdir, sessionId, path, ok = false, error = "not a file this session changed")
+            if (acc.diff.isEmpty()) return FileDiff(workdir, sessionId, path, ok = false,
+                error = "session recorded the changed path but no complete edit diff")
+            return FileDiff(workdir, sessionId, path, diff = acc.diff.toString(),
+                adds = acc.adds ?: 0, dels = acc.dels ?: 0, truncated = acc.diffTruncated)
+        }
         val transcript = transcriptFor(agent, workdir, sessionId)
             ?: return FileDiff(workdir, sessionId, path, ok = false, error = "session transcript not found")
         return fileDiffIn(agent, transcript, workdir, sessionId, path)
@@ -407,13 +479,85 @@ object SessionFilesService {
             AgentKind.CODEX -> codexScan(file, ::touch, ::record)
             AgentKind.OPENCODE -> { /* OpenCode uses SQLite, not file scanning */ }
             AgentKind.KIMI -> { /* KIMI Changes preview is P1 no-op (like OPENCODE); ACP transcript scan is P2 */ }
-            AgentKind.ZCODE -> { /* ZCode's session-store schema is not a stable public file contract */ }
-            // issue #255 v1 scope is discovery/replay/open/send only. dsh transcripts are multi-frame
-            // zstd, so a Changes preview would have to decode the whole file per scan — deferred with
-            // the rest of the non-core surface (approvals, usage, model switching).
-            AgentKind.DSH -> { /* DSH Changes preview is out of v1 scope (like OPENCODE/KIMI) */ }
+            AgentKind.ZCODE -> { /* verified DB evidence uses BackendSessionFiles */ }
+            AgentKind.DSH -> { /* verified compressed evidence uses BackendSessionFiles */ }
         }
         return seen
+    }
+
+    private fun scanEvidence(evidence: BackendSessionFiles.Evidence, workdir: String, diffFor: String?): LinkedHashMap<String, Acc> {
+        val seen = LinkedHashMap<String, Acc>()
+        for (change in evidence.changes) {
+            val abs = resolveEvidencePath(change.path, workdir) ?: continue
+            val acc = seen.remove(abs) ?: Acc(change.op, 0)
+            acc.op = change.op
+            acc.edits++
+            if (change.adds != null && change.dels != null) acc.stat(change.adds, change.dels)
+            if (abs == diffFor) {
+                if (change.diff != null) acc.appendHunks(change.diff) else acc.diffTruncated = true
+            }
+            seen[abs] = acc
+        }
+        return seen
+    }
+
+    // Fixed macOS root aliases; deliberately not a general symlink resolver.
+    private val macSystemAliases = mapOf(
+        Path.of("/tmp") to Path.of("/private/tmp"),
+        Path.of("/var") to Path.of("/private/var"),
+        Path.of("/etc") to Path.of("/private/etc"),
+    )
+
+    /** Pure validation of observations, also testable without changing any system link. */
+    internal fun verifiedMacSystemAlias(
+        alias: Path, osName: String, linkTarget: Path?, rootOwned: Boolean, realDestination: Path?,
+    ): Path? {
+        if (osName != "Mac OS X" || !rootOwned || linkTarget == null) return null
+        val destination = macSystemAliases[alias] ?: return null
+        return destination.takeIf {
+            (linkTarget == it || linkTarget == alias.parent.relativize(it)) && realDestination == it
+        }
+    }
+
+    /**
+     * Evidence identifiers are lexical, except for the three fixed macOS root aliases above.
+     * Validate the exact root-owned system link and its literal destination on every lookup;
+     * never derive an authorized identifier by resolving an arbitrary historical file's symlinks.
+     * Path.startsWith is segment-aware. Missing leaf files still retain their recorded diff identity.
+     * Non-macOS and unexpected/missing system links keep the original conservative policy.
+     */
+    internal fun resolveEvidencePath(raw: String, workdir: String): String? {
+        val lexical = resolve(raw, workdir) ?: return null
+        val path = Path.of(lexical)
+        val osName = System.getProperty("os.name")
+        if (osName != "Mac OS X") return lexical
+        val alias = macSystemAliases.keys.firstOrNull { path.startsWith(it) } ?: return lexical
+        val destination = runCatching {
+            // readSymbolicLink fails closed when the fixed alias is not a link.
+            verifiedMacSystemAlias(alias, osName, Files.readSymbolicLink(alias),
+                Files.getAttribute(alias, "unix:uid", NOFOLLOW_LINKS) == 0,
+                macSystemAliases.getValue(alias).toRealPath())
+        }.getOrNull() ?: return lexical
+        return destination.resolve(alias.relativize(path)).toString()
+    }
+
+    private fun evidenceReadGate(evidence: BackendSessionFiles.Evidence, workdir: String, path: String): ReadGate {
+        when (val gate = containedForExport(workdir, path)) {
+            is ExportGate.Allowed -> return ReadGate.Serve(gate.file)
+            else -> {}
+        }
+        val abs = resolveEvidencePath(path, workdir) ?: return ReadGate.Refuse("bad path")
+        if (evidence.changes.any { resolveEvidencePath(it.path, workdir) == abs }) {
+            val target = Path.of(abs)
+            // A historical lexical path is not evidence that a newly substituted symlink's target
+            // was changed. Refuse that expansion even when the link itself appears in the transcript.
+            val real = runCatching { target.toRealPath() }.getOrNull()
+            if (real != null && real != target.toAbsolutePath().normalize()) {
+                return ReadGate.Refuse("changed path now resolves through a symlink outside this session's project folder")
+            }
+            return ReadGate.Serve(target)
+        }
+        return ReadGate.Refuse("that path is outside this session's project folder or no longer exists")
     }
 
     // --- transcript location (same per-backend sources the session list uses) ---
@@ -426,11 +570,7 @@ object SessionFilesService {
             AgentKind.CODEX -> CodexPaths.findSession(sessionId)
             AgentKind.OPENCODE -> null // OpenCode sessions are in SQLite, not individual files
             AgentKind.KIMI -> null // KIMI file-preview is P1 no-op (transcript format unverified pre-auth)
-            AgentKind.ZCODE -> null // fail-safe: never guess a transcript path from an opaque session id
-            // dsh's transcript IS a single known file, but it is zstd-compressed — every caller here
-            // reads the path as plain JSONL, so handing it over would produce binary garbage. null until
-            // this service learns to go through DshTranscript.
-            AgentKind.DSH -> null
+            AgentKind.ZCODE, AgentKind.DSH -> null // resolved as verified evidence, never synthetic paths
         }
         return file?.takeIf { it.exists() }
     }

@@ -372,6 +372,10 @@ class RepoDesktopModel(
     override fun openRunning(m: DkMachine, p: DkProject) {
         navGen++ // user navigation — stop an in-flight RECENT refill from repointing the list (#102)
         optimisticSelectedId = null // this path bypasses selectSession — don't let a stale pick re-light mid-open (#82)
+        // #373: an explicit navigation, so RECENT brings its target into view. The session it lands on is known only once
+        // the listing is — and may be the one already selected, which no selection change would reveal — so the target is
+        // the project, in the list of the machine the row is on
+        requestReveal(p.path, accountId = m.computer.accountId)
         FleetRuntime.forPrimary(repo)?.focusProject(m.computer.accountId, p.path) ?: super.openRunning(m, p)
     }
 
@@ -496,7 +500,14 @@ class RepoDesktopModel(
     override val projects: List<DkProject>
         get() = repo.directories.map { it.toDkProject() }
 
-    private fun openSummary() = repo.sessions.firstOrNull { it.cwd == repo.workdir.value && it.title == repo.chatTitle.value }
+    private fun openSummary(): dev.ccpocket.protocol.SessionSummary? {
+        // Titles are display metadata: two sessions can start with the same prompt. Once the
+        // daemon supplies an ID, a title match must not suppress its unlisted row (#374) or select
+        // another session. Keep the title fallback only for peers that have not supplied an ID.
+        val id = repo.sessionKey.value
+        return if (id != null) repo.sessions.firstOrNull { it.sessionId == id && it.cwd == repo.workdir.value }
+        else repo.sessions.firstOrNull { it.cwd == repo.workdir.value && it.title == repo.chatTitle.value }
+    }
 
     /**
      * Daemon truth for "which sessions are alive RIGHT NOW", keyed by session id, taken from every project
@@ -580,7 +591,6 @@ class RepoDesktopModel(
         val dir = repo.sessionsDir.value ?: return null
         if (repo.convoId.value == null || (wd != dir && tilde(wd) != dir)) return null
         if (repo.sessions.any { it.sessionId == id }) return null
-        if (openSummary() != null) return null // already listed under (cwd, title) — e.g. resumed before SessionLive echoes the id
         return DkSession(
             sessionId = id, cwd = wd, title = repo.chatTitle.value ?: "Chat",
             agent = repo.sessionAgent.value ?: AgentKind.CLAUDE,
@@ -958,6 +968,7 @@ class RepoDesktopModel(
             focusDir(e.cwd)
             focusListedDir(e.cwd) // a history step into another project brings its listing (and menus) along
             optimisticSelectedId = e.sessionId
+            requestReveal(e.cwd, e.sessionId, e.accountId)
             // A synchronously refused open (unsupported agent, duplicate target) moved nothing on
             // screen — the cursor must not stay on a position the user isn't at, or the arrows lie
             // and the NEXT navigation truncates live forward entries at the phantom spot.
@@ -967,6 +978,7 @@ class RepoDesktopModel(
         optimisticSelectedId = null // another machine's session — nothing in the current list to pre-light
         val target = repo.pairedList.firstOrNull { it.accountId == e.accountId }
         if (target == null) { navCursor = from; return } // machine unpaired since — same rollback rule
+        requestReveal(e.cwd, e.sessionId, e.accountId)
         switchMachine(target)
         repo.requestOpenSession(e.cwd, e.sessionId, title = e.title, agent = e.agent)
     }
@@ -979,6 +991,7 @@ class RepoDesktopModel(
             focusListedDir(s.cwd) // …and makes it the listed one, so its right-click verbs come along
         }
         optimisticSelectedId = s.sessionId // light the clicked row NOW, don't wait out the open (#82)
+        requestReveal(s.cwd, s.sessionId) // …and bring it into RECENT's view, already selected or not (#373)
         return repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
     }
 
@@ -1026,11 +1039,20 @@ class RepoDesktopModel(
     private var projectRevealGeneration = 0L
     private var projectListRevealState by mutableStateOf<DkProjectListReveal?>(null)
     override val projectListReveal: DkProjectListReveal? get() = projectListRevealState
+
+    /** Publish a RECENT reveal (#373). Explicit navigations only — never a refresh or a listing echo: that is how the
+     *  sidebar tells "the user went back to that session" from the selection merely blinking away and back.
+     *  [accountId] is the machine whose list holds the target — for another machine's pin or RUNNING row, the one being
+     *  switched to. */
+    private fun requestReveal(path: String, sessionId: String? = null, accountId: String? = repo.paired.value?.accountId) {
+        projectListRevealState = DkProjectListReveal(path, ++projectRevealGeneration, sessionId, accountId)
+    }
+
     override fun openProjectPin(p: DkProjectPin) {
         // RECENT owns fold/scroll state inside the composable, so listing alone cannot reveal a group the
         // user folded earlier. Publish an explicit one-shot request before re-listing; the generation is
         // required because the same pinned project may be opened, folded, and opened again.
-        projectListRevealState = DkProjectListReveal(p.path, ++projectRevealGeneration)
+        requestReveal(p.path)
         openProject(DkProject(path = p.path, name = p.name))
     }
 
@@ -1059,11 +1081,13 @@ class RepoDesktopModel(
             focusDir(p.cwd) // jumping to a pin focuses its project, so a following ⌘N lands there
             focusListedDir(p.cwd) // …and lists it, so the landing project's right-click verbs work
             optimisticSelectedId = p.sessionId // same as selectSession: light the target row through the open (#82)
+            requestReveal(p.cwd, p.sessionId, p.accountId) // …a pin to the session already open included (#373)
             repo.openSession(wd = p.cwd, resumeId = p.sessionId, title = p.title, agent = p.agent)
             return
         }
         optimisticSelectedId = null // another machine's session — nothing in the current list to pre-light
         val target = repo.pairedList.firstOrNull { it.accountId == p.accountId } ?: return
+        requestReveal(p.cwd, p.sessionId, p.accountId) // for the list of the machine we are switching to
         switchMachine(target)
         // open once the switched link lands — the repo's push-tap seam (pendingOpen) owns "open when
         // Ready", including abandonment when the user disconnects or switches again meanwhile. After a

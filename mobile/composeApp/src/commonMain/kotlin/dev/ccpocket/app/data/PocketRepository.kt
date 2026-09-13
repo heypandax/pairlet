@@ -450,7 +450,7 @@ sealed interface ChatItem {
          *  [images], so "there was a screenshot you can't see" never reads as "there was no screenshot". */
         val imagesTruncated: Boolean = false,
     ) : ChatItem
-    data class Sys(val text: String) : ChatItem
+    data class Sys(val text: String, val isError: Boolean = true) : ChatItem
     data class RuleChip(val rule: String) : ChatItem // "Always allowing X this session" confirmation
 
     /** Approval design M2 §9.6: an action auto-ran under a task/session grant — the in-stream audit
@@ -2689,7 +2689,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // #165/#239: the work→idle detector is per-MACHINE state. Carrying this machine's ids into the
         // next one's first project list would mark every one of them "finished while you were away".
         lastWorkingSessions = emptySet(); lastWorkingDirectories = emptyMap(); unseenSessions.value = emptySet()
-        directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear(); clearFileUploads(); clearBackgroundJobs()
+        directories.clear(); sessions.clear(); transcript.clearMessages(); pendingImages.clear(); clearFileUploads(); clearBackgroundJobs()
         resetHistoryPaging() // #147: the transcript left with messages — so must its cursor
         demoMode.value = false // leaving the demo returns to real pairing
         demoConnecting.value = false
@@ -2836,7 +2836,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         openInFlight = null; lastOpenAttempt = null // #235: the claim + its retry target belong to the machine we're leaving
         autoFocusComposer.value = false
         clearAskQueue()
-        messages.clear(); pendingImages.clear()
+        transcript.clearMessages(); pendingImages.clear()
         resetHistoryPaging() // #147
         terminalEntries.clear(); terminalBusy.value = false
         changedFiles.clear(); changedFilesLoading.value = false; changedFilesUnavailable.value = false
@@ -3522,6 +3522,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // #165: daemon-authoritative identity for the working set (a fork/lock-heal corrected the id
                 // we opened with, so this — not the optimistic resumeId — is what the switcher remembers)
                 rememberOpenedSession(f.workdir, f.sessionId, chatTitle.value, sessionAgent.value)
+                // Metadata survives replay independently of prompt receipts and model output.
+                transcript.setSessionNotice(f.notice)
                 // SessionGone recovery: the reopen landed — resend the prompt that hit the dead convo. Single
                 // shot: a second SessionGone for the resent prompt takes the honest-error branch, never a loop.
                 // Workdir-matched so a user who navigated elsewhere mid-recovery doesn't get it misdelivered.
@@ -7105,7 +7107,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun clearConversation() {
         val c = convoId.value ?: return
         clearPromptLifecycleState()
-        messages.clear(); chatTitle.value = null; contextUsed.value = null
+        transcript.clearMessages(); chatTitle.value = null; contextUsed.value = null
         resetHistoryPaging() // #147: the wiped transcript's cursor dies with it
         clearBackgroundJobs()
         scope.launch { send(SendPrompt(c, "/clear")) }
@@ -7166,7 +7168,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         clearPromptLifecycleState()
         convoId.value = null
         chatTitle.value = null
-        messages.clear()
+        transcript.clearMessages()
         resetHistoryPaging() // #147
         pendingImages.clear()
         clearFileUploads()
@@ -7216,7 +7218,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch {
             obs?.let { send(CloseSession(it)) }
             clearPromptLifecycleState()
-            messages.clear(); convoId.value = null; observing.value = false
+            transcript.clearMessages(); convoId.value = null; observing.value = false
             resetHistoryPaging() // #147: the take-over open replays in full
             // "Continue here" resumes under the Settings default mode — omitting it fell back to the
             // wire default (ask each step), ignoring the user's chosen mode (issue #50). Model/effort
@@ -7269,7 +7271,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         clearPromptLifecycleState()
         convoId.value = null
         chatTitle.value = null
-        messages.clear()
+        transcript.clearMessages()
         resetHistoryPaging() // #147
         pendingImages.clear()
         clearFileUploads()

@@ -1149,6 +1149,8 @@
     <string name="sidebar_clear_confirm">确定？</string>
     <string name="sidebar_recent_empty">还没有会话——从下方「全部项目」打开一个项目，或直接新建会话。</string>
     <string name="sidebar_no_sessions_here">这里还没有会话</string>
+    <string name="sidebar_recent_show_all">展开显示</string>
+    <string name="sidebar_recent_show_less">收起</string>
     <string name="open_folder">打开文件夹…</string>
 
     <!-- 命令面板 -->

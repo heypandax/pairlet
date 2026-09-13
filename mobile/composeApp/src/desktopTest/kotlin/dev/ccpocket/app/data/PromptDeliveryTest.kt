@@ -54,6 +54,41 @@ class PromptDeliveryTest {
     }
 
     @Test
+    fun sessionGroupingNoticeDoesNotSettlePendingPromptAndSurvivesHistoryMerge() = runBlocking {
+        val r = repo()
+        r.convoId.value = "c1"
+        r.workdir.value = "/tmp/proj"
+        val sent = mutableListOf<SendPrompt>()
+        r.onSendForTest = { f -> if (f is SendPrompt) sent.add(f) }
+        assertTrue(r.sendPrompt("hello?"))
+        val pid = lastUserPromptId(r)
+        val live = SessionLive("c1", "/tmp/proj", "sid", executing = true,
+            notice = "This session appears under Ungrouped in DSH Web.")
+        r.receiveForTest(live)
+        assertTrue(r.messages.filterIsInstance<ChatItem.User>().single().pending)
+        assertEquals(listOf(ChatItem.Sys(live.notice!!, isError = false)), r.messages.filterIsInstance<ChatItem.Sys>())
+        assertTrue(r.messages.none { it is ChatItem.Assistant })
+        awaitCue("receipt watchdog after a notice") { r.sendStalled.value }
+        r.receiveForTest(live)
+        assertTrue(r.sendStalled.value, "repeated metadata is not receipt evidence")
+        assertEquals(1, r.messages.filterIsInstance<ChatItem.Sys>().size)
+        r.receiveForTest(ConvoHistory("c1", listOf(HistoryMessage(ChatRole.USER, "older turn"))))
+        assertEquals(1, r.messages.count { it == ChatItem.Sys(live.notice!!, isError = false) })
+        r.receiveForTest(PromptAck("c1", pid))
+        awaitCue("turn watchdog after a notice") { r.turnStalled.value }
+        assertTrue(r.streaming.value)
+        r.resendStalledPrompt()
+        assertEquals(2, sent.size, "notice preserves the retry copy")
+        assertEquals("hello?", sent.last().text)
+        assertNotEquals(pid, sent.last().promptId)
+        r.receiveForTest(AssistantChunk("c1", 1, StreamPiece.Text("Actual model answer")))
+        assertFalse(r.sendStalled.value)
+        assertFalse(r.turnStalled.value)
+        assertFalse(r.messages.filterIsInstance<ChatItem.User>().last().pending)
+        assertEquals("Actual model answer", r.messages.filterIsInstance<ChatItem.Assistant>().single().text)
+    }
+
+    @Test
     fun aSendWithNoReceiptStallsInsteadOfSendingForever() = runBlocking {
         val r = repo()
         r.convoId.value = "c1" // a live-looking conversation whose link answers nothing
