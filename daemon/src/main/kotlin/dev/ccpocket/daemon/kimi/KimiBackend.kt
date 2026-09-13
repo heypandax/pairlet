@@ -21,6 +21,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
@@ -35,7 +36,7 @@ import java.util.concurrent.atomic.AtomicLong
  * Drives the Kimi Code CLI via `kimi acp` — the Agent Client Protocol v1 over newline-delimited JSON-RPC 2.0
  * on stdio (issue #206). A stateful per-conversation handshake machine mirroring [dev.ccpocket.daemon.codex.CodexBackend]:
  * on [attach] it sends `initialize`; on the response it opens the session (`session/new`, or `session/load`
- * for a resume); the first user prompt is buffered until the session id lands. Turns stream `session/update`
+ * for a resume); user prompts are queued until the session id lands. Turns stream `session/update`
  * notifications (translated by [KimiAcpParser]); approvals are `session/request_permission` server→client
  * requests answered by the chosen option id — the exact provider-neutral shape [PermissionBridge] expects.
  *
@@ -43,6 +44,10 @@ import java.util.concurrent.atomic.AtomicLong
  * acp` is its complete stdio protocol (initialize handshake confirmed: loadSession/resume/fork/permissions).
  * ACP gives the full approval chain (design plan A). Live turn/approval behavior is UNVERIFIED — the probe
  * was blocked by device-code login (V-auth); the mapping follows the ACP v1 spec + the confirmed handshake.
+ *
+ * IMAGES (issue #377): a prompt carries images only when THIS process's `initialize` answer advertises
+ * `agentCapabilities.promptCapabilities.image` (current kimi-cli does, turning each ACP image block into a
+ * model image URL). Otherwise the prompt is refused as an error turn rather than sent as its text alone.
  */
 class KimiBackend(
     private val kimiBin: String?,
@@ -51,7 +56,7 @@ class KimiBackend(
     private val log = logger("KimiBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val idSeq = AtomicLong(1)
-    private val bootstrap = Mutex() // guards sessionId + pendingPrompt so the first turn is never lost to a race
+    private val bootstrap = Mutex() // guards sessionId + promptQueue so the opening turn is never lost to a race
 
     @Volatile private var io: AgentIo? = null
     @Volatile private var resolvedExe: Path? = null
@@ -61,7 +66,10 @@ class KimiBackend(
     @Volatile private var model: String? = null
 
     @Volatile private var sessionId: String? = null
-    private var pendingPrompt: Prompt? = null // buffered first turn (guarded by [bootstrap])
+
+    // `agentCapabilities.promptCapabilities.image` off THIS process's `initialize` answer (issue #377) — only
+    // an explicit `true` counts, and every attach forgets the previous process's answer.
+    @Volatile private var imagePrompts = false
 
     // JSON-RPC id correlation. promptIds maps the outstanding session/prompt request id → its prompt text:
     // the text is replayed as a synthesized [AgentEvent.UserReplay] when the prompt settles — kimi's live
@@ -88,7 +96,9 @@ class KimiBackend(
     // UserReplay we synthesize at prompt settle), so the queue lives HERE: at most one session/prompt in
     // flight, the rest FIFO, flushed when the in-flight prompt settles (any stopReason, incl. cancelled/
     // error). Entries still queued when the process dies stay UNSETTLED in Conversation's ledger, which
-    // re-injects them into the fresh process — so attach()'s clear loses nothing.
+    // re-injects them into the fresh process — so attach()'s clear loses nothing. Prompts that arrive before
+    // the session opens wait here too: the single buffered slot this replaced let a second early prompt (a
+    // quick follow-up, or a relaunch re-injecting two) silently overwrite the first.
     private val promptQueue = ArrayDeque<Prompt>() // guarded by [bootstrap]
 
     // toolCallId → accumulated tool state. ACP `tool_call` carries NO rawInput (probe 0.34.0): the input
@@ -116,7 +126,8 @@ class KimiBackend(
         // reset per-process protocol state (runs on every (re)launch)
         sessionId = null
         suppressReplayUpdates = false
-        bootstrap.withLock { pendingPrompt = null; promptQueue.clear() }
+        imagePrompts = false
+        bootstrap.withLock { promptQueue.clear() }
         promptIds.clear(); pendingApprovals.clear(); toolCalls.clear()
         // kick off the ACP handshake — session open happens when the initialize response lands
         initializeId = rpcRequest("initialize", buildJsonObject {
@@ -132,6 +143,8 @@ class KimiBackend(
         if (t.isEmpty()) return emptyList()
         val root = runCatching { json.parseToJsonElement(t) }.getOrNull() as? JsonObject
             ?: return listOf(AgentEvent.Unparseable(t))
+        // our own refusal (see sendPrompt) — the one frame on this pump kimi did not write
+        if (root.str("type") == SYNTHETIC_REFUSAL) return settleRefusal(root)
         val method = root.str("method")
         val idEl = root["id"]?.takeIf { it !is JsonNull }
         return runCatching {
@@ -149,15 +162,18 @@ class KimiBackend(
 
     private suspend fun handleResponse(idEl: JsonElement?, result: JsonObject?): List<AgentEvent> {
         val id = (idEl as? JsonPrimitive)?.longOrNull ?: return emptyList()
-        if (id == initializeId) { openSession(); return emptyList() }
+        if (id == initializeId) {
+            val image = result?.obj("agentCapabilities")?.obj("promptCapabilities")?.get("image") as? JsonPrimitive
+            imagePrompts = image != null && !image.isString && image.booleanOrNull == true
+            openSession()
+            return emptyList()
+        }
         if (id == sessionOpenId) return onSessionOpened(result)
         val consumed = promptIds.remove(id) ?: return emptyList()
         // settle → synthesize the consumption receipt (no live user_message_chunk, probe 0.34.0) BEFORE the
         // TurnResult, so the ledger entry is gone by the time maybeEndTaskOnSettle checks it — then let the
         // next queued prompt go out.
-        val events = listOf(AgentEvent.UserReplay(consumed)) + onPromptDone(result)
-        flushQueuedPrompt()
-        return events
+        return listOf(AgentEvent.UserReplay(consumed)) + onPromptDone(result) + flushQueuedPrompt()
     }
 
     private suspend fun handleErrorResponse(idEl: JsonElement?, error: JsonObject?): List<AgentEvent> {
@@ -166,7 +182,7 @@ class KimiBackend(
         // an auth wall (no model / not logged in) surfaces here on session open or the first prompt
         if (id == sessionOpenId || (id != null && promptIds.containsKey(id))) {
             val consumed = id?.let { promptIds.remove(it) }
-            flushQueuedPrompt() // a failed prompt must not stall the FIFO behind it
+            val next = flushQueuedPrompt() // a failed prompt must not stall the FIFO behind it
             return listOfNotNull(
                 // an errored prompt was still CONSUMED — its failure surfaced right here as an error turn.
                 // Left unsettled, Conversation would re-inject it on every relaunch, looping the same
@@ -175,7 +191,7 @@ class KimiBackend(
                 consumed?.let { AgentEvent.UserReplay(it) },
                 AgentEvent.AssistantText("⚠️ $msg"),
                 AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
-            )
+            ) + next
         }
         log.warn("kimi error response id=$id: $msg")
         return emptyList()
@@ -202,12 +218,13 @@ class KimiBackend(
         suppressReplayUpdates = false
         // session/new returns {sessionId}; session/load returns {} (id is the one we sent)
         val sid = result?.str("sessionId") ?: resumeId ?: return emptyList()
-        val flush = bootstrap.withLock {
+        val refused = ArrayList<Prompt>()
+        val first = bootstrap.withLock {
             sessionId = sid
-            pendingPrompt?.let { p -> pendingPrompt = null; reservePrompt(p.text) to p.text }
+            takeQueuedPrompt(refused) // whatever arrived before the session, oldest first
         }
-        flush?.let { (id, text) -> writePrompt(id, text) }
-        return listOf(AgentEvent.SessionInit(sessionId = sid, cwd = workdir, model = model))
+        first?.let { (id, prompt) -> writePrompt(id, prompt) }
+        return listOf(AgentEvent.SessionInit(sessionId = sid, cwd = workdir, model = model)) + refusals(refused)
     }
 
     private fun onPromptDone(result: JsonObject?): List<AgentEvent> {
@@ -320,42 +337,96 @@ class KimiBackend(
     // ---- outbound (called by Conversation) ----
 
     override suspend fun sendPrompt(text: String, images: List<ImageData>) {
+        val prompt = Prompt(text, images)
         val reserved = bootstrap.withLock {
             when {
-                sessionId == null -> { pendingPrompt = Prompt(text, images); null }
+                // no session yet — the session open releases the FIFO head
+                sessionId == null -> { promptQueue.addLast(prompt); null }
                 // a turn is in flight — ACP has no mid-turn stdin queue (-32600 turn.agent_busy, probe
                 // 0.34.0), so FIFO it HERE and flush when the in-flight prompt settles
-                promptIds.isNotEmpty() -> { promptQueue.addLast(Prompt(text, images)); null }
+                promptIds.isNotEmpty() -> { promptQueue.addLast(prompt); null }
                 else -> reservePrompt(text)
             }
+        } ?: return
+        if (acceptable(prompt)) {
+            writePrompt(reserved, prompt)
+        } else {
+            // refused through the pump, like an error response: the reservation holds everything sent after it
+            // until the refusal settles. Waiting for channel room is safe here, off the pump — a refusal the
+            // pump itself finds returns its events instead (see takeQueuedPrompt).
+            io?.inject?.invoke(syntheticRefusal(reserved, refuse(prompt)))
         }
-        reserved?.let { writePrompt(it, text) }
     }
 
     /** Allocate the request id and mark the prompt in flight — MUST run inside [bootstrap], so a racing
      *  sendPrompt/flush can never see "idle" between the decision and the registration (double-send). */
     private fun reservePrompt(text: String): Long = idSeq.getAndIncrement().also { promptIds[it] = text }
 
-    /** The in-flight prompt just settled (any stopReason / error) — send the oldest queued prompt, if any. */
-    private suspend fun flushQueuedPrompt() {
-        val next = bootstrap.withLock {
-            if (sessionId == null || promptIds.isNotEmpty()) return@withLock null
-            promptQueue.removeFirstOrNull()?.let { reservePrompt(it.text) to it.text }
-        }
-        next?.let { (id, text) -> writePrompt(id, text) }
+    /** The in-flight prompt just settled (any stopReason / error) — send the oldest queued prompt, if any.
+     *  Returns the error turns of the prompts refused on the way. */
+    private suspend fun flushQueuedPrompt(): List<AgentEvent> {
+        val refused = ArrayList<Prompt>()
+        val next = bootstrap.withLock { takeQueuedPrompt(refused) }
+        next?.let { (id, prompt) -> writePrompt(id, prompt) }
+        return refusals(refused)
     }
 
-    // NOTE: images ride the Prompt through every queue/buffer but are DROPPED at the write — kimi P1 is
-    // text-only (ACP image blocks are a follow-up); keeping them queued preserves the data for that day.
-    private suspend fun writePrompt(id: Long, text: String) {
+    /** Reserve the FIFO head when no turn is running — MUST run inside [bootstrap]. A head this session can't
+     *  take moves to [refused] and the next is tried, so a refusal never stalls the prompts behind it. Callers
+     *  run on the pump and hand refusals back as events: injecting them would wait for room on the very
+     *  channel the pump drains. */
+    private fun takeQueuedPrompt(refused: MutableList<Prompt>): Pair<Long, Prompt>? {
+        if (sessionId == null || promptIds.isNotEmpty()) return null
+        while (true) {
+            val next = promptQueue.removeFirstOrNull() ?: return null
+            if (acceptable(next)) return reservePrompt(next.text) to next
+            refused += next
+        }
+    }
+
+    /** A prompt [sendPrompt] reserved but refused settles here exactly once, like its error response — a stale
+     *  id (already settled, or reserved by a previous process) says nothing. */
+    private suspend fun settleRefusal(root: JsonObject): List<AgentEvent> {
+        val consumed = root.long("id")?.let { promptIds.remove(it) } ?: return emptyList()
+        return errorTurn(consumed, root.str("message").orEmpty()) + flushQueuedPrompt()
+    }
+
+    // images ride as ACP image blocks after the text (ImageData is already the Base64 + MIME pair a block
+    // holds); a prompt with images but blank text sends the images alone, never an empty text block
+    private suspend fun writePrompt(id: Long, prompt: Prompt) {
         val sid = sessionId ?: return
         rpcSend(id, "session/prompt", buildJsonObject {
             put("sessionId", sid)
             putJsonArray("prompt") {
-                addJsonObject { put("type", "text"); put("text", text) }
+                if (prompt.text.isNotBlank() || prompt.images.isEmpty()) {
+                    addJsonObject { put("type", "text"); put("text", prompt.text) }
+                }
+                prompt.images.forEach { image ->
+                    addJsonObject { put("type", "image"); put("data", image.base64); put("mimeType", image.mediaType) }
+                }
             }
         })
     }
+
+    /** A prompt with images needs the advertised capability — sending its text alone would be the silent loss
+     *  issue #377 is about, so without it the prompt is refused. */
+    private fun acceptable(prompt: Prompt): Boolean = prompt.images.isEmpty() || imagePrompts
+
+    private fun refusals(refused: List<Prompt>): List<AgentEvent> = refused.flatMap { errorTurn(it.text, refuse(it)) }
+
+    /** Log a refusal and word it for the chat — counts only: the image bytes reach neither. */
+    private fun refuse(prompt: Prompt): String {
+        val n = prompt.images.size
+        log.warn("kimi prompt with $n image(s) refused — this session did not advertise image input")
+        return "not sent: Kimi Code did not advertise image input for this session, so nothing reached the " +
+            "agent. Send the message again without the ${if (n == 1) "image" else "$n images"}."
+    }
+
+    private fun errorTurn(text: String, why: String): List<AgentEvent> = listOf(
+        AgentEvent.UserReplay(text),
+        AgentEvent.AssistantText("⚠️ $why"),
+        AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
+    )
 
     override suspend fun interrupt() {
         val sid = sessionId ?: return
@@ -454,4 +525,14 @@ class KimiBackend(
         write(buildJsonObject { put("jsonrpc", "2.0"); put("id", id); putJsonObject("error") { put("code", code); put("message", message) } })
 
     private suspend fun write(obj: JsonObject) { io?.writeLine(obj.toString()) }
+
+    /** The refusal of the prompt reserved as [id] (see [sendPrompt]) — settled on the pump like its error
+     *  response would be. */
+    private fun syntheticRefusal(id: Long, message: String): String =
+        buildJsonObject { put("type", SYNTHETIC_REFUSAL); put("id", id); put("message", message) }.toString()
+
+    private companion object {
+        /** Namespaced so it can never collide with a real kimi frame. */
+        const val SYNTHETIC_REFUSAL = "cc-pocket/kimi-prompt-refused"
+    }
 }
