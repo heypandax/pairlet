@@ -10,6 +10,7 @@ import org.junit.jupiter.api.condition.DisabledOnOs
 import org.junit.jupiter.api.condition.OS
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -68,7 +69,34 @@ class AgentProcessShutdownTest {
             assertNotNull(code, "wedged child must be dead after shutdown (force-kill fallback fired)")
             // 137 = 128 + SIGKILL(9): the EOF wait lapsed, SIGTERM(143) was trapped, only SIGKILL worked.
             assertEquals(137, code, "wedged child must die by SIGKILL, proving the full ladder ran")
+            assertFalse(p.isCleanTurnExit(), "forced kills must not become clean turn exits")
             // Bounded: eof(400) + term(400) + force(1000) + slack — a stuck agent can't wedge shutdown.
             assertTrue(elapsed < 5_000, "shutdown of a wedged child must stay bounded (was ${elapsed}ms)")
+        }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    fun `turn-boundary SIGTERM is recognized when EOF does not stop the child`() = proc("sleep", "30") { p ->
+        p.shutdown(eofGraceMs = 100, reason = AgentProcess.ShutdownReason.TURN_BOUNDARY)
+        assertEquals(143, p.exitCode())
+        assertTrue(p.isCleanTurnExit())
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    fun `a normal stop cannot masquerade as a completed turn`() = proc("sleep", "30") { p ->
+        p.shutdown(eofGraceMs = 100)
+        assertEquals(143, p.exitCode())
+        assertFalse(p.isCleanTurnExit())
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    fun `turn-boundary force kill remains abnormal`() =
+        proc("sh", "-c", "trap '' TERM; printf 'ready\\n'; while true; do sleep 0.2; done") { p ->
+            assertEquals("ready", p.stdout.receive())
+            p.shutdown(eofGraceMs = 100, termGraceMs = 100, reason = AgentProcess.ShutdownReason.TURN_BOUNDARY)
+            assertEquals(137, p.exitCode())
+            assertFalse(p.isCleanTurnExit())
         }
 }

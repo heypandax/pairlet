@@ -135,4 +135,14 @@ class AgentProcessStderrTailTest {
         val diag = assertNotNull(p.stderrDiagnostic(maxChars = 40))
         assertEquals(40, diag.length)
     }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    fun `terminal color controls are removed from the displayed diagnostic`() {
+        val raw = "\u001b[2m2026-09-13T02:42:37Z\u001b[0m \u001b[31mERROR\u001b[0m transport closed\n"
+        withStderr(raw) { p ->
+            assertEquals(raw.trimEnd(), p.lastStderr, "retain the raw forensic tail")
+            assertEquals("2026-09-13T02:42:37Z ERROR transport closed", p.stderrDiagnostic())
+        }
+    }
 }

@@ -6,23 +6,29 @@ import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentProcessMode
 import dev.ccpocket.daemon.agent.AgentPromptDelivery
 import dev.ccpocket.daemon.agent.AgentSpec
+import dev.ccpocket.daemon.approval.ApprovalCoordinator
 import dev.ccpocket.daemon.opencode.OpenCodeStreamParser
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
+import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
+import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PromptAck
 import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.TurnDone
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
@@ -76,7 +82,7 @@ class ConversationOpenCodeOneShotTest {
     /** Codex-shaped one-shot: prompt travels over stdin, a user replay is its receipt, and the backend
      * asks Conversation to close the process after a stable result. Each child intentionally ignores any
      * second stdin line so the clean-exit ledger must re-inject it into the next launch. */
-    private class StdinOneShotBackend : AgentBackend {
+    private class StdinOneShotBackend(private val afterEof: String = "") : AgentBackend {
         val specs = CopyOnWriteArrayList<AgentSpec>()
         val sends = CopyOnWriteArrayList<String>()
         @Volatile private var io: AgentIo? = null
@@ -94,6 +100,7 @@ class ConversationOpenCodeOneShotTest {
                 sleep 0.3
                 printf 'result\n'
                 while IFS= read -r ignored; do :; done
+                $afterEof
             """.trimIndent()
             return ProcessBuilder("sh", "-c", script)
         }
@@ -124,6 +131,67 @@ class ConversationOpenCodeOneShotTest {
         override fun listSessions(workdir: String): List<SessionSummary> = emptyList()
         override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = emptyList()
         override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+    }
+
+    /** Real stdin children with parse gates: B is staged before A's late ask, and each ask is fully
+     * resolved before the next replay. Only the first child's actual EOF/TERM exit varies. */
+    private class GrantBoundaryOneShotBackend(private val afterEof: String) : AgentBackend by StdinOneShotBackend() {
+        val specs = CopyOnWriteArrayList<AgentSpec>()
+        val sends = CopyOnWriteArrayList<String>()
+        val responses = CopyOnWriteArrayList<Pair<String, Boolean>>()
+        val releaseLateA = CompletableDeferred<Unit>()
+        val releaseShutdown = CompletableDeferred<Unit>()
+        val releaseReplayB = CompletableDeferred<Unit>()
+        @Volatile private var io: AgentIo? = null
+
+        override fun processBuilder(spec: AgentSpec): ProcessBuilder {
+            specs += spec
+            val events = if (specs.size == 1) {
+                "printf '%s\\n' result-a late-a shutdown-a"
+            } else {
+                // A non-matching replay must not activate B's staged grant either.
+                "printf '%s\\n' user:unrelated before-b; printf 'user:%s\\n' \"${'$'}line\"; printf '%s\\n' control-b"
+            }
+            val ending = if (specs.size == 1) afterEof else "exit 0"
+            return ProcessBuilder("sh", "-c", """
+                IFS= read -r line
+                printf '%s\n' session:grant-session
+                ${if (specs.size == 1) "printf 'user:%s\\n' \"${'$'}line\"" else ""}
+                $events
+                while IFS= read -r ignored; do :; done
+                $ending
+            """.trimIndent())
+        }
+
+        override suspend fun attach(io: AgentIo, spec: AgentSpec) { this.io = io }
+        override suspend fun parse(line: String): List<AgentEvent> = when {
+            line == "session:grant-session" -> listOf(AgentEvent.SessionInit("grant-session", specs.last().workdir.toString(), null))
+            line == "user:request B" -> {
+                releaseReplayB.await()
+                listOf(AgentEvent.UserReplay("request B"))
+            }
+            line.startsWith("user:") -> listOf(AgentEvent.UserReplay(line.removePrefix("user:")))
+            line == "result-a" -> listOf(AgentEvent.TurnResult("done A", null, false))
+            line == "late-a" -> {
+                releaseLateA.await()
+                listOf(AgentEvent.ControlRequest(line, "mcp__remote__do", buildJsonObject {}))
+            }
+            line == "shutdown-a" -> {
+                releaseShutdown.await()
+                io?.requestProcessExit?.invoke()
+                emptyList()
+            }
+            line == "before-b" || line == "control-b" -> listOf(AgentEvent.ControlRequest(line, "mcp__remote__do", buildJsonObject {}))
+            else -> emptyList()
+        }
+        override suspend fun sendPrompt(text: String, images: List<ImageData>) {
+            sends += text
+            io?.writeLine?.invoke(text)
+        }
+        override suspend fun respondPermission(
+            askId: String, allow: Boolean, remember: Boolean,
+            originalInput: JsonObject?, updatedInput: String?, denyMessage: String?,
+        ) { responses += askId to allow }
     }
 
     private fun okTurn(sessionId: String, text: String = "ok") = listOf(
@@ -380,6 +448,147 @@ class ConversationOpenCodeOneShotTest {
             await { frames.any { it is PocketError && it.code == "process_exited" } }
             assertTrue(frames.any { it is PocketError && it.code == "process_exited" })
         } finally {
+            convo.close()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun stdin_one_shot_term_shutdown_relaunches_a_prompt_received_after_the_result() = runBlocking {
+        if (win()) return@runBlocking
+        val frames = CopyOnWriteArrayList<Frame>()
+        val scope = CoroutineScope(Dispatchers.Default)
+        // EOF cannot finish this child: the real shutdown ladder must send SIGTERM after 3 seconds.
+        val backend = StdinOneShotBackend(afterEof = "exec sleep 30")
+        val convo = Conversation("cCodexTerm", Files.createTempDirectory("ccp-codex-term"), PermissionMode.DEFAULT, { frames.add(it) }, scope, backend)
+        try {
+            convo.open(resumeId = null, model = null)
+            convo.sendPrompt("first", promptId = "p1")
+            await { frames.any { it is TurnDone } }
+            convo.sendPrompt("second", promptId = "p2")
+            await { frames.count { it is TurnDone } >= 2 || frames.any { it is PocketError } }
+
+            assertFalse(frames.any { it is PocketError }, frames.toString())
+            assertEquals(2, frames.count { it is TurnDone })
+            assertEquals(2, backend.specs.size)
+            assertEquals("codex-stdin-1", backend.specs[1].resumeId)
+            assertEquals(listOf("first", "second", "second"), backend.sends.toList())
+            assertEquals(1, frames.count { it is PromptAck && it.promptId == "p2" })
+        } finally {
+            convo.close()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun a_completed_turn_followed_by_unrequested_sigterm_is_still_an_error() = runBlocking {
+        if (win()) return@runBlocking
+        val frames = CopyOnWriteArrayList<Frame>()
+        val scope = CoroutineScope(Dispatchers.Default)
+        val backend = OneShotBackend(listOf(okTurn("ses_external_term"))) { _, f ->
+            "cat '${f.absolutePathString()}'; kill -TERM ${'$'}${'$'}"
+        }
+        val convo = Conversation("cExternalTerm", Files.createTempDirectory("ccp-external-term"), PermissionMode.DEFAULT, { frames.add(it) }, scope, backend)
+        try {
+            convo.open(resumeId = null, model = null)
+            convo.sendPrompt("hello", promptId = "p1")
+            await { frames.any { it is PocketError && it.code == "process_exited" } }
+            assertEquals(1, frames.count { it is TurnDone })
+            assertTrue(frames.any { it is PocketError && "exit 143" in it.message }, frames.toString())
+        } finally {
+            convo.close()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun exit_143_during_requested_eof_without_daemon_sigterm_is_still_an_error() = runBlocking {
+        if (win()) return@runBlocking
+        val frames = CopyOnWriteArrayList<Frame>()
+        val scope = CoroutineScope(Dispatchers.Default)
+        // The child returns 143 itself before the daemon's escalation. Intent plus code is insufficient.
+        val backend = StdinOneShotBackend(afterEof = "exit 143")
+        val convo = Conversation("cEof143", Files.createTempDirectory("ccp-eof-143"), PermissionMode.DEFAULT, { frames.add(it) }, scope, backend)
+        try {
+            convo.open(resumeId = null, model = null)
+            convo.sendPrompt("hello", promptId = "p1")
+            await { frames.any { it is PocketError && it.code == "process_exited" } }
+            assertEquals(1, frames.count { it is TurnDone })
+            assertTrue(frames.any { it is PocketError && "exit 143" in it.message }, frames.toString())
+        } finally {
+            convo.close()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun term_turn_boundary_preserves_only_the_exact_pending_prompt_grant() = runBlocking {
+        if (win()) return@runBlocking
+        checkPendingGrantAcrossExit(afterEof = "exec sleep 30", cleanTerm = true)
+    }
+
+    @Test
+    fun self_exit_143_revokes_the_pending_prompt_grant_before_restart() = runBlocking {
+        if (win()) return@runBlocking
+        checkPendingGrantAcrossExit(afterEof = "exit 143", cleanTerm = false)
+    }
+
+    private suspend fun checkPendingGrantAcrossExit(afterEof: String, cleanTerm: Boolean) {
+        val frames = CopyOnWriteArrayList<Frame>()
+        val scope = CoroutineScope(Dispatchers.Default)
+        val backend = GrantBoundaryOneShotBackend(afterEof)
+        val approvals = ApprovalCoordinator(scope)
+        val convoId = "cGrantExit"
+        val convo = Conversation(
+            convoId, Files.createTempDirectory("ccp-grant-exit"), PermissionMode.DEFAULT,
+            { frames += it }, scope, backend, approvals = approvals, origin = "feishu-bot",
+        )
+        suspend fun denyAsk(id: String) {
+            await { frames.any { it is PermissionAsk && it.askId == id } }
+            assertFalse(backend.responses.any { it == id to true }, backend.responses.toString())
+            assertTrue(approvals.onVerdict(PermissionVerdict(convoId, id, Decision.DENY)))
+            await { backend.responses.any { it == id to false } }
+        }
+        try {
+            convo.open(resumeId = null, model = null)
+            assertTrue(convo.sendTrustedBridgePrompt("request A", promptId = "a"))
+            await { frames.any { it is TurnDone } }
+            assertTrue(convo.sendTrustedBridgePrompt("request B", promptId = "b"))
+            backend.releaseLateA.complete(Unit)
+            denyAsk("late-a")
+            backend.releaseShutdown.complete(Unit)
+
+            if (!cleanTerm) {
+                await { frames.any { it is PocketError && it.code == "process_exited" } }
+                assertTrue(frames.any { it is PocketError && "exit 143" in it.message }, frames.toString())
+                assertEquals(1, backend.specs.size, "an abnormal exit must not automatically resume B")
+                // Resume the existing ledger without giving B a fresh trusted grant.
+                convo.sendPrompt("wake", promptId = "wake")
+            }
+            denyAsk("before-b")
+            assertEquals(2, backend.specs.size)
+            assertEquals("grant-session", backend.specs[1].resumeId)
+            assertEquals(2, backend.sends.count { it == "request B" }, "B must be re-injected into the fresh process")
+            assertEquals(PromptFate.PENDING, convo.promptFate("b"), "an unrelated replay cannot consume B")
+            backend.releaseReplayB.complete(Unit)
+
+            if (cleanTerm) {
+                await { backend.responses.any { it == "control-b" to true } }
+                assertFalse(frames.any { it is PermissionAsk && it.askId == "control-b" }, frames.toString())
+                assertFalse(frames.any { it is PocketError }, frames.toString())
+            } else {
+                denyAsk("control-b")
+            }
+            assertEquals(PromptFate.CONSUMED, convo.promptFate("b"))
+            assertEquals(1, frames.count { it is PromptAck && it.promptId == "b" })
+            assertEquals(
+                listOf("late-a" to false, "before-b" to false, "control-b" to cleanTerm),
+                backend.responses.toList(),
+            )
+        } finally {
+            backend.releaseLateA.complete(Unit)
+            backend.releaseShutdown.complete(Unit)
+            backend.releaseReplayB.complete(Unit)
             convo.close()
             scope.cancel()
         }
