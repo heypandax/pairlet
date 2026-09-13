@@ -801,8 +801,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  by #31; project rows consume DirectoryEntry.sessionAgents as of issue #188. */
     val agentFilter = mutableStateOf(parseAgentFilter(SecureStore.getString(K_AGENT_FILTER)))
 
-    /** Projects screen: tree (drill-down) vs flat. Persisted (default tree). */
-    val treeView = mutableStateOf(SecureStore.getString(K_VIEW_MODE) != "flat")
+    /** Projects screen: tree (drill-down) vs flat. Persisted (default flat). */
+    val treeView = mutableStateOf(SecureStore.getString(K_VIEW_MODE) == "tree")
 
     /** Chat text scale (FONT_SCALE_MIN..MAX), persisted. 1.0 = the design's default sizes; bumped for eye comfort
      *  on small screens (issue #8). Threaded into every message via LocalFontScale. */
