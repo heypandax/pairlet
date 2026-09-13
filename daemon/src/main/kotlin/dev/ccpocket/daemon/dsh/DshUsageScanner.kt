@@ -29,7 +29,7 @@ import kotlin.io.path.getLastModifiedTime
  * so has no place in a session LIST. Usage is a different question — a sub-agent burns real tokens on the
  * user's account, so leaving those sessions out would under-report spend. We therefore walk the store
  * ourselves ([DshPaths.projectDirs] → [DshPaths.sessionDirs] → [DshPaths.transcriptFile]) and keep only
- * the `version != 0` guard.
+ * the supported-generation guard.
  *
  * Defensiveness follows [dev.ccpocket.daemon.kimi.KimiUsageScanner]: every token category tries a list of
  * plausible key spellings and takes the FIRST PRESENT one (never a sum — two spellings of one number must
@@ -92,7 +92,7 @@ object DshUsageScanner {
         for (raw in lines) {
             lineNo += 1
             if (DshTranscript.EVENT_ASSISTANT !in raw) continue // cheap prefilter before JSON parse
-            val root = DshTranscript.parseLine(raw) ?: continue
+            val root = DshTranscript.parseRecord(raw, header.version) ?: continue
             if (root.str("type") != DshTranscript.EVENT_ASSISTANT) continue
             val data = root.obj("data") ?: continue
             // `usage` is a sibling of `message` under `data`; the record object itself is the fallback so a

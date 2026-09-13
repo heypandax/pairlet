@@ -91,10 +91,16 @@ class DshTranscriptScannerTest {
     }
 
     @Test
-    fun sessions_in_an_unknown_format_version_are_skipped_entirely() {
+    fun sessions_in_an_unknown_format_stay_visible_with_a_diagnostic() {
         val root = store()
-        session(root, "/work/alpha", "session-future", version = 1, events = userMsg("x", 1))
-        assertTrue(DshTranscriptScanner.scan("/work/alpha", root).isEmpty())
+        val dir = session(root, "/work/alpha", "session-future", version = 4, events = userMsg("untrusted", 1))
+        Files.move(dir.resolve("session.jsonl.zstd"), dir.resolve("session.v4.jsonl.zstd"))
+        val row = DshTranscriptScanner.scan("/work/alpha", root).single()
+        assertEquals("session-future", row.sessionId)
+        assertTrue(row.title.contains("history unavailable"))
+        assertTrue(row.firstPrompt.contains("unsupported session format v4"))
+        assertEquals(0, row.messageCount)
+        assertNotNull(DshTranscriptScanner.find("session-future", "/work/alpha", root))
     }
 
     @Test

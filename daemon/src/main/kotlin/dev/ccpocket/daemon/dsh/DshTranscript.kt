@@ -27,9 +27,13 @@ import kotlin.io.path.isRegularFile
  *  2. **an incomplete final frame is NORMAL, not corruption** — it means dsh is writing right now. We take
  *     the complete prefix and move on; reporting damage here would make every live session look broken.
  *
- * LOGICAL FORMAT: line 1 is the session header `{"type":"session","version":0,"id":…,"cwd":…}`; every later
- * line is an event `{type, seq, time, data, ignorable?}`. `version != 0` means a format we have never seen
- * — the whole session is skipped rather than guessed at.
+ * LOGICAL FORMAT: line 1 is the session header `{type:"session", version, id, cwd, …}`. Released v0/v1
+ * store scalar events and packed streaming deltas; v2/v3 embed those deltas in the assembled assistant
+ * message. The four conversation event payloads retain their shapes. We render the human transcript,
+ * not a migrated model context, and never write or migrate DSH's persistence files.
+ *
+ * Source: deepseek-harness tag dsh-v0.1.5-rc.1, session-format-v0-to-v1 / v1-to-v2 / v2-to-v3 and
+ * session/src/types.ts. Unknown generations and filename/header disagreement are refused (#376).
  *
  * Parsing is defensive throughout: an unparseable line yields no row instead of an exception, because the
  * tail of a live transcript is expected to be ragged.
@@ -38,8 +42,8 @@ object DshTranscript {
     private val log = logger("DshTranscript")
     internal val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    /** The only session-file format version this build understands. */
-    const val SUPPORTED_VERSION = 0L
+    /** Latest format whose human-transcript payloads this build has verified, plus all predecessors. */
+    const val SUPPORTED_VERSION = 3L
 
     /** Hard ceiling on decompressed bytes we will hold for one session — a runaway/hostile file must not
      *  be able to exhaust the daemon heap just by being listed. */
@@ -51,8 +55,13 @@ object DshTranscript {
     /** Budget for a header-only read (the first record of the first frame). */
     private const val HEADER_BYTES = 256L * 1024
 
-    /** Per-line clip before JSON parse (same guard as the Claude/Kimi replays, issue #81). */
+    /** Per-line admission limit before JSON parse (same guard as the legacy replays, issue #81). */
     private const val MAX_LINE_CHARS = 200_000
+
+    /** v2/v3 embed the complete provider stream in one assistant row; a small visible reply can have
+     * a much larger physical row. Keep a separate bounded record budget instead of clipping its JSON
+     * at the legacy delta-row limit and losing the assembled message. */
+    private const val MAX_EMBEDDED_LINE_CHARS = 8 * 1024 * 1024
 
     /** The session header line. [cwd] is the ONLY trustworthy cwd for a session — the containing
      *  directory name is a lossy, colliding normalization (see [DshPaths.projectKey]). */
@@ -64,6 +73,7 @@ object DshTranscript {
         val origin: String?,
         val parentSession: String?,
         val delegationDepth: Long,
+        val filenameVersion: Long? = null,
     ) {
         /**
          * A session some agent spawned rather than the user — internal machinery that must not reach the
@@ -77,7 +87,8 @@ object DshTranscript {
          */
         val isSubagent: Boolean get() =
             origin == "subagent" || parentSession != null || delegationDepth > 0
-        val isSupported: Boolean get() = version == SUPPORTED_VERSION
+        val isSupported: Boolean get() = version in 0..SUPPORTED_VERSION &&
+            (filenameVersion == null || filenameVersion == version)
     }
 
     /**
@@ -166,9 +177,9 @@ object DshTranscript {
 
     /** Parse the header (first line). Null when the file is empty/unreadable or the first line is not a
      *  `type:"session"` record — both mean "not a transcript we can speak for". */
-    fun header(file: Path): Header? = headerOf(headerLine(file))
+    fun header(file: Path): Header? = headerOf(headerLine(file), DshPaths.transcriptVersion(file.fileName.toString()))
 
-    internal fun headerOf(firstLine: String?): Header? {
+    internal fun headerOf(firstLine: String?, filenameVersion: Long? = null): Header? {
         val root = parseLine(firstLine ?: return null) ?: return null
         if (root.str("type") != "session") return null
         val id = root.str("id") ?: return null
@@ -182,10 +193,24 @@ object DshTranscript {
             version = root.long("version") ?: -1L,
             origin = root.str("origin"),
             parentSession = root.str("parentSession"),
-            // absent reads as 0 (a root session): the field is formally required upstream, but a header
-            // that omits it must not make every session look derived — filtering is fail-open here
+            // Absent means a root session; current V3 metadata explicitly makes this field optional.
             delegationDepth = root.long("delegationDepth") ?: 0L,
+            filenameVersion = filenameVersion,
         )
+    }
+
+    /** Safe, user-visible reason for refusing the selected generation. Never reads an older copy. */
+    internal fun formatProblem(file: Path, header: Header?): String? {
+        val filenameVersion = DshPaths.transcriptVersion(file.fileName.toString())
+        val reason = when {
+            header == null -> "the session header is missing or unreadable"
+            filenameVersion != null && filenameVersion != header.version ->
+                "the filename declares format v$filenameVersion but the header declares v${header.version}"
+            header.version !in 0..SUPPORTED_VERSION ->
+                "unsupported session format v${header.version} (this Pairlet build supports v0–v$SUPPORTED_VERSION)"
+            else -> return null
+        }
+        return "DSH history unavailable: $reason. Older transcript copies were not used."
     }
 
     /**
@@ -198,11 +223,12 @@ object DshTranscript {
      * substring hit on the event name. Null when the transcript has no title event at all.
      */
     fun lastTitle(file: Path): String? {
+        val header = header(file)?.takeIf { it.isSupported } ?: return null
         var title: String? = null
         val needle = "\"$EVENT_TITLE\""
         forEachLine(file, MAX_DECOMPRESSED_BYTES) { line ->
             if (needle !in line) return@forEachLine
-            val root = parseLine(line) ?: return@forEachLine
+            val root = parseRecord(line, header.version) ?: return@forEachLine
             if (root.str("type") != EVENT_TITLE) return@forEachLine
             root.obj("data")?.str("title")?.takeIf { it.isNotBlank() }?.let { title = it }
         }
@@ -239,12 +265,13 @@ object DshTranscript {
      * is only JSON-parsed after a plain substring hit on one of the three event names.
      */
     fun resumeMeta(file: Path): ResumeMeta {
+        val header = header(file)?.takeIf { it.isSupported } ?: return ResumeMeta.EMPTY
         var model: String? = null
         var window: Long? = null
         var effort: String? = null
         forEachLine(file, MAX_DECOMPRESSED_BYTES) { line ->
             if (META_NEEDLES.none { it in line }) return@forEachLine
-            val root = parseLine(line) ?: return@forEachLine
+            val root = parseRecord(line, header.version) ?: return@forEachLine
             // dsh's own "this record carries no meaning" marker — the live path drops these too
             if (root["ignorable"]?.toString() == "true") return@forEachLine
             val data = root.obj("data") ?: return@forEachLine
@@ -314,11 +341,13 @@ object DshTranscript {
     fun title(lines: List<String>): String? {
         var title: String? = null
         var firstUser: String? = null
+        val version = headerOf(lines.firstOrNull())?.version ?: 0L
         for (line in lines) {
-            val root = parseLine(line) ?: continue
+            val root = parseRecord(line, version) ?: continue
+            if (root["ignorable"]?.toString() == "true") continue
             when (root.str("type")) {
                 EVENT_TITLE -> root.obj("data")?.str("title")?.takeIf { it.isNotBlank() }?.let { title = it }
-                EVENT_USER -> if (firstUser == null) {
+                EVENT_USER -> if (firstUser == null && messagePlacement(root, version) == MessagePlacement.APPEND) {
                     firstUser = messageText(root.obj("data"))?.takeIf { it.isNotBlank() }
                 }
             }
@@ -327,16 +356,42 @@ object DshTranscript {
     }
 
     /** Count of user turns — the session list's `messageCount`. */
-    fun countUserMessages(lines: List<String>): Int =
-        lines.count { parseLine(it)?.str("type") == EVENT_USER }
+    fun countUserMessages(lines: List<String>): Int {
+        val version = headerOf(lines.firstOrNull())?.version ?: 0L
+        return lines.count {
+            val root = parseRecord(it, version)
+            root?.str("type") == EVENT_USER && root["ignorable"]?.toString() != "true" &&
+                messagePlacement(root, version) == MessagePlacement.APPEND
+        }
+    }
+
+    internal enum class MessagePlacement { APPEND, REPLACEMENT, INVALID }
+
+    /**
+     * Upstream's isAppendSurfaceEvent contract: human history keeps append-origin messages, while
+     * compaction replacements are model-only copies. Their inclusive endpoints changed from
+     * start/end in v0–v2 to startSeq/endSeq in v3. Legacy v0/v1 keep our existing absent-marker tolerance.
+     */
+    internal fun messagePlacement(root: JsonObject, version: Long): MessagePlacement {
+        val placement = root["surfaceOp"] ?: return if (version <= 1) MessagePlacement.APPEND else MessagePlacement.INVALID
+        if ((placement as? JsonPrimitive)?.contentOrNull == "append") return MessagePlacement.APPEND
+        val replacement = placement as? JsonObject ?: return MessagePlacement.INVALID
+        val start = replacement.long(if (version >= 3) "startSeq" else "start")
+        val end = replacement.long(if (version >= 3) "endSeq" else "end")
+        return if (replacement.str("op") == "replace" && start != null && start >= 0 && end != null && end >= 0) {
+            MessagePlacement.REPLACEMENT
+        } else MessagePlacement.INVALID
+    }
 
     // ---- shared line helpers ----
 
-    internal fun parseLine(raw: String): JsonObject? {
+    internal fun parseRecord(raw: String, version: Long): JsonObject? =
+        parseLine(raw, if (version in 2..SUPPORTED_VERSION) MAX_EMBEDDED_LINE_CHARS else MAX_LINE_CHARS)
+
+    internal fun parseLine(raw: String, maxChars: Int = MAX_LINE_CHARS): JsonObject? {
         val line = raw.trim()
-        if (line.isEmpty() || line[0] != '{') return null
-        val clipped = if (line.length > MAX_LINE_CHARS) line.take(MAX_LINE_CHARS) else line
-        return runCatching { json.parseToJsonElement(clipped) }.getOrNull() as? JsonObject
+        if (line.isEmpty() || line[0] != '{' || line.length > maxChars) return null
+        return runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject
     }
 
     /**

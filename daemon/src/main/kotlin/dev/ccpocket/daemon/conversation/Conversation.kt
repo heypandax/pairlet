@@ -983,8 +983,8 @@ class Conversation(
                 // and an empty non-delta ConvoHistory means /clear to it. A DELTA goes to the OPENER's
                 // sink only (it continues that client's cursor); the full window keeps the fan-out.
                 val slice = clipToRewind(backend.replaySlice(workdir.toString(), resumeId, sinceSeq))
-                if (slice.messages.isNotEmpty()) (if (slice.delta) openerSink else sink).emit(historyFrame(slice))
-                openerSink.completeInitialHistory(convoId, slice.messages.size, slice.messages.isNotEmpty(), slice.quality, slice.sourceRows, slice.failedRows)
+                val emitted = emitHistory(slice, if (slice.delta) openerSink else sink, errorTo = openerSink)
+                openerSink.completeInitialHistory(convoId, if (emitted) slice.messages.size else 0, emitted, slice.quality, slice.sourceRows, slice.failedRows)
                 replayWorkflowRuns(resumeId, sink)
             } else openerSink.completeInitialHistory(convoId, quality = "not_required")
             emitCommands()
@@ -1016,12 +1016,34 @@ class Conversation(
         lastSeq = slice.lastSeq, firstSeq = slice.firstSeq, delta = slice.delta, hasMore = slice.hasMore,
     )
 
+    /** Read failures must never masquerade as replacement history (or as a failed model reply).
+     * PocketError is understood by older clients and preserves the transcript they already hold. */
+    private suspend fun emitHistory(
+        slice: dev.ccpocket.daemon.disk.ReplaySlice,
+        to: OutboundSink,
+        errorTo: OutboundSink = to,
+    ): Boolean {
+        slice.readError?.let {
+            errorTo.emit(PocketError("history_unavailable", it, convoId))
+            return false
+        }
+        if (slice.messages.isEmpty()) return false
+        to.emit(historyFrame(slice))
+        return true
+    }
+
     /** The phone scrolled to the top of its first-screen window — serve one page of OLDER history
      *  (issue #147). Answered to the REQUESTING sink only: other attached clients didn't ask and
      *  would prepend rows they may already hold. */
     suspend fun fetchHistoryPage(beforeSeq: Long, limit: Int, to: OutboundSink) {
         val sid = sessionId ?: openedResumeId ?: return
         val slice = backend.replayPage(workdir.toString(), sid, beforeSeq, limit.coerceIn(1, 200))
+        slice.readError?.let {
+            // Complete the outstanding page request without replacing/prepending any chat rows.
+            to.emit(ConvoHistoryPage(convoId, emptyList(), hasMore = false))
+            to.emit(PocketError("history_unavailable", it, convoId))
+            return
+        }
         to.emit(ConvoHistoryPage(convoId, slice.messages, firstSeq = slice.firstSeq, hasMore = slice.hasMore))
     }
 
@@ -1825,7 +1847,7 @@ class Conversation(
                             pendingResumeId?.let { rid ->
                                 pendingResumeId = null
                                 val slice = backend.replaySlice(workdir.toString(), rid)
-                                if (slice.messages.isNotEmpty()) sink.emit(historyFrame(slice))
+                                emitHistory(slice, sink)
                             }
                         } else if (reemitLive && sessionId != null) {
                             reemitLive = false // mode switch relaunch landed — refresh the phone's sessionId
@@ -2272,8 +2294,8 @@ class Conversation(
         newSink.emit(live(sid))
         if (sid != null) {
             val slice = backend.replaySlice(workdir.toString(), sid, sinceSeq)
-            if (slice.messages.isNotEmpty()) newSink.emit(historyFrame(slice))
-            newSink.completeInitialHistory(convoId, slice.messages.size, slice.messages.isNotEmpty(), slice.quality, slice.sourceRows, slice.failedRows)
+            val emitted = emitHistory(slice, newSink)
+            newSink.completeInitialHistory(convoId, if (emitted) slice.messages.size else 0, emitted, slice.quality, slice.sourceRows, slice.failedRows)
         } else newSink.completeInitialHistory(convoId, quality = "not_required")
         emitCommands()
         newSink.emit(BackgroundJobs(convoId, jobs.snapshot())) // a re-opened live session re-shows its running jobs

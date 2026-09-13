@@ -113,6 +113,52 @@ class DshBackendAcpTest {
     }
 
     @Test
+    fun `a fresh session explains Web grouping once without settling a turn or selecting a preset`() = runBlocking {
+        val w = mutableListOf<String>()
+        val events = mutableListOf<AgentEvent>()
+        val b = ready(w, events, spec = AgentSpec(Path.of("/repo"), agentPreset = "shell", mode = PermissionMode.DEFAULT))
+        try {
+            val notice = events.filterIsInstance<AgentEvent.AssistantText>().single().text
+            assertTrue(notice.contains("Ungrouped in DSH Web"))
+            assertTrue(notice.contains("create the session in DSH Web"))
+            assertTrue(notice.contains("continue it from Pairlet history"))
+            assertTrue(notice.endsWith("\n\n"), "keep the following model reply separate from the notice")
+            assertTrue(events.none { it is AgentEvent.TurnResult }, "a grouping notice does not finish a turn")
+            val request = Json.parseToJsonElement(w.single { "\"method\":\"session/new\"" in it }).jsonObject
+            assertEquals(setOf("cwd", "mcpServers"), request.getValue("params").jsonObject.keys)
+
+            val duplicate = b.parse(
+                """{"jsonrpc":"2.0","id":2,"result":{"sessionId":"$SESSION","configOptions":$configOptions}}""",
+            )
+            assertTrue(duplicate.none { it is AgentEvent.AssistantText && "Ungrouped" in it.text })
+            assertTrue(duplicate.none { it is AgentEvent.TurnResult })
+        } finally { b.onProcessEnded(SESSION) }
+    }
+
+    @Test
+    fun `failed or missing-id session creation never claims Web grouping`() = runBlocking {
+        val responses = listOf(
+            """{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"creation failed"}}""",
+            """{"jsonrpc":"2.0","id":2,"result":{"configOptions":$configOptions}}""",
+        )
+        for (response in responses) {
+            val w = mutableListOf<String>()
+            val injected = mutableListOf<String>()
+            val b = DshBackend(null)
+            try {
+                b.attach(
+                    AgentIo(writeLine = { w += it }, emit = {}, inject = { injected += it }),
+                    AgentSpec(Path.of("/repo"), mode = PermissionMode.DEFAULT),
+                )
+                b.parse("""{"jsonrpc":"2.0","id":1,"result":$NO_CAPABILITIES}""")
+                val events = b.parse(response)
+                assertTrue(events.none { it is AgentEvent.AssistantText && "Ungrouped" in it.text })
+                assertTrue(injected.none { "Ungrouped" in it })
+            } finally { b.onProcessEnded(null) }
+        }
+    }
+
+    @Test
     fun `a resume opens the recorded session instead of creating one`() = runBlocking<Unit> {
         val w = mutableListOf<String>()
         val b = DshBackend(null)
@@ -127,6 +173,8 @@ class DshBackendAcpTest {
         // session/resume answers WITHOUT a sessionId — the id we sent is the session.
         val events = b.parse("""{"jsonrpc":"2.0","id":2,"result":{"configOptions":$configOptions}}""")
         assertEquals("old-session", assertIs<AgentEvent.SessionInit>(events.first()).sessionId)
+        assertTrue(events.none { it is AgentEvent.AssistantText && "Ungrouped" in it.text })
+        assertTrue(events.none { it is AgentEvent.TurnResult }, "resuming does not produce a grouping turn")
     }
 
     /**

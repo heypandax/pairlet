@@ -213,7 +213,7 @@ class DshBackend(
         this.launchEffort = spec.effort
         spec.agentPreset?.takeIf { it.isNotBlank() }?.let {
             // The ACP surface has no agent-preset axis; announcing one we cannot select would be a lie in
-            // the session header. Dropped loudly in the log, silently on the wire.
+            // the session header. Creation explains the Web grouping limitation separately.
             log.info("dsh agent preset '$it' ignored — the ACP profile exposes no preset selection")
         }
         // reset per-process protocol state (runs on EVERY (re)launch)
@@ -366,12 +366,16 @@ class DshBackend(
             io?.inject?.invoke(syntheticError("dsh did not return a session id"))
             return emptyList()
         }
+        // Only a successful fresh creation needs this notice. Keeping the pre-assignment state also
+        // avoids repeating it if the same session/new response is delivered twice.
+        val showGroupingNotice = resumeId == null && sessionId == null
         options = DshConfigOptions.parse(result?.arr("configOptions"))
         catalog.publish(this, options)
         sessionId = sid
         val events = listOfNotNull(
             AgentEvent.SessionInit(sessionId = sid, cwd = workdir, model = options.currentModel),
             runtimeMeta(model = options.currentModel, effort = options.currentEffort),
+            if (showGroupingNotice) AgentEvent.AssistantText(UNGROUPED_NOTICE) else null,
         )
         // Model/effort BEFORE the prompt gate opens: running the opening turn on the previous model and
         // correcting it afterwards would bill the user for a model they did not pick. Each write is a
@@ -877,6 +881,10 @@ class DshBackend(
     private companion object {
         /** ACP v1. dsh answers `protocolVersion: 1` (probe 0.1.2-rc.1). */
         const val ACP_PROTOCOL_VERSION = 1
+
+        /** ACP creates with cwd metadata only; no preset is selected or written by Pairlet (#376). */
+        const val UNGROUPED_NOTICE = "This session appears under Ungrouped in DSH Web. " +
+            "To use a preset group, create the session in DSH Web, then continue it from Pairlet history.\n\n"
 
         /** Namespaced so they can never collide with a real dsh frame. */
         const val SYNTHETIC_ERROR = "cc-pocket/dsh-error"

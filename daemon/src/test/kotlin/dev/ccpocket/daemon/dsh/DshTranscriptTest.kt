@@ -123,7 +123,7 @@ class DshTranscriptTest {
 
     @Test
     fun an_unsupported_format_version_is_refused_rather_than_guessed_at() {
-        val file = writeFrames(tmp(), header(version = 1), userMsg("x", 1))
+        val file = writeFrames(tmp(), header(version = 4), userMsg("x", 1))
         assertEquals(false, DshTranscript.header(file)?.isSupported)
     }
 

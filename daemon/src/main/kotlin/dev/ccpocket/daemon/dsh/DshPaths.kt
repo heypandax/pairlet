@@ -12,7 +12,8 @@ import kotlin.io.path.listDirectoryEntries
  * ~/.dsh/sessions/                       # or $DSH_HOME/sessions
  * └── --<normalized-cwd>--/              # LOSSY project key; `_no-cwd` when the session had no cwd
  *     └── <encoded-session-id>/
- *         ├── session.jsonl.zstd         # concatenated multi-frame zstd (or session.jsonl uncompressed)
+ *         ├── session.v3.jsonl.zstd      # current generation; .jsonl when compression is disabled
+ *         ├── session.jsonl.zstd         # immutable legacy generation, possibly still present
  *         ├── *.tmp / .dsh-mkdir-*       # sidecars — skip
  *         └── *.lock                     # never touched
  * ```
@@ -139,17 +140,31 @@ object DshPaths {
         runCatching { projectDir.listDirectoryEntries().filter { it.isDirectory() } }.getOrDefault(emptyList())
 
     /**
-     * The transcript file inside a session dir: the zstd form is authoritative, with the uncompressed
-     * `session.jsonl` accepted as a fallback (dsh writes it when compression is disabled). Null when the
-     * directory holds neither — e.g. a half-created dir that only has its `.dsh-mkdir-*` sentinel.
+     * Select the numerically highest canonical generation, including versions we cannot read yet.
+     * DSH retains immutable predecessors after migration: falling back to one would present an old
+     * conversation as current (#376). The reader must diagnose the selected file instead.
+     *
+     * Both encodings are accepted. For a same-generation tie retain the existing zstd preference;
+     * a newer plain generation still wins over an older compressed one. Sidecars are never candidates.
      */
-    fun transcriptFile(sessionDir: Path): Path? {
-        val zstd = sessionDir.resolve("session.jsonl.zstd")
-        if (zstd.isRegularFile()) return zstd
-        val plain = sessionDir.resolve("session.jsonl")
-        if (plain.isRegularFile()) return plain
-        return null
+    fun transcriptFile(sessionDir: Path): Path? = runCatching {
+        sessionDir.listDirectoryEntries().mapNotNull { file ->
+            val version = transcriptVersion(file.fileName.toString()) ?: return@mapNotNull null
+            if (file.isRegularFile()) file to version else null
+        }.maxWithOrNull(compareBy<Pair<Path, Long>> { it.second }
+            .thenBy { it.first.fileName.toString().endsWith(".zstd") })?.first
+    }.getOrNull()
+
+    /** Official session-format filename grammar, including its JS safe-integer bound (DSH 0.1.5).
+     * `session.v0`, leading zeros, uppercase and temporary names are not canonical generations. */
+    internal fun transcriptVersion(name: String): Long? {
+        val match = TRANSCRIPT_NAME.matchEntire(name) ?: return null
+        val digits = match.groupValues[1]
+        if (digits.isEmpty()) return 0L
+        return digits.toLongOrNull()?.takeIf { it <= 9_007_199_254_740_991L }
     }
+
+    private val TRANSCRIPT_NAME = Regex("session(?:\\.v([1-9][0-9]*))?\\.jsonl(?:\\.zstd)?")
 
     /** True for sidecars that must never be parsed as a transcript. */
     fun isSidecar(name: String): Boolean =

@@ -15,10 +15,9 @@ import kotlin.io.path.getLastModifiedTime
  * look in FIRST; membership is always decided by the header's verbatim `cwd`, compared with
  * [ProjectPaths.canonicalKey] like every other backend's cross-source match.
  *
- * Two whole classes of session are filtered out:
- *  - `version != 0` — a format this build has never seen; guessing at it would surface garbage rows.
- *  - `origin == "subagent"` — dsh records each sub-agent's own session; those are internal machinery,
- *    not chats the user started (the same rule ZCode's scanner applies).
+ * Subagent sessions remain hidden. A readable header in an unsupported generation stays discoverable
+ * with an explicit diagnostic; the selected generation must never silently disappear or fall back to
+ * an immutable predecessor. Its event body is not interpreted.
  */
 object DshTranscriptScanner {
     /** A transcript written within this window counts as a live session for the list's dot. */
@@ -54,7 +53,6 @@ object DshTranscriptScanner {
         val dir = DshPaths.findSessionDir(sessionId, cwdHint, root) ?: return null
         val file = DshPaths.transcriptFile(dir) ?: return null
         val header = DshTranscript.header(file) ?: return null
-        if (!header.isSupported) return null
         return Found(header, dir, file, mtimeOf(file))
     }
 
@@ -88,8 +86,7 @@ object DshTranscriptScanner {
     private fun read(dir: Path): Found? {
         val file = DshPaths.transcriptFile(dir) ?: return null
         val header = DshTranscript.header(file) ?: return null
-        // unknown format version, or a sub-agent's internal session — neither belongs in a user's list
-        if (!header.isSupported || header.isSubagent) return null
+        if (header.isSubagent) return null
         return Found(header, dir, file, mtimeOf(file))
     }
 
@@ -115,14 +112,26 @@ object DshTranscriptScanner {
     }
 
     private fun summarize(found: Found): SessionSummary {
+        DshTranscript.formatProblem(found.file, found.header)?.let { problem ->
+            return SessionSummary(
+                sessionId = found.header.id,
+                title = "DSH history unavailable (format v${found.header.version})",
+                firstPrompt = problem,
+                messageCount = 0,
+                cwd = found.header.cwd.orEmpty(),
+                lastModified = found.mtime,
+                agent = AgentKind.DSH,
+            )
+        }
         // Bounded read for everything BUT the title: header, opening user turn and the message count all
         // live near the top, so the list never materializes a long chat. The title alone must consider
         // the whole file (renames append; see [fullTitle]) — done as a cached O(1)-memory stream.
         val lines = runCatching { DshTranscript.summaryLines(found.file) }.getOrDefault(emptyList())
         val title = fullTitle(found) ?: runCatching { DshTranscript.title(lines) }.getOrNull()
         val firstPrompt = lines.asSequence()
-            .mapNotNull { DshTranscript.parseLine(it) }
-            .firstOrNull { it.str("type") == DshTranscript.EVENT_USER }
+            .mapNotNull { DshTranscript.parseRecord(it, found.header.version) }
+            .firstOrNull { it.str("type") == DshTranscript.EVENT_USER && it["ignorable"]?.toString() != "true" &&
+                DshTranscript.messagePlacement(it, found.header.version) == DshTranscript.MessagePlacement.APPEND }
             ?.let { DshTranscript.messageText(it.obj("data")) }
             .orEmpty()
         return SessionSummary(

@@ -5,8 +5,9 @@ import dev.ccpocket.protocol.HistoryMessage
 /**
  * One transcript-replay answer with its cursor metadata (issue #147 incremental reattach).
  *
- * [lastSeq] is the transcript CURSOR at read time — the 1-based count of source `.jsonl` lines the
- * parse consumed. It is stable because both agents' transcripts are append-only: a later read of the
+ * [lastSeq] is an opaque transcript CURSOR at read time. Most backends use the 1-based count of source
+ * `.jsonl` lines; DSH also encodes its persistence generation to invalidate pre-migration cursors.
+ * Within one generation it is stable because transcripts are append-only: a later read of the
  * same session sees the same rows at the same line numbers, plus new ones after the cursor. The
  * client echoes it back as `OpenSession.lastEventSeq`; a cursor that no longer fits the file (the
  * file shrank: /clear-style rewrite, a different session) falls back to a FULL window.
@@ -17,9 +18,9 @@ import dev.ccpocket.protocol.HistoryMessage
  */
 data class ReplaySlice(
     val messages: List<HistoryMessage>,
-    /** Source line of the first included message — the `beforeSeq` anchor for older-history paging. */
+    /** Cursor of the first included message — the `beforeSeq` anchor for older-history paging. */
     val firstSeq: Long? = null,
-    /** The transcript cursor after this read (source line count) — echo it to get a delta next time. */
+    /** The opaque transcript cursor after this read — echo it to get a delta next time. */
     val lastSeq: Long? = null,
     val delta: Boolean = false,
     /** Rows older than [firstSeq] exist (shed by the count/byte caps or the page bound). */
@@ -28,6 +29,8 @@ data class ReplaySlice(
     val quality: String = "unknown",
     val sourceRows: Long? = null,
     val failedRows: Long? = null,
+    /** Daemon-internal read failure, sent as PocketError rather than replacement conversation history. */
+    val readError: String? = null,
 ) {
     companion object {
         val EMPTY = ReplaySlice(emptyList())
