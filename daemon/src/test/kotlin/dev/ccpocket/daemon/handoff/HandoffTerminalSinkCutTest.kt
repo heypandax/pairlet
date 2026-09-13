@@ -121,6 +121,7 @@ class HandoffTerminalSinkCutTest {
         override fun transcriptDir(workdir: String): Path = Path.of(workdir)
         override fun replayHistory(workdir: String, sessionId: String) = emptyList<HistoryMessage>()
         override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+        override fun resumeTitle(workdir: String, sessionId: String): String = seededTitle(sessionId)
     }
 
     /**
@@ -214,10 +215,13 @@ class HandoffTerminalSinkCutTest {
             }
         }
 
+        // A lazy open first announces a sparse SessionLive, then asynchronously seeds and announces
+        // again. The title identifies the latter: waiting only for convoId lets that second frame
+        // race the recipient baseline/cut. No agent turn (and therefore no TurnDone) exists here.
         suspend fun awaitLive(into: List<Frame>, notConvoId: String? = null): String = withTimeout(15_000) {
             var live: SessionLive? = null
             while (live == null) {
-                live = into.filterIsInstance<SessionLive>().lastOrNull { it.convoId != notConvoId }
+                live = into.filterIsInstance<SessionLive>().lastOrNull { it.convoId != notConvoId && it.title == seededTitle(it.sessionId) }
                 if (live == null) delay(20)
             }
             live.convoId
@@ -266,12 +270,26 @@ class HandoffTerminalSinkCutTest {
             return h to convoId
         }
 
-        /** Make the live conversation push one frame to its WHOLE fan-out set — the exact channel the
-         *  leak rides — and wait until the owner has it. Returns the owner's post-ping frame count. */
-        suspend fun fanOutPing(convoId: String, owner: MutableList<Frame>): Int {
-            val before = owner.convoFrames(convoId).size
-            registry.switchMode(SwitchMode(convoId, PermissionMode.PLAN))
-            withTimeout(15_000) { while (owner.convoFrames(convoId).size <= before) delay(20) }
+        /** Push an identifiable NEW SessionLive through the production fan-out. switchMode awaits
+         *  every sink emission, so its return is the broadcast completion barrier, not a frame-count
+         *  poll that an unrelated initial announce could satisfy. Before a cut, require the recipient
+         *  to have the very same broadcast as the owner; afterwards require only the owner's receipt. */
+        suspend fun fanOutPing(
+            convoId: String,
+            owner: MutableList<Frame>,
+            recipient: List<Frame>? = null,
+        ): Int {
+            val before = owner.size
+            val previousMode = owner.filterIsInstance<SessionLive>().last { it.convoId == convoId }.mode
+            val mode = if (previousMode == PermissionMode.PLAN) PermissionMode.DEFAULT else PermissionMode.PLAN
+            registry.switchMode(SwitchMode(convoId, mode))
+            val ping = assertNotNull(
+                owner.drop(before).filterIsInstance<SessionLive>().lastOrNull { it.convoId == convoId && it.mode == mode },
+                "the owner must receive this mode broadcast before switchMode returns",
+            )
+            if (recipient != null) {
+                assertTrue(recipient.any { it === ping }, "both views must receive the same completed broadcast before the cut")
+            }
             return owner.convoFrames(convoId).size
         }
 
@@ -301,7 +319,7 @@ class HandoffTerminalSinkCutTest {
         val owner = frames(); val frank = frames()
         try {
             val (h, convoId) = fx.handOver(owner, frank)
-            fx.fanOutPing(convoId, owner)
+            fx.fanOutPing(convoId, owner, frank)
             val frankBefore = frank.convoFrames(convoId).size
             assertTrue(frankBefore > 0, "the recipient really was streaming this conversation before the transition")
 
@@ -431,14 +449,14 @@ class HandoffTerminalSinkCutTest {
             val (hA, convoA) = fx.handOver(ownerA, frank, sessionId = Fixture.SESSION_A)
             val (_, convoB) = fx.handOver(ownerB, frank, sessionId = Fixture.SESSION_B)
             assertNotEquals(convoA, convoB)
-            fx.fanOutPing(convoA, ownerA); fx.fanOutPing(convoB, ownerB)
+            fx.fanOutPing(convoA, ownerA, frank); fx.fanOutPing(convoB, ownerB, frank)
             val frankA = frank.convoFrames(convoA).size
             val frankB = frank.convoFrames(convoB).size
             assertTrue(frankA > 0 && frankB > 0, "the recipient is streaming BOTH reviews")
 
             fx.routeAsCollaborator(ReturnHandoff(hA.id), Fixture.FRANK, frank)
 
-            fx.fanOutPing(convoA, ownerA); fx.fanOutPing(convoB, ownerB)
+            fx.fanOutPing(convoA, ownerA); fx.fanOutPing(convoB, ownerB, frank)
             assertEquals(frankA, frank.convoFrames(convoA).size, "the returned session is cut")
             assertTrue(frank.convoFrames(convoB).size > frankB, "the OTHER, still-IN_PROGRESS grant must keep streaming")
         } finally {
@@ -632,6 +650,8 @@ class HandoffTerminalSinkCutTest {
     private fun AssistantChunk.text(): String? = (piece as? StreamPiece.Text)?.text
 
     private companion object {
+        fun seededTitle(sessionId: String?) = "terminal-sink-cut-seeded:$sessionId"
+
         const val REVIEW_TEXT = "the recipients own review"
         const val SECRET_TEXT = "owner only work after the handoff ended"
     }

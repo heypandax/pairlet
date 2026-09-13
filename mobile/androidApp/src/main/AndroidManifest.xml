@@ -17,8 +17,14 @@
              Compose root handles via imePadding() -->
         <!-- One Compose root owns the device's relay links. Deep links and repeated launches
              must enter onNewIntent instead of stacking roots with the same device credentials. -->
+        <!-- Size changes stay in this Activity (#378): a rotation, a split-screen resize or a fold
+             hands Compose a new LocalConfiguration to re-measure against, where a recreated
+             Activity would start a fresh root on the list and drop the open chat, its draft and
+             its scroll position. Size only: density, locale, font scale, dark mode and the rest
+             still recreate the Activity, and process death is not covered. -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">

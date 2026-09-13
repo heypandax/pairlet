@@ -60,8 +60,8 @@
     },
     {
       "path": "protocol/src/commonMain/kotlin/dev/ccpocket/protocol/Messages.kt",
-      "sha256": "55e1f8ee89ebb3341dc4fd512448ec42acf95f79b9b6b11e5c1c7bd6a5dfcc1e",
-      "note": "2026-09-11 observability: optional diagnostic context and connection IDs; capability defaults false. Existing wire names, identity and E2E payload semantics preserved; DiagnosticWireCompatTest covers older peers and malformed metadata."
+      "sha256": "ab4b00c454fedc0c8199d58f06ad8aec41221a9a92feb57f6405ca16bc04a8aa",
+      "note": "2026-09-11 observability: optional diagnostic context and connection IDs; capability defaults false. Existing wire names, identity and E2E payload semantics preserved; DiagnosticWireCompatTest covers older peers and malformed metadata. 2026-09-13 #376: append nullable SessionLive.notice with a null default; null is omitted and legacy clients ignore the optional informational field. Existing frame names, lifecycle fields, identity and E2E semantics remain unchanged. SessionNoticeWireCompatTest covers legacy decoding and null omission; independent wire review passed."
     }
   ],
   "windowsUpgradeCode": "230d5f5e-4c7a-3de9-98ee-6e492cccb7d0"

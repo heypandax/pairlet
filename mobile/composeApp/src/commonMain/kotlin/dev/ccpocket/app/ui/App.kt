@@ -3838,7 +3838,10 @@ private fun MessageItem(
                 )
             }
         }
-        is ChatItem.Sys -> Text(stringResource(Res.string.error_prefix, m.text), color = Tok.danger, fontSize = 12.sp)
+        is ChatItem.Sys -> Text(
+            if (m.isError) stringResource(Res.string.error_prefix, m.text) else m.text,
+            color = if (m.isError) Tok.danger else Tok.tx2, fontSize = 12.sp,
+        )
         is ChatItem.RuleChip -> AllowChip(m.rule)
         // approval design M2 §9.6: grant-covered auto-run — light audit chip with the 收紧 affordance
         is ChatItem.AutoRun -> AutoRunChip(m) { onTightenAutoRun(m) }

@@ -70,6 +70,7 @@ class ConversationRuntimeMetaTest {
         override suspend fun parse(line: String): List<AgentEvent> = when (line.trim()) {
             // dsh's init is synthetic and carries no model — exactly the shape that left the header on "default"
             "init" -> listOf(AgentEvent.SessionInit(SID, "/tmp", model = null))
+            "init-notice" -> listOf(AgentEvent.SessionInit(SID, "/tmp", model = null, notice = "Ungrouped in DSH Web"))
             "meta" -> listOf(AgentEvent.RuntimeMeta(model = MODEL, effort = "high", contextWindow = 1_000_000))
             // a DIFFERENT window: the terminator the duplicate-suppression assertion counts up to
             "narrow" -> listOf(AgentEvent.RuntimeMeta(contextWindow = 200_000))
@@ -96,6 +97,7 @@ class ConversationRuntimeMetaTest {
         lines: List<String>,
         openModel: String?,
         until: (List<Frame>) -> Boolean,
+        verifyFrames: (List<Frame>) -> Unit = {},
         body: (List<SessionLive>) -> Unit,
     ) = runBlocking {
         val script = Files.createTempDirectory("ccp-meta-fx").resolve("stream.txt")
@@ -112,10 +114,36 @@ class ConversationRuntimeMetaTest {
             convo.open(resumeId = null, model = openModel)
             convo.sendPrompt("go") // lazy start (issue #61): this is what launches the scripted process
             withTimeout(10_000) { while (!until(synchronized(frames) { frames.toList() })) delay(20) }
+            verifyFrames(synchronized(frames) { frames.toList() })
             body(synchronized(frames) { frames.filterIsInstance<SessionLive>() })
         } finally {
             convo.close()
             scope.cancel()
+        }
+    }
+
+    @Test
+    fun session_notice_rides_normal_announcements_without_reply_or_terminal_frames() {
+        if (isWindows()) return
+        var baseline = emptyList<Triple<String?, Boolean?, Long?>>()
+        harness(
+            lines = listOf("init", "init", "narrow"), openModel = null,
+            until = { fs -> fs.any { it is SessionLive && it.contextWindow == 200_000L } },
+        ) { lives -> baseline = lives.map { Triple(it.sessionId, it.executing, it.contextWindow) } }
+        harness(
+            lines = listOf("init-notice", "init-notice", "narrow"), openModel = null,
+            until = { fs -> fs.any { it is SessionLive && it.contextWindow == 200_000L } },
+            verifyFrames = { fs ->
+                kotlin.test.assertFalse(fs.any { it is dev.ccpocket.protocol.AssistantChunk ||
+                    it is dev.ccpocket.protocol.TurnDone || it is dev.ccpocket.protocol.PocketError })
+            },
+        ) { lives ->
+            assertNull(lives.first().notice)
+            assertEquals(baseline, lives.map { Triple(it.sessionId, it.executing, it.contextWindow) },
+                "notice adds no extra announcement or lifecycle edge")
+            val named = lives.filter { it.sessionId == SID }
+            kotlin.test.assertTrue(named.isNotEmpty())
+            kotlin.test.assertTrue(named.all { it.notice == "Ungrouped in DSH Web" })
         }
     }
 

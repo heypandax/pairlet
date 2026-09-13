@@ -111,6 +111,10 @@ object DshTranscriptReplay {
             status.unavailable = true
             Diagnostics.report(ErrorPath.HISTORY_READ, Stage.READ, ErrorCode.READ_FAILED, it)
         }.getOrDefault(emptyList())
+        if (status.unavailable) {
+            return Parsed(emptyList(), lines.size.toLong(), version, "unavailable",
+                readError = "DSH history unavailable: the transcript could not be read or decompressed. Retry after restoring access.")
+        }
         var malformed = 0L
         val out = ArrayList<MutableRow>()
         // issue #291: the two "a human decided something" cards are patched in place when their second

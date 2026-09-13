@@ -105,6 +105,7 @@ import java.util.concurrent.atomic.AtomicLong
 class DshBackend(
     private val dshBin: String?,
     private val catalog: DshCatalog = DshCatalog,
+    private val sessionsRoot: () -> Path = DshPaths::sessionsRoot,
 ) : AgentBackend {
     private val log = logger("DshBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -373,9 +374,9 @@ class DshBackend(
         catalog.publish(this, options)
         sessionId = sid
         val events = listOfNotNull(
-            AgentEvent.SessionInit(sessionId = sid, cwd = workdir, model = options.currentModel),
+            AgentEvent.SessionInit(sessionId = sid, cwd = workdir, model = options.currentModel,
+                notice = if (showGroupingNotice) UNGROUPED_NOTICE else null),
             runtimeMeta(model = options.currentModel, effort = options.currentEffort),
-            if (showGroupingNotice) AgentEvent.AssistantText(UNGROUPED_NOTICE) else null,
         )
         // Model/effort BEFORE the prompt gate opens: running the opening turn on the previous model and
         // correcting it afterwards would bill the user for a model they did not pick. Each write is a
@@ -746,15 +747,21 @@ class DshBackend(
     override fun listSessions(workdir: String): List<SessionSummary> = DshTranscriptScanner.scan(workdir)
 
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =
-        DshTranscriptScanner.find(sessionId, workdir)?.let { DshTranscriptReplay.read(it.file) } ?: emptyList()
+        replaySlice(workdir, sessionId, null).messages
+
+    // Known-session replay must reach the reader even when its header is damaged. Discovery still
+    // requires a trustworthy header/cwd; locating a file by its encoded id does not invent either.
+    private fun replayFile(workdir: String, sessionId: String): Path? =
+        DshPaths.findSessionDir(sessionId, workdir, sessionsRoot())?.let(DshPaths::transcriptFile)
+
+    private fun missingHistory() = ReplaySlice(emptyList(), delta = true, quality = "unavailable",
+        readError = "DSH history unavailable: the session transcript could not be located or read. Retry after restoring access.")
 
     override fun replaySlice(workdir: String, sessionId: String, sinceSeq: Long?): ReplaySlice =
-        DshTranscriptScanner.find(sessionId, workdir)?.let { DshTranscriptReplay.slice(it.file, sinceSeq) }
-            ?: ReplaySlice.EMPTY
+        replayFile(workdir, sessionId)?.let { DshTranscriptReplay.slice(it, sinceSeq) } ?: missingHistory()
 
     override fun replayPage(workdir: String, sessionId: String, beforeSeq: Long, limit: Int): ReplaySlice =
-        DshTranscriptScanner.find(sessionId, workdir)?.let { DshTranscriptReplay.page(it.file, beforeSeq, limit) }
-            ?: ReplaySlice.EMPTY
+        replayFile(workdir, sessionId)?.let { DshTranscriptReplay.page(it, beforeSeq, limit) } ?: missingHistory()
 
     /** The RESUME SEED only — the occupancy a reopened session shows BEFORE its first new turn. Still null:
      *  the LIVE path is wired (`usage_update`), so the readout appears as soon as the session answers once,
@@ -884,7 +891,7 @@ class DshBackend(
 
         /** ACP creates with cwd metadata only; no preset is selected or written by Pairlet (#376). */
         const val UNGROUPED_NOTICE = "This session appears under Ungrouped in DSH Web. " +
-            "To use a preset group, create the session in DSH Web, then continue it from Pairlet history.\n\n"
+            "To use a preset group, create the session in DSH Web, then continue it from Pairlet history."
 
         /** Namespaced so they can never collide with a real dsh frame. */
         const val SYNTHETIC_ERROR = "cc-pocket/dsh-error"

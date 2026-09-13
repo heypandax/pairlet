@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -42,9 +43,12 @@ import org.jetbrains.compose.resources.stringResource
  *    the #226 navigation fence requires an open chat to be torn down when its list is left — so the
  *    left pane returns to Projects and the right pane returns to the placeholder.
  *
- * The threshold is a pure width question, measured once at the root ([WideLayoutScope]) and read as
- * [LocalWideLayout] everywhere else, so a narrow window is byte-for-byte the app that shipped: every
- * wide-only modifier below short-circuits to the identity when the local is false.
+ * The decision is made once at the root ([WideLayoutScope]) and read as [LocalWideLayout] everywhere
+ * else, so a narrow window is byte-for-byte the app that shipped: every wide-only modifier below
+ * short-circuits to the identity when the local is false. It is a device question before it is a
+ * width question (#378): a phone turned sideways is as wide as a small tablet, and splitting it
+ * squeezed the very chat the user had rotated for beside a list nobody asked to keep open. So a phone
+ * never splits, and only a large screen measures its width against [WIDE_LAYOUT_MIN_WIDTH].
  */
 val WIDE_LAYOUT_MIN_WIDTH = 700.dp
 
@@ -63,35 +67,71 @@ val READABLE_MEASURE_MAX = 720.dp
 val SHEET_MEASURE_MAX = 560.dp
 
 /**
- * True when the app window is wide enough for two panes. Default false: a screen mounted on its own
- * (UI tests, [dev.ccpocket.app.showcase] marketing frames) is the phone screen it has always been.
+ * What the app is running on — the half of the two-pane decision a width cannot answer (#378). It comes
+ * from the platform ([platformLayoutDeviceClass]), never from the window's height, which a keyboard shrinks.
+ */
+internal enum class LayoutDeviceClass {
+    /** A handset, a folded foldable included: one column in every orientation — rotating only widens it. */
+    PHONE,
+
+    /** A tablet, an unfolded foldable or a resizable window: two panes wherever the width holds them. */
+    LARGE_SCREEN,
+}
+
+/**
+ * The two-pane rule as a value, so a test can hand the root a phone or a tablet — and a threshold — without
+ * the device. [LayoutDeviceClass.LARGE_SCREEN] at [WIDE_LAYOUT_MIN_WIDTH] is exactly the pre-#378 rule, and
+ * it is what a desktop window keeps.
+ */
+internal data class WideLayoutPolicy(
+    val deviceClass: LayoutDeviceClass,
+    val minWidth: Dp = WIDE_LAYOUT_MIN_WIDTH,
+) {
+    fun isWide(availableWidth: Dp): Boolean =
+        deviceClass == LayoutDeviceClass.LARGE_SCREEN && availableWidth >= minWidth
+}
+
+/**
+ * True when the app gets two panes: a large screen whose window is wide enough ([WideLayoutPolicy]).
+ * Default false: a screen mounted on its own (UI tests, [dev.ccpocket.app.showcase] marketing frames)
+ * is the phone screen it has always been.
  */
 val LocalWideLayout = staticCompositionLocalOf { false }
 
 /**
- * The ONE place the window width is turned into a layout decision. Wraps the whole app content so the
- * sheets that render outside the content stack (PocketSheet, SecureApprovalSheet) see the same answer
- * the panes do.
+ * The ONE place the device and the window width are turned into a layout decision. Wraps the whole app
+ * content so the sheets that render outside the content stack (PocketSheet, SecureApprovalSheet) see the
+ * same answer the panes do.
+ *
+ * [policy] defaults to this platform's device; tests hand it a phone or a tablet. On a phone the answer is
+ * false at every width, so a rotation only re-measures the one column: it never moves the chat into another
+ * branch of [ContentRouter], which would remount it and drop its scroll position and unsent draft.
  */
 @Composable
-internal fun WideLayoutScope(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+internal fun WideLayoutScope(
+    modifier: Modifier = Modifier,
+    policy: WideLayoutPolicy = WideLayoutPolicy(platformLayoutDeviceClass()),
+    content: @Composable BoxScope.() -> Unit,
+) {
     BoxWithConstraints(modifier) {
-        CompositionLocalProvider(LocalWideLayout provides (maxWidth >= WIDE_LAYOUT_MIN_WIDTH)) { content() }
+        CompositionLocalProvider(LocalWideLayout provides policy.isWide(maxWidth)) { content() }
     }
 }
 
 /**
  * The app's content routing. Narrow = the exact single-branch `when` the phone has always rendered;
- * wide = the same three screens, two at a time.
+ * wide = the same three screens, two at a time. [chatListStateForTest] reaches [ChatScreen] in either
+ * shape, so a routing test can see where the transcript is parked across a resize.
  */
 @Composable
 internal fun ContentRouter(
     repo: PocketRepository,
     onOpenFleet: () -> Unit = {},
     onOpenInbox: () -> Unit = {},
+    chatListStateForTest: LazyListState? = null,
 ) {
-    if (LocalWideLayout.current) WidePanes(repo, onOpenFleet, onOpenInbox)
-    else NarrowContent(repo, onOpenFleet, onOpenInbox)
+    if (LocalWideLayout.current) WidePanes(repo, onOpenFleet, onOpenInbox, chatListStateForTest)
+    else NarrowContent(repo, onOpenFleet, onOpenInbox, chatListStateForTest)
 }
 
 @Composable
@@ -99,13 +139,14 @@ private fun NarrowContent(
     repo: PocketRepository,
     onOpenFleet: () -> Unit,
     onOpenInbox: () -> Unit,
+    chatListStateForTest: LazyListState?,
 ) {
     when {
         // switchingSession keeps the chat mounted across a chat→chat switch:
         // openSession nulls convoId while it waits for the daemon, and without
         // this the switcher bounced you out to a session list for a beat (#165)
         repo.convoId.value != null || repo.switchingSession.value ->
-            ChatScreen(repo, onOpenFleet = onOpenFleet, onOpenInbox = onOpenInbox)
+            ChatScreen(repo, onOpenFleet = onOpenFleet, onOpenInbox = onOpenInbox, listStateForTest = chatListStateForTest)
         repo.sessionsDir.value != null -> SessionsScreen(repo, onOpenInbox = onOpenInbox)
         else -> DirectoryScreen(repo, onOpenFleet = onOpenFleet, onOpenInbox = onOpenInbox)
     }
@@ -116,6 +157,7 @@ private fun WidePanes(
     repo: PocketRepository,
     onOpenFleet: () -> Unit,
     onOpenInbox: () -> Unit,
+    chatListStateForTest: LazyListState?,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val left = minOf(LEFT_PANE_WIDTH, maxWidth - RIGHT_PANE_MIN_WIDTH)
@@ -129,7 +171,7 @@ private fun WidePanes(
             Box(Modifier.width(Metric.hairline).fillMaxHeight().background(Tok.hair))
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 if (repo.convoId.value != null || repo.switchingSession.value) {
-                    ChatScreen(repo, onOpenFleet = onOpenFleet, onOpenInbox = onOpenInbox)
+                    ChatScreen(repo, onOpenFleet = onOpenFleet, onOpenInbox = onOpenInbox, listStateForTest = chatListStateForTest)
                 } else {
                     EmptyChatPane()
                 }

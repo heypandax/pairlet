@@ -12,7 +12,11 @@ import kotlinx.serialization.json.JsonObject
  */
 sealed interface AgentEvent {
     /** The authoritative session_id carrier (Claude system/init; Codex thread/started → thread.id). */
-    data class SessionInit(val sessionId: String?, val cwd: String?, val model: String?) : AgentEvent
+    data class SessionInit(
+        val sessionId: String?, val cwd: String?, val model: String?,
+        /** Informational session metadata; must never become assistant output or turn evidence. */
+        val notice: String? = null,
+    ) : AgentEvent
 
     /**
      * Session metadata a backend MEASURED on its own wire after the init frame — issue #320.

@@ -911,6 +911,9 @@ data class SessionLive(
      */
     val agentPreset: String? = null,
     val diagnostic: DiagnosticContext? = null,
+    /** Informational session limitation, never model output or prompt-delivery evidence.
+     * Additive: older clients ignore it; older daemons omit it. */
+    val notice: String? = null,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */

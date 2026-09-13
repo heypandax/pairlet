@@ -155,10 +155,19 @@ data class DkPin(
 data class DkProjectPin(val path: String, val name: String)
 
 /**
- * One-shot request to reveal a pinned project's session list in RECENT. [generation] makes opening the
- * same pin again observable after the user folds that project a second time.
+ * One-shot request to reveal a place in RECENT: a pinned project's session list, or — with [sessionId] — the
+ * row of a session an explicit navigation went to (a row, a session pin, ⌘1–9, ⌘[ / ⌘]). [generation] makes
+ * the same navigation observable again after the user folds its target away, even while that session is
+ * still the selected one (#373). [accountId] is the machine whose list the request is for: RECENT shows one
+ * machine at a time, so a reveal still waiting when the user switches computers must not act on the next
+ * machine's list. Null = a model that only ever drives one list (seed/preview).
  */
-data class DkProjectListReveal(val path: String, val generation: Long)
+data class DkProjectListReveal(
+    val path: String,
+    val generation: Long,
+    val sessionId: String? = null,
+    val accountId: String? = null,
+)
 
 // ── fleet ("Fleet Desktop" board): machine-grouped sidebar · cross-machine attention · watch pane ──
 
@@ -335,7 +344,7 @@ interface DesktopModel {
     fun pinProject(path: String, name: String) {}
     fun unpinProject(path: String) {}
     fun isProjectPinned(path: String): Boolean = projectPins.any { it.path == path }
-    /** Latest pinned-project reveal request. Null means this model has not opened a project pin. */
+    /** Latest RECENT reveal request — a project pin, or an explicit session navigation. Null means none yet. */
     val projectListReveal: DkProjectListReveal? get() = null
     /** Open a pinned project: its session LIST — the pinned entity is the project, not one session in it. */
     fun openProjectPin(p: DkProjectPin) { openProject(DkProject(p.path, p.name)) }

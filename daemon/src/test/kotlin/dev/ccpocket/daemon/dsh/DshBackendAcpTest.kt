@@ -16,6 +16,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.nio.file.Path
 import kotlin.test.AfterTest
+import kotlin.test.assertNotNull
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -118,11 +119,11 @@ class DshBackendAcpTest {
         val events = mutableListOf<AgentEvent>()
         val b = ready(w, events, spec = AgentSpec(Path.of("/repo"), agentPreset = "shell", mode = PermissionMode.DEFAULT))
         try {
-            val notice = events.filterIsInstance<AgentEvent.AssistantText>().single().text
+            val notice = assertNotNull(events.filterIsInstance<AgentEvent.SessionInit>().single().notice)
             assertTrue(notice.contains("Ungrouped in DSH Web"))
             assertTrue(notice.contains("create the session in DSH Web"))
             assertTrue(notice.contains("continue it from Pairlet history"))
-            assertTrue(notice.endsWith("\n\n"), "keep the following model reply separate from the notice")
+            assertTrue(events.none { it is AgentEvent.AssistantText }, "session metadata is not model output")
             assertTrue(events.none { it is AgentEvent.TurnResult }, "a grouping notice does not finish a turn")
             val request = Json.parseToJsonElement(w.single { "\"method\":\"session/new\"" in it }).jsonObject
             assertEquals(setOf("cwd", "mcpServers"), request.getValue("params").jsonObject.keys)
@@ -130,7 +131,7 @@ class DshBackendAcpTest {
             val duplicate = b.parse(
                 """{"jsonrpc":"2.0","id":2,"result":{"sessionId":"$SESSION","configOptions":$configOptions}}""",
             )
-            assertTrue(duplicate.none { it is AgentEvent.AssistantText && "Ungrouped" in it.text })
+            assertTrue(duplicate.none { it is AgentEvent.SessionInit && it.notice != null })
             assertTrue(duplicate.none { it is AgentEvent.TurnResult })
         } finally { b.onProcessEnded(SESSION) }
     }
@@ -152,7 +153,7 @@ class DshBackendAcpTest {
                 )
                 b.parse("""{"jsonrpc":"2.0","id":1,"result":$NO_CAPABILITIES}""")
                 val events = b.parse(response)
-                assertTrue(events.none { it is AgentEvent.AssistantText && "Ungrouped" in it.text })
+                assertTrue(events.none { it is AgentEvent.SessionInit && it.notice != null })
                 assertTrue(injected.none { "Ungrouped" in it })
             } finally { b.onProcessEnded(null) }
         }
@@ -173,7 +174,7 @@ class DshBackendAcpTest {
         // session/resume answers WITHOUT a sessionId — the id we sent is the session.
         val events = b.parse("""{"jsonrpc":"2.0","id":2,"result":{"configOptions":$configOptions}}""")
         assertEquals("old-session", assertIs<AgentEvent.SessionInit>(events.first()).sessionId)
-        assertTrue(events.none { it is AgentEvent.AssistantText && "Ungrouped" in it.text })
+        assertTrue(events.none { it is AgentEvent.SessionInit && it.notice != null })
         assertTrue(events.none { it is AgentEvent.TurnResult }, "resuming does not produce a grouping turn")
     }
 
