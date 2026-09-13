@@ -1553,7 +1553,7 @@ class Conversation(
             // Codex's app-server retains an exclusive cross-app writer even after thread/unsubscribe on
             // newer builds. A stable turn boundary asks for the normal EOF → TERM → KILL ladder off this
             // stdout pump; processMode classifies the resulting clean exit and lazily resumes next time.
-            requestProcessExit = { scope.launch { p.shutdown() } },
+            requestProcessExit = { scope.launch { p.shutdown(reason = AgentProcess.ShutdownReason.TURN_BOUNDARY) } },
         )
         // Ask pushes ride the emit path for two flavors of conversation (issue #91 bridge + #138 owner):
         //  - BRIDGE (origin set, no pathScope): the ask frame fans out normally (the bridge's egress
@@ -2100,7 +2100,7 @@ class Conversation(
             // stdout EOF precedes the last transcript flush, so wait for the real process exit before
             // classifying it (intentional stops settle in stopProcess)
             p.awaitExit()
-            if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && p.exitCode() == 0 && turnCompleted) {
+            if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && turnCompleted && p.isCleanTurnExit()) {
                 // The completed turn's ACTIVE authority always dies here. A later prompt that raced this
                 // clean edge keeps its still-staged token: pending authority grants nothing until that exact
                 // prompt's replay activates it in the fresh process. An unexpected crash below preserves none.

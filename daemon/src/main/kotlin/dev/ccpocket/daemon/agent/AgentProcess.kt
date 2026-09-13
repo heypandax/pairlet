@@ -61,7 +61,7 @@ class AgentProcess private constructor(
      * E2E-only: this rides the sealed [dev.ccpocket.protocol.PocketError], never a cleartext push.
      */
     fun stderrDiagnostic(maxChars: Int = MAX_DIAGNOSTIC_CHARS): String? {
-        val lines = stderrTail()
+        val lines = stderrTail().map { TERMINAL_ESCAPE.replace(it, "") }.filter { it.isNotBlank() }
         if (lines.isEmpty()) return null
         val body = lines.dropLastWhile { RUNTIME_FOOTER.matches(it.trim()) }
         if (body.isEmpty()) return lines.last()
@@ -79,6 +79,14 @@ class AgentProcess private constructor(
     /** Exit code once the process has terminated, else null (also null if it can't be read). */
     fun exitCode(): Int? = runCatching { process.exitValue() }.getOrNull()
 
+    /** Used only after a one-shot backend reported its terminal turn result. A nonzero exit is
+     * expected only when OUR turn-boundary shutdown actually reached Unix SIGTERM. A spontaneous
+     * 143, an EOF handler returning 143, a normal stop, and the SIGKILL fallback remain failures. */
+    fun isCleanTurnExit(): Boolean = exitCode().let { code ->
+        code == 0 || (code == 143 && !isWindows() &&
+            shutdownReason == ShutdownReason.TURN_BOUNDARY && shutdownStage == ShutdownStage.TERM)
+    }
+
     /** True while the OS process is still running — the "is the event source still alive?" gate for
      *  heuristics that would otherwise guess at outcomes the live agent will eventually report itself. */
     fun isAlive(): Boolean = process.isAlive
@@ -90,6 +98,10 @@ class AgentProcess private constructor(
     private val stdin: Channel<String> = Channel(capacity = 64)
     private val shutdownLock = Mutex()
     @Volatile private var shuttingDown = false
+    enum class ShutdownReason { STOP, TURN_BOUNDARY }
+    private enum class ShutdownStage { NONE, EOF, TERM, KILL }
+    @Volatile private var shutdownReason: ShutdownReason? = null
+    @Volatile private var shutdownStage = ShutdownStage.NONE
 
     // completed when the stderr pump has read its pipe to EOF — the OS exit alone does NOT imply
     // lastStderr is populated yet (the reader coroutine may not have been scheduled), and a startup
@@ -197,22 +209,33 @@ class AgentProcess private constructor(
         eofGraceMs: Long = EOF_GRACE_MS,
         termGraceMs: Long = TERM_GRACE_MS,
         forceGraceMs: Long = FORCE_GRACE_MS,
+        reason: ShutdownReason = ShutdownReason.STOP,
     ) = shutdownLock.withLock {
+        if (!shuttingDown) {
+            shutdownReason = reason
+            shutdownStage = ShutdownStage.EOF
+            log.info("agent $pid shutdown requested (reason=$reason, stage=EOF)")
+        }
         shuttingDown = true
         stdin.close()
         runCatching { process.outputStream.close() } // EOF — the CLI's stream-json shutdown signal
         var exited = withContext(Dispatchers.IO) { process.waitFor(eofGraceMs, TimeUnit.MILLISECONDS) }
         if (!exited) {
+            shutdownStage = ShutdownStage.TERM
+            log.info("agent $pid shutdown escalating (reason=$shutdownReason, stage=TERM)")
             process.destroy() // Unix: SIGTERM (catchable, flushes). Windows: TerminateProcess.
             exited = withContext(Dispatchers.IO) { process.waitFor(termGraceMs, TimeUnit.MILLISECONDS) }
         }
         if (!exited) {
+            shutdownStage = ShutdownStage.KILL
+            log.warn("agent $pid shutdown escalating (reason=$shutdownReason, stage=KILL)")
             (descendantsAtStart + process.toHandle().descendants().toList())
                 .forEach { runCatching { it.destroyForcibly() } }
             process.destroyForcibly() // Unix: SIGKILL
             withContext(Dispatchers.IO) { runCatching { process.waitFor(forceGraceMs, TimeUnit.MILLISECONDS) } }
             if (isWindows()) windowsTaskkill() // tree-reaper of last resort — only on the force path
         }
+        log.info("agent $pid shutdown finished (reason=$shutdownReason, stage=$shutdownStage, exit=${exitCode()})")
         stdout.close()
     }
 
@@ -240,6 +263,10 @@ class AgentProcess private constructor(
         private const val MAX_STDERR_LINE_CHARS = 400
         // what a phone can actually read in an error card; the caller no longer truncates.
         private const val MAX_DIAGNOSTIC_CHARS = 700
+
+        // Strip terminal styling/control sequences only from the display copy; keep raw stderr for
+        // forensic readers. Also consume a sequence cut by the per-line retention limit.
+        private val TERMINAL_ESCAPE = Regex("\u001B(?:\\[[0-?]*[ -/]*(?:[@-~]|$)|\\][^\u0007\u001B]*(?:\u0007|\u001B\\\\|$)|[@-_])")
 
         // A runtime's parting footer carries no diagnosis — Node prints a bare `Node.js v24.16.0` as
         // the LAST line of a fatal dump, which is exactly the line a last-line-only reader surfaced.
