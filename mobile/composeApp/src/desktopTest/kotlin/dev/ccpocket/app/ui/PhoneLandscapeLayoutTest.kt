@@ -283,7 +283,8 @@ class PhoneLandscapeLayoutTest {
         assertTrue(listPaneShowing())
 
         // a tablet window narrower than the line — split screen, a slim portrait — is one column. Crossing the
-        // line re-routes (and so rebuilds) a large screen's chat, as #334 always has; only phones never cross.
+        // line only takes the list pane from beside a large screen's chat, which stays where it is
+        // (WideLayoutContinuityTest); only phones never cross.
         s.size = TABLET_NARROW
         advanceFrameAndWait()
         advanceFrameAndWait()

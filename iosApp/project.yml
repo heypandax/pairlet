@@ -42,16 +42,14 @@ targets:
         INFOPLIST_FILE: iosApp/Info.plist
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: NO
-        # Universal (iPhone + iPad) since #334. This value is COUPLED to two Info.plist keys and may
-        # not be changed alone: App Store validation rejects a universal build that supports iPad
-        # multitasking without declaring all four iPad orientations, which is exactly how the earlier
-        # universal attempt failed (ecf881ff) and why this was pinned back to "1". The safe triple is:
-        #   TARGETED_DEVICE_FAMILY = 1,2  +  UIRequiresFullScreen = YES  +
-        #   UISupportedInterfaceOrientations~ipad = all four
-        # UIRequiresFullScreen opts the app out of Split View / Slide Over, so the only multitasking
-        # contract left is rotation, which the ~ipad key satisfies. iPhone stays Portrait-only via the
-        # unsuffixed UISupportedInterfaceOrientations. The committed .xcodeproj carries the same value;
-        # declaring it here keeps the CI-regenerated project in sync.
+        # Universal (iPhone + iPad) since #334. This value is COUPLED to Info.plist and may not be changed
+        # alone. The app does not set UIRequiresFullScreen (deprecated, TN3192), so on iPad it takes part in
+        # multitasking and lays itself out for whatever window it gets. A universal build that supports
+        # multitasking must declare all four iPad orientations (UISupportedInterfaceOrientations~ipad) and a
+        # launch storyboard (UILaunchStoryboardName); App Store validation rejects it otherwise, which is
+        # exactly how the earlier universal attempt failed (ecf881ff) and why this was pinned back to "1".
+        # iPhone stays Portrait-only via the unsuffixed UISupportedInterfaceOrientations. The committed
+        # .xcodeproj carries the same value; declaring it here keeps the CI-regenerated project in sync.
         TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
