@@ -113,6 +113,7 @@ import androidx.compose.ui.draganddrop.awtTransferable
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ChatRow
 import dev.ccpocket.app.data.ToolProcessPrefs
+import dev.ccpocket.app.ui.contextStatusUi
 import dev.ccpocket.app.ui.chat.KeepChatReadingPosition
 import dev.ccpocket.app.ui.chat.ProcessGroupRow
 import dev.ccpocket.app.ui.chat.rememberChatPresentationState
@@ -1303,10 +1304,6 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
         val branch = model.chatBranch?.let { "  ·  ⑂ $it" } ?: ""
         // machine-first line: which computer this session lives on leads the mono meta (fleet language)
         val machine = model.activeComputer?.name?.let { "$it  ·  " } ?: ""
-        // context occupancy readout (issue #65/#73): % when the window is known, raw tokens otherwise
-        val ctx = model.contextUsed?.let { u ->
-            model.contextWindow?.let { w -> "  ·  ctx ${(u * 100 / w)}%" } ?: "  ·  ctx ~${u / 1000}k"
-        } ?: ""
         // model segment always says SOMETHING (never a dangling " · ") for a pre-first-turn session the
         // daemon couldn't eager-resolve — mirrors mobile's placeholder + the ⋯ Model row (issue #96).
         // "default" is a Claude FACT (the account's default model when the user pinned none); for every
@@ -1331,15 +1328,25 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
         }
         val clipboard = LocalClipboardManager.current
         val copyPath = stringResource(Res.string.menu_copy_path)
-        ContextMenuArea(items = {
-            listOf(ContextMenuItem(copyPath) { clipboard.setText(AnnotatedString(model.chatWorkdir)) })
-        }) {
-            Text(
-                pathLinked("$machine${model.chatWorkdir}$branch  ·  $modelLabel$ctx"),
-                color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 10.dp),
-            )
+        Row(Modifier.padding(start = 18.dp, end = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            // weight on a Row child: ContextMenuArea's own box would otherwise take the width and push ctx out
+            Box(Modifier.weight(1f, fill = false)) {
+                ContextMenuArea(items = {
+                    listOf(ContextMenuItem(copyPath) { clipboard.setText(AnnotatedString(model.chatWorkdir)) })
+                }) {
+                    Text(
+                        pathLinked("$machine${model.chatWorkdir}$branch  ·  $modelLabel"),
+                        color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            // context status (issue #320-A): outside the path's copy menu and never ellipsized away. Main pane
+            // only — a split column's model carries no context fields, so there "not reported yet" would be false.
+            if (!model.paneScoped) {
+                Text("  ·  ", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp), maxLines = 1)
+                ContextStatusMetaEntry(contextStatusUi(model.contextUsed, model.contextWindow))
+            }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
     }

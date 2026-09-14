@@ -2094,6 +2094,14 @@
     <string name="pin_issue_pairing_changed">This computer's pairing changed. Reconnect to it to sync pins.</string>
     <string name="pin_issue_retry">Retry</string>
     <string name="pin_issue_dismiss">Dismiss</string>
+    <!-- context status (issue #320-A): name the evidence shape, never guess a value or claim "unsupported" -->
+    <string name="context_status_no_data">No context data yet</string>
+    <string name="context_status_no_data_detail">The backend hasn\'t returned a usable value for this session yet. This doesn\'t mean it\'s unsupported.</string>
+    <string name="context_status_window_unknown">Window size unknown, so no percentage is shown.</string>
+    <string name="context_status_used_pending">Usage not received yet. It isn\'t counted as 0.</string>
+    <string name="context_status_window_override">This window is a value you set, not one reported by the backend.</string>
+    <string name="context_status_gauge_no_data">Context data not available yet — open session info</string>
+    <string name="context_status_open_details">Context status — show details</string>
     <string name="tool_process_toggle">Collapse tool steps</string>
     <string name="tool_process_group">Process</string>
     <plurals name="tool_process_tools">
