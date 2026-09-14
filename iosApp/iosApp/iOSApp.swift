@@ -80,11 +80,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         PushController.shared.registrationFailed()
     }
 
-    // surface the alert even when the app is in the foreground
+    // surface the alert even when the app is in the foreground — except a turn push about the session the
+    // chat is showing right now (issue #382: daemons push turn ends even while clients are online)
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .sound])
+        let info = notification.request.content.userInfo
+        if MainViewControllerKt.shouldPresentPush(sessionId: info["sid"] as? String, kind: info["kind"] as? String) {
+            completionHandler([.banner, .sound])
+        } else {
+            completionHandler([])
+        }
     }
 
     // a tapped task-complete notification carries `wd`/`sid` custom keys → deep-link into that session;

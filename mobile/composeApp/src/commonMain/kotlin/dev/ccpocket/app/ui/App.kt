@@ -320,6 +320,8 @@ fun App(scope: CoroutineScope) {
     // a tapped task-complete push deep-links straight into its session (connecting first if needed)
     val pushOpen by dev.ccpocket.app.PushRoute.pending.collectAsState()
     LaunchedEffect(pushOpen) { pushOpen?.let { repo.requestOpenSession(it.workdir, it.sessionId); dev.ccpocket.app.PushRoute.pending.value = null } }
+    // issue #382: publish the open chat's session so a foreground turn push about it can skip the banner
+    LaunchedEffect(repo) { androidx.compose.runtime.snapshotFlow { dev.ccpocket.app.push.foregroundSessionOf(repo.sessionKey.value, repo.convoId.value, repo.connected.value) }.collect { dev.ccpocket.app.push.ForegroundSession.update(it) } }
     // a tapped OFFER push (§3.4) names only the handoff — it selects that offer in the doorway below, which
     // still runs the ordinary confirm → accept flow
     val offerOpen by dev.ccpocket.app.PushRoute.pendingHandoff.collectAsState()

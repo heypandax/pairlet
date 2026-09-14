@@ -60,8 +60,8 @@ object PushPolicy {
      * The push for a finished turn. [error] non-null = the turn ended abnormally (error result,
      * synthetic placeholder, or the agent process dying — see [dev.ccpocket.daemon.conversation.PushHook]):
      * worded distinctly from a normal turn-complete, with the usage-limit case called out by name so a
-     * locked phone knows the session can't proceed until the window resets (issue #138). The caller
-     * gates on presence (peer offline + LAN empty + pushEnabled) exactly as before.
+     * locked phone knows the session can't proceed until the window resets (issue #138). Copy only — the
+     * relay client goes through [turnPushFor] (switch gate + urgent) and [TurnPushCoalescer] (issue #382).
      */
     fun turnPush(workdir: Path, sessionId: String?, finalText: String?, error: String?): NotifyPush {
         val project = workdir.fileName?.toString() ?: "CC Pocket"
@@ -86,6 +86,30 @@ object PushPolicy {
             )
         }
     }
+
+    /** Which flavor of turn end [error] describes — the coalescing severity and the log's `kind=`. */
+    fun turnKindOf(error: String?): TurnKind = when {
+        isUsageLimit(error) -> TurnKind.LIMIT
+        error != null -> TurnKind.ERROR
+        else -> TurnKind.COMPLETE
+    }
+
+    /**
+     * The turn-end push the relay client actually sends (issue #382), or null when the desktop's
+     * "notify my phone when a reply finishes" switch ([pushEnabled], daemon `prefs.pushEnabled`) is off.
+     *
+     * That switch is now the ONLY gate. Presence — the phone attached over the relay, the desktop App (or
+     * any client) attached over LAN, other interactive devices on the account — deliberately no longer
+     * suppresses a complete / error / usage-limit push: the desktop being online says nothing about whether
+     * the user is looking at it. A phone that is in the foreground on this very session hides the banner
+     * itself (app-side, #382).
+     *
+     * `urgent = true` here means ONLY "skip the relay's interactive-device check" ([NotifyPush.urgent] /
+     * relay `NotifyGate.shouldSend`). It does not change APNs/FCM priority, sound or channel; [NotifyPush.kind]
+     * stays null so Android keeps routing it to the `task_complete` channel, not `approvals`.
+     */
+    fun turnPushFor(pushEnabled: Boolean, workdir: Path, sessionId: String?, finalText: String?, error: String?): NotifyPush? =
+        if (!pushEnabled) null else turnPush(workdir, sessionId, finalText, error).copy(urgent = true)
 
     /**
      * The push for a pending permission ask, or null = don't push (a live client already has the card).

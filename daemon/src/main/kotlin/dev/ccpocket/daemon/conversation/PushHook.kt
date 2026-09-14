@@ -4,8 +4,9 @@ import java.nio.file.Path
 
 /**
  * Invoked when a conversation finishes a turn — normally OR abnormally (issue #138). The relay client
- * wires this to send a [NotifyPush] control frame so the relay can wake an offline phone. Null (the
- * default) in local-server mode — a LAN client has no relay to push through.
+ * wires this to send a [NotifyPush] control frame to the owner's phones, gated only by the daemon's
+ * pushEnabled switch and a short per-session merge window (issue #382 — presence no longer suppresses it).
+ * Null (the default) in local-server mode — a LAN client has no relay to push through.
  *
  * [sessionId] is the conversation's current (possibly forked) claude session id — routing data so a
  * tapped notification can resume exactly this session. Null only before the first turn materializes one.

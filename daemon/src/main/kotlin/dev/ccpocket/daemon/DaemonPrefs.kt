@@ -8,9 +8,10 @@ import java.io.File
 
 /**
  * Daemon-side user preferences, persisted beside identity.json (~/.cc-pocket/prefs.json).
- * Currently just the phone-push switch (pocket/push.prefs.set): pushEnabled=false silences the
- * relay's "turn complete" phone alerts while someone is working at the computer — set from a
- * client's Settings, honored by RelayClient's push hook.
+ * [pushEnabled] is the phone-push switch (SetPushPrefs; desktop "notify my phone when a reply finishes"):
+ * false silences this computer's turn-end phone pushes (complete / error / usage limit) and the owner
+ * permission-ask pushes. Since issue #382 it is the ONLY gate on turn-end pushes — the desktop App or
+ * another client being online no longer suppresses them. Default true; a saved false is kept as is.
  */
 class DaemonPrefs private constructor(private val path: File) {
     @Serializable
