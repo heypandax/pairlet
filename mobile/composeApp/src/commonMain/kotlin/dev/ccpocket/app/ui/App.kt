@@ -75,6 +75,10 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.History
+import dev.ccpocket.app.data.managedRowKey
+import kotlinx.coroutines.flow.filterNotNull
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.material.icons.outlined.Settings
@@ -2348,6 +2352,24 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
     // here; there is no gating-order problem to solve.
     var showArchived by remember { mutableStateOf(false) }
     if (showArchived) { NavBarPadded { ArchivedSessionsScreen(repo, onBack = { showArchived = false }) }; return }
+    // #360 stage 2: "Import from local history…" for THIS project (explicit [dir]). Offered only on a computer that
+    // advertised the managed list; a successful import comes back here and scrolls to the session — nothing is sent.
+    var showImport by remember { mutableStateOf(false) }
+    var locateId by remember(dir) { mutableStateOf<String?>(null) }
+    // #360: a tapped managed row whose original record is gone — explained (and removable), never opened
+    // keyed by computer too: a notice raised on one computer must not survive a switch to another's list of the same path
+    var unavailableTarget by remember(dir, repo.paired.value?.accountId) { mutableStateOf<SessionSummary?>(null) }
+    if (showImport) {
+        dev.ccpocket.app.SystemBackHandler(enabled = true) { showImport = false }
+        NavBarPadded {
+            dev.ccpocket.app.ui.session.ManagedImportRoute(
+                repo, dir,
+                onLocate = { locateId = it.key.nativeId; showImport = false },
+                onClose = { showImport = false },
+            )
+        }
+        return
+    }
     var showQuota by remember { mutableStateOf(false) } // the allowance pill's detail sheet
     // Session groups (issue #119). Membership + the group list are daemon-owned; these hold only the
     // transient UI: which manage-sheet/dialog is open, and (client-only) which sections are collapsed —
@@ -2388,6 +2410,11 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                         Icon(Icons.Outlined.Inventory2, stringResource(Res.string.archive_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
                     }
                 }
+                if (repo.managedImportAvailable()) { // #360: only on a computer that advertised the managed list
+                    IconButton({ showImport = true }, modifier = Modifier.size(Metric.touch)) {
+                        Icon(Icons.Outlined.History, stringResource(Res.string.managed_sessions_import_entry), tint = Tok.tx2, modifier = Modifier.size(20.dp))
+                    }
+                }
                 IconButton({ showHelp = true }, modifier = Modifier.size(Metric.touch)) {
                     Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(Res.string.support_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
                 }
@@ -2422,27 +2449,71 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
             // regardless, so a project with no groups still long-presses.
             val grouped = repo.sessionGroups.isNotEmpty()
             val hasRowMenu = grouped || repo.archiveSupported.value
+            // #360: after an import, bring its row on screen — unfold its group, lift an agent filter hiding it, then
+            // page down until the list has laid it out. Waits (bounded) for the managed re-read to list it.
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+            LaunchedEffect(locateId) {
+                val id = locateId ?: return@LaunchedEffect
+                val row = kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                    snapshotFlow { repo.sessions.firstOrNull { it.sessionId == id } }.filterNotNull().first()
+                }
+                if (row != null) {
+                    if (filterSessionsByAgent(listOf(row), repo.agentFilter.value).isEmpty()) repo.clearAgentFilter()
+                    val key = row.managedRowKey()
+                    // a rewound original lives in its own collapsed bucket, not a group: unfold that bucket instead
+                    val rewound = splitRewound(filterSessionsByAgent(repo.sessions, repo.agentFilter.value)).rewound
+                    if (rewound.any { it.managedRowKey() == key }) rewoundOpen = true
+                    else collapsed.remove(row.group ?: UNGROUPED_KEY)
+                    val targets = setOf(key, "act:$key", "rw:$key")
+                    listState.scrollToItem(0)
+                    for (step in 0 until 80) {
+                        if (listState.layoutInfo.visibleItemsInfo.any { (it.key as? String) in targets }) break
+                        if (!listState.canScrollForward) break
+                        listState.scrollBy(listState.layoutInfo.viewportSize.height * 0.8f)
+                    }
+                }
+                locateId = null
+            }
             Box(Modifier.weight(1f)) {
             PullToRefreshBox(isRefreshing = repo.sessionsRefreshing.value, onRefresh = { repo.refreshSessions() }, modifier = Modifier.fillMaxSize()) {
             LazyColumn(
                 Modifier.fillMaxSize().padding(horizontal = Metric.gutter),
+                state = listState,
                 contentPadding = PaddingValues(top = Metric.gapL, bottom = if (approvalCount > 0) 88.dp else Metric.gapL),
             ) {
                 if (!agentFilterIsAll(af)) item { Box(Modifier.padding(bottom = Metric.gap)) { AgentFilterChip(af) { repo.clearAgentFilter() } } }
-                if (filtered.isEmpty()) item { SessionsEmptyState() }
+                // #360: while the managed list's first read is on its way, say so — never "no sessions" in the meantime
+                // #360: the latest managed read failed — the list is the last accepted one (plus this app's own and running sessions)
+                if (repo.managedListStale.value) item(key = "managed-stale") {
+                    Text(
+                        stringResource(Res.string.managed_sessions_list_stale), color = Tok.warn, fontSize = 13.sp,
+                        modifier = Modifier.padding(vertical = Metric.gap),
+                    )
+                }
+                if (repo.managedListLoading.value) item(key = "managed-loading") {
+                    Text(
+                        stringResource(Res.string.managed_sessions_list_loading), color = Tok.muted, fontSize = 13.sp,
+                        modifier = Modifier.padding(vertical = Metric.gap),
+                    )
+                }
+                if (filtered.isEmpty() && !repo.managedListLoading.value) item { SessionsEmptyState() }
                 // ── Active: everything that is not finished, flat. Group HEADERS are deliberately absent
                 // here (a session that needs a decision is not filed away first), but each row keeps its
                 // group membership — the long-press move/archive sheet is unchanged.
                 if (split.active.isNotEmpty()) {
                     item(key = "hdr:active") { SessionSectionLabel(stringResource(Res.string.ses_active), Modifier.padding(bottom = 10.dp)) }
-                    items(split.active, key = { "act:" + it.session.sessionId }) { row ->
+                    items(split.active, key = { "act:" + it.session.managedRowKey() }) { row ->
                         Column {
                             Hairline()
                             SessionListRow(
                                 row,
-                                onOpen = { repo.openSession(dir, row.session.sessionId, title = row.session.title, agent = row.session.agent ?: AgentKind.CLAUDE) },
+                                onOpen = {
+                                    // #360: a member whose original record is gone has nothing to resume — explain, don't open
+                                    if (repo.isManagedMissing(row.session)) unavailableTarget = row.session
+                                    else repo.openSession(dir, row.session.sessionId, title = row.session.title, agent = row.session.agent ?: AgentKind.CLAUDE)
+                                },
                                 onLongPress = if (hasRowMenu) ({ moveTarget = row.session }) else null,
-                                caption = forkCaptionOf(row.session, allForDir),
+                                caption = managedCaptionOf(row.session, allForDir, repo.managedMissing.value, repo.managedAmbiguous.value),
                             )
                         }
                     }
@@ -2485,14 +2556,14 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                         }
                     }
                     if (!isCollapsed) {
-                        items(section.sessions, key = { it.sessionId }) { s ->
+                        items(section.sessions, key = { it.managedRowKey() }) { s ->
                             Column {
                                 Hairline()
                                 SessionListRow(
                                     SessionRowUi(s, SurfaceState.COMPLETE), // by construction: this half IS the settled one
-                                    onOpen = { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) },
+                                    onOpen = { if (repo.isManagedMissing(s)) unavailableTarget = s else repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) },
                                     onLongPress = if (hasRowMenu) ({ moveTarget = s }) else null,
-                                    caption = forkCaptionOf(s, allForDir),
+                                    caption = managedCaptionOf(s, allForDir, repo.managedMissing.value, repo.managedAmbiguous.value),
                                 )
                             }
                         }
@@ -2522,7 +2593,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                         }
                     }
                     if (rewoundOpen) {
-                        items(lineage.rewound, key = { "rw:" + it.sessionId }) { s ->
+                        items(lineage.rewound, key = { "rw:" + it.managedRowKey() }) { s ->
                             Column {
                                 Hairline()
                                 // the quiet D2 row, not a full SessionListRow: no state mark colour, no
@@ -2531,7 +2602,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                                 RewoundSessionRow(
                                     s,
                                     successorTitle = rewoundSuccessorTitle(s, allForDir),
-                                    onOpen = { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) },
+                                    onOpen = { if (repo.isManagedMissing(s)) unavailableTarget = s else repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) },
                                     onLongPress = if (hasRowMenu) ({ moveTarget = s }) else null,
                                 )
                             }
@@ -2549,6 +2620,28 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
             // #202: the archive receipt. The row it refers to has already vanished from this list, so the
             // toast is the only thing that says where it went — and its action is the reverse verb, not Undo.
             ArchiveToastBar(repo, Modifier.align(Alignment.BottomCenter).padding(bottom = if (approvalCount > 0) 88.dp else 12.dp))
+            // #360: a tapped managed row whose original record is gone — why it didn't open, and the one verb that helps
+            unavailableTarget?.let { gone ->
+                // removal is two steps (what it does / doesn't do, then confirm) and reports a refusal instead of vanishing
+                var noticeUi by remember(gone.managedRowKey()) { mutableStateOf(dev.ccpocket.app.ui.session.UnavailableNoticeUi(gone.title)) }
+                dev.ccpocket.app.ui.session.UnavailableNoticeCard(
+                    noticeUi,
+                    onAskRemove = { noticeUi = noticeUi.copy(confirming = true, error = null) },
+                    onConfirmRemove = {
+                        noticeUi = noticeUi.copy(busy = true, confirming = false, error = null)
+                        repo.removeManagedMember(dir, gone.agent ?: AgentKind.CLAUDE, gone.sessionId) { result ->
+                            when (result) {
+                                dev.ccpocket.app.ui.session.RemoveResult.Removed -> unavailableTarget = null
+                                is dev.ccpocket.app.ui.session.RemoveResult.Failure -> noticeUi = noticeUi.copy(busy = false, error = result.error)
+                            }
+                        }
+                    },
+                    onCancel = { unavailableTarget = null },
+                    onDismiss = { unavailableTarget = null },
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                        .padding(start = 14.dp, end = 14.dp, bottom = if (approvalCount > 0) 88.dp else 12.dp),
+                )
+            }
             }
             // Direction B's docked strip, ABOVE the new-session dock rather than under it. The handoff's
             // Sessions frame has no dock and puts the strip on the bare bottom edge; this screen does have
@@ -3773,6 +3866,29 @@ private fun FileCompletionMenu(
                 }
             }
         }
+    }
+}
+
+/**
+ * #360: the lineage caption, plus the managed-list markers keyed by agent + id ([managedRowKey]) — "original record
+ * unavailable" for a member whose native record is gone, "group unclear" for one whose group placement cannot be
+ * attributed to a single agent.
+ */
+private fun managedCaptionOf(
+    s: SessionSummary,
+    all: List<SessionSummary>,
+    missing: Set<String>,
+    ambiguous: Set<String> = emptySet(),
+): (@Composable () -> Unit)? {
+    val fork = forkCaptionOf(s, all)
+    val key = s.managedRowKey()
+    val gone = key in missing
+    val unclear = key in ambiguous
+    if (!gone && !unclear) return fork
+    return {
+        fork?.invoke()
+        if (gone) dev.ccpocket.app.ui.session.LineageCaption("⊘", stringResource(Res.string.managed_sessions_unavailable))
+        if (unclear) dev.ccpocket.app.ui.session.LineageCaption("?", stringResource(Res.string.managed_sessions_group_ambiguous))
     }
 }
 

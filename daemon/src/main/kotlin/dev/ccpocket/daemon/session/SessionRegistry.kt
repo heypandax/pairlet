@@ -230,6 +230,10 @@ class SessionRegistry(
             value?.sessions = this
         }
 
+    /** issue #360: receives every trusted native session id a conversation's backend reports (Claude and Codex
+     *  alike — the Conversation's SessionInit choke point), read at report time. Null = managed list not wired. */
+    @Volatile var managedSessions: NativeSessionHook? = null
+
     /**
      * Handoff drive gate (SESSION-HANDOFF.md §5.3 items 2/3): may [deviceId] — the TRANSPORT-derived
      * sender identity, never a frame field — send input (prompt / cancel / question answer / permission
@@ -533,6 +537,10 @@ class SessionRegistry(
             announcedWorkdir = announcedWorkdir,
             approvals = approvals, grants = grants, riskEngine = riskEngine,
         )
+        c.nativeSessionHookProvider = { managedSessions } // issue #360: trusted native ids → managed-list registration
+        // issue #360 security review M1: the three-way owner fact, fixed at open — a bridge (origin), a guest (its path
+        // scope) or a collaborator (its handoff grant) never registers into the owner's managed list
+        c.ownerCreated = origin == null && pathScope == null && handoffAccess == null
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`
         // MIGHT still be writing this transcript. Fork (branch to a fresh id, dodging a two-writer clobber) ONLY
@@ -712,6 +720,8 @@ class SessionRegistry(
             pushHookProvider = { pushHook }, askPushHookProvider = { askPushHook },
             approvals = approvals, grants = grants, riskEngine = riskEngine,
         )
+        branch.nativeSessionHookProvider = { managedSessions } // issue #360: the rewind/fork branch reports its new id too
+        branch.ownerCreated = convo.ownerCreated // …under the owner fact of the conversation it branched from
         mutex.withLock { convos[newConvoId] = branch }
         val started = runCatching {
             branch.open(
@@ -752,6 +762,9 @@ class SessionRegistry(
         sink.emit(dev.ccpocket.protocol.RewindDone(req.convoId, ok = true, newConvoId = newConvoId))
     }
 
+    /** Test hook (issue #360 M1): the owner fact [open] fixed on [convoId]'s conversation; null for a gone convo. */
+    internal suspend fun ownerCreatedOf(convoId: String): Boolean? = get(convoId)?.ownerCreated
+
     /** Test hook: is [convoId] still a live observe view? (the issue-107 stale-observer reap) */
     internal suspend fun observing(convoId: String): Boolean = mutex.withLock { observes.containsKey(convoId) }
 
@@ -771,6 +784,19 @@ class SessionRegistry(
                 SafeMetrics(resultQuality = ResultQuality.PARTIAL)) }.getOrDefault(emptyList()) }
             .map { it.copy(group = SessionGroups.groupOf(workdir, it.sessionId)) }
             .sortedByDescending { it.lastModified }
+
+    /** One backend's scan of [workdir] WITH its completeness (issue #360) — the only scan a durable decision
+     *  (managed-list migration, import verification, "record unavailable") may rely on. Unlike [listSessions] a
+     *  failure is reported as such, never as an empty list; an unregistered backend is an ERROR scan. Rows carry
+     *  no group stamp: grouping is a projection concern. [listSessions] itself is unchanged. */
+    fun scanSessions(workdir: String, agent: AgentKind): SessionScan {
+        val factory = backends[agent] ?: return SessionScan(agent, workdir, emptyList(), ScanCompleteness.ERROR, detail = "no backend")
+        val scan = try { factory.create().scanSessions(workdir, agent) } catch (e: Exception) { SessionScan.failed(agent, workdir, e) }
+        // a row tagged with another agent cannot be attributed to this scan: never guess, downgrade instead
+        return if (scan.items.any { it.agent != null && it.agent != agent }) {
+            scan.copy(completeness = ScanCompleteness.ERROR, detail = "foreign agent rows")
+        } else scan
+    }
 
     /**
      * Close conversations with no agent activity for longer than [idleMs]. Returns the reap count.

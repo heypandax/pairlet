@@ -207,6 +207,9 @@ class WsConnection(
                                 supportsPromptRecovery = true,
                                 supportsDiagnostics = true, // #122: acked prompts stay ledgered until agent consumption
                                 supportsProjectPins = true, // #362: this build owns the per-computer project-pin list
+                                // #360: managed session list, for the agents the router can actually serve
+                                supportsManagedSessions = router.managedSessionAgentWires().isNotEmpty(),
+                                managedAgents = router.managedSessionAgentWires(),
                                 // #348: which backends' SUBSCRIPTION allowance this daemon can read. The
                                 // router owns the answer because it owns the readers; absent (an older
                                 // daemon) decodes to empty = "Claude only, legacy behaviour".
@@ -242,6 +245,22 @@ class WsConnection(
                 sink.emit(dev.ccpocket.protocol.ProjectPinsState(subscriptionId = subscription, snapshot = snapshot))
             }
         }
+        // managed session list pushes (issue #360): every LAN peer is an owner by construction (see the handoff
+        // attach above). Resolved at emission against THIS socket's current declaration and agent vocabulary, and
+        // the sink's own allowedForCaps gate re-checks the frame type.
+        // #360 security review M2: a GATED socket whose device was revoked while idle must not receive a push. The frame
+        // is still handed to the writer, which re-checks the allow-list right before sealing, drops it and closes the
+        // socket (the #362 pin rule) — so an idle revoked link is cut by the push itself. `--local` has no device.
+        val managed = router.managedSessionService
+        managed?.attach(
+            sink,
+            // security review R2: the registration notice, like every managed frame, only to a declared connection
+            onRegisterError = { notice -> if (caps.supportsManagedSessions) sink.emit(notice) },
+        ) { state ->
+            if (caps.supportsManagedSessions) {
+                sink.emit(dev.ccpocket.daemon.session.ManagedSessionService.filterAgents(state) { a -> RequestRouter.capsAllow(caps, a) })
+            }
+        }
         val writer = launch {
             for (env in outbox) {
                 val body = env.body
@@ -250,6 +269,15 @@ class WsConnection(
                 // or one that no longer declares the capability gets nothing; a push or a successful reply must
                 // still carry the current subscription. A refusal answers a request this very socket sent, so it
                 // may reach a connection whose fetch was never accepted — without that registering anything.
+                // #360 security review M2: the same rule for managed session frames (replies, pushes and the
+                // registration notice): a revoked device's socket never gets one sealed, and is closed.
+                if (crypto != null && (
+                        body is dev.ccpocket.protocol.ManagedSessionsState || body is dev.ccpocket.protocol.DiscoveredSessions ||
+                            (body is PocketError && body.code == dev.ccpocket.daemon.session.ManagedSessionService.REGISTER_FAILED)
+                        )
+                ) {
+                    if (!deviceStillAllowListed()) error("device revoked — closing live direct link")
+                }
                 if (crypto != null && body is dev.ccpocket.protocol.ProjectPinsState) {
                     if (!deviceStillAllowListed()) error("device revoked — closing live direct link")
                     if (!caps.supportsProjectPins || caps.pinRetired) continue
@@ -342,6 +370,7 @@ class WsConnection(
             registry.handoffs?.detach(sink) // this connection's fan-out slot dies with the socket
             reviews?.detach(sink)           // …keyed by THIS sink, so a sibling connection is untouched
             pins?.detach(sink)              // #362: same per-connection slot for pin pushes
+            managed?.detach(sink)           // #360: …and for managed session list pushes
             caps.pinRetired = true          // …and a closed connection can never hold a pin subscription again
             caps.pinSubscriptionId = null
             outbox.close()

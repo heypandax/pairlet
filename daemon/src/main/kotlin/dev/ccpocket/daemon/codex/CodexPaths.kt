@@ -49,6 +49,24 @@ object CodexPaths {
         return sorted
     }
 
+    /** [sessionFiles] with the facts a durable decision needs (issue #360): whether the root provably does not
+     *  exist, how many directories could not be listed (the legacy walk silently treats those as empty), and
+     *  whether [limit] cut rollouts off. Shares the listing memo; does not advance [listingGeneration]. */
+    class Listing(val files: List<Path>, val truncated: Boolean, val unreadableDirs: Int)
+
+    fun sessionListing(limit: Int, root: Path = sessionsRoot()): Listing {
+        if (!root.isDirectory()) {
+            // provably absent = no Codex history at all; anything else (a file, no permission) is unreadable
+            return Listing(emptyList(), truncated = false, unreadableDirs = if (Files.notExists(root)) 0 else 1)
+        }
+        val files = ArrayList<Path>()
+        val unreadable = IntArray(1)
+        collectRollouts(root, 0, files, unreadable)
+        val stamped = files.mapNotNull { p -> runCatching { p.getLastModifiedTime().toMillis() }.getOrNull()?.let { p to it } }
+        val sorted = stamped.sortedByDescending { it.second }.take(limit).map { it.first }
+        return Listing(sorted, truncated = stamped.size > limit, unreadableDirs = unreadable[0])
+    }
+
     /**
      * The newest rollout file for one logical thread id. Codex can leave both the original
      * `-<threadId>.jsonl` and a resumed `-<threadId>_<runId>.jsonl`; replay/resume must follow the latter
@@ -123,24 +141,26 @@ object CodexPaths {
      * which would hide a brand-new session forever. Only today's leaf directory is ever that young, so the
      * guard costs one small readdir and keeps the rest of the tree cached.
      */
-    private fun entriesOf(dir: Path): List<DirEntry> {
-        val stamp = runCatching { dir.getLastModifiedTime() }.getOrNull() ?: return emptyList()
+    private fun entriesOf(dir: Path, unreadable: IntArray? = null): List<DirEntry> {
+        val stamp = runCatching { dir.getLastModifiedTime() }.getOrNull()
+            ?: return emptyList<DirEntry>().also { if (unreadable != null && !Files.notExists(dir)) unreadable[0]++ }
         val settled = System.currentTimeMillis() - stamp.toMillis() >= DIR_SETTLE_MS
         if (settled) dirCache[dir]?.let { if (it.first == stamp) return it.second }
         val listed = runCatching {
             Files.list(dir).use { s -> s.map { DirEntry(it, Files.isDirectory(it, LinkOption.NOFOLLOW_LINKS)) }.toList() }
-        }.getOrNull() ?: return emptyList() // unreadable dir: don't cache the failure as "empty"
+        }.getOrNull() ?: return emptyList<DirEntry>().also { unreadable?.let { it[0]++ } } // unreadable dir: don't cache the failure as "empty"
         if (settled) dirCache[dir] = stamp to listed
         return listed
     }
 
     /** Depth-first collect of rollout files over the cached listings. Depth is bounded rather than pinned to
      *  the YYYY/MM/DD layout so a future Codex nesting still resolves; symlinked directories are not
-     *  descended, matching the `Files.walk` this replaced (and ruling out link cycles). */
-    private fun collectRollouts(dir: Path, depth: Int, out: MutableList<Path>) {
+     *  descended, matching the `Files.walk` this replaced (and ruling out link cycles). [unreadable], when
+     *  given, counts directories whose listing failed (issue #360) — the walk itself still skips them. */
+    private fun collectRollouts(dir: Path, depth: Int, out: MutableList<Path>, unreadable: IntArray? = null) {
         if (depth > MAX_DEPTH) return
-        for (e in entriesOf(dir)) {
-            if (e.isDir) collectRollouts(e.path, depth + 1, out)
+        for (e in entriesOf(dir, unreadable)) {
+            if (e.isDir) collectRollouts(e.path, depth + 1, out, unreadable)
             else if (isRolloutName(e.path)) out.add(e.path)
         }
     }

@@ -261,6 +261,9 @@ import dev.ccpocket.protocol.PresetsState
 import dev.ccpocket.protocol.SavePreset
 import dev.ccpocket.protocol.Secret
 import dev.ccpocket.protocol.Sessions
+import dev.ccpocket.protocol.DiscoveredSessions
+import dev.ccpocket.protocol.ListManagedSessions
+import dev.ccpocket.protocol.ManagedSessionsState
 import dev.ccpocket.protocol.Usage
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.StopBackgroundJob
@@ -1125,6 +1128,53 @@ class PocketRepository(
     /** Custom session groups for [sessionsDir] (issue #119); empty = none / older daemon that omits them.
      *  Per-session membership rides on [SessionSummary.group] (a group id, or null = ungrouped). */
     val sessionGroups = mutableStateListOf<SessionGroup>()
+
+    // ── #360 stage 2: the managed session list ─────────────────────────────────────────────────────────────
+    // Negotiated per connection: nothing below sends a frame, or changes a row, unless THIS link's DaemonInfo advertised
+    // supportsManagedSessions. The daemon's Sessions rows are kept as [legacySessions]; [sessions] is those rows with every
+    // READY agent swapped for its managed list (see [mergeManagedSessions]). Any failed, refused or timed-out list read
+    // drops the project back to the legacy rows — never to "no sessions".
+    /** DaemonInfo.supportsManagedSessions on this connection; false = every legacy path, unchanged. */
+    val daemonManagedSessions = mutableStateOf(false)
+    /** DaemonInfo.managedAgents, parsed; empty unless [daemonManagedSessions]. */
+    val daemonManagedAgents = mutableStateOf<Set<AgentKind>>(emptySet())
+    /** The listed project's accepted managed list; null = none accepted (legacy rows are showing). */
+    val managedList = mutableStateOf<ManagedProjectList?>(null)
+    /** Listed-project session ids whose native record a complete scan did not find ("original record unavailable"). */
+    val managedMissing = mutableStateOf<Set<String>>(emptySet())
+    /** The listed project's managed agents are waiting for their FIRST managed read on this link + computer: their
+     *  rows are held back (an outside session must not flash in and vanish) and lists show a loading hint instead of
+     *  "no sessions". Ends on arrival, failure or timeout — the latter two fall back to the legacy rows. */
+    val managedListLoading = mutableStateOf(false)
+    private var legacySessions: List<SessionSummary> = emptyList()
+    /** Accepted lists of THIS connection + computer, by [managedKey]. Cleared on disconnect / computer switch. */
+    private val managedByDir = HashMap<String, ManagedProjectList>()
+    private class ManagedPending(val gen: Long, val workdir: String, val mutation: Boolean, val reply: kotlinx.coroutines.CompletableDeferred<Frame?>)
+    private val managedPending = HashMap<String, ManagedPending>()
+    /** Connection generation for managed.* replies: bumped on every DaemonInfo change of capability and every disconnect. */
+    private var managedGen = 0L
+    private var managedSeq = 0L
+    private val managedFetches = HashMap<String, Job>()
+    /** Every managed.* request is answered within this or treated as unanswered (an older daemon drops unknown frames). */
+    internal var managedCallTimeoutMs = 15_000L
+    /** One page of a managed list read (a large history scans slowly daemon-side). */
+    internal var managedListPageTimeoutMs = 30_000L
+    /** An enable: the daemon takes a complete scan before it commits READY. */
+    internal var managedEnableTimeoutMs = 60_000L
+    /** Longest the first-read loading state may hide managed agents' rows; past it the legacy rows show while the read goes on. */
+    internal var managedLoadingMaxMs = 15_000L
+    /** Listed-project [managedRowKey]s whose group placement is ambiguous across agents ("group unclear"). */
+    val managedAmbiguous = mutableStateOf<Set<String>>(emptySet())
+    /** A managed list accepted for a project that is no longer the listed one — see [ManagedAccepted]. */
+    val managedAccepted = mutableStateOf<ManagedAccepted?>(null)
+    /** The listed project read successfully before but its latest read failed: the list shown is the last accepted one
+     *  (plus this app's own and running sessions) — lists say "couldn't refresh, showing the last result". */
+    val managedListStale = mutableStateOf(false)
+    /** Session ids this client saw announced by SessionLive on this link — created or opened from here. */
+    private val managedSeenHere = HashSet<String>()
+    /** An open without a resumeId is in flight: the next SessionLive names a session created here. */
+    private var managedOpeningNew = false
+    private var managedPriorSessionId: String? = null // the session we LEFT for a brand-new open: its late echo is not "created here"
     /** True when THIS connection may manage groups (issue #119): the daemon sent a groups array (owner on a
      *  group-aware daemon). Distinguishes it from the two "no groups" cases that both leave [sessionGroups]
      *  empty — a group-aware daemon with zero groups yet (show "+ New group" so the FIRST one is creatable)
@@ -2509,7 +2559,7 @@ class PocketRepository(
                 // offers addressed to THIS device. Sending the ordinary volley here would be three refusals.
                 send(ListHandoffs())
             } else {
-                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true))
+                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true, supportsManagedSessions = true))
                 send(ListDirectories())
                 send(ListPendingApprovals)
             }
@@ -2714,6 +2764,13 @@ class PocketRepository(
         daemonSupportedAgents.value = emptySet() // reverse agent capability: no stale ZCode across machines
         daemonAgentsKnown = false // #276: back to "not told yet" — the guard must not deny during reconnect
         daemonUsageAgentFilter.value = false // ditto (issue #258): the next machine re-advertises its own
+        // #360: the managed list is per link + computer. Pending replies resolve as disconnected, accepted lists are
+        // forgotten, and the capability waits for the next DaemonInfo. The group definitions go with the rows they
+        // describe: kept, they rendered under the NEXT computer's first listing until its own Sessions replaced them.
+        retireManaged()
+        daemonManagedSessions.value = false; daemonManagedAgents.value = emptySet()
+        legacySessions = emptyList(); managedList.value = null; managedMissing.value = emptySet()
+        sessionGroups.clear()
         // per-daemon truth: the allowance belongs to the ACCOUNT on the machine we just left. Showing it
         // under the next machine's name would be a straight lie about a billing number.
         quotaDeadlines.values.forEach { it.cancel() }; quotaDeadlines.clear(); quotaOutstanding.clear()
@@ -2891,6 +2948,7 @@ class PocketRepository(
         convoId.value = null; currentSessionId = null; sessionKey.value = null
         workdir.value = null // same reason as disconnect(): a stale path must not leak into a later ⌘N (issue #56)
         sessionsDir.value = null; sessions.clear(); browseIntentDir = null // #349: same rule as disconnect()
+        legacySessions = emptyList(); managedListLoading.value = false // #360: the daemon rows leave with the list
         chatTitle.value = null; observing.value = false; streaming.value = false
         opening.value = false; openTimedOut.value = false; switching.value = false; switchingSession.value = false
         openInFlight = null; lastOpenAttempt = null // #235: the claim + its retry target belong to the machine we're leaving
@@ -3328,7 +3386,10 @@ class PocketRepository(
                     // (two files, one id) once reached the phone's LazyColumn as two rows with one key — that is
                     // an instant native crash, not a cosmetic glitch. The daemon dedupes too; this edge survives
                     // an older daemon. First occurrence wins = newest (the list arrives sorted by recency).
-                    sessionsDir.value = f.workdir; replace(sessions, f.items.distinctBy { it.sessionId })
+                    sessionsDir.value = f.workdir; legacySessions = f.items.distinctBy { it.sessionId }
+                    // #360: identical to replacing with the daemon rows unless this link negotiated the managed list
+                    recomputeManagedSessions()
+                    if (managedCapable()) refreshManagedList(f.workdir)
                     replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
                     groupsSupported.value = f.groups != null // groups=[] (owner, none yet) still enables management
                     renameSupported.value = f.renameSupported // #158: false from an older daemon / a guest
@@ -3338,6 +3399,8 @@ class PocketRepository(
                 // sessionsRefreshing would greet the user with a dead indicator on the next visit.
                 sessionsRefreshing.value = false
             }
+            is ManagedSessionsState -> onManagedState(f) // #360 stage 2
+            is DiscoveredSessions -> onManagedDiscovered(f)
             is ArchivedSessions -> { // #202: the cross-project archive view's rows
                 replace(archivedSessions, f.items)
                 archivedRefreshing.value = false
@@ -3527,6 +3590,16 @@ class PocketRepository(
                 }
                 daemonDiagnostics = f.supportsDiagnostics
                 daemonOwnsPromptRecovery = f.supportsPromptRecovery
+                // #360: this link's managed-list capability. Losing it (or its agent set changing) retires every
+                // pending managed reply and every accepted list, back to the legacy rows.
+                val managedAgentsNow = if (f.supportsManagedSessions) managedAgentsOf(f.managedAgents) else emptySet()
+                if (managedAgentsNow != daemonManagedAgents.value || f.supportsManagedSessions != daemonManagedSessions.value) {
+                    retireManaged()
+                    daemonManagedSessions.value = f.supportsManagedSessions
+                    daemonManagedAgents.value = managedAgentsNow
+                    recomputeManagedSessions()
+                    sessionsDir.value?.let { if (managedCapable()) refreshManagedList(it) }
+                }
                 // #362: this connection's advertisement is the only thing that starts pin sync with this computer
                 pinLink.onDaemonInfo(f.supportsProjectPins, paired.value, pairedTransport = useRelay && !demoMode.value, outbound = capturePinOutbound())
                 if (daemonOwnsPromptRecovery) clearTurnWatchdogState()
@@ -3560,7 +3633,11 @@ class PocketRepository(
                 openInFlight = null // …and so is its #235 claim — the next click on this row is a real request again
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
-                f.sessionId?.let { sessionKey.value = it }
+                f.sessionId?.let {
+                    sessionKey.value = it
+                    // #360: only the answer to a brand-new open is "created here" — resuming an existing session is not
+                    if (managedOpeningNew && it != managedPriorSessionId) { managedSeenHere += it; managedOpeningNew = false }
+                }
                 // The opener's title is only an optimistic seed: push/deep-link routes know no title at
                 // all, and a project row can be stale while Codex renames its thread. A new daemon sends
                 // transcript/index truth here; null from an older daemon deliberately keeps the seed.
@@ -3842,6 +3919,7 @@ class PocketRepository(
                 openJob?.cancel(); openJob = null
                 opening.value = false; switchingSession.value = false // a failed open re-enables the one-tap entries right away
                 pendingNewOpenWd = null // #219: the failed open's marker must not admit a later background announce
+                managedOpeningNew = false // #360: a dead open never marks a later announce as "created here"
                 openInFlight = null // #235: release the claim on the same edge — a refused open must stay retryable
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
                 // a dead claude process never sends TurnDone — clear the streaming state here
@@ -5516,6 +5594,322 @@ class PocketRepository(
         return scope.launch { send(ListSessions(wd)) }
     }
 
+    // ── #360 stage 2: managed session list ──────────────────────────────────────────────────────────────────
+
+    /** Owner of a computer that advertised the managed list for at least one importable agent. */
+    fun managedImportAvailable(): Boolean =
+        managedCapable() && daemonManagedAgents.value.any { it in dev.ccpocket.app.ui.session.IMPORTABLE_AGENTS }
+
+    /** The managed surface is owner-only: a guest or collaborator binding sends no managed frame and never waits for one. */
+    private fun managedCapable(): Boolean =
+        daemonManagedSessions.value && daemonManagedAgents.value.isNotEmpty() && paired.value?.role == BindingRole.OWNER
+
+    /** Cache identity: the computer AND the project, so a revision is only ever compared within one computer. */
+    private fun managedKey(workdir: String): String = "${paired.value?.accountId.orEmpty()}|${dev.ccpocket.app.ui.normalizedDirKey(workdir)}"
+
+    /** Projects (by [managedKey]) that have NEVER read successfully on this link and whose last read failed: they show the
+     *  daemon rows, without the first-read loading state, until a read succeeds. */
+    private val managedFailed = HashSet<String>()
+    /** Projects whose read must run once more when the running one lands (a re-list, push or mutation arrived meanwhile). */
+    private val managedDirty = HashSet<String>()
+    /** Projects whose first-read loading window ([managedLoadingMaxMs]) ran out: daemon rows show while the read goes on. */
+    private val managedLoadingExpired = HashSet<String>()
+    private val managedLoadingTimers = HashMap<String, Job>()
+    /** The daemon rows last seen per project on this link — what a late read is merged with for a RECENT snapshot. */
+    private val legacyByKey = HashMap<String, List<SessionSummary>>()
+    private var managedAcceptedSeq = 0L
+    /** Late accepted lists of projects that are not the listed one, by [managedKey] — dropped when that project is listed
+     *  again (its own rows take over) and on retire. State, so a RECENT derive re-reads when one lands. */
+    private val managedAcceptedByKey = androidx.compose.runtime.mutableStateMapOf<String, ManagedAccepted>()
+
+    /** The late managed list of a non-listed project on this computer, if one landed after the project was left. */
+    fun managedAcceptedFor(workdir: String): ManagedAccepted? =
+        managedAcceptedByKey[managedKey(workdir)]?.takeIf { it.accountId == paired.value?.accountId }
+
+    /** Take one member out of [workdir]'s managed list (the native transcript is untouched; it can be imported again).
+     *  The daemon's durable reply re-reads the list; a lost reply is re-read the same way. */
+    fun removeManagedMember(
+        workdir: String,
+        agent: AgentKind,
+        sessionId: String,
+        onResult: (dev.ccpocket.app.ui.session.RemoveResult) -> Unit = {},
+    ) {
+        val acct = paired.value?.accountId ?: return onResult(dev.ccpocket.app.ui.session.RemoveResult.Failure(dev.ccpocket.app.ui.session.ManagedSessionsError.DISCONNECTED))
+        scope.launch {
+            val result = RepoManagedSessionsGateway(this@PocketRepository)
+                .remove(dev.ccpocket.app.ui.session.ManagedScope(acct, workdir), agent, sessionId)
+            // removed on purpose: no longer "created here", so a stale list must not bring it back
+            if (result == dev.ccpocket.app.ui.session.RemoveResult.Removed) managedSeenHere -= sessionId
+            onResult(result)
+        }
+    }
+
+    /** One fresh, complete read of [workdir]'s managed list: is ([agent], [sessionId]) a member? Null = could not read. */
+    internal suspend fun readManagedMembership(computerId: String, workdir: String, agent: AgentKind, sessionId: String): Boolean? {
+        if (!managedCapable() || paired.value?.accountId != computerId) return null
+        val list = fetchManagedPages(computerId, workdir) ?: return null
+        return list.items.any { it.agent == agent && it.sessionId == sessionId }
+    }
+
+    /** A managed member whose native record is gone: opening it would resume nothing. */
+    fun isManagedMissing(s: SessionSummary): Boolean = s.managedRowKey() in managedMissing.value
+    fun isManagedAmbiguous(s: SessionSummary): Boolean = s.managedRowKey() in managedAmbiguous.value
+
+    /** The listed project's daemon rows as they arrived — a RECENT snapshot taken while managed agents are held back. */
+    internal fun listedDaemonRows(): List<SessionSummary> = legacySessions
+
+    /** [sessions] = the listed project's daemon rows with READY agents swapped for its accepted managed list. Before the
+     *  first read of this link + computer + project lands, managed agents wait ([managedListLoading]), for at most
+     *  [managedLoadingMaxMs]. */
+    private fun recomputeManagedSessions() {
+        val dir = sessionsDir.value ?: run { managedListLoading.value = false; managedListStale.value = false; return }
+        val capable = managedCapable()
+        val key = managedKey(dir)
+        legacyByKey[key] = legacySessions
+        managedAcceptedByKey.remove(key) // listed again: its own live rows take over from a late read's snapshot
+        val managed = if (capable) managedByDir[key] else null
+        val awaiting = capable && managed == null && key !in managedFailed && key !in managedLoadingExpired
+        if (awaiting) armManagedLoadingLimit(key)
+        // The last accepted list is being kept because the latest read failed. A session created here after that read (its
+        // registration may have failed, or simply can't be read back) or one running right now must not be hidden by a
+        // list that can't know it — the daemon's own row for it stays.
+        val stale = managed != null && key in managedStale
+        val keep = if (!stale) emptySet() else legacySessions
+            .filter { it.sessionId in managedSeenHere || it.sessionId == sessionKey.value || it.live || it.busy }
+            .mapTo(HashSet()) { it.managedRowKey() }
+        val merged = mergeManagedSessions(
+            legacySessions, managed, if (capable) daemonManagedAgents.value else emptySet(), dir,
+            awaitingFirstRead = awaiting, keepFromDaemon = keep,
+        )
+        replace(sessions, merged.rows)
+        managedList.value = managed
+        managedMissing.value = merged.missing
+        managedAmbiguous.value = merged.ambiguous
+        managedListLoading.value = merged.loading
+        managedListStale.value = stale
+    }
+
+    /** Projects (by [managedKey]) showing their last accepted list because the latest read failed. */
+    private val managedStale = HashSet<String>()
+
+    /** One bounded loading window per project per link: when it ends the daemon rows show; the read itself continues. */
+    private fun armManagedLoadingLimit(key: String) {
+        if (managedLoadingTimers.containsKey(key)) return
+        val gen = managedGen
+        managedLoadingTimers[key] = scope.launch {
+            kotlinx.coroutines.delay(managedLoadingMaxMs)
+            if (gen != managedGen) return@launch
+            managedLoadingExpired += key
+            if (sessionsDir.value?.let { managedKey(it) } == key) recomputeManagedSessions()
+        }
+    }
+
+    /** Every pending managed reply resolves as disconnected and later answers from before this point are dropped. */
+    private fun retireManaged() {
+        managedGen++
+        val pending = managedPending.values.toList()
+        managedPending.clear()
+        pending.forEach { it.reply.complete(null) }
+        managedFetches.values.forEach { it.cancel() }
+        managedFetches.clear()
+        managedLoadingTimers.values.forEach { it.cancel() }
+        managedLoadingTimers.clear()
+        managedByDir.clear()
+        managedFailed.clear()
+        managedDirty.clear()
+        managedLoadingExpired.clear()
+        legacyByKey.clear()
+        managedAcceptedByKey.clear()
+        // per link + computer too: what was created here, what was stale, which changes were awaited
+        managedSeenHere.clear()
+        managedOpeningNew = false
+        managedStale.clear()
+        managedTombstones.clear()
+    }
+
+    /**
+     * Read [workdir]'s whole managed list, page by page, accepting it only when every page arrived for this very
+     * connection + computer. A read already running for the project is never restarted — that would starve a daemon
+     * slower than the re-list rate — it is marked dirty and runs exactly once more when it lands.
+     */
+    private fun refreshManagedList(workdir: String) {
+        if (!managedCapable()) return
+        val acct = paired.value?.accountId ?: return
+        val key = managedKey(workdir)
+        if (managedFetches[key]?.isActive == true) { managedDirty += key; return }
+        val gen = managedGen
+        managedFetches[key] = scope.launch {
+            do {
+                managedDirty -= key
+                val collected = fetchManagedPages(acct, workdir)
+                if (gen != managedGen || paired.value?.accountId != acct) return@launch
+                acceptManagedRead(acct, key, workdir, collected)
+            } while (key in managedDirty)
+        }
+    }
+
+    /**
+     * A finished read. Failed: a project that read successfully on this link keeps its accepted list (the contract's
+     * "keep the previous display"); one that never did falls back to the daemon rows. Accepted for a project that is not
+     * the listed one any more: published as [managedAccepted] so its RECENT snapshot can be rewritten.
+     */
+    private fun acceptManagedRead(acct: String, key: String, workdir: String, collected: ManagedProjectList?) {
+        val held = managedByDir[key]
+        if (collected == null) {
+            if (held == null) managedFailed += key
+            else managedStale += key // keep the last accepted list, and say it is the last result
+        } else {
+            managedFailed -= key
+            managedStale -= key
+            if (held == null || held.canonicalWorkdir != collected.canonicalWorkdir || (collected.revision ?: -1) >= (held.revision ?: -1)) {
+                managedByDir[key] = collected
+                val listed = sessionsDir.value
+                val daemonRows = legacyByKey[key]
+                if ((listed == null || managedKey(listed) != key) && daemonRows != null) {
+                    val merged = mergeManagedSessions(daemonRows, collected, daemonManagedAgents.value, workdir)
+                    val event = ManagedAccepted(acct, workdir, merged.rows, merged.missing, merged.ambiguous, ++managedAcceptedSeq)
+                    managedAcceptedByKey[key] = event
+                    managedAccepted.value = event
+                }
+            }
+        }
+        if (sessionsDir.value?.let { managedKey(it) == key } == true) recomputeManagedSessions()
+    }
+
+    /**
+     * Every page of one all-agents list read, or null when any page failed. Only a page saying `complete = true` ends
+     * the read (the flag defaults to false, so a reply that omits it is never "all read"); an incomplete page without a
+     * cursor is a failed read. A cursor the daemon no longer honours (store revision moved on) restarts from page one,
+     * dropping what the abandoned pass collected.
+     */
+    private suspend fun fetchManagedPages(acct: String, workdir: String): ManagedProjectList? {
+        var cursor: String? = null
+        var restarts = 0
+        var pages = 0
+        val items = ArrayList<dev.ccpocket.protocol.ManagedSessionEntry>()
+        var head: dev.ccpocket.protocol.ManagedSessionsState? = null
+        var statuses: List<dev.ccpocket.protocol.ManagedAgentStatus> = emptyList()
+        while (pages++ < MANAGED_LIST_MAX_PAGES) {
+            val o = managedCall(acct, workdir, agent = null, mutation = false, timeoutMs = managedListPageTimeoutMs) { rid -> managedListRequest(rid, workdir, cursor) }
+            val f = (o as? ManagedCallOutcome.Reply)?.frame as? dev.ccpocket.protocol.ManagedSessionsState ?: return null
+            if (f.error == dev.ccpocket.protocol.ManagedSessionErrors.CURSOR_INVALID && cursor != null && restarts++ < MANAGED_LIST_MAX_RESTARTS) {
+                cursor = null; items.clear(); head = null; statuses = emptyList()
+                continue
+            }
+            val agents = f.agents
+            val page = f.items
+            if (f.error != null || agents == null || page == null) return null
+            val first = head
+            if (first != null && first.canonicalWorkdir != f.canonicalWorkdir) return null
+            if (first == null) head = f
+            if (statuses.isEmpty()) statuses = agents
+            items += page
+            if (f.complete) {
+                val h = head ?: f
+                return ManagedProjectList(
+                    workdir, h.canonicalWorkdir, h.revision,
+                    statuses.filter(::managedStatusUsable), items.filter(::managedEntryUsable), h.readOnly,
+                )
+            }
+            cursor = f.nextCursor ?: return null
+        }
+        return null // more pages than any bounded list can have: treat as a failed read
+    }
+
+    /** One page of the project-wide list: every managed agent in one order, continuing at [cursor]. */
+    private fun managedListRequest(requestId: String, workdir: String, cursor: String?): Frame =
+        ListManagedSessions(requestId = requestId, workdir = workdir, allAgents = true, cursor = cursor)
+
+    /** Statuses and rows naming no agent (one this build cannot decode) are dropped — the client never guesses one. */
+    private fun managedStatusUsable(s: dev.ccpocket.protocol.ManagedAgentStatus): Boolean = s.agent != null
+
+    private fun managedEntryUsable(e: dev.ccpocket.protocol.ManagedSessionEntry): Boolean = e.agent != null
+
+    /**
+     * Send one managed.* request built around a fresh requestId and wait for its reply. Resolves [ManagedCallOutcome.Unsupported]
+     * without sending when this link never advertised the capability (or [agent]), [ManagedCallOutcome.Disconnected] when
+     * [computerId] is not the connected computer or the link drops/changes meanwhile, [ManagedCallOutcome.Timeout] when
+     * nothing answers within [managedCallTimeoutMs].
+     */
+    internal suspend fun managedCall(
+        computerId: String,
+        workdir: String,
+        agent: AgentKind?,
+        mutation: Boolean = agent != null,
+        timeoutMs: Long = managedCallTimeoutMs,
+        build: (String) -> Frame,
+    ): ManagedCallOutcome {
+        if (!managedCapable() || (agent != null && agent !in daemonManagedAgents.value)) return ManagedCallOutcome.Unsupported
+        if (paired.value?.accountId != computerId) return ManagedCallOutcome.Disconnected
+        val requestId = "managed-${++managedSeq}-${epochMillis()}"
+        val reply = kotlinx.coroutines.CompletableDeferred<Frame?>()
+        managedPending[requestId] = ManagedPending(managedGen, workdir, mutation, reply)
+        try {
+            try {
+                send(build(requestId))
+            } catch (t: Throwable) {
+                if (!reply.isCompleted) {
+                    if (t is CancellationException && !kotlinx.coroutines.currentCoroutineContext()[Job]!!.isActive) throw t
+                    return ManagedCallOutcome.Disconnected
+                }
+            }
+            val frame = withTimeoutOrNull(timeoutMs) { reply.await() }
+            if (frame != null) return ManagedCallOutcome.Reply(frame)
+            if (reply.isCompleted) return ManagedCallOutcome.Disconnected
+            // a change that got no answer may still have been committed daemon-side (the answer, or its push, got lost):
+            // re-read the list so what the user sees converges on what the daemon actually holds
+            if (mutation) {
+                refreshManagedList(workdir)
+                // a tombstone: if the answer does arrive later, it still counts as a change and triggers another read
+                val now = epochMillis()
+                managedTombstones.entries.removeAll { it.value.expiresAt < now }
+                managedTombstones[requestId] = ManagedTombstone(managedGen, workdir, now + MANAGED_TOMBSTONE_MS)
+            }
+            return ManagedCallOutcome.Timeout
+        } finally {
+            // answered, timed out, failed or cancelled: this request never stays pending
+            managedPending.remove(requestId)
+        }
+    }
+
+    /** A change (enable / import / remove) whose answer did not arrive in time — kept briefly so a late answer still counts. */
+    private class ManagedTombstone(val gen: Long, val workdir: String, val expiresAt: Long)
+    private val managedTombstones = HashMap<String, ManagedTombstone>()
+
+    private fun onManagedState(f: dev.ccpocket.protocol.ManagedSessionsState) {
+        if (!managedCapable()) return
+        val requestId = f.requestId
+        if (requestId != null) {
+            val p = managedPending.remove(requestId) ?: run {
+                // a change that timed out on this link but did land after all: the list must catch up with it
+                val late = managedTombstones.remove(requestId)
+                if (late != null && late.gen == managedGen && late.expiresAt >= epochMillis() && f.error == null) refreshManagedList(late.workdir)
+                return // otherwise: not ours, or an older link's
+            }
+            if (p.gen != managedGen) return
+            p.reply.complete(f)
+            // a durable change to the listed project: re-read its whole list (one project-wide order, all pages)
+            if (p.mutation && f.error == null && sessionsDir.value?.let { dev.ccpocket.app.ui.sameDirPath(it, p.workdir) } == true) {
+                refreshManagedList(p.workdir)
+            }
+            return
+        }
+        // a push: only a signal. Re-read when it names the listed project with a newer revision than we hold.
+        val dir = sessionsDir.value ?: return
+        val named = f.canonicalWorkdir ?: f.workdir
+        val held = managedByDir[managedKey(dir)]
+        val ours = dev.ccpocket.app.ui.sameDirPath(named, dir) || (held?.canonicalWorkdir != null && held.canonicalWorkdir == f.canonicalWorkdir)
+        if (!ours) return
+        if (held != null && held.canonicalWorkdir == f.canonicalWorkdir && (f.revision ?: -1) <= (held.revision ?: -1)) return
+        refreshManagedList(dir)
+    }
+
+    private fun onManagedDiscovered(f: dev.ccpocket.protocol.DiscoveredSessions) {
+        val p = managedPending.remove(f.requestId) ?: return
+        if (p.gen != managedGen) return
+        p.reply.complete(f)
+    }
+
     /** Fetch the cross-project archive (issue #202) — a multi-project scan on the daemon, so only ever on
      *  an explicit open/refresh, never on a timer. */
     fun listArchivedSessions() = scope.launch {
@@ -5757,7 +6151,9 @@ class PocketRepository(
         transcript.reset()
         convoId.value = null
         resetHistoryPaging() // #147: a fresh open replays in full — a stale cursor must not ask for a delta
+        managedPriorSessionId = sessionKey.value // #360: a late echo of the session we are leaving must not pose as the new one
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
+        managedOpeningNew = resumeId == null // #360: only a brand-new session's announce counts as "created here"
         // #219: a brand-new session's SessionLive has no sessionId to recognize it by — arm the workdir
         // match instead. A resume open disarms any stale marker: its answer is pinned by sessionKey above.
         pendingNewOpenWd = if (resumeId == null) wd else null
@@ -5917,6 +6313,7 @@ class PocketRepository(
         openTimedOutReason.value = reason // written BEFORE the flag the UI reads it under
         openTimedOut.value = true // surfaced as a slim banner instead of the old silent spinner reset (issue #41)
         pendingNewOpenWd = null // #219: the open is dead — a later background announce must not claim it
+        managedOpeningNew = false // #360: a dead open never marks a later announce as "created here"
         openInFlight = null // #235: …and the claim dies with it, so the same row can be clicked again
         // Fired exactly where the banner floats up — so the count is banners the user SAW, not deadlines
         // armed. Until now this whole path was unattributable: every failure looked the same in Firebase.
@@ -7302,6 +7699,7 @@ class PocketRepository(
         // but the original in-flight transition still owns the chat route until it lands/fails/times out.
         switchingSession.value = switchingSession.value || convoId.value != null
         sessionsDir.value = item.dirKey
+        legacySessions = emptyList() // #360: the previous project's daemon rows must not be merged under this one
         listSessions(item.dirKey) // freshen that project's list so the back trip doesn't show the old one's
         // Optimistic touch so the sheet re-orders under the tap. The daemon's SessionLive re-touches with
         // the authoritative id right after (a fork or lock-heal can hand back a different one), so a
@@ -7397,6 +7795,8 @@ class PocketRepository(
         browseIntentDir = null // #349: BACK retires the browse intent, so a reply still in flight can't re-enter the list
         sessionsDir.value = null
         sessions.clear()
+        // #360: the daemon rows went with the list — a managed read landing now must not resurrect them
+        legacySessions = emptyList(); managedListLoading.value = false
     }
 
     /** Raise the #226 browse fence and abandon an open transition the user explicitly backed out of. */

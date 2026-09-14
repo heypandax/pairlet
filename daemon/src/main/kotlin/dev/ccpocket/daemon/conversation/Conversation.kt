@@ -397,6 +397,20 @@ class Conversation(
     @Volatile
     private var openedResumeId: String? = null
 
+    /** issue #360: where a trusted native session id this conversation newly holds is reported (the registry's
+     *  managed-list hook), read at report time. Set by [dev.ccpocket.daemon.session.SessionRegistry]; null = none. */
+    @Volatile var nativeSessionHookProvider: () -> dev.ccpocket.daemon.session.NativeSessionHook? = { null }
+
+    /** issue #360 security review M1: this conversation was opened by the OWNER (no bridge origin, no guest scope, no
+     *  collaborator grant) — fixed by the registry at open, inherited by a rewind branch. Only such conversations'
+     *  native ids are registered into the managed list. Fails closed: false until the registry says otherwise.
+     *
+     *  Deliberately set ONCE, by the open that CREATED the conversation. A later open that hot-reattaches to it — the
+     *  owner rejoining a live session a guest / bridge / collaborator started — attaches a view and does NOT re-evaluate
+     *  this: such a session never becomes owner-created, so its native id stays in discovery for an explicit import
+     *  (security review R3; conservative by design, pinned by ConversationNativeSessionHookTest). */
+    @Volatile var ownerCreated: Boolean = false
+
     // whether open() decided to --fork-session (the desktop was actively writing the resumed transcript).
     // A pre-first-turn relaunch must REUSE this decision: sessionId is still null then, and the old
     // `resumeId != sessionId` heuristic read that as "foreign id → fork", minting a duplicate session
@@ -1837,6 +1851,20 @@ class Conversation(
                                         dev.ccpocket.daemon.disk.RewindLineage.note(rl.parentSid, newSid, rl.cutSeq, rl.mode)
                                     }
                                     log.info("$convoId ${rl.mode} branch: ${rl.parentSid.take(8)}… → ${newSid.take(8)}… at seq ${rl.cutSeq}")
+                                }
+                            }
+                            // issue #360: a trusted native id this conversation did not already hold — a new
+                            // session, or a branch off the one it ran/resumed. An in-place resume reports the SAME
+                            // id and registers nothing; the report re-checks its generation when processed, so a
+                            // late init from a replaced process cannot register under this conversation.
+                            if (newSid != prevSid) {
+                                val parent = (prevSid ?: openedResumeId)
+                                if (parent != newSid) nativeSessionHookProvider()?.let { hook ->
+                                    val report = dev.ccpocket.daemon.session.NativeSessionReport(
+                                        convoId, backend.kind, workdir.toString(), newSid, parent,
+                                        isCurrent = { generation == processGeneration }, ownerCreated = ownerCreated,
+                                    )
+                                    scope.launch { runCatching { hook.onNativeSession(report) } }
                                 }
                             }
                             sessionId = newSid

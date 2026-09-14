@@ -870,6 +870,14 @@ class CodexBackend(
 
     override val holdsTranscriptWhileIdle: Boolean get() = true
     override fun listSessions(workdir: String): List<SessionSummary> = CodexTranscriptScanner.scan(workdir)
+
+    // issue #360: completeness-aware scan for managed-list decisions; the display list above is unchanged
+    override fun scanSessions(workdir: String, agent: AgentKind): dev.ccpocket.daemon.session.SessionScan =
+        try {
+            CodexTranscriptScanner.scanDetailed(workdir)
+        } catch (e: Exception) {
+            dev.ccpocket.daemon.session.SessionScan.failed(agent, workdir, e)
+        }
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =
         CodexPaths.findSession(sessionId)?.let { CodexTranscriptReplay.read(it) } ?: emptyList()
 

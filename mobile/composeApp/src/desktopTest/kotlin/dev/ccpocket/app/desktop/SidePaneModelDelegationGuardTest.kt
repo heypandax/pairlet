@@ -141,6 +141,9 @@ class SidePaneModelDelegationGuardTest {
         "openProjectPin", "browseProjects",
         "projects", "sessions", "openProject", "selectSession", "hideSession",
         "sessionGroups", "clearRecent", "forgetProject", "sessionsRefreshing", "refresh", "liveSession",
+        // #360 stage 2: import from local history is raised from the sidebar's project menu, for an explicit project
+        "canImportManagedSessions", "managedListLoading", "managedImport",
+        "managedListStale", "unavailableNotice", "dismissUnavailableNotice", "askRemoveFromManagedList", "removeFromManagedList", "openManagedImport", "closeManagedImport", "locateImportedSession",
         "customGroups", "canEditGroups", "createGroup", "renameGroup", "deleteGroup", "assignGroup",
         "groupCollapsed",
         "archivedSessions", "canArchiveSessions", "archiveSession", "unarchiveSession",

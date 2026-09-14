@@ -203,6 +203,7 @@ class DeviceSessions(
         staleBridges.forEach { bridges.remove(it) }
         // #362: a device the replay no longer announces loses its pin push slot with its session
         (stale + staleBridges).forEach { core.projectPins.detach("${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$it") }
+        (stale + staleBridges).forEach { core.router.managedSessionService?.detach("${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$it") } // #360
         if (stale.isNotEmpty()) {
             persist()
             log.info("pruned ${stale.size} revoked device(s) after attach replay")
@@ -241,6 +242,7 @@ class DeviceSessions(
         bridges.remove(deviceId) // a revoked credential loses its entry (and live guard) the same instant
         // #362: its pin push slot too — delivery already re-checks membership, this keeps the table bounded
         core.projectPins.detach("${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$deviceId")
+        core.router.managedSessionService?.detach("${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$deviceId") // #360
         persist()
         // force-close the revoked credential's convos NOW (kills their process trees) — the owner's revoke
         // promise is "their sessions end", not "their link drops". Covers guests (#115) AND bridges (#91):
@@ -371,6 +373,9 @@ class DeviceSessions(
                 supportsPromptRecovery = true,
                                 supportsDiagnostics = true, // #122: acked prompts stay ledgered until agent consumption
                 supportsProjectPins = true, // #362: this build owns the per-computer project-pin list
+                // #360: managed session list — same source as the LAN transport's copy
+                supportsManagedSessions = core.router.managedSessionAgentWires().isNotEmpty(),
+                managedAgents = core.router.managedSessionAgentWires(),
                 // #348: the backends whose subscription allowance this daemon can read. Same source as the
                 // LAN transport's copy (WsConnection) — the router owns the readers, so it owns the answer.
                 quotaAgents = core.router.quotaAgentWires(),
@@ -635,6 +640,21 @@ class DeviceSessions(
                 // the device's CURRENT connection must also have declared the capability and fetched.
                 core.projectPins.attach("${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$deviceId") { snapshot ->
                     deliverProjectPins(deviceId, snapshot)
+                }
+                // managed session list pushes (issue #360): one slot per owner device, keyed like [sink] so the
+                // requester's own reply excludes it. Resolved at emission: the device's CURRENT connection must have
+                // declared the capability, rows are cut to its agent vocabulary, and [sink] re-gates the frame type
+                // and runs the restricted egress whitelist before sealing.
+                core.router.managedSessionService?.attach(
+                    sink.key,
+                    // registration notices: owner devices only, never a device later reclassified as restricted
+                    // …and only to a connection that declared the managed-session capability (security review R2)
+                    onRegisterError = { notice -> if (capsNow().supportsManagedSessions && !bridges.isBridgeCandidate(deviceId)) sink.emit(notice) },
+                ) { state ->
+                    val now = capsNow()
+                    if (now.supportsManagedSessions && !bridges.isBridgeCandidate(deviceId)) {
+                        sink.emit(dev.ccpocket.daemon.session.ManagedSessionService.filterAgents(state) { a -> RequestRouter.capsAllow(now, a) })
+                    }
                 }
                 if (env.body is dev.ccpocket.protocol.SyncProjectPins) {
                     // inline, in receive order, and bound to the connection that sent it: its context answers for that
