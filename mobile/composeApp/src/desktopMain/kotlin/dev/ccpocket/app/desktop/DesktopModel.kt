@@ -788,6 +788,9 @@ interface DesktopModel {
      *  #167 exists to kill would keep showing here after mobile stopped showing them. */
     val gatewayModels: List<String> get() = emptyList()
     val messages: List<ChatItem>
+    /** Issue #380: whose "collapse tool process" switch this pane's transcript follows (computer × agent ×
+     *  session). Null = no owner (seed/preview models) — the stream renders exactly as before. */
+    val toolProcessScope: dev.ccpocket.app.data.ToolProcessScope? get() = null
     // ── older-history lazy load (issue #147) — defaults keep Seed/test fakes compiling ──
     /** Rows older than the loaded window exist on the daemon — the top-of-list loader shows. */
     fun exposeFeature(feature: dev.ccpocket.app.telemetry.ProductFeature) {}

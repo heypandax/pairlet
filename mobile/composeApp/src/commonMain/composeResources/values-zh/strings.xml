@@ -2088,4 +2088,18 @@
     <string name="pin_issue_pairing_changed">这台电脑的配对已变更。重新连接后才能同步置顶。</string>
     <string name="pin_issue_retry">重试</string>
     <string name="pin_issue_dismiss">关闭</string>
+    <string name="tool_process_toggle">收起工具过程</string>
+    <string name="tool_process_group">执行过程</string>
+    <plurals name="tool_process_tools">
+        <item quantity="other">%1$d 项工具</item>
+    </plurals>
+    <plurals name="tool_process_thoughts">
+        <item quantity="other">%1$d 段思考</item>
+    </plurals>
+    <plurals name="tool_process_images">
+        <item quantity="other">%1$d 张图片</item>
+    </plurals>
+    <string name="tool_process_images_truncated">部分图片未载入</string>
+    <string name="tool_process_expand">展开过程</string>
+    <string name="tool_process_collapse">收起过程</string>
 </resources>
