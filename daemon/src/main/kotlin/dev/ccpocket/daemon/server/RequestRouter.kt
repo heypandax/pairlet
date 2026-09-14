@@ -230,6 +230,29 @@ class RequestRouter(
     /** Both transports attach their owner push targets through the router they already hold (issue #360). */
     internal val managedSessionService: dev.ccpocket.daemon.session.ManagedSessionService? get() = managedSessions
 
+    /**
+     * #367 G1: the EXECUTION run plane. Deliberately a settable property rather than a constructor
+     * parameter — the plane needs the grant store and the credential registry, both of which only exist
+     * once the relay link is up, exactly like [dev.ccpocket.daemon.DaemonCore.collaboratorControl].
+     *
+     * The transport ([dev.ccpocket.daemon.relay.DeviceSessions]) depends on the INTERFACE only and never on
+     * the run service: it hands over a frame already admitted by
+     * [dev.ccpocket.daemon.execution.ExecutionCaps.ingressAllowed] and already vetted by [executionGuard],
+     * on a deviceId proven by the Noise static key. NULL means "not wired": every execution frame is then
+     * refused with `execution_unavailable` — the router itself never routes one, and no owner handler is
+     * reachable from an execution credential under any circumstances.
+     */
+    @Volatile
+    var executionPlane: dev.ccpocket.daemon.execution.ExecutionRunPlane? = null
+
+    /**
+     * #367 G1: the per-frame authorisation gate the transport runs BEFORE [executionPlane] (grant live,
+     * revision, frame type, byte budget). Same lifetime and same null semantics as the plane, and null is
+     * likewise a REFUSAL — an execution frame is never admitted by a daemon with no gate to admit it.
+     */
+    @Volatile
+    var executionGuard: dev.ccpocket.daemon.execution.ExecutionGuard? = null
+
     /** [dev.ccpocket.protocol.DaemonInfo.managedAgents]: empty when the managed list is not wired. */
     fun managedSessionAgentWires(): List<String> = managedSessions?.agentWires().orEmpty()
 
@@ -356,6 +379,14 @@ class RequestRouter(
             // not-yet-declared holder fails closed
             frame is dev.ccpocket.protocol.ManagedSessionsState || frame is dev.ccpocket.protocol.DiscoveredSessions ->
                 caps?.supportsManagedSessions == true
+            // issue #367: an execution peer is a DAEMON, not a capability-declaring App — it never sends
+            // ClientCaps, so a null holder must not silently drop its replies. These frames are gated by
+            // ExecutionCaps.egressAllowed instead, at the one place they are sealed. Stated explicitly
+            // rather than left to the `else` so a future caps rule cannot swallow them by accident.
+            frame is dev.ccpocket.protocol.ExecutionGrantInfo ||
+                frame is dev.ccpocket.protocol.ExecutionRunAccepted ||
+                frame is dev.ccpocket.protocol.ExecutionRunState ||
+                frame is dev.ccpocket.protocol.ExecutionRunOutput -> true
             else -> true
         }
 

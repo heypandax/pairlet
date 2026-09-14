@@ -356,6 +356,9 @@ class SessionRegistry(
         // issue #219: the workdir the phone OPENED with (raw "~"-relative allowed) — announced verbatim in
         // SessionLive so the phone's identity guard matches it; null → the daemon's canonical workdir.
         announcedWorkdir: String? = null,
+        // #367 LOW-3: how an approval from this conversation is announced to the OWNER (see
+        // [dev.ccpocket.daemon.conversation.Conversation.askOriginLabel]). Only a remote run sets it.
+        askOriginLabel: String? = null,
     ): String {
         val resume = open.resumeId
         // A resume id is the durable backend identity. Older Apps did not send `agent`, and a newer App
@@ -532,7 +535,7 @@ class SessionRegistry(
             convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(),
             pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
             pathScope = pathScope, bridgeAllowedCommands = bridgeAllowedCommands,
-            bridgeContextPreamble = bridgeContextPreamble, ownerBypass = ownerBypass,
+            bridgeContextPreamble = bridgeContextPreamble, askOriginLabel = askOriginLabel, ownerBypass = ownerBypass,
             handoffAccess = handoffAccess, headless = headless,
             announcedWorkdir = announcedWorkdir,
             approvals = approvals, grants = grants, riskEngine = riskEngine,

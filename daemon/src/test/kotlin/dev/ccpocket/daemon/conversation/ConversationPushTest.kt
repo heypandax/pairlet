@@ -39,6 +39,8 @@ import kotlin.test.assertTrue
  *  - a burst of asks coalesces to ONE hook attempt, but a suppressed attempt (hook returned false)
  *    does NOT spend the window;
  *  - a GUEST conversation (pathScope set) never fires it;
+ *  - a #367 REMOTE-EXECUTION conversation (pathScope set AND an `execution:` origin) DOES fire it, naming
+ *    the source the owner authorised — the opposite of a guest, because nobody on the far side can answer;
  *  - an error-terminated turn hands the PushHook its error text (usage-limit wording included);
  *  - an unexpected agent-process death fires the PushHook with the exit summary.
  */
@@ -97,6 +99,7 @@ class ConversationPushTest {
         dyingStderr: String? = null,
         origin: String? = null,
         pathScope: List<String>? = null,
+        askOriginLabel: String? = null, // #367 LOW-3
         headlessSink: Boolean = false, // the sole sink is the scheduler's non-watching black hole (C1)
         askPushResult: () -> Boolean = { true },
         body: suspend Harness.() -> Unit,
@@ -126,6 +129,7 @@ class ConversationPushTest {
                 AskPushHook { _, _, o, tool, watched -> askCalls.add(AskCall(o, tool, watched)); askPushResult() }
             },
             pathScope = pathScope,
+            askOriginLabel = askOriginLabel,
         )
         try {
             convo.open(resumeId = null, model = null)
@@ -157,6 +161,29 @@ class ConversationPushTest {
             assertTrue(call.watched, "the initial sink is attached — the ask had a watcher")
             assertTrue(call.tool.isNotBlank())
             assertEquals(1, askFrames().size, "the ask frame itself still fans out to the sink")
+        }
+    }
+
+    @Test
+    fun a_remote_execution_ask_reaches_the_owner_naming_its_source() {
+        // #367 security review LOW-3. An execution session has a pathScope, which used to be the whole
+        // test for "this session answers its own asks" — true of a guest, the exact opposite of a remote
+        // run. Nobody on the far side can see or answer an ask (there is no verdict frame on the execution
+        // wire) and this session's own sink is a black hole, so WITHOUT this push the only possible
+        // outcome of any approval — every Bash, and every write under the DEFAULT ceiling — is a timeout
+        // deny. The card belongs to the TARGET owner, exactly like a bridge's.
+        val label = "remote run · Studio Mac · abcd-efgh-jkmn-pqrs-tuvw-xyz2-3456"
+        harness(
+            stages = listOf(listOf(init, controlRequest("rq-exec"))),
+            origin = "execution:xg_abcdefgh",
+            pathScope = listOf("/tmp"),
+            askOriginLabel = label,
+        ) {
+            await("the execution ask reached the owner") { askCalls.isNotEmpty() }
+            val call = askCalls.first()
+            assertEquals(label, call.origin, "the push must name the SOURCE the owner authorised, not the grant id")
+            assertTrue("execution:" !in (call.origin ?: ""), "…and never leak the opaque origin to a lock screen")
+            assertEquals("Run command", call.tool, "the ask's own title, same as every other push")
         }
     }
 

@@ -47,6 +47,20 @@ class LanE2E(
      *  paired over the relay a moment ago is accepted here without a restart. A parameter only so tests
      *  can supply a fixture instead of the real ~/.cc-pocket/devices.json. */
     val pairedDevices: () -> Map<String, ByteArray> = { PairedDevices.load() },
+    /**
+     * Is [String] a RESTRICTED credential (bridge #91 / guest #115 / collaborator / execution #367)?
+     * Such a key is structurally barred from this gate already — it lives in its own credential file and
+     * never in devices.json, which is the only allow-list [pairedDevices] reads — so this is a SECOND,
+     * explicit refusal, and it exists because of #367.
+     *
+     * An execution link is the credential class where an implicit guarantee is not good enough: it is the
+     * only one held by another DAEMON on the same LAN, so it is the only one for which "it happens to be
+     * in the wrong file" would be a reachable mistake rather than a theoretical one — and the LAN path
+     * runs PSK-less, with no capability whitelist and no per-frame grant check anywhere on it. A refusal
+     * here means the execution surface exists on exactly one transport, which is the property the design
+     * asks for. Defaults to "not restricted" so a LAN-only fixture needs no wiring.
+     */
+    val restrictedCredential: (String) -> Boolean = { false },
 ) {
     val gateSlots = kotlinx.coroutines.sync.Semaphore(MAX_PENDING_HANDSHAKES)
 
@@ -179,6 +193,9 @@ class WsConnection(
                     // a freshly paired device must prove ticket knowledge over the relay FIRST — the LAN
                     // handshake deliberately runs PSK-less and can't provide that pairing-ceremony binding
                     if (gate.firstContactPending(id)) { log.warn("direct connect from ${id.take(8)}… before its first relay handshake — refused"); return null }
+                    // #367: a restricted credential (execution link above all) never gets a LAN socket,
+                    // even if it somehow reached the allow-list — its enforcement lives on the relay path
+                    if (gate.restrictedCredential(id)) { log.warn("direct connect from restricted credential ${id.take(8)}… — refused"); return null }
                     // The allow-list authenticates the device's STATIC key, but the ephemeral bytes in
                     // this frame are still whatever the socket sent. A short, wrong-format, or off-curve
                     // P-256 point makes the crypto provider throw — mirror of the relay path's fix

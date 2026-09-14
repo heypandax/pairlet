@@ -87,6 +87,10 @@ class DeviceSessions(
     var collaboratorControl: dev.ccpocket.daemon.handoff.CollaboratorControl?
         get() = core.collaboratorControl
         set(v) { core.collaboratorControl = v }
+    /** #367: the execution-credential bind hook (see [DaemonCore.executionControl]). */
+    var executionControl: dev.ccpocket.daemon.execution.ExecutionControl?
+        get() = core.executionControl
+        set(v) { core.executionControl = v }
     private val mutex = Mutex()
     private val devicePubs = HashMap<String, ByteArray>(loadPersisted())
     private val psks = ArrayDeque<ByteArray>()              // minted tickets, oldest first
@@ -115,7 +119,12 @@ class DeviceSessions(
      *  the CONFIRMED handshake PSK — [BridgeRegistry.finalize]), but a cross-armed PSK fails BOTH
      *  devices' first handshakes, a pointless outage; refusing the overlap removes the window. */
     fun interactivePairingPending(now: Long = System.currentTimeMillis()): Boolean =
-        now - lastInteractiveMintAt < TICKET_EXCLUSION_MS
+        interactivePairingRemainingMs(now) > 0
+
+    /** How much longer an interactive pairing blocks a headless mint (0 = not blocking). Lets a refused
+     *  caller be told when to retry rather than made to poll (#367). */
+    fun interactivePairingRemainingMs(now: Long = System.currentTimeMillis()): Long =
+        (lastInteractiveMintAt + TICKET_EXCLUSION_MS - now).coerceAtLeast(0)
 
     /** The relay forwarded a newly-redeemed device's static key; allow-list + bind its PSK.
      *
@@ -256,6 +265,23 @@ class DeviceSessions(
         log.info("device revoked: ${deviceId.take(8)}… — pruned from allow-list${if (wasRestricted) " (${if (wasGuest) "guest " else ""}sessions ended)" else ""}")
         return noticed
     }
+
+    /**
+     * #367: does this daemon already know [deviceId] under an identity OTHER than a just-confirmed
+     * execution credential? The union the execution bind hook must never collide with:
+     *
+     *  - the FULL-POWER allow-list ([devicePubs] / devices.json);
+     *  - a confirmed restricted credential of any other kind ([BridgeRegistry.ids] minus the execution row);
+     *  - a key still held PROVISIONAL (announced, not yet classified).
+     *
+     * The credential being bound right now is excluded by construction, not by a special case:
+     * [BridgeRegistry.finalize] has already moved it out of `provisionalPub` into `bridgePubs` with an
+     * EXECUTION spec, so it matches none of the three clauses — while every other collision does.
+     */
+    suspend fun isKnownDevice(deviceId: String): Boolean =
+        mutex.withLock { devicePubs.containsKey(deviceId) } ||
+            bridges.isBridge(deviceId) || bridges.isGuest(deviceId) || bridges.isCollaborator(deviceId) ||
+            (bridges.pubOf(deviceId) != null && !bridges.isRestricted(deviceId))
 
     /** True while this device's FIRST post-pairing contact hasn't completed over the relay. The LAN gate
      *  refuses such devices, so first contact stays bound to the pairing ceremony — the one guarantee the
@@ -491,6 +517,24 @@ class DeviceSessions(
                         val pubB64 = bridges.pubOf(deviceId)?.let { B64enc.encodeToString(it) } ?: ""
                         runCatching { collaboratorControl?.onRedeemed(deviceId, pubB64) }
                     }
+                    // #367 execution link: the redeem proved the DERIVED first-contact PSK
+                    // (HKDF(ticket ‖ inviteSecret)) — something the relay, which only ever saw the raw
+                    // ticket, cannot compute. Bind the proven deviceId + static key into the grant row NOW.
+                    // A refusal (unknown/expired/already-bound grant, a deviceId this daemon knows under
+                    // another identity, a store that cannot persist) means no grant names this device, so
+                    // the credential must not survive the frame that created it: drop key, spec and session
+                    // and let the owner re-approve. Nothing is routed either way.
+                    if (spec.kind == CredentialKind.EXECUTION) {
+                        val pubB64 = bridges.pubOf(deviceId)?.let { B64enc.encodeToString(it) } ?: ""
+                        val bound = runCatching { executionControl?.onRedeemed(deviceId, pubB64, spec.grantId) }
+                            .getOrElse { if (it is CancellationException) throw it else null } == true
+                        if (!bound) {
+                            log.warn("execution credential ${deviceId.take(8)}… could not be bound to a grant — refused")
+                            bridges.remove(deviceId)
+                            mutex.withLock { sessions.remove(deviceId)?.let { link -> retirePins(link) } }
+                            return
+                        }
+                    }
                 }
             }
         }
@@ -623,6 +667,55 @@ class DeviceSessions(
                         )
                     }
                 }
+            }
+            bridges.isExecution(deviceId) -> {
+                // #367 EXECUTION link: a PEER DAEMON's run link. ZERO-baseline like a collaborator, but it
+                // does not reach the router AT ALL — the whitelist admits only the execution frames, the
+                // guard re-authorises the grant behind them on every single frame, and the plane is the
+                // only thing they are ever handed to. It gets no sink attach of any kind (no handoff, no
+                // review, no pins, no managed-session slot), so no fan-out can select it as a target.
+                val request = env.body as? dev.ccpocket.protocol.ToDaemon
+                val guard = core.router.executionGuard
+                val plane = core.router.executionPlane
+                // the static key that ACTUALLY decrypted this frame. The plane must be handed it rather
+                // than read the pin out of the grant store: comparing the stored pin with itself is a
+                // tautology that would pass for anyone the transport let through.
+                val linkPub = bridges.pubOf(deviceId)?.let { B64enc.encodeToString(it) }
+                if (request == null || guard == null || plane == null || linkPub == null) {
+                    // fail CLOSED: a daemon with no execution plane wired admits no execution frame
+                    log.warn("execution link ${deviceId.take(8)}… sent ${env.body::class.simpleName} with no plane wired — refused")
+                    runCatching { sealAndSend(deviceId, PocketError("execution_unavailable", "this daemon has no execution plane")) }
+                    return
+                }
+                // ONE gate, in this order: byte budget on the DECODED PAYLOAD (what the peer really sent,
+                // before any of it becomes work) → [ExecutionCaps.ingressAllowed] → the grant behind the
+                // frame. The whitelist call lives INSIDE the guard on purpose: a second copy of it here
+                // would be a second thing to keep in step, and its refusal would miss the shared ledger.
+                when (val v = guard.vet(deviceId, request, plaintext.size, firstContact = confirmedPsk?.isNotEmpty() == true)) {
+                    is dev.ccpocket.daemon.execution.ExecutionGuard.Verdict.Deny -> {
+                        log.warn("execution link ${deviceId.take(8)}… ${env.body::class.simpleName} denied: ${v.code}")
+                        runCatching { sealAndSend(deviceId, PocketError(v.code, "execution request refused")) }
+                        return
+                    }
+                    is dev.ccpocket.daemon.execution.ExecutionGuard.Verdict.Allow -> {
+                        // the reply path is the egress whitelist and NOTHING else: no ClientCaps holder is
+                        // involved (a peer daemon never declares one) and no conversation sink is created
+                        plane.handle(deviceId, linkPub, request) { out ->
+                            if (dev.ccpocket.daemon.execution.ExecutionCaps.egressAllowed(out)) sealAndSend(deviceId, out)
+                        }
+                        return
+                    }
+                }
+            }
+            bridges.isRestricted(deviceId) -> {
+                // A CONFIRMED restricted credential whose kind none of the branches above claims — i.e. a
+                // [CredentialKind] this build has no capability policy for, loaded from a file a NEWER
+                // daemon wrote. Falling through to the owner branch (which is what happened before #367)
+                // would hand it the full management plane on the strength of "we don't recognise it".
+                // Refuse instead: an unknown restricted kind is the least trusted thing here, not the most.
+                log.warn("credential ${deviceId.take(8)}… of unsupported kind ${bridges.kindOf(deviceId)} sent ${env.body::class.simpleName} — refused")
+                runCatching { sealAndSend(deviceId, PocketError("credential_unsupported", "this daemon cannot police that credential kind")) }
+                return
             }
             else -> {
                 // FULL-POWER owner device: the share/bridge/collaborator control planes (mint / list /
@@ -882,6 +975,10 @@ class DeviceSessions(
             // BRIDGE whitelist until the first transport frame confirms the kind (fail closed).
             val allowed = when (bridges.kindOf(deviceId)) {
                 CredentialKind.GUEST -> GuestCaps.egressAllowed(frame)
+                // #367: the run plane's own reply path already filters, but this is the ONE place a frame is
+                // sealed toward a relay device, so an execution credential is filtered here too — that is
+                // what keeps a resurfaced ask, a router error or any future fan-out from reaching it.
+                CredentialKind.EXECUTION -> dev.ccpocket.daemon.execution.ExecutionCaps.egressAllowed(frame)
                 CredentialKind.COLLABORATOR -> dev.ccpocket.daemon.handoff.CollaboratorCaps.egressAllowed(
                     frame,
                     // same source of truth as ingress: the credential's own spec, fail-closed when absent

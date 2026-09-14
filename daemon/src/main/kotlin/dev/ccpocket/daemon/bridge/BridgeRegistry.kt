@@ -40,6 +40,9 @@ class BridgeRegistry(
         ?: File(BridgeStore.file().parentFile, "guest-sessions.json"),
     private val collaboratorKeyStore: File = store.parentFile?.let { File(it, "collaborator-keys.json") }
         ?: CollaboratorKeyStore.file(),
+    // issue #367: the fourth credential file, derived the same way so a temp-dir test stays isolated
+    private val executionKeyStore: File = store.parentFile?.let { File(it, "execution-credentials.json") }
+        ?: ExecutionCredentialStore.file(),
 ) {
     private val log = logger("BridgeRegistry")
     private val b64enc: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
@@ -62,6 +65,7 @@ class BridgeRegistry(
         BridgeStore.load(store).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.BRIDGE) }
         GuestStore.load(guestStore).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.GUEST) }
         CollaboratorKeyStore.load(collaboratorKeyStore).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.COLLABORATOR) }
+        ExecutionCredentialStore.load(executionKeyStore).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.EXECUTION) }
         runCatching {
             if (guestSessionStore.exists()) {
                 PocketJson.decodeFromString<Map<String, List<String>>>(guestSessionStore.readText())
@@ -71,7 +75,10 @@ class BridgeRegistry(
         val bridges = specs.values.count { it.kind == CredentialKind.BRIDGE }
         val guests = specs.values.count { it.kind == CredentialKind.GUEST }
         val collabs = specs.values.count { it.kind == CredentialKind.COLLABORATOR }
-        if (bridges + guests + collabs > 0) log.info("loaded $bridges bridge + $guests guest + $collabs collaborator credential(s)")
+        val executions = specs.values.count { it.kind == CredentialKind.EXECUTION }
+        if (bridges + guests + collabs + executions > 0) {
+            log.info("loaded $bridges bridge + $guests guest + $collabs collaborator + $executions execution credential(s)")
+        }
     }
 
     /** File entries carry their own kind in the spec (default BRIDGE for pre-#115 rows); [expected] is the
@@ -80,6 +87,13 @@ class BridgeRegistry(
     private fun admitLoaded(id: String, entry: BridgeEntry, expected: CredentialKind) {
         if (entry.spec.kind != expected) {
             log.warn("ignoring ${id.take(8)}… (${entry.spec.kind.name.lowercase()} row) found in the ${expected.name.lowercase()} store — kind mismatch")
+            return
+        }
+        // issue #367: an execution row whose grantId is missing points at no authority at all — nothing
+        // could ever re-authorise it, so it is not a credential this build can police. Refuse it outright,
+        // exactly like the kind mismatch above (a widened row must never fall back to "some other policy").
+        if (expected == CredentialKind.EXECUTION && entry.spec.grantId.isNullOrBlank()) {
+            log.warn("ignoring execution credential ${id.take(8)}… with no grantId — refusing (re-approve)")
             return
         }
         runCatching { b64dec.decode(entry.pubB64) }.getOrNull()?.let { pub ->
@@ -132,6 +146,19 @@ class BridgeRegistry(
     fun intentPending(now: Long = System.currentTimeMillis()): Boolean {
         purgeExpired(now)
         return now < mintReservedUntil || intents.isNotEmpty()
+    }
+
+    /**
+     * How much longer the ONE mint slot stays busy (0 = free). #207 admits a single pairing at a time, so
+     * a caller refused for that reason can be told WHEN to try again instead of being left to poll — a
+     * burned invite blocks the next approval for its whole ticket TTL + grace, and nothing shortens it.
+     */
+    @Synchronized
+    fun mintBusyRemainingMs(now: Long = System.currentTimeMillis()): Long {
+        purgeExpired(now)
+        val reserved = (mintReservedUntil - now).coerceAtLeast(0)
+        val pending = intents.values.maxOfOrNull { (it.expiresAt - now).coerceAtLeast(0) } ?: 0
+        return maxOf(reserved, pending)
     }
 
     @Synchronized
@@ -188,6 +215,17 @@ class BridgeRegistry(
     /** SESSION-HANDOFF.md §4.1: this deviceId is a confirmed COLLABORATOR link credential. */
     @Synchronized
     fun isCollaborator(deviceId: String): Boolean = specs[deviceId]?.kind == CredentialKind.COLLABORATOR && deviceId in bridgePubs
+
+    /** issue #367: this deviceId is a confirmed EXECUTION link credential (a peer daemon's run link). */
+    @Synchronized
+    fun isExecution(deviceId: String): Boolean = specs[deviceId]?.kind == CredentialKind.EXECUTION && deviceId in bridgePubs
+
+    /** The [ExecutionGrant][dev.ccpocket.daemon.execution.ExecutionGrant] id a confirmed EXECUTION
+     *  credential points at (issue #367). Null for every other kind — and for an execution row whose
+     *  grantId is blank, which [admitLoaded] already refuses to load. */
+    @Synchronized
+    fun executionGrantIdOf(deviceId: String): String? =
+        specs[deviceId]?.takeIf { it.kind == CredentialKind.EXECUTION && deviceId in bridgePubs }?.grantId?.takeIf { it.isNotBlank() }
 
     @Synchronized
     fun kindOf(deviceId: String): CredentialKind? = specs[deviceId]?.kind
@@ -292,8 +330,8 @@ class BridgeRegistry(
 
     private fun persist() {
         // split by kind: bridges.json holds ONLY bridges, guests.json ONLY guests, collaborator-keys.json
-        // ONLY collaborators — the downgrade-isolation invariant (an older daemon reading its own files
-        // must never see a newer kind's key)
+        // ONLY collaborators, execution-credentials.json ONLY execution links — the downgrade-isolation
+        // invariant (an older daemon reading its own files must never see a newer kind's key)
         val byKind = bridgePubs.entries.groupBy { specs[it.key]?.kind }
         fun rows(kind: CredentialKind) = (byKind[kind] ?: emptyList()).associate { (id, pub) ->
             // keep each credential's ORIGINAL bind time — an unrelated persist (another bind, a revoke)
@@ -303,6 +341,8 @@ class BridgeRegistry(
         BridgeStore.save(rows(CredentialKind.BRIDGE), store)
         GuestStore.save(rows(CredentialKind.GUEST), guestStore)
         CollaboratorKeyStore.save(rows(CredentialKind.COLLABORATOR), collaboratorKeyStore)
+        ExecutionCredentialStore.save(rows(CredentialKind.EXECUTION), executionKeyStore) // issue #367
+
     }
 
     private fun persistGuestSessions() {

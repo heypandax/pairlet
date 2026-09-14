@@ -21,6 +21,12 @@ import java.nio.file.attribute.PosixFilePermissions
  *  - [GUEST] (issue #115): a scoped INTERACTIVE collaborator on one shared folder. It approves its OWN
  *    asks, lists + browses inside the shared root, but never reaches the daemon's management plane or any
  *    path outside the root. Expires; the owner can revoke.
+ *  - [EXECUTION] (issue #367): the link a PEER DAEMON holds so its owner's agent can ask THIS machine to
+ *    run a task. Its baseline is ZERO of the existing surface — no session plane at all, only the typed
+ *    execution frames ([dev.ccpocket.daemon.execution.ExecutionCaps]) — and every authority it has lives
+ *    in the target-owner's [dev.ccpocket.daemon.execution.ExecutionGrant] named by [BridgeSpec.grantId],
+ *    never in this spec. It is the only kind that is barred from the direct-LAN gate EXPLICITLY as well as
+ *    structurally, and the only one that never receives a [dev.ccpocket.protocol.DaemonInfo].
  *  - [COLLABORATOR] (SESSION-HANDOFF.md §4.1): a long-lived Collaborator Link contact. Its BASELINE is
  *    ZERO session access ([workdirs] is empty — nothing is ever in scope) — it may only receive/act on
  *    Handoff offers addressed to its own deviceId; per-handoff session access is a separate temporary
@@ -30,10 +36,11 @@ import java.nio.file.attribute.PosixFilePermissions
  * Old bridges.json entries (pre-#115) carry no `kind` → default [BRIDGE], so #91 credentials keep their
  * exact behaviour. A GUEST is persisted to a SEPARATE file (guests.json), a COLLABORATOR to
  * collaborator-keys.json, so a downgraded daemon that predates either never loads it and fails that key
- * closed — the same downgrade-safety argument that keeps bridge keys out of devices.json.
+ * closed — the same downgrade-safety argument that keeps bridge keys out of devices.json. An EXECUTION
+ * credential extends the same chain one file further (execution-credentials.json).
  */
 @Serializable
-enum class CredentialKind { BRIDGE, GUEST, COLLABORATOR }
+enum class CredentialKind { BRIDGE, GUEST, COLLABORATOR, EXECUTION }
 
 /**
  * Constraints minted with a restricted credential — decided by the OWNER at mint time and enforced
@@ -85,6 +92,15 @@ data class BridgeSpec(
      * describes a Session Handoff contact, which is exactly what every pre-ReviewRequest link was.
      */
     val purpose: dev.ccpocket.protocol.CollaboratorPurpose = dev.ccpocket.protocol.CollaboratorPurpose.SESSION_HANDOFF,
+    /**
+     * [CredentialKind.EXECUTION] only (issue #367): which [dev.ccpocket.daemon.execution.ExecutionGrant]
+     * this link credential belongs to. It is a POINTER, not an authority — every scope decision (workspaces,
+     * agents, ceiling, limits, expiry, revision) is re-read from the target owner's grant store on every
+     * frame, and a credential whose grantId names no live grant can do nothing at all.
+     *
+     * Null for every other kind, and for a pre-#367 row (which by construction is not an execution link).
+     */
+    val grantId: String? = null,
 ) {
     val isGuest: Boolean get() = kind == CredentialKind.GUEST
 
@@ -163,6 +179,27 @@ data class BridgeSpec(
         )
 
         const val COLLAB_OPENS_PER_MIN = 6
+
+        /**
+         * Build an EXECUTION spec (issue #367 G1). Like [collaborator] its baseline is ZERO: [workdirs] is
+         * empty so [PathScope.contains] is false for every path, and every rate bound is the floor — none of
+         * them is ever consulted, because an execution link reaches no session/bridge/guest code path at all
+         * (its own whitelist, [dev.ccpocket.daemon.execution.ExecutionCaps], admits only the execution frames,
+         * and every other whitelist denies those). The single meaningful field is [grantId]: the pointer the
+         * run plane re-authorises against on every frame. No [expiresAt] here either — the GRANT expires, and
+         * a lapsed grant refuses every frame while the credential is being revoked.
+         */
+        fun execution(label: String, grantId: String) = BridgeSpec(
+            name = label,
+            workdirs = emptyList(),
+            maxSessions = 1,
+            opensPerMin = 1,
+            promptsPerMin = 1,
+            kind = CredentialKind.EXECUTION,
+            expiresAt = null,
+            tier = AccessTier.REVIEW,
+            grantId = grantId,
+        )
 
         /** Build a GUEST spec (issue #115): a single canonical shared root, an access tier, and an expiry. */
         fun guest(name: String, root: String, tier: AccessTier, expiresAt: Long) = BridgeSpec(
@@ -243,6 +280,25 @@ object GuestStore {
  */
 object CollaboratorKeyStore {
     fun file(): File = credentialFile("collaborator-keys.json")
+
+    fun load(store: File = file()): Map<String, BridgeEntry> = loadCredentials(store)
+
+    fun save(map: Map<String, BridgeEntry>, store: File = file()) = saveCredentials(map, store)
+}
+
+/**
+ * The persisted registry of EXECUTION link credentials (issue #367 G1): deviceId -> [BridgeEntry]
+ * (kind = EXECUTION), in `~/.cc-pocket/execution-credentials.json`. A FOURTH separate file, for the same
+ * downgrade-safety chain as guests.json / collaborator-keys.json: a daemon that predates #367 never loads
+ * it, so the key is an unknown device → handshake refused, fail closed — and an execution key can never be
+ * mis-read as a full device (devices.json), a bridge, a guest or a collaborator.
+ *
+ * This file holds only the E2E key + spec (whose [BridgeSpec.grantId] points at the grant). The GRANT
+ * itself — scope, ceiling, limits, revision, expiry, the pinned source link key — lives in
+ * `execution-grants.json` ([dev.ccpocket.daemon.execution.ExecutionGrantStore]) and is the only authority.
+ */
+object ExecutionCredentialStore {
+    fun file(): File = credentialFile("execution-credentials.json")
 
     fun load(store: File = file()): Map<String, BridgeEntry> = loadCredentials(store)
 

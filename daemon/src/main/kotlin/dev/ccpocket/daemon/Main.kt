@@ -273,7 +273,11 @@ private class RunCmd : CliktCommand(name = "run") {
             // plaintext --local path this REQUIRES the Noise handshake, so a wide bind stays safe. A bind
             // failure (port taken) degrades to relay-only instead of killing the daemon.
             if (directBind != "none") {
-                val gate = LanE2E(identity, directUrl, hostName, gatewayUrl, firstContactPending = relayClient::deviceFirstContactPending)
+                val gate = LanE2E(
+                    identity, directUrl, hostName, gatewayUrl,
+                    firstContactPending = relayClient::deviceFirstContactPending,
+                    restrictedCredential = relayClient::deviceIsRestrictedCredential, // #367
+                )
                 runCatching { DaemonServer(core, directBind, port, gate).run(wait = false) }
                     .onSuccess { echo("direct listener on ws://$directBind:$port/v1/ws (E2E, paired devices only)") }
                     .onFailure {
@@ -895,5 +899,8 @@ fun main(args: Array<String>) {
         // contact, send a task, answer one. Both talk to the ALREADY-RUNNING daemon over its
         // token-authenticated local control API; neither can start a second daemon.
         collaboratorCommand(), reviewCommand(),
+        // #367: drive an already-authorised OTHER computer's agent, and manage those authorisations here.
+        // Same rule as the two above — it only ever talks to the running daemon's loopback control API.
+        agentCommand(),
     ).main(args)
 }

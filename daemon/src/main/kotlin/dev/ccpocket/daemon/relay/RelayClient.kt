@@ -143,8 +143,60 @@ class RelayClient(
         controlOutbox.send(dev.ccpocket.protocol.RevokeDevice(deviceId))
     }
 
+    /**
+     * Build and install the #367 execution planes (issue #367 G1). Called from the relay attach path, so a
+     * LAN-only `serve` leaves every one of them null and the transport fails closed.
+     *
+     * Three wiring details that are load-bearing rather than incidental:
+     *
+     *  1. `mintTicket(arm = false)` — the raw relay ticket is deliberately NOT armed; [ExecutionTarget]
+     *     arms `HKDF(ticket ‖ inviteSecret)` through [armPsk] instead. See [mintTicket].
+     *  2. `cutLink` does the LOCAL half of a revoke (credential + live E2E session), `revokeRelayDevice`
+     *     only the relay half — they are split so neither is done twice, and so a relay that is
+     *     unreachable cannot stop the local link from dying immediately.
+     *  3. `isKnownDevice` reads the REAL sources (devices.json + every restricted registry incl.
+     *     provisional keys), which is the whole point of it being a required parameter.
+     */
+    private fun installExecutionPlanes() {
+        val store = dev.ccpocket.daemon.execution.ExecutionGrantStore.load(
+            dev.ccpocket.daemon.execution.ExecutionGrantStore.defaultPath(), identity.e2ePubB64,
+        )
+        val target = dev.ccpocket.daemon.execution.ExecutionTarget(
+            identity = identity,
+            relayUrl = relayWsBase,
+            store = store,
+            bridges = sessions.bridges,
+            mintTicket = { mintTicket(headless = true, collaborator = true, arm = false) },
+            armPsk = { psk -> sessions.onMintedTicket(psk, headless = true) },
+            revokeRelayDevice = { deviceId -> controlOutbox.send(dev.ccpocket.protocol.RevokeDevice(deviceId)) },
+            cutLink = { deviceId -> sessions.onDeviceRevoked(deviceId) },
+            isKnownDevice = { deviceId -> sessions.isKnownDevice(deviceId) },
+            interactivePairingRemainingMs = { sessions.interactivePairingRemainingMs() },
+            targetLabel = hostname(),
+            refusals = core.executionRefusals,
+        )
+        val (linkFile, secretFile) = dev.ccpocket.daemon.execution.client.ExecutionClient.defaultLinkPaths()
+        val client = dev.ccpocket.daemon.execution.client.ExecutionClient(
+            transport = dev.ccpocket.daemon.review.RelayPeerTransport(),
+            links = dev.ccpocket.daemon.review.PeerLinkStore.load(linkFile, secretFile),
+            runs = dev.ccpocket.daemon.execution.client.ExecutionClientStore.load(
+                dev.ccpocket.daemon.execution.client.ExecutionClientStore.defaultPath(),
+            ),
+        )
+        // how the transport gate resolves a credential's grant pointer and its PROVEN static key
+        core.executionCredentialGrantId = { deviceId -> sessions.bridges.executionGrantIdOf(deviceId) }
+        core.executionCredentialPub = { deviceId ->
+            sessions.bridges.pubOf(deviceId)?.let { java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
+        }
+        core.installExecution(store, target, client)
+    }
+
     /** Exposes the pairing-ceremony gate to the direct-LAN listener (see DeviceSessions.firstContactPending). */
     suspend fun deviceFirstContactPending(deviceId: String): Boolean = sessions.firstContactPending(deviceId)
+
+    /** #367: is [deviceId] a restricted credential (bridge / guest / collaborator / execution)? The LAN
+     *  gate refuses these EXPLICITLY as well as structurally — see [dev.ccpocket.daemon.server.LanE2E]. */
+    fun deviceIsRestrictedCredential(deviceId: String): Boolean = sessions.bridges.isRestricted(deviceId)
 
     /** …and how stale is its liveness signal (ms since the last Pong, or since attach before the first one). */
     fun lastPongAgeMs(): Long? = lastPongAt.takeIf { it != 0L }?.let { System.currentTimeMillis() - it }
@@ -224,6 +276,10 @@ class RelayClient(
         // "is this link still alive" answer. Until this line runs, `review send` refuses rather than
         // minting a request addressed to a contact nobody has verified.
         core.reviews.collaborators = collaboratorService
+        // #367: the execution planes, on exactly the same relay-only footing as the three planes above —
+        // approving a grant mints a connect ticket, and the source half dials the relay. installExecution
+        // is idempotent, so a reconnect re-points the store/target without stacking a second RunService.
+        installExecutionPlanes()
         // §3.4: the content-free, device-TARGETED offer nudge for an offline contact. The whole payload is
         // built by PushPolicy from two opaque ids — nothing about the work rides the alert.
         //
@@ -318,12 +374,18 @@ class RelayClient(
      *  [collaborator] additionally marks it a Collaborator Link INBOX (§3.4) — still headless (presence-
      *  invisible, outside the owner's push fan-out) but allowed to hold its own push token and be woken by
      *  a targeted NotifyPush. Only [dev.ccpocket.daemon.handoff.CollaboratorService] passes it. */
-    suspend fun mintTicket(headless: Boolean = false, collaborator: Boolean = false): PairTicket? {
+    /**
+     * @param arm normally true: the raw relay ticket becomes the first-contact PSK. #367 passes FALSE —
+     *   an execution link's PSK is `HKDF(ticket ‖ inviteSecret)` and the caller arms THAT instead. Arming
+     *   the raw ticket as well would put a value the RELAY knows back on the armed stack, which is exactly
+     *   the capability the invite secret exists to deny it.
+     */
+    suspend fun mintTicket(headless: Boolean = false, collaborator: Boolean = false, arm: Boolean = true): PairTicket? {
         // relay needs our E2E pub to serve the code path; headless/collaborator are the authoritative markers
         // the relay stamps onto the ticket (issue #91, §3.4) so a lying redeem can't dodge presence/push/replay
         controlOutbox.send(PairBegin(identity.e2ePubB64, headless = headless, collaborator = collaborator))
         return withTimeoutOrNull(10_000) { inboundControl.filterIsInstance<PairTicket>().first() }
-            ?.also { sessions.onMintedTicket(it.ticket, headless) }
+            ?.also { if (arm) sessions.onMintedTicket(it.ticket, headless) }
     }
 
     private suspend fun connectOnce() {
