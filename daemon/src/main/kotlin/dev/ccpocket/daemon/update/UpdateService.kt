@@ -104,9 +104,9 @@ object UpdateService {
     }
 
     /** Which package manager (if any) owns this binary — for the "not ours to update" hint. */
-    fun ownerHint(exe: Path?): String = when (packageManagerOf(exe)) {
-        InstallKind.HOMEBREW -> "this install is managed by Homebrew — upgrade with:  ${updateCommand(InstallKind.HOMEBREW)}"
-        InstallKind.SCOOP -> "this install is managed by Scoop — upgrade with:  ${updateCommand(InstallKind.SCOOP)}"
+    fun ownerHint(exe: Path?, os: String = System.getProperty("os.name")): String = when (packageManagerOf(exe, os)) {
+        InstallKind.HOMEBREW -> "this install is managed by Homebrew — upgrade with:  ${updateCommand(InstallKind.HOMEBREW, os)}"
+        InstallKind.SCOOP -> "this install is managed by Scoop — upgrade with:  ${updateCommand(InstallKind.SCOOP, os)}"
         else -> genericHint()
     }
 
@@ -119,20 +119,27 @@ object UpdateService {
     /** Who owns this binary, hence who is allowed to update it. Only [MANAGED] ever self-overwrites. */
     enum class InstallKind { MANAGED, HOMEBREW, SCOOP, UNKNOWN }
 
-    /** Package-manager ownership from the path shape alone (no filesystem walk). */
-    private fun packageManagerOf(exe: Path?): InstallKind {
-        val s = exe?.toString()?.lowercase() ?: return InstallKind.UNKNOWN
+    /** Recognize package layouts only on their host OS. A directory merely containing "scoop" or
+     *  "homebrew" is not ownership evidence. Unrecognized/custom layouts use the host installer. */
+    private fun packageManagerOf(exe: Path?, os: String): InstallKind {
+        val path = exe?.toString()?.replace('\\', '/')?.lowercase() ?: return InstallKind.UNKNOWN
         return when {
-            "caskroom" in s || "/homebrew/" in s -> InstallKind.HOMEBREW
-            "scoop" in s -> InstallKind.SCOOP
+            os.lowercase().contains("mac") &&
+                Regex("(?:^|/)caskroom/cc-pocket/[^/]+/.+").containsMatchIn(path) -> InstallKind.HOMEBREW
+            os.startsWith("Windows", ignoreCase = true) &&
+                Regex("(?:^|/)scoop/apps/cc-pocket-daemon/[^/]+/.+").containsMatchIn(path) -> InstallKind.SCOOP
             else -> InstallKind.UNKNOWN
         }
     }
 
     /** Classify the install [exe] runs from. The installer tree wins: a managed layout is authoritative
      *  regardless of where it happens to sit, and only it may be hot-swapped by [apply]. */
-    fun installKind(exe: Path?, home: Path = Path.of(System.getProperty("user.home"))): InstallKind =
-        if (managedInstallOf(exe, home) != null) InstallKind.MANAGED else packageManagerOf(exe)
+    fun installKind(
+        exe: Path?,
+        home: Path = Path.of(System.getProperty("user.home")),
+        os: String = System.getProperty("os.name"),
+    ): InstallKind =
+        if (managedInstallOf(exe, home) != null) InstallKind.MANAGED else packageManagerOf(exe, os)
 
     /**
      * The ONE line that updates a [kind] install. Shown by `version`/`status` and — the point of issue
@@ -140,13 +147,15 @@ object UpdateService {
      * command for THIS machine instead of a generic "go update it". An unrecognized install has no
      * updater to invoke, so it gets the installer one-liner (re-running it converts the tree to managed).
      */
-    fun updateCommand(kind: InstallKind, os: String = System.getProperty("os.name")): String = when (kind) {
-        InstallKind.MANAGED -> "cc-pocket-daemon update"
-        InstallKind.HOMEBREW -> "brew upgrade --cask heypandax/tap/cc-pocket"
-        InstallKind.SCOOP -> "scoop update cc-pocket-daemon"
-        InstallKind.UNKNOWN ->
-            if (os.lowercase().contains("win")) "irm https://raw.githubusercontent.com/$REPO/main/scripts/install.ps1 | iex"
-            else "curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install.sh | bash"
+    fun updateCommand(kind: InstallKind, os: String = System.getProperty("os.name")): String {
+        val windows = os.startsWith("Windows", ignoreCase = true)
+        return when {
+            kind == InstallKind.MANAGED -> "cc-pocket-daemon update"
+            kind == InstallKind.HOMEBREW && os.lowercase().contains("mac") -> "brew upgrade --cask heypandax/tap/cc-pocket"
+            kind == InstallKind.SCOOP && windows -> "scoop update cc-pocket-daemon"
+            windows -> "irm https://raw.githubusercontent.com/$REPO/main/scripts/install.ps1 | iex"
+            else -> "curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install.sh | bash"
+        }
     }
 
     fun latestRelease(): Release? = ReleaseClient.latest(REPO)

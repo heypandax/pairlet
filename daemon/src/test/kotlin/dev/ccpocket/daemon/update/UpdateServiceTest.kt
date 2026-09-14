@@ -68,8 +68,8 @@ class UpdateServiceTest {
 
     @Test
     fun owner_hints_name_the_right_package_manager() {
-        assertTrue("brew upgrade" in UpdateService.ownerHint(Path.of("/opt/homebrew/Caskroom/cc-pocket/1.2.0/bin/cc-pocket-daemon")))
-        assertTrue("scoop update" in UpdateService.ownerHint(Path.of("C:\\Users\\x\\scoop\\apps\\cc-pocket-daemon\\1.2.0\\cc-pocket-daemon.exe")))
+        assertTrue("brew upgrade" in UpdateService.ownerHint(Path.of("/opt/homebrew/Caskroom/cc-pocket/1.2.0/bin/cc-pocket-daemon"), "Mac OS X"))
+        assertTrue("scoop update" in UpdateService.ownerHint(Path.of("C:\\Users\\x\\scoop\\apps\\cc-pocket-daemon\\1.2.0\\cc-pocket-daemon.exe"), "Windows 11"))
         assertTrue("one-liner" in UpdateService.ownerHint(Path.of("/somewhere/else/cc-pocket-daemon")))
     }
 
@@ -77,8 +77,8 @@ class UpdateServiceTest {
     fun install_kind_prefers_the_managed_layout_then_the_package_manager(): Unit = with(UpdateService) {
         val home = Path.of("/Users/x")
         assertEquals(InstallKind.MANAGED, installKind(Path.of("/Users/x/.local/share/cc-pocket/versions/1.2.0/bin/cc-pocket-daemon"), home))
-        assertEquals(InstallKind.HOMEBREW, installKind(Path.of("/opt/homebrew/Caskroom/cc-pocket/1.2.0/bin/cc-pocket-daemon"), home))
-        assertEquals(InstallKind.SCOOP, installKind(Path.of("C:\\Users\\x\\scoop\\apps\\cc-pocket-daemon\\1.2.0\\cc-pocket-daemon.exe"), home))
+        assertEquals(InstallKind.HOMEBREW, installKind(Path.of("/opt/homebrew/Caskroom/cc-pocket/1.2.0/bin/cc-pocket-daemon"), home, "Mac OS X"))
+        assertEquals(InstallKind.SCOOP, installKind(Path.of("C:\\Users\\x\\scoop\\apps\\cc-pocket-daemon\\1.2.0\\cc-pocket-daemon.exe"), home, "Windows 11"))
         assertEquals(InstallKind.UNKNOWN, installKind(Path.of("/Users/x/Desktop/proj/daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon"), home))
         assertEquals(InstallKind.UNKNOWN, installKind(null, home))
     }
@@ -86,13 +86,67 @@ class UpdateServiceTest {
     @Test
     fun update_command_is_one_runnable_line_per_install_kind(): Unit = with(UpdateService) {
         assertEquals("cc-pocket-daemon update", updateCommand(InstallKind.MANAGED))
-        assertEquals("brew upgrade --cask heypandax/tap/cc-pocket", updateCommand(InstallKind.HOMEBREW))
-        assertEquals("scoop update cc-pocket-daemon", updateCommand(InstallKind.SCOOP))
+        assertEquals("brew upgrade --cask heypandax/tap/cc-pocket", updateCommand(InstallKind.HOMEBREW, "Mac OS X"))
+        assertEquals("scoop update cc-pocket-daemon", updateCommand(InstallKind.SCOOP, "Windows 11"))
         // an unrecognized install has no updater to call — re-running the installer converts it to managed
         assertTrue(updateCommand(InstallKind.UNKNOWN, "Mac OS X").startsWith("curl -fsSL"))
         assertTrue(updateCommand(InstallKind.UNKNOWN, "Windows 11").startsWith("irm "))
         // the hint the CLI throws and the command the phone gets must never disagree about the owner
-        assertTrue(updateCommand(InstallKind.HOMEBREW) in ownerHint(Path.of("/opt/homebrew/Caskroom/cc-pocket/1.2.0/bin/cc-pocket-daemon")))
+        assertTrue(updateCommand(InstallKind.HOMEBREW, "Mac OS X") in ownerHint(Path.of("/opt/homebrew/Caskroom/cc-pocket/1.2.0/bin/cc-pocket-daemon"), "Mac OS X"))
+    }
+
+    @Test
+    fun package_layouts_are_classified_on_the_daemon_host(): Unit = with(UpdateService) {
+        val paths = listOf(
+            "/opt/homebrew/Caskroom/cc-pocket/1.2.0/cc-pocket-daemon.app/Contents/MacOS/cc-pocket-daemon" to InstallKind.HOMEBREW,
+            "/usr/local/Caskroom/cc-pocket/1.2.0/bin/cc-pocket-daemon" to InstallKind.HOMEBREW,
+            "C:\\Users\\x\\scoop\\apps\\cc-pocket-daemon\\current\\cc-pocket-daemon.exe" to InstallKind.SCOOP,
+            "C:/ProgramData/SCOOP/apps/cc-pocket-daemon/1.2.0/cc-pocket-daemon.exe" to InstallKind.SCOOP,
+            "C:/Users/caskroom/dev/cc-pocket-daemon.exe" to InstallKind.UNKNOWN,
+            "C:/Users/x/homebrew/bin/cc-pocket-daemon.exe" to InstallKind.UNKNOWN,
+            "/Users/scooper/dev/cc-pocket-daemon" to InstallKind.UNKNOWN,
+            "/Users/x/homebrew/bin/cc-pocket-daemon" to InstallKind.UNKNOWN,
+            "/opt/homebrew/Caskroom/some-other-app/1.2.0/bin/cc-pocket-daemon" to InstallKind.UNKNOWN,
+            "C:/Users/x/scoop/apps/another-package/1.2.0/cc-pocket-daemon.exe" to InstallKind.UNKNOWN,
+        )
+        for (os in listOf("Windows 11", "Mac OS X", "Linux")) {
+            for ((path, owner) in paths) {
+                val expected = when {
+                    owner == InstallKind.HOMEBREW && os == "Mac OS X" -> owner
+                    owner == InstallKind.SCOOP && os == "Windows 11" -> owner
+                    else -> InstallKind.UNKNOWN
+                }
+                val kind = installKind(Path.of(path), temp, os)
+                assertEquals(expected, kind, "$os / $path")
+                val command = updateCommand(kind, os)
+                assertEquals(updateCommand(expected, os), command, "$os / $path")
+                val hint = ownerHint(Path.of(path), os)
+                if (expected == InstallKind.UNKNOWN) assertTrue("one-liner" in hint)
+                else assertTrue(command in hint)
+            }
+            // An installer-owned tree remains authoritative even beneath misleading directory names.
+            val managed = temp.resolve("scoop/Caskroom/cc-pocket/versions/1.2.0/bin/cc-pocket-daemon")
+            assertEquals(InstallKind.MANAGED, installKind(managed, temp, os))
+            assertEquals(InstallKind.UNKNOWN, installKind(null, temp, os))
+        }
+    }
+
+    @Test
+    fun update_commands_reject_package_managers_from_other_host_platforms(): Unit = with(UpdateService) {
+        for (os in listOf("Windows 11", "Mac OS X", "Linux", "Darwin")) {
+            val fallback = if (os == "Windows 11")
+                "irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex"
+            else "curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash"
+            for (kind in InstallKind.entries) {
+                val expected = when {
+                    kind == InstallKind.MANAGED -> "cc-pocket-daemon update"
+                    kind == InstallKind.HOMEBREW && os == "Mac OS X" -> "brew upgrade --cask heypandax/tap/cc-pocket"
+                    kind == InstallKind.SCOOP && os == "Windows 11" -> "scoop update cc-pocket-daemon"
+                    else -> fallback
+                }
+                assertEquals(expected, updateCommand(kind, os), "$os / $kind")
+            }
+        }
     }
 
     @Test
