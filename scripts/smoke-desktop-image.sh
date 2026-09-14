@@ -12,6 +12,12 @@ case "$(uname -s)" in
     python3 "$(dirname "$0")/check-brand-compatibility.py" --mac-app "$APP_IMAGE"
     LAUNCHER="$APP_IMAGE/Contents/MacOS/CC Pocket"
     ;;
+  Linux)
+    # jpackage's Linux app image is <name>/bin/<name> — the same layout the deb/rpm install under
+    # /opt and the same launcher the AppImage AppRun execs (#379). Without this branch the fall-through
+    # looked for a .exe and the Linux gate could only ever fail.
+    LAUNCHER="$APP_IMAGE/bin/CC Pocket"
+    ;;
   *)
     LAUNCHER="$APP_IMAGE/CC Pocket.exe"
     ;;

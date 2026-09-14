@@ -153,7 +153,10 @@ compose.desktop {
             jvmArgs += "--add-exports=java.desktop/com.apple.eawt=ALL-UNNAMED"
         }
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi) // Dmg built on macOS, Msi on Windows (jpackage picks per host)
+            // jpackage picks the formats compatible with the BUILD HOST: Dmg on macOS, Msi on Windows,
+            // Deb + Rpm on Linux (#379). Adding the Linux formats registers packageDeb/packageRpm only on
+            // Linux hosts, so the macOS/Windows release jobs keep producing exactly the same artifacts.
+            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Rpm)
             // ReleaseClient uses JDK HttpClient. Compose's automatic jdeps pass misses that dependency
             // through the KMP protocol jar, so v1.9.0 shipped a seven-module runtime without java.net.http
             // and update checks failed before touching the network (#305).
@@ -170,6 +173,29 @@ compose.desktop {
                 menu = true
                 shortcut = true
                 iconFile.set(project.file("desktop-icons/cc-pocket.ico"))
+            }
+            linux {
+                // jpackage derives the deb/rpm package name from --name when --linux-package-name is
+                // absent, and "CC Pocket" is not a legal dpkg name (space + uppercase). Pin the historic
+                // CLI/service spelling instead — it is what `cc-pocket-daemon`, the systemd unit and
+                // ~/.cc-pocket already use, so nothing new appears in a Linux user's namespace.
+                // The app image directory / launcher stay "CC Pocket" (driven by the global packageName),
+                // which is what scripts/smoke-desktop-image.sh and the brand contract expect.
+                packageName = "cc-pocket"
+                // Debian Section / RPM Group. Pairlet is a developer tool, not a general utility.
+                appCategory = "devel"
+                // Debian control file requires a maintainer; jpackage writes a bare "Unknown" otherwise
+                // and lintian rejects that. Deliberately a GitHub noreply address, never a personal one.
+                debMaintainer = "heypandax <heypandax@users.noreply.github.com>"
+                // rpmbuild refuses to build without a License tag; the repository is MIT.
+                rpmLicenseType = "MIT"
+                // Desktop entry: freedesktop main category, and shortcut=true is what makes jpackage emit
+                // the .desktop file at all (without it the package installs but never shows in the menu).
+                menuGroup = "Development"
+                shortcut = true
+                // jpackage wants a PNG on Linux (.icns/.ico are rejected). Reuse the 256px launcher icon
+                // that scripts/generate-brand-icons.py already keeps in lockstep with the other platforms.
+                iconFile.set(project.file("src/desktopMain/resources/app-icon.png"))
             }
             macOS {
                 bundleID = "dev.ccpocket.app"

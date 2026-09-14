@@ -16,7 +16,7 @@ on:
       scope:
         description: Platforms to rehearse
         type: choice
-        options: [all, daemon, desktop, windows-desktop, android, ios]
+        options: [all, daemon, desktop, windows-desktop, linux-desktop, android, ios]
         default: all
 
 permissions:
@@ -155,13 +155,15 @@ jobs:
 
   desktop:
     needs: preflight
-    if: inputs.scope == 'all' || inputs.scope == 'desktop' || inputs.scope == 'windows-desktop'
+    if: inputs.scope == 'all' || inputs.scope == 'desktop' || inputs.scope == 'windows-desktop' || inputs.scope == 'linux-desktop'
     timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
-        platform: ${{ fromJSON(inputs.scope == 'windows-desktop' && '["windows-x86_64"]' || '["macos-arm64", "macos-x86_64", "windows-x86_64"]') }}
-    runs-on: ${{ matrix.platform == 'windows-x86_64' && 'windows-latest' || 'macos-14' }}
+        platform: ${{ fromJSON(inputs.scope == 'windows-desktop' && '["windows-x86_64"]' || inputs.scope == 'linux-desktop' && '["linux-x86_64", "linux-arm64"]' || '["macos-arm64", "macos-x86_64", "windows-x86_64", "linux-x86_64", "linux-arm64"]') }}
+    # jpackage bundles the HOST JRE and shells out to the host's packaging tools, so every platform/arch
+    # needs its own runner. ubuntu-24.04-arm is GitHub's free arm64 runner (same one the daemon job uses).
+    runs-on: ${{ matrix.platform == 'windows-x86_64' && 'windows-latest' || matrix.platform == 'linux-x86_64' && 'ubuntu-latest' || matrix.platform == 'linux-arm64' && 'ubuntu-24.04-arm' || 'macos-14' }}
     defaults:
       run:
         shell: bash
@@ -176,10 +178,16 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          architecture: ${{ matrix.platform == 'macos-arm64' && 'aarch64' || 'x64' }}
+          architecture: ${{ (matrix.platform == 'macos-arm64' || matrix.platform == 'linux-arm64') && 'aarch64' || 'x64' }}
       - uses: android-actions/setup-android@v4
       - name: Use placeholder Firebase config
         run: cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
+      - name: Install Linux packaging tools
+        # dpkg-deb ships with the runner image; rpmbuild does NOT, and jpackage's --type rpm shells out to it.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fakeroot rpm
       - name: Stage staging Sentry config
         uses: ./.github/actions/observability-config
         with:
@@ -189,14 +197,15 @@ jobs:
           analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT_PREVIEW }}
       - name: Build app and check bundled JVM
         env:
-          APP_IMAGE: ${{ runner.os == 'Windows' && 'CC Pocket' || 'CC Pocket.app' }}
+          APP_IMAGE: ${{ runner.os == 'macOS' && 'CC Pocket.app' || 'CC Pocket' }}
         run: |
           ./gradlew --no-daemon :mobile:composeApp:createDistributable
           bash scripts/smoke-desktop-image.sh "mobile/composeApp/build/compose/binaries/main/app/$APP_IMAGE"
       - name: Build installer with branding and compatibility hooks
         env:
-          PACKAGE_TASK: ${{ runner.os == 'Windows' && 'packageMsi' || 'packageDmg' }}
-        run: ./gradlew --no-daemon ":mobile:composeApp:$PACKAGE_TASK"
+          # Linux gets two system packages instead of one installer (issue #379).
+          PACKAGE_TASKS: ${{ runner.os == 'Windows' && ':mobile:composeApp:packageMsi' || runner.os == 'Linux' && ':mobile:composeApp:packageDeb :mobile:composeApp:packageRpm' || ':mobile:composeApp:packageDmg' }}
+        run: ./gradlew --no-daemon $PACKAGE_TASKS
       - name: Verify packaged Sentry configuration
         uses: ./.github/actions/observability-config
         with:
@@ -212,12 +221,28 @@ jobs:
           mkdir -p out
           python3 - <<'PY'
           import os, pathlib, shutil
-          extension = "msi" if os.environ["RUNNER_OS"] == "Windows" else "dmg"
-          packages = list(pathlib.Path("mobile/composeApp/build/compose/binaries/main").glob(f"{extension}/*.{extension}"))
-          assert len(packages) == 1, packages
-          shutil.copy2(packages[0], f"out/cc-pocket-desktop-{os.environ['PREVIEW_VERSION']}-{os.environ['PLATFORM']}-preview.{extension}")
+          extensions = {"Windows": ["msi"], "Linux": ["deb", "rpm"], "macOS": ["dmg"]}[os.environ["RUNNER_OS"]]
+          root = pathlib.Path("mobile/composeApp/build/compose/binaries/main")
+          for extension in extensions:
+              packages = list(root.glob(f"{extension}/*.{extension}"))
+              assert len(packages) == 1, (extension, packages)
+              shutil.copy2(packages[0], f"out/cc-pocket-desktop-{os.environ['PREVIEW_VERSION']}-{os.environ['PLATFORM']}-preview.{extension}")
           PY
           python3 scripts/preview-manifest.py out
+      - name: Build AppImage (best effort, Linux only)
+        # The rehearsal is where we learn whether appimagetool's rolling "continuous" build works on
+        # these runners without FUSE. It never blocks the deb/rpm rehearsal, and the script deletes any
+        # AppImage that fails the packaged-image smoke rather than shipping it.
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          bash scripts/build-desktop-appimage.sh "$PREVIEW_VERSION"
+          mv "cc-pocket-desktop-$PREVIEW_VERSION-$PLATFORM.AppImage" \
+             "out/cc-pocket-desktop-$PREVIEW_VERSION-$PLATFORM-preview.AppImage"
+          python3 scripts/preview-manifest.py out
+
       - uses: actions/upload-artifact@v7
         with:
           name: pairlet-preview-${{ inputs.version }}-desktop-${{ matrix.platform }}

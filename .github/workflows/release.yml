@@ -494,6 +494,104 @@ jobs:
           cp "$MSI" cc-pocket-desktop-windows-x86_64.msi
           gh release upload "v${{ inputs.version }}" cc-pocket-desktop-windows-x86_64.msi --clobber
 
+  linux-desktop:
+    needs: preflight
+    # The Compose Desktop APP for Linux — .deb + .rpm per arch, plus a best-effort .AppImage — attached
+    # to the release under stable version-less names (issue #379). jpackage can't cross-compile: it
+    # bundles the host JRE and shells out to dpkg-deb / rpmbuild, so each arch builds on a native runner,
+    # the same matrix the daemon `linux` job uses (ubuntu-24.04-arm is GitHub's free arm64 runner).
+    # Linux has no Gatekeeper/notarization equivalent, so there is no signing step here.
+    # composeApp applies the Android + googleServices plugins, so the build needs the Android SDK at
+    # configure time and a google-services.json to exist — the desktop target never touches Firebase.
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Stage production Sentry config
+        uses: ./.github/actions/observability-config
+        with:
+          component: desktop
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DESKTOP }}
+          analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT }}
+
+      - name: Set up JDK 17 (with jpackage)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
+        uses: android-actions/setup-android@v4
+
+      - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
+        run: cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
+
+      - name: Install Linux packaging tools
+        # dpkg-deb ships with the runner image; rpmbuild does NOT, and jpackage's --type rpm shells out
+        # to it. Without this the rpm half fails with a bare "rpmbuild: command not found".
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fakeroot rpm
+
+      - name: Build desktop packages — .deb + .rpm
+        run: |
+          chmod +x scripts/release-desktop-linux.sh gradlew
+          scripts/release-desktop-linux.sh "${{ inputs.version }}"
+
+      - name: Verify packaged Sentry configuration
+        uses: ./.github/actions/observability-config
+        with:
+          component: desktop
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DESKTOP }}
+          analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT }}
+          artifact: mobile/composeApp/build/compose/binaries/main/app
+
+      - name: Build AppImage (best effort)
+        # appimagetool has no stable tag — only a rolling "continuous" release — so a bad upstream day
+        # must never hold back the .deb/.rpm (or the other platforms' assets). The script self-verifies
+        # the AppImage with the packaged-image smoke and DELETES it on failure, so the upload step below
+        # publishes an AppImage only when a bundled-JVM launch actually succeeded.
+        continue-on-error: true
+        run: |
+          chmod +x scripts/build-desktop-appimage.sh
+          scripts/build-desktop-appimage.sh "${{ inputs.version }}"
+
+      - name: Upload Linux desktop packages to release v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="${{ inputs.version }}"
+          ARCH="${{ matrix.arch }}"
+          ASSETS=()
+          for ext in deb rpm; do
+            VERSIONED="cc-pocket-desktop-${VER}-linux-${ARCH}.${ext}"
+            [ -f "$VERSIONED" ] || { echo "::error::missing $VERSIONED"; exit 1; }
+            # per-arch version-less permalink, matching the dmg/msi convention:
+            # releases/latest/download/cc-pocket-desktop-linux-{x86_64,arm64}.{deb,rpm}
+            cp "$VERSIONED" "cc-pocket-desktop-linux-${ARCH}.${ext}"
+            ASSETS+=("$VERSIONED" "cc-pocket-desktop-linux-${ARCH}.${ext}")
+          done
+          APPIMAGE="cc-pocket-desktop-${VER}-linux-${ARCH}.AppImage"
+          if [ -f "$APPIMAGE" ]; then
+            cp "$APPIMAGE" "cc-pocket-desktop-linux-${ARCH}.AppImage"
+            ASSETS+=("$APPIMAGE" "cc-pocket-desktop-linux-${ARCH}.AppImage")
+          else
+            echo "::warning::AppImage not produced for ${ARCH}; .deb and .rpm are published without it"
+          fi
+          for asset in "${ASSETS[@]}"; do
+            echo "sha256: $(sha256sum "$asset" | awk '{print $1}')  $asset"
+          done
+          gh release upload "v$VER" "${ASSETS[@]}" --clobber
+
   harmony:
     needs: preflight
     # DevEco Studio is not available on GitHub-hosted macOS runners. This job is deliberately opt-in and
@@ -720,7 +818,7 @@ jobs:
     # The explicit status condition lets this run past intentionally SKIPPED jobs in
     # only_macos_desktop mode, but never rewrite SHA256SUMS for a partially failed release.
     if: ${{ !cancelled() && !failure() && !inputs.only_android }}
-    needs: [macos, windows, linux, android, macos-desktop, windows-desktop, harmony]
+    needs: [macos, windows, linux, android, macos-desktop, windows-desktop, linux-desktop, harmony]
     runs-on: ubuntu-latest
     steps:
       - name: Generate + upload SHA256SUMS for v${{ inputs.version }}

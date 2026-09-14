@@ -43,7 +43,7 @@ Six backends, four promoted capability columns. They are **not** equivalent.
 ## Platforms and distribution
 
 - **Phone / tablet app:** iOS / iPadOS — [App Store](https://apps.apple.com/cn/app/id6778773969), new versions first on [TestFlight](https://testflight.apple.com/join/8z26MWWr). Android — [APK from GitHub Releases](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk).
-- **Desktop app:** macOS Apple Silicon and Intel (signed `.dmg`), Windows x86_64 (`.msi`). **There is no official Linux desktop package** — Linux users build the desktop app from source.
+- **Desktop app:** macOS Apple Silicon and Intel (signed `.dmg`), Windows x86_64 (`.msi`), Linux x86_64 and arm64 (`.deb` and `.rpm`, unsigned; an `.AppImage` is attached when it builds).
 - **Local daemon** (the piece that actually runs the agent): macOS Apple Silicon, macOS Intel, Linux x86_64, Linux arm64, Windows x86_64. Install script, Homebrew or Scoop.
 - **HarmonyOS:** signed HAP, Preview, limited capability.
 - **Relay:** a hosted zero-knowledge relay is the default; self-hosting is supported.

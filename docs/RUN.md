@@ -116,10 +116,12 @@ $D test-client --relay ws://127.0.0.1:9000 --daemon-pub "<dpk>" --ticket "<ticke
 窗口里把地址填 `ws://127.0.0.1:8765/v1/ws` → Connect → 点目录 → 点会话/新建 → 在 Chat 里发消息。
 （这是 Desktop 目标；Android/iOS 目标需要先装 Android SDK / Xcode。）
 
-**桌面客户端（给用户的另一种选择）**：除了手机 App，cc-pocket 也能作为桌面 App 运行——从 GitHub Release 下载 DMG（macOS）/ MSI（Windows）：
+**桌面客户端（给用户的另一种选择）**：除了手机 App，cc-pocket 也能作为桌面 App 运行——从 GitHub Release 下载 DMG（macOS）/ MSI（Windows）/ deb、rpm（Linux）：
 
 - macOS：<https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg>
 - Windows：<https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi>
+- Linux x86_64：<https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-linux-x86_64.deb> · <https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-linux-x86_64.rpm>
+- Linux arm64：<https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-linux-arm64.deb> · <https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-linux-arm64.rpm>
 
 或像上面那样从源码 `./gradlew :mobile:composeApp:run`。它通过和手机端**同一套配对**连到**另一台**机器上的 daemon——桌面端没有摄像头，所以请输入 `cc-pocket-daemon pair` 打印的那 6 位配对码。
 

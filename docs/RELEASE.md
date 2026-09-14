@@ -202,20 +202,21 @@ security find-identity -v -p codesigning
 
 - macOS：签名 + 公证的 `.dmg`（Apple Silicon）。
 - Windows：`.msi`。
+- Linux：`.deb` 与 `.rpm`（x86_64 与 arm64 各一套，未签名）；`.AppImage` 是尽力而为项，构建并自检通过时才随版附上。
 
-两者都用**无版本号的固定 asset 名**——`cc-pocket-desktop-macos-arm64.dmg` 和 `cc-pocket-desktop-windows-x86_64.msi`——这样 `https://github.com/heypandax/cc-pocket/releases/latest/download/<asset>` 就是永久有效的「最新版」直链，官网与 README 都引用它。
+全部都用**无版本号的固定 asset 名**——`cc-pocket-desktop-macos-arm64.dmg`、`cc-pocket-desktop-windows-x86_64.msi`、`cc-pocket-desktop-linux-<arch>.{deb,rpm}`——这样 `https://github.com/heypandax/cc-pocket/releases/latest/download/<asset>` 就是永久有效的「最新版」直链，官网与 README 都引用它。
 
 > 桌面 App **没有 Homebrew / Scoop 入口**，纯直链下载；只有 daemon 走 cask / scoop。别把它和 daemon 的安装（brew / scoop / curl）搞混。
 
 ## CI（常规路径）
 
-`release.yml` 现在带 `macos-desktop` 和 `windows-desktop` 两个 job。一条命令：
+`release.yml` 现在带 `macos-desktop`、`windows-desktop` 和 `linux-desktop` 三个 job。一条命令：
 
 ```bash
 gh workflow run release.yml --ref v<X> -f version=<X>
 ```
 
-就会：构建 + 签名 + 公证出 DMG、构建出 MSI，并把两者都上传到 `v<X>` 这个 release —— 和 daemon、Android APK 挂在一起。（**前提**：`v<X>` 这个 GitHub Release 必须已存在，和 daemon 的 job 一样。）
+就会：构建 + 签名 + 公证出 DMG、构建出 MSI、在两种架构的 Linux runner 上出 deb/rpm，并全部上传到 `v<X>` 这个 release —— 和 daemon、Android APK 挂在一起。（**前提**：`v<X>` 这个 GitHub Release 必须已存在，和 daemon 的 job 一样。）
 
 ## macOS DMG 手动出包（本地兜底）
 
@@ -237,6 +238,16 @@ gh release upload v<X> "$DMG" --clobber   # 先把文件名改成 cc-pocket-desk
 ## Windows MSI
 
 MSI 在 `windows-latest` runner 上构建（jpackage 不能跨平台出包，且 WiX 只在该 runner 上自带），由 `release.yml` 的 `windows-desktop` job 产出并上传到 release。`build-windows.yml` 也会构建一份 MSI 供临时测试，但**只上传 workflow artifact，不传到 release**。
+
+## Linux deb / rpm（+ 尽力而为的 AppImage）
+
+jpackage 打包 Linux 同样不能跨架构（它把宿主 JRE 打进包里，并调用宿主的 `dpkg-deb` / `rpmbuild`），所以 `release.yml` 的 `linux-desktop` job 用和 daemon `linux` job 相同的矩阵：x86_64 在 `ubuntu-latest`，arm64 在 `ubuntu-24.04-arm`。runner 自带 `dpkg-deb`，但**不带 `rpmbuild`**，job 里会先 `apt-get install -y fakeroot rpm`。
+
+实际出包走 `scripts/release-desktop-linux.sh`：`createDistributable` → 用打好的 app image 跑 `scripts/smoke-desktop-image.sh`（拿捆绑 JVM 自检，和 mac/win 同一道闸）→ `packageDeb` + `packageRpm` → 校验包内确实含 `bin/CC Pocket`、`lib/runtime/` 和菜单项。Linux 没有 Gatekeeper/公证的对应物，所以没有签名步骤。
+
+AppImage 走 `scripts/build-desktop-appimage.sh`，在 workflow 里挂 `continue-on-error: true`：appimagetool 只有滚动的 `continuous` 版本，上游抽风不能拖住 deb/rpm。脚本会用 `--appimage-extract` 把产物拆开、再跑一遍 `--package-smoke`，不过关就**删掉产物**，所以 release 上出现的 AppImage 一定是自检通过的。
+
+> deb 的包名是 `cc-pocket`（`linux { packageName }`）：jpackage 默认拿 `--name` 当包名，而 `CC Pocket` 带空格和大写，dpkg 直接拒。app image 目录与启动器仍是 `CC Pocket`，与兼容清单一致。
 
 ## 注意事项
 

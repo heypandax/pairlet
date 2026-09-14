@@ -126,8 +126,12 @@ BASELINE_PHRASES = {
     ],
 }
 
-# Release-asset name shapes that would imply an official Linux desktop build.
-LINUX_DESKTOP_ARTIFACTS = r"cc-pocket-desktop-linux|desktop-linux-(?:x86_64|amd64|arm64)|cc-pocket[-_]desktop[^\s\"'<>]*\.(?:AppImage|deb|rpm)"
+# Linux desktop packages became official in #379. Public copy may now link them, but only under the
+# exact asset names release.yml uploads — a plausible-looking `amd64`/`aarch64`/`.tar.gz` spelling is a
+# 404 for the reader, which is the same kind of harm the old "there is no Linux desktop build" rule
+# guarded against. Anything matching the loose shape must match the strict shape.
+LINUX_DESKTOP_ARTIFACTS = r"cc-pocket[-_]desktop[-_]linux[^\s\"'<>)]*"
+LINUX_DESKTOP_ASSET = r"cc-pocket-desktop-linux-(?:x86_64|arm64)\.(?:deb|rpm|AppImage)"
 
 # Symbol → contract state, for parsing the rendered matrices.
 SYMBOL_STATE = {"✓": "yes", "△": "limited", "✕": "no"}
@@ -200,8 +204,8 @@ def check_contract() -> dict | None:
         if got != states:
             fail("contract", f"agent {agent_id!r} states are {got}, expected {states}")
 
-    if contract.get("platforms", {}).get("desktop", {}).get("linux", {}).get("official") is not False:
-        fail("contract", "platforms.desktop.linux.official must be false — there is no Linux desktop package")
+    if contract.get("platforms", {}).get("desktop", {}).get("linux", {}).get("official") is not True:
+        fail("contract", "platforms.desktop.linux.official must be true — release.yml publishes Linux deb/rpm (#379)")
     daemon = contract.get("platforms", {}).get("daemon", {}).get("targets", [])
     if len(daemon) != 5:
         fail("contract", f"platforms.daemon lists {len(daemon)} targets, expected 5")
@@ -331,17 +335,20 @@ def check_facts(sources: dict[str, str]) -> None:
         if text is not None and not re.search(r"timeout of its own|没有自带超时|自身没有超时", text, re.I):
             fail("deepseek", f"{rel} never states that DeepSeek requests ride the daemon's approval window (no timeout of its own)")
 
-    # No official Linux desktop binary, anywhere.
+    # Linux desktop links must use the published asset names, and must not overclaim signing.
     for rel, text in sources.items():
-        for match in re.finditer(LINUX_DESKTOP_ARTIFACTS, text, re.I):
-            line = text.count("\n", 0, match.start()) + 1
-            fail("linux-desktop", f"{rel}:{line} implies an official Linux desktop binary: {match.group(0)!r}")
+        for match in re.finditer(LINUX_DESKTOP_ARTIFACTS, text):
+            if not re.fullmatch(LINUX_DESKTOP_ASSET, match.group(0)):
+                line = text.count("\n", 0, match.start()) + 1
+                fail("linux-desktop", f"{rel}:{line} is not a published Linux desktop asset name: {match.group(0)!r}")
+    # Linux deb/rpm carry no code signature (there is no Gatekeeper/notarization equivalent), so the
+    # copy must say "unsigned" wherever it offers the download — same honesty bar as the Windows MSI.
     for rel in ("README.md", "README.zh-CN.md", "site/index.html", "site/llms.txt"):
         text = sources.get(rel)
-        if text is None:
+        if text is None or not re.search(LINUX_DESKTOP_ASSET, text):
             continue
-        if not re.search(r"no official linux desktop package|Linux 没有正式桌面安装包", text, re.I):
-            fail("linux-desktop", f"{rel} does not say there is no official Linux desktop package")
+        if not re.search(r"unsigned|未签名", text, re.I):
+            fail("linux-desktop", f"{rel} offers the Linux desktop package without saying it is unsigned")
 
 
 def check_media() -> None:
