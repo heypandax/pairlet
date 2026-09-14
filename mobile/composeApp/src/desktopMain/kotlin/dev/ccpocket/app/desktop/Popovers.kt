@@ -82,6 +82,7 @@ import dev.ccpocket.app.resources.model_gateway_suggested
 import dev.ccpocket.app.resources.model_next_turn_note
 import dev.ccpocket.app.resources.model_section_anthropic
 import dev.ccpocket.app.resources.new_path_start
+import dev.ccpocket.app.resources.new_session_mode_unavailable
 import dev.ccpocket.app.resources.new_session_title
 import dev.ccpocket.app.resources.opencode_mode_note
 import dev.ccpocket.app.resources.opencode_mode_title
@@ -226,11 +227,18 @@ fun NewSessionPopover(
     var selectedMode by remember {
         mutableStateOf(carryModeAcrossAgents(null, agent, defaultMode, defaultPermissionMode, autoAvailable))
     }
-    // Re-resolve whenever the ladder itself can change: switching agent, or Claude's native Auto row
-    // arriving a beat after the popover opened.
+    // #363: the selection is either still the SEED (untouched) or the user's ANSWER (touched). A seed
+    // re-resolves from Settings whenever the ladder changes — so a persisted native Auto is restored when its
+    // capability lands a beat after the popover opened, instead of staying on per-step Default. An answer is
+    // kept as its exact mode+nativeMode pair; a capability refresh never substitutes another rung for it
+    // (the old re-carry fell back to the Settings default — Full access — when a picked Auto disappeared).
+    var modeTouched by remember { mutableStateOf(false) }
     LaunchedEffect(agent, autoAvailable) {
-        selectedMode = carryModeAcrossAgents(selectedMode, agent, defaultMode, defaultPermissionMode, autoAvailable)
+        if (!modeTouched) selectedMode = carryModeAcrossAgents(null, agent, defaultMode, defaultPermissionMode, autoAvailable)
     }
+    // an answer the ladder no longer offers cannot start: the popover says why and waits for a new pick
+    val modeValid = agent == AgentKind.OPENCODE ||
+        availableModes.any { it.mode == selectedMode.mode && it.nativeMode == selectedMode.nativeMode }
     // null = follow the per-agent default. Reset per agent: a Claude alias isn't a model Codex can run.
     var chosenModel by remember(agent) { mutableStateOf<String?>(null) }
     // #333: reset per agent, same as the model — a dsh preset id means nothing to Claude.
@@ -250,7 +258,7 @@ fun NewSessionPopover(
             .verticalScroll(rememberScrollState())
             // Enter anywhere in the popover = the Start button (the path field holds focus)
             .onPreviewKeyEvent { e ->
-                if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter) && looksAbsolute) {
+                if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter) && looksAbsolute && modeValid) {
                     val selected = selectedMode
                     onStart(
                         trimmed,
@@ -285,7 +293,19 @@ fun NewSessionPopover(
                 selectableAgents.chunked(3).forEach { rowAgents ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                         rowAgents.forEach { candidate ->
-                            AgentCard(candidate, agent == candidate, Modifier.weight(1f)) { agent = candidate }
+                            AgentCard(candidate, agent == candidate, Modifier.weight(1f)) {
+                                // An untouched seed simply re-resolves from Settings for the new agent in the
+                                // effect above. An ANSWER is carried only as the SAME rung (#333); when the target
+                                // agent has no such rung it is kept as-is and the validity gate asks for a new
+                                // pick (#363 review P1) — never the Settings-default fallback of
+                                // [carryModeAcrossAgents], which with a Full-access default silently started BYPASS.
+                                if (modeTouched && candidate != agent) {
+                                    desktopModeChoices(candidate, autoAvailable)
+                                        .firstOrNull { it.mode == selectedMode.mode && it.nativeMode == selectedMode.nativeMode }
+                                        ?.let { selectedMode = it }
+                                }
+                                agent = candidate
+                            }
                         }
                         repeat(3 - rowAgents.size) { Spacer(Modifier.weight(1f)) }
                     }
@@ -318,7 +338,7 @@ fun NewSessionPopover(
                     Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(8.dp))
                         .background(if (picked) Tok.surface else Color.Transparent)
                         .border(1.dp, if (picked) Tok.accent else Tok.hair, RoundedCornerShape(8.dp))
-                        .clickable { selectedMode = m }.padding(horizontal = 10.dp, vertical = 8.dp),
+                        .clickable { selectedMode = m; modeTouched = true }.padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Dot(m.dot, 7.dp)
@@ -328,15 +348,25 @@ fun NewSessionPopover(
                     Text(m.token, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
                 }
             }
+            if (!modeValid) {
+                Text(
+                    stringResource(Res.string.new_session_mode_unavailable),
+                    color = Tok.warn, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+            }
             // #333: mobile parity — the preset sits under the mode ladder, and only when advertised.
             if (agentPresets.isNotEmpty()) {
                 NewSessionPresetRow(agentPresets, chosenPreset) { chosenPreset = it }
             }
             Text(
                 stringResource(Res.string.new_path_start), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).alpha(if (looksAbsolute) 1f else 0.45f)
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).alpha(if (looksAbsolute && modeValid) 1f else 0.45f)
                     .clip(RoundedCornerShape(10.dp)).background(Tok.accent)
-                    .clickable(enabled = looksAbsolute) {
+                    .clickable(enabled = looksAbsolute && modeValid) {
+                        // `enabled` only greys the pointer path; a semantics/accessibility OnClick still lands
+                        // here, so the validity gate is repeated where the start actually happens
+                        if (!looksAbsolute || !modeValid) return@clickable
                         val selected = selectedMode
                         onStart(
                             trimmed,

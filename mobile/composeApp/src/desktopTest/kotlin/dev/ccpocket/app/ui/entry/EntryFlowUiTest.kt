@@ -481,8 +481,13 @@ class EntryFlowUiTest {
         }
     }
 
+    /**
+     * #363: the MODEL resets across a backend switch (a Claude alias is not a model Codex can run) but the
+     * MODE travels as its value pair — under the backend's own name for it. "Plan" is Codex's "Cautious",
+     * and resetting it instead is what silently dropped users onto a different permission rung.
+     */
     @Test
-    fun switchingAgentResetsModelAndMode() {
+    fun switchingAgentResetsTheModelAndCarriesTheModeAsAValuePair() {
         var picked: Triple<PermissionMode, AgentKind, String?>? = null
         configure(onPicked = { m, a, native, model, _ -> picked = Triple(m, a, model) }) {
             // choose a non-default Claude rung, then switch backends
@@ -491,15 +496,15 @@ class EntryFlowUiTest {
             advanceFrameAndWait()
             onAllNodes(hasText("Codex")).onFirst().performSemanticsAction(SemanticsActions.OnClick)
             advanceFrameAndWait()
-            // Codex's own ladder is on screen, seeded at its recommended preset
-            assertTrue(present(str(Res.string.codex_preset_balanced)), "the Codex ladder replaces Claude's")
-            assertFalse(present(str(Res.string.cfg_mode_plan)), "a Claude rung must not survive the switch")
+            // Codex's own ladder is on screen — the same meaning, never Claude's wording
+            assertTrue(present(str(Res.string.codex_preset_cautious)), "the Codex ladder replaces Claude's")
+            assertFalse(present(str(Res.string.cfg_mode_plan)), "a Claude LABEL must not survive the switch")
 
             onAllNodes(hasText(str(Res.string.cfg_start), substring = true)).onFirst().performClick()
             advanceFrameAndWait()
             val p = picked
             assertTrue(p != null && p.second == AgentKind.CODEX)
-            assertEquals(agentDefaultMode(AgentKind.CODEX), p!!.first, "the mode reset to Codex's default")
+            assertEquals(PermissionMode.PLAN, p!!.first, "the hand-picked rung travelled as its value pair")
             assertNull(p.third, "and the model reset to 'follow the computer's default'")
         }
     }

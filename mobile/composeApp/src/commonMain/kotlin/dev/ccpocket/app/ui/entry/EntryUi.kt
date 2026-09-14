@@ -209,11 +209,12 @@ fun agentModeChoices(
 }
 
 /**
- * The mode [agent] starts on the moment it is chosen.
+ * The mode [agent] falls back to when nothing legal survives the switch.
  *
- * Switching agent RESETS to this: a Codex sandbox preset is not a Claude permission mode, and carrying a
- * selection across backends would show one name while the daemon runs another. OpenCode resets to the mode
- * it genuinely runs in.
+ * #363 narrowed what "nothing legal" means: a saved default or a hand-picked rung whose exact value pair
+ * this agent also offers is carried over (see [carryModeAcrossAgents]) — only a pair it has no row for
+ * lands here, because showing one name while the daemon runs another is the failure this guards. OpenCode
+ * falls back to the mode it genuinely runs in.
  */
 fun agentDefaultMode(agent: AgentKind): PermissionMode = when (agent) {
     AgentKind.OPENCODE -> PermissionMode.BYPASS_PERMISSIONS
@@ -235,8 +236,14 @@ fun ModeChoice.needsFullAccessConfirm(agent: AgentKind): Boolean =
 /**
  * The selection to open the configuration on for [agent].
  *
- * Only the agent the sheet OPENED on may inherit the caller's persisted default — every other agent is a
- * switch, and a switch resets (see [agentDefaultMode]).
+ * #363: the saved default is the USER'S answer, not the opening agent's. Every agent seeds from it as long
+ * as the exact ([PermissionMode] + Claude's optional native mode) PAIR is a rung that agent really offers —
+ * the same "carry the meaning, never the offset" rule the desktop popover already follows. Restricting the
+ * inheritance to the agent the sheet happened to open on is what produced the 09-13 report: a user with
+ * Full access saved, a sheet that opened on Codex (App.kt persists the last-picked agent), and a tap on
+ * Claude that silently reset them to step-by-step approvals. A pair the target has no rung for still falls
+ * back to [agentDefaultMode] — a Claude native Auto is not a Kimi mode, and inventing one would label the
+ * session something the daemon never runs.
  *
  * [codexPresets] is the connected daemon's advertised vocabulary, and it decides the seed too: a persisted
  * mode the daemon no longer offers must not be resurrected here, and when a newer daemon drops the rung
@@ -244,16 +251,41 @@ fun ModeChoice.needsFullAccessConfirm(agent: AgentKind): Boolean =
  */
 fun seedModeChoice(
     agent: AgentKind,
-    openedAgent: AgentKind,
     persisted: PermissionMode,
     persistedNative: String?,
     autoAvailable: Boolean = false,
     codexPresets: List<AgentModePreset> = emptyList(),
 ): ModeChoice {
     val choices = agentModeChoices(agent, autoAvailable, codexPresets)
-    if (agent == openedAgent) {
-        choices.firstOrNull { it.mode == persisted && it.nativeMode == persistedNative }?.let { return it }
-    }
+    choices.firstOrNull { it.mode == persisted && it.nativeMode == persistedNative }?.let { return it }
     val fallback = agentDefaultMode(agent)
     return choices.firstOrNull { it.mode == fallback && it.nativeMode == null } ?: choices.first()
+}
+
+/**
+ * The rung to show for [agent] after an agent switch or a capability refresh (issue #363).
+ *
+ * [picked] is the rung the user chose BY HAND in this sheet, or null while the selection is still the seed.
+ * Three cases, and the difference between them is the whole contract:
+ *
+ *  - **OpenCode**: not a ladder — the daemon runs it `--auto` and the sheet states that. There is nothing to
+ *    carry INTO it, and carrying a Plan rung there would send a mode the backend cannot honour.
+ *  - **untouched**: [seedModeChoice], i.e. the saved default wherever it is legal.
+ *  - **hand-picked**: the target's own row for that exact value pair when it has one (its `danger` flag is
+ *    the backend's to set), otherwise the pick is KEPT so the validity gate can ask for a new one. Falling
+ *    back to the saved default here is exactly what must not happen — that default may be wider than the
+ *    rung the user just chose, and nobody chose it for this agent.
+ */
+fun carryModeAcrossAgents(
+    picked: ModeChoice?,
+    agent: AgentKind,
+    persisted: PermissionMode,
+    persistedNative: String?,
+    autoAvailable: Boolean = false,
+    codexPresets: List<AgentModePreset> = emptyList(),
+): ModeChoice {
+    val choices = agentModeChoices(agent, autoAvailable, codexPresets)
+    if (modeChoiceSet(agent) == ModeChoiceSet.OPENCODE_AUTOMATIC) return choices.first()
+    if (picked == null) return seedModeChoice(agent, persisted, persistedNative, autoAvailable, codexPresets)
+    return choices.firstOrNull { it.mode == picked.mode && it.nativeMode == picked.nativeMode } ?: picked
 }

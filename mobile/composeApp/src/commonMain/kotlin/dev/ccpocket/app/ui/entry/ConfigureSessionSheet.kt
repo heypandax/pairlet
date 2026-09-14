@@ -90,6 +90,7 @@ import dev.ccpocket.app.resources.codex_preset_cautious
 import dev.ccpocket.app.resources.label_agent
 import dev.ccpocket.app.resources.label_mode
 import dev.ccpocket.app.resources.label_model
+import dev.ccpocket.app.resources.new_session_mode_unavailable
 import dev.ccpocket.app.resources.new_session_title
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
@@ -124,8 +125,11 @@ private const val CONFIGURE_SHEET_HEIGHT_FRACTION = 0.90f
  * is a selection and reads as one (a check mark, no button ink); [onPick] fires from the single filled
  * `Start session`, which prints the exact combination it will run. Consequences of that:
  *
- *  - switching agent RESETS Model and Mode to that agent's real defaults, and Start reprints before it can
- *    be tapped — no more starting under a Codex preset the label never showed;
+ *  - switching agent resets the Model, and re-resolves the Mode through [carryModeAcrossAgents] (#363): the
+ *    saved default follows the user to any agent that really has that rung, a rung they picked by hand
+ *    travels as its value pair, and anything the target cannot offer falls back to the target's OWN default
+ *    (never to something wider). Start reprints either way — no more starting under a preset the label
+ *    never showed;
  *  - Full access opens the existing confirmation, which names the agent, the workdir and the computer;
  *    Cancel returns here with the selection intact and starts nothing;
  *  - a `started` latch makes a double tap (or an overlapping dismiss callback) a no-op.
@@ -171,24 +175,34 @@ fun ConfigureSessionSheet(
     // the backend's own default", which is also what an un-answered catalogue leaves it at.
     val agentPresets = agentPresetsFor(chosenAgent)
     var chosenPreset by remember(chosenAgent) { mutableStateOf<String?>(null) }
-    var chosenMode by remember(chosenAgent) {
-        mutableStateOf(seedModeChoice(chosenAgent, openedAgent, selected, selectedNativeMode, autoAvailable, modePresets))
+    // The rung the user picked BY HAND, kept as its value pair and NOT keyed on the agent: it is an answer
+    // about how this session should behave, and it outlives both an agent switch and a capability refresh
+    // (the peer's list can land a beat AFTER the sheet opens — Claude's native Auto row appears then, and
+    // Codex's advertised vocabulary arrives with its ModelsList). Null = the selection is still the seed.
+    var pickedMode by remember { mutableStateOf<ModeChoice?>(null) }
+    var chosenMode by remember {
+        mutableStateOf(carryModeAcrossAgents(null, chosenAgent, selected, selectedNativeMode, autoAvailable, modePresets))
     }
-    // whether the ladder below is the user's answer or still the seed. The peer's capability list can land
-    // a beat AFTER the sheet opens (Claude's native Auto row appears then, and Codex's advertised vocabulary
-    // arrives with its ModelsList), and re-seeding at that moment must never overwrite a rung the user has
-    // already chosen.
-    var modeTouched by remember(chosenAgent) { mutableStateOf(false) }
+    // #363: re-resolving on every agent switch AND every capability refresh, from the one function that owns
+    // the rule — saved default while untouched, the user's own pair once touched, never a wider substitute.
     LaunchedEffect(chosenAgent, autoAvailable, modePresets) {
-        if (!modeTouched) chosenMode = seedModeChoice(chosenAgent, openedAgent, selected, selectedNativeMode, autoAvailable, modePresets)
+        chosenMode = carryModeAcrossAgents(pickedMode, chosenAgent, selected, selectedNativeMode, autoAvailable, modePresets)
     }
+    // #363 contract 2: a hand-picked rung the refreshed capability list no longer offers (Claude's native Auto
+    // withdrawn, a Codex preset the daemon dropped) is judged by its VALUE PAIR and is not submittable — the
+    // sheet says why and waits for a new pick rather than silently substituting another rung.
+    val modeChoices = agentModeChoices(chosenAgent, autoAvailable, modePresets)
+    val modeValid = modeChoiceSet(chosenAgent) == ModeChoiceSet.OPENCODE_AUTOMATIC ||
+        modeChoices.any { it.mode == chosenMode.mode && it.nativeMode == chosenMode.nativeMode }
     var confirming by remember { mutableStateOf(false) }
+    // a confirmation for a mode that just became invalid is no longer the thing the user confirmed
+    LaunchedEffect(modeValid) { if (!modeValid) confirming = false }
     // one start per sheet: a second tap, or a dismiss callback racing the start, has nothing left to fire
     var started by remember { mutableStateOf(false) }
     LaunchedEffect(chosenAgent) { onAgentPicked(chosenAgent) }
 
     val start = {
-        if (!started) {
+        if (!started && modeValid) {
             started = true
             // The preset only travels when this agent really advertised one — otherwise a value left over
             // from a build that did would ride out to a daemon that ignores it.
@@ -241,13 +255,21 @@ fun ConfigureSessionSheet(
                     }
                     else -> {
                         EntryLabel(stringResource(Res.string.label_mode), Modifier.padding(top = 22.dp, bottom = Metric.gapS))
-                        agentModeChoices(chosenAgent, autoAvailable, modePresets).forEach { choice ->
+                        modeChoices.forEach { choice ->
                             ModeSelectionRow(
                                 label = modeChoiceLabel(chosenAgent, choice),
                                 body = modeChoiceBody(chosenAgent, choice),
                                 danger = choice.danger,
-                                selected = choice == chosenMode,
-                            ) { chosenMode = choice; modeTouched = true } // selection only — nothing starts here
+                                // the value pair, not the whole row: a refresh that only re-flags `danger`
+                                // must not un-highlight a rung that is still the selection
+                                selected = choice.mode == chosenMode.mode && choice.nativeMode == chosenMode.nativeMode,
+                            ) { chosenMode = choice; pickedMode = choice } // selection only — nothing starts here
+                        }
+                        if (!modeValid) {
+                            EntryNote(
+                                stringResource(Res.string.new_session_mode_unavailable),
+                                Modifier.padding(top = Metric.gap), color = Tok.warn,
+                            )
                         }
                         modeFootnote(chosenAgent)?.let {
                             EntryNote(it, Modifier.padding(top = Metric.gap))
@@ -274,9 +296,16 @@ fun ConfigureSessionSheet(
                         agentName(chosenAgent),
                         modeChoiceLabel(chosenAgent, chosenMode),
                     ),
-                    enabled = !started,
+                    enabled = !started && modeValid,
                 ) {
-                    if (chosenMode.needsFullAccessConfirm(chosenAgent)) confirming = true else start()
+                    if (!modeValid) Unit
+                    else if (chosenMode.needsFullAccessConfirm(chosenAgent)) {
+                        // #363: the rung on the confirmation is now the user's committed answer. A capability
+                        // refresh while it is open may invalidate it (back to the panel, with the reason) but
+                        // must never re-seed it into a different rung behind the confirmation.
+                        pickedMode = chosenMode
+                        confirming = true
+                    } else start()
                 }
             }
         }
