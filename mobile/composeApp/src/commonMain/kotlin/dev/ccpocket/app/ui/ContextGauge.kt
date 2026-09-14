@@ -34,9 +34,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.context_critical_caption
+import dev.ccpocket.app.resources.context_status_gauge_no_data
 import dev.ccpocket.app.resources.qa_context_gauge
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import org.jetbrains.compose.resources.stringResource
 
 /** Ring geometry, straight from the design (gauge-rhythm.jsx `Ring`). */
@@ -95,12 +97,14 @@ fun ContextGauge(
     modifier: Modifier = Modifier,
     onOpenInfo: () -> Unit,
 ) {
-    used ?: return // no turn yet / older daemon — nothing to show
-    val known = window != null && window > 0L
-    val frac = if (known) (used.toFloat() / window!!).coerceIn(0f, 1f) else 0f
+    // #320-A: no occupancy yet (first turn pending / older daemon / a backend that hasn't reported) used to
+    // render NOTHING, which read the same as a missing feature. It now keeps the calm empty ring — no number,
+    // never a fill — and still taps through to session info, where the missing evidence is spelled out.
+    val known = used != null && window != null && window > 0L
+    val frac = if (used != null && window != null && window > 0L) (used.toFloat() / window).coerceIn(0f, 1f) else 0f
     val color = contextColor(frac, Tok.tx2)
     val track = Tok.hair
-    val a11y = stringResource(Res.string.qa_context_gauge)
+    val a11y = stringResource(if (used == null) Res.string.context_status_gauge_no_data else Res.string.qa_context_gauge)
     BoxWithConstraints(
         modifier
             // the capsule stays the design's 30dp, but the touch slot is the [Metric.touch] minimum in
@@ -113,7 +117,7 @@ fun ContextGauge(
         contentAlignment = Alignment.Center,
     ) {
         // the number appears only once it means something, and only while there is room for it
-        val showNumber = (!known || frac >= WARN_AT) && (maxWidth - reserveEnd) >= NUMBER_ROOM
+        val showNumber = used != null && (!known || frac >= WARN_AT) && (maxWidth - reserveEnd) >= NUMBER_ROOM
         Row(
             Modifier
                 .height(CAPSULE)
@@ -139,10 +143,13 @@ fun ContextGauge(
             if (showNumber) {
                 Spacer(Modifier.width(5.dp))
                 Text(
-                    if (known) "${(frac * 100).toInt()}%" else "~${formatTokens(used)}",
+                    // showNumber already requires used != null
+                    if (known) "${(frac * 100).toInt()}%" else contextUsedTokens(used ?: 0L),
                     color = if (known) color else Tok.tx2,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
+                    // beside the ring Canvas: geometric neighbour → tightCenter (AGENTS.md)
+                    style = tightCenter(11.sp),
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 0.2.sp,
                     maxLines = 1,

@@ -234,10 +234,11 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit, onHandoff: (
                 // is unknown — and this row is a status readout, so it must not invent one.
                 AboutRow(
                     stringResource(Res.string.label_model),
-                    repo.model.value ?: stringResource(
-                        if ((repo.sessionAgent.value ?: AgentKind.CLAUDE) == AgentKind.CLAUDE) Res.string.value_default
-                        else Res.string.value_unknown,
-                    ),
+                    when (sessionModelFallback(repo.sessionAgent.value, repo.model.value)) {
+                        null -> repo.model.value.orEmpty()
+                        SessionModelFallback.ACCOUNT_DEFAULT -> stringResource(Res.string.value_default)
+                        SessionModelFallback.UNKNOWN -> stringResource(Res.string.value_unknown)
+                    },
                 )
                 Hairline()
                 AboutRow(stringResource(Res.string.label_effort), repo.effort.value ?: stringResource(Res.string.value_default))
@@ -269,7 +270,13 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit, onHandoff: (
                 Hairline()
                 AboutRow(stringResource(Res.string.label_mode), modeLabel)
             }
-            ContextBar(used = repo.contextUsed.value, total = repo.contextWindow.value)
+            // #320-A: the context block names its evidence shape (both / used only / window only / none) and
+            // marks a hand-typed window as the user's value — the gauge's tap lands here, so this is where a
+            // blank has to be explained. The per-model write surface below stays the override's entry point.
+            ContextStatusPanel(
+                contextStatusUi(repo.contextUsed.value, repo.contextWindow.value, repo.contextWindowOverrideFor(repo.model.value)),
+                Modifier.padding(top = 14.dp),
+            )
             PerModelWindowRow(repo)
             Column(Modifier.padding(top = 10.dp)) {
                 Text(stringResource(Res.string.label_workdir), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
@@ -282,27 +289,6 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit, onHandoff: (
                 onOpen = { /* v1: rows are a record; the RETURNED result docks in the chat itself */ },
                 onHandoff = onHandoff?.let { action -> { onDismiss(); action() } },
             )
-        }
-    }
-}
-
-@Composable
-private fun ContextBar(used: Long?, total: Long?) {
-    Column(Modifier.padding(top = 14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(Res.string.label_context), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, modifier = Modifier.weight(1f))
-            // total == null → no known denominator (Codex): show raw occupancy instead of a fake /200k
-            val label = when {
-                total == null -> if (used == null) "—" else "~${formatTokens(used)}"
-                used == null -> "— / ${formatTokens(total)}"
-                else -> "~${formatTokens(used)} / ${formatTokens(total)}"
-            }
-            Text(label, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-        }
-        val frac = if (used == null || total == null || total <= 0) 0f else (used.toFloat() / total).coerceIn(0f, 1f)
-        val fill = contextColor(frac)
-        Box(Modifier.padding(top = 7.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Tok.hair)) {
-            if (frac > 0f) Box(Modifier.fillMaxWidth(frac).height(4.dp).clip(RoundedCornerShape(2.dp)).background(fill))
         }
     }
 }

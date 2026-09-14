@@ -2088,6 +2088,14 @@
     <string name="pin_issue_pairing_changed">这台电脑的配对已变更。重新连接后才能同步置顶。</string>
     <string name="pin_issue_retry">重试</string>
     <string name="pin_issue_dismiss">关闭</string>
+    <!-- 上下文状态（issue #320-A）：说明拿到了哪些数据，不猜数值、不断言“不支持” -->
+    <string name="context_status_no_data">尚未获得上下文数据</string>
+    <string name="context_status_no_data_detail">后端还没有返回这个会话的可用数值，这并不代表它不支持。</string>
+    <string name="context_status_window_unknown">窗口上限未知，因此不计算百分比。</string>
+    <string name="context_status_used_pending">尚未获得已用量，不按 0 计算。</string>
+    <string name="context_status_window_override">这个窗口上限是你手动设置的值，并非后端上报。</string>
+    <string name="context_status_gauge_no_data">尚未获得上下文数据——打开会话信息</string>
+    <string name="context_status_open_details">上下文状态——查看详情</string>
     <string name="tool_process_toggle">收起工具过程</string>
     <string name="tool_process_group">执行过程</string>
     <plurals name="tool_process_tools">

@@ -4,6 +4,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasContentDescription
@@ -14,6 +17,7 @@ import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.context_critical_caption
+import dev.ccpocket.app.resources.context_status_gauge_no_data
 import dev.ccpocket.app.resources.qa_context_gauge
 import dev.ccpocket.app.theme.PocketTheme
 import kotlinx.coroutines.runBlocking
@@ -123,18 +127,55 @@ class ContextGaugeUiTest {
         assertEquals(1, opened)
     }
 
-    /** Nothing to say before the first turn lands (or against an older daemon). */
+    /**
+     * Review P2: a MEASURED 0 is a reading, absence is not — assistive tech must hear the difference, and
+     * the unknown-window number must match the session sheet's `0` (not `~0`).
+     */
     @Test
-    fun noUsageYetRendersNothing() = runComposeUiTest {
+    fun zeroUsedAndNoUsedSpeakDifferently() = runComposeUiTest {
+        val noData = runBlocking { getString(Res.string.context_status_gauge_no_data) }
+        var used by mutableStateOf<Long?>(0L)
         setContent {
             PocketTheme {
                 Box(Modifier.width(wide)) {
-                    ContextGauge(used = null, window = 200_000, reserveEnd = idleReserve) {}
+                    ContextGauge(used = used, window = null, reserveEnd = idleReserve) {}
                 }
             }
         }
         waitForIdle()
-        assertTrue(onAllNodes(hasContentDescription(gaugeDesc())).fetchSemanticsNodes().isEmpty())
+        assertEquals(1, onAllNodes(hasContentDescription(gaugeDesc())).fetchSemanticsNodes().size, "used=0 is a reading")
+        assertTrue(onAllNodes(hasContentDescription(noData)).fetchSemanticsNodes().isEmpty())
+        assertTrue(present("0"), "unknown window + measured 0 prints plain 0")
+        assertFalse(present("~0", substring = true), "must match the session sheet's token string")
+
+        used = null
+        waitForIdle()
+        assertTrue(onAllNodes(hasContentDescription(gaugeDesc())).fetchSemanticsNodes().isEmpty(), "absence is not a reading")
+        assertEquals(1, onAllNodes(hasContentDescription(noData)).fetchSemanticsNodes().size)
+    }
+
+    /**
+     * #320-A: before the first turn lands (or against an older daemon / a backend that hasn't reported) the
+     * gauge used to vanish, which read like "no such feature". It now stays as an empty ring with no number —
+     * a missing value is never drawn as 0% — says so to assistive tech, and still opens session info.
+     */
+    @Test
+    fun noUsageYetKeepsAnEmptyRingThatOpensInfo() = runComposeUiTest {
+        var opened = 0
+        val noData = runBlocking { getString(Res.string.context_status_gauge_no_data) }
+        setContent {
+            PocketTheme {
+                Box(Modifier.width(wide)) {
+                    ContextGauge(used = null, window = 200_000, reserveEnd = idleReserve) { opened++ }
+                }
+            }
+        }
+        waitForIdle()
+        assertTrue(onAllNodes(hasContentDescription(gaugeDesc())).fetchSemanticsNodes().isEmpty(), "must not claim a reading")
+        assertFalse(present("%", substring = true), "no percentage without occupancy")
+        assertFalse(present("~", substring = true), "no token count without occupancy")
+        onNode(hasContentDescription(noData)).performClick()
+        assertEquals(1, opened)
     }
 
     /**
