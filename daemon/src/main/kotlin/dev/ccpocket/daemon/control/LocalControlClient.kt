@@ -4,6 +4,7 @@ import com.github.ajalt.clikt.core.CliktError
 import dev.ccpocket.protocol.PocketJson
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -47,6 +48,10 @@ class LocalControlClient(
                 setBody(PocketJson.encodeToString(bodySerializer, body))
             }
         }
+
+    /** DELETE [path]; the same gate as POST (a browser cannot send this without a preflight either). */
+    suspend fun <T> delete(path: String, serializer: KSerializer<T>): T =
+        call(serializer) { client -> client.delete("$base$path") { header(LocalControlToken.HEADER, token()) } }
 
     private suspend fun <T> call(serializer: KSerializer<T>, send: suspend (HttpClient) -> HttpResponse): T {
         val client = HttpClient(CIO)

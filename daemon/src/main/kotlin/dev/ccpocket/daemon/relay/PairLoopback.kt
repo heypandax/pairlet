@@ -4,6 +4,8 @@ import dev.ccpocket.daemon.bridge.BridgeSpec
 import dev.ccpocket.daemon.control.LOCAL_CONTROL_PREFIX
 import dev.ccpocket.daemon.control.LocalControlDeps
 import dev.ccpocket.daemon.control.LocalControlToken
+import dev.ccpocket.daemon.control.ExecutionControlDeps
+import dev.ccpocket.daemon.control.installExecutionControl
 import dev.ccpocket.daemon.control.installLocalControl
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AccessTier
@@ -380,6 +382,17 @@ class PairLoopback(
                 core?.let { c -> localControlToken?.let { token ->
                     installLocalControl(
                         LocalControlDeps({ c.collaboratorControl }, c.reviews, c.peerInbox, c.reviewOwner),
+                        token,
+                    )
+                    // #367: the remote-execution surface. SAME prefix, SAME gate (installExecutionControl
+                    // calls the very same `authorize`), separate deps — creating an execution grant is a new
+                    // permission on this computer, so it must never be reachable from the wire router.
+                    installExecutionControl(
+                        ExecutionControlDeps(
+                            target = { c.executionTarget },
+                            grants = { c.executionGrants },
+                            client = { c.executionClient },
+                        ),
                         token,
                     )
                 } }

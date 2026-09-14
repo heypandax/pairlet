@@ -76,6 +76,8 @@ class DaemonCore(
         dev.ccpocket.daemon.pins.FileProjectPinStore(dev.ccpocket.daemon.pins.FileProjectPinStore.defaultFile()),
     /** Managed session list store directory (issue #360). Read lazily; tests hand in a temp directory. */
     managedSessionRoot: java.io.File = dev.ccpocket.daemon.disk.ManagedSessionStore.defaultRoot(),
+    /** #367 run-journal root. Read lazily (see [executionRuns]); tests hand in a temp directory. */
+    private val executionRunRoot: java.io.File = dev.ccpocket.daemon.execution.RunJournal.defaultRoot(),
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + kotlinx.coroutines.CoroutineExceptionHandler { _, error ->
         Diagnostics.report(ErrorPath.ASYNC_WORKER, Stage.EXECUTE, ErrorCode.UNEXPECTED, error)
@@ -287,6 +289,108 @@ class DaemonCore(
     @Volatile
     var collaboratorControl: dev.ccpocket.daemon.handoff.CollaboratorControl? = null
 
+    /**
+     * #367 G1: the EXECUTION credential BIND hook — same install/lifetime terms as the three above
+     * (approving a grant mints a connect ticket, which needs the relay link).
+     *
+     * [dev.ccpocket.daemon.relay.DeviceSessions] calls it at the ONE moment an execution link's first
+     * transport frame has proven the derived first-contact PSK. Null (LAN-only `serve`, or the link still
+     * coming up) means no execution credential can be bound at all — which is the safe answer: an execution
+     * link is only ever created by an owner approval that itself needed the relay.
+     */
+    @Volatile
+    var executionControl: dev.ccpocket.daemon.execution.ExecutionControl? = null
+
+    // ------------------------------------------------------------------ #367 remote execution
+
+    /**
+     * The TARGET's run journal. `by lazy` on purpose: an embedded core or a unit test that never receives
+     * an execution frame must not touch `~/.cc-pocket/execution-runs` — and construction RECOVERS, i.e. it
+     * writes (STARTING/RUNNING rows a dead process left behind become INTERRUPTED_UNKNOWN).
+     */
+    val executionRuns: dev.ccpocket.daemon.execution.RunJournal by lazy {
+        dev.ccpocket.daemon.execution.RunJournal(executionRunRoot)
+    }
+
+    /**
+     * The #367 planes, installed by the relay wiring through [installExecution] once the link is up —
+     * same lifetime rule as [collaboratorControl] and for the same reason: approving a grant mints a relay
+     * ticket, and the source client dials the relay. Null on a LAN-only `serve` and before the link opens.
+     */
+    @Volatile
+    var executionTarget: dev.ccpocket.daemon.execution.ExecutionTarget? = null
+        private set
+
+    @Volatile
+    var executionGrants: dev.ccpocket.daemon.execution.ExecutionGrantStore? = null
+        private set
+
+    @Volatile
+    var executionClient: dev.ccpocket.daemon.execution.client.ExecutionClient? = null
+        private set
+
+    /** The run plane the transport hands EXECUTION frames to. Null until [installExecution]. */
+    @Volatile
+    var executionPlane: dev.ccpocket.daemon.execution.ExecutionRunPlane? = null
+        private set
+
+    /**
+     * Wire the execution planes. [store] and [target] come from the relay leg (the grant store is bound to
+     * this daemon's identity key, which lives there); [client] is the source half and may be null.
+     *
+     * Idempotent: a relay reconnect re-installs the same objects rather than stacking a second run plane —
+     * two RunServices over one journal would each think they owned the concurrency ceiling.
+     */
+    fun installExecution(
+        store: dev.ccpocket.daemon.execution.ExecutionGrantStore,
+        target: dev.ccpocket.daemon.execution.ExecutionTarget,
+        client: dev.ccpocket.daemon.execution.client.ExecutionClient? = null,
+    ) {
+        executionGrants = store
+        executionTarget = target
+        executionClient = client
+        // the BIND hook and the transport gate track the current target/store on every (re)install — a
+        // relay reconnect hands over the same objects, and an owner-visible refusal must never be answered
+        // by a stale store
+        executionControl = target
+        router.executionGuard = dev.ccpocket.daemon.execution.ExecutionGuard(
+            store,
+            grantIdOf = executionCredentialGrantId,
+            linkPubOf = executionCredentialPub,
+            refusals = executionRefusals,
+        )
+        // IDEMPOTENT: the plane and its ticker are created ONCE. Two RunServices over one journal would
+        // each think they owned the concurrency ceiling, and two tickers would double every timeout sweep.
+        if (executionPlane == null) {
+            val plane = dev.ccpocket.daemon.execution.RunService(store, executionRuns, registry, scope)
+            executionPlane = plane
+            router.executionPlane = plane
+            scope.launch {
+                while (true) {
+                    // the run plane's own sweep (timeouts, queue pump, retention) AND the owner plane's
+                    // (pending revoke writes, relay-revoke retry with backoff, clock high-water persistence)
+                    runCatching { plane.maintain() }
+                    runCatching { executionTarget?.maintain() }
+                    delay(EXECUTION_MAINTAIN_PERIOD_MS)
+                }
+            }
+        }
+    }
+
+    /**
+     * How the execution gate resolves a credential's grant pointer and its proven static key. Installed by
+     * the relay wiring (which owns [dev.ccpocket.daemon.relay.DeviceSessions] and therefore the
+     * [dev.ccpocket.daemon.bridge.BridgeRegistry]); both default to "nothing is an execution credential",
+     * so a core with no relay leg fails closed.
+     */
+    @Volatile
+    var executionCredentialGrantId: (String) -> String? = { null }
+    @Volatile
+    var executionCredentialPub: (String) -> String? = { null }
+
+    /** One refusal ledger for every execution layer (target bind, transport gate, run plane). */
+    val executionRefusals = dev.ccpocket.daemon.execution.ExecutionRefusals()
+
     suspend fun shutdown() = registry.closeAll()
 
     private companion object {
@@ -294,5 +398,9 @@ class DaemonCore(
          *  leftovers only — the common paths (process end, idle reap) unhide in real time, so this just
          *  bounds how long a stranded transcript can stay hidden without a daemon restart. */
         const val SPAWNED_SWEEP_PERIOD_MS = 5 * 60_000L
+
+        /** #367 maintenance cadence: run timeouts, grant-lifecycle stops, journal retention, queue pump.
+         *  Short enough that a revoked grant stops an in-flight run promptly, long enough to be free. */
+        const val EXECUTION_MAINTAIN_PERIOD_MS = 15_000L
     }
 }

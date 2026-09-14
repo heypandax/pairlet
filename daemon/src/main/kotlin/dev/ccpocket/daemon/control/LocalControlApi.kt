@@ -388,7 +388,7 @@ const val DIR_OUTBOUND = "outbound"
 const val DIR_INBOUND = "inbound"
 const val SCOPE_SENT = "sent"
 const val SCOPE_RECEIVED = "received"
-private const val MAX_LOCAL_BODY_BYTES = ReviewLimits.MAX_ENCODED_BYTES + 64 * 1024
+internal const val MAX_LOCAL_BODY_BYTES = ReviewLimits.MAX_ENCODED_BYTES + 64 * 1024
 
 /** Wire contact → the CLI's own contact DTO. Same fields, different vocabulary: the CLI has always
  *  spelled direction as a lowercase string, and `--json` consumers key on that. */
@@ -451,8 +451,14 @@ private fun parseStatus(raw: String): ReviewStatus? = when (raw.lowercase()) {
 
 // ---- the three gates, in one place ----------------------------------------
 
-/** Enforce the token + the anti-browser rules. Answers the call itself on refusal and returns false. */
-private suspend fun ApplicationCall.authorize(token: String, post: Boolean = true): Boolean {
+/**
+ * Enforce the token + the anti-browser rules. Answers the call itself on refusal and returns false.
+ *
+ * `internal`, not private: the #367 execution routes ([installExecutionControl]) are a SEPARATE file but
+ * must be the SAME gate. Re-implementing these three checks next door is precisely how one surface ends
+ * up without the Origin refusal or the body cap.
+ */
+internal suspend fun ApplicationCall.authorize(token: String, post: Boolean = true): Boolean {
     // a CLI never sets Origin; a browser always does. Refusing its PRESENCE (not just a wrong value) is
     // the honest statement that this API has no web callers at all.
     if (request.headers["Origin"] != null) {
@@ -474,7 +480,7 @@ private suspend fun ApplicationCall.authorize(token: String, post: Boolean = tru
     return true
 }
 
-private suspend fun <T> ApplicationCall.body(serializer: KSerializer<T>): T? {
+internal suspend fun <T> ApplicationCall.body(serializer: KSerializer<T>): T? {
     val bytes = runCatching {
         receiveChannel().readRemaining(MAX_LOCAL_BODY_BYTES.toLong() + 1).readByteArray()
     }.getOrNull()
@@ -488,10 +494,10 @@ private suspend fun <T> ApplicationCall.body(serializer: KSerializer<T>): T? {
     return parsed
 }
 
-private suspend fun <T> ApplicationCall.ok(serializer: KSerializer<T>, value: T) =
+internal suspend fun <T> ApplicationCall.ok(serializer: KSerializer<T>, value: T) =
     respondText(PocketJson.encodeToString(serializer, value), ContentType.Application.Json)
 
-private suspend fun ApplicationCall.fail(status: HttpStatusCode, code: String, message: String) =
+internal suspend fun ApplicationCall.fail(status: HttpStatusCode, code: String, message: String) =
     respondText(
         PocketJson.encodeToString(LocalError.serializer(), LocalError(code = code, message = message)),
         ContentType.Application.Json,

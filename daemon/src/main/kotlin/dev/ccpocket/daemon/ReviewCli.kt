@@ -55,7 +55,7 @@ import java.time.format.DateTimeFormatter
  * machine-readable `code` in the error. Skills read those fields — the human text is deliberately not
  * a parseable contract.
  */
-private abstract class LocalCmd(name: String, private val helpLine: String) : CliktCommand(name = name) {
+internal abstract class LocalCmd(name: String, private val helpLine: String) : CliktCommand(name = name) {
     override fun help(context: Context) = helpLine
 
     protected val pairPort by option("--pair-port", help = "loopback port of the running daemon").int().default(8799)
@@ -482,7 +482,7 @@ internal fun reviewCommand(): CliktCommand = ReviewCmd().subcommands(
 )
 
 /** Mirrors Main's `daemonStartHint()` — the per-OS way to bring the daemon back up. */
-private fun daemonStartHintText(): String {
+internal fun daemonStartHintText(): String {
     val os = System.getProperty("os.name").lowercase()
     return when {
         os.contains("win") -> "start it:  schtasks /Run /TN ${dev.ccpocket.daemon.service.ServiceInstaller.WINDOWS_TASK}    (or: cc-pocket-daemon run)"

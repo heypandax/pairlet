@@ -134,6 +134,16 @@ class Conversation(
      *  every launch, so a relaunch or resume carries it without any per-turn prompt injection. Null for
      *  owner/guest conversations and for a bridge that supplies none — nothing else changes. */
     private val bridgeContextPreamble: String? = null,
+    /**
+     * #367 security review LOW-3: how an approval from THIS conversation is announced to the owner's phone
+     * / desktop. Null → the raw [origin] is used, which is right for a bridge (its origin IS its name) and
+     * for an owner session (no origin at all).
+     *
+     * A remote run sets it, because its origin is `execution:<grantId>` — an id that tells the owner
+     * nothing about who is asking. What they need on a lock screen is the SOURCE LABEL they approved and
+     * the LINK FINGERPRINT they confirmed, so the card is answerable without opening a terminal.
+     */
+    private val askOriginLabel: String? = null,
     /** COLLABORATOR handoff (SESSION-HANDOFF.md §8.3): the Handoff Grant's operation ceiling this
      *  conversation runs under. Non-null → the PermissionBridge HARD-REFUSES write tools
      *  (Write/Edit/…) before any ask exists unless the access explicitly grants scoped writes —
@@ -908,8 +918,8 @@ class Conversation(
             // launchProcess defers to the first sendPrompt, which anchors on sessionId ?: openedResumeId).
             launchProcess(
                 AgentSpec(
-                    workdir, resumeId, model, mode, effort = this.effort, thinking = this.thinking, agentPreset = this.agentPreset,
-                    permissionMode = this.permissionMode, serviceTier = this.serviceTier, forkSession = fork,
+                    workdir, resumeId, model, launchMode(), effort = this.effort, thinking = this.thinking, agentPreset = this.agentPreset,
+                    permissionMode = launchPermissionMode(), serviceTier = this.serviceTier, forkSession = fork,
                     // ONLY here: this is the one launch the user asked for by tapping "Continue here".
                     // Codex names the branch it forks for this take-over after it (issue #347); a later
                     // relaunch resumes the branch in place and must not rename anything again.
@@ -1316,8 +1326,8 @@ class Conversation(
         val fork = if (sessionId == null) openedWithFork else resumeId != sessionId
         launchProcess(
             AgentSpec(
-                workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                permissionMode = permissionMode, serviceTier = serviceTier,
+                workdir, resumeId = resumeId, model = model, mode = launchMode(), effort = effort, thinking = thinking, agentPreset = agentPreset,
+                permissionMode = launchPermissionMode(), serviceTier = serviceTier,
                 forkSession = fork, initialPrompt = initialSend?.text,
             ),
             armExecuting = armExecuting,
@@ -1554,6 +1564,31 @@ class Conversation(
     // null origin. One place to stamp it: every AgentSpec built above flows through here.
     private val cleanRoom: Boolean = launchesCleanRoom(pathScope, origin)
 
+    /** #367 G1: this conversation belongs to an execution grant (`origin = "execution:<grantId>"`), i.e. a
+     *  REMOTE machine's run. Strictly a superset of the guest/bridge clean room: same launch flags plus the
+     *  [dev.ccpocket.daemon.execution.ExecutionSandbox] path wall and the one-hop environment strip. */
+    private val remoteExecution: Boolean = dev.ccpocket.daemon.execution.RunService.isExecutionOrigin(origin)
+
+    /**
+     * #367 security review HIGH-1: what the CLI is actually launched with, as opposed to what the ceiling
+     * says. For a REMOTE-EXECUTION session under an acceptEdits ceiling these differ ON PURPOSE.
+     *
+     * Claude's native `acceptEdits` and Codex's `approvalPolicy=never` apply in-workspace edits WITHOUT
+     * emitting a ControlRequest — and every wall this daemon has for a remote run
+     * ([dev.ccpocket.daemon.execution.ExecutionSandbox], pathScope) hangs off that request. Launching
+     * natively would mean the remote caller could write `.claude/settings.json`, a git hook or
+     * `CLAUDE.md` with no check at all: persistent code execution on the owner's machine.
+     *
+     * So the process is always started in DEFAULT, every edit comes back as a request, and
+     * [dev.ccpocket.daemon.agent.PermissionBridge.executionCeiling] re-creates the acceptEdits semantics
+     * AFTER the walls. The caller's authority is unchanged; the walls are now unavoidable.
+     */
+    private fun launchMode(): PermissionMode =
+        dev.ccpocket.daemon.execution.ExecutionSandbox.launchMode(mode, remoteExecution)
+
+    /** The raw `--permission-mode` string overrides [launchMode], so a remote run never carries one. */
+    private fun launchPermissionMode(): String? = if (remoteExecution) null else permissionMode
+
     private suspend fun launchProcess(rawSpec: AgentSpec, armExecuting: Boolean = false, initialSend: InitialSend? = null) {
         // OpenCode requires a message argument — can't launch without one (opencode run exits with error).
         // Defer to sendPrompt() which always provides initialPrompt.
@@ -1593,6 +1628,11 @@ class Conversation(
                 SafeMetrics(backend = backendLabel))
             throw error
         }
+        // #367 G1 ONE HOP: a remote run's child must not inherit anything that drives a Pairlet daemon
+        // (CC_POCKET_IDENTITY would repoint the local-control token lookup; the *_BIN overrides would let
+        // it swap the agent binary). Applied at the ONE choke point every backend's launch funnels through,
+        // so a new backend gets it without a per-launcher edit.
+        if (remoteExecution) dev.ccpocket.daemon.execution.ExecutionSandbox.stripChildEnv(builder.environment())
         val p = AgentProcess.start(builder, scope)
         val io = AgentIo(
             writeLine = p::writeLine,
@@ -1617,8 +1657,13 @@ class Conversation(
         //  - A GUEST (pathScope != null) answers its OWN asks — the ask fans out to the guest normally,
         //    and the owner must NOT be push-nudged for it (that inbox is the guest's, per the design's
         //    "requests go to <guest>" — issue #115 crypto review L2). Never hooked.
+        //  - #367 EXECUTION (pathScope != null but remote): the opposite of a guest. The remote caller can
+        //    neither see nor answer the ask (no verdict frame exists on the execution wire), and this
+        //    session's own sink is a black hole, so WITHOUT a push the only possible outcome of any
+        //    approval — a Bash command under the DEFAULT ceiling, every write under it too — is a timeout
+        //    deny. The ask belongs to the TARGET owner, exactly like a bridge's, so it is pushed to them.
         val emitWithAskPush: suspend (dev.ccpocket.protocol.Frame) -> Unit =
-            if (pathScope != null) { f -> sink.emit(f) }
+            if (pathScope != null && !remoteExecution) { f -> sink.emit(f) }
             else { f ->
                 sink.emit(f)
                 if (f is dev.ccpocket.protocol.PermissionAsk) maybePushAsk(f)
@@ -1700,6 +1745,13 @@ class Conversation(
             workdir = workdir.toString(),
             // COLLABORATOR handoff (§8.3): REVIEW_READ_ONLY hard-refuses write tools before any ask
             handoffAccess = handoffAccess,
+            // #367 G1: a run submitted by a REMOTE machine. Adds the execution deny-list INSIDE the
+            // workspace (daemon state dir, agent config, git hooks, owner-executed files) — see
+            // [dev.ccpocket.daemon.execution.ExecutionSandbox]. Derived from the origin, not passed in,
+            // so no open path can forget it.
+            executionSession = remoteExecution,
+            // #367 HIGH-1: the ceiling the CLI was deliberately NOT launched with — see [launchMode]
+            executionCeiling = if (remoteExecution) mode else null,
         )
         proc = p
         bridge = b
@@ -1813,12 +1865,16 @@ class Conversation(
             // A request-level bridge approval can happen before the first agent turn has minted a transcript
             // session id. Route the notification with convoId in that one case; SessionRegistry accepts it as
             // a live reattach anchor, then SessionLive corrects the phone once the real session id exists.
+            // #367: a remote run's push names the SOURCE the owner authorised (label + link fingerprint),
+            // not the opaque `execution:<grantId>` origin — the owner is being asked to approve something a
+            // named other machine started, and that is the only fact that makes the decision answerable.
+            val pushOrigin = askOriginLabel ?: origin
             val pushed = runCatching {
-                hook.onAskPending(workdir, sessionId ?: convoId, origin, label, watched)
+                hook.onAskPending(workdir, sessionId ?: convoId, pushOrigin, label, watched)
             }.getOrDefault(false)
             // one line so a "why didn't my phone buzz" never again means grepping two hours of relay logs:
             // this is the daemon-side truth of whether an ask-push was even attempted.
-            log.info("ask-push origin=${origin ?: "owner"} tool=$label watched=$watched → ${if (pushed) "queued to relay" else "not pushed"}")
+            log.info("ask-push origin=${pushOrigin ?: "owner"} tool=$label watched=$watched → ${if (pushed) "queued to relay" else "not pushed"}")
             if (!pushed) lastAskPushMs = prev
         }
     }

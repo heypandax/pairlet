@@ -125,6 +125,23 @@ object ToolMetadata {
      * scope, hence deliberately skipped. Grep's pattern is a REGEX (content match), not a path — never mined
      * (its search location is the path key, already covered above).
      */
+    /**
+     * Tools that WRITE a statically-knowable file target — the exact set the #367 acceptEdits shim may
+     * auto-approve once [PermissionBridge]'s walls have vetted that target
+     * ([dev.ccpocket.daemon.execution.ExecutionSandbox.forbidden] + pathScope containment).
+     *
+     * Deliberately the same list as [dev.ccpocket.daemon.execution.ExecutionSandbox]'s write set, and
+     * deliberately WITHOUT Bash: a shell command's targets are not knowable here, so no wall can have
+     * checked them, so nothing may auto-approve it. Kept beside [pathTargets] because the two must agree —
+     * a tool that writes but exposes no path key would slip an unvetted write through the shim.
+     */
+    private val FILE_WRITE_TOOLS = setOf(
+        "Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch", "ApplyPatch", "str_replace_editor",
+    )
+
+    /** Is [tool] a write whose target [pathTargets] can actually surface for the walls to check? */
+    fun isFileWriteTool(tool: String): Boolean = tool in FILE_WRITE_TOOLS
+
     fun pathTargets(tool: String, input: JsonObject?): List<String> {
         fun str(k: String) = (input?.get(k) as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
         val keyed = PATH_KEYS.mapNotNull { str(it) }

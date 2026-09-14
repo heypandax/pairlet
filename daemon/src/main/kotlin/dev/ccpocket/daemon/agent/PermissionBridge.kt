@@ -105,6 +105,34 @@ class PermissionBridge(
      *  expiry (or any mode switch) bites the very next tool call even mid-turn. Defaults to the launch
      *  mode for tests/legacy constructions. */
     private val currentMode: () -> PermissionMode = { mode },
+    // #367 G1: this conversation is driven by a REMOTE machine over an execution grant (origin
+    // `execution:<grantId>`). On top of [pathScope] — which this session always has — it adds the
+    // [dev.ccpocket.daemon.execution.ExecutionSandbox] deny-list INSIDE the workspace: the daemon's own
+    // state dir, agent-config dirs/files and git hooks are refused for every tool, and the wider
+    // "executes for the owner later" class for write tools. Hard denies, before any ask: nobody is
+    // watching this session, so "the owner will see a card" is not a control here.
+    private val executionSession: Boolean = false,
+    /**
+     * #367 security review HIGH-1 — the EFFECTIVE permission ceiling of a remote-execution session, which
+     * the CLI is deliberately NOT launched with.
+     *
+     * THE BUG THIS EXISTS TO FIX: under Claude's native `acceptEdits` (and Codex's `approvalPolicy=never`)
+     * the agent applies in-workspace Edit/Write ITSELF and never emits a ControlRequest. Everything in this
+     * class — [executionForbidden], [outOfScopeTarget], the ceiling — hangs off [onControlRequest], so a
+     * request that is never made is a wall that is never consulted. A remote caller under an acceptEdits
+     * grant could therefore write `.claude/settings.json`, `.git/hooks/pre-commit` or `CLAUDE.md` and land
+     * persistent code execution on the OWNER's machine, with the sandbox tests passing the whole time
+     * (they called the wall function directly, which the real path never reached).
+     *
+     * THE FIX: a remote-execution session is always launched in the CLI's DEFAULT mode, so every edit comes
+     * back as a ControlRequest, and the acceptEdits SEMANTICS are re-created here — an in-workspace write
+     * is auto-approved only AFTER both walls have run. Same authority for the caller, wall always present.
+     *
+     * Null for every non-execution session: no other conversation's behaviour changes.
+     */
+    private val executionCeiling: PermissionMode? = null,
+    /** `~/.cc-pocket` for the wall above; injectable so a test never depends on the developer's real one. */
+    private val daemonStateDir: String? = dev.ccpocket.daemon.execution.ExecutionSandbox.defaultStateDir(),
 ) {
     // P1-6: a getter, deliberately NOT a cached val — the bypass authority must die the instant the
     // daemon's effective mode leaves BYPASS_PERMISSIONS (Full Control 1h expiry, user switch).
@@ -112,6 +140,14 @@ class PermissionBridge(
 
     suspend fun onControlRequest(ev: AgentEvent.ControlRequest) {
         val meta = ToolMetadata.of(ev.toolName, ev.input)
+        // #367 EXECUTION WALL — FIRST, ahead of every other branch including the handoff one. A remote run
+        // has no human reading its prompts, so anything that could turn a workspace file into the owner's
+        // machine is refused outright rather than routed to a card. See [ExecutionSandbox] for the split
+        // between "refused for every tool" and "refused for writes".
+        executionForbidden(ev.toolName, ev.input)?.let { code ->
+            respond(ev.requestId, false, false, ev.input, null, "denied — a remote execution run may not touch this path ($code)")
+            return
+        }
         // HANDOFF READ-ONLY WALL (SESSION-HANDOFF §8.3, crypto review MUST-FIX): a write tool under a
         // review/read-only Handoff Grant is refused HERE — first, before every auto-allow path and
         // before any PermissionAsk is minted, exactly like the guest out-of-scope guard below. No ask
@@ -129,6 +165,20 @@ class PermissionBridge(
         // owner-approved bridge request (P1-8: request approval must not unlock path escapes).
         outOfScopeTarget(ev.toolName, ev.input)?.let { escaped ->
             respond(ev.requestId, false, false, ev.input, null, "denied — $escaped is outside the allowed directory")
+            return
+        }
+        // #367 HIGH-1: the acceptEdits SHIM. Both walls above have now run — the ExecutionSandbox deny-list
+        // (daemon state, agent config, git hooks, owner-executed files) and pathScope containment — so what
+        // is left is exactly "an ordinary file write inside the granted workspace", which is precisely what
+        // the acceptEdits ceiling permits without asking. Auto-approve it HERE rather than letting the CLI
+        // do it natively, because the CLI doing it natively is what skipped both walls.
+        //
+        // Deliberately narrow: WRITE TOOLS ONLY. Bash is never auto-approved by this shim no matter the
+        // ceiling — its targets are not statically knowable, so no wall above can have vetted them, and
+        // `acceptEdits` has never meant "run any command". Bash keeps going to the owner's card.
+        if (executionCeiling == PermissionMode.ACCEPT_EDITS && ToolMetadata.isFileWriteTool(ev.toolName)) {
+            coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "execution-accept-edits")
+            respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
         // BRIDGE destructive-command screen (issue #91): classified ONCE here. A literal DENY is refused
@@ -388,6 +438,29 @@ class PermissionBridge(
      * canonicalizes — collapsing `..` and following symlinks — so a `../../etc/passwd` or a symlink pointing
      * out of the tree is caught, mirroring the DirList/@-completion containment (#90/#67).
      */
+    /**
+     * #367 G1 SECURITY: the execution-session deny-list. Returns a stable code, never the path (this
+     * message reaches the remote caller through the tool result). Non-execution sessions always get null,
+     * so no existing conversation's behaviour changes.
+     */
+    private fun executionForbidden(tool: String, input: JsonObject?): String? {
+        if (!executionSession) return null
+        if (tool == "Bash") {
+            val command = (input?.get("command") as? JsonPrimitive)?.content
+            if (dev.ccpocket.daemon.execution.ExecutionSandbox.bashMentionsDaemonState(command, daemonStateDir)) {
+                return dev.ccpocket.daemon.execution.ExecutionSandbox.DENY_DAEMON_STATE
+            }
+            return null
+        }
+        return ToolMetadata.pathTargets(tool, input).firstNotNullOfOrNull { target ->
+            // A `~` form never reaches containment (see [outOfScopeTarget]) — but this wall runs first, so
+            // it expands the tilde itself rather than trusting the later guard to have caught it.
+            val raw = if (target.startsWith("~")) System.getProperty("user.home") + target.removePrefix("~") else target
+            val canonical = dev.ccpocket.daemon.execution.ExecutionSandbox.canonicalTarget(raw, workdir)
+            dev.ccpocket.daemon.execution.ExecutionSandbox.forbidden(tool, canonical, daemonStateDir)
+        }
+    }
+
     private fun outOfScopeTarget(tool: String, input: JsonObject?): String? {
         // GUEST: pathScope confines file tools to the shared roots. BRIDGE (issue #91): no pathScope, but a
         // structured file tool must still not escape the bound workdir — else a Read of ~/.ssh/id_rsa

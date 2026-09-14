@@ -25,6 +25,14 @@ object TierClamp {
         return if (autonomy(requested) > autonomy(ceiling)) ceiling else requested
     }
 
+    /**
+     * Clamp [requested] to an explicit [ceiling] mode rather than a tier. The EXECUTION grant (#367) states
+     * its ceiling as a [PermissionMode] the target owner picked per grant, so it needs the same one
+     * autonomy ordering — a second, private copy of it is exactly the drift this object exists to prevent.
+     */
+    fun clampTo(requested: PermissionMode, ceiling: PermissionMode): PermissionMode =
+        if (autonomy(requested) > autonomy(ceiling)) ceiling else requested
+
     /** The autonomy rank used only for the clamp — higher = the agent acts with less human gating.
      *  PLAN (research/plan only) is the most cautious; BYPASS the least (and unreachable when scoped). */
     private fun autonomy(mode: PermissionMode): Int = when (mode) {
