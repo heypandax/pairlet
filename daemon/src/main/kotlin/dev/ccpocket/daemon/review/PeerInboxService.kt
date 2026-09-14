@@ -39,6 +39,9 @@ class PeerInboxService(
     /** Passed to each [PeerInboxClient]: how often an OPEN connection re-sends its unconfirmed outbox.
      *  Injected only so a test can prove the retry without waiting out the production interval. */
     private val resendIntervalMs: Long = PeerInboxClient.RESEND_INTERVAL_MS,
+    /** Passed to each [PeerInboxClient]: the pause between dials once the peer's relay refuses the
+     *  credential outright. Injected for the same reason as [resendIntervalMs]. */
+    private val rejectedRetryMs: Long = PeerInboxClient.REJECTED_RETRY_MS,
 ) {
     private val log = logger("PeerInboxService")
 
@@ -62,7 +65,10 @@ class PeerInboxService(
 
     private fun ensureRunning(link: PeerLink) {
         if (running.containsKey(link.id)) return
-        val client = PeerInboxClient(link, links, store, transport, scope, clock, resendIntervalMs = resendIntervalMs)
+        val client = PeerInboxClient(
+            link, links, store, transport, scope, clock,
+            resendIntervalMs = resendIntervalMs, rejectedRetryMs = rejectedRetryMs,
+        )
         // one supervisor per link: a throw inside a peer's loop must not cancel its siblings. The scope
         // is DaemonCore's SupervisorJob scope, so a failed child is already isolated; the explicit
         // runCatching makes that true for the launch body itself as well.

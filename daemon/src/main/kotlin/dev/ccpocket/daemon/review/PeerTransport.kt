@@ -96,8 +96,27 @@ interface PeerTransport {
     suspend fun redeem(relay: String, ticket: String, devicePubB64: String): PairCredential?
 
     /** Establish a channel, run it until it closes, then return. Throws on any failure (the caller
-     *  backs off and retries). */
+     *  backs off and retries); [PeerCredentialRejected] when the relay refused the credential itself. */
     suspend fun dial(link: PeerLink, secret: PeerLinkSecret, session: PeerSession)
+}
+
+/**
+ * The peer's relay answered our `DeviceHello` with an [AuthError] — the credential was refused BEFORE any
+ * E2E exchange, so this is not the peer being offline. Told apart from a generic failure so the caller
+ * can react to a [terminal] refusal: the peer's owner removing the contact revokes our credential at
+ * THEIR relay, and nothing ever tells this side. Re-dialling it on the ordinary reconnect ladder is a
+ * busy loop against a dead credential (observed in the field: one warning every ~25 s, ~3,500 a day,
+ * for weeks).
+ */
+class PeerCredentialRejected(val code: String) : IllegalStateException("peer relay rejected our credential: $code") {
+    /** The credential itself is dead — revoked, unknown, or its secret no longer matches. Any other code
+     *  (`rate_limited`, `too_many_connections`, a code only a newer relay knows) is treated as transient. */
+    val terminal: Boolean get() = code in TERMINAL_CODES
+
+    companion object {
+        /** The [dev.ccpocket.relay.auth.DeviceAuthenticator] refusals that no retry can change. */
+        val TERMINAL_CODES: Set<String> = setOf("revoked", "unknown_device", "bad_credential")
+    }
 }
 
 /**
@@ -199,7 +218,7 @@ class RelayPeerTransport : PeerTransport {
             val f = incoming.receive() as? WsFrame.Text ?: continue
             when (val b = runCatching { PocketJson.decodeFromString<Envelope>(f.readText()).body }.getOrNull()) {
                 is Attached -> return
-                is AuthError -> error("peer relay rejected our credential: ${b.code}")
+                is AuthError -> throw PeerCredentialRejected(b.code)
                 else -> {}
             }
         }
