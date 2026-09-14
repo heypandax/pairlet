@@ -378,6 +378,9 @@ jobs:
 
       - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
         uses: android-actions/setup-android@v4
+        with:
+          # the SDK repository no longer serves the legacy `tools` package (setup-android default) — 2026-09 CI break
+          packages: platform-tools
 
       - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
         run: cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
@@ -453,6 +456,9 @@ jobs:
 
       - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
         uses: android-actions/setup-android@v4
+        with:
+          # the SDK repository no longer serves the legacy `tools` package (setup-android default) — 2026-09 CI break
+          packages: platform-tools
 
       - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
         shell: bash
@@ -531,6 +537,9 @@ jobs:
 
       - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
         uses: android-actions/setup-android@v4
+        with:
+          # the SDK repository no longer serves the legacy `tools` package (setup-android default) — 2026-09 CI break
+          packages: platform-tools
 
       - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
         run: cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json

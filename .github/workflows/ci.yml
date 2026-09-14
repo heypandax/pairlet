@@ -61,6 +61,9 @@ jobs:
       # The KMP Android targets need an SDK; the Android host APK uses a placeholder Firebase config.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          # the SDK repository no longer serves the legacy `tools` package (setup-android default) — 2026-09 CI break
+          packages: platform-tools
 
       - name: Use the placeholder google-services.json
         run: cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json

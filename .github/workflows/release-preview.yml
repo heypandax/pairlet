@@ -180,6 +180,9 @@ jobs:
           java-version: "17"
           architecture: ${{ (matrix.platform == 'macos-arm64' || matrix.platform == 'linux-arm64') && 'aarch64' || 'x64' }}
       - uses: android-actions/setup-android@v4
+        with:
+          # the SDK repository no longer serves the legacy `tools` package (setup-android default) — 2026-09 CI break
+          packages: platform-tools
       - name: Use placeholder Firebase config
         run: cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
       - name: Install Linux packaging tools
@@ -271,6 +274,9 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v4
+        with:
+          # the SDK repository no longer serves the legacy `tools` package (setup-android default) — 2026-09 CI break
+          packages: platform-tools
       - name: Stage staging Sentry config
         uses: ./.github/actions/observability-config
         with:
