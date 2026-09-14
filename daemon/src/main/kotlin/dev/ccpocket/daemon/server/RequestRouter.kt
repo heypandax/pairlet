@@ -220,7 +220,14 @@ class RequestRouter(
      *  recipient actions), shared with the CLI's local control API so both run one implementation.
      *  Null = not wired: the owner frames answer `review_unavailable` rather than half-working. */
     private val reviewOwner: dev.ccpocket.daemon.review.ReviewOwnerService? = null,
+    /** Project-pin sync (issue #362): this computer's authoritative pin list. Null = not wired (a bare router
+     *  in a unit test): a pin request then answers `pins_unavailable` instead of silently doing nothing. */
+    private val projectPins: dev.ccpocket.daemon.pins.ProjectPinService? = null,
 ) {
+    /** The LAN transport attaches its per-socket pin subscriber through the router it already holds, so the pin
+     *  plane reaches both transports without another server-construction seam. */
+    internal val projectPinService: dev.ccpocket.daemon.pins.ProjectPinService? get() = projectPins
+
     /**
      * The backends whose SUBSCRIPTION allowance this daemon can actually read, as
      * [dev.ccpocket.protocol.AgentKind] wire names — the payload of
@@ -260,6 +267,21 @@ class RequestRouter(
          *  would drop the unknown types anyway, but gating keeps the wire quiet and the contract real. */
         @Volatile var supportsApprovalV2: Boolean = false
         @Volatile var supportsDiagnostics: Boolean = false
+
+        /** issue #362: this connection decodes pocket/pins.state. Every such frame — reply or push — is gated
+         *  on it, so a legacy sibling on the same daemon never sees one. */
+        @Volatile var supportsProjectPins: Boolean = false
+
+        /** issue #362: the push generation this connection's owner client registered with its latest ACCEPTED
+         *  fetch — written only by the transport's [dev.ccpocket.daemon.pins.ProjectPinConnection.acceptFetch],
+         *  never by a batch or a refusal. It lives on the CONNECTION's holder: a re-handshake starts from a fresh
+         *  holder with no subscription. */
+        @Volatile var pinSubscriptionId: String? = null
+
+        /** issue #362: terminal for this holder's lifetime — set once a newer fetch of the same device was accepted
+         *  on another connection, or this connection closed or was revoked. A retired holder never registers a
+         *  subscription or receives a pin frame again, even when a late frame makes its session active again. */
+        @Volatile var pinRetired: Boolean = false
 
         /** Whether this peer can decode [agent]. CLAUDE/CODEX are the baseline vocabulary every shipped
          *  client understands; OPENCODE/KIMI are post-baseline additions each guarded by its own cap. */
@@ -315,6 +337,8 @@ class RequestRouter(
             // modern ZCode phone must never opt a legacy sibling into a HandoffUpdated it cannot
             // decode. Null is a legacy/no-declaration ingress and therefore fails closed too.
             frame is HandoffUpdated -> capsAllow(caps, frame.handoff.agent)
+            // issue #362: replies AND pushes — a pin frame only reaches a connection that declared it
+            frame is dev.ccpocket.protocol.ProjectPinsState -> caps?.supportsProjectPins == true
             else -> true
         }
 
@@ -427,7 +451,7 @@ class RequestRouter(
     // [bridgeContextPreamble] (issue #242) is a BUILT-IN bridge's session-stable context (which chat, which
     // project, what the session cannot see), appended to the agent's SYSTEM prompt for the conversation this
     // OpenSession creates. Carries no authority and is set only by trusted in-process code; null everywhere else.
-    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), bridgeContextPreamble: String? = null, ownerBypass: Boolean = false, deviceId: String? = null, collabScope: CollaboratorScope? = null, onOpened: suspend (String) -> Unit = {}) {
+    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), bridgeContextPreamble: String? = null, ownerBypass: Boolean = false, deviceId: String? = null, collabScope: CollaboratorScope? = null, pinConnection: dev.ccpocket.daemon.pins.ProjectPinConnection? = null, onOpened: suspend (String) -> Unit = {}) {
         val dev = deviceId ?: LOCAL_DEVICE_ID
         when (frame) {
             // capability declaration (wire-compat gate for AgentKind additions) — no reply; the very
@@ -441,6 +465,7 @@ class RequestRouter(
                 caps?.supportsDsh = AGENT_WIRE_DSH in frame.supportsAgents // issue #255: gates DSH rows
                 caps?.supportsDiagnostics = frame.supportsDiagnostics
                 caps?.supportsApprovalV2 = frame.supportsApprovalV2 // P2-3: gates the V2 approval frames
+                caps?.supportsProjectPins = frame.supportsProjectPins // #362: gates pocket/pins.state
             }
 
             is ListDirectories ->
@@ -506,6 +531,12 @@ class RequestRouter(
                 if (origin == null && guestScope == null && collabScope == null) {
                     scope.launch { emitArchivedSessions(sink, caps) }
                 }
+
+            // project-pin sync (issue #362): OWNER-ONLY and deliberately NOT launched — both transports hand it
+            // over in receive order, so one connection's fetch and operation batches commit in the order sent.
+            // Restricted credentials never reach here (GuestCaps / BridgeCaps / CollaboratorCaps default-deny
+            // both pin frame types); the three-way owner test below is the second door.
+            is dev.ccpocket.protocol.SyncProjectPins -> syncProjectPins(frame, sink, origin, guestScope, collabScope, caps, deviceId, pinConnection)
 
             // session rename (issue #158): lands claude's own custom-title record (live daemon session:
             // the CLI appends it itself over a control_request; idle: a one-line transcript append) —
@@ -1286,6 +1317,76 @@ class RequestRouter(
      *  weakest credential this daemon hands out). */
     private fun isOwner(origin: String?, guestScope: GuestScope?, collab: CollaboratorScope?) =
         origin == null && guestScope == null && collab == null
+
+    /**
+     * One project-pin request (issue #362). Every authority fact comes from the transport, never the frame: the
+     * owner test is the three-way one, the cursor partition is the Noise-authenticated [deviceId], and the
+     * connection facts — is it still current, which subscription did its accepted fetch register — come from
+     * [pin], the transport's context for the connection the request arrived on. A caller without both — the
+     * plaintext `--local` socket or an in-process caller — can neither subscribe nor mutate. A restricted caller
+     * gets SILENCE (its egress caps would drop any pin frame anyway), and so does a connection that never declared
+     * the capability: no reply could reach it, and it must not become a subscription.
+     *
+     * Only a fully validated, successful fetch registers a subscription. A batch must come from the connection
+     * holding the subscription it names — checked here and again under the store lock — and never replaces it. A
+     * durable change is offered to the other subscribers the moment [ProjectPinService.sync] returns: before the
+     * requester's reply is emitted, whether that emit then fails, is cancelled or times out.
+     */
+    private suspend fun syncProjectPins(
+        frame: dev.ccpocket.protocol.SyncProjectPins,
+        sink: OutboundSink,
+        origin: String?,
+        guestScope: GuestScope?,
+        collab: CollaboratorScope?,
+        caps: ClientCapsHolder?,
+        deviceId: String?,
+        pin: dev.ccpocket.daemon.pins.ProjectPinConnection?,
+    ) {
+        if (!isOwner(origin, guestScope, collab)) return
+        if (caps == null || !caps.supportsProjectPins) return
+        val subscription = frame.subscriptionId.takeIf { dev.ccpocket.protocol.isValidProjectPinToken(it) }
+        fun refusal(code: String, message: String) = dev.ccpocket.protocol.ProjectPinsState(
+            subscriptionId = subscription.orEmpty(),
+            requestId = frame.requestId.takeIf { dev.ccpocket.protocol.isValidProjectPinToken(it, minChars = 1) },
+            streamId = frame.streamId.takeIf { dev.ccpocket.protocol.isValidProjectPinToken(it) },
+            error = code,
+            message = message,
+        )
+        val svc = projectPins
+        if (svc == null || deviceId == null || pin == null) {
+            emitPinReply(sink, refusal(dev.ccpocket.protocol.ProjectPinErrors.UNAVAILABLE, "project pins sync only over a paired connection to this computer"))
+            return
+        }
+        val stale = "this connection is not the current project pin subscription of its device"
+        val fetch = frame.ops.isEmpty()
+        val admitted: suspend () -> Boolean = {
+            pin.isCurrent() && (fetch || (subscription != null && pin.currentSubscription() == subscription))
+        }
+        if (!admitted()) {
+            emitPinReply(sink, refusal(dev.ccpocket.protocol.ProjectPinErrors.SUBSCRIPTION_STALE, stale))
+            return
+        }
+        val outcome = svc.sync(deviceId, frame, admitted)
+        var reply = outcome.reply
+        var answered = false // the requester's own reply will carry this commit as a success
+        try {
+            if (reply.error == null) {
+                // the one place a subscription is registered: after the store accepted the fetch. A connection
+                // retired meanwhile registers nothing and is not told its fetch succeeded.
+                if (!fetch || (subscription != null && pin.acceptFetch(subscription))) answered = true
+                else reply = refusal(dev.ccpocket.protocol.ProjectPinErrors.SUBSCRIPTION_STALE, stale)
+            }
+        } finally {
+            // offering a durable commit is unconditional and synchronous — it never waits on the requester
+            outcome.changed?.let { svc.broadcast(it, exceptKey = if (answered) sinkKey(sink) else null) }
+        }
+        emitPinReply(sink, reply)
+    }
+
+    /** A pin reply is bounded like a pin push: an undrainable outbox must not hold the transport's inline reader. */
+    private suspend fun emitPinReply(sink: OutboundSink, reply: dev.ccpocket.protocol.ProjectPinsState) {
+        kotlinx.coroutines.withTimeoutOrNull(dev.ccpocket.daemon.pins.ProjectPinService.DELIVERY_TIMEOUT_MS) { sink.emit(reply) }
+    }
 
     /**
      * One ReviewRequest transition driven by the BOUND RECIPIENT. The recipient binding itself is

@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -630,6 +632,13 @@ private fun ApplicationScope.PocketShell() {
                             Box(Modifier.fillMaxWidth().weight(1f)) { ConnectPanel(repo) }
                         }
                     }
+                    // #362: the one pin-sync notice for the CURRENT primary — hidden with the window, while it is
+                    // minimized, and under every modal overlay below
+                    dev.ccpocket.app.ui.ProjectPinIssueNotice(
+                        repo,
+                        allowed = dev.ccpocket.app.ui.pinNoticeAllowedOnDesktop(mainWindowVisible, windowState.isMinimized, model.anyOverlayOpen),
+                        modifier = Modifier.align(Alignment.BottomCenter).widthIn(max = 560.dp).padding(bottom = 12.dp),
+                    )
                     // Settings while DISCONNECTED (issue #350). The shell that normally hosts this modal
                     // mounts only after a connection, so Settings / About / Shortcuts used to be
                     // unreachable in exactly the state where a user most needs them — which is why the

@@ -106,6 +106,32 @@ class WsConnection(
         outbox.send(Envelope(nextId.getAndIncrement().toString(), System.currentTimeMillis(), body = frame))
     }
 
+    /** #362: is this gated socket's device STILL allow-listed? Read through the gate's own lookup (re-read per
+     *  call, exactly like the handshake), so a revoke bites at the next pin frame even on an idle socket. False
+     *  for a socket that never authenticated a device (plaintext --local). */
+    private fun deviceStillAllowListed(): Boolean {
+        val id = gatedDeviceId ?: return false
+        val lookup = e2e?.pairedDevices ?: return false
+        return runCatching { lookup().containsKey(id) }.getOrDefault(false)
+    }
+
+    /** #362: this socket's own pin facts for the router — one holder per socket, so nothing here can speak for
+     *  another connection. Current while the gated device is still allow-listed, this connection still declares
+     *  pin support, and the socket has not closed; a subscription is recorded only once the store accepted the
+     *  fetch that names it. */
+    private val pinConnection = object : dev.ccpocket.daemon.pins.ProjectPinConnection {
+        override suspend fun isCurrent(): Boolean =
+            caps.supportsProjectPins && !caps.pinRetired && deviceStillAllowListed()
+
+        override suspend fun currentSubscription(): String? = if (isCurrent()) caps.pinSubscriptionId else null
+
+        override suspend fun acceptFetch(subscriptionId: String): Boolean {
+            if (!isCurrent()) return false
+            caps.pinSubscriptionId = subscriptionId
+            return true
+        }
+    }
+
     suspend fun serve() = coroutineScope {
         registry.onLanConnect() // while any LAN socket lives, the idle reaper holds off (like relay peerOnline)
         try {
@@ -180,6 +206,7 @@ class WsConnection(
                                 supportsUsageAgentFilter = true, // issue #258: this build honors FetchUsage.agent
                                 supportsPromptRecovery = true,
                                 supportsDiagnostics = true, // #122: acked prompts stay ledgered until agent consumption
+                                supportsProjectPins = true, // #362: this build owns the per-computer project-pin list
                                 // #348: which backends' SUBSCRIPTION allowance this daemon can read. The
                                 // router owns the answer because it owns the readers; absent (an older
                                 // daemon) decodes to empty = "Claude only, legacy behaviour".
@@ -206,8 +233,29 @@ class WsConnection(
         // must agree about what an owner sees, or "did my colleague answer yet" depends on which one the
         // desktop app happened to connect over.
         reviews?.attach(sink)
+        // project-pin pushes (issue #362) — for a GATED socket only: the plaintext --local socket has no
+        // transport-authenticated device and never syncs. Resolved at emission, and re-checked by the writer.
+        val pins = if (crypto != null) router.projectPinService else null
+        pins?.attach(sink) { snapshot ->
+            val subscription = caps.pinSubscriptionId
+            if (caps.supportsProjectPins && !caps.pinRetired && subscription != null && deviceStillAllowListed()) {
+                sink.emit(dev.ccpocket.protocol.ProjectPinsState(subscriptionId = subscription, snapshot = snapshot))
+            }
+        }
         val writer = launch {
             for (env in outbox) {
+                val body = env.body
+                // #362: a pin frame is re-checked right before it is sealed, INCLUDING one that was queued earlier.
+                // A device revoked while idle is cut here without waiting for an inbound frame; a closed connection
+                // or one that no longer declares the capability gets nothing; a push or a successful reply must
+                // still carry the current subscription. A refusal answers a request this very socket sent, so it
+                // may reach a connection whose fetch was never accepted — without that registering anything.
+                if (crypto != null && body is dev.ccpocket.protocol.ProjectPinsState) {
+                    if (!deviceStillAllowListed()) error("device revoked — closing live direct link")
+                    if (!caps.supportsProjectPins || caps.pinRetired) continue
+                    val refusal = body.requestId != null && body.error != null
+                    if (!refusal && body.subscriptionId != caps.pinSubscriptionId) continue
+                }
                 val text = PocketJson.encodeToString(env)
                 // the writer is the ONLY sealer — the GCM send counter advances strictly in order
                 val ws: WsFrame = if (crypto != null) {
@@ -251,6 +299,21 @@ class WsConnection(
                         router.handle(env.body, sink, caps = caps, deviceId = gatedDeviceId) { owned.add(it) }
                         continue
                     }
+                    // #362: pin requests run in receive order too, like the relay's inline route: this connection's
+                    // fetch (which registers its subscription once accepted) and its operation batches commit in send
+                    // order. Only a gated socket hands over its pin context; the plaintext one can never sync.
+                    if (env.body is dev.ccpocket.protocol.SyncProjectPins) {
+                        try {
+                            router.handle(
+                                env.body, sink, caps = caps, deviceId = gatedDeviceId,
+                                pinConnection = pinConnection.takeIf { crypto != null },
+                            )
+                        } catch (e: Exception) {
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            log.warn("handle SyncProjectPins failed: ${e::class.simpleName}")
+                        }
+                        continue
+                    }
                     log.info("recv ${env.body::class.simpleName}")
                     launch {
                         try {
@@ -278,6 +341,9 @@ class WsConnection(
         } finally {
             registry.handoffs?.detach(sink) // this connection's fan-out slot dies with the socket
             reviews?.detach(sink)           // …keyed by THIS sink, so a sibling connection is untouched
+            pins?.detach(sink)              // #362: same per-connection slot for pin pushes
+            caps.pinRetired = true          // …and a closed connection can never hold a pin subscription again
+            caps.pinSubscriptionId = null
             outbox.close()
             writer.cancel()
             withContext(NonCancellable) {
