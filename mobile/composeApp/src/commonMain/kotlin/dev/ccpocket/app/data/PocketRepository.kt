@@ -5575,6 +5575,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // refused. Like [startModel] it is deliberately not persisted: it belongs to creating ONE session.
         startAgentPreset: String? = null,
     ): Boolean {
+        // #363: resolve NEW-session defaults at the accepted click, before runOpen can be queued.
+        // Null is a resolved CLI-default model too; neither dispatch nor Retry may read newer Settings.
+        // Resumes keep their existing saved-session/default ladder in runOpen.
+        val newAgent = if (resumeId == null) agent ?: sessionDefaultAgent else null
+        val newModel = if (newAgent != null) {
+            compatibleModelForAgent(newAgent, startModel)
+                ?: compatibleModelForAgent(newAgent, defaultModelFor(newAgent))
+        } else startModel
+        return beginOpen(OpenAttempt(wd, resumeId, startMode, title, newAgent ?: agent, startPermissionMode, newModel, startAgentPreset))
+    }
+
+    private fun beginOpen(attempt: OpenAttempt): Boolean {
+        val (wd, resumeId, _, _, agent) = attempt
         // Gate the EFFECTIVE agent (the same ladder openAgent resolves below: explicit row value, then the
         // remembered backend, then the default) rather than only the caller's seed. This is synchronous like
         // the idempotence refusals below: unsupported ZCode never clears the current chat, flips opening
@@ -5584,7 +5597,6 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // supportsAgent refusal below is for EXPLICIT asks the daemon can't serve, not for the fallback.
         val targetAgent = agent ?: resumeId?.let { sessionParams[it]?.agent } ?: sessionDefaultAgent
         if (!supportsAgent(targetAgent)) return false
-        val attempt = OpenAttempt(wd, resumeId, startMode, title, agent, startPermissionMode, startModel, startAgentPreset)
         // #235: the two refusals, both decided SYNCHRONOUSLY — the defect they fix is two clicks landing in
         // the same frame, so any check that only ran inside the coroutine below was already too late.
         //  (a) the same target is in flight: a second OpenSession restarts the very session the first is
@@ -5624,9 +5636,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  SAME request, so a retry can never land under different flags than the click that failed. */
     fun retryOpen(): Boolean {
         val a = lastOpenAttempt ?: return false
-        return openSession(
-            a.wd, a.resumeId, a.startMode, a.title, a.agent, a.startPermissionMode, a.startModel, a.startAgentPreset,
-        )
+        return beginOpen(a)
     }
 
     /** The state switch + send of one accepted [openSession]. Split out only so the claim above stays
@@ -5691,7 +5701,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // #237 adds Codex defaults for NEW sessions only. Every other backend keeps the pre-#237
             // resume behavior: a missing/null local row falls through to its Settings default. In
             // particular, changing that fallback for Claude would be an unrelated behavioral regression.
-            ?: if (resumeId == null || openAgent != AgentKind.CODEX) {
+            // New-session defaults (including null) were already resolved into the attempt at the click.
+            ?: if (resumeId != null && openAgent != AgentKind.CODEX) {
                 compatibleModelForAgent(openAgent, defaultModelFor(openAgent))
             } else {
                 null
