@@ -336,13 +336,22 @@ class ZCodeBackend(
             "session.updated" -> {
                 // This is ONE provider call's usage. turn.completed sums every call in a tool loop, so
                 // Conversation must receive the last call separately for accurate context occupancy.
+                //
+                // ⚠️ The cache columns are deliberately NOT forwarded (issue #320). ZCode is OpenAI-lineage:
+                // `cacheReadTokens` is a SUBSET of `inputTokens`, while [AgentEvent.AssistantUsage]'s four
+                // columns are DISJOINT downstream ([TokenUsage.contextTokens] adds all of them). Passing
+                // them through double-counted the cached prefix — a real local turn ZCode totalled at
+                // 17544 was announced as 25224, 44% high, and the disk seed disagreed with the live
+                // readout by exactly that much. Null here is "this backend reports no disjoint split",
+                // which is true; it is not a claim that the cache was empty. Same shape as DshBackend's
+                // `usage_update`, whose `used` is likewise already a total.
                 val u = p.obj("usage")
                 if (p.str("type") == "model_request_completed" && u != null) {
                     listOf(
                         AgentEvent.AssistantUsage(
                             inputTokens = u.long("inputTokens") ?: 0,
-                            cacheCreationInputTokens = u.long("cacheWriteTokens"),
-                            cacheReadInputTokens = u.long("cacheReadTokens"),
+                            cacheCreationInputTokens = null,
+                            cacheReadInputTokens = null,
                             outputTokens = u.long("outputTokens")?.takeIf { it >= 0 },
                         ),
                     )
@@ -353,7 +362,10 @@ class ZCodeBackend(
                 val usage = p.obj("usage")?.let { u ->
                     val input = u.long("inputTokens") ?: 0
                     val output = u.long("outputTokens") ?: 0
-                    TokenUsage(input, output, cacheCreationInputTokens = u.long("cacheWriteTokens"), cacheReadInputTokens = u.long("cacheReadTokens"))
+                    // Cache columns dropped for the same containment reason as the per-call branch above
+                    // (issue #320). This total is only the FALLBACK — Conversation prefers the last call —
+                    // but a fallback that disagrees with the value it replaces is its own bug report.
+                    TokenUsage(input, output, cacheCreationInputTokens = null, cacheReadInputTokens = null)
                 }
                 promptRequests.clear()
                 flushPrompt()
@@ -633,7 +645,10 @@ class ZCodeBackend(
     override fun listSessions(workdir: String): List<SessionSummary> = ZCodeTranscriptScanner.scan(workdir)
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = ZCodeTranscriptReplay.read(sessionId)
     override fun replaySlice(workdir: String, sessionId: String, sinceSeq: Long?): ReplaySlice = ZCodeTranscriptReplay.slice(sessionId)
-    override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+    /** issue #320: the occupancy a reopened session shows before its first new turn, off ZCode's own
+     *  `model_usage` (see [ZCodeTranscriptScanner.resumeContextTokens] for the source and the arithmetic). */
+    override fun resumeContextTokens(workdir: String, sessionId: String): Long? =
+        ZCodeTranscriptScanner.resumeContextTokens(sessionId)
     override fun resumeModel(workdir: String, sessionId: String): String? = ZCodeTranscriptScanner.resumeModel(sessionId)
     override fun defaultModel(workdir: String): String? = modelService.defaultModel()
 

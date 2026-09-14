@@ -54,6 +54,9 @@ class ConversationRuntimeMetaTest {
             val model: String? = null,
             val window: Long? = null,
             val effort: String? = null,
+            /** Occupancy the resumed transcript recorded (issue #320 phase B: dsh and ZCode can now answer
+             *  this, where before every non-Claude backend returned null and the gauge stayed blank). */
+            val used: Long? = null,
             val gate: java.util.concurrent.CountDownLatch? = null,
         )
 
@@ -74,6 +77,12 @@ class ConversationRuntimeMetaTest {
             "meta" -> listOf(AgentEvent.RuntimeMeta(model = MODEL, effort = "high", contextWindow = 1_000_000))
             // a DIFFERENT window: the terminator the duplicate-suppression assertion counts up to
             "narrow" -> listOf(AgentEvent.RuntimeMeta(contextWindow = 200_000))
+            // one answered turn: the per-call usage a dsh `usage_update` / ZCode `model_request_completed`
+            // produces, then the turn boundary that settles it into the resume seed
+            "turn" -> listOf(
+                AgentEvent.AssistantUsage(LIVE_USED, cacheCreationInputTokens = null, cacheReadInputTokens = null),
+                AgentEvent.TurnResult(finalText = "ok", usage = null, isError = false),
+            )
             else -> listOf(AgentEvent.Ignored(line))
         }
         override suspend fun sendPrompt(text: String, images: List<ImageData>) { io?.writeLine("go") }
@@ -87,7 +96,7 @@ class ConversationRuntimeMetaTest {
         override fun transcriptDir(workdir: String): Path = Path.of(workdir)
         override fun listSessions(workdir: String): List<SessionSummary> = emptyList()
         override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = emptyList()
-        override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+        override fun resumeContextTokens(workdir: String, sessionId: String): Long? = onDisk { disk.used }
         override fun resumeModel(workdir: String, sessionId: String): String? = onDisk { disk.model }
         override fun resumeContextWindow(workdir: String, sessionId: String): Long? = onDisk { disk.window }
         override fun resumeEffort(workdir: String, sessionId: String): String? = onDisk { disk.effort }
@@ -337,9 +346,97 @@ class ConversationRuntimeMetaTest {
         }
     }
 
+    /**
+     * (d) Issue #320 phase B. The occupancy half of (a): a reopened dsh/ZCode session used to announce
+     * `contextUsed = null` no matter what its transcript said, because every non-Claude backend's
+     * `resumeContextTokens` was hardcoded to null. The gauge stayed blank until the user happened to run
+     * another turn — on a long session, indefinitely.
+     */
+    @Test
+    fun a_resumed_session_announces_the_occupancy_its_transcript_recorded() {
+        if (isWindows()) return
+        runBlocking {
+            val fx = resumed(MetaBackend.Disk(model = MODEL, window = 1_000_000, used = 87_400))
+            try {
+                fx.convo.open(resumeId = RESUMED, model = null)
+                val live = fx.awaitSeededOpen("the seeded resume announce") { it.sessionId == RESUMED }
+                assertEquals(87_400L, live.contextUsed)
+                assertEquals(1_000_000L, live.contextWindow, "…and a denominator to render it against")
+            } finally {
+                fx.shutdown()
+            }
+        }
+    }
+
+    /** …and a transcript that measured nothing resumes BLANK rather than at 0%: "not measured" and "empty
+     *  window" are different claims, and only one of them is true here. */
+    @Test
+    fun a_transcript_that_measured_nothing_leaves_the_gauge_blank_rather_than_at_zero() {
+        if (isWindows()) return
+        runBlocking {
+            val fx = resumed(MetaBackend.Disk(model = MODEL, window = 1_000_000))
+            try {
+                fx.convo.open(resumeId = RESUMED, model = null)
+                val live = fx.awaitSeededOpen("the seeded resume announce") { it.sessionId == RESUMED }
+                assertNull(live.contextUsed, "no measurement is not a measurement of zero")
+            } finally {
+                fx.shutdown()
+            }
+        }
+    }
+
+    /**
+     * (e) THE RACE, occupancy edition — (c)'s sibling, and the one the phase-B wiring made reachable.
+     *
+     * Unlike the model/window/effort backfill, the occupancy seed was written UNCONDITIONALLY and outside
+     * `runtimeMetaLock`. That was harmless only while every non-Claude `resumeContextTokens` returned null;
+     * the moment dsh and ZCode started answering, a slow transcript parse landing after a live turn would
+     * roll the gauge BACK to the value the session had before that turn — and a parse that returned null
+     * would erase a perfectly good live reading outright.
+     */
+    @Test
+    fun a_slow_transcript_read_can_never_roll_back_an_occupancy_that_already_landed_live() {
+        if (isWindows()) return
+        runBlocking {
+            val gate = java.util.concurrent.CountDownLatch(1)
+            val fx = resumed(
+                // deliberately ALL stale, so nothing here can pass by coinciding with the live values
+                MetaBackend.Disk(model = "deepseek-v4", window = 200_000, effort = "low", used = STALE_USED, gate = gate),
+                // `turn` settles the occupancy but announces nothing on its own (it emits TurnDone, not
+                // SessionLive); the `meta` behind it is the re-announce that carries the new value out —
+                // which is also how a real dsh session behaves, restating its metadata every step.
+                script = listOf("init", "turn", "meta"),
+            )
+            try {
+                fx.convo.open(resumeId = RESUMED, model = null)
+                fx.convo.sendPrompt("go")
+                // the live turn settles the occupancy first…
+                fx.awaitLive("the live occupancy") {
+                    it.contextWindow == 1_000_000L && it.contextUsed == LIVE_USED
+                }
+                // …and only then does the transcript parse come back with its older answer
+                gate.countDown()
+                val announced = fx.awaitSeededOpen("the post-backfill announce") { it.sessionId == RESUMED }
+                assertEquals(LIVE_USED, announced.contextUsed, "the live occupancy must survive the backfill")
+                assertEquals(
+                    emptyList(),
+                    fx.lives().filter { it.contextUsed == STALE_USED },
+                    "a superseded transcript reading must never reach the phone",
+                )
+            } finally {
+                gate.countDown() // never leave a hook blocked if an assertion threw first
+                fx.shutdown()
+            }
+        }
+    }
+
     private companion object {
         const val SID = "dsh-sid"
         const val MODEL = "deepseek-v4-flash"
         const val RESUMED = "dsh-resumed-sid"
+
+        /** Occupancy the LIVE turn reports, and the older one the gated transcript read comes back with. */
+        const val LIVE_USED = 40_000L
+        const val STALE_USED = 9_999L
     }
 }

@@ -223,18 +223,7 @@ object DshTranscript {
      * [MAX_DECOMPRESSED_BYTES]. Cheap in the common case — a line is JSON-parsed only after a plain
      * substring hit on the event name. Null when the transcript has no title event at all.
      */
-    fun lastTitle(file: Path): String? {
-        val header = header(file)?.takeIf { it.isSupported } ?: return null
-        var title: String? = null
-        val needle = "\"$EVENT_TITLE\""
-        forEachLine(file, MAX_DECOMPRESSED_BYTES) { line ->
-            if (needle !in line) return@forEachLine
-            val root = parseRecord(line, header.version) ?: return@forEachLine
-            if (root.str("type") != EVENT_TITLE) return@forEachLine
-            root.obj("data")?.str("title")?.takeIf { it.isNotBlank() }?.let { title = it }
-        }
-        return title
-    }
+    fun lastTitle(file: Path): String? = tail(file).title
 
     /**
      * What a RESUMED session can learn about itself from its own transcript (issue #320).
@@ -243,9 +232,38 @@ object DshTranscript {
      * a guess. Nothing here may be derived from a model NAME or from the local dsh config — the transcript
      * either recorded the fact or it did not.
      */
-    data class ResumeMeta(val model: String?, val contextWindow: Long?, val effort: String?) {
+    data class ResumeMeta(
+        val model: String?,
+        val contextWindow: Long?,
+        val effort: String?,
+        /**
+         * Tokens the last answered turn left in the window — the numerator for "Context NN%".
+         *
+         * Term-for-term the same arithmetic dsh's own ACP layer publishes as `usage_update.used`, so the
+         * seed and the first live frame are one quantity and a resumed session does not visibly jump:
+         * ```js
+         * used: meter.measure(session).totalTokens                     // @deepseek-ai/dsh-acp, usageUpdate()
+         * usageTokens = (u) => u.inputTokens + (u.cacheReadTokens ?? 0) + (u.cacheWriteTokens ?? 0) + u.outputTokens
+         * ```
+         * (`@deepseek-ai/dsh-token-meter`, read off the installed 0.1.5 package — the same four terms as
+         * [dev.ccpocket.protocol.TokenUsage.contextTokens].)
+         *
+         * ⚠️ NOT `contextPressure.pressureTokens` from dsh's `session_projcache`, which is the cheaper
+         * O(1) sidecar read and the wrong number: that projection is "prompt-side only … it holds still
+         * while a turn streams", i.e. it omits the reply the model just wrote.
+         */
+        val contextUsed: Long?,
+    ) {
         companion object {
-            val EMPTY = ResumeMeta(null, null, null)
+            val EMPTY = ResumeMeta(null, null, null, null)
+        }
+    }
+
+    /** One transcript's tail facts: the rename channel's final [title] plus every [ResumeMeta] field.
+     *  Produced together by [tail] because both need the whole file and the list needs both. */
+    data class Tail(val title: String?, val meta: ResumeMeta) {
+        companion object {
+            val EMPTY = Tail(null, ResumeMeta.EMPTY)
         }
     }
 
@@ -254,10 +272,16 @@ object DshTranscript {
      *
      * The live path ([DshBackend.parse]) mines the SAME three records; this is their disk twin, so a resumed
      * session announces what the running one would have. Three sources, all LAST-WINS in file order — a
-     * session that switched model or effort mid-chat must resume as what it is NOW, not what it started as:
+     * session that switched model or effort mid-chat must resume as what it is NOW, not what it started as,
+     * and a session that COMPACTED must resume at its new, smaller occupancy rather than a historic peak:
      *  - `request/context` → `data.model`, `data.contextWindow`
      *  - `request/header`  → `data.header.config.model`, `data.header.config.reasoningEffort`
-     *  - `assistant/message` → `data.message.source.model` (who actually answered)
+     *  - `assistant/message` → `data.message.source.model` (who actually answered) and `data.usage`
+     *    (what that answer cost the window — see [ResumeMeta.contextUsed])
+     *
+     * The title is written by a SEPARATE small request against a possibly different model, but dsh records
+     * it as `session/title-llm-request` rather than as a `request/context` + `assistant/message` pair, so
+     * it is excluded by the event-type match rather than by a filter that could rot.
      *
      * ⚠️ `config.maxTokens` is deliberately NOT read here either — it is the OUTPUT cap of the very model
      * whose window is 1,000,000, and mistaking it for the window understates occupancy four-fold.
@@ -265,18 +289,42 @@ object DshTranscript {
      * Streams the whole file at O(1) memory (renames taught us the tail matters, see [lastTitle]), and a line
      * is only JSON-parsed after a plain substring hit on one of the three event names.
      */
-    fun resumeMeta(file: Path): ResumeMeta {
-        val header = header(file)?.takeIf { it.isSupported } ?: return ResumeMeta.EMPTY
+    fun resumeMeta(file: Path): ResumeMeta = tail(file).meta
+
+    /**
+     * Everything only the WHOLE transcript can settle, in ONE stream: the rename channel's final title
+     * ([lastTitle], issue #289) and every [ResumeMeta] fact (issue #320).
+     *
+     * They are merged because the SESSION LIST needs both on every row — the title because renames append,
+     * the model because a row that cannot name its model reads blank next to Codex's and ZCode's. Read
+     * separately that is two full decompressions of the same bytes per session per listing; the same
+     * duplication the Codex scanner collapsed in issue #300.
+     *
+     * Last-wins throughout, over a substring prefilter ([TAIL_NEEDLES]) so a line is JSON-parsed only after
+     * a plain hit. O(1) memory, bounded by [MAX_DECOMPRESSED_BYTES]. An unreadable or unsupported header
+     * yields [Tail.EMPTY] — never a partial guess.
+     */
+    fun tail(file: Path): Tail {
+        val header = header(file)?.takeIf { it.isSupported } ?: return Tail.EMPTY
+        var title: String? = null
         var model: String? = null
         var window: Long? = null
         var effort: String? = null
+        var used: Long? = null
         forEachLine(file, MAX_DECOMPRESSED_BYTES) { line ->
-            if (META_NEEDLES.none { it in line }) return@forEachLine
+            if (TAIL_NEEDLES.none { it in line }) return@forEachLine
             val root = parseRecord(line, header.version) ?: return@forEachLine
+            val data = root.obj("data") ?: return@forEachLine
+            val type = root.str("type")
+            // The title is settled BEFORE the `ignorable` gate, exactly as its own reader always did.
+            // Merging the two passes must not quietly change which title a session shows.
+            if (type == EVENT_TITLE) {
+                data.str("title")?.takeIf { it.isNotBlank() }?.let { title = it }
+                return@forEachLine
+            }
             // dsh's own "this record carries no meaning" marker — the live path drops these too
             if (root["ignorable"]?.toString() == "true") return@forEachLine
-            val data = root.obj("data") ?: return@forEachLine
-            when (root.str("type")) {
+            when (type) {
                 EVENT_REQUEST_CONTEXT -> {
                     data.str("model")?.takeIf { it.isNotBlank() }?.let { model = it }
                     data.long("contextWindow")?.takeIf { it > 0 }?.let { window = it }
@@ -286,13 +334,40 @@ object DshTranscript {
                     config.str("model")?.takeIf { it.isNotBlank() }?.let { model = it }
                     config.str("reasoningEffort")?.takeIf { it.isNotBlank() }?.let { effort = it }
                 }
-                EVENT_ASSISTANT ->
+                EVENT_ASSISTANT -> {
                     data.obj("message")?.obj("source")?.str("model")
                         ?.takeIf { it.isNotBlank() }?.let { model = it }
+                    // ⚠️ `usage` is a SIBLING of `message` under `data`, not a member of it — the one
+                    // detail most likely to be "tidied" into a bug later (same warning DshUsageScanner
+                    // carries). A turn that reported no usage at all leaves the previous reading standing:
+                    // it is not evidence that the window emptied.
+                    usageTokens(data.obj("usage"))?.let { used = it }
+                }
                 else -> {}
             }
         }
-        return ResumeMeta(model, window, effort)
+        return Tail(title, ResumeMeta(model, window, effort, used))
+    }
+
+    /**
+     * dsh's `usageTokens`, reproduced term for term: `input + cacheRead + cacheWrite + output`.
+     *
+     * Absent cache keys are 0 exactly as dsh's own `?? 0` makes them — here that is the RECORD's statement
+     * that no cache was involved, not our guess. `reasoningTokens` is deliberately NOT added: DeepSeek
+     * counts reasoning inside the completion tokens, and dsh does not add it either, so adding it would
+     * double-count every thinking turn.
+     *
+     * Null when the record carries no usage block or when the sum is not positive — [ResumeMeta.contextUsed]
+     * must never report a confident 0% for a window nobody measured.
+     */
+    private fun usageTokens(usage: JsonObject?): Long? {
+        val u = usage ?: return null
+        val input = u.long("inputTokens") ?: return null
+        val total = input +
+            (u.long("cacheReadTokens") ?: 0L) +
+            (u.long("cacheWriteTokens") ?: 0L) +
+            (u.long("outputTokens") ?: 0L)
+        return total.takeIf { it > 0L }
     }
 
     /**
@@ -483,8 +558,9 @@ object DshTranscript {
     const val EVENT_REQUEST_CONTEXT = "request/context"
     const val EVENT_REQUEST_HEADER = "request/header"
 
-    /** Cheap prefilter for [resumeMeta]: a line without one of these substrings can be skipped unparsed. */
-    private val META_NEEDLES = listOf(
+    /** Cheap prefilter for [tail]: a line without one of these substrings can be skipped unparsed. */
+    private val TAIL_NEEDLES = listOf(
+        "\"$EVENT_TITLE\"",
         "\"$EVENT_REQUEST_CONTEXT\"",
         "\"$EVENT_REQUEST_HEADER\"",
         "\"$EVENT_ASSISTANT\"",

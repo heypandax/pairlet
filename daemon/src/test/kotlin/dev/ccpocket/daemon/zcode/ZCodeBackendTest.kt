@@ -13,6 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** Exact envelopes/events captured from the official ZCode 3.7.6 app-server probe. */
@@ -557,9 +558,12 @@ class ZCodeBackendTest {
         )
         val usage = assertIs<AgentEvent.AssistantUsage>(events.single())
         assertEquals(5, usage.inputTokens)
-        assertEquals(2, usage.cacheReadInputTokens)
-        assertEquals(3, usage.cacheCreationInputTokens)
         assertEquals(1, usage.outputTokens)
+        // issue #320: ZCode's `cacheReadTokens` is a SUBSET of `inputTokens` (its own
+        // `computed_total_tokens` proves it), while these columns are DISJOINT downstream — forwarding
+        // them double-counted the cached prefix. See ZCodeLiveContextUsageTest for the arithmetic.
+        assertNull(usage.cacheReadInputTokens)
+        assertNull(usage.cacheCreationInputTokens)
     }
 
     @Test
