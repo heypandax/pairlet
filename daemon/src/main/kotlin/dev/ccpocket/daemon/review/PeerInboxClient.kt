@@ -54,8 +54,16 @@ class PeerInboxClient(
     /** How often an OPEN connection re-sends whatever the outbox still holds. Injected for the same
      *  reason as [backoffMs]: a test proves the retry without waiting for it. */
     private val resendIntervalMs: Long = RESEND_INTERVAL_MS,
+    /** How long to wait between dials once the peer's relay has refused the credential outright.
+     *  Injected so a test proves the pause without waiting out an hour. */
+    private val rejectedRetryMs: Long = REJECTED_RETRY_MS,
 ) {
     private val log = logger("PeerInbox")
+
+    /** Set while the peer's relay refuses our credential ([PeerCredentialRejected.terminal]); the warning
+     *  is logged on the transition only, and cleared by the next connection that lives. */
+    @Volatile
+    private var credentialRejected: String? = null
 
     /** Conflated: many local mutations between two flushes still mean "flush once, now". */
     private val wake = Channel<Unit>(Channel.CONFLATED)
@@ -97,8 +105,31 @@ class PeerInboxClient(
             try {
                 connectOnce(secret)
                 attempt = 0 // a connection that lived is a healthy one; start the ladder over
+                if (credentialRejected != null) {
+                    credentialRejected = null
+                    log.info("peer \"${link.label}\" accepted our credential again — inbox resumed")
+                }
             } catch (c: CancellationException) {
                 throw c
+            } catch (r: PeerCredentialRejected) {
+                if (r.terminal) {
+                    // The peer's owner removed this contact (their relay revoked our credential) and no
+                    // message ever crosses to say so. The credential cannot come back on its own, so the
+                    // ordinary ladder would only spin against it: say it ONCE, then check back rarely — a
+                    // relay whose device table was restored is the one case a retry can still win.
+                    if (credentialRejected == null) {
+                        credentialRejected = r.code
+                        log.warn(
+                            "peer \"${link.label}\" relay refused our credential (${r.code}) — the peer has most " +
+                                "likely removed this contact. Inbox paused; retrying every ${rejectedRetryMs / 60_000} min. " +
+                                "Remove the link locally (`collaborator remove`) to stop it for good.",
+                        )
+                    }
+                    delay(rejectedRetryMs)
+                    continue
+                }
+                // a rate limit or connection cap at the peer's relay: transient, ordinary ladder
+                log.warn("peer \"${link.label}\" inbox link lost (${r.code})")
             } catch (t: Throwable) {
                 // Class only: a peer-originated exception message can quote request content (§11.4).
                 log.warn("peer \"${link.label}\" inbox link lost (${t::class.simpleName})")
@@ -310,6 +341,11 @@ class PeerInboxClient(
         /** How often an open connection re-sends its unconfirmed outbox. Slow on purpose: this is the
          *  belt to the reconnect flush's braces, not the primary delivery path. */
         const val RESEND_INTERVAL_MS = 30_000L
+
+        /** How often a link whose credential the peer's relay refuses outright is tried again. Rare on
+         *  purpose: the credential only returns if the relay's device table does, and one dial an hour
+         *  is enough to notice that without a warning every half minute in between. */
+        const val REJECTED_RETRY_MS = 60L * 60_000L
 
         /** The delivery ACK's idempotency key. CONSTANT rather than derived from the id: the sender
          *  scopes applied keys per request ([ReviewStore.wasApplied]), so one word is already unique

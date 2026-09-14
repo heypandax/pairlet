@@ -55,6 +55,12 @@ class PeerInboxTest {
 
         @Volatile var online = true
 
+        /** Every dial attempt, including the ones the relay refuses (the busy-loop probe). */
+        val dials = AtomicInteger(0)
+
+        /** When set, the peer's relay answers `DeviceHello` with this [AuthError] code. */
+        @Volatile var rejectCode: String? = null
+
         /** Eat the next delivery ACK without closing the socket (a relay hiccup, not a disconnect). */
         @Volatile var dropNextDeliveryAck = false
         @Volatile var store: PeerInboxStore? = null
@@ -72,6 +78,8 @@ class PeerInboxTest {
         }
 
         override suspend fun dial(link: PeerLink, secret: PeerLinkSecret, session: PeerSession) {
+            dials.incrementAndGet()
+            rejectCode?.let { throw PeerCredentialRejected(it) }
             if (!online) throw IllegalStateException("peer unreachable")
             connects.incrementAndGet()
             hangup = Channel(Channel.CONFLATED)
@@ -120,6 +128,8 @@ class PeerInboxTest {
         inboxPathOverride: java.io.File? = null,
         /** How fast an open connection re-sends its outbox — production's 30s, shrunk for the test. */
         resendIntervalMs: Long = PeerInboxClient.RESEND_INTERVAL_MS,
+        /** The pause after the peer's relay refuses the credential — production's hour, shrunk for the test. */
+        rejectedRetryMs: Long = PeerInboxClient.REJECTED_RETRY_MS,
     ) {
         val transport = FakeTransport()
         val inboxPath: java.io.File = inboxPathOverride ?: dir.resolve("review-inbox.json")
@@ -129,7 +139,7 @@ class PeerInboxTest {
         var seq = 0
         val service = PeerInboxService(
             scope, links, store, transport, clock = { now }, newId = { "id${seq++}" },
-            resendIntervalMs = resendIntervalMs,
+            resendIntervalMs = resendIntervalMs, rejectedRetryMs = rejectedRetryMs,
         )
     }
 
@@ -151,11 +161,14 @@ class PeerInboxTest {
         } else null,
     )
 
-    private fun <T> withFixture(block: suspend (Fixture) -> T): T = runBlocking {
+    private fun <T> withFixture(
+        rejectedRetryMs: Long = PeerInboxClient.REJECTED_RETRY_MS,
+        block: suspend (Fixture) -> T,
+    ): T = runBlocking {
         val dir = Files.createTempDirectory("ccp-peer-inbox").toFile()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         try {
-            val f = Fixture(scope, dir)
+            val f = Fixture(scope, dir, rejectedRetryMs = rejectedRetryMs)
             block(f)
         } finally {
             scope.cancel()
@@ -532,6 +545,47 @@ class PeerInboxTest {
         f.transport.deliver(ReviewListing(listOf(request("rr_late", ReviewStatus.QUEUED))))
         await("the late request") { f.store.row(link.id, "rr_late") != null }
         assertTrue(f.transport.sent.count { it is ListReviewRequests } >= 2, "every connection starts with a replay")
+    }
+
+    /**
+     * The peer's owner removed the contact: their relay revokes our credential and nothing tells this
+     * side. Before this guard the inbox re-dialled a dead credential on the ordinary ladder forever — one
+     * warning every ~25 s, ~3,500 a day, observed for weeks on a real machine. A TERMINAL refusal must
+     * park the link on the slow retry instead; a transient one keeps the ladder.
+     */
+    @Test
+    fun a_revoked_credential_parks_the_link_instead_of_redialling_on_the_ladder() = withFixture { f ->
+        joinAndConnect(f)
+        f.transport.rejectCode = "revoked"
+        f.transport.hangUp()
+        await("the disconnect") { !f.transport.connected() }
+        await("the refused redial") { f.transport.dials.get() >= 2 }
+        val refusedAt = f.transport.dials.get()
+        // the ordinary ladder (1s→2s with jitter) would have dialled at least twice more in 4 s
+        delay(4_000)
+        assertEquals(refusedAt, f.transport.dials.get(), "a revoked credential must not be re-dialled on the ladder")
+    }
+
+    @Test
+    fun a_parked_link_checks_back_and_resumes_once_the_relay_accepts_it_again() = withFixture(rejectedRetryMs = 300) { f ->
+        val link = joinAndConnect(f)
+        f.transport.rejectCode = "revoked"
+        f.transport.hangUp()
+        await("the refused redial") { f.transport.dials.get() >= 2 }
+        // the device table came back (a relay restore): the next slow check-in reconnects for real
+        f.transport.rejectCode = null
+        await("the resumed connection") { f.transport.connects.get() >= 2 }
+        f.transport.deliver(ReviewListing(listOf(request("rr_back", ReviewStatus.QUEUED))))
+        await("the inbox to work again") { f.store.row(link.id, "rr_back") != null }
+    }
+
+    @Test
+    fun a_transient_relay_refusal_keeps_the_ordinary_reconnect_ladder() = withFixture { f ->
+        joinAndConnect(f)
+        f.transport.rejectCode = "rate_limited"
+        f.transport.hangUp()
+        // 1s + 2s worst case with jitter: three refused dials fit well inside the poll deadline
+        await("the ladder to keep going") { f.transport.dials.get() >= 3 }
     }
 
     @Test
