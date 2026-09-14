@@ -763,11 +763,16 @@ class DshBackend(
     override fun replayPage(workdir: String, sessionId: String, beforeSeq: Long, limit: Int): ReplaySlice =
         replayFile(workdir, sessionId)?.let { DshTranscriptReplay.page(it, beforeSeq, limit) } ?: missingHistory()
 
-    /** The RESUME SEED only — the occupancy a reopened session shows BEFORE its first new turn. Still null:
-     *  the LIVE path is wired (`usage_update`), so the readout appears as soon as the session answers once,
-     *  but seeding it off disk means re-reading the transcript's tail and is a separate piece of work.
-     *  Null (no readout) beats a stale or wrong one. */
-    override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+    /**
+     * The RESUME SEED — the occupancy a reopened session shows BEFORE its first new turn.
+     *
+     * Read off the last answered turn's own `data.usage`, with the same arithmetic dsh publishes live as
+     * `usage_update.used` ([DshTranscript.ResumeMeta.contextUsed] documents the derivation), so the seed
+     * and the first live frame are one number. Rides the SAME (file, mtime)-cached pass as the model /
+     * window / effort reads below — the three-facts parse became four at no extra I/O.
+     */
+    override fun resumeContextTokens(workdir: String, sessionId: String): Long? =
+        resumeMeta(workdir, sessionId).contextUsed
 
     // ---- resume metadata (issue #320) ----
     //

@@ -41,13 +41,18 @@ class ConversationLastCallUsageTest {
             withTimeout(10_000) { while (frames.filterIsInstance<TurnDone>().isEmpty()) delay(10) }
             val reattached = CopyOnWriteArrayList<Frame>()
             convo.reattach({ reattached += it })
-            assertEquals(137L, reattached.filterIsInstance<SessionLive>().last().contextUsed,
+            // 107 = inputTokens(100) + outputTokens(7). Issue #320: ZCode's cacheRead/cacheWrite are
+            // SUBSETS of inputTokens, so the backend no longer forwards them into the disjoint columns —
+            // this used to read 137 by counting the cached prefix twice. The subject of this test (which
+            // call's usage wins, and when) is unchanged.
+            assertEquals(107L, reattached.filterIsInstance<SessionLive>().last().contextUsed,
                 "reconnect seeds the latest request footprint before the next turn")
             continueTurns.complete(Unit)
             withTimeout(10_000) { while (frames.filterIsInstance<TurnDone>().size < 4) delay(10) }
             val usage = frames.filterIsInstance<TurnDone>().map { it.usage!! }
             assertEquals(listOf(7L, 0L, 50L, 50L), usage.map { it.outputTokens })
-            assertEquals(listOf(137L, 130L, 180L, 10049L), usage.map { it.contextTokens },
+            // 100 + output each, except the last: no live call left, so the turn total (9999 + 50) stands.
+            assertEquals(listOf(107L, 100L, 150L, 10049L), usage.map { it.contextTokens },
                 "last-call output wins, explicit zero stays zero, unknown keeps legacy fallback, completed turn clears the last call")
         } finally {
             convo.close()

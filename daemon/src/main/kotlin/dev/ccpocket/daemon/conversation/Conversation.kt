@@ -980,7 +980,19 @@ class Conversation(
                     }
                 }
             }
-            resumeContextUsed = resumeId?.let { runCatching { backend.resumeContextTokens(workdir.toString(), it) }.getOrNull() }
+            // …and the occupancy, under the SAME barrier as the two reads above rather than the
+            // unconditional assignment this used to be. That was harmless only while every non-Claude
+            // backend answered null; now that dsh and ZCode read it off disk (issue #320 phase B), a
+            // multi-MB transcript parse returning after the session's first live turn would roll the gauge
+            // BACK to the pre-turn value — and a parse that found nothing would erase a good live reading
+            // outright. Blanks only, positive only: a 0 snaps the phone's statusline to 0% and would then
+            // poison every later seed.
+            if (resumeId != null) {
+                val diskUsed = runCatching { backend.resumeContextTokens(workdir.toString(), resumeId) }.getOrNull()
+                synchronized(runtimeMetaLock) {
+                    if (resumeContextUsed == null) diskUsed?.takeIf { it > 0 }?.let { resumeContextUsed = it }
+                }
+            }
             // seed the degraded flag from the transcript's tail: a session that died over its context
             // window stays warned across close/reopen, not just while this daemon watched it fail
             if (resumeId != null) {

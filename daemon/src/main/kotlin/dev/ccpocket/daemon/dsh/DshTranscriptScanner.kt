@@ -17,7 +17,11 @@ import kotlin.io.path.getLastModifiedTime
  *
  * Subagent sessions remain hidden. A readable header in an unsupported generation stays discoverable
  * with an explicit diagnostic; the selected generation must never silently disappear or fall back to
- * an immutable predecessor. Its event body is not interpreted.
+ * an immutable predecessor.
+ *
+ * The event body is read only for the two facts a row cannot be honest without and that only the WHOLE
+ * file settles — the renamed title (issue #289) and the model that last answered (issue #320) — through
+ * a single mtime-cached stream ([tail]). Everything else comes off the header or the summary budget.
  */
 object DshTranscriptScanner {
     /** A transcript written within this window counts as a live session for the list's dot. */
@@ -95,19 +99,26 @@ object DshTranscriptScanner {
 
     /**
      * issue #289: a rename APPENDS a `session/title` event, so the summary-budget read misses it once
-     * the chat outgrows the budget. The full-transcript streaming scan is cached by (path, mtime) — a
-     * settled session is scanned once per daemon lifetime; only a live writer (mtime moving) re-scans.
+     * the chat outgrows the budget. Issue #320 adds the model, which is last-wins for the same reason.
+     * The full-transcript streaming scan is cached by (path, mtime) — a settled session is scanned once
+     * per daemon lifetime; only a live writer (mtime moving) re-scans.
      */
-    private data class CachedTitle(val mtime: Long, val title: String?)
-    private val titleCache = java.util.concurrent.ConcurrentHashMap<String, CachedTitle>()
-    private const val TITLE_CACHE_MAX = 4_096 // ~2× the scan bound; blunt reset beats an LRU here
+    private data class CachedTail(val mtime: Long, val tail: DshTranscript.Tail)
+    private val tailCache = java.util.concurrent.ConcurrentHashMap<String, CachedTail>()
+    private const val TAIL_CACHE_MAX = 4_096 // ~2× the scan bound; blunt reset beats an LRU here
 
-    private fun fullTitle(found: Found): String? {
+    /**
+     * The title AND the model, from ONE cached stream ([DshTranscript.tail]).
+     *
+     * Both are last-wins over the whole file, so both cost the same walk — reading them separately would
+     * decompress every session twice per listing for no new information.
+     */
+    private fun tail(found: Found): DshTranscript.Tail {
         val key = found.file.toString()
-        titleCache[key]?.takeIf { it.mtime == found.mtime }?.let { return it.title }
-        val fresh = runCatching { DshTranscript.lastTitle(found.file) }.getOrNull()
-        if (titleCache.size >= TITLE_CACHE_MAX) titleCache.clear()
-        titleCache[key] = CachedTitle(found.mtime, fresh)
+        tailCache[key]?.takeIf { it.mtime == found.mtime }?.let { return it.tail }
+        val fresh = runCatching { DshTranscript.tail(found.file) }.getOrDefault(DshTranscript.Tail.EMPTY)
+        if (tailCache.size >= TAIL_CACHE_MAX) tailCache.clear()
+        tailCache[key] = CachedTail(found.mtime, fresh)
         return fresh
     }
 
@@ -123,11 +134,13 @@ object DshTranscriptScanner {
                 agent = AgentKind.DSH,
             )
         }
-        // Bounded read for everything BUT the title: header, opening user turn and the message count all
-        // live near the top, so the list never materializes a long chat. The title alone must consider
-        // the whole file (renames append; see [fullTitle]) — done as a cached O(1)-memory stream.
+        // Bounded read for everything BUT the title and the model: header, opening user turn and the
+        // message count all live near the top, so the list never materializes a long chat. Those two must
+        // consider the whole file (renames append, and the model can switch mid-chat) — done as ONE cached
+        // O(1)-memory stream; see [tail].
         val lines = runCatching { DshTranscript.summaryLines(found.file) }.getOrDefault(emptyList())
-        val title = fullTitle(found) ?: runCatching { DshTranscript.title(lines) }.getOrNull()
+        val tail = tail(found)
+        val title = tail.title ?: runCatching { DshTranscript.title(lines) }.getOrNull()
         val firstPrompt = lines.asSequence()
             .mapNotNull { DshTranscript.parseRecord(it, found.header.version) }
             .firstOrNull { it.str("type") == DshTranscript.EVENT_USER && it["ignorable"]?.toString() != "true" &&
@@ -145,6 +158,10 @@ object DshTranscriptScanner {
             lastModified = found.mtime,
             live = System.currentTimeMillis() - found.mtime < LIVE_WINDOW_MS,
             agent = AgentKind.DSH,
+            // issue #320: the model the session's own records name — last-wins, so a row says what the
+            // session IS rather than what it was opened as. Null when the transcript named none; the local
+            // default is NOT a substitute, because it describes this machine today, not that conversation.
+            model = tail.meta.model,
         )
     }
 }
