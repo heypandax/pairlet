@@ -2094,6 +2094,24 @@
     <string name="pin_issue_pairing_changed">This computer's pairing changed. Reconnect to it to sync pins.</string>
     <string name="pin_issue_retry">Retry</string>
     <string name="pin_issue_dismiss">Dismiss</string>
+    <string name="tool_process_toggle">Collapse tool steps</string>
+    <string name="tool_process_toggle_hint">Finished tool calls and thinking fold into one line. Steps from a running turn fold after you reopen the session.</string>
+    <string name="tool_process_group">Process</string>
+    <plurals name="tool_process_tools">
+        <item quantity="one">%1$d tool</item>
+        <item quantity="other">%1$d tools</item>
+    </plurals>
+    <plurals name="tool_process_thoughts">
+        <item quantity="one">%1$d thought</item>
+        <item quantity="other">%1$d thoughts</item>
+    </plurals>
+    <plurals name="tool_process_images">
+        <item quantity="one">%1$d image</item>
+        <item quantity="other">%1$d images</item>
+    </plurals>
+    <string name="tool_process_images_truncated">some images not loaded</string>
+    <string name="tool_process_expand">Show steps</string>
+    <string name="tool_process_collapse">Hide steps</string>
     <!-- context status (issue #320-A): name the evidence shape, never guess a value or claim "unsupported" -->
     <string name="context_status_no_data">No context data yet</string>
     <string name="context_status_no_data_detail">The backend hasn\'t returned a usable value for this session yet. This doesn\'t mean it\'s unsupported.</string>
@@ -2102,6 +2120,7 @@
     <string name="context_status_window_override">This window is a value you set, not one reported by the backend.</string>
     <string name="context_status_gauge_no_data">Context data not available yet — open session info</string>
     <string name="context_status_open_details">Context status — show details</string>
+    <string name="new_session_mode_unavailable">This computer no longer offers the selected mode. Choose a mode to start.</string>
     <!-- managed sessions (issue #360 stage 2): importing registers a reference only — no prompt, no takeover -->
     <string name="managed_sessions_import_entry">Import from local history…</string>
     <string name="managed_sessions_import_title">Import from local history</string>
@@ -2157,22 +2176,4 @@
     <string name="managed_sessions_remove">Remove from list</string>
     <string name="managed_sessions_dismiss">OK</string>
     <string name="managed_sessions_enable_required">Turn this on for %1$s before importing its sessions.</string>
-    <string name="new_session_mode_unavailable">This computer no longer offers the selected mode. Choose a mode to start.</string>
-    <string name="tool_process_toggle">Collapse tool steps</string>
-    <string name="tool_process_group">Process</string>
-    <plurals name="tool_process_tools">
-        <item quantity="one">%1$d tool</item>
-        <item quantity="other">%1$d tools</item>
-    </plurals>
-    <plurals name="tool_process_thoughts">
-        <item quantity="one">%1$d thought</item>
-        <item quantity="other">%1$d thoughts</item>
-    </plurals>
-    <plurals name="tool_process_images">
-        <item quantity="one">%1$d image</item>
-        <item quantity="other">%1$d images</item>
-    </plurals>
-    <string name="tool_process_images_truncated">some images not loaded</string>
-    <string name="tool_process_expand">Show steps</string>
-    <string name="tool_process_collapse">Hide steps</string>
 </resources>

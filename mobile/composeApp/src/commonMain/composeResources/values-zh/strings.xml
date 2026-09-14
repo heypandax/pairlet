@@ -2088,6 +2088,21 @@
     <string name="pin_issue_pairing_changed">这台电脑的配对已变更。重新连接后才能同步置顶。</string>
     <string name="pin_issue_retry">重试</string>
     <string name="pin_issue_dismiss">关闭</string>
+    <string name="tool_process_toggle">收起工具过程</string>
+    <string name="tool_process_toggle_hint">已完成的工具调用和思考会收成一行；运行中新产生的工具，要重新打开会话后才会收起。</string>
+    <string name="tool_process_group">执行过程</string>
+    <plurals name="tool_process_tools">
+        <item quantity="other">%1$d 项工具</item>
+    </plurals>
+    <plurals name="tool_process_thoughts">
+        <item quantity="other">%1$d 段思考</item>
+    </plurals>
+    <plurals name="tool_process_images">
+        <item quantity="other">%1$d 张图片</item>
+    </plurals>
+    <string name="tool_process_images_truncated">部分图片未载入</string>
+    <string name="tool_process_expand">展开过程</string>
+    <string name="tool_process_collapse">收起过程</string>
     <!-- 上下文状态（issue #320-A）：说明拿到了哪些数据，不猜数值、不断言“不支持” -->
     <string name="context_status_no_data">尚未获得上下文数据</string>
     <string name="context_status_no_data_detail">后端还没有返回这个会话的可用数值，这并不代表它不支持。</string>
@@ -2096,6 +2111,7 @@
     <string name="context_status_window_override">这个窗口上限是你手动设置的值，并非后端上报。</string>
     <string name="context_status_gauge_no_data">尚未获得上下文数据——打开会话信息</string>
     <string name="context_status_open_details">上下文状态——查看详情</string>
+    <string name="new_session_mode_unavailable">这台电脑已不再提供所选模式，请重新选择模式后开始。</string>
     <!-- managed sessions (issue #360 stage 2) -->
     <string name="managed_sessions_import_entry">从本机历史导入…</string>
     <string name="managed_sessions_import_title">从本机历史导入</string>
@@ -2151,19 +2167,4 @@
     <string name="managed_sessions_remove">移出清单</string>
     <string name="managed_sessions_dismiss">知道了</string>
     <string name="managed_sessions_enable_required">为 %1$s 开启后才能导入它的会话。</string>
-    <string name="new_session_mode_unavailable">这台电脑已不再提供所选模式，请重新选择模式后开始。</string>
-    <string name="tool_process_toggle">收起工具过程</string>
-    <string name="tool_process_group">执行过程</string>
-    <plurals name="tool_process_tools">
-        <item quantity="other">%1$d 项工具</item>
-    </plurals>
-    <plurals name="tool_process_thoughts">
-        <item quantity="other">%1$d 段思考</item>
-    </plurals>
-    <plurals name="tool_process_images">
-        <item quantity="other">%1$d 张图片</item>
-    </plurals>
-    <string name="tool_process_images_truncated">部分图片未载入</string>
-    <string name="tool_process_expand">展开过程</string>
-    <string name="tool_process_collapse">收起过程</string>
 </resources>
