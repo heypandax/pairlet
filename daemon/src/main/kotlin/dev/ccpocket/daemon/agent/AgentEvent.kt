@@ -62,6 +62,8 @@ sealed interface AgentEvent {
         val inputTokens: Long,
         val cacheCreationInputTokens: Long?,
         val cacheReadInputTokens: Long?,
+        /** Last-call output when the backend proves it; null preserves legacy turn-output fallback. */
+        val outputTokens: Long? = null,
     ) : AgentEvent
 
     /** a tool/command result — carries the originating tool_use id + (text) content.

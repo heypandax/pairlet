@@ -168,7 +168,8 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
         OpenCodeTranscriptReplay.read(sessionId)
     override fun replaySlice(workdir: String, sessionId: String, sinceSeq: Long?) = OpenCodeTranscriptReplay.slice(sessionId)
 
-    override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+    override fun resumeContextTokens(workdir: String, sessionId: String): Long? =
+        OpenCodeTranscriptScanner.resumeContextTokens(sessionId)
 
     override fun resumeModel(workdir: String, sessionId: String): String? =
         OpenCodeTranscriptScanner.resumeModel(sessionId)

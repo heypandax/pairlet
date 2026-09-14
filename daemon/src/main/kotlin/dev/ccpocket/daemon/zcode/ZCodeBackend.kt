@@ -343,6 +343,7 @@ class ZCodeBackend(
                             inputTokens = u.long("inputTokens") ?: 0,
                             cacheCreationInputTokens = u.long("cacheWriteTokens"),
                             cacheReadInputTokens = u.long("cacheReadTokens"),
+                            outputTokens = u.long("outputTokens")?.takeIf { it >= 0 },
                         ),
                     )
                 } else emptyList()

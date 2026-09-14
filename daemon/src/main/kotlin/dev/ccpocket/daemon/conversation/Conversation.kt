@@ -2038,12 +2038,13 @@ class Conversation(
                         // never zeros — a zero snaps the phone's statusline to 0% and poisons the resume seed.
                         // Context fields prefer the turn's LAST API call: the result event SUMS input/cache
                         // across every call of the turn (N tool batches ≈ N× the real occupancy — the phone
-                        // read 88% on a 44% session). Output keeps the result's turn total. Same
-                        // last-vs-total rule as the Codex backend.
+                        // read 88% on a 44% session). Same
+                        // last-vs-total rule as the Codex backend. When the backend supplies last-call
+                        // output too, use it; only legacy backends fall back to the result output.
                         val last = lastCallUsage
                         lastCallUsage = null
                         val usage = when {
-                            last != null -> TokenUsage(last.inputTokens, ev.usage?.outputTokens ?: 0, last.cacheCreationInputTokens, last.cacheReadInputTokens)
+                            last != null -> TokenUsage(last.inputTokens, last.outputTokens ?: ev.usage?.outputTokens ?: 0, last.cacheCreationInputTokens, last.cacheReadInputTokens)
                             else -> ev.usage
                         }
                         // keep the resume seed current: a mid-session reconnect then seeds the latest
