@@ -222,12 +222,14 @@
       "targets": [
         { "en": "macOS Apple Silicon", "zh": "macOS Apple 芯片", "channel": "signed .dmg" },
         { "en": "macOS Intel", "zh": "macOS Intel", "channel": "signed .dmg" },
-        { "en": "Windows x86_64", "zh": "Windows x86_64", "channel": ".msi" }
+        { "en": "Windows x86_64", "zh": "Windows x86_64", "channel": ".msi" },
+        { "en": "Linux x86_64", "zh": "Linux x86_64", "channel": "unsigned .deb / .rpm" },
+        { "en": "Linux arm64", "zh": "Linux arm64", "channel": "unsigned .deb / .rpm" }
       ],
       "linux": {
-        "official": false,
-        "en": "No official Linux desktop package — build from source.",
-        "zh": "没有正式的 Linux 桌面安装包，只能从源码构建。"
+        "official": true,
+        "en": "Unsigned .deb and .rpm for x86_64 and arm64; an .AppImage is attached when it builds.",
+        "zh": "x86_64 与 arm64 各有未签名的 .deb 和 .rpm；.AppImage 构建通过时才随版附上。"
       }
     },
     "daemon": {
