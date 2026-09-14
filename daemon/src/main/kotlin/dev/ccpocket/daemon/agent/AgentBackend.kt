@@ -148,6 +148,18 @@ interface AgentBackend {
     /** Resumable sessions for [workdir], newest first (reads transcript headers; no process launch). */
     fun listSessions(workdir: String): List<SessionSummary>
 
+    /** [listSessions] plus how complete it is (issue #360). Only a backend that can PROVE completeness overrides
+     *  this; the default rows are [dev.ccpocket.daemon.session.ScanCompleteness.UNVERIFIED] (display-only, never
+     *  a basis for migration or "record missing"), and a thrown scan is reported as failed, not as empty. */
+    fun scanSessions(workdir: String, agent: dev.ccpocket.protocol.AgentKind): dev.ccpocket.daemon.session.SessionScan =
+        try {
+            dev.ccpocket.daemon.session.SessionScan(
+                agent, workdir, listSessions(workdir), dev.ccpocket.daemon.session.ScanCompleteness.UNVERIFIED,
+            )
+        } catch (e: Exception) {
+            dev.ccpocket.daemon.session.SessionScan.failed(agent, workdir, e)
+        }
+
     /** Prior transcript of [sessionId] under [workdir], flattened for replay to the phone. */
     fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage>
 

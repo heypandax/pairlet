@@ -549,6 +549,7 @@ class RepoDesktopModel(
     private val sessionsDerived = derivedStateOf {
         val askWd = repo.pendingAsk.value?.let { repo.workdir.value }
         val openId = repo.sessionKey.value.takeIf { repo.convoId.value != null }
+        val missing = repo.managedMissing.value // #360: managed members whose native record is gone
         val listed = repo.sessions.map {
             DkSession(
                 sessionId = it.sessionId, cwd = it.cwd, title = it.title, agent = it.agent ?: AgentKind.CLAUDE,
@@ -561,6 +562,9 @@ class RepoDesktopModel(
                 model = it.model,
                 group = it.group, // custom session-group membership (issue #119)
                 forkedFrom = it.forkedFrom, rewindOf = it.rewindOf, // #282 lineage
+                // #360 markers, keyed by agent + id: the same native id under two agents is two different sessions
+                unavailable = dev.ccpocket.app.data.managedRowKeyOf(it.agent, it.sessionId) in missing,
+                ambiguous = dev.ccpocket.app.data.managedRowKeyOf(it.agent, it.sessionId) in repo.managedAmbiguous.value,
             )
         }
         // a just-created session isn't on disk until its first turn persists, so ListSessions can't
@@ -671,14 +675,34 @@ class RepoDesktopModel(
         val dir = repo.sessionsDir.value?.takeIf { it.isNotBlank() } ?: return
         val key = repo.workdir.value?.takeIf { repo.convoId.value != null && sameDir(it, dir) } ?: dir
         val i = visits.indexOfFirst { it.accountId == acct && sameDir(it.path, key) }
+        // #360: while the listed project's first managed read is still loading, `sessions` holds its managed agents' rows
+        // back. Freezing that would drop them — and an empty non-current group is hidden, taking the project out of
+        // RECENT. Keep the rows the visit already had, else the daemon's own rows; the late read rewrites them
+        // ([PocketRepository.managedAcceptedFor], read by the groups derive).
+        val rows = if (repo.managedListLoading.value) {
+            visits.getOrNull(i)?.snapshot?.takeIf { it.isNotEmpty() } ?: repo.listedDaemonRows().map { it.toSnapshotRow() }
+        } else sessions
         if (i >= 0) {
             val converged = visits[i].path != key
-            visits[i] = visits[i].copy(path = key, snapshot = sessions, groups = customGroups)
+            visits[i] = visits[i].copy(path = key, snapshot = rows, groups = customGroups)
             if (converged) saveVisits() // the stored key changed (tilde → absolute, #58) — keep the disk form in step
         } else {
-            visits.add(0, Visit(acct, key, sessions, customGroups))
+            visits.add(0, Visit(acct, key, rows, customGroups))
             saveVisits() // a dir listed outside openProject just entered RECENT (issue #102)
         }
+    }
+
+    /** A daemon/managed row as a RECENT snapshot row: listing-time dot (the groups derive corrects it from the daemon). */
+    private fun dev.ccpocket.protocol.SessionSummary.toSnapshotRow(
+        missing: Set<String> = emptySet(),
+        ambiguous: Set<String> = emptySet(),
+    ): DkSession {
+        val rowKey = dev.ccpocket.app.data.managedRowKeyOf(agent, sessionId)
+        return DkSession(
+            sessionId = sessionId, cwd = cwd, title = title, agent = agent ?: AgentKind.CLAUDE,
+            running = live || busy, model = model, group = group, forkedFrom = forkedFrom, rewindOf = rewindOf,
+            unavailable = rowKey in missing, ambiguous = rowKey in ambiguous,
+        )
     }
 
     // Restored visits render empty until re-listed (snapshots aren't persisted — issue #102), and the
@@ -769,7 +793,9 @@ class RepoDesktopModel(
         keys.map { v ->
             val norm = normCwd(v.path)
             val current = normLive != null && norm == normLive
-            var rows = if (current) sessions else v.snapshot
+            // #360: a managed read that landed after this project stopped being listed replaces its frozen snapshot
+            var rows = if (current) sessions
+            else repo.managedAcceptedFor(v.path)?.let { a -> a.rows.map { it.toSnapshotRow(a.missing, a.ambiguous) } } ?: v.snapshot
             if (live != null) rows = rows.map { it.runningFromDaemon(live, openId, streaming) }
             if (hidden.isNotEmpty()) rows = rows.filterNot { it.sessionId in hidden }
             val share = sharedDirs[norm]
@@ -822,6 +848,37 @@ class RepoDesktopModel(
     override fun forgetProject(g: DkSessionGroup) {
         val acct = repo.paired.value?.accountId ?: return
         if (visits.removeAll { it.accountId == acct && sameDir(it.path, g.path) }) saveVisits()
+    }
+
+    // ── import from local history (issue #360 stage 2) ─────────────────────────────────────────────────────
+    private val managedGateway by lazy { dev.ccpocket.app.data.RepoManagedSessionsGateway(repo) }
+    private var managedImportState by mutableStateOf<DkManagedImport?>(null)
+
+    override val canImportManagedSessions: Boolean get() = repo.managedImportAvailable()
+    override val managedListLoading: Boolean get() = repo.managedListLoading.value
+
+    // bound to the computer it was opened on: after a switch the panel is gone rather than searching the new one
+    override val managedImport: DkManagedImport?
+        get() = managedImportState?.takeIf { it.scope.computerId == repo.paired.value?.accountId && repo.managedImportAvailable() }
+
+    override fun openManagedImport(path: String) {
+        val acct = repo.paired.value?.accountId ?: return
+        if (!repo.managedImportAvailable() || path.isBlank()) return
+        val agents = dev.ccpocket.app.ui.session.IMPORTABLE_AGENTS.filter { it in repo.daemonManagedAgents.value }
+        managedImportState = DkManagedImport(dev.ccpocket.app.ui.session.ManagedScope(acct, path), agents, managedGateway)
+    }
+
+    override fun closeManagedImport() { managedImportState = null }
+
+    override fun locateImportedSession(imported: dev.ccpocket.app.ui.session.ImportSessionsEffect.Imported) {
+        val path = imported.scope.workdir
+        if (imported.scope.computerId != repo.paired.value?.accountId) return // a late result for a computer we left
+        managedImportState = null
+        // reveal first (#373: it unfolds a folded group and lifts the project-count fold once the row is listed), then
+        // make that project the listed one if it is not — its managed re-read is what lists the imported row
+        requestReveal(path, imported.key.nativeId)
+        val listed = repo.sessionsDir.value
+        if (listed == null || !sameDir(listed, path)) openProject(DkProject(path = path, name = folderName(path)))
     }
 
     // ── custom session groups (issue #119): the current project's groups + mutations ───────────────
@@ -899,7 +956,59 @@ class RepoDesktopModel(
         else if (!collapsed && has) { groupCollapsedState.remove(k); saveGroupCollapsed() }
     }
 
-    override fun selectSession(s: DkSession) { selectSessionReporting(s) }
+    override fun selectSession(s: DkSession) {
+        // #360: a managed member whose original record is gone has nothing to resume — explain instead of opening
+        if (s.unavailable) {
+            unavailableNoticeState = UnavailableRowNotice(repo.paired.value?.accountId, s, dev.ccpocket.app.ui.session.UnavailableNoticeUi(s.title))
+            return
+        }
+        selectSessionReporting(s)
+    }
+
+    /** The notice and the computer it was raised on — a row of one computer must never be removed on another. */
+    private data class UnavailableRowNotice(val accountId: String?, val session: DkSession, val ui: dev.ccpocket.app.ui.session.UnavailableNoticeUi)
+    private var unavailableNoticeState by mutableStateOf<UnavailableRowNotice?>(null)
+
+    /** Only on the computer it belongs to, and only while that link still speaks the managed list (a switch or a lost
+     *  link hides it — it is gone, not waiting to reappear on the next machine). */
+    private fun currentUnavailableNotice(): UnavailableRowNotice? = unavailableNoticeState?.takeIf {
+        it.accountId != null && it.accountId == repo.paired.value?.accountId && repo.daemonManagedSessions.value
+    }
+
+    // A notice outlives neither its computer nor the link's managed-list capability: it is CLEARED, not merely hidden, so a
+    // reconnect can't bring it back over a row that is no longer missing.
+    init {
+        scope.launch {
+            snapshotFlow { repo.paired.value?.accountId to repo.daemonManagedSessions.value }.collect { (acct, capable) ->
+                val n = unavailableNoticeState ?: return@collect
+                if (!capable || n.accountId != acct) unavailableNoticeState = null
+            }
+        }
+    }
+
+    override val managedListStale: Boolean get() = repo.managedListStale.value
+    override val unavailableNotice: dev.ccpocket.app.ui.session.UnavailableNoticeUi? get() = currentUnavailableNotice()?.ui
+    override fun dismissUnavailableNotice() { unavailableNoticeState = null }
+
+    override fun askRemoveFromManagedList() {
+        val n = currentUnavailableNotice() ?: return
+        unavailableNoticeState = n.copy(ui = n.ui.copy(confirming = true, error = null))
+    }
+
+    override fun removeFromManagedList() {
+        val n = currentUnavailableNotice() ?: run { unavailableNoticeState = null; return }
+        val s = n.session
+        if (s.cwd.isBlank()) return
+        unavailableNoticeState = n.copy(ui = n.ui.copy(busy = true, confirming = false, error = null))
+        repo.removeManagedMember(s.cwd, s.agent, s.sessionId) { result ->
+            // settle only the notice this removal belongs to (same computer, same row)
+            val still = unavailableNoticeState?.takeIf { it.accountId == n.accountId && it.session.rowKey == s.rowKey } ?: return@removeManagedMember
+            unavailableNoticeState = when (result) {
+                dev.ccpocket.app.ui.session.RemoveResult.Removed -> null
+                is dev.ccpocket.app.ui.session.RemoveResult.Failure -> still.copy(ui = still.ui.copy(busy = false, error = result.error))
+            }
+        }
+    }
 
     /**
      * Make [dir]'s project the LIVE-LISTED one when a session navigation lands outside it — the

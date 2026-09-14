@@ -26,8 +26,14 @@ object TranscriptScanner {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     const val LIVE_WINDOW_MS = 20_000L // transcript touched within this window = a session running right now
 
-    fun scan(dir: Path): List<SessionSummary> {
-        if (!dir.isDirectory()) return emptyList()
+    fun scan(dir: Path): List<SessionSummary> = scanDetailed(dir).items
+
+    /** [scan]'s rows plus how many transcripts failed to summarize (issue #360: PARTIAL must not read as
+     *  complete). Same contract otherwise: a missing dir is empty, a failed listing throws. */
+    data class Detailed(val items: List<SessionSummary>, val failed: Int)
+
+    fun scanDetailed(dir: Path): Detailed {
+        if (!dir.isDirectory()) return Detailed(emptyList(), 0)
         val files = try { Files.newDirectoryStream(dir, "*.jsonl").use { it.toList() } }
         catch (error: Exception) {
             Diagnostics.report(ErrorPath.SESSION_LIST, DiagnosticStage.SCAN, ErrorCode.READ_FAILED, error)
@@ -46,7 +52,7 @@ object TranscriptScanner {
         if (failed > 0) Diagnostics.report(ErrorPath.SESSION_LIST, DiagnosticStage.SCAN, ErrorCode.PARTIAL_RESULT,
             metrics = SafeMetrics(totalCount = files.size.toLong(), failedCount = failed, returnedCount = result.size.toLong(),
                 resultQuality = dev.ccpocket.observability.ResultQuality.PARTIAL))
-        return result
+        return Detailed(result, failed.toInt())
     }
 
     /** Land one ledger edge on the CHILD row. The original keeps a clean summary: clients derive "this

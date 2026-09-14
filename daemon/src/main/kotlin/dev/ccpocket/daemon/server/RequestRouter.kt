@@ -223,7 +223,16 @@ class RequestRouter(
     /** Project-pin sync (issue #362): this computer's authoritative pin list. Null = not wired (a bare router
      *  in a unit test): a pin request then answers `pins_unavailable` instead of silently doing nothing. */
     private val projectPins: dev.ccpocket.daemon.pins.ProjectPinService? = null,
+    /** Managed session list (issue #360). Null = not wired: a capable owner's managed request answers
+     *  `managed_unsupported`, and [managedSessionAgentWires] advertises nothing. */
+    private val managedSessions: dev.ccpocket.daemon.session.ManagedSessionService? = null,
 ) {
+    /** Both transports attach their owner push targets through the router they already hold (issue #360). */
+    internal val managedSessionService: dev.ccpocket.daemon.session.ManagedSessionService? get() = managedSessions
+
+    /** [dev.ccpocket.protocol.DaemonInfo.managedAgents]: empty when the managed list is not wired. */
+    fun managedSessionAgentWires(): List<String> = managedSessions?.agentWires().orEmpty()
+
     /** The LAN transport attaches its per-socket pin subscriber through the router it already holds, so the pin
      *  plane reaches both transports without another server-construction seam. */
     internal val projectPinService: dev.ccpocket.daemon.pins.ProjectPinService? get() = projectPins
@@ -283,6 +292,10 @@ class RequestRouter(
          *  subscription or receives a pin frame again, even when a late frame makes its session active again. */
         @Volatile var pinRetired: Boolean = false
 
+        /** issue #360: this connection decodes pocket/managed.state and pocket/managed.discovered. Both are gated on
+         *  it at EMISSION, replies and pushes alike; until the declaration arrives this connection receives neither. */
+        @Volatile var supportsManagedSessions: Boolean = false
+
         /** Whether this peer can decode [agent]. CLAUDE/CODEX are the baseline vocabulary every shipped
          *  client understands; OPENCODE/KIMI are post-baseline additions each guarded by its own cap. */
         fun allows(agent: AgentKind): Boolean = when (agent) {
@@ -339,6 +352,10 @@ class RequestRouter(
             frame is HandoffUpdated -> capsAllow(caps, frame.handoff.agent)
             // issue #362: replies AND pushes — a pin frame only reaches a connection that declared it
             frame is dev.ccpocket.protocol.ProjectPinsState -> caps?.supportsProjectPins == true
+            // issue #360: replies AND pushes — a managed frame only reaches a connection that declared it; a null /
+            // not-yet-declared holder fails closed
+            frame is dev.ccpocket.protocol.ManagedSessionsState || frame is dev.ccpocket.protocol.DiscoveredSessions ->
+                caps?.supportsManagedSessions == true
             else -> true
         }
 
@@ -466,6 +483,7 @@ class RequestRouter(
                 caps?.supportsDiagnostics = frame.supportsDiagnostics
                 caps?.supportsApprovalV2 = frame.supportsApprovalV2 // P2-3: gates the V2 approval frames
                 caps?.supportsProjectPins = frame.supportsProjectPins // #362: gates pocket/pins.state
+                caps?.supportsManagedSessions = frame.supportsManagedSessions // #360: gates pocket/managed.state + .discovered
             }
 
             is ListDirectories ->
@@ -537,6 +555,15 @@ class RequestRouter(
             // Restricted credentials never reach here (GuestCaps / BridgeCaps / CollaboratorCaps default-deny
             // both pin frame types); the three-way owner test below is the second door.
             is dev.ccpocket.protocol.SyncProjectPins -> syncProjectPins(frame, sink, origin, guestScope, collabScope, caps, deviceId, pinConnection)
+
+            // managed session list (issue #360): OWNER-ONLY. Restricted credentials never reach here (GuestCaps /
+            // BridgeCaps / CollaboratorCaps default-deny all five request types); the three-way owner test in
+            // [managedSessionsRequest] is the second door and refuses before any directory or title is read.
+            is dev.ccpocket.protocol.ListManagedSessions,
+            is dev.ccpocket.protocol.EnableManagedSessions,
+            is dev.ccpocket.protocol.DiscoverSessions,
+            is dev.ccpocket.protocol.ImportSession,
+            is dev.ccpocket.protocol.RemoveManagedSession -> managedSessionsRequest(frame as dev.ccpocket.protocol.ToDaemon, sink, origin, guestScope, collabScope, caps)
 
             // session rename (issue #158): lands claude's own custom-title record (live daemon session:
             // the CLI appends it itself over a control_request; idle: a one-line transcript append) —
@@ -1315,6 +1342,54 @@ class RequestRouter(
      *  out once so every owner-only ReviewRequest op tests all three (a COLLABORATOR arrives with
      *  origin == null AND guestScope == null — testing only those two is vacuous for exactly the
      *  weakest credential this daemon hands out). */
+    /**
+     * One managed session list request (issue #360). Order of the gates matters:
+     *  1. a connection that has not declared [ClientCapsHolder.supportsManagedSessions] gets SILENCE — no managed
+     *     frame could reach it (egress gates on the same bit), and it must not learn anything else either;
+     *  2. a non-owner (bridge / guest / collaborator — the three-way test) gets `managed_forbidden` before the
+     *     service is touched, so no directory, scan or store is read on its behalf;
+     *  3. an unwired service answers `managed_unsupported`.
+     * The service then validates agent / workdir / ids itself, runs reads off this pump, serializes mutations, and
+     * filters rows to this connection's agent vocabulary. The requester's sink key is excluded from the push.
+     */
+    private suspend fun managedSessionsRequest(
+        frame: dev.ccpocket.protocol.ToDaemon,
+        sink: OutboundSink,
+        origin: String?,
+        guestScope: GuestScope?,
+        collab: CollaboratorScope?,
+        caps: ClientCapsHolder?,
+    ) {
+        if (caps == null || !caps.supportsManagedSessions) return
+        fun refuse(code: String): dev.ccpocket.protocol.ToPhone? {
+            val (requestId, workdir, agent) = when (frame) {
+                is dev.ccpocket.protocol.ListManagedSessions -> Triple(frame.requestId, frame.workdir, frame.agent)
+                is dev.ccpocket.protocol.EnableManagedSessions -> Triple(frame.requestId, frame.workdir, frame.agent)
+                is dev.ccpocket.protocol.DiscoverSessions -> Triple(frame.requestId, frame.workdir, frame.agent)
+                is dev.ccpocket.protocol.ImportSession -> Triple(frame.requestId, frame.workdir, frame.agent)
+                is dev.ccpocket.protocol.RemoveManagedSession -> Triple(frame.requestId, frame.workdir, frame.agent)
+                else -> return null
+            }
+            if (!dev.ccpocket.protocol.isValidManagedId(requestId)) return null // uncorrelatable: a reply would read as a push
+            val wd = workdir.take(dev.ccpocket.protocol.MANAGED_WORKDIR_MAX_CHARS)
+            return if (frame is dev.ccpocket.protocol.DiscoverSessions) dev.ccpocket.protocol.DiscoveredSessions(requestId, wd, agent, error = code)
+            else dev.ccpocket.protocol.ManagedSessionsState(
+                requestId = requestId, workdir = wd, agent = agent,
+                allAgents = (frame as? dev.ccpocket.protocol.ListManagedSessions)?.allAgents == true, error = code,
+            )
+        }
+        if (!isOwner(origin, guestScope, collab)) {
+            refuse(dev.ccpocket.protocol.ManagedSessionErrors.FORBIDDEN)?.let { sink.emit(it) }
+            return
+        }
+        val svc = managedSessions
+        if (svc == null) {
+            refuse(dev.ccpocket.protocol.ManagedSessionErrors.UNSUPPORTED)?.let { sink.emit(it) }
+            return
+        }
+        svc.accept(frame, sink, sinkKey(sink)) { agent -> capsAllow(caps, agent) }
+    }
+
     private fun isOwner(origin: String?, guestScope: GuestScope?, collab: CollaboratorScope?) =
         origin == null && guestScope == null && collab == null
 

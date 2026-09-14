@@ -74,6 +74,8 @@ class DaemonCore(
      *  request never touches ~/.cc-pocket — and tests hand in a temp-file or in-memory store instead. */
     projectPinStore: dev.ccpocket.daemon.pins.ProjectPinStore =
         dev.ccpocket.daemon.pins.FileProjectPinStore(dev.ccpocket.daemon.pins.FileProjectPinStore.defaultFile()),
+    /** Managed session list store directory (issue #360). Read lazily; tests hand in a temp directory. */
+    managedSessionRoot: java.io.File = dev.ccpocket.daemon.disk.ManagedSessionStore.defaultRoot(),
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + kotlinx.coroutines.CoroutineExceptionHandler { _, error ->
         Diagnostics.report(ErrorPath.ASYNC_WORKER, Stage.EXECUTE, ErrorCode.UNEXPECTED, error)
@@ -234,6 +236,17 @@ class DaemonCore(
         deviceStillPaired = { id -> dev.ccpocket.daemon.identity.PairedDevices.load().containsKey(id) },
     )
 
+    /**
+     * The managed session list (issue #360): one store per daemon, shared by both transports through the router.
+     * The store reads lazily; boot recovery only finishes registrations a previous process durably recorded.
+     */
+    val managedSessions = dev.ccpocket.daemon.session.ManagedSessionService.create(
+        managedSessionRoot, scope, registry, dirs, backends.keys,
+    ).also { svc ->
+        registry.managedSessions = svc
+        scope.launch(Dispatchers.IO) { runCatching { svc.recoverPending() } }
+    }
+
     val router = RequestRouter(
         registry, dirs, transcribe, inbox, shell, exports, scope, auth, prefs, presets, scheduler,
         // presetEnv shares PresetStore with the DaemonInfo gateway pill (Main.kt): the host we ask for a
@@ -250,6 +263,7 @@ class DaemonCore(
         reviews = reviews,
         reviewOwner = reviewOwner,
         projectPins = projectPins,
+        managedSessions = managedSessions, // issue #360: without this the router advertises and serves nothing
         git = git,
         codexQuota = dev.ccpocket.daemon.codex.CodexQuotaService(codexBin),
     )

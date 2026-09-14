@@ -241,6 +241,14 @@ class ClaudeBackend(
     override fun listSessions(workdir: String): List<SessionSummary> =
         TranscriptScanner.scan(ProjectPaths.dirFor(workdir)).map { it.copy(agent = AgentKind.CLAUDE) }
 
+    // issue #360: same rows as listSessions, plus whether they are provably complete
+    override fun scanSessions(workdir: String, agent: AgentKind): dev.ccpocket.daemon.session.SessionScan =
+        try {
+            dev.ccpocket.daemon.session.claudeProjectScan(ProjectPaths.dirFor(workdir), workdir, agent)
+        } catch (e: Exception) {
+            dev.ccpocket.daemon.session.SessionScan.failed(agent, workdir, e)
+        }
+
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =
         TranscriptReplay.read(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
 

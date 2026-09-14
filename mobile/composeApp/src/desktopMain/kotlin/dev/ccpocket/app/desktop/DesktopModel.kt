@@ -109,6 +109,20 @@ data class DkSession(
     // (a session not yet on disk has no ledger entry either).
     val forkedFrom: String? = null,
     val rewindOf: String? = null,
+    // #360 stage 2: a managed member whose native record a complete scan did not find — kept in place, marked
+    val unavailable: Boolean = false,
+    // #360: the same native id is a session of another agent too, so its group placement cannot be attributed
+    val ambiguous: Boolean = false,
+) {
+    /** List identity: the same native id under two agents is two rows (Claude keeps the bare id). */
+    val rowKey: String get() = dev.ccpocket.app.data.managedRowKeyOf(agent, sessionId)
+}
+
+/** An open "Import from local history…" panel (issue #360): the computer + explicit project it was raised on. */
+data class DkManagedImport(
+    val scope: dev.ccpocket.app.ui.session.ManagedScope,
+    val agents: List<AgentKind>,
+    val gateway: dev.ccpocket.app.ui.session.ManagedSessionsGateway,
 )
 
 /** One custom session group inside a project (issue #119) — the view mirror of protocol's SessionGroup.
@@ -568,6 +582,30 @@ interface DesktopModel {
      *  CURRENTLY listed dir has no entry offered — it re-enters instantly as the synthetic live group, so
      *  removing it could only look broken. No-op for seed/preview models. */
     fun forgetProject(g: DkSessionGroup) {}
+
+    // ── import from local history (issue #360 stage 2) ─────────────────────────────────────────────
+    /** The connected computer advertised the managed list and this binding is its owner. False = no entry anywhere. */
+    val canImportManagedSessions: Boolean get() = false
+    /** The listed project's managed list has not arrived yet on this computer: its empty state says "loading". */
+    val managedListLoading: Boolean get() = false
+    /** The listed project's latest managed read failed: the list shown is the last accepted one. */
+    val managedListStale: Boolean get() = false
+    /** A click on a managed row whose original record is gone, on THIS computer: it is NOT opened; this explains why and
+     *  walks removal (ask → confirm → removing / error). Null = nothing to say. */
+    val unavailableNotice: dev.ccpocket.app.ui.session.UnavailableNoticeUi? get() = null
+    fun dismissUnavailableNotice() {}
+    /** First step of removal: show what removing does and doesn't do. */
+    fun askRemoveFromManagedList() {}
+    /** Confirmed: take the row out of the managed list (the native record, if it ever comes back, is untouched). */
+    fun removeFromManagedList() {}
+    /** The open import panel, or null. Always for an explicit project — never "the listed one" by default. */
+    val managedImport: DkManagedImport? get() = null
+    /** Open the import panel for the RECENT group at [path]. No-op unless [canImportManagedSessions]. */
+    fun openManagedImport(path: String) {}
+    fun closeManagedImport() {}
+    /** An import succeeded: show that session in RECENT (listing its project first when needed). Never sends a
+     *  prompt, never opens or takes over the session. */
+    fun locateImportedSession(imported: dev.ccpocket.app.ui.session.ImportSessionsEffect.Imported) {}
 
     // ── custom session groups (issue #119) ────────────────────────────────────────────────────────
     // These describe ONLY the current (live-listed) project — the daemon lists groups per directory, and every

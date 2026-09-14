@@ -1303,6 +1303,15 @@ data class DaemonInfo(
      * its per-computer pins and pending intent locally and sends no pin frame to that daemon.
      */
     val supportsProjectPins: Boolean = false,
+    /**
+     * Capability advertisement (issue #360): this daemon serves the managed session list and explicit import
+     * ([ListManagedSessions] / [EnableManagedSessions] / [DiscoverSessions] / [ImportSession] /
+     * [RemoveManagedSession]) for the [AgentKind] wire names in [managedAgents]. A client sends a
+     * managed.* request only when this is true AND its agent is listed. ABSENT (older daemon) decodes to
+     * false / empty: the client keeps the legacy [Sessions] list and shows no import entry.
+     */
+    val supportsManagedSessions: Boolean = false,
+    val managedAgents: List<String> = emptyList(),
 ) : ToPhone
 
 @Serializable
@@ -2078,6 +2087,9 @@ data class ClientCaps(
     // issue #362 (trailing optional): this connection decodes pocket/pins.state. The daemon never sends
     // that frame — not even a reply — to a connection that did not declare it, per connection.
     val supportsProjectPins: Boolean = false,
+    // issue #360 (trailing optional): this connection decodes pocket/managed.state and pocket/managed.discovered.
+    // The daemon never sends either — not even a reply — to a connection that did not declare it.
+    val supportsManagedSessions: Boolean = false,
 ) : ToDaemon
 
 // ── agent model listing ─────────────────────────────────────────────────

@@ -40,6 +40,35 @@ object CodexTranscriptScanner {
             .distinctBy { it.sessionId }
     }
 
+    /** Rollouts a completeness-aware scan walks (issue #360). Larger than [scan]'s display cap so a typical
+     *  history can be proven complete; a tree beyond it is reported TRUNCATED, never as complete. */
+    const val MANAGED_SCAN_LIMIT = 5000
+
+    /**
+     * [scan]'s rows for [workdir] plus how complete they are (issue #360): an unlistable directory under the
+     * rollout root is PERMISSION_DENIED, a tree beyond [limit] is TRUNCATED (older rollouts of this project may
+     * sit past the cut), a rollout that failed to read is PARTIAL. [scan] itself is unchanged.
+     */
+    fun scanDetailed(
+        workdir: String,
+        root: java.nio.file.Path = CodexPaths.sessionsRoot(),
+        limit: Int = MANAGED_SCAN_LIMIT,
+        titles: Map<String, String> = threadNames(),
+    ): dev.ccpocket.daemon.session.SessionScan {
+        val listing = CodexPaths.sessionListing(limit, root)
+        var failed = 0
+        val items = listing.files.mapNotNull { file ->
+            try { summarize(file, workdir, titles) } catch (e: Exception) { failed++; null }
+        }.sortedByDescending { it.lastModified }.distinctBy { it.sessionId }.map { it.copy(agent = AgentKind.CODEX) }
+        val completeness = when {
+            listing.unreadableDirs > 0 -> dev.ccpocket.daemon.session.ScanCompleteness.PERMISSION_DENIED
+            listing.truncated -> dev.ccpocket.daemon.session.ScanCompleteness.TRUNCATED
+            failed > 0 -> dev.ccpocket.daemon.session.ScanCompleteness.PARTIAL
+            else -> dev.ccpocket.daemon.session.ScanCompleteness.COMPLETE
+        }
+        return dev.ccpocket.daemon.session.SessionScan(AgentKind.CODEX, workdir, items, completeness, failedCount = failed)
+    }
+
     /**
      * The newest resumable Codex session for each externally-live cwd. Unlike [scan], this is called by
      * the 10-second project-list refresh, so it walks the rollout tree ONCE, skips every file whose

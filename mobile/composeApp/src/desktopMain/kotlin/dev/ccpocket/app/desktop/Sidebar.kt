@@ -138,6 +138,17 @@ import dev.ccpocket.app.resources.pin_project
 import dev.ccpocket.app.resources.recent_forget_project
 import dev.ccpocket.app.resources.this_machine
 import dev.ccpocket.app.resources.unpin_project
+import dev.ccpocket.app.resources.managed_sessions_import_entry
+import dev.ccpocket.app.resources.managed_sessions_unavailable
+import dev.ccpocket.app.resources.managed_sessions_list_loading
+import dev.ccpocket.app.resources.managed_sessions_list_stale
+import dev.ccpocket.app.resources.managed_sessions_group_ambiguous
+import dev.ccpocket.app.resources.managed_sessions_unavailable_open
+import dev.ccpocket.app.resources.managed_sessions_remove
+import dev.ccpocket.app.resources.managed_sessions_dismiss
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.ui.platform.testTag
+import androidx.compose.material3.LocalTextStyle
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentBadge
 import dev.ccpocket.app.ui.AgentTag
@@ -183,6 +194,7 @@ fun Sidebar(model: DesktopModel, width: Dp = Dk.sidebarWidth, modifier: Modifier
         RunningZone(model)
         RecentZone(model, Modifier.weight(1f))
         AllProjectsRow { model.browseProjects() }
+        model.managedImport?.let { ManagedImportPopup(model, it) } // #360: raised from a RECENT project's menu
         if (model.canArchiveSessions) ArchivedRow(model.archivedSessions.size) { model.browseArchived() }
         // The Review Center row came off (demoted 08-16, with the mobile header entry): the P2P review
         // flow saw no real use. The centre itself still opens via ⌘⇧R while its future form is decided.
@@ -760,6 +772,33 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
             limit.revealedSelection = selectedId
             reveal(targetPath, selectedId)
         }
+        // #360: the listed project's managed agents are held back until its managed list arrives — say so even when other
+        // agents' rows are on screen, or the held-back sessions look deleted
+        // #360: the latest managed read failed — what is shown is the last accepted list
+        if (model.managedListStale) {
+            Text(
+                stringResource(Res.string.managed_sessions_list_stale), color = Tok.warn, fontFamily = Dk.ui, fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+            )
+        }
+        if (model.managedListLoading) {
+            Text(
+                stringResource(Res.string.managed_sessions_list_loading), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+            )
+        }
+        // #360: a click on a managed row whose original record is gone opens nothing — this says why, and offers removal
+        model.unavailableNotice?.let { ui ->
+            dev.ccpocket.app.ui.session.UnavailableNoticeCard(
+                ui,
+                onAskRemove = { model.askRemoveFromManagedList() },
+                onConfirmRemove = { model.removeFromManagedList() },
+                onCancel = { model.dismissUnavailableNotice() },
+                onDismiss = { model.dismissUnavailableNotice() },
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                fontSize = 11.5.sp,
+            )
+        }
         // testTag: the RECENT list overflows the default test viewport (it grows with every seed
         // session) — UI tests scroll it to their target instead of assuming everything fits
         LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().testTag("sidebar-list")) { // lazy: a visited project can hold hundreds of sessions
@@ -777,11 +816,19 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                             onNewSession = { model.openNewSession(tilde(g.path)) },
                             onForget = { model.forgetProject(g) },
                             onToggle = { if (row.closed) collapsed.remove(g.path) else collapsed.add(g.path) },
+                            // #360: a guest's shared folder has no owner verbs; the path is this header's own
+                            canImport = model.canImportManagedSessions && g.sharedBy == null,
+                            onImport = { model.openManagedImport(g.path) },
                         )
                     }
                     is RecentRow.NewGroup -> NewGroupRow(model)
                     is RecentRow.Empty -> Text(
-                        stringResource(Res.string.sidebar_no_sessions_here),
+                        // #360: the listed project's managed list is still on its way — not "no sessions"
+                        stringResource(
+                            // empty non-current groups are hidden, so an empty row here is the listed project's
+                            if (model.managedListLoading) Res.string.managed_sessions_list_loading
+                            else Res.string.sidebar_no_sessions_here,
+                        ),
                         color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
                         modifier = Modifier.padding(start = 32.dp, top = 2.dp, bottom = 6.dp),
                     )
@@ -830,7 +877,56 @@ private class RecentLimit {
     var revealedSelection: String? = null
 }
 
-/** The RECENT reveal request an effect last took up (#373) — see [RecentZone]. Plain, not state, for the same reason. */
+/** Test tag of the "Import from local history…" popup panel. */
+internal const val MANAGED_IMPORT_POPUP_TAG = "managed_import_popup"
+
+/** Centres a popup in the window rather than on its anchor (the sidebar), clamped to the window's top-left. */
+private object CenteredInWindow : androidx.compose.ui.window.PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: androidx.compose.ui.unit.IntRect,
+        windowSize: androidx.compose.ui.unit.IntSize,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        popupContentSize: androidx.compose.ui.unit.IntSize,
+    ): androidx.compose.ui.unit.IntOffset = androidx.compose.ui.unit.IntOffset(
+        ((windowSize.width - popupContentSize.width) / 2).coerceAtLeast(0),
+        ((windowSize.height - popupContentSize.height) / 2).coerceAtLeast(0),
+    )
+}
+
+/**
+ * "Import from local history…" (issue #360) for the project a RECENT header was right-clicked on. Dismissing (Esc /
+ * click outside / Close) only closes the panel; a successful import hands the session to [DesktopModel.locateImportedSession].
+ */
+@Composable
+private fun ManagedImportPopup(model: DesktopModel, target: DkManagedImport) {
+    androidx.compose.ui.window.Popup(
+        popupPositionProvider = CenteredInWindow,
+        onDismissRequest = { model.closeManagedImport() },
+        properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+    ) {
+        Box(
+            // clamped to the window: never larger than 560×620, never past a small window's edges
+            Modifier.padding(16.dp)
+                .sizeIn(maxWidth = 560.dp, maxHeight = 620.dp).fillMaxSize()
+                .testTag(MANAGED_IMPORT_POPUP_TAG)
+                .clip(RoundedCornerShape(12.dp))
+                .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).background(Tok.base)
+                // the focusable popup owns the keyboard while open — Esc must close from inside it (see ModelPopover)
+                .onPreviewKeyEvent { e ->
+                    if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { model.closeManagedImport(); true } else false
+                },
+        ) {
+            dev.ccpocket.app.ui.session.ManagedImportHost(
+                gateway = target.gateway,
+                scope = target.scope,
+                agents = target.agents,
+                onLocate = { model.locateImportedSession(it) },
+                onClose = { model.closeManagedImport() },
+            )
+        }
+    }
+}
+
 private class TakenReveal(var request: DkProjectListReveal?)
 
 /**
@@ -867,7 +963,7 @@ private sealed interface RecentRow {
         val renameable: Boolean,
         val canArchive: Boolean,
     ) : RecentRow {
-        override val key = "s:$path:${session.sessionId}"
+        override val key = "s:$path:${session.rowKey}" // #360: agent + id (Claude keeps the bare id)
     }
 
     /** "Show all" / "Show less" (#373): after the last listed project, ahead of the rewound bucket. */
@@ -880,7 +976,7 @@ private sealed interface RecentRow {
     }
 
     data class Rewound(val path: String, val session: DkSession) : RecentRow {
-        override val key = "rw:${session.sessionId}"
+        override val key = "rw:${session.rowKey}"
     }
 }
 
@@ -1024,13 +1120,19 @@ private fun GroupHeader(
     onNewSession: () -> Unit,
     onForget: () -> Unit,
     onToggle: () -> Unit,
+    canImport: Boolean = false,
+    onImport: () -> Unit = {},
 ) {
     val pinLabel = stringResource(if (pinned) Res.string.unpin_project else Res.string.pin_project)
     val forget = stringResource(Res.string.recent_forget_project)
+    val importLabel = stringResource(Res.string.managed_sessions_import_entry)
     ContextMenuArea(
         items = {
             joinMenuFamilies(
                 listOf(PocketMenuItem(pinLabel, onClick = onTogglePin)),
+                // #360: brings a session INTO this project's list, for THIS header's path — current or not. Only on a
+                // computer that advertised the managed list, so an older daemon's menu is exactly what it was.
+                buildList { if (canImport) add(PocketMenuItem(importLabel, onClick = onImport)) },
                 // the CURRENT dir is exempt: it is not a RECENT entry at all but the synthetic live group
                 // (#211's chip says so), so it would come straight back and the verb would read as broken
                 buildList { if (!current) add(PocketMenuItem(forget, removal = true, onClick = onForget)) },
@@ -1490,14 +1592,30 @@ private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean,
                 fontFamily = Dk.ui, fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                // tightCenter on every row: the title shares the line with the dot, badges and the 10sp texts below
+                style = tightCenter(13.sp),
             )
+            // #360: a managed member whose native record is gone keeps its place and says so
+            if (s.unavailable) {
+                Text(
+                    stringResource(Res.string.managed_sessions_unavailable), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
+                    style = tightCenter(10.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 120.dp),
+                )
+            }
+            // #360: the same id is another agent's session too — its group placement cannot be attributed
+            if (s.ambiguous) {
+                Text(
+                    stringResource(Res.string.managed_sessions_group_ambiguous), color = Tok.warn, fontFamily = Dk.ui, fontSize = 10.sp,
+                    style = tightCenter(10.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 90.dp),
+                )
+            }
             // which model the session last ran, as its alias ("sonnet") — muted so the title leads;
             // hidden while hovered (the pin/close affordances need that space more than a static label)
             if (!hovered) {
                 s.model?.let { m ->
                     modelAlias(m).takeIf { it.isNotBlank() }?.let {
                         // bounded like the pinned row's machine name so a long alias can't steal the title's room (#179)
-                        Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 72.dp))
+                        Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 72.dp))
                     }
                 }
             }
