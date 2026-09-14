@@ -85,6 +85,9 @@ class RelayClient(
     }
 
     private val controlOutbox = Channel<ToRelay>(Channel.BUFFERED)
+
+    /** Issue #382: per-session short-window merge of turn-end pushes (see [TurnPushCoalescer]). */
+    private val turnPushes = TurnPushCoalescer()
     private val inboundControl = MutableSharedFlow<ToRelay>(extraBufferCapacity = 32)
     private val ctrlId = AtomicLong(0)
 
@@ -147,18 +150,16 @@ class RelayClient(
     fun lastPongAgeMs(): Long? = lastPongAt.takeIf { it != 0L }?.let { System.currentTimeMillis() - it }
 
     suspend fun run() = coroutineScope {
-        // wake an offline phone when a turn completes. peerOnline gates the relay-attached case and
-        // lanConnected() the direct-LAN one (an attached phone — either transport — got the TurnDone over
-        // the data plane already). The LAN check matters once LAN-resident phones carry LIVE relay tokens
-        // (the #114 follow-up dial): the relay re-checks deviceCount before actually pushing, but it can't
-        // see LAN attachment — without this gate every turn watched over the LAN doubles as a lock-screen
-        // push. Mirrors the reaper's gate below.
-        // The push copy itself (turn complete / turn failed / usage limit hit — issue #138) lives in
-        // PushPolicy so it stays unit-testable; this hook only supplies the presence gate.
+        // Turn-end pushes (complete / error / usage limit — issue #138). Issue #382: the desktop's "notify my
+        // phone when a reply finishes" switch (prefs.pushEnabled) is the ONLY gate. Presence — peerOnline, a
+        // LAN-attached desktop App or phone, other interactive devices — no longer skips the phone: the push
+        // goes out urgent so the relay's interactive-device check lets it through too. A phone showing this
+        // very session in the foreground hides the banner itself. Bursts per session are merged by
+        // TurnPushCoalescer; copy + gate live in PushPolicy / TurnPushCoalescer so they stay unit-testable.
         core.registry.pushHook = PushHook { workdir, sessionId, finalText, error ->
-            if (!peerOnline && !core.registry.lanConnected() && core.prefs.pushEnabled) {
-                controlOutbox.send(PushPolicy.turnPush(workdir, sessionId, finalText, error))
-            }
+            val decision = turnPushes.decide(core.prefs.pushEnabled, workdir, sessionId, finalText, error)
+            if (decision is TurnPushDecision.Queued) controlOutbox.send(decision.push)
+            log.info(TurnPushCoalescer.logLine(decision, sessionId))
         }
         // Permission-ask pushes. Bridge asks (issue #91, origin != null) can't reach the bridge at all
         // (egress whitelist) — always pushed, urgent. OWNER-session asks (issue #138, origin == null)
@@ -369,7 +370,16 @@ class RelayClient(
                                 log.info("dropping a targeted push: this relay has no targeted delivery (protoV=$relayProtoV)")
                                 continue
                             }
-                            sendOrDie { outgoing.send(WsFrame.Text(controlText(c))) }
+                            try {
+                                sendOrDie { outgoing.send(WsFrame.Text(controlText(c))) }
+                            } catch (t: Throwable) {
+                                // the frame in hand dies with this link (the outbox only buffers what's still
+                                // queued) — say so for pushes, so a missing alert is traceable (issue #382)
+                                if (c is NotifyPush) {
+                                    log.warn("notify-push kind=${c.kind ?: "turn"} sid=${TurnPushCoalescer.shortSid(c.sessionId)} → dropped (relay write failed: ${t::class.simpleName})")
+                                }
+                                throw t
+                            }
                         }
                     }
                     // App-level heartbeat: a half-open/zombie link keeps the TCP socket ESTABLISHED and Ktor's

@@ -217,6 +217,19 @@ class CollaboratorPushTest {
     }
 
     /**
+     * Issue #382 CONTRACT: the daemon now sends every turn-end push (complete / error / usage limit) as
+     * `urgent = true` so that a desktop App or another phone being online no longer skips the phone alert;
+     * the desktop's "notify my phone" switch is the only gate, applied daemon-side. The relay must keep
+     * letting an urgent, untargeted notify through with several interactive devices attached — changing
+     * this silently re-mutes turn-complete pushes whenever the desktop App is open.
+     */
+    @Test fun urgent_account_push_ignores_interactive_devices_for_issue_382() {
+        val turnDone = NotifyPush("proj", "All done.", workdir = "/w", sessionId = "s", urgent = true)
+        assertTrue(NotifyGate.shouldSend(turnDone, interactiveDevices = 2, targetDeviceSockets = 0))
+        assertEquals(null, NotifyGate.routeOf(turnDone)?.kind, "turn pushes keep kind=null (task_complete channel)")
+    }
+
+    /**
      * The relay owns the copy of anything it puts on a CONTACT's lock screen. Every push before §3.4 went
      * from a person to their own devices, so the daemon writing the text was writing to itself; a targeted
      * push is the first that crosses to someone else's phone, and the sender sits on the far side of that

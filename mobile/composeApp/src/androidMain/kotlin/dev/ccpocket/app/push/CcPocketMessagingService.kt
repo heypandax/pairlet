@@ -20,6 +20,8 @@ class CcPocketMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val n = message.notification ?: return // data-only messages aren't used by the relay
+        // issue #382: foreground on the very session this turn push is about → the chat already shows it
+        if (!ForegroundSession.shouldPresent(message.data["sid"], message.data["kind"])) return
         val nm = getSystemService(NotificationManager::class.java) ?: return
         ensureChannel(nm)
         // carry the routing data so a tap opens the right thing (mirrors how the system tray delivers

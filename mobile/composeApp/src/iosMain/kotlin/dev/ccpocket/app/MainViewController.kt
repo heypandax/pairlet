@@ -28,6 +28,12 @@ fun handleDeepLink(url: String) = DeepLink.handle(url)
 @Suppress("unused")
 fun handlePushOpen(workdir: String, sessionId: String) = PushRoute.open(workdir, sessionId)
 
+/** Called from iOSApp.swift `willPresent` (foreground only): false = don't show the banner, because the chat
+ *  is showing the very session this non-approval push is about (issue #382). */
+@Suppress("unused")
+fun shouldPresentPush(sessionId: String?, kind: String?): Boolean =
+    dev.ccpocket.app.push.ForegroundSession.shouldPresent(sessionId, kind)
+
 /** Called from iOSApp.swift when a Handoff OFFER notification is tapped (§3.4). Such an alert carries NO
  *  session routing at all — only the opaque `hid` custom key — so this selects the offer in the incoming
  *  doorway, which still runs the ordinary confirm → accept flow. */
