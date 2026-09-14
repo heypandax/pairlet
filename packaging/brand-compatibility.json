@@ -19,8 +19,8 @@
     },
     {
       "path": "daemon/src/main/kotlin/dev/ccpocket/daemon/update/UpdateService.kt",
-      "sha256": "286248d0135cdbe4bc36698260156f86ce8218d28690bcccaebac41305fd1998",
-      "note": "2026-09-11 observability: add bounded upgrade diagnostics and a post-switch receipt; preserve CLI symlink resolution, asset names, checksums, install paths, version switching and service identity."
+      "sha256": "5e2ab8f7c6050a66a3faecdb8fc1e0237aef8296fb302499a50945b4f0998bc7",
+      "note": "2026-09-11 observability: add bounded upgrade diagnostics and a post-switch receipt; preserve CLI symlink resolution, asset names, checksums, install paths, version switching and service identity. 2026-09-14 #364: recognize Homebrew/Scoop layouts and emit their upgrade commands only on the matching host OS; a managed layout still takes priority and unrecognized layouts get the host installer one-liner. Stable asset names, checksum validation, install paths, service identity, executable names, package-manager package ids and legacy CLI commands remain unchanged. UpdateServiceTest covers host-scoped classification and cross-platform command rejection; reviewed third-batch change."
     },
     {
       "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/Pairing.kt",
