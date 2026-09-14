@@ -166,10 +166,17 @@ object UpdateService {
      * the new version). Windows: rewrites the on-PATH .cmd shim to the new exe (the logon task is re-pointed
      * onto the new exe separately by [restartService]). Returns the new version's real exe path (which
      * [restartService] registers). Throws with a human message on any failure.
+     *
+     * [progress] observes the phases and download progress (issue #381): the CLI renders it, the background
+     * auto-updater passes [UpdateProgressListener.QUIET]. Listener exceptions are swallowed here — display
+     * must never change whether an update succeeds.
      */
-    fun apply(release: Release, install: ManagedInstall): Path {
+    fun apply(release: Release, install: ManagedInstall, progress: UpdateProgressListener = UpdateProgressListener.QUIET): Path {
         val trace = Diagnostics.begin(ErrorPath.UPDATE)
         var stage = Stage.CONFIGURE
+        var phase: UpdatePhase? = null
+        fun notify(block: UpdateProgressListener.() -> Unit) { runCatching { progress.block() } }
+        fun enter(next: UpdatePhase, detail: String = "") { phase = next; notify { onPhase(next, detail) } }
         trace?.stage(stage)
         var cleanup: Path? = null
         try {
@@ -179,8 +186,10 @@ object UpdateService {
             val file = tmp.resolve(asset)
             stage = Stage.DOWNLOAD; trace?.stage(stage)
             log.info("downloading $asset")
-            ReleaseClient.download(url, file)
+            enter(UpdatePhase.DOWNLOAD, asset)
+            ReleaseClient.download(url, file) { p -> notify { onDownload(p) } }
             stage = Stage.VERIFY; trace?.stage(stage)
+            enter(UpdatePhase.VERIFY)
             val verified = ReleaseClient.verifyAgainstSums(release, asset, file, onSkip = { log.warn(it) })
             if (verified) log.info("checksum OK ($asset)")
             else {
@@ -191,6 +200,7 @@ object UpdateService {
 
             val extracted = tmp.resolve("x").also { Files.createDirectories(it) }
             stage = Stage.EXTRACT; trace?.stage(stage)
+            enter(UpdatePhase.EXTRACT)
             extract(file, extracted)
             // one rule everywhere: versions/<ver>/ holds the archive's top-level entry UNCHANGED —
             // macOS ships a signed cc-pocket-daemon.app bundle, Windows/Linux a cc-pocket-daemon/ dir
@@ -199,6 +209,7 @@ object UpdateService {
                 ?: error("unexpected archive layout (no cc-pocket-daemon[.app] top-level entry)")
 
             stage = Stage.COMMIT; trace?.stage(stage)
+            enter(UpdatePhase.INSTALL)
             val target = install.versionsDir.resolve(release.version)
             if (target.exists()) target.toFile().deleteRecursively()
             Files.createDirectories(target)
@@ -226,8 +237,10 @@ object UpdateService {
             // Artifact switched, but the new process has not yet proven health.
             trace?.finish(Outcome.SUCCESS, Stage.COMMIT, metrics = SafeMetrics(resultQuality = ResultQuality.PARTIAL))
             dev.ccpocket.daemon.diagnostics.UpgradeReceipt.switched(release.version)
+            notify { onSwitched(release.version) }
             return newLauncher
         } catch (error: Exception) {
+            notify { onFailed(phase, error) }
             trace?.finish(Outcome.FAILURE, stage, when (stage) {
                 Stage.CONFIGURE -> ErrorCode.UNAVAILABLE
                 Stage.DOWNLOAD -> ErrorCode.IO_FAILED

@@ -710,7 +710,10 @@ private class UpdateCmd : CliktCommand(name = "update") {
         val exe = dev.ccpocket.daemon.update.UpdateService.selfExe()
         val install = dev.ccpocket.daemon.update.UpdateService.managedInstallOf(exe)
             ?: throw com.github.ajalt.clikt.core.CliktError(dev.ccpocket.daemon.update.UpdateService.ownerHint(exe))
-        val newLauncher = dev.ccpocket.daemon.update.UpdateService.apply(latest, install)
+        // progress goes to stderr (redrawn in place only on a real terminal); stdout lines stay as before (#381)
+        val newLauncher = dev.ccpocket.daemon.update.UpdateService.apply(
+            latest, install, dev.ccpocket.daemon.update.TerminalUpdateProgress.forStderr(),
+        )
         echo("installed ${latest.version} → ${install.versionsDir.resolve(latest.version)}")
         echo("restarting the background service onto it…")
         dev.ccpocket.daemon.update.UpdateService.restartService(newLauncher, pairPort)

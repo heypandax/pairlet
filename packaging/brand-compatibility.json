@@ -7,7 +7,8 @@
     },
     {
       "path": "protocol/src/jvmMain/kotlin/dev/ccpocket/protocol/update/ReleaseClient.kt",
-      "sha256": "7f726501136fd7768132a5cf1882fa521e1f627d49d970f7ad7dab586742f43e"
+      "sha256": "982995d4420b19b658088121b2bd30dd1f57abc8d17fb0e683705bb962cf9b2b",
+      "note": "2026-09-14 #381-A: download streams the body into the destination file with a counted, bounded buffer and an optional display-only progress observer (default no-op; the two-argument call still compiles). Behavior change that also applies to legacy two-argument callers such as the desktop standalone updater: after the response headers, a body with no data for 2 minutes is aborted (retry the update), next to the existing 10-minute ceiling, and a non-2xx response no longer writes its error page into the destination. Default repo slug, mirror URL/env toggle, manifest parsing, asset names, User-Agent and SHA256SUMS verification remain unchanged. ReleaseClientDownloadTest covers known/unknown length, redirects, HTTP errors, truncated and stalled bodies, lying Content-Length, callback rate and observer exceptions against a local HTTP fixture."
     },
     {
       "path": "daemon/src/main/kotlin/dev/ccpocket/daemon/service/ServiceInstaller.kt",
@@ -19,8 +20,8 @@
     },
     {
       "path": "daemon/src/main/kotlin/dev/ccpocket/daemon/update/UpdateService.kt",
-      "sha256": "5e2ab8f7c6050a66a3faecdb8fc1e0237aef8296fb302499a50945b4f0998bc7",
-      "note": "2026-09-11 observability: add bounded upgrade diagnostics and a post-switch receipt; preserve CLI symlink resolution, asset names, checksums, install paths, version switching and service identity. 2026-09-14 #364: recognize Homebrew/Scoop layouts and emit their upgrade commands only on the matching host OS; a managed layout still takes priority and unrecognized layouts get the host installer one-liner. Stable asset names, checksum validation, install paths, service identity, executable names, package-manager package ids and legacy CLI commands remain unchanged. UpdateServiceTest covers host-scoped classification and cross-platform command rejection; reviewed third-batch change."
+      "sha256": "e8de8d9f8c6bde47576a3dcb74b8cc742100acf43dd96949b3a800a4c265459f",
+      "note": "2026-09-11 observability: add bounded upgrade diagnostics and a post-switch receipt; preserve CLI symlink resolution, asset names, checksums, install paths, version switching and service identity. 2026-09-14 #364: recognize Homebrew/Scoop layouts and emit their upgrade commands only on the matching host OS; a managed layout still takes priority and unrecognized layouts get the host installer one-liner. Stable asset names, checksum validation, install paths, service identity, executable names, package-manager package ids and legacy CLI commands remain unchanged. UpdateServiceTest covers host-scoped classification and cross-platform command rejection; reviewed third-batch change. 2026-09-14 #381-A: apply accepts an optional phase/download-progress listener (default quiet; listener exceptions are swallowed) rendered by the update CLI on stderr and kept silent for background auto-update. Asset names, checksum validation, temp-dir cleanup, install paths, version switching, service identity, executable names and legacy CLI commands remain unchanged. UpdateProgressTest covers terminal and redirected output plus checksum/HTTP failure without switching the launcher."
     },
     {
       "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/Pairing.kt",
