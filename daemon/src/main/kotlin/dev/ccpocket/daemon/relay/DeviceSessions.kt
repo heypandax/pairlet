@@ -95,6 +95,9 @@ class DeviceSessions(
     private val owned = HashMap<String, MutableList<String>>()
     private val nextId = AtomicLong(0)
     private val seenThisAttach = HashSet<String>()          // devices the relay re-announced since the last attach
+    // #362: relay handshake order for pin ownership (guarded by [mutex]); see [allocatePinOrder]
+    private var nextPinHandshakeOrder = 1L
+    private var pinOrdersExhausted = false
 
     @Volatile
     private var lastInteractiveMintAt = 0L // serializes interactive vs headless pairing (issue #91)
@@ -188,7 +191,7 @@ class DeviceSessions(
         val (stale, staleBridges) = mutex.withLock {
             if (seenThisAttach.isEmpty() && !authoritativeEmpty) return
             val s = (devicePubs.keys - seenThisAttach).toList().onEach {
-                devicePubs.remove(it); sessions.remove(it); pskFor.remove(it)
+                devicePubs.remove(it); sessions.remove(it)?.let { link -> retirePins(link) }; pskFor.remove(it)
             }
             // bridges revoked while we were offline are pruned the same way (their rows vanish from the
             // replay). A NEW relay replays headless rows to us (we announce PROTO_V_HEADLESS); an OLD
@@ -198,6 +201,8 @@ class DeviceSessions(
             s to sb
         }
         staleBridges.forEach { bridges.remove(it) }
+        // #362: a device the replay no longer announces loses its pin push slot with its session
+        (stale + staleBridges).forEach { core.projectPins.detach("${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$it") }
         if (stale.isNotEmpty()) {
             persist()
             log.info("pruned ${stale.size} revoked device(s) after attach replay")
@@ -229,11 +234,13 @@ class DeviceSessions(
         }
         val revokedOrigin = if (wasRestricted) bridges.specOf(deviceId)?.name else null // read BEFORE bridges.remove
         val revokedConvos = mutex.withLock {
-            devicePubs.remove(deviceId); sessions.remove(deviceId); pskFor.remove(deviceId)
+            devicePubs.remove(deviceId); sessions.remove(deviceId)?.let { retirePins(it) }; pskFor.remove(deviceId)
             seenThisAttach.remove(deviceId)
             if (wasRestricted) owned.remove(deviceId).orEmpty() else emptyList()
         }
         bridges.remove(deviceId) // a revoked credential loses its entry (and live guard) the same instant
+        // #362: its pin push slot too — delivery already re-checks membership, this keeps the table bounded
+        core.projectPins.detach("${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$deviceId")
         persist()
         // force-close the revoked credential's convos NOW (kills their process trees) — the owner's revoke
         // promise is "their sessions end", not "their link drops". Covers guests (#115) AND bridges (#91):
@@ -316,7 +323,9 @@ class DeviceSessions(
         val session = derived.first()
         mutex.withLock {
             val link = sessions[deviceId]
-            if (link == null) sessions[deviceId] = DeviceLink(session, pskShadow = derived.getOrNull(1))
+            if (link == null) sessions[deviceId] = DeviceLink(session, pskShadow = derived.getOrNull(1)).also {
+                it.pinOrders[it.activeCaps] = allocatePinOrder()
+            }
             else {
                 // Keep the PREVIOUS session as the overlap fallback instead of overwriting it (#146): the
                 // relay's supersede kick races the dying socket's last frames, so that socket's LATE
@@ -334,6 +343,10 @@ class DeviceSessions(
                 // supersede-overlap promote below hands the surviving socket its own caps back.
                 link.fallbackCaps = link.activeCaps
                 link.activeCaps = RequestRouter.ClientCapsHolder()
+                // #362: the new connection's handshake order, fixed for its lifetime; orders of holders the link no
+                // longer retains are dropped so the table stays bounded
+                link.pinOrders.keys.retainAll { it === link.fallbackCaps || it === link.pinOwnerCaps }
+                link.pinOrders[link.activeCaps] = allocatePinOrder()
             }
         }
         preHandshakeWarnAt.remove(deviceId) // #298 hygiene: the zombie healed, drop its rate-limit slot
@@ -357,6 +370,7 @@ class DeviceSessions(
                 supportsUsageAgentFilter = true, // issue #258: this build honors FetchUsage.agent
                 supportsPromptRecovery = true,
                                 supportsDiagnostics = true, // #122: acked prompts stay ledgered until agent consumption
+                supportsProjectPins = true, // #362: this build owns the per-computer project-pin list
                 // #348: the backends whose subscription allowance this daemon can read. Same source as the
                 // LAN transport's copy (WsConnection) — the router owns the readers, so it owns the answer.
                 quotaAgents = core.router.quotaAgentWires(),
@@ -447,6 +461,9 @@ class DeviceSessions(
             }
         }
         if (plaintext == null) { log.warn("decrypt failed from ${deviceId.take(8)}…"); return }
+        // #362: the holder of the connection that sent THIS frame, captured once after any promote above. A pin
+        // request keeps exactly this holder for its context and its reply, even if a later frame moves `active`.
+        val inboundCaps = mutex.withLock { link.activeCaps }
         // PSK settled either way — reconnects use authenticated statics; a still-armed twin dies with it
         // (once ANY frame proves a session, the phone provably keyed the other way)
         val confirmedPsk = mutex.withLock { link.pskShadow = null; pskFor.remove(deviceId) }
@@ -613,6 +630,26 @@ class DeviceSessions(
                 // whitelist would drop HandoffUpdated anyway — this keeps it out of the target set entirely).
                 core.registry.handoffs?.attach(sink)
                 core.reviews.attach(sink) // an owner device sees every review request this machine sent
+                // project-pin pushes (issue #362): ONE subscriber per device key, idempotent across frames, and
+                // resolved entirely at emission by [deliverProjectPins]. Attaching delivers nothing by itself —
+                // the device's CURRENT connection must also have declared the capability and fetched.
+                core.projectPins.attach("${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$deviceId") { snapshot ->
+                    deliverProjectPins(deviceId, snapshot)
+                }
+                if (env.body is dev.ccpocket.protocol.SyncProjectPins) {
+                    // inline, in receive order, and bound to the connection that sent it: its context answers for that
+                    // holder alone, and its pin reply is sealed for that connection — never re-routed through a session
+                    // a later frame made active. Anything else the router emits takes the ordinary path.
+                    val pinSink = dev.ccpocket.daemon.conversation.KeyedSink(
+                        "${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$deviceId",
+                        OutboundSink { frame ->
+                            if (frame is dev.ccpocket.protocol.ProjectPinsState) sealPinReply(deviceId, link, inboundCaps, frame)
+                            else sink.emit(frame)
+                        },
+                    )
+                    route(env.body, pinSink, origin, guestScope, collabScope, deviceId, { inboundCaps }, RelayPinConnection(deviceId, link, inboundCaps))
+                    return
+                }
                 if (isOwnerControlFrame(env.body)) {
                     // OFF the reader loop: a mint suspends ~10s waiting for the relay's PairTicket reply,
                     // which arrives through the SAME single ws reader that called us — dispatching inline
@@ -652,11 +689,13 @@ class DeviceSessions(
         collabScope: dev.ccpocket.daemon.handoff.CollaboratorScope?,
         deviceId: String,
         caps: () -> RequestRouter.ClientCapsHolder,
+        /** #362: the pin context of the connection that sent a project-pin request; null for every other frame. */
+        pin: dev.ccpocket.daemon.pins.ProjectPinConnection? = null,
     ) {
         try {
             // deviceId is the Noise-authenticated transport identity — the handoff gate's ONLY input for
             // "who is driving" (SESSION-HANDOFF.md §5.3: never a frame field)
-            core.router.handle(frame, sink, origin, guestScope, caps = caps(), deviceId = deviceId, collabScope = collabScope) { convoId ->
+            core.router.handle(frame, sink, origin, guestScope, caps = caps(), deviceId = deviceId, collabScope = collabScope, pinConnection = pin) { convoId ->
                 mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }
                 bridges.guardOf(deviceId)?.noteOpened(convoId)     // bridge (#91)
                 bridges.guestGuardOf(deviceId)?.noteOpened(convoId) // guest (#115)
@@ -675,6 +714,134 @@ class DeviceSessions(
         is CloseSession -> frame.convoId
         is dev.ccpocket.protocol.CancelTurn -> frame.convoId
         else -> null
+    }
+
+    /**
+     * One project-pin push toward [deviceId] (issue #362), with every authority fact resolved NOW and under the
+     * lock that guards the allow-list and the live sessions: the device must still be a full-power allow-listed
+     * owner (a revoke removes it from both in one step), and the connection whose fetch was accepted last
+     * ([DeviceLink.pinOwnerCaps]) must still be retained, not retired, still declare pin support and hold its
+     * subscription — which is what gets echoed. The frame is sealed with THAT connection's session, not with
+     * [DeviceLink.active]: a late frame of a retired connection may promote its session for ordinary traffic, but
+     * never takes pin pushes back. A connection that has not had a fetch accepted gets nothing.
+     */
+    private suspend fun deliverProjectPins(deviceId: String, snapshot: dev.ccpocket.protocol.ProjectPinsSnapshot) {
+        if (bridges.isBridgeCandidate(deviceId) || bridges.isRestricted(deviceId)) return
+        val payload = mutex.withLock {
+            if (!devicePubs.containsKey(deviceId)) return
+            val link = sessions[deviceId] ?: return
+            val owner = link.pinOwnerCaps ?: return
+            val session = pinSessionOf(link, owner)
+            if (session == null) {
+                // displaced by further handshakes: nothing to seal for until a newer connection's fetch is accepted
+                owner.pinRetired = true
+                owner.pinSubscriptionId = null
+                link.pinOwnerCaps = null
+                return
+            }
+            val subscription = owner.pinSubscriptionId
+            if (owner.pinRetired || !owner.supportsProjectPins || subscription == null) return
+            val frame = dev.ccpocket.protocol.ProjectPinsState(subscriptionId = subscription, snapshot = snapshot)
+            val json = PocketJson.encodeToString(Envelope(nextId.getAndIncrement().toString(), 0L, body = frame))
+            Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray()))
+        }
+        send(deviceId, payload)
+    }
+
+    /**
+     * The reply to one pin request (issue #362), sealed for the connection that sent it and no other. A successful
+     * reply needs that connection to be the device's pin owner under the subscription it echoes; a refusal may also
+     * answer a connection whose fetch was never accepted — registering nothing — while it is still retained, not
+     * retired, and declares pin support. Anything else is dropped: an old reply is never re-routed through a
+     * session that a later handshake or frame made active.
+     */
+    private suspend fun sealPinReply(
+        deviceId: String,
+        link: DeviceLink,
+        holder: RequestRouter.ClientCapsHolder,
+        frame: dev.ccpocket.protocol.ProjectPinsState,
+    ) {
+        if (bridges.isBridgeCandidate(deviceId) || bridges.isRestricted(deviceId)) return
+        val json = PocketJson.encodeToString(Envelope(nextId.getAndIncrement().toString(), 0L, body = frame))
+        val payload = mutex.withLock {
+            if (!pinEligible(deviceId, link, holder)) return
+            val session = pinSessionOf(link, holder) ?: return
+            val owned = link.pinOwnerCaps === holder && frame.subscriptionId == holder.pinSubscriptionId
+            if (frame.error == null && !owned) return
+            Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray()))
+        }
+        send(deviceId, payload)
+    }
+
+    /** Under [mutex]: [holder] is still a connection of [deviceId]'s live [link] that may use the pin plane — and its
+     *  handshake is not older than the connection whose fetch was accepted last ([DeviceLink.highestAcceptedPinOrder]). */
+    private fun pinEligible(deviceId: String, link: DeviceLink, holder: RequestRouter.ClientCapsHolder): Boolean {
+        val order = link.pinOrders[holder] ?: 0L
+        return devicePubs.containsKey(deviceId) && sessions[deviceId] === link &&
+            !holder.pinRetired && holder.supportsProjectPins && pinSessionOf(link, holder) != null &&
+            order > 0 && order >= link.highestAcceptedPinOrder
+    }
+
+    /** Under [mutex]: the next relay handshake's pin order. Never wraps or repeats: once positive orders run out every
+     *  later handshake gets 0, which fails pin eligibility closed (generic traffic is unaffected). */
+    private fun allocatePinOrder(): Long {
+        if (pinOrdersExhausted) return 0L
+        val order = nextPinHandshakeOrder
+        if (order == Long.MAX_VALUE) pinOrdersExhausted = true else nextPinHandshakeOrder = order + 1
+        return order
+    }
+
+    /** Under [mutex]: the retained session [holder] rides with, or null once further handshakes displaced it. */
+    private fun pinSessionOf(link: DeviceLink, holder: RequestRouter.ClientCapsHolder): E2ESession? = when {
+        link.activeCaps === holder -> link.active
+        link.fallbackCaps === holder -> link.fallback
+        else -> null
+    }
+
+    /** Under [mutex]: a link leaving [sessions] (revoke, replay prune) takes every pin registration with it. */
+    private fun retirePins(link: DeviceLink) {
+        for (holder in listOfNotNull(link.activeCaps, link.fallbackCaps, link.pinOwnerCaps)) {
+            holder.pinRetired = true
+            holder.pinSubscriptionId = null
+        }
+        link.pinOwnerCaps = null
+    }
+
+    /**
+     * The relay's pin context for one inbound request (issue #362): bound to the exact connection holder that sent
+     * it and answered under [mutex] against the live allow-list and sessions, so it can neither speak for another
+     * connection nor outlive a revoke. The pin store's lock may be held while it is asked; nothing here ever
+     * waits for that lock while holding [mutex].
+     */
+    private inner class RelayPinConnection(
+        private val deviceId: String,
+        private val link: DeviceLink,
+        private val holder: RequestRouter.ClientCapsHolder,
+    ) : dev.ccpocket.daemon.pins.ProjectPinConnection {
+        override suspend fun isCurrent(): Boolean = mutex.withLock { pinEligible(deviceId, link, holder) }
+
+        override suspend fun currentSubscription(): String? = mutex.withLock {
+            holder.pinSubscriptionId.takeIf { pinEligible(deviceId, link, holder) && link.pinOwnerCaps === holder }
+        }
+
+        /** The accepted fetch makes this connection the device's pin owner: every OLDER connection the link still
+         *  holds — and an earlier owner already displaced — is retired for good, and none older can be accepted
+         *  again. A NEWER handshake that has not fetched yet stays a candidate: a late fetch of the old connection
+         *  must not lock out the one that replaces it. A newer handshake alone retires nothing; only its own
+         *  accepted fetch does. The same connection fetching again just refreshes its subscription. */
+        override suspend fun acceptFetch(subscriptionId: String): Boolean = mutex.withLock {
+            if (!pinEligible(deviceId, link, holder)) return@withLock false
+            val order = link.pinOrders.getValue(holder)
+            for (other in listOfNotNull(link.activeCaps, link.fallbackCaps, link.pinOwnerCaps)) {
+                if (other === holder || (link.pinOrders[other] ?: 0L) >= order) continue
+                other.pinRetired = true
+                other.pinSubscriptionId = null
+            }
+            holder.pinSubscriptionId = subscriptionId
+            link.highestAcceptedPinOrder = order
+            link.pinOwnerCaps = holder
+            true
+        }
     }
 
     private suspend fun sealAndSend(deviceId: String, frame: Frame) {
@@ -750,6 +917,17 @@ class DeviceSessions(
      * The holders must MOVE WITH the sessions through the promotes below: otherwise a dying socket's
      * late handshake would strip the SURVIVING socket's vocabulary for the rest of its connection,
      * re-breaking exactly what [fallback] exists to protect.
+     *
+     * [pinOwnerCaps] is the ONE holder whose project-pin fetch was accepted last (issue #362) — deliberately not
+     * read off [activeCaps]. Generic frames still promote whichever session proves itself, but such a promote
+     * must never hand the pin subscription back to a connection a newer accepted fetch retired. Pin pushes and
+     * replies are sealed with the session that holder rides with, found by holder identity, never with [active].
+     *
+     * [pinOrders] maps each retained relay holder (by identity) to its handshake order — daemon-internal, assigned
+     * once per handshake, and it travels with the holder through every promote. [highestAcceptedPinOrder] is the
+     * in-memory fence it is compared with: an accepted fetch retires only older connections, and a connection
+     * older than the last accepted one can never own pins again. Neither is wire identity nor any authority on
+     * its own; every authenticated check above still applies.
      */
     private class DeviceLink(
         var active: E2ESession,
@@ -757,7 +935,11 @@ class DeviceSessions(
         var pskShadow: E2ESession? = null,
         var activeCaps: RequestRouter.ClientCapsHolder = RequestRouter.ClientCapsHolder(),
         var fallbackCaps: RequestRouter.ClientCapsHolder = RequestRouter.ClientCapsHolder(),
-    )
+        var pinOwnerCaps: RequestRouter.ClientCapsHolder? = null,
+    ) {
+        val pinOrders = java.util.IdentityHashMap<RequestRouter.ClientCapsHolder, Long>()
+        var highestAcceptedPinOrder: Long = 0L
+    }
 
     // ---- persistence of paired device public keys (shared with the direct-LAN gate) ----
 

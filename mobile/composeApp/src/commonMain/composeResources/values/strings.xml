@@ -2082,4 +2082,16 @@
     <string name="diagnostic_sharing_save_failed">This choice could not be saved for the next launch. Please try again.</string>
     <string name="diagnostic_sharing_description">Firebase receives usage events and crash reports; Sentry receives diagnostic errors and logs to help improve reliability and features. Conversation content, prompts and file content are excluded from diagnostics. Turning this off stops new collection and clears pending reports where supported; reports already received are retained. This setting applies to this app; computer diagnostics are controlled separately.</string>
     <string name="diagnostic_copy_id">Copy latest diagnostic ID</string>
+    <string name="pin_issue_retained_locally">Some earlier pin changes were kept on this device only. Pin or unpin those projects again to apply them on every device.</string>
+    <string name="pin_issue_refused">This computer didn't accept the latest pin changes. They're still saved on this device.</string>
+    <string name="pin_issue_capacity">This computer's pinned list is full. Unpin a project, then try again.</string>
+    <string name="pin_issue_storage_failed">Couldn't confirm whether your pins were saved. Try again.</string>
+    <string name="pin_issue_local_reset">Pins saved on this device can't be read. They were left untouched, and this computer's pins can't be changed here for now.</string>
+    <string name="pin_issue_outbox_full">Too many pin changes are waiting. Connect to this computer before changing more pins.</string>
+    <string name="pin_issue_migration_uncertain">Your earlier pinned projects couldn't be assigned to a computer yet. They're kept as a backup.</string>
+    <string name="pin_issue_legacy_not_migrated">%1$d earlier pins can't sync to this computer. They stay on this device.</string>
+    <string name="pin_issue_alias_limited">Some renamed projects may briefly show as separate pins. No pin change was lost.</string>
+    <string name="pin_issue_pairing_changed">This computer's pairing changed. Reconnect to it to sync pins.</string>
+    <string name="pin_issue_retry">Retry</string>
+    <string name="pin_issue_dismiss">Dismiss</string>
 </resources>

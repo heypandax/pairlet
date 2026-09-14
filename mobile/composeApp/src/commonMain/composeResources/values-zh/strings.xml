@@ -2076,4 +2076,16 @@
     <string name="diagnostic_sharing_save_failed">未能保存此设置供下次启动使用，请重试。</string>
     <string name="diagnostic_sharing_description">Firebase 接收使用事件和崩溃报告，Sentry 接收诊断错误与日志，用于改善稳定性和功能。诊断不包含会话正文、提示词和文件内容。关闭后停止新采集，并清理平台支持清理的待发报告；已送达的数据仍会保留。此设置仅控制当前 App，电脑端诊断单独设置。</string>
     <string name="diagnostic_copy_id">复制最近诊断编号</string>
+    <string name="pin_issue_retained_locally">之前的部分置顶改动只保留在这台设备上。重新置顶或取消置顶这些项目，所有设备才会同步。</string>
+    <string name="pin_issue_refused">这台电脑没有接受最近的置顶改动，改动仍保存在这台设备上。</string>
+    <string name="pin_issue_capacity">这台电脑的置顶列表已满。先取消置顶一个项目，再重试。</string>
+    <string name="pin_issue_storage_failed">暂时无法确认置顶是否已保存，请重试。</string>
+    <string name="pin_issue_local_reset">这台设备上保存的置顶无法读取，文件保持原样；暂时不能在这里修改这台电脑的置顶。</string>
+    <string name="pin_issue_outbox_full">待同步的置顶改动太多。先连上这台电脑，再继续修改置顶。</string>
+    <string name="pin_issue_migration_uncertain">之前的置顶项目暂时无法确定属于哪台电脑，已保留备份。</string>
+    <string name="pin_issue_legacy_not_migrated">有 %1$d 个旧置顶无法同步到这台电脑，会保留在这台设备上。</string>
+    <string name="pin_issue_alias_limited">部分改过名的项目可能暂时显示成两个置顶，置顶改动没有丢失。</string>
+    <string name="pin_issue_pairing_changed">这台电脑的配对已变更。重新连接后才能同步置顶。</string>
+    <string name="pin_issue_retry">重试</string>
+    <string name="pin_issue_dismiss">关闭</string>
 </resources>

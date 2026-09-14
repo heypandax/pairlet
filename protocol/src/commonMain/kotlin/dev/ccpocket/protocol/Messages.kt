@@ -1297,6 +1297,12 @@ data class DaemonInfo(
      */
     val quotaAgents: List<String> = emptyList(),
     val supportsDiagnostics: Boolean = false,
+    /**
+     * Capability advertisement (issue #362): this daemon owns the per-computer project-pin list
+     * ([SyncProjectPins] / [ProjectPinsState]). ABSENT (older daemon) decodes to false: the client keeps
+     * its per-computer pins and pending intent locally and sends no pin frame to that daemon.
+     */
+    val supportsProjectPins: Boolean = false,
 ) : ToPhone
 
 @Serializable
@@ -2069,6 +2075,9 @@ data class ClientCaps(
     // here keeps the wire quiet and the contract explicit.
     val supportsApprovalV2: Boolean = false,
     val supportsDiagnostics: Boolean = false,
+    // issue #362 (trailing optional): this connection decodes pocket/pins.state. The daemon never sends
+    // that frame — not even a reply — to a connection that did not declare it, per connection.
+    val supportsProjectPins: Boolean = false,
 ) : ToDaemon
 
 // ── agent model listing ─────────────────────────────────────────────────

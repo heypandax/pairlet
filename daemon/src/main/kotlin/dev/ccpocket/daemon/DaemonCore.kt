@@ -70,6 +70,10 @@ class DaemonCore(
      * unit tests and embedded cores from reading ~/.cc-pocket or opening peer relay connections. */
     peerInboxFactory: (CoroutineScope) -> dev.ccpocket.daemon.review.PeerInboxService =
         dev.ccpocket.daemon.review.PeerInboxService::inMemory,
+    /** Project-pin sync (issue #362). The file store reads lazily — an embedded core that never receives a pin
+     *  request never touches ~/.cc-pocket — and tests hand in a temp-file or in-memory store instead. */
+    projectPinStore: dev.ccpocket.daemon.pins.ProjectPinStore =
+        dev.ccpocket.daemon.pins.FileProjectPinStore(dev.ccpocket.daemon.pins.FileProjectPinStore.defaultFile()),
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + kotlinx.coroutines.CoroutineExceptionHandler { _, error ->
         Diagnostics.report(ErrorPath.ASYNC_WORKER, Stage.EXECUTE, ErrorCode.UNEXPECTED, error)
@@ -219,6 +223,17 @@ class DaemonCore(
      */
     val reviewOwner = dev.ccpocket.daemon.review.ReviewOwnerService({ collaboratorControl }, reviews, peerInbox)
 
+    /**
+     * This computer's project-pin list (issue #362), shared by both transports: the router commits requests,
+     * the relay and LAN connections attach their owner push targets. A cursor is only ever reclaimed for a
+     * device that is no longer paired (it can never authenticate a frame again); the allow-list is read only
+     * when the cursor table is actually full.
+     */
+    val projectPins = dev.ccpocket.daemon.pins.ProjectPinService(
+        projectPinStore, scope,
+        deviceStillPaired = { id -> dev.ccpocket.daemon.identity.PairedDevices.load().containsKey(id) },
+    )
+
     val router = RequestRouter(
         registry, dirs, transcribe, inbox, shell, exports, scope, auth, prefs, presets, scheduler,
         // presetEnv shares PresetStore with the DaemonInfo gateway pill (Main.kt): the host we ask for a
@@ -234,6 +249,7 @@ class DaemonCore(
         approvalHistory = approvalHistory,
         reviews = reviews,
         reviewOwner = reviewOwner,
+        projectPins = projectPins,
         git = git,
         codexQuota = dev.ccpocket.daemon.codex.CodexQuotaService(codexBin),
     )

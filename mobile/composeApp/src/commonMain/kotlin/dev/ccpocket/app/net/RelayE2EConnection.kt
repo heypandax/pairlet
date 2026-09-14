@@ -16,6 +16,7 @@ import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.Route
+import dev.ccpocket.protocol.SyncProjectPins
 import dev.ccpocket.protocol.e2e.E2ECrypto
 import dev.ccpocket.protocol.e2e.E2ESession
 import dev.ccpocket.protocol.e2e.Wire
@@ -51,7 +52,7 @@ class RelayE2EConnection {
             maxFrameSize = 4L * 1024 * 1024 // accept big frames forwarded from the daemon, e.g. long transcript history replays (matches relay cap)
         }
     }
-    private val outbox = Channel<Frame>(Channel.BUFFERED)
+    private val outbox = ScopedOutbox()
     // relay control-plane (TEXT) frames the device originates — e.g. RegisterPush. Buffered across
     // reconnects like [outbox]; the per-connection writer drains it once a socket is live.
     private val controlOutbox = Channel<dev.ccpocket.protocol.ToRelay>(Channel.BUFFERED)
@@ -74,6 +75,13 @@ class RelayE2EConnection {
     // per-device supersede kick turns that overlap into a mutual-kick loop). Any coroutine of a stale
     // generation must therefore stop touching the outboxes / shared flows the moment it notices.
     @Volatile private var connSeq = 0
+
+    // the generation whose handshake completed and whose writer serves the outbox (0 = none): the only
+    // connection a scoped project-pin frame may be queued for (#362)
+    @Volatile private var liveGen = 0
+
+    /** The live connection's generation (0 = none), captured by a pin sync generation when it starts. */
+    val liveConnection: Int get() = liveGen
 
     /** @param firstTicket the pairing ticket — supplied as PSK only on the very first connect after pairing. */
     suspend fun connect(paired: PairedDaemon, keys: E2ECrypto.KeyPair, firstTicket: String?) = coroutineScope {
@@ -101,8 +109,8 @@ class RelayE2EConnection {
             // superseded while handshaking — a newer connect() owns the outboxes now; die before touching them (#142)
             if (gen != connSeq) throw DeadLinkException()
             // a reconnect-trigger burst stacked duplicate list/reattach requests while the link was down;
-            // collapse them before the writer flushes (issue #143)
-            outbox.dedupeBacklog()
+            // collapse them before the writer flushes (issue #143); pin frames of another connection go (#362)
+            outbox.prepareFor(gen)
 
             // #298 silence-deafness: the OTHER half of #146. When the daemon loses this device's session
             // (relay blip re-attaches the stream, daemon restarts, …) our sealed frames are dropped
@@ -113,11 +121,11 @@ class RelayE2EConnection {
             // one send count or a late reset costs at most one extra (cheap, invisible) re-handshake.
             var sentSinceInbound = 0
             var lastInboundAt = epochMillis() // the completed handshake IS inbound proof
+            liveGen = gen
             val writer = launch {
-                for (f in outbox) {
-                    // superseded mid-drain: hand the frame back to the live connection instead of sending
-                    // it down this dying socket, then die (#142)
-                    if (gen != connSeq) { outbox.send(f); throw DeadLinkException() }
+                // superseded mid-drain: an ordinary frame goes back to the live connection instead of down this
+                // dying socket, then the writer dies (#142); a pin frame of this connection is dropped (#362)
+                outbox.runWriter(gen, isCurrent = { gen == connSeq }) { f ->
                     val json = PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f))
                     sendOrDie { outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray())))) }
                     if (silenceDeafTripped(++sentSinceInbound, epochMillis() - lastInboundAt)) {
@@ -167,6 +175,7 @@ class RelayE2EConnection {
                     }
                 }
             } finally {
+                if (liveGen == gen) liveGen = 0
                 writer.cancel(); ctrlWriter.cancel(); pinger.cancel()
             }
         }
@@ -174,10 +183,15 @@ class RelayE2EConnection {
 
     suspend fun send(frame: Frame) = outbox.send(frame)
 
+    /** Queue a project-pin frame for connection [expectedConnection] only, without suspending (#362). */
+    fun tryEnqueuePin(frame: SyncProjectPins, fence: PinDispatchFence, expectedConnection: Int): PinEnqueueResult =
+        outbox.tryEnqueuePin(frame, fence, expectedConnection) { liveGen }
+
     /** Frames queued but not yet written. The outbox deliberately buffers across reconnects to the SAME
      *  daemon; a machine SWITCH must drain it instead — leftover frames would otherwise flush into the
-     *  next machine's link (a session open meant for computer A landing on computer B). */
-    fun drainPending(): List<Frame> = outbox.drainAll()
+     *  next machine's link (a session open meant for computer A landing on computer B). Pin frames are
+     *  never returned: they belong to the connection they were queued for (#362). */
+    fun drainPending(): List<Frame> = outbox.drainOrdinary()
 
     /** Send a relay control-plane frame (e.g. RegisterPush) on the TEXT plane. Buffers until connected. */
     suspend fun sendControl(frame: dev.ccpocket.protocol.ToRelay) = controlOutbox.send(frame)

@@ -413,6 +413,11 @@ fun App(scope: CoroutineScope) {
                     .then(coveredContent),
             ) {
                 if (!appLock.locked.value) BrandNotice(brandTransition)
+                // #362: the one pin-sync notice, in flow — never under App Lock, its privacy cover, or an approval
+                ProjectPinIssueNotice(
+                    repo,
+                    allowed = pinNoticeAllowedOnMobile(appForeground, appLock.locked.value, appLock.covered.value, approvalAsk != null),
+                )
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
                 // preview/recording mode hides the demo banner for a clean marketing capture
                 if (repo.demoMode.value && !dev.ccpocket.app.isPreviewMode()) StatusBanner(Tok.accent, stringResource(Res.string.demo_banner))

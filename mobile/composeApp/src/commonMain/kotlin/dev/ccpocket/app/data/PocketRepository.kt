@@ -593,7 +593,12 @@ class ConnectWedgedException : Exception("connect wedged: no attach within timeo
  * switching, settings writes, or session-opening through them today, and they skip push registration
  * (the platform push singleton stays owned by the primary until the per-machine policy work).
  */
-class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: PairedDaemon? = null) {
+class PocketRepository(
+    private val scope: CoroutineScope,
+    private val pinnedTo: PairedDaemon? = null,
+    /** Where project pins live (issue #362). Tests hand in a registry over a temp directory. */
+    internal val projectPinRegistry: dev.ccpocket.app.pins.ProjectPinRegistry = dev.ccpocket.app.pins.ProjectPinRegistry.shared,
+) {
     private val direct = RelayConnection()
     private val relay = RelayE2EConnection()
     private val directE2E = DirectE2EConnection()
@@ -843,18 +848,34 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  prompt (createBiometrics()); it is constructed the first time App() reads it on Android/iOS. */
     val appLock: AppLockController by lazy { AppLockController(scope, createBiometrics()) }
 
-    /** Projects the user pinned to the top, newest pin first. Persisted client-side (paths never contain
-     *  '\n', so a newline-joined string is a safe, dependency-free encoding). */
-    val pinnedPaths = mutableStateListOf<String>().also { list ->
-        SecureStore.getString(K_PINNED)?.split('\n')?.filter { it.isNotBlank() }?.let(list::addAll)
+    /** Projects the user pinned to the top, newest pin first: the pins of the computer this repository speaks for
+     *  (issue #362). An owner computer's list is owned by its daemon and shared by every paired client; a guest
+     *  binding, no binding, and the demo keep theirs on this device. Always a mirror of [pinLink]'s visible list. */
+    val pinnedPaths = mutableStateListOf<String>()
+
+    /** By the daemon's identity where it is known: a spelling the computer resolved to a pinned project is that pin. */
+    fun isPinned(path: String): Boolean {
+        val mirrored = path in pinnedPaths // read the observable mirror, so a composition re-reads when pins change
+        return pinLink.isPinned(path) ?: mirrored
     }
 
-    fun isPinned(path: String) = path in pinnedPaths
-
-    /** Toggle a project's pinned state (most-recent pin first) and persist. */
+    /** Toggle a project's pinned state — sent as an explicit pin or unpin of that one project, never a list. */
     fun togglePin(path: String) {
-        if (!pinnedPaths.remove(path)) pinnedPaths.add(0, path)
-        SecureStore.putString(K_PINNED, pinnedPaths.joinToString("\n"))
+        if (pinLink.scopeKey == null) bindProjectPins() // released by disconnect(): rebind before acting
+        pinLink.setPinned(path, !isPinned(path))
+    }
+
+    /** Point pins at the current binding: construction, pairing, switching, unpairing, a fleet promote, the demo. */
+    private fun bindProjectPins() {
+        migrateLegacyPins()
+        pinLink.bind(paired.value, demoMode.value)
+    }
+
+    /** The pre-#362 device-global list ([K_PINNED]) is placed once, by the PRIMARY repository only — a satellite
+     *  never decides where it belongs. The key itself is only read, never changed: it stays as the backup. */
+    private fun migrateLegacyPins() {
+        if (pinnedTo != null || demoMode.value) return
+        projectPinRegistry.migrateLegacyIfNeeded(SecureStore.getString(K_PINNED), pairedList.toList(), paired.value)
     }
 
     // ── cross-project working set (issue #165) ───────────────────────────────────────────────────────
@@ -1049,6 +1070,29 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val addingDevice = mutableStateOf(false)
     /** No-pairing demo: when true, all I/O is short-circuited to local sample data (see [enterDemo]). */
     val demoMode = mutableStateOf(false)
+
+    /** Project-pin sync for the computer this repository speaks for (issue #362) — [pinnedPaths] mirrors it. */
+    private val pinLink = ProjectPinLink(projectPinRegistry, scope, onVisible = { replace(pinnedPaths, it) })
+
+    /** The latest bounded, actionable pin-sync problem for this computer (null = none): e.g. changes kept on this
+     *  device after re-pairing, a refusal from the computer, or a local storage failure. */
+    val projectPinSyncIssue: androidx.compose.runtime.State<dev.ccpocket.app.pins.PinSyncIssue?> get() = pinLink.issue
+
+    /** The pin-sync notice to show for this computer now (null = none, or dismissed). Carries no error text or path. */
+    val projectPinIssueNotice: androidx.compose.runtime.State<PinIssueEvent?> get() = pinLink.notice
+
+    /** Hide [shown]'s notice. The pins, the outbox and anything retained on this device are untouched. */
+    fun dismissProjectPinIssue(shown: PinIssueEvent) = pinLink.dismiss(shown)
+
+    /** The notice's retry: re-read this computer's pin storage and fetch its pins again. Not a reconnect. */
+    fun retryProjectPins() = pinLink.retry()
+
+    init {
+        // #362: only the primary installs which binding speaks for each computer, from the pairing store itself and
+        // once per process; satellites and later repositories merely acquire leases against it
+        if (pinnedTo == null) projectPinRegistry.initializeAuthorityOnce { Pairing.loadAll() }
+        bindProjectPins() // after paired/pairedList/demoMode exist: pins load from the bound computer's own scope
+    }
 
     /** `demo=1` for the funnel events the demo also fires. [enterDemo] deliberately reuses the REAL state
      *  machine, so connected/session_opened/prompt_sent land whether or not a computer was ever paired —
@@ -1881,11 +1925,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             pairTrace?.stage(DiagnosticStage.REQUEST)
             val keys = Pairing.deviceKeys()
             paired.value = Pairing.redeem(info, keys, client!!) // upserts the list + pins this as the active account
+            projectPinRegistry.refreshAfterPairingChange { Pairing.loadAll() } // #362: a replaced credential retires old pin leases now
             // a FRESH pairing (e.g. a guest redeeming a new invite for the same daemon/accountId) supersedes
             // any recorded "share ended" terminal state — else the new binding would open on the dead card
             paired.value?.let { SecureStore.remove(K_SHARE_ENDED_PREFIX + it.accountId) }
             shareEnded.value = null
             replace(pairedList, Pairing.loadAll())
+            bindProjectPins() // #362: the new binding's own pins (and, once, where the legacy list belongs)
             addingDevice.value = false
             firstTicket = info.ticket
             Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to source, TelKey.Attempt to attempt) + productDimensions())
@@ -1917,6 +1963,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun startRelay() {
         if (paired.value == null) return
         if (sessionActive.value) return // already connected/connecting — the transport layer self-heals from here
+        bindProjectPins() // #362: a link released by disconnect() rebinds its computer's pins before connecting
         useRelay = true
         sessionActive.value = true
         retryAttempts = 0
@@ -1925,6 +1972,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Advanced: connect directly to a daemon on the LAN (no relay), still over WebSocket. */
     fun startDirect(url: String) {
+        bindProjectPins() // #362: the plaintext dev connection keeps local-only pins
         useRelay = false
         lastDirectUrl = url
         status.value = StatusMsg(Res.string.status_checking_network)
@@ -2370,6 +2418,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         daemonDiagnostics = false
         lastTransportLaunchAt = epochMillis()
         transportLaunches++
+        pinLink.onDisconnect() // #362: a new socket is a new pin sync generation — only its own DaemonInfo resumes it
         presenceProbeJob?.cancel(); presenceProbeJob = null // a full relaunch moots the #145 probe
         connected.value = true // internal "attempt active/attached" guard for retry/foreground — NOT the UI
         attachedThisSession = false; daemonOffline = false; relayDeadlinePassed = false; listWaitJob?.cancel()
@@ -2460,7 +2509,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // offers addressed to THIS device. Sending the ordinary volley here would be three refusals.
                 send(ListHandoffs())
             } else {
-                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true))
+                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true))
                 send(ListDirectories())
                 send(ListPendingApprovals)
             }
@@ -2575,6 +2624,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // Inbox links do the same with the one frame they're allowed — which doubles as the §3.2.3
             // "foreground → re-pull ListHandoffs" requirement (a missed offer push heals here).
             if (isCollaboratorInbox) refreshHandoffsSilently() else refreshDirectoriesSilently()
+            pinLink.onForeground() // #362: re-fetch heals a missed pin push; a blocked outbox may try again
         }
     }
 
@@ -2631,6 +2681,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // frames queued for the binding we're leaving must not leak into the next link (both transports
         // are reused across machine switches, and their outboxes deliberately buffer across reconnects)
         directAttemptInFlight = false
+        pinLink.onDisconnect() // #362: retire pin sync before the queues are drained (drainPending drops pin frames too)
         directE2E.drainPending(); relay.drainPending()
         connected.value = false
         phase.value = ConnPhase.Connecting
@@ -2692,6 +2743,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         directories.clear(); sessions.clear(); transcript.clearMessages(); pendingImages.clear(); clearFileUploads(); clearBackgroundJobs()
         resetHistoryPaging() // #147: the transcript left with messages — so must its cursor
         demoMode.value = false // leaving the demo returns to real pairing
+        // #362: no pin frame from this link applies to whatever comes next, and a link retired here (fleet satellite,
+        // collaborator inbox) stops listening to its computer's shared pins; the next start or switch rebinds
+        pinLink.release()
         demoConnecting.value = false
         abandonVoice()
         status.value = StatusMsg(Res.string.status_disconnected)
@@ -2720,8 +2774,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             try {
                 val info = Pairing.resolveCode(code.trim(), client)
                 val newBinding = Pairing.redeem(info, Pairing.deviceKeys(), client) // upserts the list + pins the NEW account active…
+                projectPinRegistry.refreshAfterPairingChange { Pairing.loadAll() } // #362: a replaced credential retires old pin leases now
                 keepActive?.let { Pairing.setActive(it) }          // …undo that pin so the live session stays put
                 replace(pairedList, Pairing.loadAll())
+                // #362: a first owner computer may be where the legacy list belongs; re-adding the ACTIVE computer
+                // leaves this binding stale, which the rebind reports instead of syncing with it
+                bindProjectPins()
                 Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to "code-add", TelKey.UsageMode to if (newBinding.role == BindingRole.OWNER) "own" else "shared"))
                 onDone(true)
             } catch (t: Throwable) {
@@ -2750,6 +2808,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         paired.value = target
         shareEnded.value = loadShareEnded(target.accountId) // per-account guest ending follows the switch
         loadWorkingSet(target.accountId) // #165: and so does the switcher's memory — see [workingSetMru]
+        bindProjectPins() // #362: and so do its pins — the target computer's own scope, never the outgoing list
         Pairing.setActive(target.accountId)
         firstTicket = null // an already-paired daemon authenticates by static key — the PSK is only for first pair
         startRelay()
@@ -2795,7 +2854,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         themeMode.value = from.themeMode.value
         accentTheme.value = from.accentTheme.value
         voiceWhisper.value = from.voiceWhisper.value
-        replace(pinnedPaths, from.pinnedPaths.toList())
+        // #362: pins are NOT copied from the outgoing primary — each computer has its own; rebound below
         // #165: NOT copied from the outgoing primary — the working set is per-computer, and this promote is
         // precisely the moment the machine changes. Load this satellite's own instead.
         loadWorkingSet()
@@ -2804,6 +2863,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // freshen this binding's own copy too (pinned at construction — a rename/hostName/directUrl learned
         // since then lives only in the outgoing primary's list)
         paired.value = from.pairedList.firstOrNull { it.accountId == paired.value?.accountId } ?: paired.value
+        bindProjectPins() // this computer's own scope (bound since construction) — refreshes the mirror, copies nothing
     }
 
     /**
@@ -2879,15 +2939,46 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun unpair(target: PairedDaemon) {
         val wasActive = paired.value?.accountId == target.accountId
         val remaining = Pairing.remove(target.accountId) // also re-points the active account if it was this one
+        projectPinRegistry.refreshAfterPairingChange { Pairing.loadAll() } // #362: the removed binding holds no pin lease from here
         replace(pairedList, remaining)
         SecureStore.remove(K_SHARE_ENDED_PREFIX + target.accountId) // a removed binding's guest ending goes with it
-        if (wasActive) { disconnect(); paired.value = remaining.lastOrNull(); shareEnded.value = loadShareEnded(paired.value?.accountId) }
+        if (wasActive) { disconnect(); paired.value = remaining.lastOrNull(); shareEnded.value = loadShareEnded(paired.value?.accountId); bindProjectPins() }
     }
 
     /** Remove the currently active binding (the "re-pair" escape hatch when a pairing goes invalid). */
     fun unpairActive() { paired.value?.let { unpair(it) } }
 
     internal var onSendForTest: ((Frame) -> Unit)? = null // test seam: observe outbound frames (issue #104 resend)
+
+    /** Test seam (#362): stands in for the captured connection's pin queue, after every repository and fence check. */
+    internal var pinWriterForTest: ((dev.ccpocket.protocol.SyncProjectPins, dev.ccpocket.app.net.PinDispatchFence) -> dev.ccpocket.app.net.PinEnqueueResult)? = null
+
+    /**
+     * The pin queue of exactly the connection whose DaemonInfo is being handled (#362). Pins never go through [send]:
+     * its target follows whatever this repository dials next. Every enqueue first re-checks that this repository
+     * still speaks for the same binding on the same transport launch, then the generation's fence, then the captured
+     * connection itself.
+     */
+    private fun capturePinOutbound(): dev.ccpocket.app.net.PinOutbound? {
+        if (!useRelay || demoMode.value) return null
+        val target = paired.value ?: return null
+        val launch = transportLaunches
+        val viaDirect = directE2E.connected && directE2E.account == target.accountId
+        val connection = if (viaDirect) directE2E.liveConnection else relay.liveConnection
+        val testWriter = pinWriterForTest
+        if (connection == 0 && testWriter == null) return null
+        return dev.ccpocket.app.net.PinOutbound { frame, fence ->
+            val now = paired.value
+            when {
+                transportLaunches != launch || !useRelay || demoMode.value -> dev.ccpocket.app.net.PinEnqueueResult.RETIRED
+                now == null || now.accountId != target.accountId || now.deviceId != target.deviceId -> dev.ccpocket.app.net.PinEnqueueResult.RETIRED
+                !fence.isValid() -> dev.ccpocket.app.net.PinEnqueueResult.RETIRED
+                testWriter != null -> testWriter(frame, fence)
+                viaDirect -> directE2E.tryEnqueuePin(frame, fence, connection)
+                else -> relay.tryEnqueuePin(frame, fence, connection)
+            }
+        }
+    }
 
     /** The backend an outbound frame targets, for the reverse capability guard in [send]; null = not agent-scoped. */
     private fun agentCarried(frame: Frame): AgentKind? = when (frame) {
@@ -2964,6 +3055,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // activation by [demoTag] — Connected/SessionOpened/PromptSent all run through the shared call sites.
         if (!demoMode.value) Telemetry.track(TelEvent.DemoEntered)
         demoMode.value = true
+        bindProjectPins() // #362: the demo's pins live in memory only
         // Demo has no handshake, so explicitly emulate a current daemon rather than inheriting the
         // disconnected socket's deny-by-default capability state.
         daemonSupportedAgents.value = DAEMON_SUPPORTED_AGENT_WIRES.toSet()
@@ -3214,6 +3306,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is Directories -> {
                 replace(directories, f.entries); refreshing.value = false
                 noteWorkingSessions() // #165: a session that stopped working while you were elsewhere earns a dot
+                if (!demoMode.value) pinLink.onDirectories(f.entries.map { it.path }) // #362: proves legacy fallback paths
                 directoriesRev++ // the #145 presence probe checks this to prove the computer answered
                 directoriesLoaded.value = true; daemonOffline = false; listWaitJob?.cancel() // a reply proves the computer is online
                 if (!useRelay) attachedThisSession = true // direct mode: socket + data == attached
@@ -3394,6 +3487,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     }
                 }
             }
+            is dev.ccpocket.protocol.ProjectPinsState -> pinLink.onState(f) // #362: correlated inside the link
             is PushPrefs -> pushPrefs.value = f.enabled
             is ApprovalPrefs -> {
                 approvalPrefs.value = f.noAutoDeny
@@ -3433,6 +3527,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 }
                 daemonDiagnostics = f.supportsDiagnostics
                 daemonOwnsPromptRecovery = f.supportsPromptRecovery
+                // #362: this connection's advertisement is the only thing that starts pin sync with this computer
+                pinLink.onDaemonInfo(f.supportsProjectPins, paired.value, pairedTransport = useRelay && !demoMode.value, outbound = capturePinOutbound())
                 if (daemonOwnsPromptRecovery) clearTurnWatchdogState()
                 // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
                 // the fields — "unknown" must not be shown as the previous machine's numbers
@@ -7412,7 +7508,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_DEFAULT_AGENT = "default_session_agent"   // SecureStore: AgentKind.name new sessions start under (default CLAUDE)
         const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | one agent key | comma-joined keys — project/session filter (#31/#188/#248, see AgentFilter.kt)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
-        const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
+        const val K_PINNED = "pinned_projects"                 // SecureStore, pre-#362 and now read-only: '\n'-joined device-global pins, kept as the migration backup
         const val K_WORKING_SET_PREFIX = "working_set_mru:"    // SecureStore: "working_set_mru:<accountId>" → TSV dirKey\tsessionId\ttitle\tproject\tat\tagent — that computer's switcher MRU (issue #165)
         const val K_DRAFT_PREFIX = "draft:"                    // SecureStore: "draft:<sessionId|convoId|workdir>" → unsent composer text for that conversation
         const val K_SESSION_PARAMS = "session_params"          // SecureStore: TSV sid\tmode\tmodel\teffort\tagent per line (last 100 sessions)

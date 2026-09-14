@@ -25,6 +25,12 @@ internal fun <T> Channel<T>.drainAll(): List<T> = buildList {
  */
 internal fun dedupeReconnectBacklog(frames: List<Frame>): List<Frame> {
     if (frames.size < 2) return frames
+    val keep = dedupeReconnectMask(frames)
+    return frames.filterIndexed { i, _ -> keep[i] }
+}
+
+/** [dedupeReconnectBacklog]'s decision per index (true = keep), for outboxes that wrap their frames. */
+internal fun dedupeReconnectMask(frames: List<Frame>): BooleanArray {
     val lastListDirs = HashMap<String?, Int>()
     val lastSessions = HashMap<String, Int>()
     val lastOpen = HashMap<Pair<String, String?>, Int>()
@@ -36,8 +42,8 @@ internal fun dedupeReconnectBacklog(frames: List<Frame>): List<Frame> {
             else -> {}
         }
     }
-    return frames.filterIndexed { i, f ->
-        when (f) {
+    return BooleanArray(frames.size) { i ->
+        when (val f = frames[i]) {
             is ListDirectories -> lastListDirs[f.root] == i
             is ListSessions -> lastSessions[f.workdir] == i
             is OpenSession -> lastOpen[f.workdir to f.resumeId] == i
@@ -46,12 +52,8 @@ internal fun dedupeReconnectBacklog(frames: List<Frame>): List<Frame> {
     }
 }
 
-/** Apply [dedupeReconnectBacklog] to a connection outbox in place — called right after a fresh socket's
- *  handshake, before the writer starts flushing what accumulated while the link was down. */
-internal fun Channel<Frame>.dedupeBacklog() {
-    val all = drainAll()
-    if (all.isEmpty()) return
-    val retained = dedupeReconnectBacklog(all)
+/** Put back what a connection outbox kept after its post-handshake dedupe — reporting anything that no longer fit. */
+internal fun <T> Channel<T>.requeueRetained(retained: List<T>) {
     var dropped = 0L
     retained.forEach { if (trySend(it).isFailure) dropped++ }
     if (dropped > 0) dev.ccpocket.observability.Diagnostics.report(

@@ -14,6 +14,7 @@ import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.LanHello
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.Role
+import dev.ccpocket.protocol.SyncProjectPins
 import dev.ccpocket.protocol.e2e.E2ECrypto
 import dev.ccpocket.protocol.e2e.E2ESession
 import dev.ccpocket.protocol.e2e.Wire
@@ -25,7 +26,6 @@ import io.ktor.websocket.readText
 import kotlin.concurrent.Volatile // commonMain: JVM resolves kotlin.jvm.Volatile implicitly, Kotlin/Native (iOS) does not
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
@@ -60,7 +60,7 @@ class DirectE2EConnection {
             maxFrameSize = 4L * 1024 * 1024 // big history replays travel this path too (matches relay cap)
         }
     }
-    private val outbox = Channel<Frame>(Channel.BUFFERED)
+    private val outbox = ScopedOutbox()
     val inbound = MutableSharedFlow<Frame>(extraBufferCapacity = 128)
     /** Mirrors the relay's control plane just enough for the repo's state machine: a synthetic [Attached]
      *  after the Noise handshake (the daemon IS the peer — no separate presence signal exists or is needed). */
@@ -84,6 +84,12 @@ class DirectE2EConnection {
     // connection generation (issue #142) — mirrors RelayE2EConnection: a superseded connect() must stop
     // touching the shared cross-reconnect outbox / inbound flows the moment a newer one takes over
     @Volatile private var connSeq = 0
+
+    // the handshaken generation serving the outbox (0 = none): the only target of a scoped pin frame (#362)
+    @Volatile private var liveGen = 0
+
+    /** The live connection's generation (0 = none), captured by a pin sync generation when it starts. */
+    val liveConnection: Int get() = liveGen
 
     /**
      * Dial + handshake, then serve for the life of the socket. Failure BEFORE the handshake completes
@@ -112,13 +118,16 @@ class DirectE2EConnection {
                 if (gen != connSeq) throw DeadLinkException() // superseded while handshaking — never touch the shared outbox (#142)
                 handshaken = true
                 connected = true
+                liveGen = gen
                 control.emit(Attached(Role.DEVICE, paired.accountId))
                 firstFrame?.let { inbound.emit(it) } // don't drop the confirming frame (usually DaemonInfo)
-                outbox.dedupeBacklog() // collapse the reconnect-burst duplicates queued while the link was down (#143)
+                // collapse the reconnect-burst duplicates queued while the link was down (#143); pin frames of
+                // another connection go (#362)
+                outbox.prepareFor(gen)
                 val writer = launch {
-                    for (f in outbox) {
-                        // superseded mid-drain: hand the frame back to the live connection, then die (#142)
-                        if (gen != connSeq) { outbox.send(f); throw DeadLinkException() }
+                    // superseded mid-drain: an ordinary frame goes back to the live connection, then the writer
+                    // dies (#142); a pin frame of this connection is dropped (#362)
+                    outbox.runWriter(gen, isCurrent = { gen == connSeq }) { f ->
                         val json = PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f))
                         sendOrDie { outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray())))) }
                     }
@@ -156,14 +165,20 @@ class DirectE2EConnection {
             throw t
         } finally {
             connected = false
+            if (liveGen == gen) liveGen = 0
         }
     }
 
     suspend fun send(frame: Frame) = outbox.send(frame)
 
+    /** Queue a project-pin frame for connection [expectedConnection] only, without suspending (#362). */
+    fun tryEnqueuePin(frame: SyncProjectPins, fence: PinDispatchFence, expectedConnection: Int): PinEnqueueResult =
+        outbox.tryEnqueuePin(frame, fence, expectedConnection) { liveGen }
+
     /** Frames queued but not yet written (the socket never came up / died first) — the caller re-routes
-     *  them to the relay so nothing silently evaporates in a direct→relay fallback. */
-    fun drainPending(): List<Frame> = outbox.drainAll()
+     *  them to the relay so nothing silently evaporates in a direct→relay fallback. Pin frames are dropped
+     *  instead: a pin subscribed on this connection never rides the relay's unrelated subscription (#362). */
+    fun drainPending(): List<Frame> = outbox.drainOrdinary()
 
     private suspend fun DefaultClientWebSocketSession.awaitHandshake(init: E2ESession.Initiator): E2ESession {
         while (true) {
