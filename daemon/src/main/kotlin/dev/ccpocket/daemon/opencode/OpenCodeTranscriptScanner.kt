@@ -143,6 +143,43 @@ object OpenCodeTranscriptScanner {
         }.getOrNull()
     }
 
+    /** Resume the last completed request's context footprint, never a session/turn spend sum.
+     * OpenCode v1.2.0 session/processor.ts assigns the same usage.tokens to step-finish and
+     * assistantMessage.tokens. session/index.ts getUsage splits input/cache read/cache write;
+     * output already includes reasoning. This is the same post-request footprint as the live path,
+     * not a tokenization of edits or pending tool results since that request. A newer unknown,
+     * incomplete or compaction-summary assistant invalidates the older measurement. */
+    fun resumeContextTokens(sessionId: String, conn: Connection? = OpenCodePaths.connectReadOnly()): Long? =
+        runCatching { conn?.use { resumeContextTokensFrom(it, sessionId) } }.getOrNull()
+
+    internal fun resumeContextTokensFrom(conn: Connection, sessionId: String): Long? {
+        conn.prepareStatement("SELECT data FROM message WHERE session_id=? ORDER BY time_created DESC,id DESC").use { st ->
+            st.setString(1, sessionId)
+            st.executeQuery().use { rs -> while (rs.next()) {
+                // An unreadable newer row may be an assistant: do not revive an older measurement.
+                val row = runCatching { json.parseToJsonElement(rs.getString(1)) }.getOrNull() as? JsonObject
+                    ?: return null
+                val role = (row["role"] as? JsonPrimitive)?.contentOrNull
+                if (role == "user") continue
+                if (role != "assistant" || row["summary"]?.toString() == "true") return null
+                val completed = (row["time"] as? JsonObject)?.longAt("completed") ?: 0L
+                if (completed <= 0L) return null
+                val tokens = row["tokens"] as? JsonObject ?: return null
+                val input = (tokens["input"] as? JsonPrimitive)?.longOrNull ?: return null
+                val output = (tokens["output"] as? JsonPrimitive)?.longOrNull ?: return null
+                // Supported OpenCode records always contain both normalized cache counters.
+                // Missing is unknown, not an explicit zero.
+                val cache = tokens["cache"] as? JsonObject ?: return null
+                val read = (cache["read"] as? JsonPrimitive)?.longOrNull ?: return null
+                val write = (cache["write"] as? JsonPrimitive)?.longOrNull ?: return null
+                val counts = listOf(input, output, read, write)
+                if (counts.any { it < 0L }) return null
+                return runCatching { counts.fold(0L, Math::addExact) }.getOrNull()?.takeIf { it > 0L }
+            } }
+        }
+        return null
+    }
+
     /** Every directory with a TOP-LEVEL OpenCode session → its newest session mtime.
      *  Rows are read un-grouped so the same [isSubAgentSession] rule as [scan] drops task sub-agent
      *  runs (issue #172) before aggregating — a directory that only ever hosted a sub-run must not

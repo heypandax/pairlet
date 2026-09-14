@@ -559,6 +559,7 @@ class ZCodeBackendTest {
         assertEquals(5, usage.inputTokens)
         assertEquals(2, usage.cacheReadInputTokens)
         assertEquals(3, usage.cacheCreationInputTokens)
+        assertEquals(1, usage.outputTokens)
     }
 
     @Test

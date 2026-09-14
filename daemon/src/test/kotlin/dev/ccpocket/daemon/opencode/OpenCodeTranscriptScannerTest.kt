@@ -133,6 +133,63 @@ class OpenCodeTranscriptScannerTest {
         }
     }
 
+    @Test
+    fun resume_uses_latest_request_not_sum_and_matches_live_usage() {
+        openFixtureDb().use { conn ->
+            conn.putSession("s", "Session")
+            conn.putAssistantMessage("s", "old", completedTokens(9000, 100, 8000, 7000), 1)
+            // A tool loop and subsequent compacted context can be MUCH smaller than old spend.
+            conn.putAssistantMessage("s", "tool", completedTokens(1000, 50, 100, 20).replace("\"role\":\"assistant\"", "\"role\":\"assistant\",\"finish\":\"tool-calls\""), 2)
+            assertEquals(1170L, OpenCodeTranscriptScanner.resumeContextTokensFrom(conn, "s"))
+            conn.putAssistantMessage("s", "summary", """{"role":"assistant","summary":true}""", 3)
+            assertNull(OpenCodeTranscriptScanner.resumeContextTokensFrom(conn, "s"))
+            conn.putAssistantMessage("s", "new", completedTokens(100, 40, 60, 10), 4)
+            conn.putAssistantMessage("other", "foreign", completedTokens(99999, 10, 0, 0), 5)
+            conn.putUserMessage("s", "pending", "next question", 6)
+            val restored = OpenCodeTranscriptScanner.resumeContextTokensFrom(conn, "s")
+            assertEquals(210L, restored, "last request only; reasoning and total must not be added again")
+            val live = OpenCodeStreamParser.parse(
+                """{"type":"step_finish","part":{"reason":"stop","tokens":{"input":100,"output":40,"reasoning":5,"total":210,"cache":{"read":60,"write":10}}}}""",
+            ).single() as dev.ccpocket.daemon.agent.AgentEvent.TurnResult
+            assertEquals(live.usage?.contextTokens, restored)
+        }
+    }
+
+    @Test
+    fun newer_unknown_or_compacted_assistant_never_revives_old_occupancy() {
+        val unknownRows = listOf(
+            """{"role":"assistant","time":{"completed":20}}""",
+            """{"role":"assistant","tokens":{"input":1,"output":2}}""",
+            """{"role":"assistant","summary":true,"time":{"completed":20},"tokens":{"input":100,"output":40}}""",
+            "not json",
+            """{"role":"assistant","time":{"completed":20},"tokens":{"input":100,"output":40}}""",
+            """{"role":"assistant","time":{"completed":20},"tokens":{"input":100,"output":40,"cache":{"read":60}}}""",
+            """{"role":"assistant","time":{"completed":20},"tokens":{"input":100,"output":40,"cache":{"write":10}}}""",
+            completedTokens(-1, 2, 3, 4),
+            completedTokens(Long.MAX_VALUE, 2, 0, 0),
+            completedTokens(0, 0, 0, 0),
+            """{"role":"assistant","time":{"completed":20},"tokens":{"input":100,"output":40,"cache":{"read":"bad"}}}""",
+        )
+        for (row in unknownRows) openFixtureDb().use { conn ->
+            conn.putSession("s", "Session")
+            conn.putAssistantMessage("s", "old", completedTokens(100, 40, 60, 10), 1)
+            conn.putAssistantMessage("s", "new", row, 2)
+            assertNull(OpenCodeTranscriptScanner.resumeContextTokensFrom(conn, "s"), row)
+        }
+    }
+
+    @Test
+    fun missing_store_or_session_has_no_resume_occupancy() {
+        assertNull(OpenCodeTranscriptScanner.resumeContextTokens("s", null))
+        openFixtureDb().use { conn ->
+            assertNull(OpenCodeTranscriptScanner.resumeContextTokensFrom(conn, "missing"))
+        }
+        assertNull(OpenCodeTranscriptScanner.resumeContextTokens("s", DriverManager.getConnection("jdbc:sqlite::memory:")))
+    }
+
+    private fun completedTokens(input: Long, output: Long, read: Long, write: Long) =
+        """{"role":"assistant","time":{"completed":20},"tokens":{"input":$input,"output":$output,"reasoning":5,"cache":{"read":$read,"write":$write}}}"""
+
     private fun openFixtureDb(): Connection {
         val dir = createTempDirectory("opencode-scan-test")
         val db = dir.resolve("opencode.db")

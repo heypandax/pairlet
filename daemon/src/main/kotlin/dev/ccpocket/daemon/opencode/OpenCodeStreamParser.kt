@@ -154,7 +154,8 @@ object OpenCodeStreamParser {
             val input = tokens["input"]?.jsonPrimitive?.longOrNull ?: 0L
             val output = tokens["output"]?.jsonPrimitive?.longOrNull ?: 0L
             val cacheRead = tokens["cache"]?.jsonObject?.get("read")?.jsonPrimitive?.longOrNull
-            TokenUsage(inputTokens = input, outputTokens = output, cacheReadInputTokens = cacheRead)
+            val cacheWrite = tokens["cache"]?.jsonObject?.get("write")?.jsonPrimitive?.longOrNull
+            TokenUsage(inputTokens = input, outputTokens = output, cacheCreationInputTokens = cacheWrite, cacheReadInputTokens = cacheRead)
         } else null
         return listOf(AgentEvent.TurnResult(finalText = null, usage = usage, isError = false))
     }
