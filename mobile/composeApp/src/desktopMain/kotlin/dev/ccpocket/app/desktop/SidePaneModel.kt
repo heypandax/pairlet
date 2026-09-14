@@ -61,6 +61,10 @@ class SidePaneModel(
     override val chatModel: String get() = pane.model.value ?: ""
     override val chatMode: PermissionMode get() = PermissionMode.DEFAULT
     override val messages: List<ChatItem> get() = pane.messages
+    // #380: THIS column's session and agent (the computer is the window's) — delegating would make a
+    // column follow the focused conversation's collapse switch
+    override val toolProcessScope: dev.ccpocket.app.data.ToolProcessScope
+        get() = dev.ccpocket.app.data.ToolProcessScope(base.toolProcessScope?.accountId, pane.agent, pane.sessionId, pane.convoId.value)
     override val streaming: Boolean get() = pane.streaming.value
     // this column's OWN delivery-receipt + stall cues (issue #329), read straight off SidePane like
     // openFailed above — NOT delegated: a stalled prompt in ONE column must not light the cue in another.

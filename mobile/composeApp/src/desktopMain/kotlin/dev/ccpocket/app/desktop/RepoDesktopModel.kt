@@ -1,5 +1,7 @@
 package dev.ccpocket.app.desktop
 
+import dev.ccpocket.app.data.toolProcessScope
+
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -1277,6 +1279,9 @@ class RepoDesktopModel(
     override val gatewayModels: List<String>
         get() = repo.agentModels[dev.ccpocket.protocol.AgentKind.CLAUDE]?.gatewayModels.orEmpty()
     override val messages: List<ChatItem> get() = repo.messages
+    // #380: same scope derivation the phone uses, so a session's switch reads the same on both
+    override val toolProcessScope: dev.ccpocket.app.data.ToolProcessScope
+        get() = repo.toolProcessScope
     // older-history lazy load (issue #147) — straight delegation to the shared repository
     override fun exposeFeature(feature: dev.ccpocket.app.telemetry.ProductFeature) = repo.exposeFeature(feature)
     override fun sideContentLayoutToken(pane: SidePane): String? = repo.sideContentLayoutToken(pane)

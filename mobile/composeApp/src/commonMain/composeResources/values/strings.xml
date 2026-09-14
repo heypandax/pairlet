@@ -2094,4 +2094,21 @@
     <string name="pin_issue_pairing_changed">This computer's pairing changed. Reconnect to it to sync pins.</string>
     <string name="pin_issue_retry">Retry</string>
     <string name="pin_issue_dismiss">Dismiss</string>
+    <string name="tool_process_toggle">Collapse tool steps</string>
+    <string name="tool_process_group">Process</string>
+    <plurals name="tool_process_tools">
+        <item quantity="one">%1$d tool</item>
+        <item quantity="other">%1$d tools</item>
+    </plurals>
+    <plurals name="tool_process_thoughts">
+        <item quantity="one">%1$d thought</item>
+        <item quantity="other">%1$d thoughts</item>
+    </plurals>
+    <plurals name="tool_process_images">
+        <item quantity="one">%1$d image</item>
+        <item quantity="other">%1$d images</item>
+    </plurals>
+    <string name="tool_process_images_truncated">some images not loaded</string>
+    <string name="tool_process_expand">Show steps</string>
+    <string name="tool_process_collapse">Hide steps</string>
 </resources>

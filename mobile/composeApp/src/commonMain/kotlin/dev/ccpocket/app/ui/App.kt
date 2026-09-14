@@ -165,6 +165,12 @@ import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.SupportContext
 import dev.ccpocket.app.supportPlatformLabel
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.data.ChatRow
+import dev.ccpocket.app.data.ToolProcessPrefs
+import dev.ccpocket.app.data.toolProcessScope
+import dev.ccpocket.app.ui.chat.KeepChatReadingPosition
+import dev.ccpocket.app.ui.chat.ProcessGroupRow
+import dev.ccpocket.app.ui.chat.rememberChatPresentationState
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.OpenFailure
@@ -2824,6 +2830,16 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     // possible without remounting, so an un-keyed pinned carried the PREVIOUS session's "user scrolled
     // up" over to the next one — which then opened parked mid-transcript instead of at the latest.
     var pinned by rememberBottomPinned(listState, repo.convoId.value)
+    // #380: the display projection over repo.messages (tool-process folding + source↔row mapping). Keyed on
+    // the repository, not the conversation: a reconnect re-opens under a new convoId and must keep the row
+    // identities (list keys → reading position) and the folds this screen opened; a replaced history is
+    // detected by the projection's own generation instead.
+    val toolProcess = rememberChatPresentationState(
+        repo,
+        source = { repo.messages },
+        collapse = { ToolProcessPrefs.shared.isCollapsed(repo.toolProcessScope) },
+    )
+    LaunchedEffect(repo.sessionKey.value, repo.convoId.value) { ToolProcessPrefs.shared.migrate(repo.toolProcessScope) }
     // the Jump-to-latest scroll must survive the pill leaving composition. The pill's onClick sets
     // pinned=true, and that same recomposition removes the `if (!pinned)` block below — a
     // rememberCoroutineScope declared INSIDE that block is cancelled the instant it's forgotten,
@@ -2897,6 +2913,10 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     LaunchedEffect(repo.messages.size, repo.messages.lastOrNull(), repo.streaming.value) {
         if (pinned && repo.messages.isNotEmpty()) { listState.scrollToEnd(); landed = true }
     }
+    // #380: folding changes the row count without touching messages — a reader at the end stays there.
+    // Only for THAT case: a message-count change is the effect above's (and a prepended page's landing
+    // below), so following it here too would race the page back to the bottom.
+    // (the collector lives inside the list's Box below, where the loader row's visibility is known)
     // keyboard-follow lives in its own leaf composable: the ime inset must be a COMPOSITION read
     // (iOS misses the animation otherwise), and reading it here would re-execute all of ChatScreen
     // every animation frame — the leaf confines that per-frame invalidation to itself.
@@ -3032,8 +3052,32 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 LaunchedEffect(repo.historyPrependGen.value) {
                     val n = repo.lastHistoryPrependCount
                     if (repo.historyPrependGen.value > 0 && n > 0) {
-                        listState.scrollToItem(n + (if (historyLoaderVisible) 1 else 0))
+                        // #380: n is a SOURCE index (the old window's first row); folding can show it on another row
+                        val row = toolProcess.presentation.rowOfSource(n).takeIf { it >= 0 } ?: n
+                        listState.scrollToItem(row + (if (historyLoaderVisible) 1 else 0))
                     }
+                }
+                // #380: flipping the switch / opening a fold / a tool merging into a fold keeps the reader's row
+                KeepChatReadingPosition(listState, toolProcess, leadingRows = if (historyLoaderVisible) 1 else 0, followingTail = pinned)
+                // #380 tail follow for fold-only changes (see the note above). Target: the list's EXACT last item
+                // — loader + rows + the one live status row — with an unbounded offset. An index past the end is
+                // clamped with its offset reset to 0, which parks the view at the TOP of a last reply taller than
+                // the viewport. requestScrollToItem never forces a remeasure; skipped while the reader's own scroll
+                // is in progress, so a drag that has just started is not yanked back to the bottom.
+                val loaderNow = androidx.compose.runtime.rememberUpdatedState(historyLoaderVisible)
+                LaunchedEffect(toolProcess) {
+                    var lastSourceSize = -1
+                    snapshotFlow { toolProcess.presentation.let { it.rows.size to it.sourceSize } }
+                        .collect { (rows, sourceSize) ->
+                            if (sourceSize == lastSourceSize && sourceSize > 0 && pinned && !listState.isScrollInProgress) {
+                                // the last ROW, not the live status row after it: that row can vanish the very next
+                                // frame (streaming ends), and an index one past the end is clamped with offset 0. An
+                                // index at or before the end is safe — the unbounded offset scrolls on past any status
+                                // row to the real end.
+                                listState.requestScrollToItem((if (loaderNow.value) 1 else 0) + rows - 1, Int.MAX_VALUE)
+                            }
+                            lastSourceSize = sourceSize
+                        }
                 }
                 // read-doc-inline handoff: give the mobile transcript a PathOpener so file paths in
                 // assistant markdown / tool cards become tappable — the phone can't stat a local disk, so
@@ -3042,16 +3086,14 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 val pathOpener = remember(repo) { RemotePathOpener { repo.openChangedFile(it) } }
                 CompositionLocalProvider(LocalPathCwd provides repo.workdir.value, LocalPathOpener provides pathOpener) {
                 LazyColumn(
-                    Modifier.fillMaxSize().padding(16.dp)
+                    Modifier.fillMaxSize().padding(16.dp).testTag(dev.ccpocket.app.ui.chat.CHAT_STREAM_TAG)
                         .observeHistoryLayout({ repo.contentLayoutToken.takeIf { landed } }) { token ->
                             val offset = if (historyLoaderVisible) 1 else 0
-                            val visibleContent = listState.layoutInfo.visibleItemsInfo.any { row ->
-                                repo.messages.getOrNull(row.index - offset)?.let { it is ChatItem.User || it is ChatItem.Assistant || it is ChatItem.Tool } == true
-                            }
-                            val lastOutput = listState.layoutInfo.visibleItemsInfo.map { it.index - offset }.filter {
-                                repo.messages.getOrNull(it)?.let { m -> m is ChatItem.Assistant || m is ChatItem.Tool } == true
-                            }.maxOrNull() ?: -1
-                            repo.onHistoryLaidOut(token, visibleContent, lastOutput)
+                            // #380: display rows → SOURCE indices. A folded group proves content landed, but
+                            // the tool output hidden inside it is never reported as output the reader saw.
+                            val evidence = toolProcess.presentation
+                                .layoutEvidence(listState.layoutInfo.visibleItemsInfo.map { it.index - offset })
+                            repo.onHistoryLaidOut(token, evidence.hasVisibleContent, evidence.lastVisibleOutput)
                         }
                         .graphicsLayer { alpha = if (landed) 1f else 0f }
                         .pointerInput(Unit) { detectTapGestures { focus.clearFocus() } },
@@ -3074,7 +3116,28 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     if (historyLoaderVisible) item(key = "history-loader") {
                         LoadEarlierRow(fading = !repo.historyHasMore.value)
                     }
-                    itemsIndexed(repo.messages) { mi, m ->
+                    // #380: rows of the shared projection, keyed by client row identity. With the switch off
+                    // this is exactly one Original row per message, in order.
+                    val shown = toolProcess.presentation
+                    val seamRow = shown.seamRow(historySeamAt)
+                    itemsIndexed(shown.rows, key = { _, row -> row.key }) { ri, row ->
+                        if (row is ChatRow.ProcessGroup) {
+                            Column(Modifier.readableMeasure(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (ri == seamRow) EarlierMessagesSeam(repo.historyPrependGen.value)
+                                ProcessGroupRow(row.summary, row.expanded, onToggle = {
+                                    // opening/closing a fold ABOVE the end is reading, not following: unpin so
+                                    // the reading-position keeper holds the header where it is. The last row
+                                    // keeps following the end — and so does a list that cannot scroll at all,
+                                    // where nothing moved and no gesture would ever re-pin it.
+                                    val scrollable = listState.canScrollForward || listState.canScrollBackward
+                                    if (pinned && scrollable && !toolProcess.isLastRow(row.groupKey)) pinned = false
+                                    toolProcess.toggle(row.groupKey)
+                                })
+                            }
+                            return@itemsIndexed
+                        }
+                        val mi = (row as ChatRow.Original).sourceIndex
+                        val m = shown.items[mi]
                         // a prompt the daemon hasn't acknowledged while the link is down — or while the link
                         // CLAIMS up but receipts stalled past the deadline (issue #78, multi-computer links):
                         // say so under the bubble instead of letting it look sent (issue #41 — frames queue
@@ -3083,7 +3146,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         Column(Modifier.readableMeasure(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             // seam (0714 handoff B3): for a beat after a page of older history lands,
                             // mark where the old window began so the reader keeps their place
-                            if (mi == historySeamAt) EarlierMessagesSeam(repo.historyPrependGen.value)
+                            if (ri == seamRow) EarlierMessagesSeam(repo.historyPrependGen.value)
                             MessageItem(
                                 m,
                                 workflowRun = (m as? ChatItem.Tool)?.let(repo::workflowFor),
@@ -3091,7 +3154,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 // short-circuit keeps non-tool rows from reading the list in their own
                                 // recompose scope — a whole-list read here re-runs every visible row on
                                 // every streaming delta
-                                toolSourceLabeled = m !is ChatItem.Tool || repo.messages.getOrNull(mi - 1) !is ChatItem.Tool,
+                                // (display-row neighbour: a tool right after a fold row gets its own label)
+                                toolSourceLabeled = m !is ChatItem.Tool ||
+                                    (shown.rows.getOrNull(ri - 1) as? ChatRow.Original)?.let { shown.items[it.sourceIndex] } !is ChatItem.Tool,
                                 onOpenWorkflow = repo::openWorkflow,
                                 onOpenImages = { imgs, i -> viewer = imgs to i },
                                 onOpenVideo = { videoViewer = it },
@@ -3119,7 +3184,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 }
                                 // receipted (issue #66) — shows until the reply starts streaming (this bubble
                                 // stops being the last item), so a slow agent start still reads as "it got there"
-                                m is ChatItem.User && m.delivered && m == repo.messages.lastOrNull() ->
+                                m is ChatItem.User && m.delivered && mi == shown.items.lastIndex ->
                                     Text("✓ " + stringResource(Res.string.msg_delivered), color = Tok.muted, fontSize = 11.sp)
                             }
                         }
@@ -3144,7 +3209,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     JumpToLatestPill(Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)) {
                         pinned = true
                         jumpScope.launch {
-                            if (repo.messages.isNotEmpty()) listState.animateScrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
+                            if (repo.messages.isNotEmpty()) listState.animateScrollToItem(toolProcess.presentation.rows.lastIndex + (if (historyLoaderVisible) 1 else 0), Int.MAX_VALUE)
                         }
                     }
                 }

@@ -46,6 +46,8 @@ class SidePaneModelDelegationGuardTest {
         "historyLayoutToken", "onHistoryLaidOut",
         "chatTitle", "chatAgent", "chatWorkdir",
         "messages", "streaming", "selectedSessionId",
+        // #380: the collapse-tool-process switch belongs to the column's own session + agent
+        "toolProcessScope",
         // this column's OWN delivery receipt + stall cues and its per-pane resend (issue #329): read off
         // SidePane's own watchdog, not the focused conversation's. Inert, a lost prompt in one column would
         // have stayed silently "sending" while the focused pane's cue lit; DELEGATED, a resend re-ran the

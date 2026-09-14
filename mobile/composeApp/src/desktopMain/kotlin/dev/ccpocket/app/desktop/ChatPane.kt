@@ -111,6 +111,11 @@ import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.awtTransferable
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.data.ChatRow
+import dev.ccpocket.app.data.ToolProcessPrefs
+import dev.ccpocket.app.ui.chat.KeepChatReadingPosition
+import dev.ccpocket.app.ui.chat.ProcessGroupRow
+import dev.ccpocket.app.ui.chat.rememberChatPresentationState
 import dev.ccpocket.app.ui.chat.LineageBanner
 import dev.ccpocket.app.ui.chat.RewindErrorBar
 import dev.ccpocket.app.data.FileUpState
@@ -379,9 +384,27 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             // froze the window on every appended chunk. LazyColumn renders the viewport only; while
             // "pinned" the list follows the stream, scrolling up unpins (mirrors mobile ChatScreen).
             val listState = rememberLazyListState()
-            val pinned by rememberBottomPinned(listState, model.selectedSessionId, userGesturesOnly = false)
-            LaunchedEffect(model.messages.size, model.streaming, model.ask?.askId) {
-                if (pinned && model.messages.isNotEmpty()) listState.scrollToItem(model.messages.lastIndex + 1, Int.MAX_VALUE)
+            var pinned by rememberBottomPinned(listState, model.selectedSessionId, userGesturesOnly = false)
+            // #380: the shared display projection (tool-process folding + source↔row mapping). One per pane, so
+            // a split column or a second window opens its own folds; keyed on the model, because a reconnect
+            // is not a new list — a replaced history is caught by the projection's generation.
+            val toolProcess = rememberChatPresentationState(
+                model,
+                source = { model.messages },
+                collapse = { ToolProcessPrefs.shared.isCollapsed(model.toolProcessScope) },
+            )
+            LaunchedEffect(model.toolProcessScope) { ToolProcessPrefs.shared.migrate(model.toolProcessScope) }
+            val shownRows = toolProcess.presentation.rows.size
+            LaunchedEffect(model.messages.size, model.streaming, model.ask?.askId, shownRows) {
+                // display-row count (was messages.lastIndex + 1): folding changes it without touching messages.
+                // requestScrollToItem, not scrollToItem: it never forces a remeasure, so this effect cannot throw
+                // "performMeasureAndLayout called during measure layout" when it starts inside the
+                // BoxWithConstraints subcomposition (measure) or is resumed during one (offscreen scenes).
+                // …and never while a scroll is in progress: the request stops it, so a row landing in the same
+                // frame the reader started scrolling up would drag them straight back down
+                if (pinned && model.messages.isNotEmpty() && !listState.isScrollInProgress) {
+                    listState.requestScrollToItem(shownRows, Int.MAX_VALUE)
+                }
             }
             // older-history lazy load (issue #147): a prepended page shifts every index — scroll by the
             // prepend count (+ the loader row when it stays) so the viewport keeps the row being read.
@@ -392,9 +415,13 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             LaunchedEffect(model.historyPrependGen) {
                 val n = model.lastHistoryPrependCount
                 if (model.historyPrependGen > 0 && n > 0 && !pinned) {
-                    listState.scrollToItem(n + (if (historyLoaderVisible) 1 else 0))
+                    // #380: n is a SOURCE index (the old window's first row); folding can show it on another row
+                    val row = toolProcess.presentation.rowOfSource(n).takeIf { it >= 0 } ?: n
+                    listState.scrollToItem(row + (if (historyLoaderVisible) 1 else 0))
                 }
             }
+            // #380: flipping the switch / opening a fold / a tool merging into a fold keeps the reader's row
+            KeepChatReadingPosition(listState, toolProcess, leadingRows = if (historyLoaderVisible) 1 else 0, followingTail = pinned)
             // one SelectionContainer around the whole stream: desktop text is expected to mouse-drag-select,
             // and Compose Text is inert by default — a single container (not per-message) keeps a drag
             // flowing across message boundaries. Buttons/toggles inside stay clickable (selection only
@@ -402,15 +429,12 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             SelectionContainer {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize().observeHistoryLayout({ model.historyLayoutToken }) { token ->
+                    modifier = Modifier.fillMaxSize().testTag(dev.ccpocket.app.ui.chat.CHAT_STREAM_TAG).observeHistoryLayout({ model.historyLayoutToken }) { token ->
                         val offset = if (historyLoaderVisible) 1 else 0
-                        val visible = listState.layoutInfo.visibleItemsInfo.any { row ->
-                            model.messages.getOrNull(row.index - offset)?.let { it is ChatItem.User || it is ChatItem.Assistant || it is ChatItem.Tool } == true
-                        }
-                        val lastOutput = listState.layoutInfo.visibleItemsInfo.map { it.index - offset }.filter {
-                            model.messages.getOrNull(it)?.let { m -> m is ChatItem.Assistant || m is ChatItem.Tool } == true
-                        }.maxOrNull() ?: -1
-                        model.onHistoryLaidOut(token, visible, lastOutput)
+                        // #380: display rows → SOURCE indices; a folded group's hidden tools are never "seen" output
+                        val evidence = toolProcess.presentation
+                            .layoutEvidence(listState.layoutInfo.visibleItemsInfo.map { it.index - offset })
+                        model.onHistoryLaidOut(token, evidence.hasVisibleContent, evidence.lastVisibleOutput)
                     },
                     contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -425,14 +449,30 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                             LoadEarlierRow(fading = !model.historyHasMore, fontFamily = Dk.ui)
                         }
                     }
-                    itemsIndexed(model.messages) { i, m ->
+                    // #380: rows of the shared projection, keyed by client row identity. With the switch off
+                    // this is exactly one Original row per message, in order.
+                    val shown = toolProcess.presentation
+                    val seamRow = shown.seamRow(historySeamAt)
+                    itemsIndexed(shown.rows, key = { _, row -> row.key }) { ri, row ->
                         CenteredStreamRow {
                             Column(Modifier.fillMaxWidth()) {
                                 // seam (0714 handoff B3): for a beat after a page of older history lands,
                                 // mark where the old window began so the reader keeps their place
-                                if (i == historySeamAt) EarlierMessagesSeam(model.historyPrependGen, monoFamily = Dk.mono)
+                                if (ri == seamRow) EarlierMessagesSeam(model.historyPrependGen, monoFamily = Dk.mono)
+                                if (row is ChatRow.ProcessGroup) {
+                                    ProcessGroupRow(row.summary, row.expanded, fontFamily = Dk.ui, onToggle = {
+                                        // a fold above the end is being read, not followed (see the phone twin) —
+                                        // unless the pane cannot scroll: the desktop has no jump-to-latest, so an
+                                        // unpinned short pane would only recover by switching sessions
+                                        val scrollable = listState.canScrollForward || listState.canScrollBackward
+                                        if (pinned && scrollable && !toolProcess.isLastRow(row.groupKey)) pinned = false
+                                        toolProcess.toggle(row.groupKey)
+                                    })
+                                } else {
+                                val i = (row as ChatRow.Original).sourceIndex
+                                val m = shown.items[i]
                                 MessageRow(
-                                    m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered,
+                                    m, isLast = i == shown.items.lastIndex, undelivered = model.sendUndelivered,
                                     bubbles = model.chatAlignment == ChatStreamAlignment.BUBBLES,
                                     workflowRun = (m as? ChatItem.Tool)?.let(model::workflowRunFor),
                                     onOpenWorkflow = model::openWorkflowPanel,
@@ -444,6 +484,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                         RewindEntries(!model.rewindBlockedByTurn) { turn, mode -> model.startRewind(turn, mode) }
                                     },
                                 )
+                                }
                             }
                         }
                     }
