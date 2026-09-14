@@ -5,13 +5,28 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import java.io.IOException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.net.http.HttpTimeoutException
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import java.time.Duration
+import java.util.concurrent.CancellationException
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionStage
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Flow
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The JVM half of the self-update plumbing shared by the daemon and the desktop app: read the latest GitHub
@@ -100,12 +115,180 @@ object ReleaseClient {
         null
     }
 
-    /** Download [url] to [dest] (10-minute ceiling for a large artifact). Throws on a non-2xx status. */
-    fun download(url: String, dest: Path) {
+    /**
+     * One observation of a running download (issue #381). [totalBytes] is the response's Content-Length
+     * only while it is still believable — absent, zero, or already exceeded by what arrived all mean
+     * "unknown", so a renderer never has to invent a percentage.
+     */
+    data class DownloadProgress(val receivedBytes: Long, val totalBytes: Long?) {
+        companion object {
+            fun of(received: Long, declared: Long?): DownloadProgress =
+                DownloadProgress(received, declared?.takeIf { it > 0 && received <= it })
+        }
+    }
+
+    /**
+     * Download [url] to [dest] (10-minute ceiling for a large artifact). Throws on a non-2xx status.
+     * [onProgress] is called from the calling thread about every 100 ms from the moment the request is sent —
+     * `(0, null)` while connecting / redirecting / waiting for headers, then the real count — also when no new
+     * bytes arrived, so an observer can tell "waiting for the network" apart, and once more with the final
+     * count. It is display-only: an exception from it is swallowed and never affects the file.
+     *
+     * Behavior change for EVERY caller, including the two-argument form (e.g. the desktop standalone updater):
+     * once the headers are in, a body that delivers no data for 2 minutes is aborted with an
+     * [HttpTimeoutException] (retry the update), next to the 10-minute ceiling; and a non-2xx response no
+     * longer writes its error page into [dest].
+     */
+    fun download(url: String, dest: Path, onProgress: (DownloadProgress) -> Unit = {}) =
+        download(url, dest, onProgress, DOWNLOAD_CEILING, DOWNLOAD_STALL)
+
+    private val DOWNLOAD_CEILING: Duration = Duration.ofMinutes(10)
+    private val DOWNLOAD_STALL: Duration = Duration.ofMinutes(2)
+
+    /** [download] with injectable limits (tests). The body is streamed straight into [dest] one network
+     *  buffer at a time — the next buffer is only requested after the previous one is on disk — so memory
+     *  stays bounded however large the artifact is. On success, failure, timeout or interruption the file
+     *  channel is closed and the HTTP exchange is cancelled; no thread is left parked on the socket. */
+    internal fun download(
+        url: String,
+        dest: Path,
+        onProgress: (DownloadProgress) -> Unit,
+        overallTimeout: Duration,
+        stallTimeout: Duration,
+        tick: Duration = Duration.ofMillis(100),
+    ) {
+        val startNs = System.nanoTime()
         val req = HttpRequest.newBuilder(URI(url)).header("User-Agent", "cc-pocket")
-            .timeout(Duration.ofMinutes(10)).build()
-        val res = http.send(req, HttpResponse.BodyHandlers.ofFile(dest))
+            .timeout(overallTimeout).build()
+        val sinkRef = AtomicReference<FileSink?>() // set on an HttpClient thread, read by this one
+        val aborted = AtomicBoolean(false)
+        val handler = HttpResponse.BodyHandler<Unit> { info ->
+            if (info.statusCode() !in 200..299 || aborted.get()) HttpResponse.BodySubscribers.replacing(Unit)
+            else {
+                val sink = FileSink(dest, info.headers().firstValueAsLong("content-length").orElse(-1L))
+                sinkRef.set(sink)
+                // abort() may have run between the check above and set(): it sets the flag BEFORE reading
+                // sinkRef, so re-checking here guarantees one side closes the channel we just opened
+                if (aborted.get()) sink.abort()
+                sink
+            }
+        }
+        val future = http.sendAsync(req, handler)
+        var observerBroken = false
+        fun report() {
+            if (observerBroken) return
+            val s = sinkRef.get()
+            val p = if (s == null) DownloadProgress(0, null) // connecting / redirecting / awaiting headers
+            else DownloadProgress.of(s.received.get(), s.declared.takeIf { it > 0 })
+            try { onProgress(p) }
+            catch (_: Exception) { observerBroken = true } // a renderer bug must not cost the download
+        }
+        fun abort(cause: Throwable): Nothing {
+            aborted.set(true)
+            sinkRef.get()?.abort()
+            future.cancel(true)
+            throw cause
+        }
+        val res = try {
+            var result: HttpResponse<Unit>? = null
+            while (result == null) {
+                try {
+                    result = future.get(tick.toMillis(), TimeUnit.MILLISECONDS)
+                } catch (_: TimeoutException) {
+                    val now = System.nanoTime()
+                    if (now - startNs > overallTimeout.toNanos()) {
+                        abort(HttpTimeoutException("download timed out after ${overallTimeout.toSeconds()}s: $url"))
+                    }
+                    val s = sinkRef.get()
+                    if (s != null && now - s.lastByteNs.get() > stallTimeout.toNanos()) {
+                        abort(HttpTimeoutException(
+                            "download stalled — no data for ${stallTimeout.toSeconds()}s after ${s.received.get()} bytes: $url"))
+                    }
+                    report()
+                }
+            }
+            result
+        } catch (e: ExecutionException) {
+            abort(e.cause ?: e)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            abort(e)
+        } catch (e: CancellationException) {
+            abort(e)
+        }
         check(res.statusCode() in 200..299) { "download failed (HTTP ${res.statusCode()}): $url" }
+        report()
+    }
+
+    /** Streams a 2xx body into [dest]: counts bytes, writes each buffer before asking for the next. */
+    private class FileSink(dest: Path, val declared: Long) : HttpResponse.BodySubscriber<Unit> {
+        val received = AtomicLong(0)
+        val lastByteNs = AtomicLong(System.nanoTime()) // headers just arrived: the stall clock starts now
+        private val lock = Any()
+        private val channel: FileChannel = FileChannel.open(
+            dest, StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING,
+        )
+        private var subscription: Flow.Subscription? = null
+        private var closed = false
+        private val done = CompletableFuture<Unit>()
+
+        override fun getBody(): CompletionStage<Unit> = done
+
+        override fun onSubscribe(s: Flow.Subscription) {
+            val cancelled = synchronized(lock) { subscription = s; closed }
+            if (cancelled) s.cancel() else s.request(1)
+        }
+
+        override fun onNext(item: List<ByteBuffer>) {
+            val s = synchronized(lock) {
+                if (closed) return
+                try {
+                    for (buf in item) {
+                        val n = buf.remaining().toLong()
+                        while (buf.hasRemaining()) channel.write(buf)
+                        received.addAndGet(n)
+                    }
+                } catch (e: IOException) {
+                    closeLocked()
+                    subscription?.cancel()
+                    done.completeExceptionally(e)
+                    return
+                }
+                lastByteNs.set(System.nanoTime())
+                subscription
+            }
+            s?.request(1)
+        }
+
+        override fun onError(t: Throwable) {
+            synchronized(lock) { closeLocked() }
+            done.completeExceptionally(t)
+        }
+
+        override fun onComplete() {
+            val error = synchronized(lock) {
+                if (closed) return
+                runCatching { channel.force(false) }
+                closeLocked()
+                if (declared > 0 && received.get() < declared)
+                    IOException("download ended after ${received.get()} of $declared bytes")
+                else null
+            }
+            if (error != null) done.completeExceptionally(error) else done.complete(Unit)
+        }
+
+        /** Caller-side abort (timeout / interrupt): stop writing, release the file, drop the exchange. */
+        fun abort() {
+            val s = synchronized(lock) { closeLocked(); subscription }
+            s?.cancel()
+            done.completeExceptionally(CancellationException("download aborted"))
+        }
+
+        private fun closeLocked() {
+            if (closed) return
+            closed = true
+            runCatching { channel.close() }
+        }
     }
 
     fun sha256(file: Path): String {

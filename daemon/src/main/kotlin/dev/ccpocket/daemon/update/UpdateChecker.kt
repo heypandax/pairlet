@@ -88,7 +88,8 @@ object UpdateChecker {
 
         if (canAuto) {
             log.info("auto-updating to ${latest.version}")
-            UpdateService.apply(latest, install!!)
+            // background path: no terminal to draw on, and a redrawn line would flood the daemon log (#381)
+            UpdateService.apply(latest, install!!, UpdateProgressListener.QUIET)
             log.info("switched — exiting so the service supervisor relaunches v${latest.version}")
             exitProcess(0) // KeepAlive / Restart=always brings the new binary up within seconds
         }
