@@ -17,6 +17,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -104,8 +105,9 @@ val LocalWideLayout = staticCompositionLocalOf { false }
  * same answer the panes do.
  *
  * [policy] defaults to this platform's device; tests hand it a phone or a tablet. On a phone the answer is
- * false at every width, so a rotation only re-measures the one column: it never moves the chat into another
- * branch of [ContentRouter], which would remount it and drop its scroll position and unsent draft.
+ * false at every width, so a rotation only re-measures the one column. A large screen's window can cross the
+ * line under an open chat, and [ContentRouter] then only adds or removes the list beside it: the chat stays
+ * where it is, with its scroll position, unsent draft and focus.
  */
 @Composable
 internal fun WideLayoutScope(
@@ -119,9 +121,18 @@ internal fun WideLayoutScope(
 }
 
 /**
- * The app's content routing. Narrow = the exact single-branch `when` the phone has always rendered;
+ * The app's content routing. Narrow = the exact single-branch derivation the phone has always rendered;
  * wide = the same three screens, two at a time. [chatListStateForTest] reaches [ChatScreen] in either
  * shape, so a routing test can see where the transcript is parked across a resize.
+ *
+ * Both shapes are ONE row, and crossing between them changes only what stands beside the chat (#334, second
+ * stage). A large screen's window can be resized across [WIDE_LAYOUT_MIN_WIDTH] under an open chat (iPad
+ * multitasking, Android split screen). While each shape called [ChatScreen] from a parent of its own, every
+ * crossing rebuilt it: the unsent draft, the reading position, a half-answered question and any open sheet were
+ * gone. Moving it between those parents as movable content kept that state, but took its nodes out of the tree
+ * and back, and a focused field that leaves the tree loses focus, so the keyboard still dropped. So the chat has
+ * one call site in one parent at every width; the list column and its hairline come and go before it, and the
+ * chat only re-measures. Closing the chat still removes it, and reopening composes a fresh one.
  */
 @Composable
 internal fun ContentRouter(
@@ -130,54 +141,44 @@ internal fun ContentRouter(
     onOpenInbox: () -> Unit = {},
     chatListStateForTest: LazyListState? = null,
 ) {
-    if (LocalWideLayout.current) WidePanes(repo, onOpenFleet, onOpenInbox, chatListStateForTest)
-    else NarrowContent(repo, onOpenFleet, onOpenInbox, chatListStateForTest)
-}
-
-@Composable
-private fun NarrowContent(
-    repo: PocketRepository,
-    onOpenFleet: () -> Unit,
-    onOpenInbox: () -> Unit,
-    chatListStateForTest: LazyListState?,
-) {
-    when {
-        // switchingSession keeps the chat mounted across a chat→chat switch:
-        // openSession nulls convoId while it waits for the daemon, and without
-        // this the switcher bounced you out to a session list for a beat (#165)
-        repo.convoId.value != null || repo.switchingSession.value ->
-            ChatScreen(repo, onOpenFleet = onOpenFleet, onOpenInbox = onOpenInbox, listStateForTest = chatListStateForTest)
-        repo.sessionsDir.value != null -> SessionsScreen(repo, onOpenInbox = onOpenInbox)
-        else -> DirectoryScreen(repo, onOpenFleet = onOpenFleet, onOpenInbox = onOpenInbox)
-    }
-}
-
-@Composable
-private fun WidePanes(
-    repo: PocketRepository,
-    onOpenFleet: () -> Unit,
-    onOpenInbox: () -> Unit,
-    chatListStateForTest: LazyListState?,
-) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val left = minOf(LEFT_PANE_WIDTH, maxWidth - RIGHT_PANE_MIN_WIDTH)
-        Row(Modifier.fillMaxSize()) {
-            Box(Modifier.width(left).fillMaxHeight()) {
-                // the list column follows the SAME derivation as the phone's list branches, so a
-                // sessions list opened here is the sessions list, with its own Back to Projects
+    val wide = LocalWideLayout.current
+    // switchingSession keeps the chat mounted across a chat→chat switch:
+    // openSession nulls convoId while it waits for the daemon, and without
+    // this the switcher bounced you out to a session list for a beat (#165)
+    val chatOpen = repo.convoId.value != null || repo.switchingSession.value
+    Row(Modifier.fillMaxSize()) {
+        // the list column: beside the chat when wide, the whole width with nothing open, and gone under a narrow chat
+        if (wide || !chatOpen) {
+            Box((if (wide) Modifier.listPaneWidth() else Modifier.weight(1f)).fillMaxHeight()) {
+                // the phone's list derivation in both shapes, so a sessions list opened in the wide left pane is the
+                // sessions list, with its own Back to Projects
                 if (repo.sessionsDir.value != null) SessionsScreen(repo, onOpenInbox = onOpenInbox)
                 else DirectoryScreen(repo, onOpenFleet = onOpenFleet, onOpenInbox = onOpenInbox)
             }
-            Box(Modifier.width(Metric.hairline).fillMaxHeight().background(Tok.hair))
+        }
+        if (wide) Box(Modifier.width(Metric.hairline).fillMaxHeight().background(Tok.hair))
+        // the chat's one call site: nothing here may wrap, key or branch it on the width, or a crossing takes it out
+        // of the tree again
+        if (chatOpen) {
             Box(Modifier.weight(1f).fillMaxHeight()) {
-                if (repo.convoId.value != null || repo.switchingSession.value) {
-                    ChatScreen(repo, onOpenFleet = onOpenFleet, onOpenInbox = onOpenInbox, listStateForTest = chatListStateForTest)
-                } else {
-                    EmptyChatPane()
-                }
+                ChatScreen(repo, onOpenFleet = onOpenFleet, onOpenInbox = onOpenInbox, listStateForTest = chatListStateForTest)
             }
+        } else if (wide) {
+            Box(Modifier.weight(1f).fillMaxHeight()) { EmptyChatPane() }
         }
     }
+}
+
+/**
+ * The list column: [LEFT_PANE_WIDTH], given back down to [RIGHT_PANE_MIN_WIDTH] of chat on a 700–740dp window.
+ * Measured here in layout rather than read from a BoxWithConstraints, which would subcompose what it wraps:
+ * [ContentRouter] stays one plain row in both shapes, so the chat's parent never changes.
+ */
+private fun Modifier.listPaneWidth(): Modifier = layout { measurable, constraints ->
+    val width = minOf(LEFT_PANE_WIDTH, constraints.maxWidth.toDp() - RIGHT_PANE_MIN_WIDTH)
+        .roundToPx().coerceIn(constraints.minWidth, constraints.maxWidth)
+    val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
 }
 
 /** The right pane with nothing open. Deliberately quiet — the left pane is where the next tap is. */
