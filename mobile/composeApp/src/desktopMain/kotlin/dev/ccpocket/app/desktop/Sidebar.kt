@@ -431,7 +431,9 @@ private fun PinRow(
                     menuGroups.filter { it.id != live?.group }.forEach { grp ->
                         add(PocketMenuItem(grp.name, mutedPrefix = "$moveTo ·") { model.assignGroup(p.sessionId, grp.id) })
                     }
-                    if (live?.group != null) add(PocketMenuItem(moveOut) { model.assignGroup(p.sessionId, null) })
+                    // "out" only beside "to", as on the RECENT rows: a pin into a project that isn't listed resolves
+                    // [live] from that project's RECENT copy, whose groups aren't the listing's to edit (#360)
+                    if (live?.group != null && menuGroups.isNotEmpty()) add(PocketMenuItem(moveOut) { model.assignGroup(p.sessionId, null) })
                 },
                 buildList {
                     if (canArchive) add(PocketMenuItem(archive) { model.archiveSession(asSession) })
@@ -610,8 +612,10 @@ private fun RunningRow(r: DkRunningRow, onBrowse: () -> Unit, onClick: () -> Uni
 // ── zone 4: RECENT — the visited projects' sessions, grouped, one scroll ────────────────────────
 
 // THE render predicate for RECENT groups — [recentRows] and the reveal effects both filter through this one
-// definition, so the row a reveal resolves is a row the list actually draws
-private fun renderedGroups(model: DesktopModel) = model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() }
+// definition, so the row a reveal resolves is a row the list actually draws. Named groups count as content (#360):
+// a project whose groups are still empty holds structure the user made, not an empty listing.
+private fun renderedGroups(model: DesktopModel) =
+    model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() || it.customGroups.isNotEmpty() }
 
 /** RECENT's section label with the hover clear-all affordance (issue #102): "clear" arms to "sure?",
  *  a second click forgets every visited project (pins / hidden rows untouched); moving the pointer off
@@ -894,16 +898,19 @@ private fun recentRows(
         val closed = g.path in collapsed
         add(RecentRow.Header(g, closed))
         if (closed) continue
-        // issue #119: only the live-listed project carries custom-group data (the daemon lists
-        // groups per dir) — a RECENT snapshot has none and renders FLAT, which is also the
-        // degrade path for an older daemon that omits groups entirely.
+        // issue #119: the daemon lists groups per dir. The live-listed project's come from the model, whose
+        // group verbs all act on that listing; any other project renders the copy its RECENT snapshot kept
+        // (#360) — the same sections in the same order, READ-ONLY, since a verb issued there would land on
+        // the listed project. No groups (an older daemon, a guest, none made yet) renders FLAT.
         // #282: the rewound originals leave the visible list before anything else groups it,
         // so the fold holds across custom groups and the flat fallback alike.
         val shown = visibleSessions(g.sessions)
-        val custom = if (g.current) model.customGroups else emptyList()
+        val custom = if (g.current) model.customGroups else g.customGroups
+        // group editing — "+ New group", section rename/delete, moving a session — is the listed project's alone
+        val editable = g.current && model.canEditGroups
         // sessions the current project can be moved between (owner + has groups) — drives the row
-        // right-click "move to group" menu; empty everywhere else so no menu appears.
-        val menuGroups = if (g.current && model.canEditGroups) custom else emptyList()
+        // right-click "move to / remove from group" entries; empty everywhere else so neither appears.
+        val menuGroups = if (editable) custom else emptyList()
         // right-click "Rename session" (issue #158) — EVERY group's rows now: the row hands its
         // own dir to the rename, so the frame resolves against the right project wherever the
         // listing points (the old current-only gate existed because the UI defaulted the dir).
@@ -919,12 +926,12 @@ private fun recentRows(
         // entry forces scrolling past a long session list to create a group. Current + group-aware
         // + owner only (canEditGroups folds in groupsSupported), so it also creates the FIRST group
         // from a still-flat list; an older daemon / guest / RECENT snapshot shows nothing.
-        if (g.current && model.canEditGroups) add(RecentRow.NewGroup(g.path))
+        if (editable) add(RecentRow.NewGroup(g.path))
         if (custom.isEmpty()) {
             if (shown.isEmpty()) add(RecentRow.Empty(g.path))
             shown.forEach { add(RecentRow.Session(g.path, it, indented = false, menuGroups, renameable, canArchive)) }
         } else {
-            sessionSections(shown, custom).forEach { sec ->
+            sessionSections(shown, custom, editable).forEach { sec ->
                 add(RecentRow.Section(g.path, sec))
                 if (!model.groupCollapsed(g.path, sec.id)) {
                     sec.sessions.forEach { add(RecentRow.Session(g.path, it, indented = true, menuGroups, renameable, canArchive)) }
@@ -1120,13 +1127,14 @@ private fun GroupHeaderBody(
     }
 }
 
-// ── issue #119: custom session-group sections inside the current project ────────────────────────
+// ── issue #119: custom session-group sections inside a project ──────────────────────────────────────
 
 private const val UNGROUPED_SECTION = "__ungrouped__"
 
-/** A rendered slice of the current project's session list: a named custom group, or the Ungrouped
- *  fallback ([name] null / [editable] false). Named groups always show — even empty, they're move targets;
- *  Ungrouped shows only when it actually holds rows. */
+/** A rendered slice of a project's session list: a named custom group, or the Ungrouped fallback ([name] null).
+ *  [editable] = its header offers rename/delete: a named group the listed project may edit — never Ungrouped, never
+ *  a RECENT snapshot's copy (#360). Named groups always show, even empty (structure the user made, and in the
+ *  listed project a move target); Ungrouped shows only when it actually holds rows. */
 private data class SessionSection(val id: String, val name: String?, val editable: Boolean, val sessions: List<DkSession>)
 
 /**
@@ -1147,10 +1155,10 @@ private fun visibleSessions(sessions: List<DkSession>): List<DkSession> {
     return if (gone.isEmpty()) sessions else sessions.filter { it.sessionId !in gone }
 }
 
-private fun sessionSections(sessions: List<DkSession>, custom: List<DkGroup>): List<SessionSection> {
+private fun sessionSections(sessions: List<DkSession>, custom: List<DkGroup>, editable: Boolean): List<SessionSection> {
     val ids = custom.mapTo(HashSet()) { it.id }
     val named = custom.sortedBy { it.order }.map { grp ->
-        SessionSection(grp.id, grp.name, editable = true, sessions = sessions.filter { it.group == grp.id })
+        SessionSection(grp.id, grp.name, editable, sessions = sessions.filter { it.group == grp.id })
     }
     // a session whose group id no longer exists (just-deleted group, cross-version) also falls to Ungrouped
     val ungrouped = sessions.filter { it.group == null || it.group !in ids }
@@ -1158,12 +1166,16 @@ private fun sessionSections(sessions: List<DkSession>, custom: List<DkGroup>): L
 }
 
 /** A custom-group sub-header (issue #119): collapse chevron · name · session-count badge, with hover
- *  rename/delete for editable groups (Ungrouped is a fallback and can't be edited). Rename swaps in an
- *  inline field; delete arms a confirm bar (group_delete_confirm). */
+ *  rename/delete for editable groups (Ungrouped is a fallback and can't be edited, nor can another project's
+ *  copy, #360). Rename swaps in an inline field; delete arms a confirm bar (group_delete_confirm). */
 @Composable
 private fun CustomGroupHeader(model: DesktopModel, projectPath: String, sec: SessionSection) {
-    var editing by remember(sec.id) { mutableStateOf(false) }
-    var confirming by remember(sec.id) { mutableStateOf(false) }
+    val canEdit = model.canEditGroups && sec.editable
+    // keyed on [canEdit] too: a header that stops being editable with its field or confirm bar open — its project
+    // stopped being the listed one (#360) — drops them, because committing either acts on the LISTED project's
+    // group of this id
+    var editing by remember(sec.id, canEdit) { mutableStateOf(false) }
+    var confirming by remember(sec.id, canEdit) { mutableStateOf(false) }
     if (editing) {
         GroupNameInput(
             initial = sec.name ?: "", hint = stringResource(Res.string.group_name_hint),
@@ -1176,7 +1188,6 @@ private fun CustomGroupHeader(model: DesktopModel, projectPath: String, sec: Ses
         return
     }
     val collapsed = model.groupCollapsed(projectPath, sec.id)
-    val canEdit = model.canEditGroups && sec.editable
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     Row(
@@ -1414,7 +1425,10 @@ private fun SessionRow(
                     menuGroups.filter { it.id != s.group }.forEach { grp ->
                         add(PocketMenuItem(grp.name, mutedPrefix = "$moveTo ·") { model.assignGroup(s.sessionId, grp.id) })
                     }
-                    if (s.group != null) add(PocketMenuItem(moveOut) { model.assignGroup(s.sessionId, null) })
+                    // "out" only beside "to": [menuGroups] is empty wherever this row's groups aren't the listing's to
+                    // edit — another project's RECENT copy (#360), a guest, an older daemon — and moving out is a verb
+                    // on that same listing
+                    if (s.group != null && menuGroups.isNotEmpty()) add(PocketMenuItem(moveOut) { model.assignGroup(s.sessionId, null) })
                 },
                 buildList {
                     if (canArchive) {

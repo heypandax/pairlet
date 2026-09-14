@@ -69,7 +69,7 @@ private data class PinRec(
 private data class HiddenRec(val accountId: String, val sessionId: String, val cwd: String)
 
 /** Persisted form of a RECENT visit (issue #102) — the KEY only: account + path, list order = recency.
- *  A visit's session snapshot is a re-pullable cache and deliberately not stored. */
+ *  A visit's snapshot — its rows and their group definitions (#360) — is a re-pullable cache and deliberately not stored. */
 @Serializable
 private data class VisitRec(val accountId: String, val path: String)
 
@@ -616,7 +616,14 @@ class RepoDesktopModel(
     // ── RECENT groups: session lists cached per visited project (per account) ─────────────────────
     // The protocol only lists sessions per directory (ListSessions), so cross-project RECENT is built
     // client-side: each visit carries a snapshot of its list, and the current dir always reads live.
-    private data class Visit(val accountId: String, val path: String, val snapshot: List<DkSession> = emptyList())
+    // [groups] are the custom-group definitions that listing came with (#360): the snapshot's rows name their
+    // group by id, and without the definitions a project that stopped being listed rendered flat.
+    private data class Visit(
+        val accountId: String,
+        val path: String,
+        val snapshot: List<DkSession> = emptyList(),
+        val groups: List<DkGroup> = emptyList(),
+    )
 
     // most recent first. The KEYS survive restarts (issue #102): loaded from the store here, persisted on
     // every reorder — snapshots stay empty until [refillRecent] (or a fresh visit) re-lists the dir.
@@ -651,7 +658,9 @@ class RepoDesktopModel(
     private fun sameDir(a: String, b: String): Boolean = sameDirPath(a, b)
 
     /** Upsert the live list under its dir before [openProject] points the repo somewhere else — this is
-     *  also how a dir listed outside openProject (e.g. a restored chat's) enters RECENT. Converges the stored
+     *  also how a dir listed outside openProject (e.g. a restored chat's) enters RECENT. Rows and their group
+     *  definitions are taken together, from that one listing, replacing whatever the visit kept before — so a
+     *  group renamed or deleted since can't come back with the snapshot (#360). Converges the stored
      *  key to the daemon's ABSOLUTE workdir once the open session resolved it (sessionsDir only echoes the raw,
      *  maybe-tilde request), so a tilde reseed and a later absolute directory entry don't split (issue #58). */
     private fun snapshotCurrent() {
@@ -662,10 +671,10 @@ class RepoDesktopModel(
         val i = visits.indexOfFirst { it.accountId == acct && sameDir(it.path, key) }
         if (i >= 0) {
             val converged = visits[i].path != key
-            visits[i] = visits[i].copy(path = key, snapshot = sessions)
+            visits[i] = visits[i].copy(path = key, snapshot = sessions, groups = customGroups)
             if (converged) saveVisits() // the stored key changed (tilde → absolute, #58) — keep the disk form in step
         } else {
-            visits.add(0, Visit(acct, key, sessions))
+            visits.add(0, Visit(acct, key, sessions, customGroups))
             saveVisits() // a dir listed outside openProject just entered RECENT (issue #102)
         }
     }
@@ -690,7 +699,8 @@ class RepoDesktopModel(
 
     /** Re-list [acct]'s restored, snapshot-empty visits, oldest first — the most-recent group's echo lands
      *  last, leaving it the live one (the state the user quit in). Each echo is archived into its visit by
-     *  [snapshotCurrent] (position preserved by the upsert); user navigation stops the remainder, and an
+     *  [snapshotCurrent] (position preserved by the upsert) — rows and group definitions both, so every restored
+     *  project keeps its sections, not just the last one listed (#360); user navigation stops the remainder, and an
      *  unanswered dir just stays empty — the sweep must never wedge the sidebar. */
     private suspend fun refillRecent(acct: String) {
         val gen = navGen
@@ -753,6 +763,7 @@ class RepoDesktopModel(
         val live = daemonLiveSessions()
         val openId = repo.sessionKey.value.takeIf { repo.convoId.value != null }
         val streaming = repo.streaming.value
+        val listedGroups = customGroups // the listed dir's — mapped once for this derive, not per visit
         keys.map { v ->
             val norm = normCwd(v.path)
             val current = normLive != null && norm == normLive
@@ -767,6 +778,8 @@ class RepoDesktopModel(
                 sessions = rows,
                 sharedBy = share?.sharedBy,
                 shareExpiresAt = share?.shareExpiresAt,
+                // the groups come from where the rows do (#360): the listing's own, else the copy the snapshot kept
+                customGroups = if (current) listedGroups else v.groups,
             )
         }
     }
@@ -777,7 +790,7 @@ class RepoDesktopModel(
     override fun refresh(g: DkSessionGroup?) {
         navGen++ // manual refresh repoints the list deliberately — stop any RECENT refill sweep (#102)
         repo.refreshDirectoriesSilently() // manual refresh means "sync the sidebar" — projects/running state rides along
-        if (g != null && !g.current) snapshotCurrent() // keep the outgoing live group's rows before repointing
+        if (g != null && !g.current) snapshotCurrent() // keep the outgoing live group's rows and groups before repointing
         repo.refreshSessions(g?.path) // null → the current dir; no-op when nothing is listed yet
     }
 
@@ -812,7 +825,8 @@ class RepoDesktopModel(
     // ── custom session groups (issue #119): the current project's groups + mutations ───────────────
     // repo.sessionGroups already tracks the listed dir's groups (null/older-daemon collapsed to empty
     // upstream — so an empty list is the flat-render signal). Every mutation targets the current dir; the
-    // daemon answers by re-pushing Sessions, so no optimistic local edit is needed here.
+    // daemon answers by re-pushing Sessions, so no optimistic local edit is needed here. Other projects'
+    // groups are the copies [snapshotCurrent] took (#360), which nothing here ever edits.
     override val customGroups: List<DkGroup>
         get() = repo.sessionGroups.map { DkGroup(it.id, it.name, it.order) }.sortedBy { it.order }
 

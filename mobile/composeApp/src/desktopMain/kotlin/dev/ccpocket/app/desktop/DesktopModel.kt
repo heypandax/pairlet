@@ -100,8 +100,8 @@ data class DkSession(
     val running: Boolean = false,
     val pending: Int = 0,
     val model: String? = null, // last turn's model id (row shows its alias; null = unknown/older daemon)
-    // custom session-group id this row belongs to (issue #119), or null = ungrouped. Only meaningful for
-    // the CURRENT project's live rows — the daemon lists groups only for the listed dir.
+    // custom session-group id this row belongs to (issue #119), or null = ungrouped. Resolved against the group
+    // definitions listed WITH the row: the listed project's live ones, or the copy a RECENT snapshot kept (#360).
     val group: String? = null,
     // rewind/fork lineage (issue #282), mirroring SessionSummary: [forkedFrom] keeps both sessions
     // visible as peers, [rewindOf] folds the ORIGINAL — the one this row names — into the collapsed
@@ -130,6 +130,11 @@ data class DkSessionGroup(
     // the header renders the "Shared" pill + owner + remaining validity. Null = an ordinary local dir.
     val sharedBy: String? = null,
     val shareExpiresAt: Long? = null,
+    // this project's custom session groups (issue #119), listed together with [sessions]: live for the current
+    // group, the copy its snapshot kept for every other one (#360) — which is what lets a project that stops being
+    // listed keep its sections. Display only: every group verb acts on the listed project ([DesktopModel.customGroups]).
+    // Empty = no groups, an older daemon or a guest — the rows render flat.
+    val customGroups: List<DkGroup> = emptyList(),
 )
 
 /**
@@ -565,8 +570,9 @@ interface DesktopModel {
     fun forgetProject(g: DkSessionGroup) {}
 
     // ── custom session groups (issue #119) ────────────────────────────────────────────────────────
-    // These describe ONLY the current (live-listed) project — the daemon lists groups per directory, so a
-    // non-current RECENT snapshot has none and stays flat. Empty [customGroups] = an older daemon that omits
+    // These describe ONLY the current (live-listed) project — the daemon lists groups per directory, and every
+    // verb below acts on that listing. Another RECENT project shows the copy its snapshot kept
+    // ([DkSessionGroup.customGroups], #360), read-only. Empty [customGroups] = an older daemon that omits
     // them OR a project with no groups yet: either way the current project's rows render flat (the degrade).
     /** The current project's custom groups, ordered; empty = none / older daemon → flat list. */
     val customGroups: List<DkGroup> get() = emptyList()
