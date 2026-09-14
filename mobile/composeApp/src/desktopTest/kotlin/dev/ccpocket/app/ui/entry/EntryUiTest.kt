@@ -242,27 +242,59 @@ class EntryUiTest {
     }
 
     @Test
-    fun onlyTheOpeningAgentInheritsThePersistedDefault() {
-        // opened on Claude/Plan → Claude keeps Plan…
+    fun everyAgentInheritsTheSavedDefaultItCanActuallyOffer() {
+        // saved Plan → Claude opens on Plan…
         val kept = seedModeChoice(
-            agent = AgentKind.CLAUDE, openedAgent = AgentKind.CLAUDE,
-            persisted = PermissionMode.PLAN, persistedNative = null,
+            agent = AgentKind.CLAUDE, persisted = PermissionMode.PLAN, persistedNative = null,
         )
         assertEquals(PermissionMode.PLAN, kept.mode)
-        // …but SWITCHING to Codex resets to Codex's own default, rather than reinterpreting "Plan" as
-        // Codex's Cautious sandbox preset behind the user's back
+        // …and #363: so does Codex, because that value pair IS a row Codex offers. The old rule — only the
+        // agent the sheet opened on may inherit — is what turned a saved Full access into step-by-step
+        // approvals the moment the user tapped a different agent chip.
         val switched = seedModeChoice(
-            agent = AgentKind.CODEX, openedAgent = AgentKind.CLAUDE,
-            persisted = PermissionMode.PLAN, persistedNative = null,
+            agent = AgentKind.CODEX, persisted = PermissionMode.PLAN, persistedNative = null,
         )
-        assertEquals(agentDefaultMode(AgentKind.CODEX), switched.mode, "a switch resets the mode")
-        // …and a switch never carries a native Claude mode onto a backend that has none
+        assertEquals(PermissionMode.PLAN, switched.mode, "a saved rung the target has is inherited")
+        // …but a pair the target has no row for still falls back to that agent's OWN default: a native
+        // Claude mode is not something a backend without one can be started in
         val toKimi = seedModeChoice(
-            agent = AgentKind.KIMI, openedAgent = AgentKind.CLAUDE,
-            persisted = PermissionMode.DEFAULT, persistedNative = CLAUDE_PERMISSION_MODE_AUTO,
-            autoAvailable = true,
+            agent = AgentKind.KIMI, persisted = PermissionMode.DEFAULT,
+            persistedNative = CLAUDE_PERMISSION_MODE_AUTO, autoAvailable = true,
         )
         assertNull(toKimi.nativeMode, "Claude's native Auto is not a Kimi mode")
+        assertEquals(agentDefaultMode(AgentKind.KIMI), toKimi.mode)
+    }
+
+    @Test
+    fun aHandPickedRungTravelsAsItsValuePairAndIsNeverWidenedByTheSavedDefault() {
+        val plan = agentModeChoices(AgentKind.CLAUDE).single { it.mode == PermissionMode.PLAN }
+        val accept = agentModeChoices(AgentKind.CLAUDE).single { it.mode == PermissionMode.ACCEPT_EDITS }
+        // saved default is the WIDEST rung there is — it must not be what an unsupported pick falls back to
+        val saved = PermissionMode.BYPASS_PERMISSIONS
+        assertEquals(
+            PermissionMode.PLAN,
+            carryModeAcrossAgents(plan, AgentKind.DSH, saved, null).mode,
+            "dsh has a Plan rung, so the hand-picked one is kept",
+        )
+        val stranded = carryModeAcrossAgents(accept, AgentKind.KIMI, saved, null)
+        assertEquals(
+            accept, stranded,
+            "Kimi has no Accept edits rung: the pick is KEPT so the validity gate can ask for a new one",
+        )
+        assertTrue(
+            agentModeChoices(AgentKind.KIMI).none { it.mode == stranded.mode && it.nativeMode == stranded.nativeMode },
+            "…which is precisely what makes it invalid — never a silent substitution",
+        )
+        // OpenCode is a statement, not a ladder: nothing is carried into it, in either direction
+        assertEquals(
+            agentModeChoices(AgentKind.OPENCODE).single(),
+            carryModeAcrossAgents(plan, AgentKind.OPENCODE, saved, null),
+        )
+        // an untouched selection is just the seed
+        assertEquals(
+            seedModeChoice(AgentKind.CODEX, saved, null),
+            carryModeAcrossAgents(null, AgentKind.CODEX, saved, null),
+        )
     }
 
     @Test
@@ -274,8 +306,8 @@ class EntryUiTest {
             AgentModePreset(PermissionMode.BYPASS_PERMISSIONS, "full", "Full access"),
         )
         val seeded = seedModeChoice(
-            agent = AgentKind.CODEX, openedAgent = AgentKind.CODEX,
-            persisted = PermissionMode.DEFAULT, persistedNative = null, codexPresets = advertised,
+            agent = AgentKind.CODEX, persisted = PermissionMode.DEFAULT, persistedNative = null,
+            codexPresets = advertised,
         )
         assertTrue(
             seeded in agentModeChoices(AgentKind.CODEX, codexPresets = advertised),
@@ -286,20 +318,26 @@ class EntryUiTest {
             "DEFAULT is not advertised any more, so the seed falls to the first row this daemon does offer " +
                 "— never to a preset it dropped, and never to nothing",
         )
-        // …and a persisted mode the daemon still offers is still inherited by the opening agent
+        // …and a persisted mode the daemon still offers is inherited
         assertEquals(
             PermissionMode.ACCEPT_EDITS,
             seedModeChoice(
-                agent = AgentKind.CODEX, openedAgent = AgentKind.CODEX,
-                persisted = PermissionMode.ACCEPT_EDITS, persistedNative = null, codexPresets = advertised,
+                agent = AgentKind.CODEX, persisted = PermissionMode.ACCEPT_EDITS, persistedNative = null,
+                codexPresets = advertised,
             ).mode,
         )
-        // an unadvertised daemon leaves the seed exactly where it is today
+        // with no advertisement the built-in table decides, and Plan is Codex's Cautious row — so the saved
+        // pair is inherited there too (#363)
+        assertEquals(
+            PermissionMode.PLAN,
+            seedModeChoice(agent = AgentKind.CODEX, persisted = PermissionMode.PLAN, persistedNative = null).mode,
+        )
+        // …while a pair not even the built-in table has still lands on Codex's own default
         assertEquals(
             agentDefaultMode(AgentKind.CODEX),
             seedModeChoice(
-                agent = AgentKind.CODEX, openedAgent = AgentKind.CLAUDE,
-                persisted = PermissionMode.PLAN, persistedNative = null,
+                agent = AgentKind.CODEX, persisted = PermissionMode.DEFAULT,
+                persistedNative = CLAUDE_PERMISSION_MODE_AUTO,
             ).mode,
         )
     }

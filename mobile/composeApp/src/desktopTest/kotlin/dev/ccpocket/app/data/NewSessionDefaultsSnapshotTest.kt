@@ -55,6 +55,51 @@ class NewSessionDefaultsSnapshotTest {
         }
     }
 
+    /**
+     * #363: the tuple the new-session sheet / popover hands over (mode, agent, nativeMode, model) must reach
+     * the wire unchanged — including Claude's native Auto — and a Settings change made while the open is
+     * still queued (or before Retry) must not leak into it.
+     */
+    private fun checkPickedTuple(mode: PermissionMode, agent: AgentKind, native: String?, model: String?, retry: Boolean) {
+        val scheduler = TestCoroutineScheduler()
+        val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler))
+        val repo = PocketRepository(scope)
+        val sent = mutableListOf<Frame>()
+        try {
+            repo.setDefaultAgent(AgentKind.CODEX)
+            repo.setDefaultMode(PermissionMode.PLAN)
+            repo.onSendForTest = { sent += it }
+            assertTrue(repo.openSession("/tmp/picked", startMode = mode, agent = agent, startPermissionMode = native, startModel = model))
+            if (retry) {
+                scheduler.runCurrent()
+                repo.receiveForTest(PocketError("open_failed", "fixture failure"))
+                sent.clear()
+            }
+            repo.setDefaultAutoMode() // Settings flips to Auto mid-flight
+            repo.setDefaultAgent(AgentKind.KIMI)
+            if (retry) assertTrue(repo.retryOpen())
+            scheduler.runCurrent()
+            val open = sent.filterIsInstance<OpenSession>().single()
+            assertEquals(agent, open.agent)
+            assertEquals(mode, open.mode)
+            assertEquals(native, open.permissionMode)
+            assertEquals(model, open.model)
+        } finally {
+            repo.setDefaultAgent(AgentKind.CLAUDE)
+            repo.setDefaultMode(PermissionMode.DEFAULT)
+            scope.cancel()
+        }
+    }
+
+    @Test fun pickedFullAccessReachesTheWire() =
+        checkPickedTuple(PermissionMode.BYPASS_PERMISSIONS, AgentKind.CLAUDE, null, "sonnet", retry = false)
+    @Test fun pickedNativeAutoReachesTheWire() =
+        checkPickedTuple(PermissionMode.DEFAULT, AgentKind.CLAUDE, dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO, "sonnet", retry = false)
+    @Test fun pickedNativeAutoSurvivesRetry() =
+        checkPickedTuple(PermissionMode.DEFAULT, AgentKind.CLAUDE, dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO, null, retry = true)
+    @Test fun pickedCodexFullAccessSurvivesRetry() =
+        checkPickedTuple(PermissionMode.BYPASS_PERMISSIONS, AgentKind.CODEX, null, null, retry = true)
+
     @Test fun queuedNewSessionKeepsDefaultAgent() = checkSnapshot("sonnet", switchAgent = true)
     @Test fun retryKeepsDefaultAgent() = checkSnapshot("sonnet", retry = true, switchAgent = true)
     @Test fun queuedNewSessionKeepsDefaultModelAndAgent() = checkSnapshot("sonnet")

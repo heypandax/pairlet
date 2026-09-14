@@ -2096,6 +2096,7 @@
     <string name="context_status_window_override">这个窗口上限是你手动设置的值，并非后端上报。</string>
     <string name="context_status_gauge_no_data">尚未获得上下文数据——打开会话信息</string>
     <string name="context_status_open_details">上下文状态——查看详情</string>
+    <string name="new_session_mode_unavailable">这台电脑已不再提供所选模式，请重新选择模式后开始。</string>
     <string name="tool_process_toggle">收起工具过程</string>
     <string name="tool_process_group">执行过程</string>
     <plurals name="tool_process_tools">

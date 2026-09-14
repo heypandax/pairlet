@@ -2102,6 +2102,7 @@
     <string name="context_status_window_override">This window is a value you set, not one reported by the backend.</string>
     <string name="context_status_gauge_no_data">Context data not available yet — open session info</string>
     <string name="context_status_open_details">Context status — show details</string>
+    <string name="new_session_mode_unavailable">This computer no longer offers the selected mode. Choose a mode to start.</string>
     <string name="tool_process_toggle">Collapse tool steps</string>
     <string name="tool_process_group">Process</string>
     <plurals name="tool_process_tools">
