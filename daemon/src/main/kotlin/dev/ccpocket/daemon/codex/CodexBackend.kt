@@ -82,7 +82,8 @@ class CodexBackend(
     // thread/name/set is BEST EFFORT and deliberately kept out of [pendingControls] (issue #347): a name is
     // cosmetic, so its response must never gate the writer hand-back that map drives, and its failure must
     // never reach the chat as an error card. Tracked only so the outcome can be logged and the map drained.
-    private val pendingNames = ConcurrentHashMap<Long, String>() // thread/name/set id → name we asked for
+    private val pendingNames = ConcurrentHashMap<Long, String>()
+    private val TAKEOVER_REVEAL_GRACE_MS = 1500L // thread/name/set id → name we asked for
     // Threads this PROCESS GENERATION has already named — [attach] clears it, so one fork is named once even
     // if thread/started arrives after the thread/fork response and re-enters onThreadReady.
     private val namedThreads = ConcurrentHashMap.newKeySet<String>()
@@ -375,6 +376,26 @@ class CodexBackend(
             put("threadId", tid)
             put("name", name)
         }) }.onFailure { log.warn("codex thread/name/set write failed: ${it.message}") }
+        revealTakeoverBranchOnDesktop(tid)
+    }
+
+    /** Issue #347: the desktop app only hydrates its list at launch and from ITS OWN app-server's
+     * notifications — our fork lands in the shared state db but its sidebar never hears about it. Its
+     * deep link makes it hydrate exactly this thread, so the user finds the branch without restarting.
+     * Best effort, off the pump thread, after a short grace so `thread/name/set` above has landed in the
+     * state db before the app reads the row; any failure costs only the reveal. */
+    private fun revealTakeoverBranchOnDesktop(tid: String) {
+        val cmd = CodexTakeoverLineage.desktopOpenCommand(tid) ?: return
+        Thread({
+            try {
+                Thread.sleep(TAKEOVER_REVEAL_GRACE_MS)
+                val p = ProcessBuilder(cmd).redirectErrorStream(true).start()
+                val code = if (p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) p.exitValue() else { p.destroyForcibly(); -1 }
+                log.info("codex desktop reveal ${tid.take(8)} → exit $code")
+            } catch (e: Exception) {
+                log.info("codex desktop reveal ${tid.take(8)} skipped: ${e.javaClass.simpleName}")
+            }
+        }, "codex-desktop-reveal").apply { isDaemon = true }.start()
     }
 
     /** Newer app-server builds retain the rollout's exclusive writer after thread/unsubscribe. A clean
