@@ -27,6 +27,16 @@ object CodexTakeoverLineage {
     /** Marks a branch as cc-pocket's work. Deliberately NOT a status word like "taking over": the name is
      *  permanent, and a status would be a lie the moment the take-over finishes. */
     const val PREFIX_MARK: String = "CC Pocket ·"
+
+    /** The Codex desktop app's own deep link (issue #347): `codex://threads/<id>` is the URL its TUI `/app`
+     *  command opens, the app validates it (scheme `codex:`, host `threads`, UUID id) and hydrates that one
+     *  thread straight into the recent list — no restart, no list refresh. */
+    fun desktopDeepLink(threadId: String): String = "codex://threads/$threadId"
+
+    /** `open -g` (macOS only; `-g` keeps the phone user's desktop focus where it was). Null elsewhere: the
+     *  desktop app registers the scheme per platform and we only have evidence for macOS. */
+    fun desktopOpenCommand(threadId: String, osName: String = System.getProperty("os.name") ?: ""): List<String>? =
+        if (osName.lowercase().contains("mac")) listOf("/usr/bin/open", "-g", desktopDeepLink(threadId)) else null
     private const val PREFIX = "$PREFIX_MARK "
 
     /** Names longer than this get elided — a sidebar row shows a prefix, not a paragraph. */
