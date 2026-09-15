@@ -127,7 +127,8 @@ class ChatTranscript {
                     // card has carried its toolUseId since the beginning (see the `else` branch below).
                     messages[i] = card.copy(
                         ok = f.ok,
-                        output = f.output,
+                        // a bare outcome frame (#380 live folding) carries no output: keep what the card has
+                        output = if (f.outcomeOnly) card.output else f.output,
                         // absent images never ERASE what the card already had: a sub-agent's RESULT and
                         // an image-bearing RESULT are different frames, and only one of them speaks here
                         images = f.images.takeIf { it.isNotEmpty() }?.let(::decodeImages) ?: card.images,

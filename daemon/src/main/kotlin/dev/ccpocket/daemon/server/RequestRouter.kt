@@ -319,6 +319,9 @@ class RequestRouter(
          *  it at EMISSION, replies and pushes alike; until the declaration arrives this connection receives neither. */
         @Volatile var supportsManagedSessions: Boolean = false
 
+        /** issue #380 live folding: the client wants an outcome-only RESULT for every finished ordinary tool. */
+        @Volatile var supportsToolOutcomes: Boolean = false
+
         /** Whether this peer can decode [agent]. CLAUDE/CODEX are the baseline vocabulary every shipped
          *  client understands; OPENCODE/KIMI are post-baseline additions each guarded by its own cap. */
         fun allows(agent: AgentKind): Boolean = when (agent) {
@@ -387,6 +390,9 @@ class RequestRouter(
                 frame is dev.ccpocket.protocol.ExecutionRunAccepted ||
                 frame is dev.ccpocket.protocol.ExecutionRunState ||
                 frame is dev.ccpocket.protocol.ExecutionRunOutput -> true
+            // issue #380 live folding: a bare outcome RESULT only reaches a connection that asked for it; sub-agent
+            // and image RESULTs (outcomeOnly = false) keep flowing to every client as before
+            frame is dev.ccpocket.protocol.ToolEvent && frame.outcomeOnly -> caps?.supportsToolOutcomes == true
             else -> true
         }
 
@@ -515,6 +521,7 @@ class RequestRouter(
                 caps?.supportsApprovalV2 = frame.supportsApprovalV2 // P2-3: gates the V2 approval frames
                 caps?.supportsProjectPins = frame.supportsProjectPins // #362: gates pocket/pins.state
                 caps?.supportsManagedSessions = frame.supportsManagedSessions // #360: gates pocket/managed.state + .discovered
+                caps?.supportsToolOutcomes = frame.supportsToolOutcomes // #380: gates outcome-only tool RESULTs
             }
 
             is ListDirectories ->

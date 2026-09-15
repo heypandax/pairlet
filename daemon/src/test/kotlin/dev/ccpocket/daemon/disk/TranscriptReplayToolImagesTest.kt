@@ -20,9 +20,9 @@ import kotlin.test.assertTrue
  * this machine's own transcripts — 218 such blocks across 29 of 268 files, every one a base64 source),
  * so a reattach can show the same screenshot the live stream showed instead of a bare tool name.
  *
- * The narrow scope is deliberate and asserted: an ordinary replayed TOOL row gains pictures and
- * NOTHING else. It has never carried an outcome, and quietly starting to stamp `ok` here would light a
- * ✓ on every historical Bash call in the transcript.
+ * Since #380 live folding (2026-09-15) an ordinary replayed TOOL row also takes its OUTCOME from the
+ * tool_result (`ok` from `is_error`), so a reopened transcript folds finished steps exactly like the live
+ * stream, which now settles every card. A row whose result never arrived stays outcome-free.
  */
 class TranscriptReplayToolImagesTest {
 
@@ -63,7 +63,7 @@ class TranscriptReplayToolImagesTest {
     }
 
     @Test
-    fun an_image_bearing_result_does_not_stamp_an_outcome_on_the_row() {
+    fun an_image_bearing_result_stamps_the_outcome_too() {
         val f = tmpFile("nook.jsonl")
         f.writeText(
             listOf(
@@ -72,13 +72,13 @@ class TranscriptReplayToolImagesTest {
             ).joinToString("\n"),
         )
         val tool = TranscriptReplay.read(f).single { it.role == ChatRole.TOOL }
-        assertEquals(null, tool.ok, "an ordinary replayed tool row must stay outcome-free")
+        assertEquals(true, tool.ok, "the ordinary tool row takes its outcome from the result (#380)")
         assertEquals(null, tool.output)
         assertEquals(1, tool.images.size)
     }
 
     @Test
-    fun an_ordinary_text_only_tool_row_is_completely_unchanged() {
+    fun an_ordinary_text_only_tool_row_gains_only_its_outcome() {
         val f = tmpFile("plain.jsonl")
         f.writeText(
             listOf(
@@ -90,7 +90,23 @@ class TranscriptReplayToolImagesTest {
         assertEquals("Bash", tool.tool)
         assertEquals(emptyList(), tool.images)
         assertFalse(tool.imagesTruncated)
-        assertEquals(null, tool.ok)
+        assertEquals(true, tool.ok, "a text-only result still settles the row (#380)")
+    }
+
+    @Test
+    fun a_failed_result_reads_false_and_a_missing_result_stays_unknown() {
+        val f = tmpFile("outcome.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"run it"}}""",
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"false"}}]}}""",
+                """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"b1","is_error":true,"content":"exit 1"}]}}""",
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b2","name":"Bash","input":{"command":"sleep 99"}}]}}""",
+            ).joinToString("\n"),
+        )
+        val tools = TranscriptReplay.read(f).filter { it.role == ChatRole.TOOL }
+        assertEquals(listOf(false, null), tools.map { it.ok }, "is_error → false; no tool_result yet → unknown, never folded")
+        assertTrue(tools.all { it.images.isEmpty() && it.output == null })
     }
 
     @Test

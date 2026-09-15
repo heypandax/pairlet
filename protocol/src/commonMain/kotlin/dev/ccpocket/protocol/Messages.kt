@@ -945,15 +945,24 @@ data class ToolEvent(
     val output: String? = null,
     /**
      * Images the tool RESULT carried (issue #332: a Playwright/MCP screenshot returned as an
-     * `{"type":"image"}` block). Rides the RESULT phase only — and a RESULT is emitted for a non-sub-agent
-     * tool ONLY when it carried at least one image, so the pre-#332 stream (START-only for ordinary
-     * tools) is otherwise unchanged. The daemon downscales each image to a wire-safe thumbnail before
+     * `{"type":"image"}` block). Rides the RESULT phase only. For a non-sub-agent tool a RESULT is emitted
+     * when it carried at least one image, or — to a connection that declared
+     * [ClientCaps.supportsToolOutcomes] — as a bare [outcomeOnly] frame; the pre-#332 stream (START-only
+     * for ordinary tools) is otherwise unchanged. The daemon downscales each image to a wire-safe thumbnail before
      * sending (bounded edge, bounded bytes, bounded count per result) — the full-resolution file, when the
      * tool also wrote one inside the workdir, stays reachable through [ReadFile]. Same [ImageData] shape as
      * the uplink. Trailing optional both ways: an old daemon never sends it (today's card), an old client
      * ignores it.
      */
     val images: List<ImageData> = emptyList(),
+    /**
+     * This RESULT exists only to report [ok] for an ORDINARY tool (2026-09-15, issue #380 live folding): no
+     * output, no images — the card it patches keeps whatever it already shows. The daemon sends these only
+     * to connections whose [ClientCaps.supportsToolOutcomes] is true; everyone else keeps the START-only
+     * stream for plain tools. Trailing optional: an old daemon never sets it, an old client ignores it, and a
+     * client that did receive one merely patches the card's outcome — which is what RESULT always meant.
+     */
+    val outcomeOnly: Boolean = false,
 ) : ToPhone
 
 /** The tool names the Claude CLI uses for a sub-agent call — "Task" through 2.1.x, "Agent" on
@@ -2090,6 +2099,10 @@ data class ClientCaps(
     // issue #360 (trailing optional): this connection decodes pocket/managed.state and pocket/managed.discovered.
     // The daemon never sends either — not even a reply — to a connection that did not declare it.
     val supportsManagedSessions: Boolean = false,
+    // issue #380 live folding (trailing optional): this connection wants a RESULT frame for EVERY finished
+    // tool (ok only — [ToolEvent.outcomeOnly]), not just sub-agents and image results. Undeclared
+    // connections keep the START-only stream for ordinary tools.
+    val supportsToolOutcomes: Boolean = false,
 ) : ToDaemon
 
 // ── agent model listing ─────────────────────────────────────────────────

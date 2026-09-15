@@ -59,6 +59,19 @@ class ChatTranscriptTest {
     }
 
     @Test
+    fun aBareOutcomeResultSetsOkAndKeepsTheCardsOutput() {
+        // issue #380 live folding: the daemon's outcome-only RESULT patches ok without erasing anything
+        val t = ChatTranscript()
+        t.onToolEvent(ToolEvent("c", 1, ToolPhase.START, "Bash", "ls", toolUseId = "t1"))
+        t.onToolEvent(ToolEvent("c", 2, ToolPhase.RESULT, "Read", toolUseId = "t1", ok = true, output = "3 files"))
+        t.onToolEvent(ToolEvent("c", 3, ToolPhase.RESULT, "Bash", toolUseId = "t1", ok = true, outcomeOnly = true))
+        val card = t.messages.filterIsInstance<ChatItem.Tool>().single()
+        assertEquals(true, card.ok)
+        assertEquals("3 files", card.output, "a bare outcome must not blank an output the card already carried")
+        assertEquals(1, t.messages.size, "and it never adds a row")
+    }
+
+    @Test
     fun aChildToolEventCountsUpItsParentCardInsteadOfAddingARow() {
         val t = ChatTranscript()
         t.onToolEvent(ToolEvent("c", 1, ToolPhase.START, "Task", "explore", toolUseId = "parent"))

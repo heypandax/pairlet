@@ -2016,9 +2016,10 @@ class Conversation(
                     is AgentEvent.ToolResult -> {
                         val wasSubagent = ev.parentId == null && ev.toolUseId?.let(subagentRuns::containsKey) == true
                         if (ev.parentId == null) finishSubagentFromResult(ev)
-                        // an ordinary tool that returned a PICTURE gets the one RESULT frame it would
-                        // otherwise never get (issue #332) — see [emitToolResultImages]
-                        if (!wasSubagent) emitToolResultImages(ev)
+                        // an ordinary tool that returned a PICTURE gets a RESULT with thumbnails (issue #332);
+                        // every other ordinary tool gets a bare outcome RESULT (issue #380 live folding), which
+                        // the ingress gates deliver only to clients that declared supportsToolOutcomes
+                        if (!wasSubagent && !emitToolResultImages(ev)) emitToolOutcome(ev)
                         if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) {
                             syncBackgroundWork()
                             emitJobs()
@@ -3015,8 +3016,8 @@ class Conversation(
     }
 
     /**
-     * Emit the RESULT phase for a NON-sub-agent tool — but ONLY when its result actually carried an
-     * image (issue #332).
+     * Emit the image-bearing RESULT for a NON-sub-agent tool (issue #332). Returns whether a frame went
+     * out; when it did not, the caller sends the bare [emitToolOutcome] frame instead.
      *
      * Ordinary tools are START-only on this wire and stay that way: a RESULT for every Bash call would
      * double the tool traffic of a busy turn and change what every already-shipped client renders (the
@@ -3030,12 +3031,12 @@ class Conversation(
      * A result INSIDE a sub-agent ([AgentEvent.ToolResult.parentId] set) is skipped: those fold into the
      * parent's card as a child count and have no row of their own to hang a thumbnail on.
      */
-    private suspend fun emitToolResultImages(ev: AgentEvent.ToolResult) {
-        if (ev.images.isEmpty()) return
-        if (ev.parentId != null) return
-        val id = ev.toolUseId ?: return
+    private suspend fun emitToolResultImages(ev: AgentEvent.ToolResult): Boolean {
+        if (ev.images.isEmpty()) return false
+        if (ev.parentId != null) return false
+        val id = ev.toolUseId ?: return false
         val thumbs = ImageThumbnail.thumbnails(ev.images)
-        if (thumbs.isEmpty()) return // every image was undecodable / over budget — nothing to show
+        if (thumbs.isEmpty()) return false // every image was undecodable / over budget — the outcome frame still goes out
         val frame = ToolEvent(
             convoId, seq.getAndIncrement(), ToolPhase.RESULT,
             toolNames[id] ?: "tool",
@@ -3056,6 +3057,20 @@ class Conversation(
             frame.copy(images = emptyList())
         }
         sink.emit(sized)
+        return true
+    }
+
+    /**
+     * The bare RESULT for an ordinary tool that returned only text (issue #380 live folding): outcome and
+     * id, nothing else, so the live card can read Done / Failed — and fold — without waiting for a reopen.
+     * Marked [ToolEvent.outcomeOnly]; the ingress gates ([RequestRouter.allowedForCaps]) deliver it only to
+     * connections that declared [ClientCaps.supportsToolOutcomes], so an older client's stream is unchanged.
+     * Results INSIDE a sub-agent are skipped for the same reason as in [emitToolResultImages].
+     */
+    private suspend fun emitToolOutcome(ev: AgentEvent.ToolResult) {
+        if (ev.parentId != null) return
+        val id = ev.toolUseId ?: return
+        sink.emit(ToolEvent(convoId, seq.getAndIncrement(), ToolPhase.RESULT, toolNames[id] ?: "tool", ok = !ev.isError, toolUseId = id, outcomeOnly = true))
     }
 
     /** Main-chain tool_result for a tracked sub-agent: a foreground run's result IS its report — emit the

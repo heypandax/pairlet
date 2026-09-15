@@ -93,7 +93,7 @@ object TranscriptReplay {
         val out = ArrayList<MutableRow>()
         val taskIdx = HashMap<String, Int>() // sub-agent tool_use id -> its card's index in `out` (issue #77)
         val questionIdx = HashMap<String, Int>() // AskUserQuestion tool_use id -> its row's index (issue #110)
-        val toolIdx = HashMap<String, Int>() // ordinary tool_use id -> its row's index, for images (issue #332)
+        val toolIdx = HashMap<String, Int>() // ordinary tool_use id -> its row's index: outcome (#380) + images (#332)
         var lineNo = 0L
         var malformed = 0L
         var lastMalformed = -1L
@@ -118,7 +118,7 @@ object TranscriptReplay {
                         "user" -> {
                             attachSubagentResults(obj, out, taskIdx, lineNo)
                             attachQuestionAnswers(obj, out, questionIdx, lineNo)
-                            attachToolImages(obj, out, toolIdx, lineNo)
+                            attachToolResults(obj, out, toolIdx, lineNo)
                             if (isRealUserTurn(obj)) userContent(obj)
                                 // an IMAGE-ONLY prompt has no text at all (issue #254) — keeping the row
                                 // on its attachments is why this is no longer a bare isNotBlank() gate
@@ -138,9 +138,11 @@ object TranscriptReplay {
                         // the id keys the AskUserQuestion row (issue #110) or the sub-agent card (issue #77);
                         // the tool name says which map so its later tool_result patches the right one
                         "assistant" -> assistantBlocks(obj).forEach { (msg, id) ->
-                            // three destinations now (issue #332). The first two patch an OUTCOME onto
-                            // the row; `toolIdx` only ever patches pictures, so an ordinary tool row is
-                            // still outcome-free exactly as before.
+                            // three destinations. All three patch an OUTCOME onto the row once its
+                            // tool_result shows up: the question card its answers (#110), the sub-agent card
+                            // its report (#77), and — since #380 live folding — the ordinary tool row its
+                            // ok (plus pictures, #332), so a reopened transcript folds exactly like the
+                            // live stream did.
                             id?.let {
                                 val tool = msg.tool ?: ""
                                 when {
@@ -253,36 +255,35 @@ object TranscriptReplay {
     }
 
     /**
-     * Patch an ordinary TOOL row with the pictures its result returned (issue #332) — a Playwright
-     * `browser_take_screenshot`, or a `Read` of a PNG, which is the shape that actually occurs in this
-     * machine's own transcripts. The CLI persists these inline as base64 in the tool_result content, so
-     * a replay can show exactly what the live stream showed.
+     * Patch an ordinary tool row when its main-chain tool_result shows up: the OUTCOME (`ok`, from the
+     * block's `is_error` — issue #380 live folding, so a reopened transcript folds finished steps exactly
+     * like the live stream, which now settles every card through an outcome RESULT), and the PICTURES the
+     * result returned (issue #332). A text-only result still stamps the outcome; only a missing
+     * tool_result leaves the row outcome-free (`ok == null`), which the clients read as "unknown" and
+     * never fold.
      *
-     * Deliberately narrower than its two siblings: it patches ONLY [HistoryMessage.images] /
-     * [HistoryMessage.imagesTruncated] and never `ok`/`output`. An ordinary replayed tool row has never
-     * carried an outcome, and quietly starting to stamp one here would light up a ✓ on every historical
-     * Bash call the moment this shipped.
-     *
-     * Thumbnailed through the same [ImageThumbnail] the live path uses — the raw blocks are up to
-     * ~620 KB of base64 apiece (measured), which the replay budget would simply shed.
+     * Images are thumbnailed through the same [ImageThumbnail] the live path uses — the raw blocks are up
+     * to ~620 KB of base64 apiece (measured), which the replay budget would simply shed.
      */
-    private fun attachToolImages(obj: JsonObject, out: ArrayList<MutableRow>, toolIdx: HashMap<String, Int>, lineNo: Long) {
+    private fun attachToolResults(obj: JsonObject, out: ArrayList<MutableRow>, toolIdx: HashMap<String, Int>, lineNo: Long) {
         if (toolIdx.isEmpty()) return
         val content = (obj["message"] as? JsonObject)?.get("content") as? JsonArray ?: return
         for (el in content) {
             val block = el as? JsonObject ?: continue
             if (block.str("type") != "tool_result") continue
-            // Resolve the row index BEFORE looking for images so the entry is consumed either way — a
-            // text-only result must not leave its id in the map to be matched by some later result.
+            // consume the entry either way — a later result must never match a stale id
             val idx = block.str("tool_use_id")?.let(toolIdx::remove) ?: continue
+            val row = out.getOrNull(idx) ?: continue
             val raw = (block["content"] as? JsonArray)
                 ?.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "image" }?.let(::imageBlock) }
                 .orEmpty()
-            if (raw.isEmpty()) continue
-            val row = out.getOrNull(idx) ?: continue
-            val thumbs = ImageThumbnail.thumbnails(raw)
-            if (thumbs.isEmpty()) continue // all undecodable: say nothing rather than claim a lost picture
-            row.msg = row.msg.copy(images = thumbs, imagesTruncated = thumbs.size < raw.size)
+            // all undecodable: say nothing about pictures rather than claim a lost one — the outcome still lands
+            val thumbs = if (raw.isEmpty()) emptyList() else ImageThumbnail.thumbnails(raw)
+            row.msg = row.msg.copy(
+                ok = (block["is_error"] as? JsonPrimitive)?.booleanOrNull != true,
+                images = if (thumbs.isEmpty()) row.msg.images else thumbs,
+                imagesTruncated = if (thumbs.isEmpty()) row.msg.imagesTruncated else thumbs.size < raw.size,
+            )
             row.patchLine = lineNo
         }
     }

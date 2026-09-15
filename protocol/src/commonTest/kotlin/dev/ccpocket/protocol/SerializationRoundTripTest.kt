@@ -264,6 +264,24 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun toolEvent_outcomeOnly_and_clientCaps_supportsToolOutcomes_are_additive_and_legacy_safe() {
+        // issue #380 live folding: the bare outcome RESULT
+        val ev = ToolEvent(convoId = "c", seq = 3, phase = ToolPhase.RESULT, tool = "Bash", ok = true, toolUseId = "tu2", outcomeOnly = true)
+        assertEquals(ev, PocketJson.decodeFromString<ToolEvent>(PocketJson.encodeToString(ev)))
+        // an old daemon's frame (no key) is not an outcome-only frame
+        assertEquals(false, PocketJson.decodeFromString<ToolEvent>("""{"convoId":"c","seq":1,"phase":"result","tool":"Agent","output":"done"}""").outcomeOnly)
+        // an old client's concrete serializer skips the flag and still reads a plain RESULT that patches ok
+        assertEquals(
+            OldToolEvent("c", 3, ToolPhase.RESULT, "Bash", ok = true, toolUseId = "tu2"),
+            PocketJson.decodeFromString<OldToolEvent>(PocketJson.encodeToString(ev)),
+        )
+        // the capability bit is trailing-optional: absent = false, and it round-trips
+        assertEquals(false, PocketJson.decodeFromString<ClientCaps>("""{"supportsAgents":["kimi"]}""").supportsToolOutcomes)
+        val caps = ClientCaps(supportsAgents = listOf("kimi"), supportsToolOutcomes = true)
+        assertEquals(caps, PocketJson.decodeFromString<ClientCaps>(PocketJson.encodeToString(caps)))
+    }
+
+    @Test
     fun daemonInfo_quotaAgents_is_additive_and_absent_means_legacy_claude_only() {
         val info = DaemonInfo(daemonVersion = "1.9.7", quotaAgents = listOf("claude", "codex"))
         assertEquals(info, PocketJson.decodeFromString<DaemonInfo>(PocketJson.encodeToString(info)))

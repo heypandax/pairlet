@@ -139,7 +139,7 @@ class ConversationToolImagesTest {
     }
 
     @Test
-    fun ordinary_tools_without_images_stay_START_only() {
+    fun ordinary_tools_without_images_get_a_bare_outcome_RESULT() {
         val events = pump(
             listOf(
                 header,
@@ -151,13 +151,19 @@ class ConversationToolImagesTest {
             ),
         )
         if (events.isEmpty()) return
-        assertEquals(listOf(ToolPhase.START, ToolPhase.START), events.map { it.phase })
-        assertTrue(events.none { it.images.isNotEmpty() })
+        // issue #380 live folding: START, then a bare outcome RESULT per tool — ok only, no output, no images
+        assertEquals(listOf(ToolPhase.START, ToolPhase.RESULT, ToolPhase.START, ToolPhase.RESULT), events.map { it.phase })
+        val results = events.filter { it.phase == ToolPhase.RESULT }
+        assertEquals(listOf("b1", "b2"), results.map { it.toolUseId })
+        assertEquals(listOf("Bash", "Read"), results.map { it.tool })
+        assertTrue(results.all { it.outcomeOnly && it.ok == true && it.output == null && it.images.isEmpty() })
+        assertTrue(events.filter { it.phase == ToolPhase.START }.none { it.outcomeOnly })
     }
 
     @Test
-    fun an_image_bearing_tool_does_not_give_its_neighbours_a_RESULT() {
-        // the mixed turn: only the screenshot breaks the START-only rule, and only for itself
+    fun only_the_image_bearing_tool_gets_pictures_its_neighbours_get_bare_outcomes() {
+        // the mixed turn: every finished tool settles its card (#380 live folding), but only the screenshot's
+        // RESULT carries thumbnails — the neighbours get the bare outcome frame
         val events = pump(
             listOf(
                 header,
@@ -172,14 +178,16 @@ class ConversationToolImagesTest {
         )
         if (events.isEmpty()) return
         val results = events.filter { it.phase == ToolPhase.RESULT }
-        assertEquals(1, results.size, "exactly one RESULT — the one that carried a picture")
-        assertEquals("s1", results.single().toolUseId)
+        assertEquals(listOf("b1", "s1", "b2"), results.map { it.toolUseId }, "one RESULT per finished tool, in order")
+        val picture = results.single { it.toolUseId == "s1" }
+        assertTrue(picture.images.isNotEmpty() && !picture.outcomeOnly, "the screenshot's RESULT is the full one")
+        assertTrue(results.filter { it.toolUseId != "s1" }.all { it.outcomeOnly && it.images.isEmpty() && it.ok == true })
         assertEquals(3, events.count { it.phase == ToolPhase.START })
     }
 
     @Test
-    fun an_undecodable_image_emits_no_RESULT_at_all() {
-        // fail-soft all the way through: nothing to show means the card stays exactly as it was
+    fun an_undecodable_image_falls_back_to_a_bare_outcome_RESULT() {
+        // fail-soft: nothing to show, so no pictures — but the outcome still settles the card (#380 live folding)
         val events = pump(
             listOf(
                 header,
@@ -189,7 +197,9 @@ class ConversationToolImagesTest {
             ),
         )
         if (events.isEmpty()) return
-        assertEquals(listOf(ToolPhase.START), events.map { it.phase })
+        assertEquals(listOf(ToolPhase.START, ToolPhase.RESULT), events.map { it.phase })
+        val result = events.single { it.phase == ToolPhase.RESULT }
+        assertTrue(result.outcomeOnly && result.images.isEmpty() && result.ok == true && result.output == null)
     }
 
     @Test
