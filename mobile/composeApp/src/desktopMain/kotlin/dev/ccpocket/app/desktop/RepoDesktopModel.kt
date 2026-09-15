@@ -243,7 +243,22 @@ class RepoDesktopModel(
     override val selectedDiff: dev.ccpocket.protocol.FileDiff? get() = repo.viewedFileDiff.value
     override val selectedContent: dev.ccpocket.protocol.FileContent? get() = repo.viewedFile.value
     override val selectedContentProgress: Pair<Long, Long>? get() = repo.viewedFileProgress.value
-    override fun selectChangedFile(path: String) = repo.openChangedFile(path)
+    // Per-conversation memory for the docked panel (same key as [showChanges]): the repo's viewer state is
+    // per session and is closed on every switch, so without this the panel on A came back BLANK after a
+    // detour through B, and A's expanded tree collapsed with it.
+    private val viewedPathFor = mutableStateMapOf<String, String>()
+    private val expandedDirsFor = HashMap<String, MutableMap<String, Unit>>()
+    override fun selectChangedFile(path: String) {
+        conversationKey?.let { viewedPathFor[it] = path }
+        repo.openChangedFile(path)
+    }
+    override fun restoreChangedFile(): Boolean {
+        val path = conversationKey?.let { viewedPathFor[it] } ?: return false
+        if (repo.viewedFilePath.value != path) repo.openChangedFile(path)
+        return true
+    }
+    override fun expandedDirs(): MutableMap<String, Unit> =
+        expandedDirsFor.getOrPut(conversationKey ?: "") { mutableStateMapOf() }
 
     // 「全部」视角：逐层缓存 + 隐藏项开关也都住在 repo，这里同样只是投影
     override val fileTree: Map<String, dev.ccpocket.protocol.PathEntries> get() = repo.fileTree

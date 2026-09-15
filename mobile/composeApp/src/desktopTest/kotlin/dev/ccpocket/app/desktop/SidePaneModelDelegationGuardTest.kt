@@ -182,6 +182,7 @@ class SidePaneModelDelegationGuardTest {
         // Changes browser / Git panel / worktrees: overlays, raised from the focused header only
         "changedFilesLoading", "changedFilesStale", "fetchChangedFiles", "selectedChangedPath",
         "selectedDiff", "selectedContent", "selectedContentProgress", "selectChangedFile", "openChanges", "toggleChanges",
+        "restoreChangedFile", "expandedDirs",
         // 「全部」视角（files-browser-dual-view）: 逐层树缓存 + 隐藏项开关，只被 ChangesPanel 读写
         "fileTree", "browseFileTree", "clearFileTree",
         "filesShowHidden", "toggleFilesShowHidden", "loadFilesShowHidden",

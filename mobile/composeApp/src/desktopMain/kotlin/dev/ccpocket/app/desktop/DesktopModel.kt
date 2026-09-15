@@ -937,6 +937,17 @@ interface DesktopModel {
     /** Received/total bytes of an in-flight chunked read (issue #134) — the loading card's determinate bar. */
     val selectedContentProgress: Pair<Long, Long>? get() = null
     fun selectChangedFile(path: String) {}
+    /**
+     * Re-open the file this CONVERSATION last had in the viewer. The repo closes the viewer on every
+     * session switch (its viewer state is per session), so the docked panel came back blank on A after
+     * a detour through B — the live model remembers the path per [conversationKey] and re-requests it.
+     * Returns true when a remembered file was re-opened (the panel then skips its "first changed file"
+     * fallback).
+     */
+    fun restoreChangedFile(): Boolean = false
+    /** The tree's expanded directories for the open conversation — per conversation in the live model so
+     *  the same detour does not collapse the tree either. Default: a fresh (remembered-by-the-panel) map. */
+    fun expandedDirs(): MutableMap<String, Unit> = androidx.compose.runtime.mutableStateMapOf()
     /** Open the browser: flip the flag and refresh both the list and the remembered selection. */
     fun openChanges() { showChanges = true; fetchChangedFiles(); loadFilesShowHidden() }
     /** The ± pill's verb: a docked panel's entry point is a toggle (the menu's SHOW_FILES stays [openChanges]). */

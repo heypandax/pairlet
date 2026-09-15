@@ -188,15 +188,17 @@ fun ChangesPanel(model: DesktopModel, onDismiss: () -> Unit, modifier: Modifier 
     // 关掉时把逐层缓存丢掉——下次打开重新读到最新的磁盘状态
     var view by remember { mutableStateOf(FilesView.ALL) } // 默认「全部」：面板现在首先是个目录浏览器
     // 展开的目录（值无意义，只用 key）——这个 Compose 版本还没有 mutableStateSetOf
-    val expanded = remember { mutableStateMapOf<String, Unit>() }
+    // per conversation in the live model (restored after a session switch); a fresh map elsewhere
+    val expanded = remember(model.conversationKey) { model.expandedDirs() }
     DisposableEffect(Unit) {
         model.loadFilesShowHidden()
         onDispose { model.clearFileTree() }
     }
     // 只在「还没有任何选中」时落到第一条：一旦用户从「全部」视角点开了一个没改过的文件，
     // 它就不在 files 里——旧写法会把选中拽回 files.first()，等于禁止浏览未改文件
+    // 会话切换后先回到这个会话上次看的文件（repo 每次切换都关掉查看器），没有记忆才落到第一条
     LaunchedEffect(files, selectedPath) {
-        if (selectedPath == null && files.isNotEmpty()) model.selectChangedFile(files.first().path)
+        if (selectedPath == null && !model.restoreChangedFile() && files.isNotEmpty()) model.selectChangedFile(files.first().path)
     }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
@@ -480,7 +482,10 @@ private fun LeftPaneHeader(model: DesktopModel, view: FilesView, onPick: (FilesV
 /** 设计稿 tree：行 h26、缩进步进 14dp、▾/▸ 展开、改过的文件行尾状态点、含改动的目录行尾计数徽章。 */
 @Composable
 private fun WorkdirTree(model: DesktopModel, expanded: MutableMap<String, Unit>) {
-    LaunchedEffect(Unit) { model.browseFileTree("") } // 根这一层总要有
+    LaunchedEffect(Unit) {
+        model.browseFileTree("") // 根这一层总要有
+        expanded.keys.toList().forEach(model::browseFileTree) // 面板重启后逐层缓存已清空，把记住的展开层重新读回来
+    }
     val workdir = model.chatWorkdir
     val actions = rememberFileActions(model)
     val index = changedIndexOf(workdir, model.changedFiles)
