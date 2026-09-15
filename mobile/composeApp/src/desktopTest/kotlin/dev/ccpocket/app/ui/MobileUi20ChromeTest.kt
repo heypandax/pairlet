@@ -20,6 +20,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SkikoComposeUiTest
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasContentDescription
@@ -63,6 +64,7 @@ import dev.ccpocket.app.resources.switcher_open
 import dev.ccpocket.app.resources.time_just_now
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
+import dev.ccpocket.app.ui.chat.TOOL_PROCESS_GROUP_TAG
 import dev.ccpocket.app.ui.chat.CONTEXT_SEP
 import dev.ccpocket.app.ui.chat.ChatHeader
 import dev.ccpocket.app.ui.chat.ChatStateBlock
@@ -589,6 +591,9 @@ class MobileUi20ChromeTest {
         },
         content = { ChatScreen(it) },
     ) {
+        // #380 (2026-09-15): a run of finished tool calls folds by default; open the fold to inspect the bands
+        onNodeWithTag(TOOL_PROCESS_GROUP_TAG).performClick()
+        waitForIdle()
         assertTrue(present(str(Res.string.chat_you).uppercase()), "the user turn names its source")
         assertTrue(present("CLAUDE"), "the agent turn names the REAL backend, not a generic \"assistant\"")
         assertTrue(present(str(Res.string.chat_src_tool).uppercase()), "and a tool call says so")

@@ -170,8 +170,6 @@ import dev.ccpocket.app.SupportContext
 import dev.ccpocket.app.supportPlatformLabel
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ChatRow
-import dev.ccpocket.app.data.ToolProcessPrefs
-import dev.ccpocket.app.data.toolProcessScope
 import dev.ccpocket.app.ui.chat.KeepChatReadingPosition
 import dev.ccpocket.app.ui.chat.ProcessGroupRow
 import dev.ccpocket.app.ui.chat.rememberChatPresentationState
@@ -2932,9 +2930,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     val toolProcess = rememberChatPresentationState(
         repo,
         source = { repo.messages },
-        collapse = { ToolProcessPrefs.shared.isCollapsed(repo.toolProcessScope) },
+        // finished tool steps always fold (the per-session switch was removed 2026-09-15 by user decision)
+        collapse = { true },
     )
-    LaunchedEffect(repo.sessionKey.value, repo.convoId.value) { ToolProcessPrefs.shared.migrate(repo.toolProcessScope) }
     // the Jump-to-latest scroll must survive the pill leaving composition. The pill's onClick sets
     // pinned=true, and that same recomposition removes the `if (!pinned)` block below — a
     // rememberCoroutineScope declared INSIDE that block is cancelled the instant it's forgotten,

@@ -61,8 +61,7 @@ const val CHAT_STREAM_TAG = "chat-stream"
 /**
  * One chat list's projection state: row identity for its transcript plus which folds THIS list has opened.
  * Each list (a phone screen, a desktop pane, a split column, a second window) owns one, so expanding a fold
- * in one never opens it in another, while the session's switch itself is shared through
- * [dev.ccpocket.app.data.ToolProcessPrefs].
+ * in one never opens it in another. Folding itself is unconditional for finished steps.
  *
  * Expansion is remembered by MEMBER identity, not by the fold's key: a fold whose key changes because it
  * gained a new first member (older tools paged in ahead of it, an earlier parallel call finishing after

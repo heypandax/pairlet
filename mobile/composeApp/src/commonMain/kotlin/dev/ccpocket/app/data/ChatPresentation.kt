@@ -10,7 +10,8 @@ import dev.ccpocket.protocol.isWorkflowTool
  * keep consuming the raw `messages`; only the two chat lists (phone/iPad [dev.ccpocket.app.ui.ChatScreen]
  * and the desktop ChatPane) render through this, and they share this one algorithm so the two cannot drift.
  *
- * What folds, and only when the session's switch is on: a run of at least [MIN_GROUP] CONSECUTIVE rows that
+ * What folds (always — the per-session switch was removed 2026-09-15): a run of at least [MIN_GROUP]
+ * CONSECUTIVE rows that
  * are each [isFoldableProcess] — an ordinary tool whose outcome is known to be success, or a finished
  * thinking block. Everything else stays its own row AND ends the run: prose (User / Assistant), a failed,
  * running or outcome-unknown tool (`ok == null` is never read as success), sub-agent / workflow / plan

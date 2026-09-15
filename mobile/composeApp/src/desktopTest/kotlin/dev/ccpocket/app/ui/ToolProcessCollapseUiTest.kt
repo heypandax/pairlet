@@ -24,9 +24,6 @@ import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.ProcessSummary
-import dev.ccpocket.app.data.ToolProcessPrefs
-import dev.ccpocket.app.data.ToolProcessScope
-import dev.ccpocket.app.data.toolProcessScope
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
@@ -50,7 +47,6 @@ import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.ToolEvent
 import dev.ccpocket.protocol.ToolPhase
-import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -63,17 +59,6 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class ToolProcessCollapseUiTest {
-
-    private val touched = mutableListOf<ToolProcessScope>()
-
-    @AfterTest
-    fun resetSwitches() = touched.forEach { ToolProcessPrefs.shared.setCollapsed(it, false) }
-
-    private fun setCollapsed(repo: PocketRepository, on: Boolean = true) {
-        val scope = repo.toolProcessScope
-        touched += scope
-        ToolProcessPrefs.shared.setCollapsed(scope, on)
-    }
 
     private fun account(id: String) = PairedDaemon(
         relay = "wss://test.invalid", accountId = id, daemonPub = "pub", deviceId = "dev", credential = "cred",
@@ -127,14 +112,10 @@ class ToolProcessCollapseUiTest {
     }
 
     @Test
-    fun foldExpandAndSwitchOff() = runComposeUiTest {
-        val repo = mount("acct-380-fold", "c-fold", listOf(u("please look"), tool("echo one"), tool("echo two"), a("all done here")))
-        assertEquals(0, groups(), "off by default")
-        assertPresent("echo one", substring = true)
-
-        setCollapsed(repo)
+    fun finishedToolsFoldByDefaultAndTheFoldOpensAndCloses() = runComposeUiTest {
+        mount("acct-380-fold", "c-fold", listOf(u("please look"), tool("echo one"), tool("echo two"), a("all done here")))
         waitForIdle()
-        assertEquals(1, groups())
+        assertEquals(1, groups(), "finished steps fold without any switch")
         assertFalse(present("echo one", substring = true))
         assertPresent("all done here", substring = true)
         assertPresent("please look", substring = true)
@@ -147,11 +128,6 @@ class ToolProcessCollapseUiTest {
         onNodeWithTag(TOOL_PROCESS_GROUP_TAG).performClick()
         waitForIdle()
         assertFalse(present("echo two", substring = true))
-
-        setCollapsed(repo, on = false)
-        waitForIdle()
-        assertEquals(0, groups())
-        assertPresent("echo two", substring = true)
     }
 
     @Test
@@ -191,7 +167,6 @@ class ToolProcessCollapseUiTest {
                 tool("outcome unknown", ok = null), tool("read three"), tool("read four"),
             ),
         )
-        setCollapsed(repo)
         repo.receiveForTest(PermissionAsk("c-attn", "ask-380", "Bash", "git push --force", title = "Force push 380"))
         waitForIdle()
         assertEquals(2, groups(), "two separate runs — the failure and the unknown outcome cut between them")
@@ -211,7 +186,6 @@ class ToolProcessCollapseUiTest {
             "acct-380-page", "c-page", (1..30).flatMap { listOf(u("q$it"), a("answer $it")) },
             listState = listState, height = 600, firstSeq = 100, hasMore = true,
         )
-        setCollapsed(repo)
         waitForIdle()
         runOnIdle { listState.requestScrollToItem(0) }
         waitForIdle()
@@ -236,7 +210,6 @@ class ToolProcessCollapseUiTest {
             firstSeq = 100, hasMore = true,
             onSend = { f -> if (f is FetchHistoryPage) pageRequests.add(f) },
         )
-        setCollapsed(repo)
         armed = repo
         waitForIdle()
         // the window is short, so ONE automatic page is today's short-window behaviour; answer every request
@@ -259,30 +232,6 @@ class ToolProcessCollapseUiTest {
     }
 
     @Test
-    fun readingInTheMiddleKeepsTheFirstVisibleRowWhenTheSwitchFlips() = runComposeUiTest {
-        val listState = LazyListState()
-        val repo = mount("acct-380-mid", "c-mid", longTranscript(), listState = listState, height = 700)
-        // a real drag unpins the list (programmatic scrolls never do on the phone)
-        onNodeWithTag(CHAT_STREAM_TAG).performTouchInput { swipeDown() }
-        waitForIdle()
-        runOnIdle { listState.requestScrollToItem(25, 20) } // "question 6", 20px into it
-        waitForIdle()
-        val key = listState.layoutInfo.visibleItemsInfo.first().key
-        val offset = listState.firstVisibleItemScrollOffset
-
-        setCollapsed(repo)
-        waitForIdle()
-        assertEquals(key, listState.layoutInfo.visibleItemsInfo.first().key, "the row being read stays the first row")
-        assertEquals(offset, listState.firstVisibleItemScrollOffset, "…at the same pixel offset")
-        assertTrue(listState.canScrollForward, "and the reader was not thrown to the bottom")
-
-        setCollapsed(repo, on = false)
-        waitForIdle()
-        assertEquals(key, listState.layoutInfo.visibleItemsInfo.first().key)
-        assertEquals(offset, listState.firstVisibleItemScrollOffset)
-    }
-
-    @Test
     fun aReaderAtTheBottomStaysThereWhenTheSwitchFlipsOrTheLastFoldOpens() = runComposeUiTest {
         val listState = LazyListState()
         val history = (1..10).flatMap { listOf(u("q$it"), a("answer $it " + "words ".repeat(25))) } +
@@ -290,7 +239,6 @@ class ToolProcessCollapseUiTest {
         val repo = mount("acct-380-tail", "c-tail", history, listState = listState, height = 700)
         assertFalse(listState.canScrollForward, "sanity: landed at the end")
 
-        setCollapsed(repo)
         waitForIdle()
         assertFalse(listState.canScrollForward, "folding shortened the list — still at the end")
 
@@ -305,7 +253,6 @@ class ToolProcessCollapseUiTest {
         val history = (1..10).flatMap { listOf(u("q$it"), a("answer $it " + "words ".repeat(25))) } +
             listOf(u("now")) + (1..8).map { tool("step $it") } + listOf(a("the final answer, a few lines long " + "x ".repeat(40)))
         val repo = mount("acct-380-near", "c-near", history, listState = listState, height = 700)
-        setCollapsed(repo)
         waitForIdle()
         assertTrue(fullyVisible(TOOL_PROCESS_GROUP_TAG), "sanity: the fold sits just above the final answer")
 
@@ -318,7 +265,6 @@ class ToolProcessCollapseUiTest {
     @Test
     fun aReplayThatFillsInOutcomesFoldsTheLiveToolCards() = runComposeUiTest {
         val repo = mount("acct-380-merge", "c-merge", listOf(u("go")))
-        setCollapsed(repo)
         repo.receiveForTest(ToolEvent("c-merge", 1, ToolPhase.START, "Bash", inputPreview = "live one", toolUseId = "tu-1"))
         repo.receiveForTest(ToolEvent("c-merge", 2, ToolPhase.START, "Bash", inputPreview = "live two", toolUseId = "tu-2"))
         waitForIdle()
@@ -342,7 +288,6 @@ class ToolProcessCollapseUiTest {
                 a("copy this reply"),
             ),
         )
-        setCollapsed(repo)
         waitForIdle()
         assertEquals(1, groups())
         assertEquals(2, onAllNodesWithText(str(Res.string.code_copy)).fetchSemanticsNodes().size, "copy chips on the prompt and the reply")
@@ -365,7 +310,6 @@ class ToolProcessCollapseUiTest {
         val repo = mount("acct-380-tall-flip", "c-tall-flip", history, listState = listState, height = 700)
         assertFalse(listState.canScrollForward, "sanity: landed at the very end of the tall reply")
 
-        setCollapsed(repo)
         waitForIdle()
         // (the fold itself is scrolled out of view above the tall reply, so it is not asserted as a node here)
         assertFalse(listState.canScrollForward, "folding above a tall last reply must keep the END of it on screen")
@@ -376,7 +320,6 @@ class ToolProcessCollapseUiTest {
         val listState = LazyListState()
         val rows = (1..6).flatMap { listOf(u("q$it"), a("answer $it")) } + listOf(u("go"), tool("t1"), tool("t2"))
         val repo = mount("acct-380-tall-join", "c-tall-join", rows + listOf(tool("t3", ok = null), tallReply()), listState = listState, height = 700)
-        setCollapsed(repo)
         waitForIdle()
         assertFalse(listState.canScrollForward, "sanity: still at the end after folding t1 + t2")
 
@@ -390,7 +333,6 @@ class ToolProcessCollapseUiTest {
     fun openingAFoldInAShortTranscriptKeepsFollowingTheEnd() = runComposeUiTest {
         val listState = LazyListState()
         val repo = mount("acct-380-short", "c-short", listOf(u("go"), tool("s1"), tool("s2"), tool("s3"), a("short reply")), listState = listState, height = 800)
-        setCollapsed(repo)
         waitForIdle()
         assertFalse(listState.canScrollForward || listState.canScrollBackward, "sanity: everything fits, nothing to scroll")
 

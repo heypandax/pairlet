@@ -112,7 +112,6 @@ import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.awtTransferable
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ChatRow
-import dev.ccpocket.app.data.ToolProcessPrefs
 import dev.ccpocket.app.ui.contextStatusUi
 import dev.ccpocket.app.ui.chat.KeepChatReadingPosition
 import dev.ccpocket.app.ui.chat.ProcessGroupRow
@@ -392,9 +391,9 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             val toolProcess = rememberChatPresentationState(
                 model,
                 source = { model.messages },
-                collapse = { ToolProcessPrefs.shared.isCollapsed(model.toolProcessScope) },
+                // finished tool steps always fold (the per-session switch was removed 2026-09-15 by user decision)
+                collapse = { true },
             )
-            LaunchedEffect(model.toolProcessScope) { ToolProcessPrefs.shared.migrate(model.toolProcessScope) }
             val shownRows = toolProcess.presentation.rows.size
             LaunchedEffect(model.messages.size, model.streaming, model.ask?.askId, shownRows) {
                 // display-row count (was messages.lastIndex + 1): folding changes it without touching messages.

@@ -94,9 +94,6 @@ import dev.ccpocket.app.resources.qa_compact
 import dev.ccpocket.app.resources.qa_terminal
 import dev.ccpocket.app.resources.quick_actions_title
 import dev.ccpocket.app.resources.fast_mode
-import dev.ccpocket.app.resources.tool_process_toggle
-import dev.ccpocket.app.resources.tool_process_toggle_hint
-import dev.ccpocket.app.data.ToolProcessPrefs
 import dev.ccpocket.app.resources.value_off
 import dev.ccpocket.app.resources.value_on
 import dev.ccpocket.app.resources.value_default
@@ -542,27 +539,6 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                     QaRow(stringResource(Res.string.ho_menu_row)) { onDismiss(); model.showHandoff = true }
                 }
                 QaRow(stringResource(Res.string.qa_compact)) { model.compactConversation(); onDismiss() }
-                // #380: view-only switch for THIS conversation, next to the other context rows (same slot as the phone
-                // sheet) — hidden while there is no session or conversation id to remember it under
-                model.toolProcessScope?.takeIf { it.sessionId != null || it.convoId != null }?.let { scope ->
-                    val collapsed = ToolProcessPrefs.shared.isCollapsed(scope)
-                    QaRow(
-                        stringResource(Res.string.tool_process_toggle),
-                        value = stringResource(if (collapsed) Res.string.value_on else Res.string.value_off),
-                    ) {
-                        ToolProcessPrefs.shared.setCollapsed(scope, !collapsed)
-                        onDismiss()
-                    }
-                    // known limit (user decision 09-14): a live tool has no outcome yet, so steps from a running turn
-                    // fold only once the conversation is reopened and the history carries one
-                    Text(
-                        stringResource(Res.string.tool_process_toggle_hint), color = Tok.muted, fontFamily = Dk.ui,
-                        fontSize = 10.5.sp, lineHeight = 14.sp,
-                        modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
-                    )
-                    // a rule before the destructive Clear row, so the caption never reads as Clear's footnote
-                    Box(Modifier.fillMaxWidth().padding(bottom = 6.dp).height(1.dp).background(Tok.hair))
-                }
                 QaRow(
                     stringResource(if (clearArmed) Res.string.qa_clear_armed else Res.string.qa_clear), danger = true,
                 ) { if (clearArmed) { model.clearConversation(); onDismiss() } else clearArmed = true }

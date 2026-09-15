@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.SidePane
-import dev.ccpocket.app.data.ToolProcessPrefs
 import dev.ccpocket.app.data.ToolProcessScope
 import dev.ccpocket.app.present
 import dev.ccpocket.app.theme.PocketTheme
@@ -33,7 +32,6 @@ import dev.ccpocket.app.ui.chat.CHAT_STREAM_TAG
 import dev.ccpocket.app.ui.chat.TOOL_PROCESS_GROUP_TAG
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
-import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -46,16 +44,6 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class ToolProcessPaneUiTest {
-
-    private val touched = mutableListOf<ToolProcessScope>()
-
-    private fun collapse(scope: ToolProcessScope) {
-        touched += scope
-        ToolProcessPrefs.shared.setCollapsed(scope, true)
-    }
-
-    @AfterTest
-    fun resetSwitches() = touched.forEach { ToolProcessPrefs.shared.setCollapsed(it, false) }
 
     private open class Seed(
         override val messages: SnapshotStateList<ChatItem>,
@@ -97,7 +85,7 @@ class ToolProcessPaneUiTest {
     }
 
     @Test
-    fun finishedToolsFoldIntoOneRowThatOpensAndTheSwitchRestoresTheStream() = runComposeUiTest {
+    fun finishedToolsFoldIntoOneRowByDefaultThatOpensAndCloses() = runComposeUiTest {
         val scope = ToolProcessScope("mac-pane-fold", AgentKind.CLAUDE, "s-pane-fold", "c-pane-fold")
         val model = Seed(
             mutableStateListOf(
@@ -111,12 +99,7 @@ class ToolProcessPaneUiTest {
         )
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
-        assertEquals(0, groups(), "default is off — today's stream, untouched")
-        assertPresent("echo one", substring = true)
-
-        collapse(scope)
-        waitForIdle()
-        assertEquals(1, groups())
+        assertEquals(1, groups(), "finished steps fold without any switch")
         assertFalse(present("echo one", substring = true), "the folded tool rows are behind the fold")
         assertPresent("all done here", substring = true)
         assertPresent("please look", substring = true)
@@ -130,17 +113,11 @@ class ToolProcessPaneUiTest {
         onNodeWithTag(TOOL_PROCESS_GROUP_TAG).performClick()
         waitForIdle()
         assertFalse(present("echo one", substring = true))
-
-        ToolProcessPrefs.shared.setCollapsed(scope, false)
-        waitForIdle()
-        assertEquals(0, groups())
-        assertPresent("echo one", substring = true)
     }
 
     @Test
     fun failuresRunningToolsErrorsAndTheApprovalCardStayVisible() = runComposeUiTest {
         val scope = ToolProcessScope("mac-pane-attn", AgentKind.CLAUDE, "s-pane-attn", "c-pane-attn")
-        collapse(scope)
         val model = Seed(
             mutableStateListOf(
                 ChatItem.Tool("Bash", "ls first", ok = true),
@@ -165,7 +142,7 @@ class ToolProcessPaneUiTest {
     }
 
     @Test
-    fun aSplitColumnFollowsItsOwnSessionsSwitch() = runComposeUiTest {
+    fun aSplitColumnFoldsItsOwnFinishedToolsToo() = runComposeUiTest {
         val column = SidePane(7, "sid-col-380", "/Users/dev/api", "Column", AgentKind.CLAUDE).apply {
             convoId.value = "convo-col-380"
             opening.value = false
@@ -182,12 +159,11 @@ class ToolProcessPaneUiTest {
             focusedScope,
             columns = listOf(column),
         )
-        collapse(ToolProcessScope(null, AgentKind.CLAUDE, "sid-col-380", "convo-col-380"))
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
-        assertEquals(1, groups(), "only the column's session is switched on")
+        assertEquals(2, groups(), "the focused pane and the split column each fold their own finished steps")
         assertFalse(present("column step one", substring = true))
-        assertPresent("focused step one", substring = true)
+        assertFalse(present("focused step one", substring = true))
         assertTrue(present("column reply", substring = true))
     }
 
@@ -196,7 +172,6 @@ class ToolProcessPaneUiTest {
     @Test
     fun aPageOfOlderHistoryLandsOnTheSourceRowWithFoldsOn() = runComposeUiTest {
         val scope = ToolProcessScope("mac-pane-page", AgentKind.CLAUDE, "s-pane-page", "c-pane-page")
-        collapse(scope)
         val model = PagingSeed(
             mutableStateListOf<ChatItem>(ChatItem.User("first-window-question")).apply {
                 repeat(25) { add(ChatItem.Assistant("window answer $it " + "words ".repeat(30))); add(ChatItem.User("follow-up $it")) }
@@ -231,7 +206,6 @@ class ToolProcessPaneUiTest {
     @Test
     fun twoPanesOfTheSameSessionOpenFoldsIndependently() = runComposeUiTest {
         val scope = ToolProcessScope("mac-pane-twin", AgentKind.CLAUDE, "s-pane-twin", "c-pane-twin")
-        collapse(scope)
         val model = Seed(
             mutableStateListOf(
                 ChatItem.User("twin prompt"),
@@ -271,7 +245,6 @@ class ToolProcessPaneUiTest {
     @Test
     fun pinnedOpeningAFoldAboveTheEndKeepsItsHeaderOnScreen() = runComposeUiTest {
         val scope = ToolProcessScope("mac-pane-near", AgentKind.CLAUDE, "s-pane-near", "c-pane-near")
-        collapse(scope)
         val model = Seed(
             mutableStateListOf<ChatItem>().apply {
                 repeat(10) { add(ChatItem.User("q$it")); add(ChatItem.Assistant("answer $it " + "words ".repeat(40))) }
@@ -294,7 +267,6 @@ class ToolProcessPaneUiTest {
     @Test
     fun openingAFoldInAShortPaneKeepsFollowingTheEnd() = runComposeUiTest {
         val scope = ToolProcessScope("mac-pane-short", AgentKind.CLAUDE, "s-pane-short", "c-pane-short")
-        collapse(scope)
         val messages = mutableStateListOf<ChatItem>(
             ChatItem.User("go"),
             ChatItem.Tool("Bash", "short one", ok = true),

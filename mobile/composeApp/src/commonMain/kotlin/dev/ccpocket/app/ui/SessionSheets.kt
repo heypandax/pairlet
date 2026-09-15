@@ -62,8 +62,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
-import dev.ccpocket.app.data.ToolProcessPrefs
-import dev.ccpocket.app.data.toolProcessScope
 import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.ui.handoff.toHistoryItem
 import dev.ccpocket.app.resources.*
@@ -488,25 +486,6 @@ fun QuickActionsSheet(
                             QaGroup(stringResource(Res.string.qa_group_context)) {
                                 ActionRow(stringResource(Res.string.qa_compact)) { repo.sendPrompt("/compact"); onDismiss() }
                                 if (repo.hasSimplify()) ActionRow(stringResource(Res.string.qa_simplify)) { repo.sendPrompt("/simplify"); onDismiss() }
-                                // #380: a low-frequency view setting for how this conversation reads, so it sits last and
-                                // never pushes Mode / Tools below the fold. Stays open like Fast mode so the flip is
-                                // visible; hidden while there is no session or conversation id to remember it under.
-                                val toolScope = repo.toolProcessScope
-                                if (toolScope.sessionId != null || toolScope.convoId != null) {
-                                    val toolsCollapsed = ToolProcessPrefs.shared.isCollapsed(toolScope)
-                                    ActionRow(
-                                        stringResource(Res.string.tool_process_toggle),
-                                        value = stringResource(if (toolsCollapsed) Res.string.value_on else Res.string.value_off),
-                                        divider = false,
-                                    ) { ToolProcessPrefs.shared.setCollapsed(toolScope, !toolsCollapsed) }
-                                    // known limit (user decision 09-14): a live tool has no outcome yet, so steps from a
-                                    // running turn fold only once the conversation is reopened and the history carries one
-                                    Text(
-                                        stringResource(Res.string.tool_process_toggle_hint), color = Tok.muted,
-                                        fontSize = 12.5.sp, lineHeight = 17.sp, modifier = Modifier.padding(bottom = 10.dp),
-                                    )
-                                    Hairline()
-                                }
                             }
                             // destructive, set apart by a wider gap and its own rule — never a filled primary.
                             // Two taps in the SAME row: the armed hint rides the row's value, so the state is
