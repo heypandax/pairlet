@@ -89,7 +89,8 @@ fun DesktopApp(
         )
     }
     val density = LocalDensity.current
-    val filePreview = remember(model) { DesktopFilePreviewState() }
+    // per-conversation document memory (same key as the Changes dock): see DesktopFilePreviewState
+    val filePreview = remember(model) { DesktopFilePreviewState { model.conversationKey } }
     // One silent update check per launch (issue #200), extending the existing #87 checker rather than
     // adding a channel: it only ever moves updateState, never downloads — applying stays a click in
     // Settings ▸ About. Delayed so it can't compete with connect/first paint, and guarded on Idle so a

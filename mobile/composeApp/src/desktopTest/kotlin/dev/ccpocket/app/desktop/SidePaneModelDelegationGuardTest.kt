@@ -45,6 +45,8 @@ class SidePaneModelDelegationGuardTest {
         "hasChat", "opening", "openFailed", "retryOpen",
         "historyLayoutToken", "onHistoryLaidOut",
         "chatTitle", "chatAgent", "chatWorkdir",
+        // the column's own conversation identity — what per-conversation docks (file preview) key on
+        "conversationKey",
         "messages", "streaming", "selectedSessionId",
         // #380: the collapse-tool-process switch belongs to the column's own session + agent
         "toolProcessScope",

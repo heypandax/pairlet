@@ -54,6 +54,9 @@ class SidePaneModel(
     override val chatTitle: String get() = pane.title.value
     override val chatAgent: AgentKind get() = pane.agent
     override val chatWorkdir: String get() = pane.workdir
+    // this column's OWN conversation identity (same sessionId → convoId → workdir chain as the live model),
+    // so a per-conversation dock keyed on it never reads the FOCUSED chat's slot
+    override val conversationKey: String? get() = pane.sessionId.takeIf { it.isNotEmpty() } ?: pane.convoId.value ?: pane.workdir
     override val chatBranch: String? get() = null
     // the pane's OWN model (its SessionLive fills SidePane.model) — the chip used to answer "" here and
     // read as "默认" while the session demonstrably ran something; switching routes through the

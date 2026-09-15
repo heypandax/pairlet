@@ -812,6 +812,13 @@ interface DesktopModel {
     val chatTitle: String
     val chatAgent: AgentKind
     val chatWorkdir: String
+    /**
+     * The open CONVERSATION's own identity — what per-conversation docks (Changes, the file preview) key
+     * their "open on A ≠ open on B" state on. Not [selectedSessionId]: that is a sidebar-row concept and
+     * is null whenever the open chat has no row in the currently listed directory. The live model derives
+     * it from sessionKey → convoId → workdir; seed/preview models fall back to the cwd.
+     */
+    val conversationKey: String? get() = chatWorkdir.takeIf { it.isNotEmpty() }
     val chatBranch: String?
     val chatModel: String
     /** Raw model id (unaliased) — the quick-actions picker compares options against this. */

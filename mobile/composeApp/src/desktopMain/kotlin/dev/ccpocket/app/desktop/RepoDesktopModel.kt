@@ -165,12 +165,14 @@ class RepoDesktopModel(
     // opened from a pin/RECENT of another project, a cwd that differs from the listing's) — the first
     // cut keyed on it, and the pill silently did nothing for every project but the listed one.
     private val changesOpenFor = mutableStateMapOf<String, Unit>()
-    private val changesKey: String?
+    // shared with the file preview dock (DesktopFilePreviewState), which remembers the open document per
+    // conversation on the same identity
+    override val conversationKey: String?
         get() = repo.sessionKey.value ?: repo.convoId.value ?: repo.workdir.value
     override var showChanges: Boolean
-        get() = changesKey?.let { changesOpenFor.containsKey(it) } ?: false
+        get() = conversationKey?.let { changesOpenFor.containsKey(it) } ?: false
         set(v) {
-            val id = changesKey ?: return
+            val id = conversationKey ?: return
             if (v) changesOpenFor[id] = Unit else changesOpenFor.remove(id)
         }
     override var showGit by mutableStateOf(false)

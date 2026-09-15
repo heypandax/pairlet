@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -60,20 +61,32 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.stringResource
 
-/** Window-local document state, independent of the session's Changes/Diff selection. */
-internal class DesktopFilePreviewState {
-    var file by mutableStateOf<File?>(null)
-        private set
+/**
+ * Document state for the right-hand preview, independent of the session's Changes/Diff selection.
+ *
+ * Remembered PER CONVERSATION, like the Changes dock: the document opened beside conversation A stays
+ * with A — switch to project B and B shows its own document (or none), switch back and A's is open
+ * again. A single window-level slot did neither: it carried A's document over B, and any document
+ * opened on B silently threw A's away. [conversationKey] is read inside snapshot reads, so a key flip
+ * recomposes the layout like any other state change. A null key (no open conversation) has no slot,
+ * so nothing is shown and open() is a no-op.
+ */
+internal class DesktopFilePreviewState(private val conversationKey: () -> String? = { WINDOW_KEY }) {
+    private val files = mutableStateMapOf<String, File>()
+    val file: File? get() = conversationKey()?.let { files[it] }
     var revision by mutableStateOf(0)
         private set
 
     fun open(file: File) {
-        this.file = file.absoluteFile.normalize()
+        val key = conversationKey() ?: return
+        files[key] = file.absoluteFile.normalize()
         refresh() // clicking the same link again re-reads the file after an agent edits it
     }
 
     fun refresh() { revision++ }
-    fun close() { file = null }
+    fun close() { conversationKey()?.let { files.remove(it) } }
+
+    private companion object { const val WINDOW_KEY = "window" }
 }
 
 internal val LocalDesktopFilePreview = staticCompositionLocalOf<DesktopFilePreviewState?> { null }

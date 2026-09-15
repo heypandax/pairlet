@@ -2,6 +2,7 @@ package dev.ccpocket.app.desktop
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
@@ -107,6 +108,43 @@ class DesktopFilePreviewTest {
                 onNodeWithTag("file-preview-refresh").performClick()
                 waitUntil(timeoutMillis = 5_000) { present("file no longer exists") }
                 onNodeWithTag("chat").assertIsDisplayed()
+            }
+        } finally {
+            base.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun previewIsRememberedPerConversationAcrossSwitches() {
+        val base = createTempDirectory("ccpocket-md-convo").toFile()
+        try {
+            val docA = File(base, "a.md").apply { writeText("# Project A notes") }
+            val docB = File(base, "b.md").apply { writeText("# Project B notes") }
+            val convo = mutableStateOf("A")
+            val state = DesktopFilePreviewState { convo.value }
+            runDesktopComposeUiTest(width = 1000, height = 700) {
+                setContent {
+                    PocketTheme {
+                        DesktopFilePreviewLayout(state) { Box(Modifier.fillMaxSize().testTag("chat")) }
+                    }
+                }
+                runOnIdle { state.open(docA) }
+                waitUntil(timeoutMillis = 5_000) { present("Project A notes") }
+                // switching projects: B has no document of its own, so the dock is absent — A's is not carried over
+                runOnIdle { convo.value = "B" }
+                waitForIdle()
+                onNodeWithTag("desktop-file-preview").assertDoesNotExist()
+                runOnIdle { state.open(docB) }
+                waitUntil(timeoutMillis = 5_000) { present("Project B notes") }
+                // back on A, the document opened there is still open
+                runOnIdle { convo.value = "A" }
+                waitUntil(timeoutMillis = 5_000) { present("Project A notes") }
+                onNodeWithText("Project B notes").assertDoesNotExist()
+                // closing on A only forgets A's document; B keeps its own
+                onNodeWithTag("file-preview-close").performClick()
+                onNodeWithTag("desktop-file-preview").assertDoesNotExist()
+                runOnIdle { convo.value = "B" }
+                waitUntil(timeoutMillis = 5_000) { present("Project B notes") }
             }
         } finally {
             base.deleteRecursively()
