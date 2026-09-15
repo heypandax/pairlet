@@ -71,10 +71,19 @@ grep -Fq 'bin/CC Pocket' "$DEB_LIST" || { echo "ERROR: .deb payload has no 'bin/
 grep -Fq 'lib/runtime/' "$DEB_LIST" || { echo "ERROR: .deb payload has no bundled JVM runtime"; exit 1; }
 grep -Fq 'bin/CC Pocket' "$RPM_LIST" || { echo "ERROR: .rpm payload has no 'bin/CC Pocket' launcher"; exit 1; }
 grep -Fq 'lib/runtime/' "$RPM_LIST" || { echo "ERROR: .rpm payload has no bundled JVM runtime"; exit 1; }
-# jpackage installs a menu entry under share/applications ONLY when it received --linux-shortcut
-# (Compose's `linux { shortcut = true }`). Without it the package installs but never appears in the
-# desktop menu, which to a user is indistinguishable from "the app is broken".
-grep -Fq 'share/applications/' "$DEB_LIST" || { echo "ERROR: .deb installs no menu entry (linux.shortcut lost?)"; exit 1; }
+# Menu entry. jpackage never ships share/applications/ inside the payload: the .desktop file lives
+# under <install-dir>/lib/ and the package's post-install script registers it with
+# `xdg-desktop-menu install` (verified on the 2.1.0 packages). Without that registration the app
+# installs but never appears in the desktop menu, which to a user reads as "the app is broken" —
+# so assert BOTH halves, on both package formats.
+grep -Eq 'lib/[^/ ]+\.desktop$' "$DEB_LIST" || { echo "ERROR: .deb payload has no .desktop file under lib/"; exit 1; }
+grep -Eq 'lib/[^/ ]+\.desktop$' "$RPM_LIST" || { echo "ERROR: .rpm payload has no .desktop file under lib/"; exit 1; }
+CTL_DIR="$(mktemp -d)"; RPM_SCRIPTS="$(mktemp)"
+trap 'rm -rf "$DEB_LIST" "$RPM_LIST" "$CTL_DIR" "$RPM_SCRIPTS"' EXIT
+dpkg-deb -e "$DEB" "$CTL_DIR" || { echo "ERROR: dpkg-deb could not extract control scripts from $DEB"; exit 1; }
+grep -Fq 'xdg-desktop-menu install' "$CTL_DIR/postinst" || { echo "ERROR: .deb postinst does not register a menu entry (xdg-desktop-menu)"; exit 1; }
+rpm -qp --scripts "$RPM" > "$RPM_SCRIPTS" || { echo "ERROR: rpm could not read scripts from $RPM"; exit 1; }
+grep -Fq 'xdg-desktop-menu install' "$RPM_SCRIPTS" || { echo "ERROR: .rpm post-install does not register a menu entry (xdg-desktop-menu)"; exit 1; }
 
 DEB_OUT="cc-pocket-desktop-${VERSION}-linux-${ARCH}.deb"
 RPM_OUT="cc-pocket-desktop-${VERSION}-linux-${ARCH}.rpm"
