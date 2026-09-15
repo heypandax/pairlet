@@ -190,10 +190,20 @@ private fun ApplicationScope.PocketShell() {
     val savedBounds = remember {
         SecureStore.getString(K_WIN_BOUNDS)?.split(',')?.mapNotNull { it.toFloatOrNull() }?.takeIf { it.size >= 4 }
     }
+    // 5th field: 0 windowed, 1 zoomed, 2 fullscreen — the first four are always the WINDOWED frame to return to
     val savedZoomed = remember { savedBounds?.getOrNull(4) == 1f }
+    val savedFullscreen = remember { savedBounds?.getOrNull(4) == 2f }
+    val initialBounds = remember { initialWindowBounds(savedBounds) }
+    // quit while zoomed → come back zoomed: OPEN at the zoomed frame rather than zooming the shown window
+    // afterwards — Compose applies windowState as it shows the window and overwrote a post-launch zoom
+    // (reproduced: a ",1" record relaunched as a plain window). The saved frame stays the un-zoom target.
+    val initialZoomFrame = remember { if (savedZoomed) initialBounds?.let(::usableBoundsFor) else null }
+    // zoom (double-click the title bar): non-null == currently zoomed, holding the bounds to restore
+    var zoomRestore by remember { mutableStateOf(if (initialZoomFrame != null) initialBounds else null) }
+    val launchFrame = initialZoomFrame ?: initialBounds
     val windowState = rememberWindowState(
-        size = savedBounds?.let { DpSize(it[2].dp, it[3].dp) } ?: DpSize(1180.dp, 760.dp),
-        position = savedBounds?.let { WindowPosition(it[0].dp, it[1].dp) } ?: WindowPosition(Alignment.Center),
+        size = launchFrame?.let { DpSize(it.width.dp, it.height.dp) } ?: DpSize(1180.dp, 760.dp),
+        position = launchFrame?.let { WindowPosition(it.x.dp, it.y.dp) } ?: WindowPosition(Alignment.Center),
     )
     val scope = rememberCoroutineScope()
     // fleet: one live link per paired computer (primary + pinned satellites) — the grouped sidebar,
@@ -272,7 +282,7 @@ private fun ApplicationScope.PocketShell() {
             // TODO(win/linux): GraphicsDevice.setFullScreenWindow for exclusive FS if a mode switch is wanted.
             val r = fsRestore
             if (r != null) { w.bounds = r; fsRestore = null; fullscreen = false }
-            else { fsRestore = w.bounds; w.bounds = w.graphicsConfiguration.bounds; fullscreen = true }
+            else { fsRestore = w.bounds; w.bounds = screenConfigFor(w.bounds).bounds; fullscreen = true }
         }
     }
 
@@ -357,11 +367,14 @@ private fun ApplicationScope.PocketShell() {
         // excluded), second click restores. Manual, because WindowPlacement.Maximized is unreliable for
         // undecorated windows on macOS. Non-null == currently zoomed, holding the bounds to restore.
         // (The green traffic light no longer zooms — it toggles native fullscreen, issue #94.)
-        var zoomRestore by remember { mutableStateOf<Rectangle?>(null) }
         val toggleZoom: () -> Unit = {
             val restore = zoomRestore
-            if (restore != null) {
-                window.bounds = restore
+            // "zoomed" is what the frame IS, not just a remembered flag: a zoomed window the user has since
+            // dragged or resized maximizes again on its current screen instead of jumping back to the old frame
+            if (restore != null && isZoomed(window)) {
+                val here = screenConfigFor(window.bounds)
+                window.bounds = if (screenConfigFor(restore).device == here.device) restore
+                else centeredOn(usableBounds(here), restore.width, restore.height)
                 zoomRestore = null
             } else {
                 zoomRestore = window.bounds
@@ -449,11 +462,18 @@ private fun ApplicationScope.PocketShell() {
             // record the window bounds (debounced) so the next launch reopens exactly here. While zoomed,
             // persist the PRE-zoom bounds plus a zoomed flag: the next launch re-zooms itself (below) and
             // the green button still knows what to restore to.
-            snapshotFlow { windowState.size to windowState.position }.collectLatest { (s, p) ->
+            // While fullscreen, persist the frame fullscreen will return to plus a fullscreen flag, so the next
+            // launch comes back fullscreen. `fullscreen` is part of the key: native fullscreen can settle
+            // without a further size change reaching windowState.
+            snapshotFlow { Triple(windowState.size, windowState.position, fullscreen) }.collectLatest { (s, p, fs) ->
                 delay(400)
+                // moved/resized out of the zoomed frame by hand → no longer zoomed
+                if (zoomRestore != null && !fs && !isZoomed(window)) zoomRestore = null
                 val z = zoomRestore
                 when {
-                    fullscreen -> {} // don't persist the fullscreen frame — keep the last windowed bounds
+                    fs -> (z ?: fsRestore)?.let { r ->
+                        SecureStore.putString(K_WIN_BOUNDS, "${r.x},${r.y},${r.width},${r.height},2")
+                    }
                     z != null -> SecureStore.putString(K_WIN_BOUNDS, "${z.x},${z.y},${z.width},${z.height},1")
                     p is WindowPosition.Absolute -> SecureStore.putString(
                         K_WIN_BOUNDS,
@@ -532,7 +552,7 @@ private fun ApplicationScope.PocketShell() {
                     MacWindow.FsPhase.ENTERING -> {
                         fullscreen = true // before the resize, so the bounds persister skips the fullscreen frame
                         fsRestore = window.bounds
-                        window.bounds = window.graphicsConfiguration.bounds
+                        window.bounds = screenConfigFor(window.bounds).bounds
                     }
                     MacWindow.FsPhase.EXITING -> { fsRestore?.let { window.bounds = it }; fsRestore = null }
                     MacWindow.FsPhase.ENTERED -> fullscreen = true // defensive: keep state true if ENTERING was missed
@@ -570,11 +590,11 @@ private fun ApplicationScope.PocketShell() {
                 val b = ge.defaultScreenDevice.defaultConfiguration.bounds
                 window.setLocation(b.x + (b.width - window.width) / 2, b.y + (b.height - window.height) / 2)
             }
-            // quit while zoomed → come back zoomed: re-apply the zoom on the (possibly re-centered) screen,
-            // keeping the restored pre-zoom bounds as the un-zoom target
-            if (savedZoomed) {
-                zoomRestore = window.bounds
-                window.bounds = usableScreenBounds(window)
+            // quit while fullscreen → come back fullscreen. Give the native window a moment to be on screen
+            // first: AppKit ignores a fullscreen request for a window that isn't ordered in yet.
+            if (savedFullscreen) {
+                delay(500)
+                if (!fullscreen) toggleFullscreen()
             }
         }
         // appearance (issue #63): PocketTheme resolves the persisted mode against the OS, so a SYSTEM pick
@@ -669,9 +689,54 @@ private fun ApplicationScope.PocketShell() {
 
 /** The window's CURRENT screen minus menu bar / Dock — what the zoom (double-click title bar) fills. Manual,
  *  because WindowPlacement.Maximized is unreliable for undecorated windows on macOS. */
-private fun usableScreenBounds(window: java.awt.Window): Rectangle {
-    val gc = window.graphicsConfiguration
+private fun usableScreenBounds(window: java.awt.Window): Rectangle = usableBoundsFor(window.bounds)
+
+private fun usableBoundsFor(r: Rectangle): Rectangle = usableBounds(screenConfigFor(r))
+
+private fun usableBounds(gc: java.awt.GraphicsConfiguration): Rectangle {
     val b = gc.bounds
     val ins = Toolkit.getDefaultToolkit().getScreenInsets(gc)
     return Rectangle(b.x + ins.left, b.y + ins.top, b.width - ins.left - ins.right, b.height - ins.top - ins.bottom)
 }
+
+/** The screen showing most of [r]. Deliberately NOT `window.graphicsConfiguration`: on macOS it can stay on the
+ *  screen the window was created on after we place the window ourselves (bounds restored onto a secondary
+ *  display), so the first double-click zoom filled the PRIMARY screen and the window jumped over there. */
+private fun screenConfigFor(r: Rectangle): java.awt.GraphicsConfiguration {
+    val ge = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+    return ge.screenDevices.map { it.defaultConfiguration }
+        .filter { it.bounds.intersects(r) }
+        .maxByOrNull { gc -> gc.bounds.intersection(r).let { it.width.toLong() * it.height } }
+        ?: ge.defaultScreenDevice.defaultConfiguration
+}
+
+/** The window currently fills its screen's usable bounds (a couple of points of rounding slack). */
+private fun isZoomed(window: java.awt.Window): Boolean {
+    val u = usableScreenBounds(window)
+    val b = window.bounds
+    return Math.abs(b.x - u.x) <= 2 && Math.abs(b.y - u.y) <= 2 &&
+        Math.abs(b.width - u.width) <= 2 && Math.abs(b.height - u.height) <= 2
+}
+
+private fun centeredOn(area: Rectangle, width: Int, height: Int): Rectangle {
+    val w = minOf(width, area.width)
+    val h = minOf(height, area.height)
+    return Rectangle(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h)
+}
+
+/**
+ * Launch frame, sized to the desktop it opens on: saved bounds are kept, unless they collapsed to something
+ * unusably small (e.g. the 720×480 minimum stored as the pre-zoom frame) — then, like a first launch, the
+ * window gets ~80%×85% of that screen's usable area, centered. null (headless / no AWT) → caller's fallback.
+ */
+private fun initialWindowBounds(saved: List<Float>?): Rectangle? = runCatching {
+    if (java.awt.GraphicsEnvironment.isHeadless()) return@runCatching null
+    val savedRect = saved?.let { Rectangle(it[0].toInt(), it[1].toInt(), it[2].toInt(), it[3].toInt()) }
+    val gc = savedRect?.let(::screenConfigFor)
+        ?: java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration
+    val area = usableBounds(gc)
+    val w = (area.width * 0.8).toInt().coerceIn(minOf(1180, area.width), maxOf(1180, minOf(1680, area.width)))
+    val h = (area.height * 0.85).toInt().coerceIn(minOf(760, area.height), maxOf(760, minOf(1100, area.height)))
+    if (savedRect != null && savedRect.width >= w * 0.6 && savedRect.height >= h * 0.6) savedRect
+    else centeredOn(area, w, h)
+}.getOrNull()
