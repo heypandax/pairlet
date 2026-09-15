@@ -59,14 +59,22 @@ RPM="$(ls -t mobile/composeApp/build/compose/binaries/main/rpm/*.rpm 2>/dev/null
 # Payload gate: jpackage happily emits a well-formed package around an empty tree. Prove the launcher
 # and the bundled runtime actually shipped before we attach either file to a release.
 echo "==> verify package payloads"
-dpkg-deb -c "$DEB" | grep -Fq 'bin/CC Pocket' || { echo "ERROR: .deb payload has no 'bin/CC Pocket' launcher"; exit 1; }
-dpkg-deb -c "$DEB" | grep -Fq 'lib/runtime/' || { echo "ERROR: .deb payload has no bundled JVM runtime"; exit 1; }
-rpm -qlp "$RPM" | grep -Fq 'bin/CC Pocket' || { echo "ERROR: .rpm payload has no 'bin/CC Pocket' launcher"; exit 1; }
-rpm -qlp "$RPM" | grep -Fq 'lib/runtime/' || { echo "ERROR: .rpm payload has no bundled JVM runtime"; exit 1; }
+# List each payload ONCE into a file, then grep the file. `dpkg-deb -c | grep -q` looks equivalent but
+# is not under `set -o pipefail`: grep -q exits at the first match, dpkg-deb's tar gets SIGPIPE
+# ("tar: stdout: write error", exit 2) and the pipeline reports failure for a package that is fine —
+# exactly how the first v2.1.0 linux-desktop run died on both arches.
+DEB_LIST="$(mktemp)"; RPM_LIST="$(mktemp)"
+trap 'rm -f "$DEB_LIST" "$RPM_LIST"' EXIT
+dpkg-deb -c "$DEB" > "$DEB_LIST" || { echo "ERROR: dpkg-deb could not list $DEB"; exit 1; }
+rpm -qlp "$RPM" > "$RPM_LIST" || { echo "ERROR: rpm could not list $RPM"; exit 1; }
+grep -Fq 'bin/CC Pocket' "$DEB_LIST" || { echo "ERROR: .deb payload has no 'bin/CC Pocket' launcher"; exit 1; }
+grep -Fq 'lib/runtime/' "$DEB_LIST" || { echo "ERROR: .deb payload has no bundled JVM runtime"; exit 1; }
+grep -Fq 'bin/CC Pocket' "$RPM_LIST" || { echo "ERROR: .rpm payload has no 'bin/CC Pocket' launcher"; exit 1; }
+grep -Fq 'lib/runtime/' "$RPM_LIST" || { echo "ERROR: .rpm payload has no bundled JVM runtime"; exit 1; }
 # jpackage installs a menu entry under share/applications ONLY when it received --linux-shortcut
 # (Compose's `linux { shortcut = true }`). Without it the package installs but never appears in the
 # desktop menu, which to a user is indistinguishable from "the app is broken".
-dpkg-deb -c "$DEB" | grep -Fq 'share/applications/' || { echo "ERROR: .deb installs no menu entry (linux.shortcut lost?)"; exit 1; }
+grep -Fq 'share/applications/' "$DEB_LIST" || { echo "ERROR: .deb installs no menu entry (linux.shortcut lost?)"; exit 1; }
 
 DEB_OUT="cc-pocket-desktop-${VERSION}-linux-${ARCH}.deb"
 RPM_OUT="cc-pocket-desktop-${VERSION}-linux-${ARCH}.rpm"
