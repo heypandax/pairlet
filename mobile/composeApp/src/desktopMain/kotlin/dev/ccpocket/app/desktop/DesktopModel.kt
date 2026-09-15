@@ -627,6 +627,13 @@ interface DesktopModel {
     /** Per project + per group collapse memory (issue #119; persisted like #102's RECENT keys). */
     fun groupCollapsed(projectPath: String, groupId: String): Boolean = false
     fun setGroupCollapsed(projectPath: String, groupId: String, collapsed: Boolean) {}
+    /** A RECENT project header's own collapse (its chevron), remembered per project across restarts. */
+    fun projectCollapsed(projectPath: String): Boolean = false
+    fun setProjectCollapsed(projectPath: String, collapsed: Boolean) {}
+    /** How many session rows a project's list ([groupId] null) or one of its custom groups lets through before
+     *  "Show more", remembered per project across restarts. Null = the sidebar's default first page. */
+    fun sessionsShown(projectPath: String, groupId: String?): Int? = null
+    fun setSessionsShown(projectPath: String, groupId: String?, count: Int?) {}
 
     // ── session archive (issue #202) ──────────────────────────────────────────────────────────────
     // Daemon-side truth (unlike pins/hidden, which are client-local): archiving on the phone hides the row

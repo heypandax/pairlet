@@ -1154,6 +1154,7 @@
     <string name="sidebar_no_sessions_here">No sessions here yet</string>
     <string name="sidebar_recent_show_all">Show all</string>
     <string name="sidebar_recent_show_less">Show less</string>
+    <string name="sidebar_sessions_show_more">Show more</string>
     <string name="open_folder">Open Folder…</string>
 
     <!-- command palette -->

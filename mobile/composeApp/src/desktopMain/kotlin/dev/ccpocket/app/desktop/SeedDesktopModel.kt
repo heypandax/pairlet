@@ -77,6 +77,17 @@ open class SeedDesktopModel : DesktopModel {
         val k = "$projectPath\u0000$groupId"
         if (collapsed) { if (k !in groupCollapse) groupCollapse.add(k) } else groupCollapse.remove(k)
     }
+    private val projectCollapse = mutableStateListOf<String>()
+    override fun projectCollapsed(projectPath: String) = projectPath in projectCollapse
+    override fun setProjectCollapsed(projectPath: String, collapsed: Boolean) {
+        if (collapsed) { if (projectPath !in projectCollapse) projectCollapse.add(projectPath) } else projectCollapse.remove(projectPath)
+    }
+    private val sessionsShownMap = androidx.compose.runtime.mutableStateMapOf<String, Int>()
+    override fun sessionsShown(projectPath: String, groupId: String?) = sessionsShownMap["$projectPath\u0000${groupId.orEmpty()}"]
+    override fun setSessionsShown(projectPath: String, groupId: String?, count: Int?) {
+        val k = "$projectPath\u0000${groupId.orEmpty()}"
+        if (count == null) sessionsShownMap.remove(k) else sessionsShownMap[k] = count
+    }
 
     // RECENT: the live project plus a previously visited one — exercises the grouped sidebar zone —
     // plus a guest's shared folder (issue #115), so the "Shared" pill surface stays exercised too

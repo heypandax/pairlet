@@ -56,6 +56,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -130,6 +131,7 @@ import dev.ccpocket.app.resources.sidebar_pins_full
 import dev.ccpocket.app.resources.sidebar_recent_empty
 import dev.ccpocket.app.resources.sidebar_recent_show_all
 import dev.ccpocket.app.resources.sidebar_recent_show_less
+import dev.ccpocket.app.resources.sidebar_sessions_show_more
 import dev.ccpocket.app.resources.status_reconnecting
 import dev.ccpocket.app.resources.switcher_all_projects
 import dev.ccpocket.app.resources.switcher_recent
@@ -683,9 +685,8 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
             )
             return@Column
         }
-        // collapse set + scroll position hoisted out of the LazyColumn so the reveal effect below can
-        // drive them (expand a folded group, scroll it in) without collapsing the others (#83)
-        val collapsed = remember { mutableStateListOf<String>() }
+        // project collapse lives on the model (remembered per project across restarts); the scroll position is
+        // hoisted out of the LazyColumn so the reveal effect below can expand a folded group and scroll it in (#83)
         // #282: the rewound bucket's fold, collapsed by default (that default IS the feature's promise)
         var rewoundOpen by remember { mutableStateOf(false) }
         // #373: the project-count fold. Lives as long as this UI does (no stored preference) and is keyed on
@@ -699,14 +700,26 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
         LaunchedEffect(model.sessionsRefreshing) { if (!model.sessionsRefreshing) refreshTarget = null }
         val spinningPath = if (model.sessionsRefreshing) refreshTarget ?: groups.firstOrNull { it.current }?.path else null
         val selectedId = model.selectedSessionId // resolved by scanning the session list — once, not per row
-        val rows = recentRows(model, groups, collapsed, limit.expanded, rewoundOpen)
+        val rows = recentRows(model, groups, limit.expanded, rewoundOpen)
         val shownRows by rememberUpdatedState(rows)
         // Unfold [path]'s group — lifting the #373 fold first when the group sits past it — and scroll the row
         // [revealIndex] picks into view, unless that row is already on screen. Only the effects keyed on [limit] call
         // this, so the fold it lifts is always the one of the machine that asked.
         suspend fun reveal(path: String, sessionId: String?) {
-            if (renderedGroups(model).indexOfFirst { it.path == path } >= RECENT_VISIBLE_LIMIT) limit.expanded = true
-            collapsed.remove(path) // a no-op when the group is already open
+            val listed = renderedGroups(model)
+            if (listed.indexOfFirst { it.path == path } >= RECENT_VISIBLE_LIMIT) limit.expanded = true
+            model.setProjectCollapsed(path, false) // a no-op when the group is already open
+            // the session fold too: a target past its slice's "Show more" is brought in a page at a time
+            if (sessionId != null) {
+                listed.firstOrNull { it.path == path }?.let { g ->
+                    sessionSlices(model, g).forEach { slice ->
+                        val i = slice.rows.indexOfFirst { it.sessionId == sessionId }
+                        if (i >= 0 && i >= slice.shown(model)) {
+                            model.setSessionsShown(path, slice.groupId, (i / SESSIONS_VISIBLE_LIMIT + 1) * SESSIONS_VISIBLE_LIMIT)
+                        }
+                    }
+                }
+            }
             // Both changes land on a later composition, and its layout after that. Wait until the list holds the
             // target group open AND has measured exactly those rows: the index and the on-screen test below have
             // to describe what is drawn, not the rows from before the unfold.
@@ -815,7 +828,7 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                             onTogglePin = { if (model.isProjectPinned(g.path)) model.unpinProject(g.path) else model.pinProject(g.path, g.name) },
                             onNewSession = { model.openNewSession(tilde(g.path)) },
                             onForget = { model.forgetProject(g) },
-                            onToggle = { if (row.closed) collapsed.remove(g.path) else collapsed.add(g.path) },
+                            onToggle = { model.setProjectCollapsed(g.path, !row.closed) },
                             // #360: a guest's shared folder has no owner verbs; the path is this header's own
                             canImport = model.canImportManagedSessions && g.sharedBy == null,
                             onImport = { model.openManagedImport(g.path) },
@@ -838,6 +851,15 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                         menuGroups = row.menuGroups, renameable = row.renameable, canArchive = row.canArchive,
                     ) { model.selectSession(row.session) }
                     is RecentRow.LimitToggle -> RecentLimitToggle(row.expanded) { limit.expanded = !row.expanded }
+                    is RecentRow.SessionsMore -> RecentLimitToggle(
+                        expanded = !row.more, tag = "sessions-more:${row.scope}",
+                        startPad = if (row.indented) 36.dp else 22.dp,
+                        label = if (row.more) Res.string.sidebar_sessions_show_more else Res.string.sidebar_recent_show_less,
+                        quiet = true,
+                    ) {
+                        val next = if (row.more) row.shown + SESSIONS_VISIBLE_LIMIT else null
+                        model.setSessionsShown(row.path, row.groupId, next)
+                    }
                     is RecentRow.RewoundHeader -> Row(
                         Modifier.fillMaxWidth().height(26.dp).hoverFill()
                             .clickable { rewoundOpen = !rewoundOpen }
@@ -864,6 +886,10 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
 
 /** How many RECENT projects show before the rest fold behind "Show all" (#373). */
 private const val RECENT_VISIBLE_LIMIT = 5
+
+/** How many session rows a project (or one of its custom groups) shows at first, and how many more each
+ *  "Show more" brings in. */
+private const val SESSIONS_VISIBLE_LIMIT = 5
 
 /**
  * RECENT's project-count fold (#373) for one machine's list — see [RecentZone].
@@ -971,6 +997,13 @@ private sealed interface RecentRow {
         override val key = "recent-limit"
     }
 
+    /** "Show more" ([more]) / "Show less" closing one slice of session rows — a flat project's ([groupId] null),
+     *  or one custom group's ([indented]). [shown] is the depth it currently lets through. */
+    data class SessionsMore(val path: String, val groupId: String?, val indented: Boolean, val shown: Int, val more: Boolean) : RecentRow {
+        val scope = if (groupId == null) path else "$path/$groupId"
+        override val key = "sessions-more:$scope"
+    }
+
     data class RewoundHeader(val count: Int) : RecentRow {
         override val key = "rewound-header"
     }
@@ -980,18 +1013,40 @@ private sealed interface RecentRow {
     }
 }
 
-/** Every row RECENT emits, in order — see [RecentRow]. [expanded] lifts the [RECENT_VISIBLE_LIMIT] fold. */
+/** One slice of a project's session rows under its own "Show more" fold: the flat list ([groupId] null) or one
+ *  custom section. */
+private data class SessionSlice(val path: String, val groupId: String?, val rows: List<DkSession>) {
+    /** The depth the model remembers for this slice, else the first page. */
+    fun shown(model: DesktopModel): Int = model.sessionsShown(path, groupId) ?: SESSIONS_VISIBLE_LIMIT
+}
+
+/** The slices a project's session rows are dealt into. Rewound originals are already out ([visibleSessions]).
+ *  The list and its reveals both read this, so the fold they see is the same. */
+private fun sessionSlices(model: DesktopModel, g: DkSessionGroup): List<SessionSlice> {
+    val shown = visibleSessions(g.sessions)
+    val custom = if (g.current) model.customGroups else g.customGroups
+    return if (custom.isEmpty()) listOf(SessionSlice(g.path, null, shown))
+    else sessionSections(shown, custom, editable = g.current && model.canEditGroups).map { SessionSlice(g.path, it.id, it.sessions) }
+}
+
+/** Every row RECENT emits, in order — see [RecentRow]. [expanded] lifts the [RECENT_VISIBLE_LIMIT] fold; each
+ *  project's header collapse and session "Show more" depth are read off the model, which remembers them. */
 private fun recentRows(
     model: DesktopModel,
     groups: List<DkSessionGroup>,
-    collapsed: List<String>,
     expanded: Boolean,
     rewoundOpen: Boolean,
 ): List<RecentRow> = buildList {
+    // one session slice: its remembered depth of rows, then "Show more" / "Show less" once it overflows
+    fun MutableList<RecentRow>.addSlice(path: String, groupId: String?, rows: List<DkSession>, indented: Boolean, row: (DkSession) -> RecentRow) {
+        val n = model.sessionsShown(path, groupId) ?: SESSIONS_VISIBLE_LIMIT
+        rows.take(n).forEach { add(row(it)) }
+        if (rows.size > SESSIONS_VISIBLE_LIMIT) add(RecentRow.SessionsMore(path, groupId, indented, n, more = rows.size > n))
+    }
     // #373: past the limit the rest wait behind "Show all" — a cut of the list as it stands, never a re-sort
     val listed = if (expanded) groups else groups.take(RECENT_VISIBLE_LIMIT)
     for (g in listed) {
-        val closed = g.path in collapsed
+        val closed = model.projectCollapsed(g.path)
         add(RecentRow.Header(g, closed))
         if (closed) continue
         // issue #119: the daemon lists groups per dir. The live-listed project's come from the model, whose
@@ -1025,12 +1080,12 @@ private fun recentRows(
         if (editable) add(RecentRow.NewGroup(g.path))
         if (custom.isEmpty()) {
             if (shown.isEmpty()) add(RecentRow.Empty(g.path))
-            shown.forEach { add(RecentRow.Session(g.path, it, indented = false, menuGroups, renameable, canArchive)) }
+            addSlice(g.path, null, shown, indented = false) { RecentRow.Session(g.path, it, indented = false, menuGroups, renameable, canArchive) }
         } else {
             sessionSections(shown, custom, editable).forEach { sec ->
                 add(RecentRow.Section(g.path, sec))
                 if (!model.groupCollapsed(g.path, sec.id)) {
-                    sec.sessions.forEach { add(RecentRow.Session(g.path, it, indented = true, menuGroups, renameable, canArchive)) }
+                    addSlice(g.path, sec.id, sec.sessions, indented = true) { RecentRow.Session(g.path, it, indented = true, menuGroups, renameable, canArchive) }
                 }
             }
         }
@@ -1073,22 +1128,33 @@ private fun List<RecentRow>.revealIndex(path: String, sessionId: String?): Int {
 /**
  * RECENT's project-count fold (#373): "Show all" while more than [RECENT_VISIBLE_LIMIT] projects wait, "Show less"
  * once they all show. It wears the rewound bucket's quiet 26dp row, so the list's own controls read as one family.
+ * The session fold ([RecentRow.SessionsMore]) wears the same row, indented to its slice, with its own [label] and [tag].
  */
 @Composable
-private fun RecentLimitToggle(expanded: Boolean, onToggle: () -> Unit) {
+private fun RecentLimitToggle(
+    expanded: Boolean,
+    tag: String = "recent-limit",
+    startPad: androidx.compose.ui.unit.Dp = 14.dp,
+    label: org.jetbrains.compose.resources.StringResource =
+        if (expanded) Res.string.sidebar_recent_show_less else Res.string.sidebar_recent_show_all,
+    // the session fold sits between session rows: no arrow, the lightest text, regular weight, so it reads as a hint
+    quiet: Boolean = false,
+    onToggle: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().height(26.dp).hoverFill().clickable(onClick = onToggle)
-            .testTag("recent-limit").padding(start = 14.dp, end = 12.dp),
+            .testTag(tag).padding(start = startPad, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         // points where the list goes next: down to bring the rest in, up to fold them away again
-        Icon(
+        if (!quiet) Icon(
             Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted,
             modifier = Modifier.size(12.dp).rotate(if (expanded) 180f else 0f),
         )
         Text(
-            stringResource(if (expanded) Res.string.sidebar_recent_show_less else Res.string.sidebar_recent_show_all),
-            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            stringResource(label),
+            color = if (quiet) Tok.muted else Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp,
+            fontWeight = if (quiet) FontWeight.Normal else FontWeight.SemiBold,
             style = tightCenter(11.sp), maxLines = 1,
         )
     }

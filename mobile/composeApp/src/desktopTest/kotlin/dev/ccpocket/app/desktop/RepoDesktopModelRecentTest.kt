@@ -226,4 +226,28 @@ class RepoDesktopModelRecentTest {
         assertTrue(m.sessionGroups.first { it.path == b.path }.sessions.isNotEmpty()) // live rows kept
         assertTrue(m.sessionGroups.first { it.path == a.path }.sessions.isNotEmpty())
     }
+
+    @Test
+    fun projectCollapseAndSessionDepthPersistAcrossRestart() {
+        val store = FakeDesktopStore()
+        val (_, m1) = demoModel(store)
+        m1.setProjectCollapsed("/demo/a", true)
+        m1.setSessionsShown("/demo/b", null, 10)
+        m1.setSessionsShown("/demo/b", "g-x", 15)
+        assertTrue(store.map.getValue("desktop_project_collapsed").contains("/demo/a"))
+
+        val (_, m2) = demoModel(store) // "restart" over the same store
+        assertTrue(m2.projectCollapsed("/demo/a"))
+        assertFalse(m2.projectCollapsed("/demo/b"))
+        assertEquals(10, m2.sessionsShown("/demo/b", null))
+        assertEquals(15, m2.sessionsShown("/demo/b", "g-x"), "each custom group keeps its own depth")
+        assertEquals(null, m2.sessionsShown("/demo/a", null), "untouched projects start from the default page")
+
+        m2.setProjectCollapsed("/demo/a", false)
+        m2.setSessionsShown("/demo/b", null, null) // Show less
+        val (_, m3) = demoModel(store)
+        assertFalse(m3.projectCollapsed("/demo/a"))
+        assertEquals(null, m3.sessionsShown("/demo/b", null))
+        assertEquals(15, m3.sessionsShown("/demo/b", "g-x"))
+    }
 }

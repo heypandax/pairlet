@@ -309,7 +309,9 @@ class SidebarRecentLimitTest {
             ),
         )
         val model = RecentModel(
-            listOf(current) + (2..5).map { project(it, sessions = 3) } + p6 + project(7, sessions = 30),
+            // p7 emits five rows and a session fold; p8–p11 (past the project fold, which the reveal lifts) are
+            // the list length below the revealed row that lets it scroll to the very top
+            listOf(current) + (2..5).map { project(it, sessions = 3) } + p6 + project(7, sessions = 30) + (8..11).map { project(it, sessions = 5) },
             customGroups = listOf(DkGroup("g-a", "A", 0), DkGroup("g-b", "B", 1), DkGroup("g-c", "C", 2)),
             canEditGroups = true,
         )

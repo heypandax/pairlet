@@ -146,6 +146,8 @@ class SidePaneModelDelegationGuardTest {
         "managedListStale", "unavailableNotice", "dismissUnavailableNotice", "askRemoveFromManagedList", "removeFromManagedList", "openManagedImport", "closeManagedImport", "locateImportedSession",
         "customGroups", "canEditGroups", "createGroup", "renameGroup", "deleteGroup", "assignGroup",
         "groupCollapsed",
+        // the sidebar's per-project fold memory: project header collapse + session "Show more" depth
+        "projectCollapsed", "sessionsShown",
         "archivedSessions", "canArchiveSessions", "archiveSession", "unarchiveSession",
         "refreshArchived", "browseArchived",
         "canRenameSessions", "renameSession", "renameError", "dismissRenameError",

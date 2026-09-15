@@ -956,6 +956,33 @@ class RepoDesktopModel(
         else if (!collapsed && has) { groupCollapsedState.remove(k); saveGroupCollapsed() }
     }
 
+    // project-header collapse and the session "Show more" depth, per canonical project path — stored the same way
+    private val projectCollapsedState = mutableStateListOf<String>().apply {
+        runCatching {
+            store.getString(K_PROJECT_COLLAPSED)?.takeIf { it.isNotBlank() }?.let { addAll(storeJson.decodeFromString<List<String>>(it)) }
+        }
+    }
+    override fun projectCollapsed(projectPath: String): Boolean = normCwd(projectPath) in projectCollapsedState
+    override fun setProjectCollapsed(projectPath: String, collapsed: Boolean) {
+        val k = normCwd(projectPath)
+        val has = k in projectCollapsedState
+        if (collapsed == has) return
+        if (collapsed) projectCollapsedState.add(k) else projectCollapsedState.remove(k)
+        store.putString(K_PROJECT_COLLAPSED, storeJson.encodeToString(projectCollapsedState.toList()))
+    }
+    private val sessionsShownState = androidx.compose.runtime.mutableStateMapOf<String, Int>().apply {
+        runCatching {
+            store.getString(K_SESSIONS_SHOWN)?.takeIf { it.isNotBlank() }?.let { putAll(storeJson.decodeFromString<Map<String, Int>>(it)) }
+        }
+    }
+    override fun sessionsShown(projectPath: String, groupId: String?): Int? = sessionsShownState[groupCollapseKey(projectPath, groupId.orEmpty())]
+    override fun setSessionsShown(projectPath: String, groupId: String?, count: Int?) {
+        val k = groupCollapseKey(projectPath, groupId.orEmpty())
+        if (sessionsShownState[k] == count) return
+        if (count == null) sessionsShownState.remove(k) else sessionsShownState[k] = count
+        store.putString(K_SESSIONS_SHOWN, storeJson.encodeToString(sessionsShownState.toMap()))
+    }
+
     override fun selectSession(s: DkSession) {
         // #360: a managed member whose original record is gone has nothing to resume — explain instead of opening
         if (s.unavailable) {
@@ -1773,6 +1800,8 @@ class RepoDesktopModel(
         const val K_HIDDEN = "desktop_hidden_sessions" // sessions removed from RECENT via the row ✕ (#62)
         const val K_VISITS = "desktop_recent_visits" // RECENT visit keys (issue #102) — account + path, order = recency
         const val K_GROUP_COLLAPSED = "desktop_group_collapsed" // per project+group collapse memory (issue #119)
+        const val K_PROJECT_COLLAPSED = "desktop_project_collapsed" // RECENT project headers the user folded
+        const val K_SESSIONS_SHOWN = "desktop_sessions_shown" // per project(+group) session "Show more" depth
         const val K_TERMINAL_APP = "desktop_terminal_app"
         const val K_CHAT_ALIGN = "desktop_chat_alignment" // ChatStreamAlignment name (LEFT/BUBBLES; issue #213)
         const val K_TERMINAL_EMBED = "desktop_terminal_embed" // "1"/absent = embedded default, "0" = external (#153)

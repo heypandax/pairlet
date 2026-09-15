@@ -1151,6 +1151,7 @@
     <string name="sidebar_no_sessions_here">这里还没有会话</string>
     <string name="sidebar_recent_show_all">展开显示</string>
     <string name="sidebar_recent_show_less">收起</string>
+    <string name="sidebar_sessions_show_more">展示更多</string>
     <string name="open_folder">打开文件夹…</string>
 
     <!-- 命令面板 -->
