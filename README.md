@@ -12,7 +12,7 @@ Pairlet is an open-source, local-first control plane for command-line coding age
 
 **v1.9.4** drives six agent backends — Claude Code, OpenAI Codex, OpenCode, Kimi Code (Preview), ZCode and DeepSeek. They are not equivalent: see [the capability matrix](#agent-support) before you pick one.
 
-**🌐 [Website](https://pairlet.org/)** · **📖 [User manual](https://pairlet.org/manual/en/)** · **💬 [Support, no sign-in](https://pairlet.org/support/)** · **📦 [Latest release](https://github.com/heypandax/pairlet/releases/latest)**
+**🌐 [Website](https://pairlet.org/)** · **🛠️ [Engineering Wiki](https://wiki.pairlet.org/)** · **📖 [User manual](https://pairlet.org/manual/en/)** · **💬 [Support, no sign-in](https://pairlet.org/support/)** · **📦 [Latest release](https://github.com/heypandax/pairlet/releases/latest)**
 
 <p align="center"><a href="https://pairlet.org/"><img src="site/assets/product/overview.png" alt="Pairlet: the desktop console showing paired machines and a live session, beside the phone app showing a session list and an approval decision." width="900"></a></p>
 

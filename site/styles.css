@@ -422,6 +422,10 @@ a{color:inherit;text-decoration:none;}
 
 /* ─────────────────────────── responsive ─────────────────────────── */
 @media (max-width:1023px){
+  .nav-links{display:none;}
+  .hamburger{display:flex;}
+  .nav-right .seg{display:none;}
+  .nav-right .desktop-github{display:none;}
   .hero .wrap{grid-template-columns:1fr;gap:48px;text-align:center;}
   .hero-btns,.hero .sub{margin-left:auto;margin-right:auto;}
   .hero .sub{max-width:560px;}
@@ -437,10 +441,6 @@ a{color:inherit;text-decoration:none;}
 @media (max-width:767px){
   body{font-size:16px;}
   .section{padding:72px 0;}
-  .nav-links{display:none;}
-  .hamburger{display:flex;}
-  .nav-right .seg{display:none;}
-  .nav-right .desktop-github{display:none;}
   .moment .wrap{grid-template-columns:1fr;text-align:center;gap:32px;}
   .moment .mini{margin:0 auto;}
   .arch-flow{flex-direction:column;}

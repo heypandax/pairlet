@@ -2,7 +2,7 @@
 
 Issues and PRs are welcome, in English or Chinese. This file collects everything a fresh clone needs that isn't obvious from the code.
 
-Documentation starts at [docs/README.md](docs/README.md). Before adding files, follow the [repository content policy](docs/REPOSITORY-CONTENT.md): keep reusable sources and required release assets in Git; keep raw design exports, conversations, campaign receipts and local configuration outside the tracked tree. Check with `python3 scripts/check-repository-content.py` after staging changes. Historical records under `docs/archive/` describe their original task only.
+Explore the [Engineering Wiki](https://wiki.pairlet.org/) for architecture, modules and development guides. Repository documentation starts at [docs/README.md](docs/README.md). Before adding files, follow the [repository content policy](docs/REPOSITORY-CONTENT.md): keep reusable sources and required release assets in Git; keep raw design exports, conversations, campaign receipts and local configuration outside the tracked tree. Check with `python3 scripts/check-repository-content.py` after staging changes. Historical records under `docs/archive/` describe their original task only.
 
 ## Modules at a glance
 

@@ -4,6 +4,7 @@
 
 | 任务 | 入口 |
 |---|---|
+| 了解架构、模块与开发指南 | [工程 Wiki](https://wiki.pairlet.org/) |
 | 管理本期 Issue 修复与交付 | [2026-09-13 本期任务管理](iterations/2026-09-13-issue-delivery.md) |
 | 交给 Claude Code 独立实施后续 Issue | [2026-09-14 任务目录与方案](iterations/2026-09-14-claude-code/README.md) |
 | 了解使用方式与运行链路 | [使用说明](USAGE.md)、[运行说明](RUN.md)、[贡献指南](../CONTRIBUTING.md) |

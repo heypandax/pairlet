@@ -12,7 +12,7 @@ Pairlet 是一个开源的本地优先控制面，用来遥控命令行编码 ag
 
 **v1.9.4** 支持六个 agent 后端：Claude Code、OpenAI Codex、OpenCode、Kimi Code（Preview）、ZCode 和 DeepSeek。它们的能力**并不等价**，选之前先看[能力矩阵](#agent-支持)。
 
-**🌐 [官网](https://pairlet.org/)** · **📖 [用户手册](https://pairlet.org/manual/zh/)** · **💬 [帮助与客服（免登录）](https://pairlet.org/support/)** · **📦 [最新 Release](https://github.com/heypandax/pairlet/releases/latest)**
+**🌐 [官网](https://pairlet.org/)** · **🛠️ [工程 Wiki](https://wiki.pairlet.org/)** · **📖 [用户手册](https://pairlet.org/manual/zh/)** · **💬 [帮助与客服（免登录）](https://pairlet.org/support/)** · **📦 [最新 Release](https://github.com/heypandax/pairlet/releases/latest)**
 
 <p align="center"><a href="https://pairlet.org/"><img src="site/assets/product/overview.png" alt="Pairlet：左边是桌面控制台的已配对电脑与运行中会话，右边是手机上的会话列表和一次授权决策。" width="900"></a></p>
 
