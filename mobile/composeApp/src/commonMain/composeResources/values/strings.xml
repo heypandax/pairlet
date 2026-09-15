@@ -592,6 +592,14 @@
 
     <!-- ── changed files v2: line-level diffs ────────────────────── -->
     <string name="files_stale_banner">Update the daemon on your computer to see line-level diffs.</string>
+    <string name="files_copy_full_path">Copy full path</string>
+    <string name="files_copy_rel_path">Copy relative path</string>
+    <string name="files_insert_path">Insert path into message</string>
+    <string name="files_open_default">Open with default app</string>
+    <string name="files_open_terminal">Open terminal here</string>
+    <string name="files_reveal_explorer">Show in Explorer</string>
+    <string name="files_reveal_finder">Reveal in Finder</string>
+    <string name="files_reveal_generic">Show in file manager</string>
     <string name="diff_tab">Diff</string>
     <string name="file_tab">File</string>
     <string name="html_preview">Preview</string>

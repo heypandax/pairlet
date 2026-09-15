@@ -85,26 +85,54 @@ internal fun DesktopFilePreviewLayout(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    var fraction by remember { mutableStateOf(0.45f) }
+    val file = state.file
+    DockedRightPaneLayout(
+        open = file != null,
+        modifier = modifier,
+        dividerTag = "file-preview-divider",
+        pane = { paneModifier -> file?.let { DesktopFilePreviewPane(state, it, paneModifier) } },
+        content = content,
+    )
+}
+
+/**
+ * The window's "docked beside the chat" layout: [content] keeps the left, and while [open] a right-hand
+ * pane takes [initialFraction] of the width behind a drag-to-resize divider. Shared by the file preview and
+ * the Changes panel so both dock the same way — the alternative to docking was a centered modal, which
+ * hid the conversation exactly when the user wanted to read it next to a diff. Chat retains its
+ * composition, input and scroll position across open/close because it never leaves the tree.
+ */
+@Composable
+internal fun DockedRightPaneLayout(
+    open: Boolean,
+    modifier: Modifier = Modifier,
+    dividerTag: String,
+    initialFraction: Float = 0.45f,
+    minFraction: Float = 0.3f,
+    maxFraction: Float = 0.65f,
+    pane: @Composable (Modifier) -> Unit,
+    content: @Composable () -> Unit,
+) {
+    var fraction by remember { mutableStateOf(initialFraction) }
     val density = LocalDensity.current
     BoxWithConstraints(modifier.fillMaxHeight()) {
         val availableWidth = maxWidth
         val widthPx = with(density) { availableWidth.toPx() }
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxHeight().clipToBounds()) { content() }
-            state.file?.let { file ->
+            if (open) {
                 Box(
-                    Modifier.width(5.dp).fillMaxHeight().testTag("file-preview-divider")
+                    Modifier.width(5.dp).fillMaxHeight().testTag(dividerTag)
                         .pointerHoverIcon(PointerIcon(Cursor(Cursor.E_RESIZE_CURSOR)))
                         .pointerInput(widthPx) {
                             detectHorizontalDragGestures { change, dx ->
                                 change.consume()
-                                if (widthPx > 0) fraction = (fraction - dx / widthPx).coerceIn(0.3f, 0.65f)
+                                if (widthPx > 0) fraction = (fraction - dx / widthPx).coerceIn(minFraction, maxFraction)
                             }
                         },
                     contentAlignment = Alignment.Center,
                 ) { Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair)) }
-                DesktopFilePreviewPane(state, file, Modifier.width(availableWidth * fraction).fillMaxHeight())
+                pane(Modifier.width(availableWidth * fraction).fillMaxHeight())
             }
         }
     }

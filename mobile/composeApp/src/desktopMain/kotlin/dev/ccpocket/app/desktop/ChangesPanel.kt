@@ -1,5 +1,7 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +29,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.InsertDriveFile
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -48,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
@@ -79,6 +83,14 @@ import dev.ccpocket.app.resources.files_title
 import dev.ccpocket.app.resources.files_truncated
 import dev.ccpocket.app.resources.files_view_all
 import dev.ccpocket.app.resources.files_view_changes
+import dev.ccpocket.app.resources.files_copy_full_path
+import dev.ccpocket.app.resources.files_copy_rel_path
+import dev.ccpocket.app.resources.files_insert_path
+import dev.ccpocket.app.resources.files_open_default
+import dev.ccpocket.app.resources.files_open_terminal
+import dev.ccpocket.app.resources.files_reveal_explorer
+import dev.ccpocket.app.resources.files_reveal_finder
+import dev.ccpocket.app.resources.files_reveal_generic
 import dev.ccpocket.app.resources.key_close
 import dev.ccpocket.app.resources.key_collapse_hunk
 import dev.ccpocket.app.resources.key_switch_file
@@ -108,6 +120,7 @@ import dev.ccpocket.app.ui.flattenFileTree
 import dev.ccpocket.app.ui.isImagePath
 import dev.ccpocket.app.ui.joinNative
 import dev.ccpocket.app.ui.parentDirOf
+import dev.ccpocket.app.ui.relUnderWorkdir
 import dev.ccpocket.app.ui.rememberCopied
 import dev.ccpocket.app.ui.rememberDiffTab
 import dev.ccpocket.app.ui.rememberWrapState
@@ -120,8 +133,11 @@ import org.jetbrains.compose.resources.stringResource
 // ════════════════════════════════════════════════════════════════════
 //  Changes — the desktop two-pane diff browser (changed-files v2).
 //  Left: the session's changed files; right: the selected file's diff
-//  at desktop density (dual gutter). Same overlay language as ⌘K; the
-//  panes and tab policy are DiffView.kt's shared pieces.
+//  at desktop density (dual gutter). DOCKED beside the chat columns
+//  (DockedRightPaneLayout), not a centered modal: the whole point of
+//  reading a diff is to scroll the conversation next to it, and the
+//  scrim version blocked exactly that. The panes and tab policy are
+//  DiffView.kt's shared pieces.
 // ════════════════════════════════════════════════════════════════════
 
 /**
@@ -140,7 +156,7 @@ fun ChangesPill(model: DesktopModel) {
         Box(
             Modifier.height(20.dp).width(26.dp).clip(RoundedCornerShape(999.dp))
                 .border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
-                .clickable { model.openChanges() },
+                .clickable { model.toggleChanges() },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -157,18 +173,20 @@ fun ChangesPill(model: DesktopModel) {
         modifier = Modifier.clip(RoundedCornerShape(999.dp))
             .background(Tok.accent.copy(alpha = 0.12f))
             .border(1.dp, Tok.accent.copy(alpha = 0.4f), RoundedCornerShape(999.dp))
-            .clickable { model.openChanges() }
+            .clickable { model.toggleChanges() }
             .padding(horizontal = 9.dp, vertical = 3.dp),
     )
 }
 
+/** The docked Changes panel. [modifier] carries the width the dock layout allots; the frame is flat
+ *  (no shadow / rounding) because it is a column of the window now, not a card floating over it. */
 @Composable
-fun ChangesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
+fun ChangesPanel(model: DesktopModel, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     val files = model.changedFiles
     val selectedPath = model.selectedChangedPath
     // 视角与树的展开集住在 overlay 这一层：来回切视角保持选中文件与右栏（设计裁决），
     // 关掉时把逐层缓存丢掉——下次打开重新读到最新的磁盘状态
-    var view by remember { mutableStateOf(FilesView.CHANGES) }
+    var view by remember { mutableStateOf(FilesView.ALL) } // 默认「全部」：面板现在首先是个目录浏览器
     // 展开的目录（值无意义，只用 key）——这个 Compose 版本还没有 mutableStateSetOf
     val expanded = remember { mutableStateMapOf<String, Unit>() }
     DisposableEffect(Unit) {
@@ -184,12 +202,13 @@ fun ChangesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
     LaunchedEffect(Unit) { focus.requestFocus() }
 
     Column(
-        Modifier.widthIn(max = 1040.dp).fillMaxWidth(0.92f).heightIn(max = 640.dp).fillMaxHeight(0.88f)
-            .shadow(30.dp, RoundedCornerShape(14.dp)).clip(RoundedCornerShape(14.dp))
-            .background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(14.dp))
+        modifier.background(Tok.raised).testTag("changes-panel")
             .focusRequester(focus).focusable()
             .onPreviewKeyEvent { e ->
                 if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                // 停靠后不再是模态：窗口级的 Esc 路由（anyOverlayOpen）不认识它，所以 Esc 在面板自己
+                // 持有焦点时关闭——焦点在输入框时 Esc 仍归输入框（打断回合 / 收起斜杠菜单）
+                if (e.key == Key.Escape) { onDismiss(); return@onPreviewKeyEvent true }
                 // ↑↓ 走的是变更列表；在「全部」视角里它会把选中拽出当前那棵树，所以只在变更视角生效
                 if (view != FilesView.CHANGES) return@onPreviewKeyEvent false
                 val idx = files.indexOfFirst { it.path == model.selectedChangedPath }
@@ -216,10 +235,20 @@ fun ChangesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
 
-        // 左栏（280dp）永远在：视角头 + 当前视角的列表；右栏是选中文件的预览（改过 = diff，
+        // 目录列（240dp，靠右）永远在：视角头 + 当前视角的列表；左边是选中文件的预览（改过 = diff，
         // 没改过 = 全文）。零改动不再是一整块空态——「全部」视角照样能浏览 workdir。
+        // 目录放右、预览放左：面板停靠在会话右侧，预览紧挨会话读起来顺，目录靠窗边当索引。
+        // 240 而不是弹层时代的 280：停靠面板默认只占窗口一半，diff 栏得留够宽度。
         Row(Modifier.weight(1f).fillMaxWidth()) {
-            Column(Modifier.width(280.dp).fillMaxHeight().background(Tok.raised)) {
+            Column(Modifier.weight(1f).fillMaxHeight().background(DiffTok.codeBg)) {
+                // 未改过的文件不在 changedFiles 里 —— 预览只需要一条 path，改动元信息（状态点 / 增删数）
+                // 有就带、没有就不显示
+                model.selectedChangedPath?.let { path ->
+                    SelectedFilePane(model, path, files.firstOrNull { it.path == path })
+                }
+            }
+            Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
+            Column(Modifier.width(CHANGES_LIST_WIDTH).fillMaxHeight().background(Tok.raised)) {
                 LeftPaneHeader(model, view, onPick = { view = it })
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
                 when (view) {
@@ -234,21 +263,18 @@ fun ChangesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
                             )
                         }
                         files.isEmpty() -> EmptyBody()
-                        else -> LazyColumn(Modifier.fillMaxSize()) {
-                            items(files, key = { it.path }) { f ->
-                                DesktopFileRow(f, selected = f.path == model.selectedChangedPath) { model.selectChangedFile(f.path) }
+                        else -> {
+                            val actions = rememberFileActions(model)
+                            LazyColumn(Modifier.fillMaxSize()) {
+                                items(files, key = { it.path }) { f ->
+                                    ContextMenuArea(items = { actions.menuFor(f.path, isDir = false, rel = relUnderWorkdir(model.chatWorkdir, f.path)) }) {
+                                        DesktopFileRow(f, selected = f.path == model.selectedChangedPath) { model.selectChangedFile(f.path) }
+                                    }
+                                }
                             }
                         }
                     }
                     FilesView.ALL -> WorkdirTree(model, expanded)
-                }
-            }
-            Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
-            Column(Modifier.weight(1f).fillMaxHeight().background(DiffTok.codeBg)) {
-                // 未改过的文件不在 changedFiles 里 —— 右栏只需要一条 path，改动元信息（状态点 / 增删数）
-                // 有就带、没有就不显示
-                model.selectedChangedPath?.let { path ->
-                    SelectedFilePane(model, path, files.firstOrNull { it.path == path })
                 }
             }
         }
@@ -264,6 +290,78 @@ fun ChangesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
             FootHint("click @@", stringResource(Res.string.key_collapse_hunk))
             FootHint("esc", stringResource(Res.string.key_close))
         }
+    }
+}
+
+private val CHANGES_LIST_WIDTH = 240.dp
+
+// ── 文件 / 文件夹 / 工作目录的右键动作 ─────────────────────────────────────────────────────────
+
+/**
+ * One context menu for every path the panel shows — the workdir line, a tree folder, a tree file, a
+ * changed-file row — so the four surfaces never disagree on what a right-click offers. Families, in
+ * the app's menu order: open (reveal / default app / terminal) → copy (full / relative) → compose
+ * (insert into the message). The open family only exists for a LOCAL session ([local]: the workdir is
+ * a directory on this machine, the same test the ">_" terminal button makes); a remote session's
+ * paths still copy and insert, which is everything that is true of them here.
+ */
+private class FileActions(
+    val local: Boolean,
+    val revealLabel: String,
+    private val openDefault: String,
+    private val openTerminal: String,
+    private val copyFull: String,
+    private val copyRel: String,
+    private val insert: String,
+    private val copy: (String) -> Unit,
+    private val model: DesktopModel,
+) {
+    /** [rel] is the workdir-relative form when there is one ('/'-keyed, as the tree keys it); the
+     *  workdir line itself has none, and an outside-workdir changed file (#67 exports) has none either. */
+    fun menuFor(abs: String, isDir: Boolean, rel: String?): List<ContextMenuItem> = joinMenuFamilies(
+        buildList {
+            if (!local) return@buildList
+            add(PocketMenuItem(revealLabel) { LocalFileActions.reveal(abs) })
+            if (!isDir) add(PocketMenuItem(openDefault) { LocalFileActions.openDefault(abs) })
+            if (isDir) add(PocketMenuItem(openTerminal) { TerminalLauncher.open(model.terminalApp, abs) })
+        },
+        buildList {
+            // "full" means what a shell or another app can take verbatim: `~` expanded (the panel's
+            // display form), not the display string itself
+            add(PocketMenuItem(copyFull) { copy(if (local) LocalFileActions.resolve(abs).absolutePath else abs) })
+            if (rel != null) add(PocketMenuItem(copyRel) { copy(rel) })
+        },
+        buildList {
+            // the CLI's own @-mention shape, relative when the file is under the workdir; appended after
+            // whatever is already drafted, with a space so the next word doesn't glue to the path
+            val mention = "@" + (rel ?: abs)
+            add(PocketMenuItem(insert) {
+                val cur = model.composer
+                model.composer = if (cur.isEmpty() || cur.endsWith(" ") || cur.endsWith("\n")) "$cur$mention " else "$cur $mention "
+            })
+        },
+    )
+}
+
+@Composable
+private fun rememberFileActions(model: DesktopModel): FileActions {
+    val workdir = model.chatWorkdir
+    val local = remember(workdir) { TerminalLauncher.canOpen(workdir) }
+    val reveal = stringResource(
+        when {
+            LocalFileActions.mac -> Res.string.files_reveal_finder
+            LocalFileActions.win -> Res.string.files_reveal_explorer
+            else -> Res.string.files_reveal_generic
+        },
+    )
+    val openDefault = stringResource(Res.string.files_open_default)
+    val openTerminal = stringResource(Res.string.files_open_terminal)
+    val copyFull = stringResource(Res.string.files_copy_full_path)
+    val copyRel = stringResource(Res.string.files_copy_rel_path)
+    val insert = stringResource(Res.string.files_insert_path)
+    val (_, copy) = rememberCopied()
+    return remember(local, reveal, openDefault, openTerminal, copyFull, copyRel, insert, model) {
+        FileActions(local, reveal, openDefault, openTerminal, copyFull, copyRel, insert, copy, model)
     }
 }
 
@@ -302,7 +400,25 @@ private fun LeftPaneHeader(model: DesktopModel, view: FilesView, onPick: (FilesV
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        TailPathText(model.chatWorkdir, fontSize = 10.sp, color = Tok.muted)
+        // workdir 一行：路径 + 「在 Finder 中显示」按钮（仅本机会话），右键给全套目录动作
+        val workdir = model.chatWorkdir
+        val actions = rememberFileActions(model)
+        ContextMenuArea(items = { actions.menuFor(workdir, isDir = true, rel = null) }) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(Modifier.weight(1f)) { TailPathText(workdir, fontSize = 10.sp, color = Tok.muted) }
+                if (actions.local) {
+                    val label = actions.revealLabel
+                    val src = remember { MutableInteractionSource() }
+                    val hovered by src.collectIsHoveredAsState()
+                    Icon(
+                        Icons.Outlined.FolderOpen, label, tint = if (hovered) Tok.tx2 else Tok.muted,
+                        modifier = Modifier.size(20.dp).clip(RoundedCornerShape(5.dp))
+                            .background(if (hovered) Tok.raised else Color.Transparent)
+                            .hoverable(src).clickable { LocalFileActions.reveal(workdir) }.padding(3.dp),
+                    )
+                }
+            }
+        }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 Modifier.weight(1f).height(24.dp).clip(RoundedCornerShape(6.dp))
@@ -366,6 +482,7 @@ private fun LeftPaneHeader(model: DesktopModel, view: FilesView, onPick: (FilesV
 private fun WorkdirTree(model: DesktopModel, expanded: MutableMap<String, Unit>) {
     LaunchedEffect(Unit) { model.browseFileTree("") } // 根这一层总要有
     val workdir = model.chatWorkdir
+    val actions = rememberFileActions(model)
     val index = changedIndexOf(workdir, model.changedFiles)
     val rows = flattenFileTree(model.fileTree, expanded.keys, model.filesShowHidden)
     val root = model.fileTree[""]
@@ -387,18 +504,22 @@ private fun WorkdirTree(model: DesktopModel, expanded: MutableMap<String, Unit>)
             items(rows, key = { it.kind.name + ":" + it.subPath }) { row ->
                 when (row.kind) {
                     FileRowKind.TRUNCATED -> TreeTruncatedRow(row.depth)
-                    FileRowKind.DIR -> TreeDirRow(row, subtreeChangeCount(index, row.subPath)) {
-                        if (expanded.remove(row.subPath) == null) {
-                            expanded[row.subPath] = Unit
-                            model.browseFileTree(row.subPath)
+                    FileRowKind.DIR -> ContextMenuArea(items = { actions.menuFor(joinNative(workdir, row.subPath), isDir = true, rel = row.subPath) }) {
+                        TreeDirRow(row, subtreeChangeCount(index, row.subPath)) {
+                            if (expanded.remove(row.subPath) == null) {
+                                expanded[row.subPath] = Unit
+                                model.browseFileTree(row.subPath)
+                            }
                         }
                     }
                     FileRowKind.FILE -> {
                         // ChangedFile.path 是 daemon 主机上的绝对原生路径 —— 树行也必须拼成同一形状，
                         // 否则查看器认不出它是改过的文件（状态点 / 增删数会整个丢掉）
                         val abs = joinNative(workdir, row.subPath)
-                        TreeFileRow(row, index[row.subPath], selected = abs == model.selectedChangedPath) {
-                            model.selectChangedFile(abs)
+                        ContextMenuArea(items = { actions.menuFor(abs, isDir = false, rel = row.subPath) }) {
+                            TreeFileRow(row, index[row.subPath], selected = abs == model.selectedChangedPath) {
+                                model.selectChangedFile(abs)
+                            }
                         }
                     }
                 }

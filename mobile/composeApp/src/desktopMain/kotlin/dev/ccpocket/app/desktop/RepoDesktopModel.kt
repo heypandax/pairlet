@@ -5,6 +5,7 @@ import dev.ccpocket.app.data.toolProcessScope
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -155,7 +156,23 @@ class RepoDesktopModel(
     override fun dismissHandoffInvite() { repo.lastHandoffInvite.value = null }
     override var showModelPopover by mutableStateOf(false)
     override var showQuotaPopover by mutableStateOf(false)
-    override var showChanges by mutableStateOf(false)
+    // The Changes dock is PER SESSION: opened on A, it stays open on A and is absent on B until B opens
+    // its own. A single window-level flag showed A's dock (and A's file tree) over B the moment the user
+    // switched, which is the one thing a "beside this conversation" panel must not do.
+    //
+    // Keyed on the CONVERSATION's own identity, not [selectedSessionId]: that one is a sidebar-row
+    // concept and is null whenever the open chat has no row in the currently LISTED directory (a session
+    // opened from a pin/RECENT of another project, a cwd that differs from the listing's) — the first
+    // cut keyed on it, and the pill silently did nothing for every project but the listed one.
+    private val changesOpenFor = mutableStateMapOf<String, Unit>()
+    private val changesKey: String?
+        get() = repo.sessionKey.value ?: repo.convoId.value ?: repo.workdir.value
+    override var showChanges: Boolean
+        get() = changesKey?.let { changesOpenFor.containsKey(it) } ?: false
+        set(v) {
+            val id = changesKey ?: return
+            if (v) changesOpenFor[id] = Unit else changesOpenFor.remove(id)
+        }
     override var showGit by mutableStateOf(false)
     override var showWorktrees by mutableStateOf(false)
     override var showSkills by mutableStateOf(false)

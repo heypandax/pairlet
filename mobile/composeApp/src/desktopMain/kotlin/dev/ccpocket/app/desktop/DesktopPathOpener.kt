@@ -67,3 +67,46 @@ class DesktopPathOpener(
         }
     }
 }
+
+/**
+ * The file-manager verbs the Changes panel's context menus raise on a LOCAL path (same locality
+ * contract as [DesktopPathOpener] / [TerminalLauncher]: the caller checks the session workdir exists
+ * on this machine first; a remote session's paths never reach here). Every launch is best-effort —
+ * a missing path or an OS without a handler is a silent no-op, never a crash.
+ */
+object LocalFileActions {
+    private val os = System.getProperty("os.name").lowercase()
+    val mac = os.contains("mac")
+    val win = os.contains("win")
+
+    /** The panel shows the workdir in its `~/…` form (RepoDesktopModel.chatWorkdir) and joins tree
+     *  paths onto it — so every path here may start with `~`, which `java.io.File` takes literally.
+     *  Same expansion as [TerminalLauncher.resolve], whose canOpen() is the locality test the menu
+     *  relies on: the two must agree or "reveal" no-ops on the very path the button was shown for. */
+    fun resolve(path: String): File = TerminalLauncher.resolve(path)
+
+    /** Reveal [f] SELECTED inside its folder (Finder `open -R`, Explorer `/select,`); elsewhere the
+     *  best a generic file manager offers is the parent folder. A folder is revealed, not entered —
+     *  that is the "show me where this is" gesture, and entering a folder is one click away from it. */
+    fun reveal(path: String) {
+        val f = resolve(path)
+        if (!f.exists()) return
+        runCatching {
+            when {
+                mac -> ProcessBuilder("open", "-R", f.absolutePath).start()
+                win -> ProcessBuilder("explorer.exe", "/select,", f.absolutePath).start()
+                else -> java.awt.Desktop.getDesktop().open(f.absoluteFile.parentFile ?: f)
+            }
+        }
+    }
+
+    /** Hand [f] to the OS default application (folders: the file manager itself). */
+    fun openDefault(path: String) {
+        val f = resolve(path)
+        if (!f.exists()) return
+        runCatching {
+            if (mac) ProcessBuilder("open", f.absolutePath).start()
+            else java.awt.Desktop.getDesktop().open(f)
+        }
+    }
+}

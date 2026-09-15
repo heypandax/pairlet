@@ -592,6 +592,14 @@
 
     <!-- ── 改动文件 v2：逐行改动 ─────────────────────────────────── -->
     <string name="files_stale_banner">更新电脑上的 daemon 后可查看逐行改动。</string>
+    <string name="files_copy_full_path">复制完整路径</string>
+    <string name="files_copy_rel_path">复制相对路径</string>
+    <string name="files_insert_path">把路径插入输入框</string>
+    <string name="files_open_default">用默认应用打开</string>
+    <string name="files_open_terminal">在此处打开终端</string>
+    <string name="files_reveal_explorer">在资源管理器中显示</string>
+    <string name="files_reveal_finder">在 Finder 中显示</string>
+    <string name="files_reveal_generic">在文件管理器中显示</string>
     <string name="diff_tab">改动</string>
     <string name="file_tab">文件</string>
     <string name="html_preview">预览</string>

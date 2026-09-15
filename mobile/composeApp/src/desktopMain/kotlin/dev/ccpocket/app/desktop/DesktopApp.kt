@@ -34,6 +34,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
@@ -150,7 +151,24 @@ fun DesktopApp(
                     onCollapse = { model.setSidebarCollapsed(true) },
                 )
             }
-            DesktopFilePreviewLayout(filePreview, Modifier.weight(1f)) {
+            // Changes (changed-files v2) docks on the far right, OUTSIDE the file preview: reading a diff
+            // is a "beside the conversation" activity, and as a centered-scrim modal it blocked scrolling
+            // the very session the user wanted to check against. It is not an overlay in the model's
+            // bookkeeping either (anyOverlayOpen) — Esc, drag-to-split and the terminal interop all keep
+            // working with it open.
+            DockedRightPaneLayout(
+                open = model.showChanges,
+                modifier = Modifier.weight(1f),
+                dividerTag = "changes-divider",
+                initialFraction = 0.55f,
+                minFraction = 0.35f,
+                maxFraction = 0.75f,
+                // keyed on the session so a switch between two sessions that BOTH have the dock open
+                // restarts the panel: its view/expansion state and the model's per-layer tree cache
+                // (cleared on dispose) belong to one workdir, not to the slot
+                pane = { paneModifier -> key(model.selectedSessionId, model.chatWorkdir) { ChangesPanel(model, onDismiss = { model.showChanges = false }, modifier = paneModifier) } },
+            ) {
+            DesktopFilePreviewLayout(filePreview, Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxSize()) {
             val watch = model.watch
             val split = model.sidePanes
@@ -203,6 +221,7 @@ fun DesktopApp(
             if (dockedWf != null) {
                 Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
                 WorkflowPanel(model, dockedWf)
+            }
             }
             }
             }
@@ -326,12 +345,6 @@ fun DesktopApp(
         if (model.palette != null) {
             Overlay(onDismiss = { model.palette = null }, alignment = Alignment.TopCenter, padding = PaddingValues(top = 80.dp), scrim = true) {
                 CommandPalette(model) { model.palette = null }
-            }
-        }
-        if (model.showChanges) {
-            // the two-pane diff browser (changed-files v2) — same centered-scrim language as settings
-            Overlay(onDismiss = { model.showChanges = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
-                ChangesOverlay(model) { model.showChanges = false }
             }
         }
         if (model.showGit) {

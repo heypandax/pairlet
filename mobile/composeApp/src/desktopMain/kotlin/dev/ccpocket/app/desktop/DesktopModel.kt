@@ -271,7 +271,7 @@ interface DesktopModel {
     var showAttention: Boolean // bell popover: cross-machine approvals without leaving the session
     var showQuickActions: Boolean // chat-header ⋯ popover: effort/mode + compact/clear (mirrors mobile's sheet)
     var showModelPopover: Boolean // the composer chip's anchored model popover (issue #157) — the ⋯ Model row shortcuts here too
-    var showChanges: Boolean // the Changes two-pane diff browser (chat-header ± pill / palette verb)
+    var showChanges: Boolean // the Changes two-pane diff browser (chat-header ± pill / palette verb) — DOCKED beside the chat, not an overlay: absent from anyOverlayOpen on purpose; per session in the live model (open on A ≠ open on B)
     var showGit: Boolean // the Git panel overlay (issue #280; chat-header branch pill)
     var showWorktrees: Boolean // every checkout of the open repository (issue #281; raised from the Git overlay)
     var showSkills: Boolean // the installed skills/plugins browser (issue #132; sidebar row / palette verb)
@@ -334,11 +334,11 @@ interface DesktopModel {
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showGit || showWorktrees || showSkills || showHandoff || showReviewCenter || showFolderPicker || showQuotaPopover || handoffInvite != null
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showGit || showWorktrees || showSkills || showHandoff || showReviewCenter || showFolderPicker || showQuotaPopover || handoffInvite != null
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showGit = false; showWorktrees = false; showSkills = false; showHandoff = false; showReviewCenter = false; showFolderPicker = false; showQuotaPopover = false; dismissHandoffInvite()
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showGit = false; showWorktrees = false; showSkills = false; showHandoff = false; showReviewCenter = false; showFolderPicker = false; showQuotaPopover = false; dismissHandoffInvite()
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts
@@ -932,6 +932,8 @@ interface DesktopModel {
     fun selectChangedFile(path: String) {}
     /** Open the browser: flip the flag and refresh both the list and the remembered selection. */
     fun openChanges() { showChanges = true; fetchChangedFiles(); loadFilesShowHidden() }
+    /** The ± pill's verb: a docked panel's entry point is a toggle (the menu's SHOW_FILES stays [openChanges]). */
+    fun toggleChanges() { if (showChanges) showChanges = false else openChanges() }
 
     // ── 文件浏览「全部」视角（files-browser-dual-view）───────────────────────────────────────────
     // 同一个 Changes overlay 的第二个视角，不是第二个实体：逐层缓存住在 repo（['fileTree']），

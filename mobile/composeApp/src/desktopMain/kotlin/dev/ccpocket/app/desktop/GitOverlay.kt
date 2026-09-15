@@ -275,7 +275,7 @@ private fun SectionHeader(key: String, chip: GitChip, count: Int) {
     }
 }
 
-/** One left-pane row, at ChangesOverlay's density: chip · path · counts, with the Stage/Unstage pill
+/** One left-pane row, at ChangesPanel's density: chip · path · counts, with the Stage/Unstage pill
  *  appearing on hover or selection so the column of pills does not shout down the list. */
 @Composable
 private fun DesktopGitRow(
