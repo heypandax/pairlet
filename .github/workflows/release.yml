@@ -27,6 +27,10 @@ on:
         description: "Only rebuild & re-attach the macOS DESKTOP app (.dmg, both arches) + regenerate SHA256SUMS, leaving the daemon tarballs / Windows / Android untouched. For a desktop-only hotfix onto an existing release WITHOUT changing the daemon sha256 (which would break the published Homebrew cask / Scoop manifest)."
         type: boolean
         default: false
+      only_linux_desktop:
+        description: "Only rebuild & re-attach the Linux DESKTOP packages (.deb/.rpm, both arches) + regenerate SHA256SUMS, leaving every other asset untouched. Same hotfix contract as only_macos_desktop: desktop packages carry no Homebrew/Scoop sha pin, so re-attaching them is safe. Like the other only_* modes it may run from main."
+        type: boolean
+        default: false
       include_harmony:
         description: "Also build and attach the signed HarmonyOS HAP on the dedicated self-hosted macOS/ARM64/harmony runner. Off by default: GitHub-hosted runners do not provide DevEco Studio."
         type: boolean
@@ -57,6 +61,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
           ONLY_ANDROID: ${{ inputs.only_android }}
           ONLY_MACOS_DESKTOP: ${{ inputs.only_macos_desktop }}
+          ONLY_LINUX_DESKTOP: ${{ inputs.only_linux_desktop }}
           ONLY_HARMONY: ${{ inputs.only_harmony }}
         run: |
           bash scripts/check-release-version.sh "$RELEASE_VERSION"
@@ -64,6 +69,10 @@ jobs:
             echo "::error::only_android and only_macos_desktop cannot both be true"
             exit 1
           }
+          if [ "$ONLY_LINUX_DESKTOP" = "true" ] && { [ "$ONLY_ANDROID" = "true" ] || [ "$ONLY_MACOS_DESKTOP" = "true" ] || [ "$ONLY_HARMONY" = "true" ]; }; then
+            echo "::error::only_linux_desktop cannot be combined with any other only_* mode"
+            exit 1
+          fi
           if [ "$ONLY_HARMONY" = "true" ] && { [ "$ONLY_ANDROID" = "true" ] || [ "$ONLY_MACOS_DESKTOP" = "true" ]; }; then
             echo "::error::only_harmony cannot be combined with only_android or only_macos_desktop"
             exit 1
@@ -73,7 +82,7 @@ jobs:
             echo "::error::GitHub Release ${TAG} must exist before the artifact workflow starts"
             exit 1
           }
-          if [ "$ONLY_ANDROID" != "true" ] && [ "$ONLY_MACOS_DESKTOP" != "true" ]; then
+          if [ "$ONLY_ANDROID" != "true" ] && [ "$ONLY_MACOS_DESKTOP" != "true" ] && [ "$ONLY_LINUX_DESKTOP" != "true" ]; then
             [ "$GITHUB_REF" = "refs/tags/${TAG}" ] || {
               echo "::error::full releases must run from immutable tag ${TAG}; got ${GITHUB_REF}"
               exit 1
@@ -82,7 +91,7 @@ jobs:
 
   macos:
     needs: preflight
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony && !inputs.only_linux_desktop }}
     strategy:
       fail-fast: false
       matrix:
@@ -163,7 +172,7 @@ jobs:
 
   windows:
     needs: preflight
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony && !inputs.only_linux_desktop }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -201,7 +210,7 @@ jobs:
 
   linux:
     needs: preflight
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony && !inputs.only_linux_desktop }}
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -253,7 +262,7 @@ jobs:
     # website's "newest .apk" link always resolves to a current, release-signed build. The signing
     # key is injected from repo secrets; if any are missing the build.gradle signing config is
     # skipped and we FAIL the job rather than ship an unsigned APK (apksigner verify is the gate).
-    if: ${{ !inputs.only_macos_desktop && !inputs.only_harmony }}
+    if: ${{ !inputs.only_macos_desktop && !inputs.only_harmony && !inputs.only_linux_desktop }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -345,7 +354,7 @@ jobs:
     # job; we AVOID the retiring macos-13 Intel runner (jobs there queue indefinitely).
     # composeApp applies the Android + googleServices plugins, so the build needs the Android SDK at configure
     # time and a google-services.json to exist — the desktop target never touches Firebase, so a placeholder is fine.
-    if: ${{ !inputs.only_android && !inputs.only_harmony }}
+    if: ${{ !inputs.only_android && !inputs.only_harmony && !inputs.only_linux_desktop }}
     strategy:
       fail-fast: false
       matrix:
@@ -436,7 +445,7 @@ jobs:
     # The Compose Desktop APP (.msi installer) for Windows, attached to the release under a stable version-less
     # name. jpackage can't cross-compile, so this runs on windows-latest (which ships WiX, so the MSI builds).
     # Mirrors build-windows.yml's windows-app job but uploads to the release instead of a workflow artifact.
-    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony && !inputs.only_linux_desktop }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -606,7 +615,7 @@ jobs:
     # DevEco Studio is not available on GitHub-hosted macOS runners. This job is deliberately opt-in and
     # targets only the trusted ephemeral/JIT runner documented in harmony/README.md. A normal release
     # keeps include_harmony=false, so it neither queues for that runner nor fails when the runner is offline.
-    if: ${{ (inputs.include_harmony || inputs.only_harmony) && !inputs.only_android && !inputs.only_macos_desktop }}
+    if: ${{ (inputs.include_harmony || inputs.only_harmony) && !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_linux_desktop }}
     runs-on: [self-hosted, macOS, ARM64, harmony]
     environment: harmony-release
     timeout-minutes: 90
@@ -785,7 +794,7 @@ jobs:
     # inherit SKIPPED from anything upstream of `checksums` (harmony is skipped on normal releases),
     # which is exactly how the scoop bump silently vanished from green release runs (issue #243).
     # `needs.checksums.result == 'success'` keeps the "never point at a partial release" guarantee.
-    if: ${{ !cancelled() && !failure() && needs.checksums.result == 'success' && !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony }}
+    if: ${{ !cancelled() && !failure() && needs.checksums.result == 'success' && !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony && !inputs.only_linux_desktop }}
     # Do not publish a package-manager pointer until every requested artifact and the
     # aggregate checksum manifest have completed successfully.
     needs: [checksums]
