@@ -44,7 +44,11 @@ class PushRegistrationAckTest {
     private fun register(store: RelayStore, frame: RegisterPush): List<String> {
         val sent = mutableListOf<String>()
         val conn = Conn("acct", Role.DEVICE, "dev1", sendText = { sent += it }, sendBinary = {}, close = {})
-        runBlocking { RelayServer("127.0.0.1", 0, store, clock = { 1_000 }).handleDeviceControl(conn, control(frame)) }
+        runBlocking {
+            val server = RelayServer("127.0.0.1", 0, store, clock = { 1_000 })
+            server.broker.attachDevice(conn) // a live socket, as in handleDevice; unattached = superseded/closed
+            server.handleDeviceControl(conn, control(frame))
+        }
         return sent
     }
 

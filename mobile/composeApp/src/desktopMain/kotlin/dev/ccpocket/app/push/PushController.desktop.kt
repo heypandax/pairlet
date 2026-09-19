@@ -7,8 +7,7 @@ package dev.ccpocket.app.push
  *  state, and calling it denied would paint a permanent error on a platform that never wanted push. */
 actual object PushController {
     actual fun start(onToken: (PushToken) -> Unit) {}
-    actual fun requestToken(prompt: Boolean) {}
+    actual fun requestToken(prompt: Boolean, onFailed: (PushRegistrationFailure) -> Unit) {}
     actual fun readAuthorization(cb: (PushAuthorization) -> Unit) { cb(PushAuthorization.UNKNOWN) }
     actual fun openNotificationSettings() {}
-    actual var onRegistrationFailed: ((PushRegistrationFailure) -> Unit)? = null
 }

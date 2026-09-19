@@ -30,14 +30,17 @@ actual object PushController {
     /** Set from Swift at launch: opens the system notification settings page for this app. */
     var settingsOpener: (() -> Unit)? = null
 
-    actual var onRegistrationFailed: ((PushRegistrationFailure) -> Unit)? = null
+    /** The latest ask's failure sink. APNs reports a failure without saying which ask it answers
+     *  ([registrationFailed] carries only a category), so it is attributed to the most recent ask. */
+    private var onFailed: ((PushRegistrationFailure) -> Unit)? = null
 
     actual fun start(onToken: (PushToken) -> Unit) {
         cb = onToken
         last?.let { onToken(it) } // replay a token that arrived before start()
     }
 
-    actual fun requestToken(prompt: Boolean) {
+    actual fun requestToken(prompt: Boolean, onFailed: (PushRegistrationFailure) -> Unit) {
+        this.onFailed = onFailed // before invoking: the Swift side may refuse synchronously
         registrar?.invoke(prompt)
     }
 
@@ -80,7 +83,7 @@ actual object PushController {
      * so this reports the boundary and nothing else.
      */
     fun registrationFailed(category: Int) {
-        onRegistrationFailed?.invoke(
+        onFailed?.invoke(
             when (category) {
                 1 -> PushRegistrationFailure.NETWORK
                 2 -> PushRegistrationFailure.DENIED

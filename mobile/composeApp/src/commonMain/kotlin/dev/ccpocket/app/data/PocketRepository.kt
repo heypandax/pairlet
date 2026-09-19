@@ -2243,9 +2243,8 @@ class PocketRepository(
      * mean "sent, and no confirmation is coming".
      */
     private suspend fun submitPush(frame: RegisterPush, ackTimeoutMs: Long): SubmitOutcome {
-        val p = paired.value
+        val p = paired.value ?: return SubmitOutcome.Failed(FailReason.NO_ROUTE)
         if (directLinkUp()) {
-            if (p == null) return SubmitOutcome.Failed(FailReason.NO_ROUTE)
             return try {
                 when (val r = pushDial(p, frame, ackTimeoutMs)) {
                     is DepositOutcome.Acked -> SubmitOutcome.Acked(r.result)
@@ -2284,7 +2283,7 @@ class PocketRepository(
                     }
                 }
             }
-            val written = runCatching { withTimeoutOrNull(ackTimeoutMs) { relay.sendControlAwaitWritten(frame) } }
+            val written = runCatching { withTimeoutOrNull(ackTimeoutMs) { relay.sendControlAwaitWritten(p, frame) } }
                 .getOrNull() ?: false
             if (!written) {
                 receipt?.cancel()

@@ -45,14 +45,17 @@ class PushRegistrarTest {
 
     private class FakePlatform : PushPlatform {
         val tokenState = MutableStateFlow<PushToken?>(null)
-        val failureFlow = MutableSharedFlow<PushRegistrationFailure>(extraBufferCapacity = 8)
+        val failureFlow = MutableSharedFlow<PushFailureEvent>(extraBufferCapacity = 8)
         override val token = tokenState
         override val failures = failureFlow
         /** What the OS hands back when asked; null = the callback never comes. */
         var autoToken: PushToken? = PushToken("ios", "tok-A")
         var authorization = PushAuthorization.AUTHORIZED
         val prompts = mutableListOf<Boolean>()
-        override fun requestToken(prompt: Boolean) {
+        /** The ask number of the latest [requestToken] — what a refusal of that ask is tagged with. */
+        var lastRequest = 0L
+        override fun requestToken(prompt: Boolean, request: Long) {
+            lastRequest = request
             prompts += prompt
             autoToken?.let { tokenState.value = it }
         }
@@ -367,7 +370,7 @@ class PushRegistrarTest {
         advanceTimeBy(1_000)
 
         platform.authorization = PushAuthorization.DENIED
-        platform.failureFlow.tryEmit(PushRegistrationFailure.DENIED)
+        platform.failureFlow.tryEmit(PushFailureEvent(platform.lastRequest, PushRegistrationFailure.DENIED))
         advanceUntilIdle()
 
         assertEquals(PairingStatus.BLOCKED, reg.stateOf(key)?.status)

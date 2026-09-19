@@ -131,8 +131,15 @@ Issue 报告 Apple 双端 2.1.0、Claude Code 无通知，附诊断 Markdown。�
 
 ## 结果记录（实施后填写）
 
-- #389 附件核验、实际断点及关联可信度：待填写。
-- 注册恢复与其他故障分支的完成状态：待填写。
-- 协议／参数最终取舍、提交及相对草稿的变化：待填写。
-- 自动测试、iOS／Android 验证、实际展示与未执行项：待填写。
-- relay／客户端发布需求与现场保护情况：待填写。
+- #389 附件核验、实际断点及关联可信度：**未核验**。实现由另一会话完成，本记录撰写时未读取 Issue 附件中的诊断 Markdown，没有把用户现场断点与注册缺口关联起来；当前修复针对方案中已确认的源码缺口，不能据此宣称已找到反馈者的根因。
+- 注册恢复与其他故障分支的完成状态：注册恢复已实现（提交 `1e1e3a6f`：`RegisterPush` 的 requestId、`PushRegistrationResult` 回执、`PushRegistrar` 恢复协调器、iOS 生命周期恢复）。2026-09-19 审核（`_local/review-2026-09-19-6df16c59/REVIEW.md`，未入库）发现五项缺陷，已全部修复：① commonMain 的 `@Volatile` 缺少公共导入，metadata 编译失败；② 已被替换的 relay 连接能在清除 ACK 后写回旧 token——`Broker` 增加按设备的条带锁，连接替换与登记写入在同一临界区核对连接身份，被替换连接的在途／排队／迟到登记一律不写库、不回执；③ relay 控制帧 writer 依赖 E2E 握手——改为收到 Attached 即启动，握手期间转发登记回执，仍复用同一条设备连接；④ token 轮换后的二次确认失败停在 PENDING——改走统一的有限重试与冷却；⑤ 同步 UNSUPPORTED 失败丢失——先订阅再请求，失败事件按请求编号关联。触发、合并抑制、APNs 接受、设备展示等其他故障分支未诊断。
+- 协议／参数最终取舍、提交及相对草稿的变化：wire 未新增字段。被替换连接的登记选择静默丢弃而不是回失败码，因为现有 `REJECTED`／`no_device` 会让客户端判定 BLOCKED，`store_failed` 又会误报存储故障；客户端靠 ACK 超时在新连接上重试。`PushController.requestToken` 的平台接口改为单次失败回调，去掉全局 `onRegistrationFailed`；iOS 的 Swift bridge 不带请求标识，失败只能归到最近一次请求。daemon 离线时连接仍会在 15 秒握手超时后重连，重连空窗内的登记等下一次 Attached。审核修复尚未提交。
+- 自动测试、iOS／Android 验证、实际展示与未执行项：relay 定向测试 62 项全部通过（`PushSupersedeRaceTest`、`PushTest`、`PushRegistrationAckTest`、`CollaboratorPushTest`、`RelayCoreTest`、`BridgeRelayTest`）；移动端 `compileCommonMainKotlinMetadata` 通过，定向测试 44 项全部通过（含审核复现用例及新增的“只有 relay、没有 daemon”用例）。审核的三个复现用例在修复前均失败，已作为常驻回归保留。**未执行**：iOS framework 与 Swift bridge 编译、Android 编译（本机无 SDK）、专用 iPhone 生命周期与真实通知展示、新旧版本四组合、Android 回归真机。
+- relay／客户端发布需求与现场保护情况：需要先部署兼容 relay，再发布客户端。本轮未部署或重启生产 relay，未更新本机 daemon，未覆盖用户手机 App，未发送任何真实通知。
+
+### 2026-09-19 复审补充修复：取消的控制帧跨连接重发
+
+- 复审发现：取消旧登记后，经 LAN 短连接两次清除均收到 ACK，普通 relay 恢复时仍会发送队列中的旧 token。帧通过新连接到达，服务端的旧连接检查无法阻止。
+- 已修复：等待发送的回执绑定调用方 Job，取消／超时使排队帧失效，writer 跳过失效帧；取消还会中止仍在等待的写入，且不因此停止其他请求的 writer。控制帧绑定 `(relay, accountId, deviceId)`，切换配对时拒绝错配帧。已经交给 socket 的字节无法撤回，仍由登记协调器按最新意图收敛。
+- 常驻回归 `RelayControlCancellationTest` 覆盖取消后 LAN 清除再回 relay、超时后 token 更新、配对的三个身份字段分别变化；以后一有效请求的 ACK 证明前面的队列已处理完，同时验证有效排队请求能继续发送。
+- 验证：`compileCommonMainKotlinMetadata`、桌面编译通过；移动端 7 个专项类共 **42 项、0 失败**（上轮推送专项加上述 3 项，不含 `ConnectionDiagnosticTest`）。仓库内容检查和 diff 格式检查通过。本次修改未提交、未部署；iOS／Android 原生编译及真机通知验收仍待执行。

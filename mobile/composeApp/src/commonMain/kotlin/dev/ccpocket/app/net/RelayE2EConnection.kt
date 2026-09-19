@@ -16,6 +16,7 @@ import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PeerPresence
 import dev.ccpocket.protocol.PocketJson
+import dev.ccpocket.protocol.PushRegistrationResult
 import dev.ccpocket.protocol.Route
 import dev.ccpocket.protocol.SyncProjectPins
 import dev.ccpocket.protocol.e2e.E2ECrypto
@@ -28,9 +29,13 @@ import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.websocket.readText
 import kotlin.concurrent.Volatile // commonMain: JVM resolves kotlin.jvm.Volatile implicitly, Kotlin/Native (iOS) does not
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -56,7 +61,8 @@ class RelayE2EConnection {
     }
     private val outbox = ScopedOutbox()
     // relay control-plane (TEXT) frames the device originates — e.g. RegisterPush. Buffered across
-    // reconnects like [outbox]; the per-connection writer drains it once a socket is live.
+    // reconnects like [outbox]; the per-connection writer drains it once the relay has ATTACHED the
+    // socket — before, and independent of, the E2E handshake with the daemon.
     private val controlOutbox = Channel<ControlSend>(Channel.BUFFERED)
     val inbound = MutableSharedFlow<Frame>(extraBufferCapacity = 128)
     /** Relay control-plane frames (Attached, AuthError, PeerPresence) — NOT E2E daemon traffic. The
@@ -70,10 +76,34 @@ class RelayE2EConnection {
     val deaf = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private var nextId = 0L
 
-    /** A queued control frame, plus the caller's optional "did this really reach a socket?" receipt.
-     *  Without the receipt a caller can only know the frame was ENQUEUED — which is how a push token
-     *  could sit in this buffer across a dead link while the app counted itself registered. */
-    private class ControlSend(val frame: dev.ccpocket.protocol.ToRelay, val written: CompletableDeferred<Boolean>? = null)
+    /** Stable identity for control frames retained across reconnects. */
+    private data class ControlTarget(val relay: String, val accountId: String, val deviceId: String) {
+        constructor(paired: PairedDaemon) : this(paired.relay, paired.accountId, paired.deviceId)
+    }
+
+    /** A queued control frame and its optional write receipt. The receipt belongs to the caller's job:
+     *  abandoning the wait invalidates the queued intent instead of replaying it on a future socket. */
+    private class ControlSend(
+        val target: ControlTarget,
+        val frame: dev.ccpocket.protocol.ToRelay,
+        val written: CompletableDeferred<Boolean>? = null,
+    ) {
+        val cancelled: Boolean get() = written?.isCancelled == true
+
+        /** Cancellation also interrupts a socket write that has suspended. Bytes already handed to the
+         *  socket cannot be recalled; the registrar still reconciles those with the latest intent. */
+        suspend fun write(block: suspend () -> Unit) = coroutineScope {
+            val sendJob = coroutineContext[Job]!!
+            val cancellation = written?.invokeOnCompletion { if (cancelled) sendJob.cancel() }
+            try {
+                ensureActive()
+                block()
+                written?.complete(true)
+            } finally {
+                cancellation?.dispose()
+            }
+        }
+    }
 
     /** The relay's announced capability level from [Attached.relayProtoV] (null until attached, 0 for a
      *  relay that predates the announcement). Read to decide whether a receipt is worth waiting for. */
@@ -99,119 +129,148 @@ class RelayE2EConnection {
     suspend fun connect(paired: PairedDaemon, keys: E2ECrypto.KeyPair, firstTicket: String?) = coroutineScope {
         val gen = ++connSeq
         client.webSocket(urlString = "${paired.relay}/v1/device") {
-            // Bound the whole pre-heartbeat prelude: the repo's connect watchdog only guards up to Attached,
-            // and the pinger below isn't armed yet — a link that wedges BETWEEN Attached and the Noise
-            // handshake would otherwise hang forever with no guard. Rethrown as DeadLinkException because a
-            // TimeoutCancellationException IS a CancellationException, which the repo reads as intentional
-            // teardown and would swallow without reconnecting.
-            // sticky: the computer was offline at some point of this wait, so nobody could answer the handshake
-            var peerWasOffline = false
-            val session = try {
-                withTimeout(HANDSHAKE_TIMEOUT_MS) {
-                    outgoing.send(WsFrame.Text(control(DeviceHello(paired.deviceId, paired.credential))))
-                    peerWasOffline = peerOfflineAtAttach(awaitAttached())
-                    val psk = (firstTicket ?: "").encodeToByteArray()
-                    val init = E2ESession.initiator(keys.privateRaw, keys.publicRaw, B64Url.decode(paired.daemonPub), psk)
-                    outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.HANDSHAKE, init.ephPublic)))
-                    awaitHandshake(init) { online -> if (!online) peerWasOffline = true }
+            // The relay control plane (RegisterPush and its receipt) is usable from the moment the relay has
+            // authenticated us — it does NOT depend on the daemon being online or on the E2E handshake. So
+            // its writer starts at Attached, not after the handshake: with the computer off, the handshake
+            // never completes, and a push registration (or the clearing one when notifications are turned
+            // off) would sit in [controlOutbox] until the send timed out. Riding THIS socket rather than a
+            // helper dial also matters: a second connection for the same device would supersede this one.
+            var ctrlWriter: Job? = null
+            try {
+                // Bound the whole pre-heartbeat prelude: the repo's connect watchdog only guards up to Attached,
+                // and the pinger below isn't armed yet — a link that wedges BETWEEN Attached and the Noise
+                // handshake would otherwise hang forever with no guard. Rethrown as DeadLinkException because a
+                // TimeoutCancellationException IS a CancellationException, which the repo reads as intentional
+                // teardown and would swallow without reconnecting.
+                // sticky: the computer was offline at some point of this wait, so nobody could answer the handshake
+                var peerWasOffline = false
+                val session = try {
+                    withTimeout(HANDSHAKE_TIMEOUT_MS) {
+                        outgoing.send(WsFrame.Text(control(DeviceHello(paired.deviceId, paired.credential))))
+                        peerWasOffline = peerOfflineAtAttach(awaitAttached())
+                        // launched on the SESSION, not in this timeout block (which would wait for it to finish)
+                        ctrlWriter = this@webSocket.launchControlWriter(gen, ControlTarget(paired))
+                        val psk = (firstTicket ?: "").encodeToByteArray()
+                        val init = E2ESession.initiator(keys.privateRaw, keys.publicRaw, B64Url.decode(paired.daemonPub), psk)
+                        outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.HANDSHAKE, init.ephPublic)))
+                        awaitHandshake(init, onPresence = { online -> if (!online) peerWasOffline = true }) { receipt ->
+                            // a push receipt answers a control frame that may have been written mid-handshake;
+                            // dropping it here would turn a stored registration into an ACK_TIMEOUT
+                            if (gen == connSeq) control.emit(receipt)
+                        }
+                    }
+                } catch (e: TimeoutCancellationException) {
+                    // An offline computer is the user's environment, not a handshake fault: the relay had no
+                    // daemon to hand our HANDSHAKE to. Only a silent wait with the daemon present is an error.
+                    if (gen == connSeq) Diagnostics.report(ErrorPath.HANDSHAKE, DiagnosticStage.HANDSHAKE,
+                        if (peerWasOffline) ErrorCode.UNAVAILABLE else ErrorCode.TIMEOUT, isError = !peerWasOffline)
+                    throw DeadLinkException()
                 }
-            } catch (e: TimeoutCancellationException) {
-                // An offline computer is the user's environment, not a handshake fault: the relay had no
-                // daemon to hand our HANDSHAKE to. Only a silent wait with the daemon present is an error.
-                if (gen == connSeq) Diagnostics.report(ErrorPath.HANDSHAKE, DiagnosticStage.HANDSHAKE,
-                    if (peerWasOffline) ErrorCode.UNAVAILABLE else ErrorCode.TIMEOUT, isError = !peerWasOffline)
-                throw DeadLinkException()
-            }
-            // superseded while handshaking — a newer connect() owns the outboxes now; die before touching them (#142)
-            if (gen != connSeq) throw DeadLinkException()
-            // a reconnect-trigger burst stacked duplicate list/reattach requests while the link was down;
-            // collapse them before the writer flushes (issue #143); pin frames of another connection go (#362)
-            outbox.prepareFor(gen)
+                // superseded while handshaking — a newer connect() owns the outboxes now; die before touching them (#142)
+                if (gen != connSeq) throw DeadLinkException()
+                // a reconnect-trigger burst stacked duplicate list/reattach requests while the link was down;
+                // collapse them before the writer flushes (issue #143); pin frames of another connection go (#362)
+                outbox.prepareFor(gen)
 
-            // #298 silence-deafness: the OTHER half of #146. When the daemon loses this device's session
-            // (relay blip re-attaches the stream, daemon restarts, …) our sealed frames are dropped
-            // pre-handshake on its side and NOTHING comes back — zero inbound means the decrypt-failure
-            // counter below never moves, and the link zombies until the process dies (observed: 28 min on
-            // desktop, would be a full outage on a relay-only phone). Sends with no inbound for too long
-            // trip the SAME [deaf] recovery. Benignly racy across the writer/reader coroutines: an off-by-
-            // one send count or a late reset costs at most one extra (cheap, invisible) re-handshake.
-            var sentSinceInbound = 0
-            var lastInboundAt = epochMillis() // the completed handshake IS inbound proof
-            liveGen = gen
-            val writer = launch {
-                // superseded mid-drain: an ordinary frame goes back to the live connection instead of down this
-                // dying socket, then the writer dies (#142); a pin frame of this connection is dropped (#362)
-                outbox.runWriter(gen, isCurrent = { gen == connSeq }) { f ->
-                    val json = PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f))
-                    sendOrDie { outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray())))) }
-                    if (silenceDeafTripped(++sentSinceInbound, epochMillis() - lastInboundAt)) {
-                        sentSinceInbound = 0 // signal once, then let the forced re-handshake take over
-                        // gen recheck (review, Low): sendOrDie can stall ~10s, long enough for a #142
-                        // supersede — a dying writer must not tear down its healthy successor
-                        if (gen == connSeq) deaf.emit(Unit)
+                // #298 silence-deafness: the OTHER half of #146. When the daemon loses this device's session
+                // (relay blip re-attaches the stream, daemon restarts, …) our sealed frames are dropped
+                // pre-handshake on its side and NOTHING comes back — zero inbound means the decrypt-failure
+                // counter below never moves, and the link zombies until the process dies (observed: 28 min on
+                // desktop, would be a full outage on a relay-only phone). Sends with no inbound for too long
+                // trip the SAME [deaf] recovery. Benignly racy across the writer/reader coroutines: an off-by-
+                // one send count or a late reset costs at most one extra (cheap, invisible) re-handshake.
+                var sentSinceInbound = 0
+                var lastInboundAt = epochMillis() // the completed handshake IS inbound proof
+                liveGen = gen
+                val writer = launch {
+                    // superseded mid-drain: an ordinary frame goes back to the live connection instead of down this
+                    // dying socket, then the writer dies (#142); a pin frame of this connection is dropped (#362)
+                    outbox.runWriter(gen, isCurrent = { gen == connSeq }) { f ->
+                        val json = PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f))
+                        sendOrDie { outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray())))) }
+                        if (silenceDeafTripped(++sentSinceInbound, epochMillis() - lastInboundAt)) {
+                            sentSinceInbound = 0 // signal once, then let the forced re-handshake take over
+                            // gen recheck (review, Low): sendOrDie can stall ~10s, long enough for a #142
+                            // supersede — a dying writer must not tear down its healthy successor
+                            if (gen == connSeq) deaf.emit(Unit)
+                        }
                     }
                 }
-            }
-            // control frames (e.g. RegisterPush) ride the TEXT plane in the clear — the relay parses these
-            val ctrlWriter = launch {
-                var inFlight: ControlSend? = null
+                // Heartbeat (see LinkHealth.launchHeartbeat): an idle-link WS ping under sendOrDie, so a wedged socket
+                // (network switch / NAT / relay idle-drop) trips the write timeout and reconnects. Ktor's own ping
+                // can't catch this — it rides the same outgoing path and wedges too. The relay's ktor auto-pongs it.
+                val pinger = launchHeartbeat()
+                var deafRun = 0 // consecutive inbound frames that wouldn't decrypt (#146 deaf-link detection)
                 try {
-                    for (c in controlOutbox) {
-                        // same fencing as the data writer (#142) — the receipt rides back into the queue
-                        // with its frame, so a superseded connection never strands the caller
-                        if (gen != connSeq) { controlOutbox.send(c); throw DeadLinkException() }
-                        inFlight = c
-                        try {
-                            sendOrDie { outgoing.send(WsFrame.Text(control(c.frame))) }
-                        } catch (e: Throwable) {
-                            // the frame was TAKEN from the queue and then lost: the old code dropped it
-                            // silently here, which is exactly the "queued means registered" lie
-                            c.written?.complete(false)
-                            inFlight = null
-                            throw e
+                    for (frame in incoming) {
+                        if (gen != connSeq) break // a stale reader must not emit into the shared inbound/control flows (#142)
+                        when {
+                            frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT -> {
+                                val pt = session.open(Wire.payloadBody(frame.data))
+                                if (pt == null) {
+                                    // A lone stray/reordered frame is noise; CONSECUTIVE failures mean the daemon
+                                    // is sealing under a session this live socket can't open (#146) — signal the
+                                    // repo to force a re-handshake, then reset so the heal attempt starts clean.
+                                    if (deafTripped(++deafRun)) { deaf.emit(Unit); deafRun = 0 }
+                                    continue
+                                }
+                                deafRun = 0 // a good decrypt proves the link is not deaf
+                                // …and disarms the silence watchdog: the daemon demonstrably holds our session
+                                sentSinceInbound = 0
+                                lastInboundAt = epochMillis()
+                                runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }
+                                    .onFailure { Diagnostics.protocolDecodeFailed(it, pt.size.toLong()) }.getOrNull()?.let { inbound.emit(it.body) }
+                            }
+                            // relay control frames ride the TEXT plane after the handshake (e.g. PeerPresence)
+                            frame is WsFrame.Text ->
+                                runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull()?.let { control.emit(it) }
+                            else -> {}
                         }
-                        c.written?.complete(true)
-                        inFlight = null
                     }
                 } finally {
-                    inFlight?.written?.complete(false) // cancelled mid-send (link teardown)
-                }
-            }
-            // Heartbeat (see LinkHealth.launchHeartbeat): an idle-link WS ping under sendOrDie, so a wedged socket
-            // (network switch / NAT / relay idle-drop) trips the write timeout and reconnects. Ktor's own ping
-            // can't catch this — it rides the same outgoing path and wedges too. The relay's ktor auto-pongs it.
-            val pinger = launchHeartbeat()
-            var deafRun = 0 // consecutive inbound frames that wouldn't decrypt (#146 deaf-link detection)
-            try {
-                for (frame in incoming) {
-                    if (gen != connSeq) break // a stale reader must not emit into the shared inbound/control flows (#142)
-                    when {
-                        frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT -> {
-                            val pt = session.open(Wire.payloadBody(frame.data))
-                            if (pt == null) {
-                                // A lone stray/reordered frame is noise; CONSECUTIVE failures mean the daemon
-                                // is sealing under a session this live socket can't open (#146) — signal the
-                                // repo to force a re-handshake, then reset so the heal attempt starts clean.
-                                if (deafTripped(++deafRun)) { deaf.emit(Unit); deafRun = 0 }
-                                continue
-                            }
-                            deafRun = 0 // a good decrypt proves the link is not deaf
-                            // …and disarms the silence watchdog: the daemon demonstrably holds our session
-                            sentSinceInbound = 0
-                            lastInboundAt = epochMillis()
-                            runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }
-                                .onFailure { Diagnostics.protocolDecodeFailed(it, pt.size.toLong()) }.getOrNull()?.let { inbound.emit(it.body) }
-                        }
-                        // relay control frames ride the TEXT plane after the handshake (e.g. PeerPresence)
-                        frame is WsFrame.Text ->
-                            runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull()?.let { control.emit(it) }
-                        else -> {}
-                    }
+                    if (liveGen == gen) liveGen = 0
+                    writer.cancel(); pinger.cancel()
                 }
             } finally {
-                if (liveGen == gen) liveGen = 0
-                writer.cancel(); ctrlWriter.cancel(); pinger.cancel()
+                // every exit — handshake timeout with the computer offline, supersede, socket loss — ends
+                // this connection's control writer; a queued frame waits for the next Attached
+                ctrlWriter?.cancel()
             }
+        }
+    }
+
+    /** The relay control-plane writer of connection [gen]: control frames (e.g. RegisterPush) ride the TEXT
+     *  plane in the clear — the relay parses these. Started at Attached, independent of the E2E handshake. */
+    private fun DefaultClientWebSocketSession.launchControlWriter(gen: Int, target: ControlTarget): Job = launch {
+        var inFlight: ControlSend? = null
+        try {
+            for (c in controlOutbox) {
+                if (c.cancelled) continue
+                // same fencing as the data writer (#142) — the receipt rides back into the queue
+                // with its frame, so a superseded connection never strands the caller
+                if (gen != connSeq) { controlOutbox.send(c); throw DeadLinkException() }
+                // A machine switch must not turn a queued registration for A into a write for B.
+                if (c.target != target) { c.written?.complete(false); continue }
+                inFlight = c
+                try {
+                    c.write { sendOrDie { outgoing.send(WsFrame.Text(control(c.frame))) } }
+                } catch (e: CancellationException) {
+                    c.written?.complete(false)
+                    // A cancelled request retires only that write; cancelling the socket still tears down
+                    // the writer. Otherwise a toggle could disconnect an unrelated chat session.
+                    currentCoroutineContext().ensureActive()
+                    if (!c.cancelled) throw e
+                } catch (e: Throwable) {
+                    // the frame was TAKEN from the queue and then lost: the old code dropped it
+                    // silently here, which is exactly the "queued means registered" lie
+                    c.written?.complete(false)
+                    inFlight = null
+                    throw e
+                }
+                inFlight = null
+            }
+        } finally {
+            inFlight?.written?.complete(false) // cancelled mid-send (link teardown)
         }
     }
 
@@ -229,15 +288,21 @@ class RelayE2EConnection {
 
     /** Send a relay control-plane frame (e.g. RegisterPush) on the TEXT plane. Buffers until connected.
      *  Fire-and-forget: the caller learns nothing about whether it was ever written. */
-    suspend fun sendControl(frame: dev.ccpocket.protocol.ToRelay) = controlOutbox.send(ControlSend(frame))
+    suspend fun sendControl(paired: PairedDaemon, frame: dev.ccpocket.protocol.ToRelay) =
+        controlOutbox.send(ControlSend(ControlTarget(paired), frame))
 
     /** Like [sendControl], but suspends until the frame has really been handed to a live socket.
      *  Returns false when the send failed or the link was torn down with the frame in hand — the caller
-     *  can then retry rather than assume the relay heard it. */
-    suspend fun sendControlAwaitWritten(frame: dev.ccpocket.protocol.ToRelay): Boolean {
-        val written = CompletableDeferred<Boolean>()
-        controlOutbox.send(ControlSend(frame, written))
-        return written.await()
+     *  can then retry rather than assume the relay heard it. Cancellation/timeout invalidates any frame
+     *  still waiting in the queue, including across reconnects. Only [paired]'s socket may send it. */
+    suspend fun sendControlAwaitWritten(paired: PairedDaemon, frame: dev.ccpocket.protocol.ToRelay): Boolean {
+        val written = CompletableDeferred<Boolean>(currentCoroutineContext()[Job])
+        try {
+            controlOutbox.send(ControlSend(ControlTarget(paired), frame, written))
+            return written.await()
+        } finally {
+            written.cancel() // also covers cancellation while blocked on a full outbox
+        }
     }
 
     private suspend fun DefaultClientWebSocketSession.awaitAttached(): Attached {
@@ -252,12 +317,21 @@ class RelayE2EConnection {
     }
 
     /** [onPresence] only feeds the timeout's classification; presence edges that land mid-handshake stay
-     *  unforwarded to the repo, exactly as before. */
-    private suspend fun DefaultClientWebSocketSession.awaitHandshake(init: E2ESession.Initiator, onPresence: (Boolean) -> Unit): E2ESession {
+     *  unforwarded to the repo, exactly as before. [onPushReceipt] gets the relay's answer to a control frame
+     *  the (already running) control writer sent while this handshake was still pending. */
+    private suspend fun DefaultClientWebSocketSession.awaitHandshake(
+        init: E2ESession.Initiator,
+        onPresence: (Boolean) -> Unit,
+        onPushReceipt: suspend (PushRegistrationResult) -> Unit,
+    ): E2ESession {
         while (true) {
             when (val f = incoming.receive()) {
                 is WsFrame.Binary -> if (Wire.payloadType(f.data) == Wire.HANDSHAKE) return init.finish(Wire.payloadBody(f.data))
-                is WsFrame.Text -> (runCatching { PocketJson.decodeFromString<Envelope>(f.readText()).body }.getOrNull() as? PeerPresence)?.let { onPresence(it.online) }
+                is WsFrame.Text -> when (val b = runCatching { PocketJson.decodeFromString<Envelope>(f.readText()).body }.getOrNull()) {
+                    is PeerPresence -> onPresence(b.online)
+                    is PushRegistrationResult -> onPushReceipt(b)
+                    else -> {}
+                }
                 else -> {}
             }
         }

@@ -99,7 +99,8 @@ class RelayServer(
     analyticsConfig: AnalyticsConfig = AnalyticsConfig.disabled(),
     ga4Forwarder: Ga4Forwarder = HttpGa4Forwarder(),
 ) {
-    private val broker = Broker()
+    // internal: control-plane tests attach their socket first, exactly as handleDevice does
+    internal val broker = Broker()
     private val limiter = RateLimiter(clock)
     // Desktop analytics ingress (docs/observability/DESKTOP-GA4-INGRESS.md): shares the limiter instance
     // (own key namespace) but nothing else — no broker, no store, no frames.
@@ -381,7 +382,16 @@ class RelayServer(
             store.getDevice(deviceId)?.mayRegisterPush != true -> {
                 code = "forbidden"; PushRegistrationOutcome.REJECTED
             }
-            else -> runCatching { store.setPushToken(deviceId, body.platform, body.token, clock()) }.fold(
+            // The write lands only while THIS socket is still the device's current one, checked inside the
+            // same per-device critical section as the write (#389 review, issue 2): a handler that suspended
+            // above while a newer socket attached and cleared must not resume and restore its old token.
+            // Superseded / already-detached socket: nothing written, nothing answered. Every outcome in the
+            // closed vocabulary would lie here — REJECTED or "no_device" park the pairing as BLOCKED on the
+            // client, "store_failed" blames storage — and this socket is being closed anyway, so the client's
+            // own ack timeout retries on the link that replaced it.
+            else -> (broker.whileCurrentDevice(conn) {
+                runCatching { store.setPushToken(deviceId, body.platform, body.token, clock()) }
+            } ?: return).fold(
                 onSuccess = { stored ->
                     when {
                         !stored -> { code = "no_device"; PushRegistrationOutcome.FAILED }

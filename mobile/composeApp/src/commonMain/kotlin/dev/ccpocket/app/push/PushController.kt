@@ -53,15 +53,14 @@ expect object PushController {
     fun start(onToken: (PushToken) -> Unit)
 
     /** Ask the platform for the current token. [prompt] = true may show the system permission dialog when
-     *  authorization is NOT_DETERMINED; false registers silently only if already authorized. Idempotent. */
-    fun requestToken(prompt: Boolean)
+     *  authorization is NOT_DETERMINED; false registers silently only if already authorized. Idempotent.
+     *  [onFailed] receives THIS ask's refusal — possibly synchronously, from inside this call. Where the
+     *  platform reports failures without saying which ask they answer (iOS), the latest ask's sink gets it. */
+    fun requestToken(prompt: Boolean, onFailed: (PushRegistrationFailure) -> Unit)
 
     /** Async read of the OS authorization state; UNKNOWN where the platform cannot tell (desktop). */
     fun readAuthorization(cb: (PushAuthorization) -> Unit)
 
     /** Open this app's OS notification settings; no-op on desktop. */
     fun openNotificationSettings()
-
-    /** Registration failure sink, set once by [PushTokens]. */
-    var onRegistrationFailed: ((PushRegistrationFailure) -> Unit)?
 }

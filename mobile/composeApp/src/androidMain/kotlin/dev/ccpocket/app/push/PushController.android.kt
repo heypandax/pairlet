@@ -29,25 +29,28 @@ actual object PushController {
         last?.let { onToken(it) } // replay a token that arrived before start()
     }
 
-    actual fun requestToken(prompt: Boolean) {
+    actual fun requestToken(prompt: Boolean, onFailed: (PushRegistrationFailure) -> Unit) {
         // MULTI-VENDOR SEAM: choose the channel here (by Build.MANUFACTURER / build flavor) and tag the
         // token's platform accordingly ("xiaomi"/"huawei"/…) once a vendor SDK is integrated; FCM today.
+        // Each ask gets its OWN failure listener, so a slow refusal of an earlier ask reports against
+        // that ask and can never be mistaken for the verdict on a newer one.
         runCatching {
             FirebaseMessaging.getInstance().token
                 .addOnSuccessListener { t -> deliver(PushToken("fcm", t)) }
-                .addOnFailureListener(::onTokenFailure)
+                .addOnFailureListener { onTokenFailure(it, onFailed) }
         }.onFailure {
             // no Play Services / no Firebase config: a token is never coming on this device, and the
-            // coordinator must learn that instead of burning its retry budget on it
-            onRegistrationFailed?.invoke(PushRegistrationFailure.UNSUPPORTED)
+            // coordinator must learn that instead of burning its retry budget on it. This fires
+            // SYNCHRONOUSLY, inside the caller's ask.
+            onFailed(PushRegistrationFailure.UNSUPPORTED)
         }
     }
 
-    private fun onTokenFailure(error: Throwable) {
+    private fun onTokenFailure(error: Throwable, onFailed: (PushRegistrationFailure) -> Unit) {
         // isError=false as before: a phone without a reachable FCM is an environment fact, not a defect
         // of this build — the retry budget, not the error stream, is what handles it.
         Diagnostics.report(ErrorPath.PUSH, Stage.REQUEST, ErrorCode.UNAVAILABLE, error, isError = false)
-        onRegistrationFailed?.invoke(PushRegistrationFailure.NETWORK)
+        onFailed(PushRegistrationFailure.NETWORK)
     }
 
     /**
@@ -79,8 +82,6 @@ actual object PushController {
             )
         }
     }
-
-    actual var onRegistrationFailed: ((PushRegistrationFailure) -> Unit)? = null
 
     /** Fed by the initial token fetch and by [CcPocketMessagingService.onNewToken] on refresh. */
     fun deliver(token: PushToken) {

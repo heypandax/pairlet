@@ -14,6 +14,7 @@ import dev.ccpocket.protocol.PushRegistrationResult
 import dev.ccpocket.protocol.RegisterPush
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -31,6 +32,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlin.concurrent.Volatile // commonMain: JVM resolves kotlin.jvm.Volatile implicitly, Kotlin/Native (iOS) does not
 import kotlin.random.Random
 
 // ── the pieces a pairing supplies ───────────────────────────────────────────────────────────────────
@@ -78,11 +80,19 @@ interface PairingLink {
     suspend fun submit(frame: RegisterPush, ackTimeoutMs: Long): SubmitOutcome
 }
 
+/** A platform refusal, tagged with the [PushPlatform.requestToken] ask it answers. The tag is what keeps
+ *  a LATE failure of an ask the coordinator already gave up on from being read as the verdict on the ask
+ *  it is waiting for now. */
+data class PushFailureEvent(val request: Long, val failure: PushRegistrationFailure)
+
 /** The device-wide platform token source. Separate from [PushTokens] purely so tests can drive it. */
 interface PushPlatform {
     val token: StateFlow<PushToken?>
-    val failures: Flow<PushRegistrationFailure>
-    fun requestToken(prompt: Boolean)
+    /** Refusals as EVENTS (no replay): a listener must be subscribed before the ask it cares about. */
+    val failures: Flow<PushFailureEvent>
+    /** Ask for a token as ask number [request]; a refusal of this ask is emitted tagged with it — possibly
+     *  synchronously, from inside this call. */
+    fun requestToken(prompt: Boolean, request: Long)
     fun readAuthorization(cb: (PushAuthorization) -> Unit)
 }
 
@@ -192,6 +202,8 @@ class PushRegistrar(
     private var authorization: PushAuthorization = PushAuthorization.UNKNOWN
     /** Bumped on every genuine token change: the identity of "what we are trying to register". */
     private var tokenGen = 0
+    /** Numbers every platform ask, so a refusal can be matched to the ask it answers. */
+    private var tokenRequestSeq = 0L
     private var promptedOnce = false
 
     private val gate = Semaphore(config.maxConcurrentSubmits)
@@ -411,8 +423,8 @@ class PushRegistrar(
         for (attempt in 1..config.attemptsPerRound) {
             // only the FIRST attempt of a prompting round may prompt: a dialog re-appearing on a silent
             // retry is the single most obnoxious thing this machine could do
-            platform.requestToken(prompt && attempt == 1)
-            when (val r = awaitTokenAttempt()) {
+            val request = ++tokenRequestSeq
+            when (val r = awaitTokenAttempt(request) { platform.requestToken(prompt && attempt == 1, request) }) {
                 is TokenAttempt.Got -> return // the token collector owns the transition to AVAILABLE
                 is TokenAttempt.Failed -> when (r.failure) {
                     PushRegistrationFailure.DENIED, PushRegistrationFailure.UNSUPPORTED -> {
@@ -470,15 +482,25 @@ class PushRegistrar(
         data object TimedOut : TokenAttempt
     }
 
-    /** Whichever comes first: a token, a refusal, or [Config.tokenWaitForegroundMs] of FOREGROUND time. */
-    private suspend fun awaitTokenAttempt(): TokenAttempt = coroutineScope {
+    /** Run [ask] (ask number [request]), then whichever comes first: a token, a refusal OF THAT ASK, or
+     *  [Config.tokenWaitForegroundMs] of FOREGROUND time. */
+    private suspend fun awaitTokenAttempt(request: Long, ask: () -> Unit): TokenAttempt = coroutineScope {
         val done = CompletableDeferred<TokenAttempt>()
+        // The listeners are armed (UNDISPATCHED: subscribed by the time launch returns) BEFORE asking. A
+        // platform may refuse synchronously from inside the ask — Android's no-Firebase path does — and the
+        // failure stream replays nothing, so a listener attached afterwards would miss the verdict and
+        // burn the whole retry budget waiting for a callback that already happened.
         val racers = listOf(
-            launch { platform.token.first { it != null }; done.complete(TokenAttempt.Got) },
-            launch { done.complete(TokenAttempt.Failed(platform.failures.first())) },
-            launch { foregroundWait(config.tokenWaitForegroundMs); done.complete(TokenAttempt.TimedOut) },
+            launch(start = CoroutineStart.UNDISPATCHED) { platform.token.first { it != null }; done.complete(TokenAttempt.Got) },
+            launch(start = CoroutineStart.UNDISPATCHED) {
+                // an earlier ask's late refusal is not a verdict on this one
+                done.complete(TokenAttempt.Failed(platform.failures.first { it.request == request }.failure))
+            },
         )
+        ask()
+        val timer = launch { foregroundWait(config.tokenWaitForegroundMs); done.complete(TokenAttempt.TimedOut) }
         val result = done.await()
+        timer.cancel()
         racers.forEach { it.cancel() }
         result
     }
@@ -577,8 +599,12 @@ class PushRegistrar(
                             if (r.requestId != requestId) continue // a receipt for a superseded attempt
                             when (r.result) {
                                 expected -> {
-                                    confirm(key, link, expectedGen, trace, attempt)
-                                    return@run
+                                    if (confirm(key, link, expectedGen, trace, attempt)) return@run
+                                    // the extra round-trip a possibly-stale write demands did not come
+                                    // back: that is a failed attempt like any other, spending the same
+                                    // budget and ending in the same cooldown + wake timer — never a
+                                    // silent PENDING that nothing will ever look at again
+                                    trace?.retry()
                                 }
                                 PushRegistrationOutcome.REJECTED -> {
                                     // the identity may not register — no budget can fix that
@@ -650,8 +676,9 @@ class PushRegistrar(
     }
 
     /** A round succeeded. When an earlier, superseded attempt may already have been written, one more
-     *  round-trip is required before believing it: the relay's last write could be the stale one. */
-    private suspend fun confirm(key: PairingKey, link: PairingLink, gen: Int, trace: dev.ccpocket.observability.OperationTrace?, attempt: Int) {
+     *  round-trip is required before believing it: the relay's last write could be the stale one.
+     *  Returns false when that extra round-trip failed — the caller counts it as a failed attempt. */
+    private suspend fun confirm(key: PairingKey, link: PairingLink, gen: Int, trace: dev.ccpocket.observability.OperationTrace?, attempt: Int): Boolean {
         val prev = states[key] ?: PairingState()
         if (prev.staleWrittenPossible) {
             update(key, prev.copy(staleWrittenPossible = false))
@@ -659,18 +686,17 @@ class PushRegistrar(
             val want = link.desiredEnabled.value
             val token = platform.token.value
             val platformTag = token?.platform ?: lastPlatformTag() ?: UNKNOWN_PLATFORM
-            val body = if (want) token?.token ?: return else ""
+            val body = if (want) token?.token else ""
             val expected = if (want) PushRegistrationOutcome.STORED else PushRegistrationOutcome.CLEARED
             val rid = newRequestId()
-            val again = runCatching {
+            val again = if (body == null) null else runCatching {
                 gate.withPermit { link.submit(RegisterPush(platformTag, body, rid), config.ackTimeoutMs) }
             }.getOrNull()
             val ok = again is SubmitOutcome.Acked && again.result.requestId == rid && again.result.result == expected
             if (!ok) {
-                update(key, (states[key] ?: prev).copy(status = PairingStatus.PENDING))
-                trace?.finish(Outcome.FAILURE, DiagnosticStage.ACK, ErrorCode.WRITE_FAILED,
-                    metrics = SafeMetrics(totalCount = attempt.toLong()))
-                return
+                // still unproven: the next ack this round earns has to pass the same double-check
+                update(key, (states[key] ?: prev).copy(status = PairingStatus.IN_FLIGHT, staleWrittenPossible = true))
+                return false
             }
         }
         val recovering = (states[key] ?: prev).failedRounds > 0
@@ -681,6 +707,7 @@ class PushRegistrar(
         trace?.finish(Outcome.SUCCESS, DiagnosticStage.COMPLETE, ErrorCode.OK,
             metrics = SafeMetrics(totalCount = attempt.toLong()))
         if (recovering) trace?.recovered()
+        return true
     }
 
     private fun markStaleWritten(key: PairingKey) {
@@ -861,8 +888,8 @@ private fun PushAuthorization.allowsPush() = this == PushAuthorization.AUTHORIZE
 /** The production platform: the one process-wide token hub. */
 object DefaultPushPlatform : PushPlatform {
     override val token: StateFlow<PushToken?> get() = PushTokens.token
-    override val failures: Flow<PushRegistrationFailure> get() = PushTokens.failures
-    override fun requestToken(prompt: Boolean) = PushTokens.requestToken(prompt)
+    override val failures: Flow<PushFailureEvent> get() = PushTokens.failures
+    override fun requestToken(prompt: Boolean, request: Long) = PushTokens.requestToken(prompt, request)
     override fun readAuthorization(cb: (PushAuthorization) -> Unit) = PushTokens.readAuthorization(cb)
 }
 

@@ -27,14 +27,16 @@ object PushTokens {
     private val _token = MutableStateFlow<PushToken?>(null)
     // replay=0: a failure is an EVENT, and a late subscriber re-reading an old refusal would knock a
     // perfectly healthy registration back into "blocked". extraBufferCapacity so emitting never suspends
-    // the platform callback thread.
-    private val _failures = MutableSharedFlow<PushRegistrationFailure>(extraBufferCapacity = 8)
+    // the platform callback thread. The flip side: nothing is kept for a listener that is not yet
+    // subscribed, so the coordinator subscribes BEFORE it asks (a refusal can be synchronous).
+    private val _failures = MutableSharedFlow<PushFailureEvent>(extraBufferCapacity = 8)
 
     /** The latest platform token, or null until the OS hands one over (never on desktop). */
     val token: StateFlow<PushToken?> = _token
 
-    /** Why the platform refused / could not produce a token. Drives the coordinator's retry budget. */
-    val failures: SharedFlow<PushRegistrationFailure> = _failures
+    /** Why the platform refused / could not produce a token, tagged with the ask it answers. Drives the
+     *  coordinator's retry budget. */
+    val failures: SharedFlow<PushFailureEvent> = _failures
 
     private var started = false
 
@@ -47,11 +49,12 @@ object PushTokens {
         if (started) return
         started = true
         PushController.start { _token.value = it }
-        PushController.onRegistrationFailed = { _failures.tryEmit(it) }
     }
 
-    /** Ask the platform for a token; [prompt] may show the system permission dialog (iOS). */
-    fun requestToken(prompt: Boolean) = PushController.requestToken(prompt)
+    /** Ask the platform for a token as ask number [request]; [prompt] may show the system permission
+     *  dialog (iOS). A refusal of THIS ask is published tagged with [request]. */
+    fun requestToken(prompt: Boolean, request: Long) =
+        PushController.requestToken(prompt) { _failures.tryEmit(PushFailureEvent(request, it)) }
 
     /** Read the OS authorization state (never prompts). */
     fun readAuthorization(cb: (PushAuthorization) -> Unit) = PushController.readAuthorization(cb)
@@ -63,5 +66,5 @@ object PushTokens {
     internal fun deliverForTest(token: PushToken?) { _token.value = token }
 
     /** Test seam: publish a registration failure without a platform push stack. */
-    internal fun failForTest(failure: PushRegistrationFailure) { _failures.tryEmit(failure) }
+    internal fun failForTest(request: Long, failure: PushRegistrationFailure) { _failures.tryEmit(PushFailureEvent(request, failure)) }
 }

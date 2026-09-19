@@ -39,6 +39,12 @@ class Broker {
     private val mutex = Mutex()
     private val daemons = HashMap<String, Conn>()
     private val devices = HashMap<String, MutableSet<Conn>>()
+    // Per-device ordering of socket generation vs. relay-side device-state writes (push registration,
+    // #389). Striped by deviceId so memory stays fixed however many devices ever connect; two devices
+    // sharing a stripe only serialize a short store write. Lock order is always stripe -> [mutex].
+    private val deviceWriteLocks = Array(DEVICE_WRITE_STRIPES) { Mutex() }
+
+    private fun deviceWriteLock(deviceId: String) = deviceWriteLocks[Math.floorMod(deviceId.hashCode(), DEVICE_WRITE_STRIPES)]
 
     /** Register a daemon; returns the superseded previous daemon (caller closes it — newest wins). */
     suspend fun attachDaemon(conn: Conn): Conn? = mutex.withLock { daemons.put(conn.account, conn) }
@@ -53,12 +59,34 @@ class Broker {
     /** Register a device socket; returns the superseded previous socket with the same deviceId, if any
      *  (caller closes it — newest wins, like daemons). One live socket per device matters: the daemon keeps
      *  a single E2E session per deviceId, so two sockets racing their handshakes deafen whichever loses. */
-    suspend fun attachDevice(conn: Conn): Conn? = mutex.withLock {
-        val set = devices.getOrPut(conn.account) { mutableSetOf() }
-        val old = conn.deviceId?.let { id -> set.firstOrNull { it.deviceId == id } }
-        if (old != null) set.remove(old)
-        set.add(conn)
-        old
+    suspend fun attachDevice(conn: Conn): Conn? {
+        // Taking the device's write stripe first means the swap waits out any write the previous socket is
+        // already inside ([whileCurrentDevice]); once this returns, that socket can never write again.
+        val id = conn.deviceId ?: return mutex.withLock { devices.getOrPut(conn.account) { mutableSetOf() }.add(conn); null }
+        return deviceWriteLock(id).withLock {
+            mutex.withLock {
+                val set = devices.getOrPut(conn.account) { mutableSetOf() }
+                val old = set.firstOrNull { it.deviceId == id }
+                if (old != null) set.remove(old)
+                set.add(conn)
+                old
+            }
+        }
+    }
+
+    /** Run [block] (a relay-side write on behalf of [conn]'s device) only while [conn] is that device's
+     *  CURRENT socket, serialized against every other such write for the device and against [attachDevice].
+     *  Null = [conn] was superseded or already detached, and [block] did not run.
+     *
+     *  The check sits inside the same critical section as the write on purpose: a handler that passed an
+     *  entry check, then suspended (store read, queued frame), would otherwise resume after a newer socket
+     *  replaced it and overwrite what that socket just wrote and had acknowledged (#389 review, issue 2). */
+    suspend fun <T : Any> whileCurrentDevice(conn: Conn, block: suspend () -> T): T? {
+        val id = conn.deviceId ?: return null
+        return deviceWriteLock(id).withLock {
+            val current = mutex.withLock { devices[conn.account]?.any { it === conn } == true }
+            if (current) block() else null
+        }
     }
 
     suspend fun detachDevice(conn: Conn): Unit = mutex.withLock {
@@ -130,5 +158,9 @@ class Broker {
         val ds = mutex.withLock { devices[account]?.filter { it.deviceId == deviceId }.orEmpty() }
         ds.forEach { runCatching { it.close("revoked") } }
         return ds
+    }
+
+    private companion object {
+        const val DEVICE_WRITE_STRIPES = 64
     }
 }
