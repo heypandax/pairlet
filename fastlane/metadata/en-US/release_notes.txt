@@ -1,9 +1,6 @@
-What's new in 2.1.0
+What's new in 2.1.1
 
-• Collapse finished tool steps in a conversation so the final reply stands out; failed tools, approvals and questions stay visible.
-• Managed session list: only sessions you created in Pairlet are listed, and sessions started elsewhere can be imported explicitly.
-• Completion, error and quota notifications now reach your phone even while the desktop app is online; repeats within 30 seconds are merged.
-• Context usage shows a clear status when no data is available yet, and history sessions from more backends report their usage.
-• New sessions start in your default mode, and the mode you picked is kept when switching agents.
-• Phone landscape opens a session in a full-width single column; the project list defaults to a flat view; the desktop sidebar folds older projects.
-• Project pins sync per computer, iPad multitasking keeps the session state, and image attachments are forwarded to more backends.
+• Expand long questions in conversation history to read the full text, then collapse them again.
+• Improve notification registration recovery after reconnecting or returning to the app.
+• Improve scrolling in HTML attachment previews.
+• Improve reliability when starting and handing off supported coding sessions.
