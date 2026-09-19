@@ -330,6 +330,26 @@ class DshProbeSessionTest {
         assertTrue(real.resolve("session.jsonl").exists(), "the delete followed a link out of the store")
     }
 
+    @Test
+    fun a_project_link_inside_the_store_is_also_refused_without_changing_its_target() {
+        val store = root()
+        val probeCwd = cwd("scratch")
+        val target = store.resolve("other-project")
+        val session = target.resolve(DshPaths.encodeSessionId("probe-id"))
+        Files.createDirectories(session)
+        Files.writeString(session.resolve("session.jsonl"), header("probe-id", probeCwd) + "\n")
+        val before = snapshot(session)
+        val link = store.resolve(DshPaths.projectKey(probeCwd))
+        if (runCatching { Files.createSymbolicLink(link, target) }.isFailure) return
+
+        assertEquals(
+            DshProbeSessionCleanup.Outcome.Refused("project directory is a link"),
+            DshProbeSessionCleanup.remove("probe-id", probeCwd, store),
+        )
+        assertUnchanged(session, before)
+        assertTrue(Files.isSymbolicLink(link))
+    }
+
     /**
      * The allow-list fails CLOSED. A dsh that adds a boot record this build has never seen must make the
      * sweep refuse and SAY so — the alternative, a deny-list, would delete a future conversation row by

@@ -90,12 +90,17 @@ object DshProbeSessionCleanup {
 
         val realRoot = runCatching { root.toRealPath() }.getOrNull() ?: return Outcome.Absent
         val projectDir = realRoot.resolve(DshPaths.projectKey(scratchCwd))
-        if (!projectDir.isDirectory(LinkOption.NOFOLLOW_LINKS)) return Outcome.Absent
+        // NOFOLLOW reports false for a present symlink. Keep it for the canonical boundary check
+        // below instead of incorrectly reporting that the probe's persisted session is absent.
+        if (!projectDir.isDirectory(LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(projectDir)) {
+            return Outcome.Absent
+        }
         val realProject = runCatching { projectDir.toRealPath() }.getOrNull()
             ?: return Outcome.Refused("project directory could not be resolved")
         // A junction/symlink is reported as a directory by isDirectory but resolves elsewhere; the
         // parent check below is what actually fences the delete inside the store.
         if (realProject.parent != realRoot) return Outcome.Refused("project directory leaves the session root")
+        if (Files.isSymbolicLink(projectDir)) return Outcome.Refused("project directory is a link")
 
         val sessionDir = realProject.resolve(encoded)
         if (Files.isSymbolicLink(sessionDir)) return Outcome.Refused("session directory is a link")
