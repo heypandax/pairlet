@@ -10,7 +10,7 @@ token = Spaceship::ConnectAPI::Token.create(
 )
 Spaceship::ConnectAPI.token = token
 app = Spaceship::ConnectAPI::App.find("com.panda.ccpocket") or abort("ASC app not found")
-info = app.fetch_edit_app_info or abort("No current app info available")
+info = app.fetch_edit_app_info || app.fetch_live_app_info or abort("No current app info available")
 uri = URI("https://api.appstoreconnect.apple.com/v1/appInfos/#{info.id}/ageRatingDeclaration")
 request = Net::HTTP::Get.new(uri)
 request["Authorization"] = "Bearer #{token.text}"

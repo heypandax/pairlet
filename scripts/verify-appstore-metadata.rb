@@ -15,7 +15,7 @@ if ENV["BUILD_NUMBER"]
   abort("unexpected attached build #{build.version}") unless build.version == ENV.fetch("BUILD_NUMBER")
   puts("Attached build #{build.version} verified")
 end
-info = app.fetch_edit_app_info or abort("no editable app info")
+info = app.fetch_edit_app_info || app.fetch_live_app_info or abort("no current app info")
 app_locales = info.get_app_info_localizations
 version_locales = version.get_app_store_version_localizations
 metadata = ENV.fetch("METADATA_PATH")
