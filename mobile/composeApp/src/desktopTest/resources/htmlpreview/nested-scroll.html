@@ -1,0 +1,59 @@
+<!doctype html>
+<!-- #390 sample B: an inner overflow container inside an otherwise long page. No external resource.
+     Separates "the inner box scrolls" from "the whole document scrolls": a gesture started on the
+     grey box must move the box, a gesture started outside it must move the page. -->
+<html lang="en"><head><meta charset="utf-8"><title>nested scroll</title>
+<style>
+  body { font: 16px/1.7 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; color: #222 }
+  h1 { font-size: 20px }
+  .marker { font-weight: 700; color: #b3401f }
+  .box { height: 180px; overflow: auto; border: 1px solid #bbb; background: #f3f3f3; padding: 8px;
+         -webkit-overflow-scrolling: touch }
+  .box p { margin: 0 0 10px }
+  .filler { margin: 0 0 14px }
+</style>
+</head><body>
+<h1 class="marker">NESTED-TOP-MARKER-390</h1>
+<p class="filler">Page text above the inner scroller.</p>
+<p class="filler">Page text above the inner scroller.</p>
+<p class="filler">Page text above the inner scroller.</p>
+<div class="box">
+  <p class="marker">INNER-TOP-MARKER-390</p>
+  <p>Inner line 1</p><p>Inner line 2</p><p>Inner line 3</p><p>Inner line 4</p><p>Inner line 5</p>
+  <p>Inner line 6</p><p>Inner line 7</p><p>Inner line 8</p><p>Inner line 9</p><p>Inner line 10</p>
+  <p>Inner line 11</p><p>Inner line 12</p><p>Inner line 13</p><p>Inner line 14</p><p>Inner line 15</p>
+  <p>Inner line 16</p><p>Inner line 17</p><p>Inner line 18</p><p>Inner line 19</p><p>Inner line 20</p>
+  <p class="marker">INNER-BOTTOM-MARKER-390</p>
+</div>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<p class="filler">Page text below the inner scroller.</p>
+<h1 class="marker">NESTED-BOTTOM-MARKER-390</h1>
+</body></html>

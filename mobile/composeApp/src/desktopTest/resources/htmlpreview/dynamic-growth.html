@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- #390 sample C: the document is short on load and grows afterwards, both from script-appended
+     paragraphs and from an image that only takes up space once decoded. The image is an inline
+     data: SVG so the sample stays offline. Checks that a scroll range appearing AFTER the first
+     layout is still reachable (a host that measures height once would fail here). -->
+<html lang="en"><head><meta charset="utf-8"><title>dynamic growth</title>
+<style>
+  body { font: 16px/1.7 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; color: #222 }
+  h1 { font-size: 20px }
+  .marker { font-weight: 700; color: #b3401f }
+  img { display: block; width: 100%; height: auto; margin: 12px 0 }
+</style>
+</head><body>
+<h1 class="marker">GROWTH-TOP-MARKER-390</h1>
+<p>This page is one screen tall on load. Content is appended 300&nbsp;ms later.</p>
+<img alt="tall placeholder" src="data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 90'&gt;&lt;rect width='40' height='90' fill='%23dde5ee'/&gt;&lt;/svg&gt;">
+<div id="late"></div>
+<script>
+  setTimeout(function () {
+    var host = document.getElementById('late');
+    for (var i = 1; i <= 60; i++) {
+      var p = document.createElement('p');
+      p.textContent = 'Appended paragraph ' + i + ' — added after first layout.';
+      host.appendChild(p);
+    }
+    var end = document.createElement('h1');
+    end.className = 'marker';
+    end.textContent = 'GROWTH-BOTTOM-MARKER-390';
+    host.appendChild(end);
+  }, 300);
+</script>
+</body></html>

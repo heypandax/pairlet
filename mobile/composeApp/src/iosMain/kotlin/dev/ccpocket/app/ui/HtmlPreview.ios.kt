@@ -5,6 +5,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.viewinterop.UIKitInteropInteractionMode
+import androidx.compose.ui.viewinterop.UIKitInteropProperties
 import androidx.compose.ui.viewinterop.UIKitView
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCSignatureOverride
@@ -51,5 +53,18 @@ internal actual fun HtmlPreview(document: String, modifier: Modifier, onError: (
             }
         },
         onRelease = { view -> view.navigationDelegate = null; view.stopLoading(); view.loadHTMLString("", baseURL = null) },
+        // DRAFT for #390, never compiled or run on a device — see docs/iterations/2026-09-19-claude-code/
+        // issue-390-html-scroll.md. The default interop mode is Cooperative: Compose holds a touch that
+        // lands on this view for a moment to see whether a Compose ancestor wants it, and only then
+        // replays it to WKWebView. Nothing above this preview competes for a drag (the file viewer is a
+        // full-screen route; every ancestor is a plain Box/Column and the chat list is not composed at
+        // all), so that first refusal buys nothing and can cost the flick that should have scrolled the
+        // document. NonCooperative hands touches straight to the web view.
+        //
+        // Scope is exactly this view's bounds: the 预览/源码 buttons and the ← back button sit outside it
+        // and keep working. The trade is that Compose can no longer intercept a gesture over the preview,
+        // so a future swipe-to-dismiss covering this area would not fire — there is none today
+        // (SystemBackHandler is a no-op on iOS; navigation is the ← button).
+        properties = UIKitInteropProperties(interactionMode = UIKitInteropInteractionMode.NonCooperative),
     )
 }

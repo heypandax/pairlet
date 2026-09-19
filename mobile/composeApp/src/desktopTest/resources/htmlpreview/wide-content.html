@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- #390 sample E: Chinese prose, unwrapped long code lines and a wide table. Overflows on BOTH axes,
+     so it exercises vertical and horizontal gestures plus pinch zoom at the same time. No web fonts,
+     no external resource. -->
+<html lang="en"><head><meta charset="utf-8"><title>wide content</title>
+<style>
+  body { font: 16px/1.8 -apple-system, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+         margin: 0; padding: 16px; color: #222 }
+  h1 { font-size: 20px }
+  .marker { font-weight: 700; color: #b3401f }
+  pre { background: #f5f5f5; padding: 10px; overflow-x: auto; white-space: pre;
+        font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace }
+  table { border-collapse: collapse; margin: 14px 0 }
+  th, td { border: 1px solid #ccc; padding: 6px 10px; white-space: nowrap }
+  .wide { width: 1400px; max-width: none }
+</style>
+</head><body>
+<h1 class="marker">WIDE-TOP-MARKER-390</h1>
+<p>这是一段中文正文，用来检验中文字形的换行、行高与垂直滚动。手指从这一段向上滑动时，文档应当整体向上移动，而不是被宿主吞掉手势。</p>
+<p>继续第二段中文正文。附件预览里的中文段落常常是最长的部分，也最容易暴露行高与视口高度计算的问题。</p>
+<pre>fun veryLongSingleLine(a: Int, b: Int, c: Int) = "this line is intentionally far wider than any phone viewport so the pre element must scroll horizontally on its own: " + a + b + c</pre>
+<table>
+  <tr><th>column A</th><th>column B</th><th>column C</th><th>column D</th><th>column E</th><th>column F</th><th>column G</th><th>column H</th></tr>
+  <tr><td>value A1</td><td>value B1</td><td>value C1</td><td>value D1</td><td>value E1</td><td>value F1</td><td>value G1</td><td>value H1</td></tr>
+  <tr><td>value A2</td><td>value B2</td><td>value C2</td><td>value D2</td><td>value E2</td><td>value F2</td><td>value G2</td><td>value H2</td></tr>
+</table>
+<div class="wide">这一整块宽度被写死为 1400px，因此整个文档在水平方向也会溢出视口。</div>
+<p>第三段中文正文。</p><p>第四段中文正文。</p><p>第五段中文正文。</p>
+<p>第六段中文正文。</p><p>第七段中文正文。</p><p>第八段中文正文。</p>
+<p>第九段中文正文。</p><p>第十段中文正文。</p><p>第十一段中文正文。</p>
+<p>第十二段中文正文。</p><p>第十三段中文正文。</p><p>第十四段中文正文。</p>
+<p>第十五段中文正文。</p><p>第十六段中文正文。</p><p>第十七段中文正文。</p>
+<p>第十八段中文正文。</p><p>第十九段中文正文。</p><p>第二十段中文正文。</p>
+<p>第二十一段中文正文。</p><p>第二十二段中文正文。</p><p>第二十三段中文正文。</p>
+<p>第二十四段中文正文。</p><p>第二十五段中文正文。</p><p>第二十六段中文正文。</p>
+<p>第二十七段中文正文。</p><p>第二十八段中文正文。</p><p>第二十九段中文正文。</p>
+<p>第三十段中文正文。</p>
+<h1 class="marker">WIDE-BOTTOM-MARKER-390</h1>
+</body></html>
