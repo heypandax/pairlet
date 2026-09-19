@@ -208,7 +208,7 @@ object ZCodeLauncher {
         }
         val registryDirs = registryInstallLocations()
         val dirs = fallbackDirs(registryDirs = registryDirs)
-        runCatching {
+        val wrapper = runCatching {
             ExecutableResolver.resolve(
                 explicit = null,
                 envBin = null,
@@ -216,7 +216,9 @@ object ZCodeLauncher {
                 fallbackDirs = dirs,
                 notFound = "zcode wrapper not found",
             )
-        }.getOrNull()?.let { return it }
+        }.getOrNull()
+        // A bundle that ships BOTH artefacts must be opened the way ZCode itself opens it (issue #386).
+        if (wrapper != null) return bundledNodeEntry(wrapper.parent) ?: wrapper
         dirs.asSequence().map { Path.of(it, "zcode.cjs") }
             .firstOrNull { it.isRegularFile() }?.let { return it.toRealPath() }
         // Ship the evidence with the failure: a pasted-back error then states exactly where we looked.
@@ -259,6 +261,39 @@ object ZCodeLauncher {
             // entry without depending on launchd's PATH or a separately-installed node.
             if (electron != null) environment()["ELECTRON_RUN_AS_NODE"] = "1"
         }
+    }
+
+    /**
+     * The `zcode.cjs` that belongs to [dir], but only when [dir] really is a complete official bundle —
+     * i.e. its own Electron runtime resolves. Null otherwise, which leaves the wrapper in charge.
+     *
+     * WHY this outranks a wrapper found in the SAME directory (issue #386). ZCode's own resolver
+     * (`resolveDefaultZCodeAgentCommand`, read out of the 3.11.2 `app.asar`) orders its entries
+     * `resolveElectronRuntimeZCodeAgentCommand` BEFORE `resolveDeployedZCodeAgentBinaryCommand`: the
+     * Electron + node-bundle pair first, the deployed native `zcode-agent(.exe)` only as the fallback for
+     * hosts with no Electron at all. `ExecutableResolver` ranks the other way round — native binaries beat
+     * script-ish entries, and `zcode-agent.exe` heads [exeNames] — so a bundle shipping the optional native
+     * artefact next to `zcode.cjs` used to be started through the entry ZCode's desktop never picks.
+     *
+     * That inversion is not cosmetic. Measured on this machine's official 3.11.2 bundle: started as
+     * `ZCode.exe <zcode.cjs>` with `ELECTRON_RUN_AS_NODE=1` the runtime reports
+     * `process.resourcesPath = C:\Program Files\ZCode\resources`, while the same code under any non-Electron
+     * host (plain `node`, and therefore also a single-executable `zcode-agent.exe`) reports `undefined`.
+     * The runtime resource lookups transcribed from the same bundle (`findZCodeAgentRuntimeBinary` /
+     * `findZCodeAgentRuntimeNodeBundle`) start from exactly that value and, when it is missing, fall through
+     * to `~/.zcode/server/agents/...` and `process.cwd()`-relative "legacy bundled-resources" roots — which
+     * is the shape of the two paths #386 reports (one relative `resources/glm/...`, one resolved against a
+     * drive root). So: hand the runtime the host that knows where its own resources are.
+     *
+     * The check is deliberately per-directory. A ZCode Server deployment under
+     * `~/.zcode/server/agents/glm` also holds both files but no Electron, so [packagedElectron] returns null
+     * there and the native agent keeps winning (feedback #195). macOS's `Resources/app/bin` wrapper lives in
+     * a different directory from `Resources/glm/zcode.cjs` and is likewise untouched.
+     */
+    internal fun bundledNodeEntry(dir: Path?): Path? {
+        val cjs = dir?.resolve("zcode.cjs")?.takeIf { it.isRegularFile() } ?: return null
+        val real = runCatching { cjs.toRealPath() }.getOrNull() ?: return null
+        return real.takeIf { packagedElectron(it) != null }
     }
 
     private fun packagedElectron(cjs: Path): Path? {

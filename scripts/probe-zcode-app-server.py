@@ -120,8 +120,34 @@ def find_session_id(frame: dict[str, Any]) -> str | None:
     return None
 
 
+def bundled_electron(cjs: Path) -> Path | None:
+    """The Electron shipped beside `cjs`, i.e. the runtime ZCode's own desktop starts the CLI with.
+
+    Measured on the official 3.11.2 Windows bundle: launched as `ZCode.exe <zcode.cjs>` with
+    ELECTRON_RUN_AS_NODE=1 the CLI reports `process.resourcesPath=<install>\\resources`, while the same
+    file under a plain `node` reports `undefined` — and the runtime's own resource lookups start from that
+    value.  The daemon's ZCodeLauncher launches through the bundled Electron for exactly that reason, so a
+    probe that silently used a PATH node would be measuring a launch shape nothing in production uses.
+    """
+    resources = cjs.parent.parent
+    contents = resources.parent
+    candidates = [
+        contents / "ZCode.exe",
+        contents / "zcode.exe",
+        contents / "MacOS" / "ZCode",
+        contents / "zcode",
+    ]
+    return next((c for c in candidates if c.is_file() and os.access(c, os.X_OK)), None)
+
+
 def zcode_base_argv(path: Path, explicit_node: str | None = None) -> list[str]:
     if path.suffix == ".cjs" or path.suffix == ".js":
+        if not explicit_node and not os.environ.get("ZCODE_NODE_BIN"):
+            electron = bundled_electron(path)
+            if electron:
+                # Inherited by every child this probe spawns; Electron needs it to act as plain Node.
+                os.environ["ELECTRON_RUN_AS_NODE"] = "1"
+                return [str(electron), str(path)]
         candidate = explicit_node or os.environ.get("ZCODE_NODE_BIN") or shutil.which("node")
         node = shutil.which(candidate) if candidate else None
         if not node and candidate and Path(candidate).expanduser().is_file():
@@ -150,6 +176,15 @@ def discover_zcode(explicit: str | None) -> Path | None:
             Path("/opt/ZCode/app/resources/glm/zcode.cjs"),
         ]
     )
+    # Windows electron-builder installs (issue #386). No personal paths: only the three roots the
+    # installer can choose from, read out of the environment.
+    for root in (
+        os.environ.get("LOCALAPPDATA") and Path(os.environ["LOCALAPPDATA"]) / "Programs" / "ZCode",
+        os.environ.get("ProgramFiles") and Path(os.environ["ProgramFiles"]) / "ZCode",
+        os.environ.get("ProgramFiles(x86)") and Path(os.environ["ProgramFiles(x86)"]) / "ZCode",
+    ):
+        if root:
+            candidates.append(root / "resources" / "glm" / "zcode.cjs")
     return next((p.resolve() for p in candidates if p.is_file()), None)
 
 
@@ -174,6 +209,16 @@ def run_help(argv: list[str], suffix: list[str]) -> tuple[int, str]:
         return 124, output
 
 
+def redacted(value: Any) -> Any:
+    """Same value with every `apiKey` replaced. The evidence log is kept and pasted around; the provider
+    credential this probe carries inline (see store_runtime_model) must never travel with it."""
+    if isinstance(value, dict):
+        return {k: "<redacted>" if k == "apiKey" else redacted(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redacted(v) for v in value]
+    return value
+
+
 class EvidenceLog:
     def __init__(self, path: Path):
         self.path = path
@@ -181,7 +226,7 @@ class EvidenceLog:
         self._lock = threading.Lock()
 
     def write(self, direction: str, value: Any) -> None:
-        row = {"time": time.time(), "direction": direction, "value": value}
+        row = {"time": time.time(), "direction": direction, "value": redacted(value)}
         with self._lock:
             self._file.write(json.dumps(row, ensure_ascii=False) + "\n")
             self._file.flush()
@@ -404,7 +449,11 @@ def self_test() -> int:
     assert find_session_id({"result": {"sessionId": "s1"}}) == "s1"
     assert find_session_id({"result": {"session": {"sessionId": "s2"}}}) == "s2"
     assert error_code({"error": {"code": -32601}}) == -32601
-    assert zcode_base_argv(Path("/tmp/zcode.cjs"), shutil.which("node"))[-1] == "/tmp/zcode.cjs"
+    # str(Path(...)) is separator-normalised per host, so compare against the same normalisation instead
+    # of a POSIX literal — the literal made this assertion unsatisfiable on Windows, the very platform
+    # issue #386 is reported from.
+    cjs = Path("/tmp/zcode.cjs")
+    assert zcode_base_argv(cjs, shutil.which("node"))[-1] == str(cjs)
     assert RUNTIME_PREFERENCES["modelContextBudgetStrategy"] == "preflight-v1"
     print("self-test: PASS")
     return 0
@@ -447,18 +496,68 @@ def probe_schema(client: AppServer) -> None:
         record(f"Z3.{method}", present, compact(response))
 
 
+def store_runtime_model() -> tuple[dict[str, Any], str] | None:
+    """The `runtimeModel` the daemon sends on every open, built from ZCode's own provider store.
+
+    ZCode 3.9+ writes its providers to `~/.zcode/v2/config.json`, while the bundled runtime resolves an
+    unqualified model from `~/.zcode/cli/config.json` — a file the desktop no longer writes.  The official
+    shell bridges that gap by carrying the provider inline on `session/create`, and so does
+    ZCodeProviderCatalog; a probe that omits it can only ever record `ModelConfigMissing` on a 3.9+ install,
+    which says nothing about the bundle under test.  Shapes here mirror the runtime's strict zod schemas —
+    an unknown key rejects the whole open, so nothing extra may be added.
+
+    Returns (runtimeModel, "providerId/modelId"), or None when no authenticated provider is on disk.
+    """
+    for name in ("v2", "cli"):
+        path = Path.home() / ".zcode" / name / "config.json"
+        if not path.is_file():
+            continue
+        try:
+            root = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for provider_id, raw in (root.get("provider") or {}).items():
+            if not isinstance(raw, dict) or raw.get("enabled") is False:
+                continue
+            options = raw.get("options") if isinstance(raw.get("options"), dict) else {}
+            api_key = options.get("apiKey") or raw.get("apiKey")
+            kind = raw.get("kind")
+            models = list((raw.get("models") or {}).keys())
+            if not api_key or kind not in {"anthropic", "openai", "openai-compatible"} or not models:
+                continue
+            provider: dict[str, Any] = {
+                "providerId": provider_id,
+                "kind": kind,
+                "models": [{"modelId": m} for m in models],
+            }
+            base_url = options.get("baseURL") or raw.get("baseURL")
+            if base_url:
+                provider["baseURL"] = base_url
+            provider["apiKey"] = {"source": "inline", "value": api_key}
+            runtime_model = {
+                "revision": "probe",
+                "generatedAt": int(time.time() * 1000),
+                "model": {"providerId": provider_id, "modelId": models[0]},
+                "provider": provider,
+            }
+            return runtime_model, f"{provider_id}/{models[0]}"
+    return None
+
+
 def active_probe(
     client: AppServer,
     workspace: Path,
     permission_probe: bool,
     cancel_probe: bool,
+    runtime_model: dict[str, Any] | None = None,
 ) -> None:
     print("\nZ4-Z8 active session probe")
     workspace_obj = {"workspacePath": str(workspace), "workspaceKey": str(workspace)}
+    create_params: dict[str, Any] = {"workspace": workspace_obj, "mode": "build"}
+    if runtime_model:
+        create_params["runtimeModel"] = runtime_model
     try:
-        created = client.request(
-            "session/create", {"workspace": workspace_obj, "mode": "build"}, timeout=30
-        )
+        created = client.request("session/create", create_params, timeout=30)
     except (RuntimeError, TimeoutError) as exc:
         record("Z4.create", False, str(exc))
         return
@@ -638,6 +737,11 @@ def parse_args() -> argparse.Namespace:
         "--active", action="store_true", help="create/resume a session and send PONG"
     )
     parser.add_argument(
+        "--no-runtime-model",
+        action="store_true",
+        help="open without the inline provider read from ~/.zcode; 3.9+ then fails with ModelConfigMissing",
+    )
+    parser.add_argument(
         "--permission-probe",
         action="store_true",
         help="ask for a no-op high-risk tool call; all permission requests are denied",
@@ -694,6 +798,10 @@ def main() -> int:
     log_path = args.log.resolve() if args.log else workspace / "zcode-app-server-probe.jsonl"
     log = EvidenceLog(log_path)
     before_storage = storage_snapshot(args.zcode_home.expanduser())
+    selected = None if args.no_runtime_model else store_runtime_model()
+    runtime_model = selected[0] if selected else None
+    if args.active:
+        print(f"runtime model: {selected[1] if selected else 'none (store has no authenticated provider)'}")
     log.write(
         "meta",
         {
@@ -703,6 +811,7 @@ def main() -> int:
             "argv": argv + ["app-server", "--stdio"],
             "workspace": str(workspace),
             "active": args.active,
+            "runtimeModel": selected[1] if selected else None,
             "storageBefore": before_storage,
         },
     )
@@ -711,7 +820,9 @@ def main() -> int:
         client = AppServer(argv, workspace, log)
         probe_schema(client)
         if args.active:
-            active_probe(client, workspace, args.permission_probe, args.cancel_probe)
+            active_probe(
+                client, workspace, args.permission_probe, args.cancel_probe, runtime_model
+            )
     except (OSError, RuntimeError, TimeoutError) as exc:
         record("app-server", False, str(exc))
     finally:

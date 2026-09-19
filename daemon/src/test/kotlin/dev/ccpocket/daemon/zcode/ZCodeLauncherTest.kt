@@ -2,26 +2,74 @@ package dev.ccpocket.daemon.zcode
 
 import dev.ccpocket.daemon.agent.AgentSpec
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createFile
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ZCodeLauncherTest {
-    @Test
-    fun `official cjs launches through bundle electron instead of its path node shebang`() {
-        val root = Files.createTempDirectory("zcode-app")
+    private val windowsHost = System.getProperty("os.name").lowercase().contains("win")
+
+    /**
+     * An official bundle in THIS host's own layout, returning `electron to zcode.cjs`. The launcher reads
+     * `os.name` at class-init to decide which runtime file name to look for, so a fixture hard-coded to one
+     * platform can only ever pass on that platform — the macOS-only shape used to fail the whole suite on
+     * Windows, which is the platform issue #386 is about.
+     */
+    private fun officialBundle(root: Path): Pair<Path, Path> = if (windowsHost) {
+        val electron = root.resolve("ZCode.exe").also { it.parent.createDirectories(); it.createFile() }
+        val cjs = root.resolve("resources/glm/zcode.cjs").also { it.parent.createDirectories(); it.createFile() }
+        electron to cjs
+    } else {
         val contents = root.resolve("ZCode.app/Contents")
         val electron = contents.resolve("MacOS/ZCode").also { it.parent.createDirectories(); it.createFile() }
         Files.setPosixFilePermissions(electron, PosixFilePermissions.fromString("rwx------"))
         val cjs = contents.resolve("Resources/glm/zcode.cjs").also { it.parent.createDirectories(); it.createFile() }
+        electron to cjs
+    }
+
+    @Test
+    fun `official cjs launches through bundle electron instead of its path node shebang`() {
+        val root = Files.createTempDirectory("zcode-app")
+        val (electron, cjs) = officialBundle(root)
 
         val pb = ZCodeLauncher.processBuilder(cjs, AgentSpec(root))
         assertEquals(listOf(electron.toString(), cjs.toString(), "app-server", "--stdio"), pb.command())
         assertEquals("1", pb.environment()["ELECTRON_RUN_AS_NODE"])
+    }
+
+    @Test
+    fun `a complete bundle answers with its node entry so the native agent binary never wins`() {
+        val root = Files.createTempDirectory("zcode-both")
+        val (_, cjs) = officialBundle(root)
+        // The optional native artefact ZCode also ships in this very directory (`zcode-agent(.exe)`).
+        cjs.parent.resolve(if (windowsHost) "zcode-agent.exe" else "zcode-agent").createFile()
+
+        assertEquals(cjs.toRealPath(), ZCodeLauncher.bundledNodeEntry(cjs.parent))
+    }
+
+    @Test
+    fun `a server agent directory without electron keeps its native binary`() {
+        val agents = Files.createTempDirectory("zcode-server").resolve(".zcode/server/agents/glm")
+        agents.createDirectories()
+        agents.resolve("zcode.cjs").createFile()
+        agents.resolve(if (windowsHost) "zcode-agent.exe" else "zcode-agent").createFile()
+
+        assertNull(ZCodeLauncher.bundledNodeEntry(agents))
+    }
+
+    @Test
+    fun `a wrapper directory without a node entry is left alone`() {
+        val bin = Files.createTempDirectory("zcode-wrapper").resolve("bin")
+        bin.createDirectories()
+
+        assertNull(ZCodeLauncher.bundledNodeEntry(bin))
+        assertNull(ZCodeLauncher.bundledNodeEntry(null))
     }
 
     @Test
@@ -41,10 +89,10 @@ class ZCodeLauncherTest {
 
     @Test
     fun `official linux server agent fallback is discovered`() {
-        assertTrue(
-            ZCodeLauncher.fallbackDirs("/home/panda", "Linux")
-                .contains("/home/panda/.zcode/server/agents/glm"),
-        )
+        // Built with Path.of in production, so the separator is the HOST's — spell the expectation the same
+        // way rather than hard-coding "/", which made this Linux assertion unsatisfiable on a Windows host.
+        val expected = Path.of("/home/panda", ".zcode", "server", "agents", "glm").toString()
+        assertTrue(ZCodeLauncher.fallbackDirs("/home/panda", "Linux").contains(expected))
     }
 
     @Test
