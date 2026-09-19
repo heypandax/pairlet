@@ -273,6 +273,14 @@ if (System.getProperty("os.name").lowercase().contains("linux")) {
             }
         }
     }
+    // Compose's Linux installer tasks build a separate image by default. Feed
+    // them the completed image so the compact classpath survives deb/rpm packaging.
+    tasks.withType(org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask::class.java)
+        .matching { it.name == "packageDeb" || it.name == "packageRpm" }
+        .configureEach {
+            dependsOn("createDistributable")
+            appImage.set(layout.buildDirectory.dir("compose/binaries/main/app/CC Pocket"))
+        }
 }
 
 // jpackage derives CFBundleName from packageName. Finish the private image and re-seal its
