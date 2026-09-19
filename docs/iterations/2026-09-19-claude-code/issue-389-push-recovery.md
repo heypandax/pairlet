@@ -143,3 +143,7 @@ Issue 报告 Apple 双端 2.1.0、Claude Code 无通知，附诊断 Markdown。�
 - 已修复：等待发送的回执绑定调用方 Job，取消／超时使排队帧失效，writer 跳过失效帧；取消还会中止仍在等待的写入，且不因此停止其他请求的 writer。控制帧绑定 `(relay, accountId, deviceId)`，切换配对时拒绝错配帧。已经交给 socket 的字节无法撤回，仍由登记协调器按最新意图收敛。
 - 常驻回归 `RelayControlCancellationTest` 覆盖取消后 LAN 清除再回 relay、超时后 token 更新、配对的三个身份字段分别变化；以后一有效请求的 ACK 证明前面的队列已处理完，同时验证有效排队请求能继续发送。
 - 验证：`compileCommonMainKotlinMetadata`、桌面编译通过；移动端 7 个专项类共 **42 项、0 失败**（上轮推送专项加上述 3 项，不含 `ConnectionDiagnosticTest`）。仓库内容检查和 diff 格式检查通过。本次修改未提交、未部署；iOS／Android 原生编译及真机通知验收仍待执行。
+
+## 2.1.1 发布补记（2026-09-19）
+
+已发布／iOS 待审核，待真机验收；[GitHub 状态回执](https://github.com/heypandax/pairlet/issues/389#issuecomment-5744963021) 已写回并核对。完整构建、生产部署和剩余验收范围见 [2.1.1 发布记录](RELEASE-2.1.1.md)。上文未推送／未发布等描述保留为当时的实施快照。

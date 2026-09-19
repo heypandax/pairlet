@@ -48,3 +48,7 @@ Windows 上安装在非默认目录的受支持 ZCode，通过 Pairlet 能启动
 - Windows 真测／fixture 回归／未取得的反馈者证据：`:daemon:test --tests '*ZCodeLauncherTest' --tests '*ZCodeBackendTest'` 在 Windows 上 40 项全绿（13 + 27）；此前其中 2 项因 fixture 写死 macOS 布局和 POSIX 权限，在 Windows 必定失败，已改成按宿主构造。新增 fixture 覆盖「同目录完整 bundle 取 node 入口」「无 Electron 的 server agent 目录保留原生二进制」「没有 node 入口的 wrapper 目录不动」。探针 `scripts/probe-zcode-app-server.py`：`--self-test` 通过（原断言写死 POSIX 字面量，在 Windows 不可能成立）；对本机 bundle 的只读探测，以及临时目录里的一次隔离 `--active` roundtrip 全部 PASS，argv 即 `ZCode.exe <zcode.cjs> app-server --stdio`，证据日志里 `apiKey` 已脱敏。未取得的：反馈者的 ZCode 精确版本与安装方式、daemon 当时选中的入口、失败进程的 stderr 原文，以及其官方 App 自身能否正常对话。
 - daemon 更新和发布状态：未更新本机 daemon、未提交、未部署、未发布。
 - 提交状态（2026-09-19 补记）：已提交到 main，提交 `7e1573af`；未推送、未部署、未发布。上文“未提交”指子任务实施当时的状态。
+
+## 2.1.1 发布补记（2026-09-19）
+
+已发布，待原版本验收；[GitHub 状态回执](https://github.com/heypandax/pairlet/issues/386#issuecomment-5744961840) 已写回并核对。完整构建、生产部署和剩余验收范围见 [2.1.1 发布记录](RELEASE-2.1.1.md)。上文未推送／未发布等描述保留为当时的实施快照。

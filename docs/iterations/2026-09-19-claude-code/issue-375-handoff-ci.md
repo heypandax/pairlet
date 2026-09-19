@@ -50,3 +50,7 @@
 - 定向／有界重复／daemon／CI 结果：`:daemon:test --tests '*HandoffTerminalSinkCutTest'` 通过，13 个用例、0 失败。有界重复固定 20 次（每次 `--rerun`），**20 次全部通过、0 失败**，逐次记录在案，不是「跑到绿为止」。相邻受影响套件 `*Conversation* *SessionRegistry* *Handoff* *Collaborator*` 有 7 条失败，已用「还原改动跑同一命令」对照确认**基线同样是这 7 条**（`ConversationPushTest`、`CollaboratorGrantEnforcementTest`、`SessionRegistryBridgeApprovalRouteTest`，均依赖 `sh` 脚本化 agent），属 Windows 环境不满足，非本次补丁引入。依赖 sh 的 `the_recipient_stops_receiving_assistant_chunks_the_moment_control_returns` 在 Windows 上提前返回，记为**未执行**，需在 POSIX／Ubuntu 补齐。正常 CI 本轮未执行。
 - 是否存在生产泄漏、剩余观察与关闭建议：**未发现生产泄漏**——终态之后没有任何一次完成的分发把收件方列入扇出集合；撤权逻辑本身未改动（`HandoffService.kt` 仅核对契约）。剩余观察：CI 失败报告始终未取得，本机也未复现原报告的偶发失败，所以「根因已解释」只覆盖到「旧断言方式为何不可靠、新屏障强在哪里」，不能宣称已复现并消灭线上那一次失败。建议：先在 Ubuntu CI 上跑完整 daemon 测试（含被 Windows 跳过的 scripted backend 用例）；若后续再失败，新断言会直接指出是「没有分发记录」「分发记录里没有 owner」还是「分发记录里仍有收件方」，并附脱敏的分发次序，届时再据此判断可否关闭。
 - 提交状态（2026-09-19 补记）：已提交到 main，提交 `63d41463`；未推送、未部署、未发布。上文“未提交”指子任务实施当时的状态。
+
+## 2.1.1 发布补记（2026-09-19）
+
+已发布，已关闭；[GitHub 状态回执](https://github.com/heypandax/pairlet/issues/375#issuecomment-5744958937) 已写回并核对。完整构建、生产部署和剩余验收范围见 [2.1.1 发布记录](RELEASE-2.1.1.md)。上文未推送／未发布等描述保留为当时的实施快照。

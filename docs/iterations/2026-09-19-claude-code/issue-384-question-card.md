@@ -41,3 +41,7 @@
 - 实际验证的平台、用例及结果：桌面 JVM 测试 `./gradlew.bat :mobile:composeApp:desktopTest --tests '*QuestionCardUiTest'`，BUILD SUCCESSFUL，9 个用例全过（`tests="9" skipped="0" failures="0" errors="0"`）。新增用例：长中文提问在无限高 `verticalScroll` 宿主里默认折叠、展开后正文高度翻倍以上、收起回到原高度；短提问不出现展开／收起入口；`LazyColumn` 中两条长提问只有被点的那条展开，另一条高度不变且仍带自己的入口。断言走的是可见正文高度与入口存废，不是 `maxLines` 数值。
 - 未执行项／发布状态：手机与桌面目验未执行（本机无设备／未启动 App）；窗口缩放、手机横竖屏、长路径与英文长词的目视检查同样未执行。未跑 `check-all.sh` 全量（按任务范围只跑指定用例，整个 desktopTest 源集已随编译通过）。未提交、未推送、未发布，发布后才具备用户验收条件。
 - 提交状态（2026-09-19 补记）：已提交到 main，提交 `a1225145`；未推送、未部署、未发布。上文“未提交”指子任务实施当时的状态。
+
+## 2.1.1 发布补记（2026-09-19）
+
+已发布，已关闭；[GitHub 状态回执](https://github.com/heypandax/pairlet/issues/384#issuecomment-5744959823) 已写回并核对。完整构建、生产部署和剩余验收范围见 [2.1.1 发布记录](RELEASE-2.1.1.md)。上文未推送／未发布等描述保留为当时的实施快照。

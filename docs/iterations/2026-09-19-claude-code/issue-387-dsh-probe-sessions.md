@@ -53,3 +53,7 @@
 - 正常／异常路径验证及残余限制：`./gradlew.bat :daemon:test --tests '*DshModelServiceTest' --tests '*RequestRouterFetchModelsDshTest' --tests '*DshProbeSessionTest'` 共 37 例全绿（新增 `DshProbeSessionTest` 26 例）；覆盖有活会话不新建探测、缓存命中与 8 并发只探测一次、失败不缓存、启动抛错仍释放 scratch、无回包／子进程不死／清理抛错都不误删且不丢已取得的目录，以及相邻真实会话、`projectKey` 碰撞（`…/a/b` 与 `…/a-b`）、同前缀 cwd、多代转写、子目录、链接、越界 ID 等场景下原记录逐字节不变。真实 DSH 前后对照由新增的 `DshProbeSessionLiveIT`（默认关闭，`CC_POCKET_DSH_LIVE=1` 开启）完成：对真实 `~/.dsh` 跑一次真实探测，会话根内每个文件的大小与 CRC 前后完全一致。这次实测同时纠正了方案里的一个隐含假设——空探测会话不是只有 header：dsh 还会写入 `permission/preset`、`sandbox/mode`、`approval/policy` 三条启动配置记录，因此“只删空会话”落地成一份可验证的白名单，白名单之外的记录一律拒删。残余限制：白名单是 fail-closed 的，未来 dsh 新增一条启动记录会让清理开始拒绝并在日志里报 `unrecognized record`，届时需重跑探针确认其不含用户内容后再加入；历史垃圾（本机 `--…cc-pocket-dsh-models17070857550401876678--` 等）按方案不在本轮批量清理；dsh 的 `storages/session_projcache` 等全局缓存不属于会话目录，本改动不碰。
 - 本机更新、发布与反馈验收：未执行。按本次任务边界不 commit、不 push、不部署、不更新本机 daemon；`scripts/update-local-daemon*.sh`、发布，以及 #388 的“正常会话仍可发现与接管”验证留给后续。
 - 提交状态（2026-09-19 补记）：已提交到 main，提交 `2e83f6d9`；未推送、未部署、未发布。上文“未提交”指子任务实施当时的状态。
+
+## 2.1.1 发布补记（2026-09-19）
+
+daemon 已发布，已关闭；[GitHub 状态回执](https://github.com/heypandax/pairlet/issues/387#issuecomment-5744960561) 已写回并核对。完整构建、生产部署和剩余验收范围见 [2.1.1 发布记录](RELEASE-2.1.1.md)。上文未推送／未发布等描述保留为当时的实施快照。

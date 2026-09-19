@@ -60,3 +60,7 @@
 - iOS 真机、Android／桌面回归、提交：iOS **未编译、未真机验收**（Windows 无 Kotlin/Native iOS 工具链，Compose 的 iOS klib 本机也没有缓存，`UIKitInteropProperties` 的确切签名未经编译器校验）。Android **未回归**（未改共用 wrapper，也未改 Android 实现）。桌面：`:mobile:composeApp:desktopTest --tests '*HtmlPreviewRenderingTest' --tests '*HtmlPreviewPolicyTest' --tests '*HtmlPreviewScrollSampleTest'` 通过（`BUILD SUCCESSFUL in 3m 54s`），`:mobile:composeApp:compileKotlinDesktop` 通过；JavaFX 的 headless 跳过本次未触发，测试在有显示器的本机真实跑了 WebKit。**未提交、未推送。**
 - 未验收项及客户端发布状态：待验收项——iOS 侧编译、真机用五个样例逐条滑到尾部标记、短页不抖动、源码／预览与关闭重开、横竖屏、iPad 触屏回归（不含 #352 的妙控键盘／输入法）。补丁停在草案：`NonCooperative` 是基于「wrapper 与宿主两层均被排除」推出的唯一剩余宿主侧抓手，不是实测确认的根因；若真机上问题依旧，下一步应先在真机记录 `WKWebView.scrollView` 的 `contentSize`／`contentOffset` 与触摸归属，再判断是否属于用户 HTML 自身行为。客户端未发布。
 - 提交状态（2026-09-19 补记）：已提交到 main，提交 `e7cd961e`；未推送、未部署、未发布。上文“未提交”指子任务实施当时的状态。
+
+## 2.1.1 发布补记（2026-09-19）
+
+iOS 已提审，待真机验收；[GitHub 状态回执](https://github.com/heypandax/pairlet/issues/390#issuecomment-5744963521) 已写回并核对。完整构建、生产部署和剩余验收范围见 [2.1.1 发布记录](RELEASE-2.1.1.md)。上文未推送／未发布等描述保留为当时的实施快照。

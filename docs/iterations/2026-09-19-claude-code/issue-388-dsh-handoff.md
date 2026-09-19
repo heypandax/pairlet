@@ -68,3 +68,7 @@
 - 修改、测试、上游限制及未验收项：改动 [DshBackend.kt](../../../daemon/src/main/kotlin/dev/ccpocket/daemon/dsh/DshBackend.kt)（新增 `openFailure` 状态、`describeError`、`failStartup` ／ `injectStartupFailure` ／ `drainWaitingPrompts` 与三个阶段常量；`handleErrorResponse`、`onSessionOpened`、`watchHandshake`、`sendPrompt` 接上），测试 [DshBackendAcpTest.kt](../../../daemon/src/test/kotlin/dev/ccpocket/daemon/dsh/DshBackendAcpTest.kt)（+5）与 [DshTranscriptScannerTest.kt](../../../daemon/src/test/kotlin/dev/ccpocket/daemon/dsh/DshTranscriptScannerTest.kt)（+1）。`./gradlew.bat :daemon:test --tests '*DshBackendAcpTest' --tests '*DshTranscriptScannerTest' --tests '*DshGenerationReplayTest' --tests '*DshResumeMetaTest'` 全绿：29 ／ 9 ／ 13 ／ 7 共 58 项，0 失败 0 跳过。上游限制：ACP 无工作区挂载能力（见 A），也无 rename ／ preset ／ fork。未验收项：A 的 Web 端可见性、B 的真实 Web→Pairlet 端到端、C 在 `0.1.5-rc.1` 上的真实错误回包形态（fixture 用的是受测过的 `-32603` ／ `-32602` 形态，不是 0.1.5 实测回包）、活跃会话占用与两方向再切回。
 - daemon 更新、发布状态：未提交、未推送、未更新本机 daemon、未发布——按任务边界只在独立 worktree 内改动与自测。
 - 提交状态（2026-09-19 补记）：已提交到 main，提交 `24f5e734`；未推送、未部署、未发布。上文“未提交”指子任务实施当时的状态。
+
+## 2.1.1 发布补记（2026-09-19）
+
+部分修复已发布，继续跟进；[GitHub 状态回执](https://github.com/heypandax/pairlet/issues/388#issuecomment-5744962369) 已写回并核对。完整构建、生产部署和剩余验收范围见 [2.1.1 发布记录](RELEASE-2.1.1.md)。上文未推送／未发布等描述保留为当时的实施快照。
