@@ -65,6 +65,50 @@ duration_ms 必须筛选同类结果后再计算。平均操作耗时用总耗�
 
 留存配置已完成：纳入/返回分别为 first_value_observed/value_reached，每日、标准；通过事件细分同时限制 production、internal=0、schema IN (1,v1)、own/shared。自由表格的统一过滤器不会进入群组查询，不可仅写 unifiedFilters 就认为过滤生效；多条件应在界面显示“并且”，不能是“或”。实际正式群组无符合条件的样本，staging 首日有 1 个身份；未成熟日期不计算留存率。GA4 会将符合条件的用户分配到所有适用群组，且按设备身份计算，参见 [官方群组说明](https://support.google.com/analytics/answer/9670133?hl=en)。
 
+## 激活报表脚本（issue #342）
+
+`scripts/observability-ga4-activation.py` 是只读的 GA4 Data API 报表脚本，为 issue #342（海外用户激活：从「装了、看了」到迈出配对第一步）产出数据视角。它只调用 `runReport` 与 `metadata`，不写 GA4、不改埋点、不重试，也不把任何一行用户行为数据打到终端。
+
+### 用法
+
+```bash
+# 默认口径：production、非内部流量、schema IN ("1", "v1")，日期从 2026-09-07 到昨天
+python3 scripts/observability-ga4-activation.py --credentials ~/secrets/ga4-readonly.json
+
+# 海外切片（在统一过滤上追加 country != China），并显式指定日期范围
+python3 scripts/observability-ga4-activation.py --credentials ~/secrets/ga4-readonly.json \
+  --overseas --start 2026-09-07 --end 2026-09-16
+
+# 跑报表前先确认自定义维度是否已在 GA4 注册
+python3 scripts/observability-ga4-activation.py --credentials ~/secrets/ga4-readonly.json --list-dimensions
+```
+
+其他参数：`--property`（默认 `540841272`）、`--environment staging`（验收用，替换 `app_environment` 那一项）、`--include-internal`（去掉 `internal_traffic = 0`）、`--min-users`（样本门槛，默认 30）、`--out-dir`。
+
+### 凭据要求
+
+- 认证用 Google 服务账号 JSON，路径来自 `--credentials` 或环境变量 `GOOGLE_APPLICATION_CREDENTIALS`，scope 为 `https://www.googleapis.com/auth/analytics.readonly`；该服务账号需在 GA4 媒体资源上具备查看者权限。
+- **密钥文件必须在仓库之外**：脚本会 resolve 路径，落在仓库根目录之内就直接拒绝运行，理由是密钥不能进 Git。
+- 唯一的第三方依赖是 `google-auth`（只用来换取 access token），缺失时脚本提示 `pip install google-auth` 并以退出码 2 结束；HTTP 全部走标准库 `urllib.request`，超时 30 秒、响应上限 4MB、禁止重定向。
+- 请求失败时只打印 HTTP 状态码和响应里的 `error.status` 码，不打印服务器原文；HTTP 400 且响应提到 `customEvent:` 时，额外提示「某个自定义维度尚未在 GA4 注册」并列出脚本自己用到的维度名。
+
+### 产出与输出边界
+
+- 报表写到 `_local/observability/ga4-activation-<start>_<end>.md` 与同名 `.json`（`_local/` 已被忽略；`--out-dir` 若指向仓库内，必须在 `_local/` 之下）。`.json` 保留原始行与本次请求 body，便于复查。
+- 终端只打印：写到了哪两个文件、样本状态那一行、五张表各自的行数。用户行为数据只留内部渠道，不进终端记录，也不进 Git。
+- 五张表：激活漏斗总览（按漏斗顺序而非数量排序，并给出 `pair_started/onboarding_shown`、`paired/pair_started`、`value_reached/paired` 三个相邻步骤比例）、引导页操作拆分（`target` × `value`）、配对失败原因（`reason` × `app_platform`）、按国家的漏斗（前 15 个国家，其余合并为 `(others)`）、按平台的漏斗。
+
+### 口径限制
+
+- 日期范围按 GA4 媒体资源时区 UTC+08 解释；`--end` 默认取本机日期的昨天，本机时区较早时要核对实际发送日期，别把截断当成没有数据。
+- `totalUsers` 按参与采集的安装身份解释，不是去重真人；换设备或重装会是两个身份。比例是按安装身份的横向比值，不是同一安装在观察窗内的严格序列漏斗。
+- demo 分支与真实配对分开看：`demo_entered` 只说明进入了演示，不证明已配对或真实使用。
+- `pair_started` 未取得绑定角色时 `usage_mode` 未知，不猜成 own 或 shared；共享入口分支从 `paired` 起。
+- 既有安装的首次观测不是新安装，本脚本不区分安装时间。
+- 漏斗总览里 `onboarding_shown` 的 `totalUsers` 低于 `--min-users`（默认 30）时，报表顶部与每张表都会标「样本不足」，此时比例不能作为结论。
+- 按国家 / 按平台的宽表单元格是该步骤的 `totalUsers`；`(others)` 行把尾部国家的 `totalUsers` 相加，而 GA4 的用户指标不可跨行相加去重，该值是上界不是去重人数。
+- `onboarding_cta` 的 `value` 只在 `os_segment`、`install_method` 等少数 target 上有值，其余是 `(not set)`，脚本原样保留不做合并；出现未登记的 target 时会单列出来，需要回头核对埋点。
+
 ## 告警配置草案（未启用）
 
 Errors 先按项目/production/新 issue 合并，持续异常按稳定指纹和时间窗聚合，接收者待具体启用时记录。阈值在首个真实七天基线之后制定，不从合成 smoke 次数推导。relay 健康独立于 Sentry 采集健康；见 [RELEASE](RELEASE.md)。告警状态恢复须与故障触发一起验收。

@@ -139,15 +139,17 @@ class OperationTrace internal constructor(
     }
     fun retry() = lock.withLock { if (terminal == null) attempt = (attempt + 1).coerceAtMost(1000) }
 
+    /** [expected]: the operation could not complete because of the user's own environment (their computer is
+     *  off, …) — a result worth counting, never an issue that spends the error budget. */
     fun finish(outcome: Outcome, stage: Stage = Stage.COMPLETE, code: ErrorCode = ErrorCode.OK,
-               error: Throwable? = null, metrics: SafeMetrics = SafeMetrics()): String? {
+               error: Throwable? = null, metrics: SafeMetrics = SafeMetrics(), expected: Boolean = false): String? {
         val snapshot = lock.withLock {
             if (terminal != null) return@withLock null
             terminal = outcome
             reporter.traceSteps.snapshot(stepKey) to attempt
         } ?: return null
         return reporter.emit(path, stage, code, error, metrics,
-            if ((outcome == Outcome.FAILURE || outcome == Outcome.TIMEOUT) && code !in setOf(ErrorCode.REJECTED, ErrorCode.EXPIRED, ErrorCode.PERMISSION_DENIED, ErrorCode.CANCELLED, ErrorCode.SUPERSEDED, ErrorCode.NOT_FOUND, ErrorCode.SIZE_LIMIT)) DiagnosticKind.ERROR else DiagnosticKind.RESULT,
+            if (!expected && (outcome == Outcome.FAILURE || outcome == Outcome.TIMEOUT) && code !in setOf(ErrorCode.REJECTED, ErrorCode.EXPIRED, ErrorCode.PERMISSION_DENIED, ErrorCode.CANCELLED, ErrorCode.SUPERSEDED, ErrorCode.NOT_FOUND, ErrorCode.SIZE_LIMIT)) DiagnosticKind.ERROR else DiagnosticKind.RESULT,
             id, outcome, start.elapsedNow().inWholeMilliseconds, snapshot.second, snapshot.first, generation, spanId, parentSpanId)
     }
 

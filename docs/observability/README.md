@@ -46,6 +46,7 @@ Errors 和 Logs 都有 `diag_schema`、`diag_event_id`、`error_path`、`operati
 
 - `coverage=client_only` 当前表示**仅当前组件的观测**，daemon/relay 也使用该值；不表示可穿透 E2E 关联，也不表示已形成 Sentry 性能 spans。
 - 当前 `SessionLive` 结束的是打开确认阶段；`result_quality=unknown`，不能据此判断历史完整/界面已渲染。此前的连接超时与打开确认超时分别标记 CONNECT/ATTACH。
+- 连接（EP-03/EP-05）只把“在用户眼前真正失败的尝试”记为 issue：电脑离线是用户环境，记 `stage=wait`、`code=unavailable` 的结果而非错误；“连不上服务器”只是界面宽限，拨号仍在进行时不下结论，等该次尝试确实断开或被看门狗拆除才记 `stage=connect` 失败；relay 已标注连接但没有对端时的握手超时记 `EP-05:unavailable` 日志；App 在后台时的重试阶梯不报错。Android 取不到 FCM token 属覆盖限制，与 iOS 一样只记日志。依据见 2026-09 生产复盘：此前约 94% 的 `EP-03:unavailable` 恰好落在 2s/6s 两个界面定时器上。
 - 未知 Frame 类型作为 UNSUPPORTED 日志，已知消息结构损坏作为 DECODE_FAILED 错误；两者都不上传原始 JSON。
 - Prompt 迟迟没有回执记为 `stage=ack`；已收到回执但没有 turn 输出记为 `stage=execute`。已知正在排队的等待不报超时错误，两者都沿用业务现有截止时间，不改变重发规则。
 - 历史 JSONL 最后一行未写完作为 INCOMPLETE 日志；更早的损坏行、读失败以及部分扫描失败保留错误和 PARTIAL 计数。
