@@ -258,11 +258,10 @@ class WinTrayFlyoutTest {
     // ── 托盘右键（issue #322，纯决策） ──────────────────────────────────────────────────────
 
     @Test
-    fun leftClickOpensTheFlyoutEverywhereAndRightClickOnWindows() {
-        // #322 起初把 Windows 右键接到 AWT 原生 PopupMenu 上。那个菜单是 Win32 传统菜单：不跟随每显示器
-        // DPI（高分屏上小到看不清）、吃不到任何应用样式，中英文还落到度量不同的两套 fallback 字体上。
-        // 右键改走左键那扇自绘浮层，尺寸／样式／定位一次性都对。
-        assertTrue(trayOpensOn(true, MouseEvent.BUTTON1, TrayClickPhase.PRESSED))
+    fun windowsReservesTheFlyoutForRightClick() {
+        // Windows 左键激活主窗口，两个鼠标相位都不能打开浮层；其他平台仍保留左键菜单。
+        assertTrue(!trayOpensOn(true, MouseEvent.BUTTON1, TrayClickPhase.PRESSED))
+        assertTrue(!trayOpensOn(true, MouseEvent.BUTTON1, TrayClickPhase.RELEASED))
         assertTrue(trayOpensOn(false, MouseEvent.BUTTON1, TrayClickPhase.PRESSED))
         assertTrue(trayOpensOn(true, MouseEvent.BUTTON3, TrayClickPhase.RELEASED))
     }
@@ -280,7 +279,7 @@ class WinTrayFlyoutTest {
     fun eachButtonFiresInExactlyOnePhase() {
         // 两个相位不能重叠：toggle 有 350ms 去抖，同一次点击在按下和抬起各判一次的话，
         // 按住超过 350ms 的慢点击会被读成「开了又关」
-        assertTrue(!trayOpensOn(true, MouseEvent.BUTTON1, TrayClickPhase.RELEASED), "左键只在按下算数")
+        assertTrue(!trayOpensOn(false, MouseEvent.BUTTON1, TrayClickPhase.RELEASED), "非 Windows 左键只在按下打开浮层")
         assertTrue(!trayOpensOn(true, MouseEvent.BUTTON3, TrayClickPhase.PRESSED), "右键只在抬起算数")
     }
 

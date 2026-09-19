@@ -58,7 +58,8 @@ import org.jetbrains.skiko.currentSystemTheme
  * Compose [Window] packed to the popover's content, anchored under the click (macOS) or above it
  * (bottom taskbars), dismissed on focus loss / Esc; ⌘⏎ raises the main window. The popover renders the
  * SAME [TrayPopover] the title-bar dot shows in-window — one surface, promoted to the OS layer.
- * On Windows the RIGHT button opens that same flyout ([trayOpensOn]), plus a transparent flyout
+ * On Windows left click activates the existing main window; the RIGHT button opens the flyout
+ * ([trayOpensOn]), plus a transparent flyout
  * shell so the 8dp corners can actually read ([trayWindowChrome]) — both issue #322.
  *
  * Headless / unsupported trays (Linux without a tray, CI) compose to nothing, so every other platform
@@ -79,6 +80,7 @@ internal fun MenuBarExtra(
     }
     if (!supported) return
     val reportAvailability by rememberUpdatedState(onAvailabilityChanged)
+    val activateWindow by rememberUpdatedState(onActivateWindow)
 
     // ── five-state machine: snapshot fold + the time-boxed done-flash bit ──
     val snapshot = menuBarSnapshot(model)
@@ -105,6 +107,13 @@ internal fun MenuBarExtra(
     var anchor by remember { mutableStateOf<TrayAnchor?>(null) }
     var openedAt by remember { mutableStateOf(0L) }
     var closedAt by remember { mutableStateOf(0L) }
+    val activate: () -> Unit = {
+        appearancePing++
+        anchor = null
+        closedAt = System.currentTimeMillis()
+        model.showTray = false
+        activateWindow()
+    }
     // mousePressed AND actionPerformed can fire for one click depending on platform; and clicking the icon
     // while the popover is open steals its focus first (focus-loss closes it) — both debounce here so a
     // single click is a single toggle instead of a flicker.
@@ -125,7 +134,7 @@ internal fun MenuBarExtra(
             toolTip = "CC Pairlet"
         }
     }
-    DisposableEffect(Unit) {
+    DisposableEffect(isWindows) {
         // tray mouse/action events arrive on the AWT EDT — the same thread Compose Desktop composes on,
         // so writing the anchor state here is safe
         val mouse = object : java.awt.event.MouseAdapter() {
@@ -134,12 +143,22 @@ internal fun MenuBarExtra(
             }
 
             override fun mouseReleased(e: java.awt.event.MouseEvent) {
-                if (trayOpensOn(isWindows, e.button, TrayClickPhase.RELEASED)) toggle(e.xOnScreen, e.yOnScreen)
+                if (isWindows && e.button == java.awt.event.MouseEvent.BUTTON1) {
+                    activate()
+                } else if (trayOpensOn(isWindows, e.button, TrayClickPhase.RELEASED)) {
+                    toggle(e.xOnScreen, e.yOnScreen)
+                }
             }
         }
         val action = java.awt.event.ActionListener {
-            val p = java.awt.MouseInfo.getPointerInfo()?.location
-            toggle(p?.x ?: 0, p?.y ?: 0)
+            // Windows also emits this on double-click / keyboard activation. Never reopen the
+            // flyout after the mouse listener has activated the main window.
+            if (isWindows) {
+                activate()
+            } else {
+                val p = java.awt.MouseInfo.getPointerInfo()?.location
+                toggle(p?.x ?: 0, p?.y ?: 0)
+            }
         }
         trayIcon.addMouseListener(mouse)
         trayIcon.addActionListener(action)
@@ -303,20 +322,12 @@ internal enum class TrayClickPhase { PRESSED, RELEASED }
  * 托盘图标上的这一下该不该开浮层 —— **纯函数**，因为另一半（AWT 的鼠标事件）在 headless 下根本不来，
  * 测不了；把「哪个键、哪个相位算数」的决策搬到 AWT 之外，至少这一半是可断言的。
  *
- * 左键在所有平台都开，沿用按下即开。**右键只在 Windows 算数，且在抬起时**：Win32 的通知区惯例是
- * WM_RBUTTONUP 才弹菜单；另一个更硬的理由是 [toggle] 的 350ms 去抖——按下开、抬起再判一次的话，按住
- * 超过 350ms 的一次慢点击会被读成「开了又关」，分相就没有这个重叠。mac 菜单栏图标的右键由系统给
- * （等同左键那套）、Linux 各家托盘实现也自带右键语义，硬塞一层只会和系统抢，所以两个平台一律不接。
- *
- * issue #322 当初把 Windows 右键接到 AWT 原生 [java.awt.PopupMenu] 上，理由是「自绘的在多屏 + 任务栏
- * 靠侧边时必然错位，还得自己复刻点别处就关」。这条理由已被同一个文件里的左键推翻：左键开的就是自绘的
- * [WinTrayFlyout]，贴角锚定（[winFlyoutAnchor]）与失焦关闭都在正常工作，且锚点与光标位置无关，右键沿用
- * 同一套。而原生菜单的代价是实测拿不掉的——它是 Win32 传统菜单，不跟随每显示器 DPI 缩放（高分屏上小到
- * 看不清）、也吃不到任何应用样式，中英文还会落到度量不同的两套 fallback 字体上。所以右键改走和左键同
- * 一扇浮层：尺寸、样式、定位一次性都对，「打开 / 退出」两个出口在浮层页脚里原样都在。
+ * Windows 左键抬起激活现有主窗口，不开浮层；右键仍按 Win32 惯例在抬起时打开 [WinTrayFlyout]。
+ * macOS / Linux 保留左键按下即开的行为，右键交给系统。每个键只处理一个相位，避免一次慢点击
+ * 跨过 350ms 去抖间隔后把浮层开了又关。
  */
 internal fun trayOpensOn(isWindows: Boolean, button: Int, phase: TrayClickPhase): Boolean = when (phase) {
-    TrayClickPhase.PRESSED -> button == java.awt.event.MouseEvent.BUTTON1
+    TrayClickPhase.PRESSED -> !isWindows && button == java.awt.event.MouseEvent.BUTTON1
     TrayClickPhase.RELEASED -> isWindows && button == java.awt.event.MouseEvent.BUTTON3
 }
 
