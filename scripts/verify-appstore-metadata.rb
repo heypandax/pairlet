@@ -7,9 +7,14 @@ Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.create(
   filepath: File.join(ENV.fetch("RUNNER_TEMP"), "AuthKey.p8"),
 )
 app = Spaceship::ConnectAPI::App.find("com.panda.ccpocket") or abort("ASC app not found")
-version = app.get_edit_app_store_version(platform: "IOS") or abort("no editable iOS version")
-abort("unexpected editable version #{version.version_string}") unless version.version_string == ENV.fetch("VERSION")
-abort("expected manual release") unless version.release_type == "MANUAL"
+version = app.get_app_store_versions(filter: { platform: "IOS", versionString: ENV.fetch("VERSION") }, includes: nil).find { |item| item.version_string == ENV.fetch("VERSION") } or abort("target iOS version not found")
+expected_release = ENV.fetch("EXPECTED_RELEASE_TYPE", "MANUAL")
+abort("unexpected release type #{version.release_type}; expected #{expected_release}") unless version.release_type == expected_release
+if ENV["BUILD_NUMBER"]
+  build = version.get_build or abort("no build attached to target iOS version")
+  abort("unexpected attached build #{build.version}") unless build.version == ENV.fetch("BUILD_NUMBER")
+  puts("Attached build #{build.version} verified")
+end
 info = app.fetch_edit_app_info or abort("no editable app info")
 app_locales = info.get_app_info_localizations
 version_locales = version.get_app_store_version_localizations
@@ -42,4 +47,4 @@ if File.file?(notes)
   abort("ASC review notes differ from staged source") unless actual == File.read(notes).strip.gsub("\r\n", "\n")
   puts("Review notes match staged source")
 end
-puts("Version #{version.version_string}: manual release; text verified")
+puts("Version #{version.version_string}: #{version.app_store_state}; #{version.release_type}; text verified")
