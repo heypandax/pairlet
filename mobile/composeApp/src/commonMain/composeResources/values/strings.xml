@@ -353,6 +353,14 @@
     <string name="notifications_section">NOTIFICATIONS</string>
     <string name="notify_on_complete">Notify when a task finishes</string>
     <string name="notify_on_complete_sub">Wake your phone when Claude finishes a turn while the app is closed.</string>
+    <string name="notify_status_preparing">Setting up notifications…</string>
+    <string name="notify_status_failed">Notifications couldn't be set up yet.</string>
+    <string name="notify_status_retry">Retry</string>
+    <string name="notify_status_denied">System notifications are turned off.</string>
+    <string name="notify_status_open_settings">Open Settings</string>
+    <string name="notify_status_enabled">Notifications are on.</string>
+    <string name="notify_status_partial">Notifications are on for some computers.</string>
+    <string name="notify_status_unconfirmed">Notification status not confirmed yet.</string>
 
     <!-- ── approvals (issue #201) ────────────────────────────────── -->
     <string name="approvals_section">APPROVALS</string>
@@ -718,6 +726,8 @@
     <string name="questions_answered_many">Answered %1$d questions</string>
     <string name="questions_withdrawn">Claude moved on — answers no longer needed</string>
     <string name="questions_unanswered">Unanswered question — that turn ended without a reply</string>
+    <string name="questions_unanswered_expand">Expand</string>
+    <string name="questions_unanswered_collapse">Collapse</string>
     <string name="path_copy">Copy</string>
     <string name="path_open">Open in browser</string>
     <string name="path_copied">Copied</string>

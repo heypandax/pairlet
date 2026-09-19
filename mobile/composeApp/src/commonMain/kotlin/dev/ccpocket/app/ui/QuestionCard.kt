@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +44,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -488,14 +490,28 @@ private fun TinyChip(text: String, muted: Boolean = false) {
  * frame so it still reads as a question, but everything actionable is gone and the label says why — the
  * whole complaint in #321 was a question card you could see and not complete, with nothing explaining it.
  * Muted, not alarming: an unanswered question is a dead end, not an error.
+ *
+ * Readable, not just recognizable (issue #384): the three-line summary is the default, but a question
+ * longer than that gets an expand affordance so the whole text can be read and then folded away again.
  */
 @Composable
 fun QuestionsUnansweredRow(text: String) {
     val shape = RoundedCornerShape(12.dp)
+    // #384 state. Keyed on the transcript's EXISTING message identity, with nothing new on the wire or in
+    // the database: the chat list gives every row a stable lazy key ("m:<sourceKey>", ChatPresentation),
+    // and LazyColumn scopes rememberSaveable by that key — so an expansion survives scrolling the row out
+    // of view and can never be restored onto a different message. `text` as an input is the second guard:
+    // if a slot is ever recycled for another question, the new text re-initialises to collapsed.
+    var expanded by rememberSaveable(text) { mutableStateOf(false) }
+    // Whether the COLLAPSED layout actually had more to show. Measured from the real text layout — never
+    // estimated from a character count, which CJK, long paths and every window width would all get wrong.
+    var overflows by remember(text) { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().clip(shape).background(Tok.surface).border(1.dp, Tok.hair, shape)
             .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        // Expanded, the badge belongs at the label line: centring it against a wall of text would float it
+        // in the middle of the paragraph, detached from the line it labels.
+        verticalAlignment = if (expanded) Alignment.Top else Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         QBadge(22.dp)
@@ -504,13 +520,34 @@ fun QuestionsUnansweredRow(text: String) {
                 stringResource(Res.string.questions_unanswered), color = Tok.muted, fontSize = 11.5.sp,
                 style = tightCenter(11.5.sp),
             )
-            // Both Texts carry tightCenter, never just one: this Column is geometrically centred against
-            // the QBadge beside it, and a mixed row is the alignment trap CLAUDE.md's rule exists for.
+            // EVERY Text here carries tightCenter, never just one: this Column is geometrically centred
+            // against the QBadge beside it, and a mixed row is the alignment trap CLAUDE.md's rule exists for.
             if (text.isNotBlank()) {
                 Text(
-                    text, color = Tok.tx2, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    text, color = Tok.tx2, fontSize = 13.sp,
+                    maxLines = if (expanded) Int.MAX_VALUE else 3,
+                    overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
+                    // Only the collapsed layout can answer "is there more to read"; the expanded one never
+                    // overflows, so leave the flag alone there and keep the fold-back affordance reachable.
+                    onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow },
                     style = tightCenter(13.sp), modifier = Modifier.padding(top = 2.dp),
                 )
+                // No affordance for a question that already fits — a permanent "expand" on a one-liner is
+                // noise. The expanded row always keeps its way back.
+                if (expanded || overflows) {
+                    val label = stringResource(
+                        if (expanded) Res.string.questions_unanswered_collapse else Res.string.questions_unanswered_expand,
+                    )
+                    Text(
+                        label, color = Tok.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                        style = tightCenter(12.sp),
+                        modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(6.dp))
+                            // Role.Button + the label spell the action out for a screen reader, and the two
+                            // labels differ, so expand and collapse are never the same announcement.
+                            .clickable(onClickLabel = label, role = Role.Button) { expanded = !expanded }
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                    )
+                }
             }
         }
     }

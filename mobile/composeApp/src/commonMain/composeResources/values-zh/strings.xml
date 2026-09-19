@@ -353,6 +353,14 @@
     <string name="notifications_section">通知</string>
     <string name="notify_on_complete">任务完成时通知</string>
     <string name="notify_on_complete_sub">应用关闭时，Claude 完成一轮回复就唤醒手机。</string>
+    <string name="notify_status_preparing">正在准备通知</string>
+    <string name="notify_status_failed">通知暂时无法完成设置</string>
+    <string name="notify_status_retry">重试</string>
+    <string name="notify_status_denied">系统通知未开启</string>
+    <string name="notify_status_open_settings">前往设置</string>
+    <string name="notify_status_enabled">通知已启用</string>
+    <string name="notify_status_partial">部分电脑的通知已启用</string>
+    <string name="notify_status_unconfirmed">通知状态尚未确认</string>
 
     <!-- ── 审批（issue #201） ────────────────────────────────────── -->
     <string name="approvals_section">审批</string>
@@ -718,6 +726,8 @@
     <string name="questions_answered_many">回答了 %1$d 个问题</string>
     <string name="questions_withdrawn">Claude 已继续，无需再回答</string>
     <string name="questions_unanswered">未作答的提问——该回合已结束，没有收到回答</string>
+    <string name="questions_unanswered_expand">展开</string>
+    <string name="questions_unanswered_collapse">收起</string>
     <string name="path_copy">复制</string>
     <string name="path_open">在浏览器打开</string>
     <string name="path_copied">已复制</string>
