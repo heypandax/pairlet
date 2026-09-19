@@ -127,6 +127,17 @@ class DshBackend(
 
     @Volatile private var sessionId: String? = null
 
+    /**
+     * Why this session will never open, once a startup stage has answered with an error (issue #388).
+     *
+     * Set by [failStartup], cleared by [attach]. It carries three duties: it stops [watchHandshake] from
+     * volunteering a second, WRONG diagnosis over a stage that already reported a real one; it settles
+     * prompts that arrive AFTER the failure, which would otherwise queue behind a gate that can no longer
+     * open; and it is the record that this process is done trying — nothing here retries a stage or opens
+     * a replacement session, because a resume that failed must stay the session the user asked for.
+     */
+    @Volatile private var openFailure: String? = null
+
     /** `agentCapabilities.promptCapabilities.image` off THIS process's `initialize` answer — only an explicit
      *  `true` counts (see "Images" above). */
     @Volatile private var imagePrompts = false
@@ -220,6 +231,7 @@ class DshBackend(
         // reset per-process protocol state (runs on EVERY (re)launch)
         sessionId = null
         promptGate = false
+        openFailure = null
         imagePrompts = false
         options = DshConfigOptions.EMPTY
         catalog.unpublish(this)
@@ -246,12 +258,15 @@ class DshBackend(
      */
     private suspend fun watchHandshake() {
         repeat(HANDSHAKE_POLLS) {
-            if (sessionId != null || initializeId < 0) return
+            if (sessionId != null || initializeId < 0 || openFailure != null) return
             delay(HANDSHAKE_POLL_MS)
             if (sessionOpenId >= 0) return // the handshake got as far as opening a session; errors ride the wire
+            // A stage that answered with an error already told the user WHICH stage and why (issue #388);
+            // "your dsh is too old" on top of that would be a second, contradicting diagnosis.
+            if (openFailure != null) return
         }
-        if (sessionOpenId < 0 && sessionId == null) {
-            io?.inject?.invoke(syntheticError(DshLauncher.outdatedHint()))
+        if (sessionOpenId < 0 && sessionId == null && openFailure == null) {
+            injectStartupFailure(STAGE_HANDSHAKE, DshLauncher.outdatedHint())
         }
     }
 
@@ -313,18 +328,100 @@ class DshBackend(
 
     private suspend fun handleErrorResponse(idEl: JsonElement?, error: JsonObject?): List<AgentEvent> {
         val id = (idEl as? JsonPrimitive)?.longOrNull
-        val why = error?.str("message") ?: "the DeepSeek Harness rejected the request"
+        val why = describeError(error)
         configIds.remove(id ?: -1)?.let { return onConfigFailed(it, why) }
+        // issue #388: the two startup stages, told apart. `initialize` failing used to fall through to the
+        // log line below — invisible on the wire, after which the handshake watchdog blamed the dsh version
+        // 30s later. And a failed session open reported itself but left the opening prompt queued behind a
+        // gate that could never open, so the conversation showed "Internal error" and then a turn that never
+        // settled (and that every relaunch re-ran).
+        if (id != null && id == initializeId) return failStartup(STAGE_HANDSHAKE, why)
         if (id != null && id == sessionOpenId) {
-            return listOf(
-                AgentEvent.AssistantText("⚠️ could not start a DeepSeek Harness session: $why"),
-                AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
-            )
+            return failStartup(if (resumeId != null) STAGE_RESUME else STAGE_NEW, why)
         }
         val consumed = id?.let { promptIds.remove(it) }
         if (consumed != null) return failedPrompt(consumed, why)
         log.warn("dsh error response id=$id: $why")
         return emptyList()
+    }
+
+    /**
+     * A JSON-RPC error object → one line a user can act on.
+     *
+     * `message` alone is routinely `Internal error` (the JSON-RPC text for -32603), which names neither the
+     * cause nor the stage; dsh puts the real reason in `data`. So the code and a BOUNDED, single-line
+     * summary of `data` ride along — bounded because `data` can carry a whole stack, and this string is
+     * shown in a chat.
+     */
+    private fun describeError(error: JsonObject?): String {
+        val message = error?.str("message")?.takeIf { it.isNotBlank() }
+            ?: "the DeepSeek Harness rejected the request"
+        val code = error?.long("code")
+        val data = error?.get("data")?.takeIf { it !is JsonNull }?.let { detail ->
+            val text = (detail as? JsonPrimitive)?.contentOrNull
+                ?: (detail as? JsonObject)?.let { o -> o.str("message") ?: o.str("details") ?: o.toString() }
+                ?: detail.toString()
+            text.replace(Regex("\\s+"), " ").trim().takeIf { it.isNotBlank() && it != message }
+        }
+        return buildString {
+            append(message)
+            if (code != null) append(" (code $code)")
+            if (data != null) append(": ").append(data.take(MAX_ERROR_DETAIL_CHARS))
+        }
+    }
+
+    /**
+     * A startup stage answered with an error, so this session will never open (issue #388).
+     *
+     * Names the STAGE — "Internal error" on its own leaves a user unable to tell a too-old dsh from a
+     * session that no longer exists from a prompt that was refused — and gives every message that was
+     * waiting on the session a TERMINAL state. That second half is not cosmetic: an unsettled prompt keeps
+     * its entry in the Conversation's unconsumed-prompt ledger, so it is re-injected on the next relaunch
+     * and the failure loops (the same hazard [failedPrompt] exists for).
+     *
+     * What it deliberately does NOT do: retry the stage, or open a replacement session. A resume that
+     * failed must stay the session the user asked for, and no other conversation's state is touched.
+     */
+    private suspend fun failStartup(stage: String, why: String): List<AgentEvent> {
+        val message = "$stage: $why"
+        openFailure = message
+        log.warn("dsh startup failed — $message")
+        val stranded = drainWaitingPrompts()
+        return if (stranded.isEmpty()) {
+            listOf(
+                AgentEvent.AssistantText("⚠️ $message"),
+                AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
+            )
+        } else {
+            stranded.flatMap { errorTurn(it.text, message) }
+        }
+    }
+
+    /** [failStartup] for callers that are NOT on the parse pump (the handshake watchdog): the same
+     *  settlement, delivered through [AgentIo.inject] because only the pump may return events. */
+    private suspend fun injectStartupFailure(stage: String, why: String) {
+        val message = "$stage: $why"
+        openFailure = message
+        log.warn("dsh startup failed — $message")
+        val stranded = drainWaitingPrompts()
+        if (stranded.isEmpty()) {
+            io?.inject?.invoke(syntheticError(message))
+            return
+        }
+        // Each waiting prompt settles exactly like a refused one: reserve its id, then let the pump turn the
+        // refusal into its error turn (UserReplay included, so the ledger entry goes away).
+        for (prompt in stranded) {
+            val id = bootstrap.withLock { reservePrompt(prompt.text) }
+            io?.inject?.invoke(syntheticRefusal(id, message))
+        }
+    }
+
+    /** Everything queued on a session that will never take it, removed in arrival order. */
+    private suspend fun drainWaitingPrompts(): List<Prompt> = bootstrap.withLock {
+        val waiting = pendingPrompts.toList() + promptQueue.toList()
+        pendingPrompts.clear()
+        promptQueue.clear()
+        waiting
     }
 
     /** A failed prompt was still CONSUMED — its failure surfaces right here as an error turn. Left unsettled,
@@ -363,10 +460,10 @@ class DshBackend(
      * blank until the session happened to answer once.
      */
     private suspend fun onSessionOpened(result: JsonObject?): List<AgentEvent> {
-        val sid = result?.str("sessionId") ?: resumeId ?: run {
-            io?.inject?.invoke(syntheticError("dsh did not return a session id"))
-            return emptyList()
-        }
+        val sid = result?.str("sessionId") ?: resumeId
+            // A `session/new` that answers without an id is a success frame for a session nobody can address:
+            // the same dead end as an error response, settled the same way rather than left to the watchdog.
+            ?: return failStartup(STAGE_NEW, "dsh did not return a session id")
         // Only a successful fresh creation needs this notice. Keeping the pre-assignment state also
         // avoids repeating it if the same session/new response is delivered twice.
         val showGroupingNotice = resumeId == null && sessionId == null
@@ -491,6 +588,14 @@ class DshBackend(
 
     override suspend fun sendPrompt(text: String, images: List<ImageData>) {
         val prompt = Prompt(text, images)
+        // The session already failed to open (issue #388): buffering this would park it behind a gate that
+        // can never open — no terminal state, and a re-run on the next relaunch. Settle it instead, with the
+        // stage error that explains why, exactly like a refused prompt.
+        openFailure?.let { why ->
+            val id = bootstrap.withLock { reservePrompt(text) }
+            io?.inject?.invoke(syntheticRefusal(id, why))
+            return
+        }
         val reserved = bootstrap.withLock {
             when {
                 sessionId == null || !promptGate -> { pendingPrompts.addLast(prompt); null }
@@ -897,6 +1002,19 @@ class DshBackend(
         /** ACP creates with cwd metadata only; no preset is selected or written by Pairlet (#376). */
         const val UNGROUPED_NOTICE = "This session appears under Ungrouped in DSH Web. " +
             "To use a preset group, create the session in DSH Web, then continue it from Pairlet history."
+
+        /**
+         * The startup stages a failure can land in (issue #388). Each opening is a DIFFERENT thing for the
+         * user to do — reinstall dsh, pick another session, or just try again — which is precisely what a
+         * bare "Internal error" (and the "turn failed" that used to follow it) never said.
+         */
+        const val STAGE_HANDSHAKE = "the DeepSeek Harness never completed its handshake"
+        const val STAGE_NEW = "could not start a DeepSeek Harness session"
+        const val STAGE_RESUME = "could not resume this DeepSeek Harness session — " +
+            "it was not reopened, and nothing was sent to a different one"
+
+        /** `error.data` is summarized, not quoted whole: it can carry a full stack, and this lands in a chat. */
+        const val MAX_ERROR_DETAIL_CHARS = 300
 
         /** Namespaced so they can never collide with a real dsh frame. */
         const val SYNTHETIC_ERROR = "cc-pocket/dsh-error"

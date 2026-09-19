@@ -496,6 +496,112 @@ class DshBackendAcpTest {
         assertEquals(blocks("again", JPEG), contentOf(prompts(w).last()))
     }
 
+    // ---- issue #388 (C): a startup failure names its stage and settles what was waiting on it ----
+
+    /**
+     * The reported sequence — `Internal error`, then a turn that never finished. The error answered
+     * `session/new`, and the opening prompt stayed parked behind a gate that could no longer open: no
+     * terminal state for the user, and a re-run on the next relaunch (the ledger of issue #122).
+     */
+    @Test
+    fun `a failed session creation names the stage and settles the waiting prompt`() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = DshBackend(null)
+        b.attach(AgentIo(writeLine = { w += it }, emit = {}), AgentSpec(Path.of("/repo"), mode = PermissionMode.DEFAULT))
+        b.sendPrompt("first message", emptyList())
+        b.parse("""{"jsonrpc":"2.0","id":1,"result":$NO_CAPABILITIES}""")
+        val events = b.parse(
+            """{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"Internal error",""" +
+                """"data":{"message":"agent store unavailable"}}}""",
+        )
+        assertEquals("first message", events.filterIsInstance<AgentEvent.UserReplay>().single().text)
+        val text = assertIs<AgentEvent.AssistantText>(events[1]).text
+        assertTrue("could not start a DeepSeek Harness session" in text, text)
+        assertTrue("code -32603" in text, "the bare JSON-RPC message names no cause: $text")
+        assertTrue("agent store unavailable" in text, "error.data carries the real reason: $text")
+        assertTrue(events.filterIsInstance<AgentEvent.TurnResult>().single().isError)
+        assertTrue(prompts(w).isEmpty(), "nothing is sent to a session that never opened")
+    }
+
+    /** A resume that failed stays the session the user asked for — no replacement minted behind their back. */
+    @Test
+    fun `a failed resume names the resume stage and opens no replacement session`() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = DshBackend(null)
+        b.attach(
+            AgentIo(writeLine = { w += it }, emit = {}),
+            AgentSpec(Path.of("/repo"), resumeId = "session-4021805e", mode = PermissionMode.DEFAULT),
+        )
+        b.sendPrompt("carry on", emptyList())
+        b.parse("""{"jsonrpc":"2.0","id":1,"result":$NO_CAPABILITIES}""")
+        val events = b.parse("""{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"no such session"}}""")
+        assertEquals("carry on", events.filterIsInstance<AgentEvent.UserReplay>().single().text)
+        val text = assertIs<AgentEvent.AssistantText>(events[1]).text
+        assertTrue("could not resume this DeepSeek Harness session" in text, text)
+        assertTrue(events.filterIsInstance<AgentEvent.TurnResult>().single().isError)
+        assertTrue(w.none { """"method":"session/new"""" in it }, "a failed resume must not mint a replacement")
+    }
+
+    /**
+     * An `initialize` error used to fall through to a log line — nothing on the wire — after which the
+     * handshake watchdog blamed the dsh version, a diagnosis the error itself contradicts.
+     */
+    @Test
+    fun `an initialize error reports the handshake stage instead of blaming the dsh version`() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = DshBackend(null)
+        b.attach(AgentIo(writeLine = { w += it }, emit = {}), AgentSpec(Path.of("/repo"), mode = PermissionMode.DEFAULT))
+        val events = b.parse("""{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"Internal error"}}""")
+        val text = assertIs<AgentEvent.AssistantText>(events.first()).text
+        assertTrue("never completed its handshake" in text, text)
+        assertTrue("Internal error" in text && "code -32603" in text, text)
+        assertTrue("acp` profile" !in text, "the version hint is for a handshake that never ANSWERED: $text")
+        assertTrue(events.filterIsInstance<AgentEvent.TurnResult>().single().isError)
+        assertTrue(
+            w.none { """"method":"session/new"""" in it || """"method":"session/resume"""" in it },
+            "a dead handshake opens nothing",
+        )
+    }
+
+    /** After the failure nothing can open the gate, so a later message settles rather than waiting forever. */
+    @Test
+    fun `a prompt sent after a failed startup settles instead of waiting for a gate that cannot open`() =
+        runBlocking {
+            val w = mutableListOf<String>()
+            val injected = mutableListOf<String>()
+            val b = DshBackend(null)
+            b.attach(
+                AgentIo(writeLine = { w += it }, emit = {}, inject = { injected += it }),
+                AgentSpec(Path.of("/repo"), mode = PermissionMode.DEFAULT),
+            )
+            b.parse("""{"jsonrpc":"2.0","id":1,"result":$NO_CAPABILITIES}""")
+            b.parse("""{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"Internal error"}}""")
+            b.sendPrompt("anyone there?", emptyList())
+            val events = b.parse(injected.single())
+            assertEquals("anyone there?", assertIs<AgentEvent.UserReplay>(events[0]).text)
+            assertTrue("could not start a DeepSeek Harness session" in assertIs<AgentEvent.AssistantText>(events[1]).text)
+            assertTrue(assertIs<AgentEvent.TurnResult>(events[2]).isError)
+            assertTrue(prompts(w).isEmpty())
+        }
+
+    /** A relaunch is a fresh process: the dead one's failure must not refuse the new one's prompts. */
+    @Test
+    fun `a relaunch clears the previous process's startup failure`() = runBlocking {
+        val w = mutableListOf<String>()
+        val injected = mutableListOf<String>()
+        val b = DshBackend(null)
+        b.attach(
+            AgentIo(writeLine = { w += it }, emit = {}, inject = { injected += it }),
+            AgentSpec(Path.of("/repo"), mode = PermissionMode.DEFAULT),
+        )
+        b.parse("""{"jsonrpc":"2.0","id":1,"result":$NO_CAPABILITIES}""")
+        b.parse("""{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"Internal error"}}""")
+
+        reattach(b, w, injected, initialize = NO_CAPABILITIES)
+        b.sendPrompt("try again", emptyList())
+        assertEquals(blocks("try again"), contentOf(prompts(w).single()), "the new process takes prompts normally")
+    }
+
     private companion object {
         const val SESSION = "744ff28d-161c-4186-9f61-82e1de14e6fe"
 

@@ -135,6 +135,28 @@ class DshTranscriptScannerTest {
         assertNull(DshTranscriptScanner.find("session-missing", "/work/alpha", root))
     }
 
+    /**
+     * issue #388 (B), Web→Pairlet. A session DSH Web created carries the Web's OWN id shape
+     * (`session-<uuid>`; the ACP profile mints bare UUIDs) and can sit under a cwd with spaces and CJK —
+     * the two spellings that the lossy `--…--` directory key mangles. Discovery must still find it by its
+     * recorded cwd and locate it by that exact id, with or without a hint, because taking a Web session
+     * over is nothing more than resuming THAT id.
+     */
+    @Test
+    fun a_web_created_session_is_discovered_by_its_own_id_and_cwd() {
+        val root = store()
+        val cwd = "/Users/panda/我的 项目/mind"
+        val webId = "session-4021805e-4e75-406c-9f61-bc527e206ee8"
+        session(root, cwd, webId, events = userMsg("web turn", 1))
+        session(root, cwd, "a5adb58c-9cba-4633-a59d-65683cef66e5", events = userMsg("acp turn", 1))
+
+        val rows = DshTranscriptScanner.scan(cwd, root)
+        assertEquals(setOf(webId, "a5adb58c-9cba-4633-a59d-65683cef66e5"), rows.map { it.sessionId }.toSet())
+        assertEquals(cwd, rows.first { it.sessionId == webId }.cwd, "the header's cwd, verbatim")
+        assertEquals(webId, assertNotNull(DshTranscriptScanner.find(webId, cwd, root)).header.id)
+        assertEquals(webId, assertNotNull(DshTranscriptScanner.find(webId, null, root)).header.id)
+    }
+
     @Test
     fun an_absent_store_lists_nothing_rather_than_throwing() {
         val missing = store().resolve("never-created")
