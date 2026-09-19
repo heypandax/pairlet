@@ -32,11 +32,14 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import dev.ccpocket.app.push.PushUiStatus
+import dev.ccpocket.app.theme.tightCenter
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -370,6 +373,7 @@ private fun GeneralPage(repo: PocketRepository) {
         checked = repo.notificationsOn.value,
         onChange = { repo.setNotificationsEnabled(it) },
     )
+    PushStatusRow(repo)
 
     // Only shown where a native dictation engine exists to choose against (iOS) — elsewhere
     // whisper is already the only voice path and the toggle would be a no-op.
@@ -1324,6 +1328,51 @@ private fun ToggleRow(label: String, sub: String, checked: Boolean, onChange: (B
             Switch(checked = checked, onCheckedChange = onChange)
         }
         Hairline()
+    }
+}
+
+/**
+ * Whether notifications are actually WORKING, under the toggle that claims they are.
+ *
+ * The switch alone used to be the entire truth: it said "on" the moment the preference was written,
+ * regardless of whether the relay ever stored a token. This row reports the coordinator's real state,
+ * and — for the two states a person can do something about — offers the one action that helps.
+ */
+@Composable
+private fun PushStatusRow(repo: PocketRepository) {
+    val status by repo.pushStatus.collectAsState()
+    if (status == PushUiStatus.OFF) return // the switch already says everything there is to say
+    val text = when (status) {
+        PushUiStatus.PREPARING -> stringResource(Res.string.notify_status_preparing)
+        PushUiStatus.FAILED -> stringResource(Res.string.notify_status_failed)
+        PushUiStatus.DENIED, PushUiStatus.NEEDS_PERMISSION -> stringResource(Res.string.notify_status_denied)
+        PushUiStatus.ENABLED -> stringResource(Res.string.notify_status_enabled)
+        PushUiStatus.PARTIAL -> stringResource(Res.string.notify_status_partial)
+        PushUiStatus.UNCONFIRMED_LEGACY -> stringResource(Res.string.notify_status_unconfirmed)
+        PushUiStatus.OFF -> return
+    }
+    val action = when (status) {
+        PushUiStatus.FAILED -> stringResource(Res.string.notify_status_retry) to { repo.retryPushRegistration() }
+        PushUiStatus.DENIED, PushUiStatus.NEEDS_PERMISSION ->
+            stringResource(Res.string.notify_status_open_settings) to { repo.openNotificationSettings() }
+        else -> null
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // tightCenter on BOTH: the status line sits beside a tappable action of a different weight, and
+        // a bare fontSize centers the LINE BOX, not the glyphs (see AGENTS.md / TightText.kt)
+        Text(
+            text, color = if (status == PushUiStatus.ENABLED) Tok.muted else Tok.tx2,
+            fontSize = 11.5.sp, style = tightCenter(11.5.sp), modifier = Modifier.weight(1f),
+        )
+        action?.let { (label, onClick) ->
+            Text(
+                label, color = Tok.accent, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
+                modifier = Modifier.clickable(onClick = onClick).padding(horizontal = 6.dp, vertical = 4.dp),
+            )
+        }
     }
 }
 

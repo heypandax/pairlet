@@ -13,8 +13,10 @@ import dev.ccpocket.protocol.DeviceHello
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.NotifyPush
 import dev.ccpocket.protocol.PROTO_V_HEADLESS
-import dev.ccpocket.protocol.PROTO_V_TARGETED_PUSH
 import dev.ccpocket.protocol.PROTO_V_ATTACH_REPLAY_COMPLETE
+import dev.ccpocket.protocol.PROTO_V_PUSH_ACK
+import dev.ccpocket.protocol.PushRegistrationOutcome
+import dev.ccpocket.protocol.PushRegistrationResult
 import dev.ccpocket.protocol.PairBegin
 import dev.ccpocket.protocol.PairCodePayload
 import dev.ccpocket.protocol.PairCodeResolve
@@ -349,15 +351,51 @@ class RelayServer(
     internal suspend fun handleDeviceControl(conn: Conn, text: String) {
         val deviceId = conn.deviceId ?: return
         when (val body = runCatching { PocketJson.decodeFromString<Envelope>(text).body }.getOrNull()) {
-            is RegisterPush -> if (store.getDevice(deviceId)?.mayRegisterPush == true) {
-                runCatching { store.setPushToken(deviceId, body.platform, body.token, clock()) }
-            }
+            is RegisterPush -> onRegisterPush(conn, deviceId, body)
             // app-level liveness echo on THIS socket only (mirrors the daemon leg's Ping handling). Clients
             // with no protocol-layer ping (HarmonyOS webSocket API) drive pocket/ping→pocket/pong themselves
             // and drop the link on a missed pong — without the echo they loop-reconnect every ~30s.
             is Ping -> runCatching { conn.sendText(controlText(Pong(body.ts))) }
             else -> {}
         }
+    }
+
+    /** Store the token and — only when the request opted in with a [RegisterPush.requestId] — answer with
+     *  the verdict ([PROTO_V_PUSH_ACK]).
+     *
+     *  Why a receipt at all: the old path was `runCatching { setPushToken(...) }` with the result thrown
+     *  away, so a device that could not be stored (row pruned, storage raised) still counted itself
+     *  registered and went silent forever. The identity is taken from the AUTHENTICATED socket
+     *  ([Conn.deviceId]) and never from the frame, exactly as before.
+     *
+     *  [PushRegistrationResult.code] stays inside the closed vocabulary the protocol documents — a client
+     *  cannot act on more than that, and anything richer would leak storage internals (or the token) to a
+     *  peer that is only entitled to "did it land". A request WITHOUT a requestId behaves exactly as it
+     *  did before this version: store, say nothing. */
+    private suspend fun onRegisterPush(conn: Conn, deviceId: String, body: RegisterPush) {
+        var code: String? = null
+        val outcome = when {
+            body.platform.isBlank() || body.token.length > MAX_PUSH_TOKEN_CHARS -> {
+                code = "bad_request"; PushRegistrationOutcome.REJECTED
+            }
+            store.getDevice(deviceId)?.mayRegisterPush != true -> {
+                code = "forbidden"; PushRegistrationOutcome.REJECTED
+            }
+            else -> runCatching { store.setPushToken(deviceId, body.platform, body.token, clock()) }.fold(
+                onSuccess = { stored ->
+                    when {
+                        !stored -> { code = "no_device"; PushRegistrationOutcome.FAILED }
+                        body.token.isBlank() -> PushRegistrationOutcome.CLEARED
+                        else -> PushRegistrationOutcome.STORED
+                    }
+                },
+                // the exception itself never crosses the wire: the client can only retry, and the detail
+                // belongs in the relay's own log
+                onFailure = { code = "store_failed"; PushRegistrationOutcome.FAILED },
+            )
+        }
+        val requestId = body.requestId ?: return
+        runCatching { conn.sendText(controlText(PushRegistrationResult(requestId, outcome, code))) }
     }
 
     // ---- device socket: bearer-credential login, then opaque BINARY ----
@@ -400,7 +438,7 @@ class RelayServer(
         }
         val peerId = broker.daemonConn(account)?.diagnosticId
         Diagnostics.connection(conn.diagnosticId, peerId)
-        sendControl(Attached(Role.DEVICE, account, relayProtoV = PROTO_V_TARGETED_PUSH, connectionId = DiagnosticId(conn.diagnosticId), peerConnectionId = peerId?.let(::DiagnosticId)))
+        sendControl(Attached(Role.DEVICE, account, relayProtoV = PROTO_V_PUSH_ACK, connectionId = DiagnosticId(conn.diagnosticId), peerConnectionId = peerId?.let(::DiagnosticId)))
         if (!headless) broker.controlToDaemon(account, controlText(PeerPresence(true, DiagnosticId(conn.diagnosticId))))
         try {
             for (frame in incoming) when (frame) {
@@ -518,5 +556,9 @@ class RelayServer(
         // §3.4: ceiling on how often ONE device may be woken by a targeted push. A real workflow rings a
         // contact a handful of times a day; this only bites a daemon looping the frame.
         const val MAX_TARGETED_PUSH_PER_HOUR = 20
+        // an APNs token is 64 hex chars and an FCM one a few hundred; 4096 is far above any real vendor
+        // token and exists so a malformed/hostile registration is refused ("bad_request") instead of
+        // being written into the devices row
+        const val MAX_PUSH_TOKEN_CHARS = 4096
     }
 }

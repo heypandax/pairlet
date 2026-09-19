@@ -14,6 +14,7 @@ import dev.ccpocket.protocol.AuthError
 import dev.ccpocket.protocol.DeviceHello
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.PeerPresence
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.Route
 import dev.ccpocket.protocol.SyncProjectPins
@@ -26,6 +27,7 @@ import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.websocket.readText
 import kotlin.concurrent.Volatile // commonMain: JVM resolves kotlin.jvm.Volatile implicitly, Kotlin/Native (iOS) does not
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -55,7 +57,7 @@ class RelayE2EConnection {
     private val outbox = ScopedOutbox()
     // relay control-plane (TEXT) frames the device originates — e.g. RegisterPush. Buffered across
     // reconnects like [outbox]; the per-connection writer drains it once a socket is live.
-    private val controlOutbox = Channel<dev.ccpocket.protocol.ToRelay>(Channel.BUFFERED)
+    private val controlOutbox = Channel<ControlSend>(Channel.BUFFERED)
     val inbound = MutableSharedFlow<Frame>(extraBufferCapacity = 128)
     /** Relay control-plane frames (Attached, AuthError, PeerPresence) — NOT E2E daemon traffic. The
      *  repository reads this to drive an honest connection state (e.g. "computer offline"). */
@@ -67,6 +69,16 @@ class RelayE2EConnection {
      *  (startListWait) into the middle of a passively-observed turn. */
     val deaf = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private var nextId = 0L
+
+    /** A queued control frame, plus the caller's optional "did this really reach a socket?" receipt.
+     *  Without the receipt a caller can only know the frame was ENQUEUED — which is how a push token
+     *  could sit in this buffer across a dead link while the app counted itself registered. */
+    private class ControlSend(val frame: dev.ccpocket.protocol.ToRelay, val written: CompletableDeferred<Boolean>? = null)
+
+    /** The relay's announced capability level from [Attached.relayProtoV] (null until attached, 0 for a
+     *  relay that predates the announcement). Read to decide whether a receipt is worth waiting for. */
+    @Volatile var attachedProtoV: Int? = null
+        private set
 
     // Connection GENERATION (issue #142): bumped once per connect() call. The repo serializes connects
     // (cancel + bounded join of the previous socket before dialing), but a wedged close can outlive that
@@ -92,18 +104,22 @@ class RelayE2EConnection {
             // handshake would otherwise hang forever with no guard. Rethrown as DeadLinkException because a
             // TimeoutCancellationException IS a CancellationException, which the repo reads as intentional
             // teardown and would swallow without reconnecting.
+            // sticky: the computer was offline at some point of this wait, so nobody could answer the handshake
+            var peerWasOffline = false
             val session = try {
                 withTimeout(HANDSHAKE_TIMEOUT_MS) {
                     outgoing.send(WsFrame.Text(control(DeviceHello(paired.deviceId, paired.credential))))
-                    awaitAttached()
+                    peerWasOffline = peerOfflineAtAttach(awaitAttached())
                     val psk = (firstTicket ?: "").encodeToByteArray()
                     val init = E2ESession.initiator(keys.privateRaw, keys.publicRaw, B64Url.decode(paired.daemonPub), psk)
                     outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.HANDSHAKE, init.ephPublic)))
-                    awaitHandshake(init)
+                    awaitHandshake(init) { online -> if (!online) peerWasOffline = true }
                 }
             } catch (e: TimeoutCancellationException) {
+                // An offline computer is the user's environment, not a handshake fault: the relay had no
+                // daemon to hand our HANDSHAKE to. Only a silent wait with the daemon present is an error.
                 if (gen == connSeq) Diagnostics.report(ErrorPath.HANDSHAKE, DiagnosticStage.HANDSHAKE,
-                    ErrorCode.TIMEOUT, isError = true)
+                    if (peerWasOffline) ErrorCode.UNAVAILABLE else ErrorCode.TIMEOUT, isError = !peerWasOffline)
                 throw DeadLinkException()
             }
             // superseded while handshaking — a newer connect() owns the outboxes now; die before touching them (#142)
@@ -138,9 +154,27 @@ class RelayE2EConnection {
             }
             // control frames (e.g. RegisterPush) ride the TEXT plane in the clear — the relay parses these
             val ctrlWriter = launch {
-                for (c in controlOutbox) {
-                    if (gen != connSeq) { controlOutbox.send(c); throw DeadLinkException() } // same fencing as the data writer (#142)
-                    sendOrDie { outgoing.send(WsFrame.Text(control(c))) }
+                var inFlight: ControlSend? = null
+                try {
+                    for (c in controlOutbox) {
+                        // same fencing as the data writer (#142) — the receipt rides back into the queue
+                        // with its frame, so a superseded connection never strands the caller
+                        if (gen != connSeq) { controlOutbox.send(c); throw DeadLinkException() }
+                        inFlight = c
+                        try {
+                            sendOrDie { outgoing.send(WsFrame.Text(control(c.frame))) }
+                        } catch (e: Throwable) {
+                            // the frame was TAKEN from the queue and then lost: the old code dropped it
+                            // silently here, which is exactly the "queued means registered" lie
+                            c.written?.complete(false)
+                            inFlight = null
+                            throw e
+                        }
+                        c.written?.complete(true)
+                        inFlight = null
+                    }
+                } finally {
+                    inFlight?.written?.complete(false) // cancelled mid-send (link teardown)
                 }
             }
             // Heartbeat (see LinkHealth.launchHeartbeat): an idle-link WS ping under sendOrDie, so a wedged socket
@@ -193,24 +227,39 @@ class RelayE2EConnection {
      *  never returned: they belong to the connection they were queued for (#362). */
     fun drainPending(): List<Frame> = outbox.drainOrdinary()
 
-    /** Send a relay control-plane frame (e.g. RegisterPush) on the TEXT plane. Buffers until connected. */
-    suspend fun sendControl(frame: dev.ccpocket.protocol.ToRelay) = controlOutbox.send(frame)
+    /** Send a relay control-plane frame (e.g. RegisterPush) on the TEXT plane. Buffers until connected.
+     *  Fire-and-forget: the caller learns nothing about whether it was ever written. */
+    suspend fun sendControl(frame: dev.ccpocket.protocol.ToRelay) = controlOutbox.send(ControlSend(frame))
 
-    private suspend fun DefaultClientWebSocketSession.awaitAttached() {
+    /** Like [sendControl], but suspends until the frame has really been handed to a live socket.
+     *  Returns false when the send failed or the link was torn down with the frame in hand — the caller
+     *  can then retry rather than assume the relay heard it. */
+    suspend fun sendControlAwaitWritten(frame: dev.ccpocket.protocol.ToRelay): Boolean {
+        val written = CompletableDeferred<Boolean>()
+        controlOutbox.send(ControlSend(frame, written))
+        return written.await()
+    }
+
+    private suspend fun DefaultClientWebSocketSession.awaitAttached(): Attached {
         while (true) {
             val f = incoming.receive() as? WsFrame.Text ?: continue
             when (val b = runCatching { PocketJson.decodeFromString<Envelope>(f.readText()).body }.getOrNull()) {
-                is Attached -> { control.emit(b); return }
+                is Attached -> { attachedProtoV = b.relayProtoV; control.emit(b); return b }
                 is AuthError -> { control.emit(b); throw RelayAuthException(b.code) }
                 else -> {}
             }
         }
     }
 
-    private suspend fun DefaultClientWebSocketSession.awaitHandshake(init: E2ESession.Initiator): E2ESession {
+    /** [onPresence] only feeds the timeout's classification; presence edges that land mid-handshake stay
+     *  unforwarded to the repo, exactly as before. */
+    private suspend fun DefaultClientWebSocketSession.awaitHandshake(init: E2ESession.Initiator, onPresence: (Boolean) -> Unit): E2ESession {
         while (true) {
-            val f = incoming.receive() as? WsFrame.Binary ?: continue
-            if (Wire.payloadType(f.data) == Wire.HANDSHAKE) return init.finish(Wire.payloadBody(f.data))
+            when (val f = incoming.receive()) {
+                is WsFrame.Binary -> if (Wire.payloadType(f.data) == Wire.HANDSHAKE) return init.finish(Wire.payloadBody(f.data))
+                is WsFrame.Text -> (runCatching { PocketJson.decodeFromString<Envelope>(f.readText()).body }.getOrNull() as? PeerPresence)?.let { onPresence(it.online) }
+                else -> {}
+            }
         }
     }
 
@@ -226,6 +275,12 @@ class RelayE2EConnection {
         /** Pure (for tests): a live socket is DEAF once this many inbound transport frames fail to decrypt
          *  consecutively — a re-keyed/overwritten daemon session (#146), not a lone stray frame. */
         fun deafTripped(consecutiveFailures: Int): Boolean = consecutiveFailures >= DEAF_DECRYPT_FAILURES
+
+        /** Pure (for tests): a relay that labels connections names the daemon's socket in [Attached] whenever
+         *  one is attached, so a labelled attach WITHOUT a peer means the computer is offline. An old relay
+         *  labels nothing — unknown, and the caller keeps treating a silent handshake as a fault. */
+        fun peerOfflineAtAttach(attached: Attached): Boolean =
+            attached.connectionId != null && attached.peerConnectionId == null
 
         // #298: the silence half. BOTH thresholds must hold — a count alone would trip on any send burst
         // while the daemon is legitimately quiet, a clock alone would trip on an idle background link that

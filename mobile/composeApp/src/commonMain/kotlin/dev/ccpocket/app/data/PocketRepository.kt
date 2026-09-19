@@ -30,8 +30,15 @@ import dev.ccpocket.app.net.DirectE2EConnection
 import dev.ccpocket.app.net.DirectUnreachableException
 import dev.ccpocket.app.net.RelayAuthException
 import dev.ccpocket.app.net.RelayConnection
+import dev.ccpocket.app.net.DeadLinkException
+import dev.ccpocket.app.net.DepositOutcome
 import dev.ccpocket.app.net.RelayControlDial
 import dev.ccpocket.app.net.RelayE2EConnection
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.merge
@@ -43,13 +50,19 @@ import dev.ccpocket.app.pairing.Pairing
 import dev.ccpocket.app.pairing.classifyPairFailure
 import dev.ccpocket.app.pairing.parseIncomingLink
 import dev.ccpocket.app.pairing.wireReason
+import dev.ccpocket.app.push.FailReason
+import dev.ccpocket.app.push.PairingKey
+import dev.ccpocket.app.push.PairingLink
+import dev.ccpocket.app.push.PushRegistrar
+import dev.ccpocket.app.push.PushUiStatus
 import dev.ccpocket.app.push.PushTokens
+import dev.ccpocket.app.push.SubmitOutcome
+import dev.ccpocket.app.push.TriggerReason
 import dev.ccpocket.app.lock.AppLockController
 import dev.ccpocket.app.lock.createBiometrics
 import dev.ccpocket.app.theme.AccentTheme
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.ui.sameDirPath
-import dev.ccpocket.app.push.PushToken
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.telemetry.TelEvent
 import dev.ccpocket.app.telemetry.TelKey
@@ -218,7 +231,9 @@ import dev.ccpocket.protocol.PendingApprovals
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.isQuestion
+import dev.ccpocket.protocol.PROTO_V_PUSH_ACK
 import dev.ccpocket.protocol.PocketError
+import dev.ccpocket.protocol.PushRegistrationResult
 import dev.ccpocket.protocol.PromptAck
 import dev.ccpocket.protocol.RegisterPush
 import dev.ccpocket.protocol.RunShellCommand
@@ -650,18 +665,25 @@ class PocketRepository(
     // wire) — one-shot flag; consumed by the first AssistantChunk/ToolEvent, reset at turn boundaries
 
     // ── push notifications: register the device's APNs/FCM token so the relay can wake it while offline ──
-    private var pushToken: PushToken? = null
-    private var pushStarted = false
-    private var pushRegistered: Pair<String, String>? = null // last (platform, token) sent; skip redundant re-sends
-    private var pushDialJob: Job? = null // in-flight one-shot relay dial (direct-LAN registration compensation)
-    private var pushTokenJob: Job? = null // observes the shared platform token (see PushTokens)
+    // This link is one PAIRING among several (primary computer, every fleet satellite, every collaborator
+    // inbox); the device-wide token and the retry/confirm state machine live in the shared [PushRegistrar],
+    // which drives each of them through [PairingLink]. The repository's whole job here is transport:
+    // "write this frame and tell me what the relay said".
+    private val pushDesired = MutableStateFlow(false)
+    private val pushConnected = MutableStateFlow(false)
+    private var attachedPushKey: PairingKey? = null
     // direct-LAN registration seams (internal for tests, mirroring promptReceiptTimeoutMs). directLinkUp
     // includes the in-flight direct attempt: a RegisterPush buffered into the relay control outbox during
     // that ≤3s window would otherwise sit undrained for as long as the phone stays on the LAN, then flush
     // a STALE token over a newer one at the next real relay attach.
     internal var directLinkUp: () -> Boolean = { directE2E.connected || directAttemptInFlight }
-    internal var pushDial: suspend (PairedDaemon, RegisterPush) -> Unit = { p, f -> RelayControlDial.deposit(p, f) }
-    internal var pushDialRetryMs = 30_000L
+    internal var pushDial: suspend (PairedDaemon, RegisterPush, Long) -> DepositOutcome =
+        { p, f, ackMs -> RelayControlDial.deposit(p, f, ackMs) }
+    /** Test seam: a coordinator of this test's own, instead of the process-wide one. */
+    internal var registrarOverride: PushRegistrar? = null
+    /** The process-wide push coordinator. Resolved lazily so merely CONSTRUCTING a repository (a fleet
+     *  satellite, a demo instance) never decides which scope the singleton lives on. */
+    private val registrar: PushRegistrar get() = registrarOverride ?: PushRegistrar.shared(scope)
     /** Task-complete push toggle (persisted, default on); the single source of truth the Settings switch binds to. */
     val notificationsOn = mutableStateOf(SecureStore.getString(K_NOTIFY) != "0")
 
@@ -2066,8 +2088,18 @@ class PocketRepository(
             connectionRecovery = null
         }
         if (ready) { reconnectGraceJob?.cancel(); reconnectGraceJob = null; reconnectGracePassed = false; listWaitRetried = false } // truly back — reset for the next blip
-        if (!ready && next in listOf(ConnPhase.PairingInvalid, ConnPhase.RelayUnreachable, ConnPhase.ComputerOffline) && !connectionDiagnosticEnded) {
-            connectionDiagnostic?.finish(Outcome.FAILURE, DiagnosticStage.CONNECT, if (next == ConnPhase.PairingInvalid) ErrorCode.REJECTED else ErrorCode.UNAVAILABLE)
+        // RelayUnreachable is a UI grace ([FIRST_GRACE_MS]), not a verdict: while the attempt is still in flight
+        // a slow dial usually attaches seconds later. The failure is recorded once the attempt has really died
+        // (socket error / connect watchdog → onTransportDown → back here with connected=false).
+        val verdictDue = next == ConnPhase.PairingInvalid || next == ConnPhase.ComputerOffline ||
+            (next == ConnPhase.RelayUnreachable && !connected.value)
+        if (!ready && verdictDue && !connectionDiagnosticEnded) {
+            when (next) {
+                ConnPhase.PairingInvalid -> connectionDiagnostic?.finish(Outcome.FAILURE, DiagnosticStage.CONNECT, ErrorCode.REJECTED)
+                // the relay attached us; the user's computer is simply off/asleep — their environment, not a fault
+                ConnPhase.ComputerOffline -> connectionDiagnostic?.finish(Outcome.FAILURE, DiagnosticStage.WAIT, ErrorCode.UNAVAILABLE, expected = true)
+                else -> connectionDiagnostic?.finish(Outcome.FAILURE, DiagnosticStage.CONNECT, ErrorCode.UNAVAILABLE)
+            }
             connectionDiagnosticEnded = connectionDiagnostic != null
         }
         consumePendingOpenIfReady() // a push-tap target waits here until the link is actually Ready
@@ -2104,7 +2136,7 @@ class PocketRepository(
     /** Relay control-plane events (not E2E daemon traffic) drive the honest connection phase. */
     private fun handleControl(f: Frame) {
         when (f) {
-            is Attached -> { diagnosticConnectionId = f.connectionId?.validated(); Diagnostics.connection(diagnosticConnectionId, f.peerConnectionId?.validated()); attachedThisSession = true; connected.value = true; connGen.value++; relayDeadlinePassed = false; armLinkStableReset(); ensurePushStarted(); registerPush(); startListWait(); recomputePhase() }
+            is Attached -> { diagnosticConnectionId = f.connectionId?.validated(); Diagnostics.connection(diagnosticConnectionId, f.peerConnectionId?.validated()); attachedThisSession = true; connected.value = true; connGen.value++; relayDeadlinePassed = false; armLinkStableReset(); ensurePushLink(); startListWait(); recomputePhase() }
             // Only re-handshake on a genuine offline->online transition. The relay re-broadcasts
             // PeerPresence(true) on every daemon (re)attach; a redundant true must NOT tear down a healthy
             // transport (that surfaced as a spurious Reconnecting banner when opening a session).
@@ -2155,71 +2187,121 @@ class PocketRepository(
 
     // ── push registration ───────────────────────────────────────────────────────────────────────────
 
-    /** Start platform push registration once, after the first relay attach (so the iOS permission prompt
-     *  follows pairing). The token callback may land later — [registerPush] also runs on every Attached.
+    /**
+     * Wire this pairing into the shared push coordinator, once per attach.
      *
-     *  Fleet satellites stay out: they are other machines of the SAME user, and the primary link's token
-     *  already wakes this phone for them. A COLLABORATOR inbox is not a satellite (§3.4) — it is a different
-     *  person's daemon, which can only reach this phone through the token registered under the INBOX's own
-     *  deviceId (the owner's account fan-out deliberately excludes it). So an inbox registers for itself,
-     *  sharing the one platform token through [PushTokens] rather than fighting the primary over the
-     *  single-callback [PushController]. */
-    private fun ensurePushStarted() {
-        if (pinnedTo != null && !isCollaboratorInbox) return
-        if (pushStarted || !notificationsOn.value) return
-        pushStarted = true
-        PushTokens.ensureStarted()
-        pushTokenJob = scope.launch { PushTokens.token.collect { t -> t?.let(::onPushToken) } }
+     * Everything that used to live here — "have we started the platform stack", "is this token the same
+     * one we last sent", a one-shot dial retry timer — is now the coordinator's, because none of it could
+     * see the only fact that matters: whether the RELAY stored the token. What remains is identity and a
+     * nudge.
+     *
+     * Fleet satellites now register too. They were excluded on the theory that the primary link's token
+     * already wakes this phone — true for the OWNER's fan-out, but it made a satellite's own deviceId
+     * permanently unreachable by a targeted push, and it meant a phone whose primary link was broken had
+     * no other registered path at all. The relay still refuses the identities that must not register
+     * (headless bridges, via `mayRegisterPush`); the client no longer second-guesses that list.
+     */
+    private fun ensurePushLink() {
+        if (!useRelay) return
+        val p = paired.value ?: return
+        PushTokens.ensureStarted() // sinks only — this no longer asks the OS for anything
+        refreshPushDesire()
+        pushConnected.value = true
+        val key = PairingKey(p.relay, p.accountId, p.deviceId)
+        if (attachedPushKey != key) {
+            // a machine switch retargets this repository; the old identity keeps its persisted state
+            // (it may well come back) but stops being driven by THIS link
+            attachedPushKey?.let { registrar.detach(it, forget = false) }
+            attachedPushKey = key
+            registrar.attach(RepoPairingLink(key))
+        }
+        registrar.trigger(TriggerReason.CONNECTED)
     }
 
-    /** Platform token callback (and the test seam for it): remember the token, then (re)register. */
-    internal fun onPushToken(token: PushToken) { pushToken = token; registerPush() }
+    /** Notifications wanted AND this link is a relay identity that can hold a token at all. */
+    private fun refreshPushDesire() { pushDesired.value = notificationsOn.value && useRelay && !demoMode.value }
 
-    /** (Re)send the push token — or an empty token to de-register when notifications are off — to the
-     *  relay, whose store is the single push-routing truth. On the relay transport it rides the live
-     *  control plane. The direct-LAN transport has NO relay control plane, and a phone that always finds
-     *  its daemon on the LAN never relay-attaches — "register on the next real relay attach" never comes,
-     *  so its token (and every APNs/FCM rotation) would rot server-side forever (#114 follow-up): instead
-     *  the direct path deposits the token through a one-shot [RelayControlDial]. Skips when unchanged
-     *  since the last send (the relay persists it), so the foreground-triggered reconnect storm doesn't
-     *  rewrite the same row; a failed dial rolls that guard back (+ one timed retry that self-arms while
-     *  the direct link stays up) so the token still converges. */
-    private fun registerPush() {
-        if (!useRelay) return // unpaired dev-direct transport: no relay account to deposit to
-        val tok = pushToken
-        // OFF must converge even with no platform token in hand. A cold start with notifications already
-        // off never starts the platform stack (starting it is what prompts on iOS), so [pushToken] stays
-        // null — and if the clearing frame was lost the first time (killed app, drained outbox) the relay
-        // would keep a live token forever while the UI reads "off". The relay ignores the platform of a
-        // blank-token register (it nulls both columns), so the last known one — or a placeholder — clears
-        // the row just as well. §3.4 makes this consequential: a contact's daemon is now a pusher too.
-        val sent = when {
-            !notificationsOn.value -> (tok?.platform ?: lastPushPlatform() ?: "unknown") to ""
-            tok != null -> tok.platform to tok.token
-            else -> return // ON but no token yet — the platform callback will re-enter here
-        }
-        if (sent == pushRegistered) return
-        if (sent.second.isNotEmpty()) SecureStore.putString(K_PUSH_PLATFORM, sent.first)
-        pushRegistered = sent
+    /** This repository as one registerable identity. */
+    private inner class RepoPairingLink(override val key: PairingKey) : PairingLink {
+        override val desiredEnabled: StateFlow<Boolean> get() = pushDesired
+        override val connected: StateFlow<Boolean> get() = pushConnected
+        override suspend fun submit(frame: RegisterPush, ackTimeoutMs: Long): SubmitOutcome =
+            submitPush(frame, ackTimeoutMs)
+    }
+
+    /**
+     * Write one registration and report what actually happened to it.
+     *
+     * Two transports, one contract. The direct-LAN path has no relay control plane at all, so it dials
+     * one ([RelayControlDial]) and lets the dial wait for the verdict inline. The relay path writes on
+     * the live control plane and waits for the receipt on the control flow — subscribing BEFORE the write
+     * (`UNDISPATCHED`), because the relay can answer faster than a later collector could attach, and a
+     * missed receipt would be indistinguishable from a relay that never stored anything.
+     *
+     * Every return value is a fact, never an assumption: `written=false` means the bytes demonstrably did
+     * not reach a socket, and only [SubmitOutcome.SentLegacy] — an ack-incapable relay — is allowed to
+     * mean "sent, and no confirmation is coming".
+     */
+    private suspend fun submitPush(frame: RegisterPush, ackTimeoutMs: Long): SubmitOutcome {
+        val p = paired.value
         if (directLinkUp()) {
-            val p = paired.value ?: return
-            pushDialJob?.cancel() // a newer (platform, token) supersedes an in-flight dial/retry
-            pushDialJob = scope.launch {
-                val err = runCatching { pushDial(p, RegisterPush(sent.first, sent.second)) }.exceptionOrNull() ?: return@launch
-                if (err is CancellationException) throw err // superseded — the newer dial owns the dedup state
-                if (pushRegistered == sent) pushRegistered = null // roll back the dedup: this send never landed
-                if (err is RelayAuthException) return@launch // a revoked credential won't fix itself on a timer
-                delay(pushDialRetryMs)
-                if (directLinkUp() && pushRegistered == null) registerPush()
+            if (p == null) return SubmitOutcome.Failed(FailReason.NO_ROUTE)
+            return try {
+                when (val r = pushDial(p, frame, ackTimeoutMs)) {
+                    is DepositOutcome.Acked -> SubmitOutcome.Acked(r.result)
+                    DepositOutcome.Legacy -> SubmitOutcome.SentLegacy
+                }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: RelayAuthException) {
+                SubmitOutcome.Failed(FailReason.AUTH_REJECTED)
+            } catch (e: DeadLinkException) {
+                // the dial wedged — possibly AFTER the frame went out, so treat it as written
+                SubmitOutcome.Failed(FailReason.ACK_TIMEOUT, written = true)
+            } catch (e: Throwable) {
+                SubmitOutcome.Failed(FailReason.SEND_FAILED)
             }
-        } else {
-            scope.launch { runCatching { relay.sendControl(RegisterPush(sent.first, sent.second)) } }
+        }
+        if (!connected.value) {
+            // Severing a link is the ONE case where "no live route" must not mean "try later": the
+            // credential is about to be discarded, so a one-shot dial is the last chance this relay row
+            // has to be cleared at all. Everywhere else NO_ROUTE parks the round until a route exists.
+            val p2 = paired.value
+            if (!pushSevering || p2 == null) return SubmitOutcome.Failed(FailReason.NO_ROUTE)
+            return runCatching {
+                when (val r = pushDial(p2, frame, ackTimeoutMs)) {
+                    is DepositOutcome.Acked -> SubmitOutcome.Acked(r.result)
+                    DepositOutcome.Legacy -> SubmitOutcome.SentLegacy
+                }
+            }.getOrElse { if (it is CancellationException) throw it else SubmitOutcome.Failed(FailReason.SEND_FAILED) }
+        }
+        val requestId = frame.requestId
+        return coroutineScope {
+            val receipt = requestId?.let {
+                async(start = CoroutineStart.UNDISPATCHED) {
+                    withTimeoutOrNull(ackTimeoutMs) {
+                        relay.control.filterIsInstance<PushRegistrationResult>().first { r -> r.requestId == it }
+                    }
+                }
+            }
+            val written = runCatching { withTimeoutOrNull(ackTimeoutMs) { relay.sendControlAwaitWritten(frame) } }
+                .getOrNull() ?: false
+            if (!written) {
+                receipt?.cancel()
+                return@coroutineScope SubmitOutcome.Failed(FailReason.SEND_FAILED)
+            }
+            // an old relay never answers; waiting the full budget for it would only eat the caller's
+            // retry allowance, so degrade to the honest "written, unconfirmed"
+            if (receipt == null || (relay.attachedProtoV ?: 0) < PROTO_V_PUSH_ACK) {
+                receipt?.cancel()
+                return@coroutineScope SubmitOutcome.SentLegacy
+            }
+            when (val r = receipt.await()) {
+                null -> SubmitOutcome.Failed(FailReason.ACK_TIMEOUT, written = true)
+                else -> SubmitOutcome.Acked(r)
+            }
         }
     }
-
-    /** The platform tag of the last token we registered, so a later "off" can still clear the relay row
-     *  even when this launch never obtained a token. Not a secret and not the token itself. */
-    private fun lastPushPlatform(): String? = SecureStore.getString(K_PUSH_PLATFORM)?.takeIf { it.isNotBlank() }
 
     /**
      * Clear THIS link's push token at the relay without touching the device-wide preference — used when a
@@ -2229,24 +2311,37 @@ class PocketRepository(
      */
     fun deregisterPush() {
         if (!useRelay) return
-        val platform = pushToken?.platform ?: lastPushPlatform() ?: "unknown"
-        pushRegistered = platform to ""
-        val p = paired.value
-        scope.launch {
-            runCatching {
-                if (directLinkUp() && p != null) pushDial(p, RegisterPush(platform, ""))
-                else relay.sendControl(RegisterPush(platform, ""))
-            }
-        }
+        pushDesired.value = false
+        val key = attachedPushKey ?: return
+        attachedPushKey = null
+        pushSevering = true
+        scope.launch { registrar.clearAndForget(key) }
     }
+
+    /** True from the moment this link is being severed: [submitPush] may then dial even with no live
+     *  transport, because there will be no later attempt. */
+    private var pushSevering = false
+
+    /** What the Settings notification row renders — aggregated across every attached pairing. */
+    val pushStatus: StateFlow<PushUiStatus> get() = registrar.status
+
+    /** Settings "retry": the one trigger that ignores an active cooldown and resets the budget. */
+    fun retryPushRegistration() = registrar.trigger(TriggerReason.USER_RETRY)
+
+    /** Settings "open settings": the only cure for a DENIED OS permission. */
+    fun openNotificationSettings() = PushTokens.openNotificationSettings()
 
     /** Settings toggle: persist the choice, then register (on) or clear (off) the token on the relay. */
     fun setNotificationsEnabled(on: Boolean) {
         if (on == notificationsOn.value) return
         notificationsOn.value = on
         SecureStore.putString(K_NOTIFY, if (on) "1" else "0")
-        ensurePushStarted() // self-guards when off
-        registerPush()
+        PushTokens.ensureStarted()
+        refreshPushDesire()
+        // USER_ENABLED is the one trigger allowed to prompt (iOS) and to reset the retry budget: the
+        // person is standing in Settings right now. Turning it OFF is an expectation change the
+        // coordinator picks up from [pushDesired], and it converges on a blank-token registration.
+        registrar.trigger(if (on) TriggerReason.USER_ENABLED else TriggerReason.START)
         onNotificationsChanged?.invoke(on) // §3.4: contacts' inbox links hold their own tokens
     }
 
@@ -2461,8 +2556,12 @@ class PocketRepository(
         // reattach volley into the cross-reconnect outbox.
         if (shouldCoalesceReconnect(force, reconnect, connectJob?.isActive == true, epochMillis() - lastTransportLaunchAt)) return
         if (connectionDiagnostic == null) {
-            connectionDiagnostic = Diagnostics.begin(ErrorPath.CONNECTION)
-            connectionDiagnosticEnded = false
+            // a backgrounded retry ladder (Android keeps the process; Doze starves its network) is not a
+            // failure anyone is looking at — same rule as the prompt deadlines; the foreground return re-arms
+            if (appIsForeground.value) {
+                connectionDiagnostic = Diagnostics.begin(ErrorPath.CONNECTION)
+                connectionDiagnosticEnded = false
+            }
         } else connectionDiagnostic?.retry()
         connectionDiagnostic?.stage(DiagnosticStage.CONNECT)
         daemonDiagnostics = false
@@ -2610,7 +2709,7 @@ class PocketRepository(
                 is ConnectWedgedException -> ErrorCode.TIMEOUT
                 is RelayAuthException -> ErrorCode.REJECTED
                 else -> ErrorCode.CONNECTION_CLOSED
-            }, err, isError = err is ConnectWedgedException)
+            }, err, isError = err is ConnectWedgedException && appIsForeground.value)
         Telemetry.track(TelEvent.ConnFailed, mapOf(TelKey.Transport to transportName(), TelKey.Reason to reason, TelKey.Attempt to retryAttempts))
         if (err is RelayAuthException || pairingInvalid) { // expired/invalid pairing — re-pair, never auto-retry
             pairingInvalid = true; recomputePhase(); return
@@ -2653,6 +2752,7 @@ class PocketRepository(
         connectionDiagnostic = null; connectionDiagnosticEnded = false
         fileViewObservation?.cancel(background = true)
         appIsForeground.value = false
+        PushRegistrar.appForeground.value = false
         historyDiagnosticDeadline?.cancel(); historyDiagnosticDeadline = null
         openObservation?.background()
         sidePanes.panes.forEach { it.openObservation?.background() }
@@ -2662,6 +2762,10 @@ class PocketRepository(
 
     fun onAppForeground() {
         appIsForeground.value = true
+        // a return to the foreground is when a stalled registration gets its cheapest chance to heal:
+        // the OS is willing to call back again, and the token wait only counts foreground time anyway
+        PushRegistrar.appForeground.value = true
+        registrar.trigger(TriggerReason.FOREGROUND)
         if (demoMode.value || pairingInvalid) return
         if (sessionActive.value && !connected.value) {
             retryJob?.cancel()
@@ -2746,12 +2850,11 @@ class PocketRepository(
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
         handoffsLoaded.value = false // inbox mode's readiness proof dies with the link, same as the list
         clearReviewState() // a review ledger belongs to one machine — never show the last daemon's inbox
-        pushDialJob?.cancel(); pushDialJob = null // an in-flight LAN-side token dial dies with the link
-        // the shared-token observer dies with the link too (an inbox link that was removed must not be kept
-        // alive by a collector); pushStarted re-arms it on the next Attached. PushTokens.ensureStarted() is
-        // globally once-only, so this never re-triggers the iOS permission prompt.
-        pushTokenJob?.cancel(); pushTokenJob = null; pushStarted = false
-        pushRegistered = null // a fresh connect (or a switched daemon) must re-register the token
+        // the link is down: the coordinator must stop submitting into nothing (its round parks on
+        // `connected` instead of burning attempts). The per-pairing CONFIRMATION deliberately survives —
+        // a reconnect is not evidence that the relay forgot the token — while a machine SWITCH retargets
+        // the identity in ensurePushLink().
+        pushConnected.value = false
         // per-daemon truth must not survive a machine switch: a stale non-null presetsState would keep
         // the token-bearing create/edit form UNLOCKED after switching to a daemon that predates presets
         // (it silently drops FetchPresets), breaking "never fire a plaintext token at a peer that can't
@@ -2996,6 +3099,13 @@ class PocketRepository(
     /** Remove one binding. If it was active, fall back to another (or to PairingScreen when none remain). */
     fun unpair(target: PairedDaemon) {
         val wasActive = paired.value?.accountId == target.accountId
+        // The push record is keyed by (account, device), and that identity is about to stop existing.
+        // Leaving it behind would resurrect a stale confirmation (or cooldown) if the same deviceId ever
+        // came back. No clearing frame: the credential is being discarded, and the relay-side token goes
+        // with the revoked device.
+        val key = PairingKey(target.relay, target.accountId, target.deviceId)
+        registrar.detach(key, forget = true)
+        if (attachedPushKey == key) attachedPushKey = null
         val remaining = Pairing.remove(target.accountId) // also re-points the active account if it was this one
         projectPinRegistry.refreshAfterPairingChange { Pairing.loadAll() } // #362: the removed binding holds no pin lease from here
         replace(pairedList, remaining)
@@ -6509,6 +6619,10 @@ class PocketRepository(
      *  sending again goes through. Callers keep the composer text on false. */
     @OptIn(ExperimentalEncodingApi::class)
     fun sendPrompt(text: String): Boolean {
+        // about to start work whose completion is exactly what a push would announce — a cheap, honest
+        // moment to notice that this pairing is not actually registered. Non-blocking: it only enqueues
+        // an evaluation, and an unregistered link never delays the prompt itself.
+        registrar.trigger(TriggerReason.PROMPT_SENT)
         val c = convoId.value ?: return false
         if (uploadsBusy()) return false // send waits for uploads to settle (the button shows the spinner)
         val ready = pendingImages.filter { it.state == ImgState.Ready }.map { it.bytes }

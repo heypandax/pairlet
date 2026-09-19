@@ -2264,6 +2264,16 @@ const val PROTO_V_TARGETED_PUSH: Int = 3
  * settled after a wall-clock delay. */
 const val PROTO_V_ATTACH_REPLAY_COMPLETE: Int = 4
 
+/** The [Attached.relayProtoV] from which a relay ACKNOWLEDGES push registration: every [RegisterPush]
+ *  that carries a [RegisterPush.requestId] is answered with a [PushRegistrationResult] naming that id.
+ *
+ *  Before this there was no receipt at all — the device queued the frame, called itself registered, and
+ *  a relay-side store failure (or a row that no longer existed) left the account silently push-less
+ *  forever. A client MUST gate "wait for the verdict" on this version: against an older relay no answer
+ *  is ever coming, so waiting would mean retrying until the budget is gone. Absent (0) = degrade to
+ *  "written, unconfirmed" and re-confirm once the relay announces this. */
+const val PROTO_V_PUSH_ACK: Int = 5
+
 /** relay -> daemon: a single-use nonce to sign (bound to this socket, short TTL). */
 @Serializable
 @SerialName("pocket/challenge")
@@ -2378,10 +2388,48 @@ data class Pong(val ts: Long) : ToRelay
  * socket is offline. [platform] selects the relay-side sender — "apns"/"apns_sandbox" (iOS, by build
  * env) or "fcm" (Android via Firebase); future domestic-vendor channels ("xiaomi"/"huawei"/…) slot in
  * here. An empty [token] de-registers (the user turned notifications off). Re-sent on every reconnect.
+ *
+ * [requestId] opts this registration into a RECEIPT: a relay at [PROTO_V_PUSH_ACK] or above answers with
+ * a [PushRegistrationResult] carrying the same id, so the device learns whether the token actually landed
+ * instead of assuming it did. Absent (the original wire shape, and every frame an old client sends) = the
+ * relay stores as before and stays silent; `null` is never encoded (explicitNulls=false), so an old
+ * relay's parse and an old client's bytes are both untouched.
  */
 @Serializable
 @SerialName("pocket/push.register")
-data class RegisterPush(val platform: String, val token: String) : ToRelay
+data class RegisterPush(val platform: String, val token: String, val requestId: String? = null) : ToRelay
+
+/** The verdict for ONE [RegisterPush]. Deliberately coarse: the device only ever decides between
+ *  "confirmed", "stop asking" and "try again", and a finer vocabulary would tempt the relay into
+ *  narrating its storage layer to a client that cannot act on it. */
+@Serializable
+enum class PushRegistrationOutcome {
+    /** The token is now stored for this device. */
+    @SerialName("stored") STORED,
+    /** The registration carried a blank token and the device is now de-registered. */
+    @SerialName("cleared") CLEARED,
+    /** This identity may not register (or the request was malformed) — retrying cannot help. */
+    @SerialName("rejected") REJECTED,
+    /** The relay tried and could not store it — retrying later may help. */
+    @SerialName("failed") FAILED,
+}
+
+/**
+ * relay -> device: the verdict for ONE [RegisterPush] that carried a [RegisterPush.requestId].
+ *
+ * [requestId] echoes the request's id verbatim; a device MUST ignore a result whose id it does not
+ * recognize (a receipt for a superseded attempt must never confirm the current one). [code] is a
+ * fixed, closed vocabulary — "forbidden" (this identity may not register), "no_device" (the row is
+ * gone), "store_failed" (storage raised), "bad_request" (blank platform / oversized token) — and
+ * carries NOTHING else: no exception text, no SQL, and never the token.
+ */
+@Serializable
+@SerialName("pocket/push.register.result")
+data class PushRegistrationResult(
+    val requestId: String,
+    val result: PushRegistrationOutcome,
+    val code: String? = null,
+) : ToRelay
 
 /**
  * daemon -> relay: a notify-worthy event happened (a turn finished). The relay pushes [title]/[body]

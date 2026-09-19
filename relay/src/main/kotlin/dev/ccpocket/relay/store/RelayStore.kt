@@ -97,8 +97,11 @@ interface RelayStore {
     suspend fun touchDevice(deviceId: String, now: Long)
 
     // ---- push notifications ----
-    /** Store (or clear, when [token] is blank) a device's push token + platform for offline wake-ups. */
-    suspend fun setPushToken(deviceId: String, platform: String, token: String, now: Long)
+    /** Store (or clear, when [token] is blank) a device's push token + platform for offline wake-ups.
+     *  Returns false when no row was touched — the device is gone (revoked+pruned, or a credential that
+     *  outlived its row). That distinction is what a client's registration receipt is made of: "stored"
+     *  and "the relay has nowhere to put it" used to be indistinguishable here. */
+    suspend fun setPushToken(deviceId: String, platform: String, token: String, now: Long): Boolean
     /** Drop a device's push token after the gateway reported it permanently dead (APNs 410 / FCM 404) —
      *  but only if it still equals [platform]/[token], so a device that re-registered a fresh token in the
      *  meantime keeps it. Returns true if a row was actually cleared. */

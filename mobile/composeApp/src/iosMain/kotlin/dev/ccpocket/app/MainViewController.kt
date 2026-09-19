@@ -46,9 +46,22 @@ fun handlePushOpenHandoff(handoffId: String) = PushRoute.openHandoff(handoffId)
 fun setPushToken(platform: String, token: String) = PushController.deliver(PushToken(platform, token))
 
 /** Called from iOSApp.swift at launch to wire the Swift-side APNs registration (UNUserNotificationCenter
- *  authorization + UIApplication.registerForRemoteNotifications); invoked when push registration starts. */
+ *  authorization + UIApplication.registerForRemoteNotifications). The Boolean is `prompt`: true may raise
+ *  the system authorization alert, false registers only when the OS already grants notifications — that is
+ *  how a silent recovery pass re-reads a rotated token without ever prompting an existing user. */
 @Suppress("unused")
-fun setPushRegistrar(register: () -> Unit) { PushController.registrar = register }
+fun setPushRegistrar(register: (Boolean) -> Unit) { PushController.registrar = register }
+
+/** Called from iOSApp.swift at launch to wire the system-permission read. Swift answers with the raw
+ *  `UNAuthorizationStatus` value on the main queue; the Int keeps the bridge primitive and leaves the
+ *  raw → enum mapping in one place (PushController.readAuthorization). */
+@Suppress("unused")
+fun setPushAuthorizationReader(read: ((Int) -> Unit) -> Unit) { PushController.authorizationReader = read }
+
+/** Called from iOSApp.swift at launch to wire the "open system notification settings" action — the only
+ *  recovery an app has once the user denied notifications, since it may not re-prompt. */
+@Suppress("unused")
+fun setPushSettingsOpener(open: () -> Unit) { PushController.settingsOpener = open }
 
 /** Called from iOSApp.swift right after `FirebaseApp.configure()` to wire the analytics sink. */
 @Suppress("unused")

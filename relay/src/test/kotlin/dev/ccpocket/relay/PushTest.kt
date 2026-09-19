@@ -37,13 +37,15 @@ class PushTest {
         store.insertDevice(device("dev1", "acct"))
         assertTrue(store.pushTargets("acct").isEmpty()) // no token yet
 
-        store.setPushToken("dev1", "fcm", "tok-123", 2)
+        // the return value IS the receipt the control plane answers with: true = a row was touched
+        assertTrue(store.setPushToken("dev1", "fcm", "tok-123", 2))
+        assertFalse(store.setPushToken("ghost", "fcm", "tok-123", 2)) // no such device → nothing stored
         val targets = store.pushTargets("acct")
         assertEquals(1, targets.size)
         assertEquals("fcm", targets[0].platform)
         assertEquals("tok-123", targets[0].token)
 
-        store.setPushToken("dev1", "fcm", "", 3) // opt-out clears it
+        assertTrue(store.setPushToken("dev1", "fcm", "", 3)) // opt-out clears it
         assertTrue(store.pushTargets("acct").isEmpty())
     }
 

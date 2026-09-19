@@ -1,18 +1,25 @@
 package dev.ccpocket.app.data
 
 import dev.ccpocket.app.PushRoute
+import dev.ccpocket.app.net.DepositOutcome
 import dev.ccpocket.app.pairing.BindingRole
 import dev.ccpocket.app.pairing.PairedDaemon
+import dev.ccpocket.app.push.DefaultPushPlatform
+import dev.ccpocket.app.push.PushRegistrar
+import dev.ccpocket.app.push.PushStateStore
 import dev.ccpocket.app.push.PushToken
 import dev.ccpocket.app.push.PushTokens
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.protocol.Attached
+import dev.ccpocket.protocol.PushRegistrationOutcome
+import dev.ccpocket.protocol.PushRegistrationResult
 import dev.ccpocket.protocol.RegisterPush
 import dev.ccpocket.protocol.Role
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import java.util.concurrent.CopyOnWriteArrayList
@@ -57,21 +64,48 @@ class CollaboratorInboxPushTest {
         PushRoute.pendingHandoff.value = null
     }
 
-    private fun repo(role: BindingRole, dialed: MutableList<RegisterPush>) =
-        PocketRepository(
-            scope,
-            pinnedTo = PairedDaemon(
-                relay = "wss://127.0.0.1:9", accountId = "acct-colleague", daemonPub = "pk",
-                deviceId = "dev-me", credential = "cred", role = role,
-            ),
-        ).apply {
-            useRelay = true
-            sessionActive.value = true
-            notificationsOn.value = true // independent of whatever a previous run persisted
-            directLinkUp = { true }      // observe the token through the one-shot dial rather than a socket
-            pushDial = { _, f -> dialed += f }
-            onSendForTest = {}
+    /** The coordinator's own records stay in memory: they must not leak into the shared on-disk store. */
+    private class MapStore : PushStateStore {
+        private val map = mutableMapOf<String, String>()
+        override fun get(key: String): String? = map[key]
+        override fun put(key: String, value: String) { map[key] = value }
+        override fun remove(key: String) { map.remove(key) }
+    }
+
+    /** ONE store per test: two "launches" in the same test are the same device, and the remembered push
+     *  platform is exactly the kind of fact that has to survive the process that learned it. */
+    private val pushState = MapStore()
+
+    private fun registrar() = PushRegistrar(
+        scope = scope, platform = DefaultPushPlatform, store = pushState,
+        foreground = MutableStateFlow(true), jitter = { 0.0 },
+    )
+
+    private fun repo(
+        role: BindingRole,
+        dialed: MutableList<RegisterPush>,
+        reg: PushRegistrar = registrar(),
+    ) = PocketRepository(
+        scope,
+        pinnedTo = PairedDaemon(
+            relay = "wss://127.0.0.1:9", accountId = "acct-colleague", daemonPub = "pk",
+            deviceId = "dev-me", credential = "cred", role = role,
+        ),
+    ).apply {
+        useRelay = true
+        sessionActive.value = true
+        notificationsOn.value = true // independent of whatever a previous run persisted
+        directLinkUp = { true }      // observe the token through the one-shot dial rather than a socket
+        registrarOverride = reg
+        pushDial = { _, f, _ ->
+            dialed += f
+            DepositOutcome.Acked(PushRegistrationResult(
+                f.requestId!!,
+                if (f.token.isEmpty()) PushRegistrationOutcome.CLEARED else PushRegistrationOutcome.STORED,
+            ))
         }
+        onSendForTest = {}
+    }
 
     @Test
     fun anInboxLinkRegistersItsOwnPushToken() {
@@ -82,23 +116,26 @@ class CollaboratorInboxPushTest {
         r.receiveControlForTest(Attached(Role.DEVICE, "acct-colleague"))
 
         assertEquals(
-            listOf(RegisterPush("ios", "tok-A")), dialed.toList(),
+            listOf("tok-A"), dialed.map { it.token },
             "without its own token the contact's daemon has nothing to target — §3.4 cannot deliver",
         )
     }
 
+    /**
+     * Fleet satellites register too now. They used to be excluded on the theory that the primary link's
+     * token already wakes this phone — true of the owner's account fan-out, but it left the satellite's
+     * own deviceId unreachable by a TARGETED push, and a phone whose primary link was broken with no
+     * other registered path at all. The relay still refuses the identities that must not register.
+     */
     @Test
-    fun aFleetSatelliteStillLeavesPushRegistrationToThePrimaryLink() {
+    fun aFleetSatelliteRegistersItsOwnTokenToo() {
         PushTokens.deliverForTest(PushToken("ios", "tok-A"))
         val dialed = CopyOnWriteArrayList<RegisterPush>()
         val r = repo(BindingRole.OWNER, dialed)
 
         r.receiveControlForTest(Attached(Role.DEVICE, "acct-colleague"))
 
-        assertTrue(
-            dialed.isEmpty(),
-            "another of YOUR machines needs no separate token — the primary link's registration already wakes this phone",
-        )
+        assertEquals(listOf("tok-A"), dialed.map { it.token })
     }
 
     @Test
@@ -111,7 +148,7 @@ class CollaboratorInboxPushTest {
 
         PushTokens.deliverForTest(PushToken("android", "tok-late")) // APNs/FCM answers a moment later
 
-        assertEquals(listOf(RegisterPush("android", "tok-late")), dialed.toList())
+        assertEquals(listOf("tok-late"), dialed.map { it.token })
     }
 
     @Test
@@ -133,7 +170,7 @@ class CollaboratorInboxPushTest {
 
     /**
      * "Off" has to converge even when this launch never obtained a platform token. Turning notifications
-     * off never starts the platform stack (starting it is what prompts), so `pushToken` is null on the next
+     * off never starts the platform stack (starting it is what prompts), so no token exists on the next
      * cold start — and if the clearing register was lost the first time (app killed, outbox drained), the
      * relay would keep a live token forever while the UI reads "off". A contact's daemon is a pusher now,
      * so an un-clearable token is someone ELSE's ability to buzz this phone.
@@ -144,9 +181,10 @@ class CollaboratorInboxPushTest {
         PushTokens.deliverForTest(PushToken("ios", "tok-A"))
         val first = CopyOnWriteArrayList<RegisterPush>()
         repo(BindingRole.COLLABORATOR, first).receiveControlForTest(Attached(Role.DEVICE, "acct-colleague"))
-        assertEquals(listOf(RegisterPush("ios", "tok-A")), first.toList())
+        assertEquals(listOf("tok-A"), first.map { it.token })
 
-        // launch 2: notifications are already off, so nothing ever starts the platform stack
+        // launch 2: notifications are already off, so nothing ever starts the platform stack — and a new
+        // process means a fresh coordinator with no memory of the confirmation above
         PushTokens.deliverForTest(null)
         val second = CopyOnWriteArrayList<RegisterPush>()
         val r = repo(BindingRole.COLLABORATOR, second).apply { notificationsOn.value = false }

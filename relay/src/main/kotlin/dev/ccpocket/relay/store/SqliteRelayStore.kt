@@ -172,16 +172,17 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
         Unit
     }
 
-    override suspend fun setPushToken(deviceId: String, platform: String, token: String, now: Long) = tx { c ->
+    override suspend fun setPushToken(deviceId: String, platform: String, token: String, now: Long): Boolean = tx { c ->
         // a blank token de-registers — null out both columns so pushTargets() drops the device
         val clear = token.isBlank()
         c.prepareStatement("UPDATE devices SET push_platform=?, push_token=?, push_updated_at=? WHERE device_id=?").use { ps ->
             if (clear) { ps.setNull(1, java.sql.Types.VARCHAR); ps.setNull(2, java.sql.Types.VARCHAR) }
             else { ps.setString(1, platform); ps.setString(2, token) }
             ps.setLong(3, now); ps.setString(4, deviceId)
-            ps.executeUpdate()
+            // rows-affected IS the receipt: 0 means the device row is gone, which the caller reports as
+            // "no_device" instead of letting the phone believe it is registered
+            ps.executeUpdate() > 0
         }
-        Unit
     }
 
     override suspend fun clearPushToken(deviceId: String, platform: String, token: String, now: Long): Boolean = tx { c ->

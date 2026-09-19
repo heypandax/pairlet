@@ -96,15 +96,14 @@ class InMemoryRelayStore : RelayStore {
         Unit
     }
 
-    override suspend fun setPushToken(deviceId: String, platform: String, token: String, now: Long): Unit = lock.withLock {
+    override suspend fun setPushToken(deviceId: String, platform: String, token: String, now: Long): Boolean = lock.withLock {
         val clear = token.isBlank() // a blank token de-registers
-        devices[deviceId]?.let {
-            devices[deviceId] = it.with(
-                pushPlatform = if (clear) null else platform,
-                pushToken = if (clear) null else token,
-            )
-        }
-        Unit
+        val d = devices[deviceId] ?: return@withLock false
+        devices[deviceId] = d.with(
+            pushPlatform = if (clear) null else platform,
+            pushToken = if (clear) null else token,
+        )
+        true
     }
 
     override suspend fun clearPushToken(deviceId: String, platform: String, token: String, now: Long): Boolean = lock.withLock {
