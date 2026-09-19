@@ -8,6 +8,7 @@ import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.claude.StreamParser
+import dev.ccpocket.daemon.conversation.Conversation
 import dev.ccpocket.daemon.conversation.KeyedSink
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.DirectoryService
@@ -49,8 +50,10 @@ import dev.ccpocket.protocol.ToolEvent
 import dev.ccpocket.protocol.TurnDone
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
@@ -145,7 +148,7 @@ class HandoffTerminalSinkCutTest {
         ) {}
     }
 
-    private class Fixture(scope: CoroutineScope, backend: AgentBackend = StubBackend()) {
+    private class Fixture(private val scope: CoroutineScope, backend: AgentBackend = StubBackend()) {
         var now: Long = System.currentTimeMillis()
         val tmp: File = Files.createTempDirectory("ccp-cut").toFile()
         val workdir: String = Files.createTempDirectory("ccp-cut-wd").toString()
@@ -176,10 +179,64 @@ class HandoffTerminalSinkCutTest {
          *  in-memory fan-out baseline + guards, same persisted ledger). */
         fun newService() = HandoffService(HandoffRegistry(HandoffStore.load(tmp.resolve("handoffs.json")), clock = { now }))
 
+        /**
+         * A QUEUEING transport for the owner's device, injected by the negative regression below: the
+         * emit is acknowledged at once and the frame lands on the client's list [deferOwnerDeliveryMs]
+         * later. 0 (the default everywhere else) keeps the ordinary in-line sink. This is a fault
+         * INJECTION, not an observation — today's relay sink awaits its write — and it exists to hold
+         * the fixture to the honest contract: what an emit returning means is "dispatched", never "the
+         * client can see it".
+         */
+        var deferOwnerDeliveryMs: Long = 0L
+        private val deferred = CopyOnWriteArrayList<Job>()
+
+        /** Join every outstanding deferred delivery — the injected queue drained deterministically,
+         *  rather than slept past. */
+        suspend fun drainDeferred() { deferred.toList().forEach { it.join() } }
+
         /** The relay's stable per-device fan-out identity — what the conversation, the handoff fan-out
          *  and the cut all key on. */
         fun sinkFor(deviceId: String, into: MutableList<Frame>): OutboundSink =
-            KeyedSink("dev:$deviceId", OutboundSink { into += it })
+            KeyedSink(
+                "$SINK_KEY_PREFIX$deviceId",
+                OutboundSink { frame ->
+                    val lag = deferOwnerDeliveryMs
+                    if (lag <= 0L || deviceId != OWNER) into += frame
+                    else deferred += scope.launch { delay(lag); into += frame }
+                },
+            )
+
+        /** One FINISHED fan-out: the frame and the sink identities it reached, as recorded by
+         *  [Conversation.fanOutProbe] after the last sink's emit returned. */
+        class Dispatch(val frame: Frame, val to: Set<Any>)
+
+        private val fanOutLogs = java.util.concurrent.ConcurrentHashMap<String, CopyOnWriteArrayList<Dispatch>>()
+
+        /**
+         * Start recording what [convoId] finishes broadcasting. Installed per conversation rather than
+         * once at open time on purpose: the §8.3 hot→cold rebuild mints a NEW [Conversation] for the
+         * grant, and that rebuilt one is what every assertion here is about. Idempotent.
+         */
+        suspend fun watchFanOut(convoId: String): CopyOnWriteArrayList<Dispatch> {
+            fanOutLogs[convoId]?.let { return it }
+            val convo = assertNotNull(
+                registry.conversationForTest(convoId),
+                "no live conversation ${convoId.take(8)}… to watch — a barrier over nothing proves nothing",
+            )
+            val log = CopyOnWriteArrayList<Dispatch>()
+            fanOutLogs[convoId] = log
+            convo.fanOutProbe = Conversation.FanOutProbe { frame, to -> log += Dispatch(frame, to) }
+            return log
+        }
+
+        /** Redacted dispatch order for a failure message — frame KINDS and sink identities only, never
+         *  payloads. Keeps a CI failure self-explaining instead of "expected not null". */
+        fun trace(window: List<Dispatch>): String =
+            window.joinToString(prefix = "[", postfix = "]") { d ->
+                val kind = d.frame::class.simpleName
+                val mode = (d.frame as? SessionLive)?.let { "/${it.mode}" } ?: ""
+                "$kind$mode→${d.to.map(Any::toString).sorted()}"
+            }
 
         suspend fun route(frame: Frame, deviceId: String, into: MutableList<Frame>) =
             router.handle(frame, sinkFor(deviceId, into), deviceId = deviceId)
@@ -217,19 +274,30 @@ class HandoffTerminalSinkCutTest {
 
         // A lazy open first announces a sparse SessionLive, then asynchronously seeds and announces
         // again. The title identifies the latter: waiting only for convoId lets that second frame
-        // race the recipient baseline/cut. No agent turn (and therefore no TurnDone) exists here.
-        suspend fun awaitLive(into: List<Frame>, notConvoId: String? = null): String = withTimeout(15_000) {
+        // race the recipient baseline/cut. No agent turn (and therefore no TurnDone) exists here, so
+        // there is no TurnDone to wait for — the seeded announce is the only end-of-open marker.
+        //
+        // [exclude] is the caller's pre-open snapshot of convoIds already in [into]. Without it this is
+        // an `any`-shaped wait that a frame from an EARLIER conversation on the same list satisfies
+        // instantly (a device reviewing two sessions), and the helper returns the wrong conversation.
+        suspend fun awaitLive(into: List<Frame>, exclude: Set<String> = emptySet()): String = withTimeout(15_000) {
             var live: SessionLive? = null
             while (live == null) {
-                live = into.filterIsInstance<SessionLive>().lastOrNull { it.convoId != notConvoId && it.title == seededTitle(it.sessionId) }
+                live = into.filterIsInstance<SessionLive>()
+                    .lastOrNull { it.convoId !in exclude && it.title == seededTitle(it.sessionId) }
                 if (live == null) delay(20)
             }
             live.convoId
         }
 
+        /** Every convoId this list has already been told about — the [awaitLive] exclusion snapshot. */
+        fun knownConvos(into: List<Frame>): Set<String> =
+            into.filterIsInstance<SessionLive>().mapTo(HashSet()) { it.convoId }
+
         suspend fun openSession(deviceId: String, into: MutableList<Frame>, sessionId: String = SESSION_A): String {
+            val known = knownConvos(into)
             route(OpenSession(workdir, resumeId = sessionId), deviceId, into)
-            return awaitLive(into)
+            return awaitLive(into, known)
         }
 
         suspend fun createBound(recipient: String, into: MutableList<Frame>, sessionId: String = SESSION_A): SessionHandoff {
@@ -254,13 +322,16 @@ class HandoffTerminalSinkCutTest {
             deviceId: String = FRANK,
             sessionId: String = SESSION_A,
         ): Pair<SessionHandoff, String> {
-            handoffs.attach(sinkFor("owner", owner))
+            handoffs.attach(sinkFor(OWNER, owner))
             handoffs.attach(sinkFor(deviceId, recipient), recipientDeviceId = deviceId)
-            val ownerConvo = openSession("owner", owner, sessionId)
+            val ownerConvo = openSession(OWNER, owner, sessionId)
             val h = createBound(deviceId, owner, sessionId)
             routeAsCollaborator(AcceptHandoff(h.id), deviceId, recipient)
+            // snapshot BEFORE the open: a recipient reviewing a second session already holds the first
+            // grant's SessionLive, and an unfiltered wait would hand that stale convoId back here
+            val known = knownConvos(recipient) + ownerConvo
             routeAsCollaborator(OpenSession(workdir, resumeId = sessionId), deviceId, recipient)
-            val convoId = awaitLive(recipient)
+            val convoId = awaitLive(recipient, known)
             assertNotEquals(ownerConvo, convoId, "the grant open rebuilds the conversation (§8.3)")
             // the owner was migrated onto the rebuilt convo — it is IN the fan-out set, which is what
             // makes "the recipient is cut but the owner is not" a meaningful assertion at all
@@ -270,33 +341,92 @@ class HandoffTerminalSinkCutTest {
             return h to convoId
         }
 
-        /** Push an identifiable NEW SessionLive through the production fan-out. switchMode awaits
-         *  every sink emission, so its return is the broadcast completion barrier, not a frame-count
-         *  poll that an unrelated initial announce could satisfy. Before a cut, require the recipient
-         *  to have the very same broadcast as the owner; afterwards require only the owner's receipt. */
+        /**
+         * Push ONE identifiable SessionLive through the production fan-out, and read the outcome off the
+         * DISPATCH RECORD rather than off anybody's inbox.
+         *
+         * `registry.switchMode` → `Conversation.switchMode` → `recordPendingSettings` → the fan-out lambda
+         * is one suspending chain today, so its return does complete the dispatch — but "it returned" is
+         * not evidence of that, and three distinct failures all look identical from a frame-list poll:
+         * the convo was gone (`get(convoId)?.switchMode(…) ?: Unit` — a silent no-op), the owner was not
+         * in the fan-out set, or the switch was a no-op that announced nothing new. [Conversation.fanOutProbe]
+         * fires after the LAST sink's emit returned and names the sinks the frame reached, which separates
+         * all three and — the part that matters for §5.3 item 7 — makes "the recipient was not in this
+         * broadcast" a statement about the fan-out set at dispatch time instead of about a delivery that
+         * simply had not happened yet when the assertion looked.
+         *
+         * The target mode comes from the conversation's OWN [Conversation.currentMode], never from the
+         * owner's frame history: a history-derived toggle can pick the mode the convo is already in, and
+         * that no-op announce is exactly the case where there is nothing new to observe.
+         *
+         * Returns the owner's post-ping conversation-frame count.
+         */
         suspend fun fanOutPing(
             convoId: String,
             owner: MutableList<Frame>,
             recipient: List<Frame>? = null,
         ): Int {
+            val log = watchFanOut(convoId)
+            val convo = assertNotNull(
+                registry.conversationForTest(convoId),
+                "the conversation must still be live to be pinged: ${convoId.take(8)}…",
+            )
+            val mark = log.size
+            val before = owner.size
+            val mode = if (convo.currentMode() == PermissionMode.PLAN) PermissionMode.DEFAULT else PermissionMode.PLAN
+            registry.switchMode(SwitchMode(convoId, mode))
+            val window = log.drop(mark)
+            val ping = assertNotNull(
+                window.lastOrNull { d -> (d.frame as? SessionLive)?.let { it.convoId == convoId && it.mode == mode } == true },
+                "switchMode must FINISH fanning this mode broadcast out before it returns " +
+                    "(convo=${convoId.take(8)}… mode=$mode) — dispatched: ${trace(window)}",
+            )
+            assertEquals(mode, convo.currentMode(), "the ping must really move the mode; a no-op switch broadcasts nothing new")
+            assertTrue(
+                OWNER_SINK in ping.to,
+                "the owner must be in this broadcast's fan-out set — reached: ${ping.to.map(Any::toString).sorted()}",
+            )
+            if (recipient != null) {
+                assertTrue(
+                    RECIPIENT_SINK in ping.to,
+                    "both views must be in the SAME completed broadcast before the cut — reached: ${ping.to.map(Any::toString).sorted()}",
+                )
+            }
+            // …and the owner's TRANSPORT landed it. Separate from the dispatch fact above on purpose:
+            // an emit returning says "handed to the transport", so this is the half that belongs in a
+            // bounded wait, correlated to the very frame the record above proves was already sent.
+            withTimeout(15_000) {
+                while (owner.drop(before).none { it === ping.frame }) delay(20)
+            }
+            if (recipient != null) {
+                assertTrue(recipient.any { it === ping.frame }, "the recipient's view holds the very same broadcast")
+            }
+            return owner.convoFrames(convoId).size
+        }
+
+        /** The PRE-#375 barrier — "read the owner's frame list the instant switchMode returns" — kept
+         *  solely so [a_queueing_transport_breaks_the_old_poll_and_not_the_dispatch_barrier] can show it
+         *  failing. Never used by a real assertion. */
+        suspend fun legacyFanOutPing(convoId: String, owner: MutableList<Frame>) {
             val before = owner.size
             val previousMode = owner.filterIsInstance<SessionLive>().last { it.convoId == convoId }.mode
             val mode = if (previousMode == PermissionMode.PLAN) PermissionMode.DEFAULT else PermissionMode.PLAN
             registry.switchMode(SwitchMode(convoId, mode))
-            val ping = assertNotNull(
+            assertNotNull(
                 owner.drop(before).filterIsInstance<SessionLive>().lastOrNull { it.convoId == convoId && it.mode == mode },
                 "the owner must receive this mode broadcast before switchMode returns",
             )
-            if (recipient != null) {
-                assertTrue(recipient.any { it === ping }, "both views must receive the same completed broadcast before the cut")
-            }
-            return owner.convoFrames(convoId).size
         }
 
         companion object {
             const val SESSION_A = "aaaaaaaa-bbbb-cccc-dddd-000000000001"
             const val SESSION_B = "aaaaaaaa-bbbb-cccc-dddd-000000000002"
             const val FRANK = "dev-frank"
+            const val OWNER = "owner"
+            const val SINK_KEY_PREFIX = "dev:"
+            /** The two fan-out identities every assertion below is phrased in. */
+            const val OWNER_SINK = "$SINK_KEY_PREFIX$OWNER"
+            const val RECIPIENT_SINK = "$SINK_KEY_PREFIX$FRANK"
         }
     }
 
@@ -319,11 +449,13 @@ class HandoffTerminalSinkCutTest {
         val owner = frames(); val frank = frames()
         try {
             val (h, convoId) = fx.handOver(owner, frank)
+            val fanOut = fx.watchFanOut(convoId)
             fx.fanOutPing(convoId, owner, frank)
             val frankBefore = frank.convoFrames(convoId).size
             assertTrue(frankBefore > 0, "the recipient really was streaming this conversation before the transition")
 
             settle(fx, h, convoId, owner, frank)
+            val sinceCut = fanOut.size
 
             assertEquals(
                 expected,
@@ -338,6 +470,16 @@ class HandoffTerminalSinkCutTest {
                 frankBefore,
                 frank.convoFrames(convoId).size,
                 "the recipient must receive NOTHING from this conversation once the grant ended",
+            )
+            // …which is stronger than "nothing has arrived yet": not one broadcast this conversation
+            // FINISHED after the transition even listed the recipient, so none can land late either.
+            // Covers every producer, not just the ping above — the lazy open's own announce tail
+            // (Conversation.open's `scope.launch`) pushes SessionLive/history/commands on the
+            // conversation's scope, outside any call this test makes.
+            val leaked = fanOut.drop(sinceCut).filter { Fixture.RECIPIENT_SINK in it.to }
+            assertTrue(
+                leaked.isEmpty(),
+                "no post-transition broadcast may still reach the recipient: ${fx.trace(leaked)}",
             )
             // the recipient was still told the grant ended (the handoff plane is a different fan-out)
             assertTrue(
@@ -576,6 +718,88 @@ class HandoffTerminalSinkCutTest {
             val frankAfterCut = late.convoFrames(lateConvo).size
             assertTrue(fx.fanOutPing(lateConvo, owner) > 0, "the owner still drives the session")
             assertEquals(frankAfterCut, late.convoFrames(lateConvo).size, "the backstop must cut the raced view")
+        } finally {
+            fx.registry.closeAll()
+            scope.cancel()
+        }
+    }
+
+    // ---- the barrier itself, proven both ways ------------------------------
+
+    /**
+     * NEGATIVE 1 — the old helper's premise, isolated (issue #375). [Fixture.legacyFanOutPing] is the
+     * pre-#375 barrier: read the owner's frame list the instant `switchMode` returns. It holds only
+     * while every transport lands its frame INSIDE the emit call. Give the owner a transport that
+     * acknowledges the emit and delivers a moment later — a write queue, which is all a relay sink is —
+     * and the broadcast moves outside the old assertion's window: the old helper then fails on EVERY
+     * attempt, while [Fixture.fanOutPing] passes on the same ordering because it asserts on the
+     * dispatch record and waits for arrival separately.
+     *
+     * Deliberately not a sleep-based "it went green" argument: the injected lag is drained by joining
+     * its delivery jobs, and the failure it forces is deterministic, not sampled.
+     */
+    @Test
+    fun a_queueing_transport_breaks_the_old_poll_and_not_the_dispatch_barrier() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Default)
+        val fx = Fixture(scope)
+        val owner = frames(); val frank = frames()
+        try {
+            val (_, convoId) = fx.handOver(owner, frank)
+            fx.watchFanOut(convoId)
+            fx.fanOutPing(convoId, owner, frank) // the same fixture, still sound with no lag injected
+
+            fx.deferOwnerDeliveryMs = 250
+            repeat(3) { attempt ->
+                val broke = runCatching { fx.legacyFanOutPing(convoId, owner) }.exceptionOrNull()
+                assertNotNull(broke, "attempt $attempt: the pre-#375 poll must fail once the broadcast lands late")
+                assertTrue(
+                    broke.message.orEmpty().contains("before switchMode returns"),
+                    "attempt $attempt: it must fail on ITS OWN assertion, not incidentally: ${broke.message}",
+                )
+                fx.drainDeferred()
+                fx.fanOutPing(convoId, owner, frank) // …and the dispatch barrier is untouched by the lag
+            }
+        } finally {
+            fx.deferOwnerDeliveryMs = 0
+            fx.registry.closeAll()
+            scope.cancel()
+        }
+    }
+
+    /**
+     * NEGATIVE 2 — the assertions still BITE. Re-attach the recipient's sink to the live conversation
+     * after the cut, i.e. exactly the leak §5.3 item 7 exists to prevent (a view the transition failed
+     * to remove), and both post-transition checks must go red: the recipient's frame count moves, and
+     * the dispatch record names it in a broadcast that happened after the grant ended. A barrier that
+     * cannot fail on a real leak would be decoration.
+     */
+    @Test
+    fun a_recipient_view_that_survives_the_cut_still_fails_both_checks() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Default)
+        val fx = Fixture(scope)
+        val owner = frames(); val frank = frames()
+        try {
+            val (h, convoId) = fx.handOver(owner, frank)
+            val fanOut = fx.watchFanOut(convoId)
+            fx.fanOutPing(convoId, owner, frank)
+            val frankBefore = frank.convoFrames(convoId).size
+
+            fx.route(RecallHandoff(h.id), Fixture.OWNER, owner)
+            assertEquals(HandoffStatus.RECALLED, fx.handoffs.registry.byId(h.id)?.status)
+            // the injected leak: a recipient view the cut did not remove
+            assertNotNull(fx.registry.conversationForTest(convoId)).reattach(fx.sinkFor(Fixture.FRANK, frank))
+            val sinceCut = fanOut.size
+
+            fx.fanOutPing(convoId, owner)
+            assertNotEquals(
+                frankBefore,
+                frank.convoFrames(convoId).size,
+                "the injected leak must reach the recipient — otherwise the real test's count check is vacuous",
+            )
+            assertTrue(
+                fanOut.drop(sinceCut).any { Fixture.RECIPIENT_SINK in it.to },
+                "and the dispatch record must name the recipient in a post-transition broadcast",
+            )
         } finally {
             fx.registry.closeAll()
             scope.cancel()

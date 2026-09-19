@@ -113,6 +113,12 @@ class SessionRegistry(
     /** Test-only race seam between the optimistic live lookup and its authoritative atomic claim. */
     internal var beforeLiveReattachClaim: (suspend () -> Unit)? = null
 
+    /** Test-only handle on the LIVE conversation behind [convoId] (issue #375), so a test can read the
+     *  authoritative state — [Conversation.currentMode], fan-out membership — and install
+     *  [Conversation.fanOutProbe], instead of inferring any of it from one client's frame history.
+     *  Null means "no live conversation", which is exactly what makes [switchMode] a silent no-op. */
+    internal suspend fun conversationForTest(convoId: String): Conversation? = get(convoId)
+
     // live LAN sockets — the reaper must treat "a phone is attached over LAN" like relay peerOnline,
     // else a LAN session idle past the reap window is killed under the user's thumbs
     private val lanConnections = java.util.concurrent.atomic.AtomicInteger(0)

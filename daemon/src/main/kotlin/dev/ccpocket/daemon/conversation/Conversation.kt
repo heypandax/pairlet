@@ -30,6 +30,7 @@ import dev.ccpocket.protocol.contextWindowFor
 import dev.ccpocket.protocol.provenWindow
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.ConvoHistoryPage
+import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PendingApproval
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
@@ -268,12 +269,39 @@ class Conversation(
         put(sinkKey(initialSink), initialSink)
     }
 
+    /**
+     * Test seam (issue #375) — the fan-out's COMPLETION record. Invoked once per frame, after the last
+     * attached sink's [OutboundSink.emit] returned, carrying the [sinkKey]s the frame actually reached.
+     *
+     * Nothing else can tell a test that a broadcast is over. Polling one client's frame list proves only
+     * that this client has it, never that the dispatch to the others finished — and a call that reached
+     * no live conversation at all ([dev.ccpocket.daemon.session.SessionRegistry.switchMode] is a silent
+     * `?: Unit` when the convo is gone) is indistinguishable from "not yet". The delivered-to set is read
+     * AT dispatch time, which is what makes "that view was not in this broadcast" a fact rather than a
+     * race that had not happened yet.
+     *
+     * Null in production — nothing installs one, and the null check keeps the hot path allocation-free.
+     */
+    @Volatile
+    internal var fanOutProbe: FanOutProbe? = null
+
+    /** @see fanOutProbe */
+    internal fun interface FanOutProbe {
+        /** [to] = the [sinkKey]s [frame] was delivered to, snapshotted as the fan-out ran. */
+        fun dispatched(frame: Frame, to: Set<Any>)
+    }
+
     // every existing emit site goes through this fan-out; one failing transport must not break the rest
     private val sink: OutboundSink = OutboundSink { f ->
         if (f is PromptAck) promptDiagnostics.ack(f.promptId)
-        sinks.values.forEach { s -> runCatching { s.emit(f) }.onFailure {
-            Diagnostics.report(ErrorPath.PAYLOAD_SEND, Stage.WRITE, ErrorCode.SEND_FAILED, it)
-        } }
+        val probe = fanOutProbe
+        val reached = if (probe == null) null else LinkedHashSet<Any>()
+        sinks.entries.forEach { (key, s) -> runCatching { s.emit(f) }
+            .onSuccess { reached?.add(key) }
+            .onFailure {
+                Diagnostics.report(ErrorPath.PAYLOAD_SEND, Stage.WRITE, ErrorCode.SEND_FAILED, it)
+            } }
+        probe?.dispatched(f, reached ?: emptySet())
     }
     private val promptDiagnostics by lazy { dev.ccpocket.daemon.diagnostics.PromptDiagnostics(convoId, scope) { sink.emit(it) } }
 
