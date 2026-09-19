@@ -106,6 +106,12 @@ else
   exit 1
 fi
 
+if ! python3 scripts/smoke-linux-launcher.py "$VERIFY/squashfs-root/usr"; then
+  rm -f "$ROOT/$OUT"
+  echo "ERROR: AppImage failed the Linux small-pipe launcher regression"
+  exit 1
+fi
+
 echo ""
 echo "    artifact : $OUT"
 echo "    sha256   : $(sha256sum "$ROOT/$OUT" | awk '{print $1}')"

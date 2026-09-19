@@ -47,6 +47,7 @@ APP_IMAGE="mobile/composeApp/build/compose/binaries/main/app/CC Pocket"
 
 echo "==> packaged-image smoke (runs the BUNDLED JVM, catches jlink module drops — #251/#305)"
 bash scripts/smoke-desktop-image.sh "$APP_IMAGE"
+python3 scripts/smoke-linux-launcher.py "$APP_IMAGE"
 
 echo "==> gradle packageDeb + packageRpm"
 ./gradlew :mobile:composeApp:packageDeb :mobile:composeApp:packageRpm --no-daemon "${GRADLE_JDK[@]}"
@@ -71,6 +72,8 @@ grep -Fq 'bin/CC Pocket' "$DEB_LIST" || { echo "ERROR: .deb payload has no 'bin/
 grep -Fq 'lib/runtime/' "$DEB_LIST" || { echo "ERROR: .deb payload has no bundled JVM runtime"; exit 1; }
 grep -Fq 'bin/CC Pocket' "$RPM_LIST" || { echo "ERROR: .rpm payload has no 'bin/CC Pocket' launcher"; exit 1; }
 grep -Fq 'lib/runtime/' "$RPM_LIST" || { echo "ERROR: .rpm payload has no bundled JVM runtime"; exit 1; }
+grep -Fq 'lib/app/cc-pocket-classpath.jar' "$DEB_LIST" || { echo "ERROR: .deb missing compact launcher classpath"; exit 1; }
+grep -Fq 'lib/app/cc-pocket-classpath.jar' "$RPM_LIST" || { echo "ERROR: .rpm missing compact launcher classpath"; exit 1; }
 # Menu entry. jpackage never ships share/applications/ inside the payload: the .desktop file lives
 # under <install-dir>/lib/ and the package's post-install script registers it with
 # `xdg-desktop-menu install` (verified on the 2.1.0 packages). Without that registration the app
@@ -84,6 +87,7 @@ dpkg-deb -e "$DEB" "$CTL_DIR" || { echo "ERROR: dpkg-deb could not extract contr
 grep -Fq 'xdg-desktop-menu install' "$CTL_DIR/postinst" || { echo "ERROR: .deb postinst does not register a menu entry (xdg-desktop-menu)"; exit 1; }
 rpm -qp --scripts "$RPM" > "$RPM_SCRIPTS" || { echo "ERROR: rpm could not read scripts from $RPM"; exit 1; }
 grep -Fq 'xdg-desktop-menu install' "$RPM_SCRIPTS" || { echo "ERROR: .rpm post-install does not register a menu entry (xdg-desktop-menu)"; exit 1; }
+python3 scripts/smoke-linux-launcher.py "$DEB"
 
 DEB_OUT="cc-pocket-desktop-${VERSION}-linux-${ARCH}.deb"
 RPM_OUT="cc-pocket-desktop-${VERSION}-linux-${ARCH}.rpm"

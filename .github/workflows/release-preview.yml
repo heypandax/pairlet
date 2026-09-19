@@ -204,11 +204,17 @@ jobs:
         run: |
           ./gradlew --no-daemon :mobile:composeApp:createDistributable
           bash scripts/smoke-desktop-image.sh "mobile/composeApp/build/compose/binaries/main/app/$APP_IMAGE"
+      - name: Verify Linux launcher with small pipes
+        if: runner.os == 'Linux'
+        run: python3 scripts/smoke-linux-launcher.py "mobile/composeApp/build/compose/binaries/main/app/CC Pocket"
       - name: Build installer with branding and compatibility hooks
         env:
           # Linux gets two system packages instead of one installer (issue #379).
           PACKAGE_TASKS: ${{ runner.os == 'Windows' && ':mobile:composeApp:packageMsi' || runner.os == 'Linux' && ':mobile:composeApp:packageDeb :mobile:composeApp:packageRpm' || ':mobile:composeApp:packageDmg' }}
         run: ./gradlew --no-daemon $PACKAGE_TASKS
+      - name: Verify Linux installer launcher with small pipes
+        if: runner.os == 'Linux'
+        run: python3 scripts/smoke-linux-launcher.py mobile/composeApp/build/compose/binaries/main/deb/*.deb
       - name: Verify packaged Sentry configuration
         uses: ./.github/actions/observability-config
         with:

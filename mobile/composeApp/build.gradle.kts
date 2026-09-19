@@ -259,6 +259,22 @@ if (System.getProperty("os.name").lowercase().contains("win")) {
     }
 }
 
+// #385 / JDK-8380085: the JDK 17 Linux launcher can partially read its pipe when
+// the expanded classpath exceeds the pipe capacity, then SIGSEGV before JVM init.
+// Keep the exact ordered classpath in a manifest JAR; deb/rpm/AppImage all consume
+// this completed image. No changes to the runtime or rendering backend are needed.
+if (System.getProperty("os.name").lowercase().contains("linux")) {
+    tasks.matching { it.name == "createDistributable" }.configureEach {
+        inputs.file(rootProject.file("scripts/compact-linux-classpath.py"))
+        doLast {
+            packagingExec.exec {
+                commandLine("python3", rootProject.file("scripts/compact-linux-classpath.py"),
+                    layout.buildDirectory.dir("compose/binaries/main/app/CC Pocket").get().asFile)
+            }
+        }
+    }
+}
+
 // jpackage derives CFBundleName from packageName. Finish the private image and re-seal its
 // outer signature using the same identity BEFORE packageDmg consumes it; never mutate an installed app.
 if (System.getProperty("os.name").lowercase().contains("mac")) {
