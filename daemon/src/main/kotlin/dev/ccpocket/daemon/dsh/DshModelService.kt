@@ -8,16 +8,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
-import java.io.BufferedReader
-import java.io.File
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.TimeUnit
 
 /**
  * The DeepSeek Harness model + reasoning-effort catalogue (issue #333, re-sourced by the dsh 0.1.2 ACP switch), read from dsh's OWN ACP
@@ -38,6 +28,16 @@ import java.util.concurrent.TimeUnit
  * The scratch directory is deliberate: `session/new` needs a cwd and dsh persists every session it
  * creates, so pointing this at a real project would litter that project's session list with empty rows.
  * A temp dir keys the throwaway session under a project nobody browses (see [DshPaths.projectKey]).
+ *
+ * ## The probe cleans up after itself (issue #387)
+ *
+ * A temp cwd hides the litter from the user's projects; it does not stop dsh from making it. dsh
+ * materializes a header for an empty session DURING `session/new`, offers no ephemeral/no-persist
+ * option, and registers no `session/delete` — so opening the model picker used to leave a permanent
+ * `cc-pocket-dsh-models…` row in dsh's own web list every ten minutes. [DshProbeSession] now owns the
+ * whole lifecycle and sweeps that one row, under [DshProbeSessionCleanup]'s ownership proof, after its
+ * process is confirmed gone. A sweep that cannot prove ownership REFUSES and says so in the log; it
+ * never costs the caller a catalogue that was read successfully.
  *
  * ## What "no answer" means
  *
@@ -146,79 +146,19 @@ class DshModelService(
          *  a user just configured shows up without restarting the daemon. */
         const val CACHE_TTL_MS = 10 * 60 * 1000L
 
-        /** A cold Node start plus dsh's profile compose; generous because the alternative is a blank picker. */
-        const val BOOT_TIMEOUT_MS = 60_000L
-
-        private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-
         /**
-         * Boot `dsh --profile acp`, handshake, open one scratch session, read its `configOptions`, kill it.
+         * Boot `dsh --profile acp`, handshake, open one scratch session, read its `configOptions`, and
+         * take the process, the scratch directory and the session dsh persisted for it back out again.
          *
-         * The child is OURS to kill from the moment it starts: every exit — a timeout, a throw, a
-         * cancelled fetch — must take the process with it, or a Node host outlives the request holding
-         * `$DSH_HOME` open with nobody left who knows how to close it.
+         * The whole lifecycle lives in [DshProbeSession] so it can be driven by a test with injected
+         * process and filesystem failures; the only thing that belongs here is which executable to run.
+         * Note what this returns: THE CATALOGUE, and nothing about the sweep. A probe whose litter could
+         * not be cleaned still answers the picker — see [DshProbeSession.Result].
          */
         suspend fun bootTransient(dshBin: String?): DshConfigOptions? = withContext(Dispatchers.IO) {
             val exe = DshLauncher.resolveExecutable(dshBin)
-            val scratch = kotlin.io.path.createTempDirectory("cc-pocket-dsh-models").toFile()
-            val proc = ProcessBuilder(exe.toString(), "--profile", DshLauncher.PROFILE)
-                .directory(scratch)
-                .redirectErrorStream(false) // dsh logs on stderr; stdout is exclusively ACP frames
-                .also { it.environment().putIfAbsent("LANG", "C.UTF-8") }
-                .start()
-            val answers = CompletableFuture<JsonObject>()
-            Thread {
-                // Drain stderr for the child's whole life: a full pipe buffer would wedge the process we
-                // are about to ask a question of.
-                runCatching { proc.errorStream.bufferedReader().forEachLine { } }
-            }.apply { isDaemon = true; name = "dsh-models-stderr" }.start()
-            Thread {
-                runCatching {
-                    proc.inputStream.bufferedReader().use { reader: BufferedReader ->
-                        reader.forEachLine { line ->
-                            val root = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject
-                            val result = root?.obj("result") ?: return@forEachLine
-                            // The session answer is the one carrying configOptions; initialize's has none.
-                            if (result.arr("configOptions") != null && !answers.isDone) answers.complete(result)
-                        }
-                    }
-                }
-                answers.complete(JsonObject(emptyMap())) // stdout closed with no answer — unblock the waiter
-            }.apply { isDaemon = true; name = "dsh-models-stdout" }.start()
-            try {
-                val writer = proc.outputStream.bufferedWriter()
-                fun send(obj: JsonObject) {
-                    writer.write(obj.toString()); writer.write("\n"); writer.flush()
-                }
-                send(
-                    buildJsonObject {
-                        put("jsonrpc", "2.0"); put("id", 1); put("method", "initialize")
-                        putJsonObject("params") {
-                            put("protocolVersion", 1)
-                            putJsonObject("clientCapabilities") {
-                                putJsonObject("fs") { put("readTextFile", false); put("writeTextFile", false) }
-                            }
-                        }
-                    },
-                )
-                // No need to wait for the initialize response: dsh answers requests in order, and a
-                // session/new arriving behind an unfinished handshake is queued, not refused.
-                send(
-                    buildJsonObject {
-                        put("jsonrpc", "2.0"); put("id", 2); put("method", "session/new")
-                        putJsonObject("params") {
-                            put("cwd", scratch.absolutePath)
-                            putJsonArray("mcpServers") {}
-                        }
-                    },
-                )
-                val result = runCatching { answers.get(BOOT_TIMEOUT_MS, TimeUnit.MILLISECONDS) }.getOrNull()
-                val options = result?.arr("configOptions")?.let { DshConfigOptions.parse(it) }
-                options?.takeIf { !it.isEmpty }
-            } finally {
-                runCatching { proc.destroyForcibly() }
-                runCatching { scratch.deleteRecursively() }
-            }
+            DshProbeSession(launch = { scratch -> DshProbeSession.processBuilder(exe, scratch).start() })
+                .run().options
         }
     }
 }
