@@ -185,7 +185,7 @@ class ReleaseClientDownloadTest {
         val e = assertFailsWith<IOException> {
             ReleaseClient.download(
                 "$base/stall", dir.resolve("stall.bin"), { seen += it },
-                overallTimeout = Duration.ofMinutes(10), stallTimeout = Duration.ofMillis(700),
+                headerTimeout = Duration.ofMinutes(10), stallTimeout = Duration.ofMillis(700),
             )
         }
         val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
@@ -207,7 +207,7 @@ class ReleaseClientDownloadTest {
         val seen = CopyOnWriteArrayList<ReleaseClient.DownloadProgress>()
         val dest = dir.resolve("slowhead.bin")
         ReleaseClient.download("$base/slowhead", dest, { seen += it },
-            overallTimeout = Duration.ofMinutes(1), stallTimeout = Duration.ofSeconds(30), tick = Duration.ofMillis(100))
+            headerTimeout = Duration.ofMinutes(1), stallTimeout = Duration.ofSeconds(30), tick = Duration.ofMillis(100))
         val beforeHeaders = seen.takeWhile { it == ReleaseClient.DownloadProgress(0, null) }
         assertTrue(beforeHeaders.size >= 5, "an observer hears about the wait for headers: ${beforeHeaders.size} ticks")
         assertEquals(ReleaseClient.DownloadProgress(payload.size.toLong(), payload.size.toLong()), seen.last())
@@ -229,28 +229,35 @@ class ReleaseClientDownloadTest {
             finally { headersSent.countDown() }
         }
         val dest = dir.resolve("late.bin")
-        assertFailsWith<IOException> {
+        val error = assertFailsWith<java.net.http.HttpTimeoutException> {
             ReleaseClient.download("$base/lateheaders", dest, {},
-                overallTimeout = Duration.ofMillis(300), stallTimeout = Duration.ofSeconds(30))
+                headerTimeout = Duration.ofMillis(300), stallTimeout = Duration.ofSeconds(30))
         }
+        assertTrue(error.message!!.contains("waiting for response"), error.message)
         assertTrue(headersSent.await(10, TimeUnit.SECONDS))
         Thread.sleep(300) // let any late response processing happen before looking
         assertFalse(Files.exists(dest), "late headers after an abort must not create the destination")
     }
 
     @Test
-    fun overall_ceiling_applies_even_while_bytes_trickle() {
+    fun continuing_download_outlives_both_timeout_windows() {
+        val chunks = 40
+        val chunk = ByteArray(64) { 7 }
         route("/trickle") { ex ->
-            ex.sendResponseHeaders(200, 10L * 1024 * 1024)
-            repeat(400) { ex.responseBody.write(ByteArray(64)); ex.responseBody.flush(); Thread.sleep(25) }
+            ex.sendResponseHeaders(200, (chunks * chunk.size).toLong())
+            repeat(chunks) { ex.responseBody.write(chunk); ex.responseBody.flush(); Thread.sleep(75) }
         }
-        val e = assertFailsWith<IOException> {
-            ReleaseClient.download(
-                "$base/trickle", dir.resolve("t.bin"), {},
-                overallTimeout = Duration.ofMillis(800), stallTimeout = Duration.ofSeconds(30),
-            )
-        }
-        assertTrue(e.message!!.contains("timed out"), e.message)
+        val dest = dir.resolve("t.bin")
+        val seen = CopyOnWriteArrayList<ReleaseClient.DownloadProgress>()
+        val started = System.nanoTime()
+        ReleaseClient.download(
+            "$base/trickle", dest, { seen += it },
+            headerTimeout = Duration.ofMillis(700), stallTimeout = Duration.ofMillis(700),
+        )
+        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) > 2_100,
+            "the transfer survives several timeout windows as long as bytes keep arriving")
+        assertContentEquals(ByteArray(chunks * chunk.size) { 7 }, Files.readAllBytes(dest))
+        assertEquals(ReleaseClient.DownloadProgress((chunks * chunk.size).toLong(), (chunks * chunk.size).toLong()), seen.last())
     }
 
     @Test
@@ -262,7 +269,7 @@ class ReleaseClientDownloadTest {
         val calls = CopyOnWriteArrayList<Long>()
         val started = System.nanoTime()
         ReleaseClient.download("$base/slow", dir.resolve("s.bin"), { calls += System.nanoTime() },
-            overallTimeout = Duration.ofMinutes(1), stallTimeout = Duration.ofSeconds(30), tick = Duration.ofMillis(100))
+            headerTimeout = Duration.ofMinutes(1), stallTimeout = Duration.ofSeconds(30), tick = Duration.ofMillis(100))
         val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
         // one per tick plus the final report — never one per network read
         assertTrue(calls.size <= elapsedMs / 100 + 3, "${calls.size} callbacks in ${elapsedMs}ms")

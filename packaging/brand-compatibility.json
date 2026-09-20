@@ -7,8 +7,8 @@
     },
     {
       "path": "protocol/src/jvmMain/kotlin/dev/ccpocket/protocol/update/ReleaseClient.kt",
-      "sha256": "982995d4420b19b658088121b2bd30dd1f57abc8d17fb0e683705bb962cf9b2b",
-      "note": "2026-09-14 #381-A: download streams the body into the destination file with a counted, bounded buffer and an optional display-only progress observer (default no-op; the two-argument call still compiles). Behavior change that also applies to legacy two-argument callers such as the desktop standalone updater: after the response headers, a body with no data for 2 minutes is aborted (retry the update), next to the existing 10-minute ceiling, and a non-2xx response no longer writes its error page into the destination. Default repo slug, mirror URL/env toggle, manifest parsing, asset names, User-Agent and SHA256SUMS verification remain unchanged. ReleaseClientDownloadTest covers known/unknown length, redirects, HTTP errors, truncated and stalled bodies, lying Content-Length, callback rate and observer exceptions against a local HTTP fixture."
+      "sha256": "77716471dd8a461fe84b8c942558d7d8fc73467bb91d47c91b1b401a802f3b14",
+      "note": "2026-09-20 daemon v2.1.1 hotfix: remove the 600-second total download ceiling so transfers that keep receiving bytes can complete on slow links. Keep the 15-second connection timeout, bound waiting for response headers to 2 minutes, and abort bodies after 2 minutes without data. Streaming, progress callbacks, endpoints, asset names, HTTP error handling and checksum verification remain unchanged. ReleaseClientDownloadTest verifies continued progress across multiple timeout windows and stalled/late response cancellation."
     },
     {
       "path": "daemon/src/main/kotlin/dev/ccpocket/daemon/service/ServiceInstaller.kt",

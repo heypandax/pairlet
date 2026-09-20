@@ -128,21 +128,20 @@ object ReleaseClient {
     }
 
     /**
-     * Download [url] to [dest] (10-minute ceiling for a large artifact). Throws on a non-2xx status.
+     * Download [url] to [dest] with no total duration limit. Throws on a non-2xx status.
      * [onProgress] is called from the calling thread about every 100 ms from the moment the request is sent —
      * `(0, null)` while connecting / redirecting / waiting for headers, then the real count — also when no new
      * bytes arrived, so an observer can tell "waiting for the network" apart, and once more with the final
      * count. It is display-only: an exception from it is swallowed and never affects the file.
      *
-     * Behavior change for EVERY caller, including the two-argument form (e.g. the desktop standalone updater):
-     * once the headers are in, a body that delivers no data for 2 minutes is aborted with an
-     * [HttpTimeoutException] (retry the update), next to the 10-minute ceiling; and a non-2xx response no
-     * longer writes its error page into [dest].
+     * Waiting for headers or receiving no body data for 2 minutes aborts with an [HttpTimeoutException].
+     * A slow transfer that keeps delivering bytes may run as long as needed. This applies to EVERY caller,
+     * including the desktop standalone updater. A non-2xx response never writes its error page into [dest].
      */
     fun download(url: String, dest: Path, onProgress: (DownloadProgress) -> Unit = {}) =
-        download(url, dest, onProgress, DOWNLOAD_CEILING, DOWNLOAD_STALL)
+        download(url, dest, onProgress, DOWNLOAD_HEADERS, DOWNLOAD_STALL)
 
-    private val DOWNLOAD_CEILING: Duration = Duration.ofMinutes(10)
+    private val DOWNLOAD_HEADERS: Duration = Duration.ofMinutes(2)
     private val DOWNLOAD_STALL: Duration = Duration.ofMinutes(2)
 
     /** [download] with injectable limits (tests). The body is streamed straight into [dest] one network
@@ -153,13 +152,14 @@ object ReleaseClient {
         url: String,
         dest: Path,
         onProgress: (DownloadProgress) -> Unit,
-        overallTimeout: Duration,
+        headerTimeout: Duration,
         stallTimeout: Duration,
         tick: Duration = Duration.ofMillis(100),
     ) {
         val startNs = System.nanoTime()
-        val req = HttpRequest.newBuilder(URI(url)).header("User-Agent", "cc-pocket")
-            .timeout(overallTimeout).build()
+        // Bound the wait for headers below, independently of the body. A request-wide deadline would
+        // cut off healthy downloads on slow links (large artifacts can take 1500s or longer).
+        val req = HttpRequest.newBuilder(URI(url)).header("User-Agent", "cc-pocket").build()
         val sinkRef = AtomicReference<FileSink?>() // set on an HttpClient thread, read by this one
         val aborted = AtomicBoolean(false)
         val handler = HttpResponse.BodyHandler<Unit> { info ->
@@ -196,10 +196,10 @@ object ReleaseClient {
                     result = future.get(tick.toMillis(), TimeUnit.MILLISECONDS)
                 } catch (_: TimeoutException) {
                     val now = System.nanoTime()
-                    if (now - startNs > overallTimeout.toNanos()) {
-                        abort(HttpTimeoutException("download timed out after ${overallTimeout.toSeconds()}s: $url"))
-                    }
                     val s = sinkRef.get()
+                    if (s == null && now - startNs > headerTimeout.toNanos()) {
+                        abort(HttpTimeoutException("download timed out waiting for response after ${headerTimeout.toSeconds()}s: $url"))
+                    }
                     if (s != null && now - s.lastByteNs.get() > stallTimeout.toNanos()) {
                         abort(HttpTimeoutException(
                             "download stalled — no data for ${stallTimeout.toSeconds()}s after ${s.received.get()} bytes: $url"))

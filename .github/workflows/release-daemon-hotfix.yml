@@ -1,0 +1,289 @@
+name: daemon-hotfix
+run-name: Replace daemon assets from ${{ github.ref_name }}
+
+# An explicitly pushed immutable hotfix tag replaces only the daemon artifacts on an existing
+# release. Keep vX.Y.Z itself unchanged; tag daemon-hotfix-vX.Y.Z-<revision> records the new source.
+on:
+  push:
+    tags: ['daemon-hotfix-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    timeout-minutes: 25
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: version
+        name: Validate hotfix tag and existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^daemon-hotfix-v([0-9]+\.[0-9]+\.[0-9]+)-[a-zA-Z0-9.-]+$ ]] || exit 1
+          VERSION="${BASH_REMATCH[1]}"
+          bash scripts/check-release-version.sh "$VERSION"
+          gh release view "v$VERSION" --json isDraft,isPrerelease | jq -e '.isDraft == false and .isPrerelease == false'
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          python3 scripts/check-repository-content.py
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Test download behavior and daemon update integration
+        run: |
+          cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
+          ./gradlew --no-daemon :protocol:jvmTest --tests 'dev.ccpocket.protocol.update.*' :daemon:test --tests 'dev.ccpocket.daemon.update.*'
+
+  macos:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            jdk_arch: aarch64   # native on the Apple Silicon runner
+          - arch: x86_64
+            jdk_arch: x64       # cross-build via Rosetta
+    timeout-minutes: 40
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Stage production Sentry config
+        uses: ./.github/actions/observability-config
+        with:
+          component: daemon
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DAEMON }}
+
+      - name: Install Rosetta (for the x86_64 JDK)
+        if: matrix.arch == 'x86_64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          architecture: ${{ matrix.jdk_arch }}
+
+      - name: Import Developer ID signing certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          # Import the Developer ID Application cert into a throwaway keychain so codesign can find
+          # it. The keychain is unlocked and added to the search list for this runner only.
+          KEYCHAIN="$RUNNER_TEMP/ccp-signing.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          # allow codesign to use the key without an interactive prompt
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          # Match the existing release signing setup; this command intentionally expands the keychain list.
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build, sign, notarize, tarball
+        env:
+          CCP_ARCH: ${{ matrix.arch }}
+          DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          chmod +x scripts/release-macos.sh gradlew
+          scripts/release-macos.sh "${{ needs.preflight.outputs.version }}"
+
+      - name: Verify native CLI aliases without starting a daemon
+        run: python3 scripts/smoke-daemon-cli.py daemon/build/jpackage/cc-pocket-daemon.app
+
+      - name: Verify packaged Sentry configuration
+        uses: ./.github/actions/observability-config
+        with:
+          component: daemon
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DAEMON }}
+          artifact: daemon/build/jpackage/cc-pocket-daemon.app
+
+      - name: Stage verified artifact (do not publish a partial build)
+        uses: actions/upload-artifact@v7
+        with:
+          name: daemon-macos-${{ matrix.arch }}
+          path: cc-pocket-daemon-*-macos-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    needs: preflight
+    timeout-minutes: 40
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Stage production Sentry config
+        uses: ./.github/actions/observability-config
+        with:
+          component: daemon
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DAEMON }}
+
+      - name: Set up JDK 17 (with jpackage)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build self-contained Windows zip
+        run: pwsh scripts/release-windows.ps1 "${{ needs.preflight.outputs.version }}"
+
+      - name: Verify packaged Sentry configuration
+        uses: ./.github/actions/observability-config
+        with:
+          component: daemon
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DAEMON }}
+          artifact: daemon/build/jpackage/cc-pocket-daemon
+
+      - name: Stage verified artifact (do not publish a partial build)
+        uses: actions/upload-artifact@v7
+        with:
+          name: daemon-windows-x86_64
+          path: cc-pocket-daemon-*-windows-x86_64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    needs: preflight
+    timeout-minutes: 40
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        # jpackage bundles the HOST JRE (no cross-build), so each arch needs a native runner.
+        # ubuntu-24.04-arm is GitHub's free arm64 runner for public repos (issue #34).
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Stage production Sentry config
+        uses: ./.github/actions/observability-config
+        with:
+          component: daemon
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DAEMON }}
+
+      - name: Set up JDK 17 (with jpackage)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build self-contained Linux tarball
+        run: |
+          chmod +x scripts/release-linux.sh gradlew
+          scripts/release-linux.sh "${{ needs.preflight.outputs.version }}"
+
+      - name: Verify packaged Sentry configuration
+        uses: ./.github/actions/observability-config
+        with:
+          component: daemon
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DAEMON }}
+          artifact: daemon/build/jpackage/cc-pocket-daemon
+
+      - name: Stage verified artifact (do not publish a partial build)
+        uses: actions/upload-artifact@v7
+        with:
+          name: daemon-linux-${{ matrix.arch }}
+          path: cc-pocket-daemon-*-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    timeout-minutes: 20
+    needs: [preflight, macos, windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Shares the normal release's lock while modifying assets and SHA256SUMS.
+    concurrency:
+      group: release-${{ github.repository }}-${{ needs.preflight.outputs.version }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - name: Back up the complete existing release before replacement
+        run: |
+          gh release download "v$VERSION" --dir before
+          gh api "repos/$GH_REPO/releases/tags/v$VERSION" > before-assets.json
+          cd before
+          sha256sum --check SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-before-daemon-hotfix
+          path: |
+            before/
+            before-assets.json
+          retention-days: 14
+          if-no-files-found: error
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: daemon-*
+          path: replacement
+          merge-multiple: true
+      - name: Assemble and validate replacement manifest
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib, os
+          from pathlib import Path
+          version = os.environ['VERSION']
+          expected = {f'cc-pocket-daemon-{version}-{platform}.{ext}' for platform, ext in (
+              ('macos-arm64', 'tar.gz'), ('macos-x86_64', 'tar.gz'),
+              ('linux-arm64', 'tar.gz'), ('linux-x86_64', 'tar.gz'), ('windows-x86_64', 'zip'))}
+          replacement = Path('replacement')
+          assert {p.name for p in replacement.iterdir()} == expected, 'Incomplete daemon artifact set'
+          before = Path('before')
+          assert expected <= {p.name for p in before.iterdir()}, 'Not an existing five-platform daemon release'
+          lines = []
+          for original in sorted(before.iterdir()):
+              if original.name == 'SHA256SUMS':
+                  continue
+              path = replacement / original.name if original.name in expected else original
+              digest = hashlib.file_digest(path.open('rb'), 'sha256').hexdigest()
+              lines.append(f'{digest}  {original.name}\n')
+          (replacement / 'SHA256SUMS').write_text(''.join(lines))
+          PYCODE
+      - name: Replace only daemon packages and their checksums
+        run: gh release upload "v$VERSION" replacement/* --clobber
+      - name: Verify every published asset digest and preserve all other assets
+        run: |
+          gh api "repos/$GH_REPO/releases/tags/v$VERSION" > after-assets.json
+          gh release download "v$VERSION" --pattern SHA256SUMS --dir verify
+          cmp replacement/SHA256SUMS verify/SHA256SUMS
+          python3 - <<'PYCODE'
+          import json
+          from pathlib import Path
+          before = {a['name']: a for a in json.loads(Path('before-assets.json').read_text())['assets']}
+          after = {a['name']: a for a in json.loads(Path('after-assets.json').read_text())['assets']}
+          assert before.keys() == after.keys(), 'Asset names changed'
+          replacements = {p.name for p in Path('replacement').iterdir()}
+          for name in before.keys() - replacements:
+              assert before[name]['id'] == after[name]['id'], f'Unrelated asset replaced: {name}'
+          for line in Path('verify/SHA256SUMS').read_text().splitlines():
+              digest, name = line.split(None, 1)
+              assert after[name]['digest'] == f'sha256:{digest}', f'Digest mismatch: {name}'
+          print('Verified five replaced daemon packages; all other release assets preserved.')
+          PYCODE
