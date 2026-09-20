@@ -267,7 +267,9 @@ jobs:
           (replacement / 'SHA256SUMS').write_text(''.join(lines))
           PYCODE
       - name: Replace only daemon packages and their checksums
-        run: gh release upload "v$VERSION" replacement/* --clobber
+        run: |
+          gh release upload "v$VERSION" replacement/cc-pocket-daemon-* --clobber
+          gh release upload "v$VERSION" replacement/SHA256SUMS --clobber
       - name: Verify every published asset digest and preserve all other assets
         run: |
           gh api "repos/$GH_REPO/releases/tags/v$VERSION" > after-assets.json

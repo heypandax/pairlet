@@ -40,3 +40,12 @@
 #352、第四批 #381／#342 不属于本次发布后的 issue 操作范围。
 
 以上八项均已写回 GitHub 并回读状态：#375／#384／#387 为 closed，#385／#386／#388／#389／#390 保持 open；没有以构建成功代替剩余的用户环境验收。
+
+## 2026-09-20 daemon 下载超时热修复
+
+- 按本次用户确认，仅替换 v2.1.1 的五种 daemon 资产，版本号和原 `v2.1.1` 标签保持不变；桌面端、Android 等其他发布资产的 ID 和 SHA-256 保持原值。热修复源码为 `37e2dba5`，不可变来源标签为 `daemon-hotfix-v2.1.1-20260920-download-timeout`。
+- 移除下载过程的 600 秒总时限；持续收到数据的下载可以超过 1500 秒。保留 15 秒连接超时、120 秒等待响应及连续 120 秒无数据的停滞保护。旧更新器仍受原限制，同版本替换也不会触发新版本提示，因此已受影响用户需重新运行官方安装脚本覆盖安装一次。
+- 本地下载与更新测试 53 项通过、daemon `installDist` 构建通过；安装脚本的重复安装等 4 项检查通过。[发布源码主 CI](https://github.com/heypandax/pairlet/actions/runs/35501306770) 全部通过。
+- [daemon 热修复流水线](https://github.com/heypandax/pairlet/actions/runs/35501327448) 全部通过：五个平台构建，macOS 双架构签名与公证，先备份原发布资产再统一替换，最后回读全部资产摘要。原发布文件的流水线备份保留 14 天。发布后实际下载五个 daemon 包，逐一验证 SHA-256，并检查其中 `ReleaseClient.class` 已包含 `DOWNLOAD_HEADERS` 且不再包含 `DOWNLOAD_CEILING`。
+- [Homebrew 校验值](https://github.com/heypandax/homebrew-tap/commit/ddcb8316011d7d8d1aba1e21055da85a619a2f8f) 与 [Scoop 校验值](https://github.com/heypandax/scoop-bucket/commit/2eab341fb0425d277399e8e64c1102fcfa73b121) 已更新并回读，仓库模板同步更新。
+- 镜像源站链路实测较慢，因此先移走旧 daemon 缓存，将公开 `latest.json` 的资产地址指向 GitHub 新包，并更新镜像的 `SHA256SUMS`。公开入口已验证：清单匹配新包，五个旧缓存地址返回 404；macOS/Linux 安装脚本按既有逻辑回退 GitHub，Windows 安装脚本直接使用清单中的 GitHub 地址。旧文件保留在源站私有备份目录。既有镜像同步服务与定时器已恢复，缓存由其继续补齐，完整校验后会自动恢复本地镜像地址；此时不能把缓存状态写成“已经全部同步”。
