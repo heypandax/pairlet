@@ -57,6 +57,7 @@ class StorePushService(
     override suspend fun notify(account: String, title: String, body: String, route: NotifyRoute?) {
         val targets = store.pushTargets(account)
         if (targets.isEmpty()) {
+            Diagnostics.push(Stage.DISPATCH, ErrorCode.NO_TOKEN)
             // the silent dead-end that hid a whole class of "my phone never buzzes": the relay got the
             // NotifyPush and had NOWHERE to send it (no registered token — the app never registered, or
             // every token was pruned after a 410). Now it says so.
@@ -69,6 +70,7 @@ class StorePushService(
     override suspend fun notifyDevice(account: String, deviceId: String, title: String, body: String, route: NotifyRoute?) {
         val target = store.pushTargetFor(account, deviceId)
         if (target == null) {
+            Diagnostics.push(Stage.DISPATCH, ErrorCode.NO_TOKEN)
             // the recipient turned notifications off, never registered, was revoked — or the deviceId simply
             // is not this account's. Nothing to do; the offer is still waiting on the daemon for the next pull.
             log("[push] account=${account.take(8)}… device=${deviceId.take(8)}… has NO registered token — dropping \"$title\"")

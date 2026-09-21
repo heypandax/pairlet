@@ -848,6 +848,13 @@ internal fun DiagnosticSharingSetting() {
                 diagnosticClipboard.setText(androidx.compose.ui.text.AnnotatedString(diagnosticId))
             }) { Text(stringResource(Res.string.diagnostic_copy_id)) }
         }
+        if (sharing) {
+            androidx.compose.material3.TextButton(onClick = {
+                diagnosticClipboard.setText(AnnotatedString(dev.ccpocket.observability.Diagnostics.pushHistoryText()))
+            }) { Text(stringResource(Res.string.diagnostic_copy_push)) }
+            Text(stringResource(Res.string.diagnostic_push_history_description), color = Tok.tx2,
+                fontSize = 12.sp, lineHeight = 18.sp)
+        }
         if (sharingSaveFailed) Text(stringResource(Res.string.diagnostic_sharing_save_failed),
             color = Tok.danger, fontSize = 12.sp, lineHeight = 18.sp)
     }

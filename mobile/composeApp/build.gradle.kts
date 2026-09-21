@@ -18,7 +18,7 @@ val packagingExec = objects.newInstance<PackagingServices>().execOperations
 // Single source of truth for the app version: the Android versionName AND the in-app "About" version both
 // derive from this (the latter via the generated constant below, so it can never drift — which is how it
 // got stuck at 0.1.0). Keep in lockstep with the iOS CFBundleShortVersionString in iosApp/iosApp/Info.plist.
-val appVersionName = "2.1.1"
+val appVersionName = "2.1.2"
 extra["appVersionName"] = appVersionName
 
 // Emit a commonMain constant from [appVersionName] so the displayed version always matches the build.
@@ -166,7 +166,7 @@ compose.desktop {
             // Compatibility identity: also controls the .app directory, executable and Windows install path.
             // Keep this stable; Pairlet's device name is separate metadata (see docs/PAIRLET-COMPATIBILITY.md).
             packageName = "CC Pocket"
-            packageVersion = "2.1.1"
+            packageVersion = "2.1.2"
             windows {
                 // From the verified v1.9.8 MSI. Changing the displayed name must not create a second product.
                 upgradeUuid = "230d5f5e-4c7a-3de9-98ee-6e492cccb7d0"

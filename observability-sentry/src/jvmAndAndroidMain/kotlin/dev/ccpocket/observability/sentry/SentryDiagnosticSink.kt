@@ -144,6 +144,10 @@ class SentryDiagnosticSink private constructor(
                 uri.path.matches(Regex("/[0-9]+")) && uri.query == null && uri.fragment == null && dsn.length <= 512
         }.getOrDefault(false)
 
+        private fun diagnosticMessage(record: DiagnosticRecord): String =
+            if (record.path == ErrorPath.PUSH) "${record.path.id}:${record.stage.name.lowercase()}:${record.code.name.lowercase()}"
+            else "${record.path.id}:${record.code.name.lowercase()}"
+
         internal fun tags(record: DiagnosticRecord): Map<String, String> = buildMap {
             put("diag_schema", record.schemaVersion.toString())
             put("diag_event_id", record.eventId)
@@ -176,7 +180,7 @@ class SentryDiagnosticSink private constructor(
             logger = "cc-pocket.diagnostics"
             level = SentryLevel.ERROR
             tags(record).forEach { (key, value) -> setTag(key, value) }
-            message = Message().apply { message = "${record.path.id}:${record.code.name.lowercase()}" }
+            message = Message().apply { message = diagnosticMessage(record) }
             val error = record.exception
             if (error != null) {
                 exceptions = listOf(SentryException().apply {
@@ -200,6 +204,12 @@ class SentryDiagnosticSink private constructor(
             m.totalCount?.let { put("total_count", it) }; m.failedCount?.let { put("failed_count", it) }
             m.returnedCount?.let { put("returned_count", it) }; m.byteCount?.let { put("byte_count", it) }
             m.queueSize?.let { put("queue_size", it) }; m.exitCode?.let { put("exit_code", it) }
+            m.nativeErrorDomain?.let { put("native_error_domain", it.name.lowercase()) }
+            m.nativeErrorCode?.let { put("native_error_code", it) }
+            m.notificationAlert?.let { put("notification_alert", it.name.lowercase()) }
+            m.notificationLockScreen?.let { put("notification_lock_screen", it.name.lowercase()) }
+            m.notificationCenter?.let { put("notification_center", it.name.lowercase()) }
+            m.notificationSound?.let { put("notification_sound", it.name.lowercase()) }
             m.transport?.let { put("transport", it.name.lowercase()) }
             m.resultQuality?.let { put("result_quality", it.name.lowercase()) }
             put("steps", record.steps.map { mapOf("stage" to it.stage.name.lowercase(), "code" to it.code.name.lowercase(), "elapsed_ms" to it.elapsedMs) })
@@ -207,7 +217,7 @@ class SentryDiagnosticSink private constructor(
 
         internal fun toLog(record: DiagnosticRecord): SentryLogEvent = SentryLogEvent(
             SentryId(record.traceId ?: record.eventId), record.occurredAtMs / 1000.0,
-            "${record.path.id}:${record.code.name.lowercase()}", SentryLogLevel.INFO,
+            diagnosticMessage(record), SentryLogLevel.INFO,
         ).apply {
             tags(record).forEach { (key, value) -> setAttribute(key, SentryLogEventAttributeValue("string", value)) }
             setAttribute("release", SentryLogEventAttributeValue("string", record.release))

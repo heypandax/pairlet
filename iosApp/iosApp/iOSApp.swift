@@ -45,7 +45,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             }
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
                 if let error = error {
-                    PushController.shared.registrationFailed(category: AppDelegate.registrationFailureCategory(error))
+                    AppDelegate.reportRegistrationFailure(error, authorizationFailure: true)
                     return
                 }
                 guard granted else {
@@ -56,7 +56,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                     PushController.shared.registrationFailed(category: 2)
                     return
                 }
-                DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() }
+                DispatchQueue.main.async {
+                    PushController.shared.registrationStarted()
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
             }
         }
 
@@ -67,6 +70,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 // getNotificationSettings answers on an arbitrary queue; hop to main so Kotlin always
                 // resumes on the thread its state machine already runs on.
                 let raw = Int32(settings.authorizationStatus.rawValue)
+                PushController.shared.authorizationObserved(raw: raw)
+                Self.recordPresentationSettings(settings)
                 DispatchQueue.main.async { callback(KotlinInt(int: raw)) }
             }
         }
@@ -101,13 +106,24 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     /// relay via the existing setPushToken bridge (idempotent: the phone dedupes, the relay upserts).
     fileprivate func refreshPushRegistrationIfAuthorized() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
+            PushController.shared.authorizationObserved(raw: Int32(settings.authorizationStatus.rawValue))
+            Self.recordPresentationSettings(settings)
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
-                DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() }
+                DispatchQueue.main.async {
+                    PushController.shared.registrationStarted()
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
             default:
                 break // not yet granted — leave the prompt to the post-pairing registrar
             }
         }
+    }
+
+    private static func recordPresentationSettings(_ settings: UNNotificationSettings) {
+        PushPresentationDiagnostics.shared.settings(
+            alert: Int32(settings.alertSetting.rawValue), lockScreen: Int32(settings.lockScreenSetting.rawValue),
+            center: Int32(settings.notificationCenterSetting.rawValue), sound: Int32(settings.soundSetting.rawValue))
     }
 
     func application(_ application: UIApplication,
@@ -142,15 +158,25 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        // Usually transient — Kotlin's coordinator owns the retry, the cooldown and the diagnostic record,
-        // so nothing is logged or classified any further here.
-        PushController.shared.registrationFailed(category: AppDelegate.registrationFailureCategory(error))
+        Self.reportRegistrationFailure(error, authorizationFailure: false)
     }
 
-    /// Reduce a native registration error to the fixed category Kotlin understands (0 unknown, 1 network,
-    /// 2 denied, 3 unsupported). Only this closed allow-list crosses the bridge: `domain` and
-    /// `localizedDescription` are free-form vendor strings that would reach telemetry verbatim, so they are
-    /// neither handed to Kotlin nor written to the device log.
+    /// Preserve a finite domain label + numeric code, never NSError text or userInfo.
+    private static func reportRegistrationFailure(_ error: Error, authorizationFailure: Bool) {
+        let ns = error as NSError
+        let domain: Int32
+        switch ns.domain {
+        case NSURLErrorDomain: domain = 0
+        case NSCocoaErrorDomain: domain = 1
+        case NSPOSIXErrorDomain: domain = 2
+        case NSMachErrorDomain: domain = 3
+        default: domain = 4
+        }
+        PushController.shared.nativeRegistrationFailed(
+            category: registrationFailureCategory(error), errorDomain: domain,
+            errorCode: Int32(clamping: ns.code), authorizationFailure: authorizationFailure)
+    }
+
     private static func registrationFailureCategory(_ error: Error) -> Int32 {
         let ns = error as NSError
         // no route to APNs — worth retrying once connectivity returns
@@ -166,7 +192,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         let info = notification.request.content.userInfo
-        if MainViewControllerKt.shouldPresentPush(sessionId: info["sid"] as? String, kind: info["kind"] as? String) {
+        let present = MainViewControllerKt.shouldPresentPush(sessionId: info["sid"] as? String, kind: info["kind"] as? String)
+        PushPresentationDiagnostics.shared.foreground(present: present)
+        if present {
             completionHandler([.banner, .sound])
         } else {
             completionHandler([])
@@ -178,6 +206,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        PushPresentationDiagnostics.shared.opened()
         let info = response.notification.request.content.userInfo
         if let hid = info["hid"] as? String {
             MainViewControllerKt.handlePushOpenHandoff(handoffId: hid)

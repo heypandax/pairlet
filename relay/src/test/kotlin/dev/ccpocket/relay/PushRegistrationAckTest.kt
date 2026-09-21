@@ -1,5 +1,6 @@
 package dev.ccpocket.relay
 
+import dev.ccpocket.observability.*
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.PushRegistrationOutcome
@@ -169,4 +170,22 @@ class PushRegistrationAckTest {
         assertTrue(register(store, RegisterPush("fcm", "tok")).isEmpty())        // no requestId → silent
         assertTrue(register(store, RegisterPush("fcm", "tok", "rid-10")).isNotEmpty()) // opted in → answered
     }
+    @Test fun databaseFailureIsObservableWithoutLeakingTokenOrExceptionMessage() {
+        val records = mutableListOf<DiagnosticRecord>()
+        Diagnostics.install(DiagnosticReporter(Component.RELAY, Environment.STAGING, "relay@test", DiagnosticSink { records.add(it) }))
+        try {
+            val backing = seeded(device("dev1"))
+            val store = object : RelayStore by backing {
+                override suspend fun setPushToken(deviceId: String, platform: String, token: String, now: Long): Boolean =
+                    throw IllegalStateException("PRIVATE_SQL secret-token")
+            }
+            assertEquals("store_failed", receiptOf(register(store, RegisterPush("apns", "secret-token", "rid"))).code)
+            val failed = records.single { it.code == ErrorCode.STORE_FAILED }
+            assertEquals(Stage.PUSH_REGISTER, failed.stage)
+            assertEquals(DiagnosticKind.ERROR, failed.kind)
+            val payload = kotlinx.serialization.json.Json.encodeToString(failed)
+            assertTrue("PRIVATE_SQL" !in payload && "secret-token" !in payload && "dev1" !in payload)
+        } finally { Diagnostics.install(null) }
+    }
+
 }

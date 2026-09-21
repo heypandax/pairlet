@@ -2186,4 +2186,6 @@
     <string name="managed_sessions_remove">移出清单</string>
     <string name="managed_sessions_dismiss">知道了</string>
     <string name="managed_sessions_enable_required">为 %1$s 开启后才能导入它的会话。</string>
+    <string name="diagnostic_copy_push">复制推送诊断</string>
+    <string name="diagnostic_push_history_description">包含本次启动以来最近的通知注册结果，不包含通知 token 或消息内容。</string>
 </resources>

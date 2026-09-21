@@ -2195,4 +2195,6 @@
     <string name="managed_sessions_remove">Remove from list</string>
     <string name="managed_sessions_dismiss">OK</string>
     <string name="managed_sessions_enable_required">Turn this on for %1$s before importing its sessions.</string>
+    <string name="diagnostic_copy_push">Copy push diagnostics</string>
+    <string name="diagnostic_push_history_description">Includes the latest notification setup results from this app launch. Contains no notification tokens or message content.</string>
 </resources>

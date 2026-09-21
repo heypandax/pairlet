@@ -51,6 +51,49 @@ final class PocketDiagnosticsTests: XCTestCase {
         XCTAssertFalse(PocketDiagnostics.shared.enqueue(json))
     }
 
+    func testPushNativeFailurePreservesDomainCodeAndTraceInErrorsAndLogs() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [EnvelopeProtocol.self]
+        EnvelopeProtocol.reset()
+        await PocketDiagnostics.shared.configureForTesting(
+            dsn: "https://0123456789abcdef0123456789abcdef@diagnostic.invalid/1",
+            session: URLSession(configuration: config))
+        let json = """
+        {"eventId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","traceId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","path":"PUSH","kind":"ERROR","stage":"PUSH_TOKEN","code":"NETWORK_FAILED","release":"ios@test","environment":"STAGING","occurredAtMs":1800000000000,"attempt":2,"metrics":{"nativeErrorDomain":"URL","nativeErrorCode":-1009},"steps":[],"message":"PRIVATE_ERROR_DESCRIPTION"}
+        """
+        XCTAssertTrue(PocketDiagnostics.shared.enqueue(json))
+        XCTAssertTrue(PocketDiagnostics.shared.enqueue(json.replacingOccurrences(of: "\"kind\":\"ERROR\"", with: "\"kind\":\"LOG\"")))
+        PocketDiagnostics.shared.flushForTesting()
+        let envelopes = try EnvelopeProtocol.payloads().map(Self.decodeBody)
+        XCTAssertFalse(envelopes.isEmpty)
+        for body in envelopes {
+            XCTAssertTrue(body.contains("native_error_domain"), body)
+            XCTAssertTrue(body.contains("native_error_code"), body)
+            XCTAssertTrue(body.contains("-1009"), body)
+            XCTAssertTrue(body.contains("push_token"), body)
+            XCTAssertTrue(body.contains("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), body)
+            XCTAssertFalse(body.contains("PRIVATE_ERROR_DESCRIPTION"))
+        }
+    }
+
+    func testPushPresentationSettingsReachLogEnvelope() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [EnvelopeProtocol.self]
+        EnvelopeProtocol.reset()
+        await PocketDiagnostics.shared.configureForTesting(
+            dsn: "https://0123456789abcdef0123456789abcdef@diagnostic.invalid/1",
+            session: URLSession(configuration: config))
+        let json = """
+        {"eventId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","path":"PUSH","kind":"LOG","stage":"PUSH_PRESENTATION","code":"SETTINGS_OBSERVED","release":"ios@test","environment":"STAGING","occurredAtMs":1800000000000,"metrics":{"notificationAlert":"DISABLED","notificationLockScreen":"ENABLED","notificationCenter":"ENABLED","notificationSound":"DISABLED"}}
+        """
+        XCTAssertTrue(PocketDiagnostics.shared.enqueue(json))
+        PocketDiagnostics.shared.flushForTesting()
+        let body = try EnvelopeProtocol.payloads().map(Self.decodeBody).joined(separator: "\n")
+        for key in ["notification_alert", "notification_lock_screen", "notification_center", "notification_sound", "push_presentation", "disabled", "enabled"] {
+            XCTAssertTrue(body.contains(key), body)
+        }
+    }
+
     func testStoppingDuringAdmissionDropsLateWorkerBeforeTheSDK() async {
         EnvelopeProtocol.reset()
         let entered = expectation(description: "worker entered admission")

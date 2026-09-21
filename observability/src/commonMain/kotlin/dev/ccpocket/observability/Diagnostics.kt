@@ -37,11 +37,38 @@ class DiagnosticReporter(
     private var dropped = 0L
     private val limits = linkedMapOf<String, Pair<Long, Int>>()
     private val logLimits = linkedMapOf<String, Pair<Long, Int>>()
+    // A launch-scoped random label, never derived from a token, account or device identity.
+    private var pushTraceId = newId()
+    private var pushStartedAt = epochMs()
+    private val pushHistory = ArrayDeque<String>()
+    private val pushSteps = ArrayDeque<DiagnosticStep>()
+
+    /** Bounded local evidence survives cloud sampling/budgets, but obeys the same opt-out. No disk I/O. */
+    fun push(stage: Stage, code: ErrorCode, attempt: Int = 0,
+             metrics: SafeMetrics = SafeMetrics(), isError: Boolean = false, error: Throwable? = null): String? = lock.withLock {
+        if (!enabled) return@withLock null
+        val safe = metrics.bounded()
+        val tries = attempt.coerceIn(0, 1000)
+        if (pushHistory.size == 64) pushHistory.removeFirst()
+        pushHistory.addLast("${epochMs()} stage=${stage.name.lowercase()} code=${code.name.lowercase()} attempt=$tries metrics=${Json.encodeToString(safe)}")
+        if (pushSteps.size == 32) pushSteps.removeFirst()
+        pushSteps.addLast(DiagnosticStep(stage, (epochMs() - pushStartedAt).coerceAtLeast(0), code))
+        // LOG facts are not 1%-sampled successes. Existing rate and upload budgets still apply.
+        emit(ErrorPath.PUSH, stage, code, error, safe, if (isError) DiagnosticKind.ERROR else DiagnosticKind.LOG,
+            traceId = pushTraceId, attempt = tries, steps = if (isError) pushSteps.toList() else emptyList())
+    }
+
+    fun pushHistoryText(): String = lock.withLock {
+        if (!enabled) return@withLock "Push diagnostics disabled"
+        "release=$release component=${component.name.lowercase()} environment=${environment.name.lowercase()}\npush_trace_id=$pushTraceId\n" +
+            pushHistory.joinToString("\n")
+    }
 
     fun setEnabled(value: Boolean) = lock.withLock {
         enabled = value
         generation++
         traceSteps.clear()
+        if (!value) { pushHistory.clear(); pushSteps.clear(); pushTraceId = newId(); pushStartedAt = epochMs() }
         // Keep rate budgets across toggles; reopening collection must not reset the daily quota.
     }
 
@@ -188,6 +215,10 @@ object Diagnostics {
         return lock.withLock { reporter }?.emit(ErrorPath.RELAY, Stage.CONNECT, code, null, SafeMetrics(transport = Transport.RELAY),
             DiagnosticKind.LOG, connectionId = own, peerConnectionId = valid(peerId))
     }
+    fun push(stage: Stage, code: ErrorCode, attempt: Int = 0, metrics: SafeMetrics = SafeMetrics(),
+             isError: Boolean = false, error: Throwable? = null): String? =
+        lock.withLock { reporter }?.push(stage, code, attempt, metrics, isError, error)
+    fun pushHistoryText(): String = lock.withLock { reporter }?.pushHistoryText() ?: "Push diagnostics disabled"
     fun latestId(): String? = lock.withLock { reporter }?.latestId()?.takeIf { it.length == 32 && it.all { c -> c in '0'..'9' || c in 'a'..'f' } }
     fun newId(): String = diagnosticId()
     fun begin(path: ErrorPath, traceId: String? = null, parentSpanId: String? = null): OperationTrace? = lock.withLock { reporter }?.begin(path, traceId, parentSpanId)

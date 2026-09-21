@@ -20,6 +20,10 @@ name: ios-release
 on:
   workflow_dispatch:
     inputs:
+      testflight_only:
+        description: "Upload and wait for TestFlight processing only; skip App Store metadata, build attachment and App Review. External distribution still requires distribute_testflight=true."
+        type: boolean
+        default: false
       marketing_version:
         description: "Marketing version override. LEAVE EMPTY to use the repo's lockstepped version (Info.plist CFBundleShortVersionString) — a stale hardcoded default shipped 1.0.1 twice and ASC rejected the upload after a 20-minute archive. Only set this to attach another build to a DIFFERENT already-open version."
         required: false
@@ -252,6 +256,7 @@ jobs:
                 > "$RUNNER_TEMP/asc_api_key.json"
 
       - name: Verify target version and live age rating before submission
+        if: ${{ !inputs.testflight_only }}
         env:
           ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
@@ -268,6 +273,7 @@ jobs:
           ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
           BUILD_NUMBER: ${{ github.run_number }}
+          MARKETING_VERSION: ${{ needs.ios.outputs.version }}
         run: |
           cat > "$RUNNER_TEMP/wait_processing.rb" <<'RUBY'
           require "spaceship"
@@ -279,7 +285,7 @@ jobs:
           app = Spaceship::ConnectAPI::App.find("com.panda.ccpocket") or abort("app not found in ASC")
           deadline = Time.now + 45 * 60
           loop do
-            build = app.get_builds(filter: { version: ENV.fetch("BUILD_NUMBER") }, sort: "-uploadedDate").first
+            build = app.get_builds(filter: { version: ENV.fetch("BUILD_NUMBER"), "preReleaseVersion.version" => ENV.fetch("MARKETING_VERSION") }, sort: "-uploadedDate").first
             state = build&.processing_state
             puts "#{Time.now.strftime('%H:%M:%S')} build #{ENV['BUILD_NUMBER']}: #{state || 'not visible yet'}"
             break if state == "VALID"
@@ -291,6 +297,7 @@ jobs:
           ruby "$RUNNER_TEMP/wait_processing.rb"
 
       - name: Deliver — metadata + attach build ${{ github.run_number }}${{ inputs.submit_for_review && ' + submit for review' || '' }}
+        if: ${{ !inputs.testflight_only }}
         # One deliver call does it all: syncs release_notes/review notes from fastlane/metadata, creates
         # the ASC version when absent, pins THIS run's build to it, and (input-gated) submits. The
         # questionnaire answers live in fastlane/Deliverfile (submission_information). If this fails,
@@ -308,6 +315,7 @@ jobs:
             --automatic_release "$AUTO_RELEASE"
 
       - name: Read back submitted version, build and localized metadata
+        if: ${{ !inputs.testflight_only }}
         env:
           ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}

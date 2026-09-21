@@ -1,5 +1,7 @@
 package dev.ccpocket.app.push
 
+import dev.ccpocket.observability.*
+
 /**
  * iOS push registration. The actual APNs calls — reading the authorization status, requesting it,
  * `registerForRemoteNotifications` and opening the system settings page — live in Swift (wired via
@@ -41,13 +43,20 @@ actual object PushController {
 
     actual fun requestToken(prompt: Boolean, onFailed: (PushRegistrationFailure) -> Unit) {
         this.onFailed = onFailed // before invoking: the Swift side may refuse synchronously
-        registrar?.invoke(prompt)
+        val register = registrar
+        if (register == null) {
+            Diagnostics.push(Stage.PUSH_TOKEN, ErrorCode.BRIDGE_MISSING, isError = true)
+        } else register(prompt)
     }
 
     actual fun readAuthorization(cb: (PushAuthorization) -> Unit) {
         // No Swift reader wired (unit tests, or a host that never called setPushAuthorizationReader):
         // answer UNKNOWN rather than dropping the callback, so a caller awaiting it can never hang.
-        val reader = authorizationReader ?: return cb(PushAuthorization.UNKNOWN)
+        val reader = authorizationReader ?: run {
+            Diagnostics.push(Stage.PUSH_AUTHORIZATION, ErrorCode.BRIDGE_MISSING, isError = true)
+            cb(PushAuthorization.UNKNOWN)
+            return
+        }
         reader { raw ->
             // UNAuthorizationStatus raw values, fixed by the SDK:
             // notDetermined = 0, denied = 1, authorized = 2, provisional = 3, ephemeral = 4.
@@ -70,26 +79,53 @@ actual object PushController {
 
     /** Called from Swift when APNs delivers (or refreshes) the device token. */
     fun deliver(token: PushToken) {
+        Diagnostics.push(Stage.PUSH_TOKEN, when (token.platform) {
+            "apns_sandbox" -> ErrorCode.TOKEN_SANDBOX
+            "apns" -> ErrorCode.TOKEN_PRODUCTION
+            else -> ErrorCode.TOKEN_RECEIVED
+        })
         last = token
         cb?.invoke(token)
     }
 
-    /**
-     * Called from Swift when authorization or APNs registration fails. Swift passes a fixed category
-     * (0 unknown, 1 network, 2 denied, 3 unsupported) — never an `NSError`, its `domain`, its `code` or its
-     * `localizedDescription`. Those are free-form vendor strings that would reach telemetry verbatim, so the
-     * allow-listed (domain, code) → category mapping stays on the Swift side and only the verdict crosses.
-     * Recording the diagnostic is the common-code coordinator's job (it alone knows the attempt and stage),
-     * so this reports the boundary and nothing else.
-     */
+    /** Native callbacks may occur before a coordinator is waiting; record them at the boundary. */
+    fun registrationStarted() { Diagnostics.push(Stage.PUSH_TOKEN, ErrorCode.STARTED) }
+
+    fun authorizationObserved(raw: Int) {
+        Diagnostics.push(Stage.PUSH_AUTHORIZATION, when (raw) {
+            0 -> ErrorCode.NOT_DETERMINED
+            1 -> ErrorCode.PERMISSION_DENIED
+            2 -> ErrorCode.AUTHORIZED
+            3 -> ErrorCode.PROVISIONAL
+            4 -> ErrorCode.EPHEMERAL
+            else -> ErrorCode.UNEXPECTED
+        })
+    }
+
     fun registrationFailed(category: Int) {
-        onFailed?.invoke(
+        nativeRegistrationFailed(category, 4, 0, category == 2)
+    }
+
+    /** Only a closed domain label and bounded numeric code cross from NSError, never its description. */
+    fun nativeRegistrationFailed(category: Int, errorDomain: Int, errorCode: Int, authorizationFailure: Boolean) {
+        Diagnostics.push(if (authorizationFailure) Stage.PUSH_AUTHORIZATION else Stage.PUSH_TOKEN,
             when (category) {
-                1 -> PushRegistrationFailure.NETWORK
-                2 -> PushRegistrationFailure.DENIED
-                3 -> PushRegistrationFailure.UNSUPPORTED
-                else -> PushRegistrationFailure.UNKNOWN
-            }
-        )
+                1 -> ErrorCode.NETWORK_FAILED
+                2 -> ErrorCode.PERMISSION_DENIED
+                3 -> ErrorCode.UNSUPPORTED
+                else -> ErrorCode.NATIVE_FAILED
+            }, metrics = if (category == 2) SafeMetrics() else SafeMetrics(nativeErrorDomain = when (errorDomain) {
+                0 -> NativeErrorDomain.URL
+                1 -> NativeErrorDomain.COCOA
+                2 -> NativeErrorDomain.POSIX
+                3 -> NativeErrorDomain.MACH
+                else -> NativeErrorDomain.OTHER
+            }, nativeErrorCode = errorCode), isError = category != 2)
+        onFailed?.invoke(when (category) {
+            1 -> PushRegistrationFailure.NETWORK
+            2 -> PushRegistrationFailure.DENIED
+            3 -> PushRegistrationFailure.UNSUPPORTED
+            else -> PushRegistrationFailure.UNKNOWN
+        })
     }
 }

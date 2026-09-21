@@ -45,6 +45,23 @@ daemon 自动更新只查询镜像 `latest.json` 和 GitHub `/releases/latest`�
 
 ## 当前全平台主流程
 
+### 仅准备 iOS TestFlight
+
+使用已确认版本且通过定向验证的提交，运行：
+
+```bash
+gh workflow run ios-release.yml --ref <发布提交所在的固定-ref> \
+  -f testflight_only=true -f submit_for_review=false \
+  -f automatic_release=false -f distribute_testflight=false
+```
+
+此模式仍验证归档中的 Sentry 配置、上传对应 dSYM、签名上传，并等待**本次版本和 build**
+在 ASC 处理为 `VALID`；跳过商店元数据同步、商店版本绑定、正式审核与公开测试组分发。
+build 号使用 ios-release 的 run number。只有工作流成功且确认目标 build 可用，才能报告
+TestFlight 构建准备完成；外部用户安装仍取决于测试组分配及 Beta App Review 状态。
+
+### 全平台协调发布
+
 协调发布使用同一个 `x.y.z` 版本，覆盖 daemon（macOS 双架构、Windows、Linux 双架构）、
 桌面 App（macOS 双架构、Windows）、Android 和 iOS。HarmonyOS 是显式 opt-in，依赖独立的
 受保护 environment 与临时自托管 runner，不属于默认全平台任务。

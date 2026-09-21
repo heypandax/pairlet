@@ -261,7 +261,7 @@ final class PocketDiagnostics {
                 attributes["elapsed_ms"] = record.elapsedMs
                 attributes["suppressed_count"] = record.suppressedCount ?? 0
                 self.metricAttributes(record).forEach { attributes[$0.key] = $0.value }
-                SentrySDK.logger.info("\(record.pathID):\(record.code.lowercased())", attributes: attributes)
+                SentrySDK.logger.info(self.message(record), attributes: attributes)
             }
             self.captureManualTrace(record, generation: token)
         }
@@ -290,6 +290,10 @@ final class PocketDiagnostics {
     func stopForTesting() { configure(false) }
     #endif
 
+    private func message(_ r: Record) -> String {
+        r.path == "PUSH" ? "\(r.pathID):\(r.stage.lowercased()):\(r.code.lowercased())" : "\(r.pathID):\(r.code.lowercased())"
+    }
+
     private func tags(_ r: Record) -> [String: String] {
         var result = ["diag_schema": "1", "diag_event_id": r.eventId, "error_path": r.pathID,
                       "operation": r.path.lowercased(), "stage": r.stage.lowercased(), "code": r.code.lowercased(),
@@ -312,7 +316,7 @@ final class PocketDiagnostics {
         result.environment = r.environment.lowercased()
         result.platform = "cocoa"
         result.logger = "cc-pocket.diagnostics"
-        result.message = SentryMessage(formatted: "\(r.pathID):\(r.code.lowercased())")
+        result.message = SentryMessage(formatted: message(r))
         result.tags = tags(r)
         var context: [String: Any] = ["attempt": r.attempt ?? 0, "suppressed_count": r.suppressedCount ?? 0]
         context["elapsed_ms"] = r.elapsedMs
@@ -348,8 +352,11 @@ final class PocketDiagnostics {
     private static let metricKeys = ["totalCount": "total_count", "failedCount": "failed_count",
                                      "returnedCount": "returned_count", "byteCount": "byte_count",
                                      "queueSize": "queue_size", "exitCode": "exit_code",
-                                     "resultQuality": "result_quality", "transport": "transport"]
-    private static let logKeys: Set<String> = ["diag_schema", "diag_event_id", "diag_trace_id", "diag_span_id", "connection_id", "peer_connection_id", "error_path", "operation", "stage", "code", "component", "coverage", "outcome", "agent", "exception_type", "release", "environment", "attempt", "elapsed_ms", "suppressed_count", "total_count", "failed_count", "returned_count", "byte_count", "queue_size", "exit_code", "result_quality", "transport"]
+                                     "resultQuality": "result_quality", "transport": "transport",
+                                     "nativeErrorDomain": "native_error_domain", "nativeErrorCode": "native_error_code",
+                                     "notificationAlert": "notification_alert", "notificationLockScreen": "notification_lock_screen",
+                                     "notificationCenter": "notification_center", "notificationSound": "notification_sound"]
+    private static let logKeys: Set<String> = ["diag_schema", "diag_event_id", "diag_trace_id", "diag_span_id", "connection_id", "peer_connection_id", "error_path", "operation", "stage", "code", "component", "coverage", "outcome", "agent", "exception_type", "release", "environment", "attempt", "elapsed_ms", "suppressed_count", "total_count", "failed_count", "returned_count", "byte_count", "queue_size", "exit_code", "result_quality", "transport", "native_error_domain", "native_error_code", "notification_alert", "notification_lock_screen", "notification_center", "notification_sound"]
 
     private func metricAttributes(_ record: Record) -> [String: Any] {
         var result: [String: Any] = [:]

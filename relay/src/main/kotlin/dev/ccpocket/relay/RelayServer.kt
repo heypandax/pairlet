@@ -375,6 +375,19 @@ class RelayServer(
      *  did before this version: store, say nothing. */
     private suspend fun onRegisterPush(conn: Conn, deviceId: String, body: RegisterPush) {
         var code: String? = null
+        val stage = if (body.token.isBlank()) Stage.PUSH_CLEAR else Stage.PUSH_REGISTER
+        // Identity prefixes stay in the existing server journal; cloud diagnostics contain no identity/token.
+        fun record(result: ErrorCode, error: Throwable? = null) {
+            val errorType = error?.javaClass?.simpleName?.takeIf { it.matches(Regex("[A-Za-z0-9_]{1,100}")) }
+            val nativeCode = (error as? java.sql.SQLException)?.errorCode
+            println("[push-register] account=${conn.account.take(8)} device=${deviceId.take(8)} action=${stage.name.lowercase()} result=${result.name.lowercase()}" +
+                (errorType?.let { " exception_type=$it" } ?: "") + (nativeCode?.let { " native_error_code=$it" } ?: ""))
+            val metrics = if (error is java.sql.SQLException)
+                SafeMetrics(nativeErrorDomain = NativeErrorDomain.SQLITE, nativeErrorCode = error.errorCode) else SafeMetrics()
+            Diagnostics.push(stage, result, metrics = metrics,
+                isError = error != null || result == ErrorCode.STORE_FAILED, error = error)
+        }
+        record(ErrorCode.STARTED)
         val outcome = when {
             body.platform.isBlank() || body.token.length > MAX_PUSH_TOKEN_CHARS -> {
                 code = "bad_request"; PushRegistrationOutcome.REJECTED
@@ -391,7 +404,7 @@ class RelayServer(
             // own ack timeout retries on the link that replaced it.
             else -> (broker.whileCurrentDevice(conn) {
                 runCatching { store.setPushToken(deviceId, body.platform, body.token, clock()) }
-            } ?: return).fold(
+            } ?: run { record(ErrorCode.SUPERSEDED); return }).fold(
                 onSuccess = { stored ->
                     when {
                         !stored -> { code = "no_device"; PushRegistrationOutcome.FAILED }
@@ -401,11 +414,23 @@ class RelayServer(
                 },
                 // the exception itself never crosses the wire: the client can only retry, and the detail
                 // belongs in the relay's own log
-                onFailure = { code = "store_failed"; PushRegistrationOutcome.FAILED },
+                onFailure = {
+                    code = "store_failed"
+                    record(ErrorCode.STORE_FAILED, it)
+                    PushRegistrationOutcome.FAILED
+                },
             )
         }
-        val requestId = body.requestId ?: return
+        if (code != "store_failed") record(when (outcome) {
+            PushRegistrationOutcome.STORED -> ErrorCode.STORED
+            PushRegistrationOutcome.CLEARED -> ErrorCode.CLEARED
+            PushRegistrationOutcome.REJECTED -> if (code == "bad_request") ErrorCode.BAD_REQUEST else ErrorCode.FORBIDDEN
+            PushRegistrationOutcome.FAILED -> ErrorCode.NOT_FOUND
+        })
+        val requestId = body.requestId ?: run { record(ErrorCode.FALLBACK_USED); return }
         runCatching { conn.sendText(controlText(PushRegistrationResult(requestId, outcome, code))) }
+            .onSuccess { record(ErrorCode.ACK_SENT) }
+            .onFailure { record(ErrorCode.SEND_FAILED, it) }
     }
 
     // ---- device socket: bearer-credential login, then opaque BINARY ----

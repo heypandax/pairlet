@@ -2219,7 +2219,13 @@ class PocketRepository(
     }
 
     /** Notifications wanted AND this link is a relay identity that can hold a token at all. */
-    private fun refreshPushDesire() { pushDesired.value = notificationsOn.value && useRelay && !demoMode.value }
+    private fun refreshPushDesire() {
+        // Record the phone preference separately from the effective per-link registration intent.
+        // A local/demo link being disabled must not be mistaken for the person turning notifications off.
+        Diagnostics.push(DiagnosticStage.CONFIGURE, if (notificationsOn.value) ErrorCode.ENABLED else ErrorCode.DISABLED,
+            metrics = SafeMetrics(transport = if (useRelay) dev.ccpocket.observability.Transport.RELAY else dev.ccpocket.observability.Transport.DIRECT))
+        pushDesired.value = notificationsOn.value && useRelay && !demoMode.value
+    }
 
     /** This repository as one registerable identity. */
     private inner class RepoPairingLink(override val key: PairingKey) : PairingLink {

@@ -1,6 +1,3 @@
-What's new in 2.1.1
+What's new in 2.1.2
 
-• Expand long questions in conversation history to read the full text, then collapse them again.
-• Improve notification registration recovery after reconnecting or returning to the app.
-• Improve scrolling in HTML attachment previews.
-• Improve reliability when starting and handing off supported coding sessions.
+Improved notification diagnostics to help investigate missing alerts. When diagnostic sharing is enabled, you can copy push diagnostics from Settings and share them with support.

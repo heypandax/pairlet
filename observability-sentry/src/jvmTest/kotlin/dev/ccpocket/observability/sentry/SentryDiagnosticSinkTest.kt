@@ -75,6 +75,23 @@ class SentryDiagnosticSinkTest {
         } finally { sink.close() }
     }
 
+    @Test fun pushFactsKeepNativeCodesAndPhaseInBothSdkFormats() {
+        val records = mutableListOf<DiagnosticRecord>()
+        val reporter = DiagnosticReporter(Component.IOS, Environment.STAGING, "ios@test", DiagnosticSink { records.add(it) })
+        reporter.push(Stage.PUSH_TOKEN, ErrorCode.NATIVE_FAILED, 2,
+            SafeMetrics(nativeErrorDomain = NativeErrorDomain.COCOA, nativeErrorCode = 3000), isError = true)
+        val event = SentryDiagnosticSink.toEvent(records.single())
+        val log = SentryDiagnosticSink.toLog(records.single())
+        for (item in listOf(event, log)) {
+            val writer = java.io.StringWriter()
+            JsonSerializer(SentryOptions()).serialize(item, writer)
+            val body = writer.toString()
+            assertTrue(body.contains("EP-28:push_token:native_failed"), body)
+            assertTrue(body.contains("native_error_domain") && body.contains("cocoa"), body)
+            assertTrue(body.contains("native_error_code") && body.contains("3000"), body)
+        }
+    }
+
     @Test fun missingAndMalformedConfigurationAreNoOp() {
         assertNull(SentryDiagnosticSink.create(null, Component.DESKTOP))
         assertFalse(SentryDiagnosticSink.validDsn("http://key@example.invalid/1"))

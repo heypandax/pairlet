@@ -21,11 +21,14 @@ enum class ErrorPath(val id: String) {
     LAYOUT, START, CONFIGURE, CONNECT, ATTACH, HANDSHAKE, DECRYPT, DECODE, QUEUE, WRITE, RECEIVE,
     SCAN, READ, PARSE, ENCODE, APPLY, COMPLETE, SPAWN, INITIALIZE, ACK, EXECUTE, EXIT,
     REQUEST, WAIT, VERDICT, COMMIT, DISPATCH, RECONCILE, DOWNLOAD, VERIFY, EXTRACT, RESTART,
+    PUSH_AUTHORIZATION, PUSH_TOKEN, PUSH_REGISTER, PUSH_CLEAR, PUSH_PRESENTATION,
 }
 @Serializable enum class Outcome { SUCCESS, FAILURE, TIMEOUT, CANCELLED, RECOVERED, UNKNOWN }
 @Serializable enum class ResultQuality { COMPLETE, PARTIAL, FALLBACK, UNKNOWN }
 @Serializable enum class AgentBackendLabel { CLAUDE, CODEX, OPENCODE, KIMI, ZCODE, DSH, UNKNOWN }
 @Serializable enum class Transport { RELAY, DIRECT, LOCAL, UNKNOWN }
+@Serializable enum class NativeErrorDomain { URL, COCOA, POSIX, MACH, SQLITE, OTHER }
+@Serializable enum class NotificationSetting { ENABLED, DISABLED, UNSUPPORTED, UNKNOWN }
 @Serializable enum class DiagnosticKind { LOG, ERROR, RESULT, RECOVERY }
 @Serializable enum class ErrorCode {
     UNEXPECTED, UNAVAILABLE, REJECTED, EXPIRED, NOT_FOUND, PERMISSION_DENIED, TIMEOUT,
@@ -33,6 +36,11 @@ enum class ErrorPath(val id: String) {
     INCOMPLETE, PARTIAL_RESULT, FALLBACK_USED, SIZE_LIMIT, RATE_LIMITED, SUPERSEDED,
     CONNECTION_CLOSED, SPAWN_FAILED, PROCESS_EXITED, IO_FAILED, APPLY_FAILED,
     COMMIT_FAILED, CANCELLED, RECOVERED, OK, SMOKE_TEST,
+    STARTED, AUTHORIZED, NOT_DETERMINED, PROVISIONAL, EPHEMERAL, BRIDGE_MISSING,
+    NETWORK_FAILED, NATIVE_FAILED, TOKEN_RECEIVED, TOKEN_SANDBOX, TOKEN_PRODUCTION,
+    RETRY_EXHAUSTED, STORED, CLEARED, ACK_TIMEOUT, NO_ROUTE, ACK_MISMATCH,
+    STORE_FAILED, NO_TOKEN, ENABLED, DISABLED, RECONFIRMING, ACK_SENT, BAD_REQUEST, FORBIDDEN, LATE_CALLBACK, TOKEN_ROTATED, SENT, CONFIRMED,
+    SETTINGS_OBSERVED, FOREGROUND_PRESENTED, FOREGROUND_SUPPRESSED, OPENED,
 }
 
 /** Numeric technical facts only. Negative/huge/unbounded values are normalized at the collection seam. */
@@ -47,13 +55,20 @@ data class SafeMetrics(
     val resultQuality: ResultQuality? = null,
     val transport: Transport? = null,
     val backend: AgentBackendLabel? = null,
+    val nativeErrorDomain: NativeErrorDomain? = null,
+    val nativeErrorCode: Int? = null,
+    val notificationAlert: NotificationSetting? = null,
+    val notificationLockScreen: NotificationSetting? = null,
+    val notificationCenter: NotificationSetting? = null,
+    val notificationSound: NotificationSetting? = null,
 ) {
     internal fun bounded() = copy(
         totalCount = totalCount?.coerceIn(0, MAX_VALUE), failedCount = failedCount?.coerceIn(0, MAX_VALUE),
         returnedCount = returnedCount?.coerceIn(0, MAX_VALUE), byteCount = byteCount?.coerceIn(0, MAX_VALUE),
+        nativeErrorCode = nativeErrorCode?.coerceIn(-1_000_000, 1_000_000),
         queueSize = queueSize?.coerceIn(0, MAX_VALUE), exitCode = exitCode?.coerceIn(-65_536, 65_536),
     )
-    private companion object { const val MAX_VALUE = 1_000_000_000_000L }
+    companion object { private const val MAX_VALUE = 1_000_000_000_000L }
 }
 
 @Serializable data class SafeStackFrame(val symbol: String, val file: String? = null, val line: Int? = null)

@@ -1,5 +1,6 @@
 package dev.ccpocket.app.push
 
+import dev.ccpocket.observability.*
 import dev.ccpocket.protocol.PushRegistrationOutcome
 import dev.ccpocket.protocol.PushRegistrationResult
 import dev.ccpocket.protocol.RegisterPush
@@ -54,9 +55,11 @@ class PushRegistrarTest {
         val prompts = mutableListOf<Boolean>()
         /** The ask number of the latest [requestToken] — what a refusal of that ask is tagged with. */
         var lastRequest = 0L
+        var autoFailure: PushRegistrationFailure? = null
         override fun requestToken(prompt: Boolean, request: Long) {
             lastRequest = request
             prompts += prompt
+            autoFailure?.let { failureFlow.tryEmit(PushFailureEvent(request, it)) }
             autoToken?.let { tokenState.value = it }
         }
         override fun readAuthorization(cb: (PushAuthorization) -> Unit) = cb(authorization)
@@ -101,6 +104,7 @@ class PushRegistrarTest {
         } finally {
             scopes.forEach { it.cancel() }
             scopes.clear()
+            Diagnostics.install(null)
         }
     }
 
@@ -136,6 +140,58 @@ class PushRegistrarTest {
         const val MIN = 60_000L
         /** One full round at the default config: three attempts, 5s and 30s apart. */
         const val ROUND_MS = 35_000L
+    }
+
+    private fun capturePush(): MutableList<DiagnosticRecord> {
+        val records = mutableListOf<DiagnosticRecord>()
+        Diagnostics.install(DiagnosticReporter(Component.IOS, Environment.STAGING, "ios@test",
+            DiagnosticSink { records.add(it) }, successSamplePercent = 0))
+        return records
+    }
+
+    @Test fun failedTokenRoundPreservesCauseAndCannotLookLikeRelayFailure() = pushTest {
+        val records = capturePush()
+        val platform = FakePlatform().apply { autoToken = null; autoFailure = PushRegistrationFailure.NETWORK }
+        val reg = registrar(platform, FakeStore())
+        val link = FakeLink(key) { testScheduler.currentTime }
+        reg.attach(link)
+        advanceTimeBy(ROUND_MS + 1)
+        assertTrue(link.submitted.isEmpty())
+        assertTrue(records.any { it.stage == Stage.PUSH_TOKEN && it.code == ErrorCode.NETWORK_FAILED && it.attempt == 1 })
+        val exhausted = records.single { it.code == ErrorCode.RETRY_EXHAUSTED }
+        assertEquals(Stage.PUSH_TOKEN, exhausted.stage)
+        assertEquals(3, exhausted.attempt)
+        assertTrue(exhausted.steps.any { it.code == ErrorCode.NETWORK_FAILED })
+    }
+
+    @Test fun relayTimeoutAndSendFailureAreSeparateFromTokenFailure() = pushTest {
+        val records = capturePush()
+        val reg = registrar(FakePlatform(), FakeStore())
+        val link = FakeLink(key) { testScheduler.currentTime }
+        var count = 0
+        link.responder = { SubmitOutcome.Failed(if (++count < 3) FailReason.ACK_TIMEOUT else FailReason.SEND_FAILED) }
+        reg.attach(link)
+        advanceTimeBy(ROUND_MS + 1)
+        assertTrue(records.any { it.stage == Stage.PUSH_REGISTER && it.code == ErrorCode.ACK_TIMEOUT })
+        assertTrue(records.any { it.stage == Stage.PUSH_REGISTER && it.code == ErrorCode.SEND_FAILED })
+        val exhausted = records.single { it.code == ErrorCode.RETRY_EXHAUSTED }
+        assertEquals(Stage.PUSH_REGISTER, exhausted.stage)
+        assertEquals(3, exhausted.attempt)
+        assertTrue(exhausted.steps.any { it.code == ErrorCode.TOKEN_RECEIVED })
+    }
+
+    @Test fun storedAndClearedHaveUnsampledEvidenceWithoutTokenOrIdentity() = pushTest {
+        val records = capturePush()
+        val reg = registrar(FakePlatform(), FakeStore())
+        val link = FakeLink(key) { testScheduler.currentTime }.apply { responder = { verdict(it) } }
+        reg.attach(link)
+        advanceUntilIdle()
+        link.desiredEnabled.value = false
+        advanceUntilIdle()
+        assertTrue(records.any { it.stage == Stage.PUSH_REGISTER && it.code == ErrorCode.STORED })
+        assertTrue(records.any { it.stage == Stage.PUSH_CLEAR && it.code == ErrorCode.CLEARED })
+        val history = Diagnostics.pushHistoryText()
+        for (secret in listOf("tok-A", "acct", "dev-1", "wss://r")) assertTrue(secret !in history)
     }
 
     // ── 1. the happy path ───────────────────────────────────────────────────────────────────────────

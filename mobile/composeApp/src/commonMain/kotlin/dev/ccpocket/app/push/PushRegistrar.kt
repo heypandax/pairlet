@@ -222,14 +222,21 @@ class PushRegistrar(
             for (first in triggers) {
                 val reasons = mutableSetOf(first)
                 while (true) reasons += (triggers.tryReceive().getOrNull() ?: break)
-                runCatching { evaluate(reasons) }
+                runCatching { evaluate(reasons) }.onFailure { error ->
+                    if (error !is CancellationException) Diagnostics.push(DiagnosticStage.PUSH_REGISTER,
+                        ErrorCode.UNEXPECTED, isError = true, error = error)
+                }
             }
         }
         scope.launch {
             var previous: PushToken? = null
             platform.token.collect { t ->
                 if (t == null) return@collect
+                Diagnostics.push(DiagnosticStage.PUSH_TOKEN, ErrorCode.TOKEN_RECEIVED)
                 val rotated = previous != null && previous != t
+                if (rotated) Diagnostics.push(DiagnosticStage.PUSH_TOKEN, ErrorCode.TOKEN_ROTATED)
+                if (device.status == DeviceTokenStatus.RETRY_WAIT || device.status == DeviceTokenStatus.BLOCKED)
+                    Diagnostics.push(DiagnosticStage.PUSH_TOKEN, ErrorCode.LATE_CALLBACK)
                 previous = t
                 tokenGen++
                 // a real token settles every earlier verdict: a DENIED/backoff record that the OS has
@@ -263,6 +270,7 @@ class PushRegistrar(
             launch {
                 var seen: Boolean? = null
                 link.desiredEnabled.collect { want ->
+                    Diagnostics.push(DiagnosticStage.PUSH_REGISTER, if (want) ErrorCode.ENABLED else ErrorCode.DISABLED)
                     val changed = seen != null && seen != want
                     if (changed) onExpectationChanged(key)
                     seen = want
@@ -309,7 +317,22 @@ class PushRegistrar(
         rounds.remove(key)?.cancel()
         if (link != null) {
             val tag = platform.token.value?.platform ?: lastPlatformTag() ?: UNKNOWN_PLATFORM
-            runCatching { gate.withPermit { link.submit(RegisterPush(tag, "", newRequestId()), config.ackTimeoutMs) } }
+            Diagnostics.push(DiagnosticStage.PUSH_CLEAR, ErrorCode.STARTED, 1)
+            val rid = newRequestId()
+            val result = runCatching { gate.withPermit { link.submit(RegisterPush(tag, "", rid), config.ackTimeoutMs) } }
+            val code = when (val outcome = result.getOrNull()) {
+                is SubmitOutcome.Acked -> if (outcome.result.requestId == rid && outcome.result.result == PushRegistrationOutcome.CLEARED)
+                    ErrorCode.CLEARED else ErrorCode.ACK_MISMATCH
+                is SubmitOutcome.Failed -> when (outcome.reason) {
+                    FailReason.ACK_TIMEOUT -> ErrorCode.ACK_TIMEOUT
+                    FailReason.AUTH_REJECTED -> ErrorCode.REJECTED
+                    FailReason.NO_ROUTE -> ErrorCode.NO_ROUTE
+                    FailReason.SEND_FAILED -> ErrorCode.SEND_FAILED
+                }
+                SubmitOutcome.SentLegacy -> ErrorCode.FALLBACK_USED
+                null -> if (result.exceptionOrNull() is CancellationException) ErrorCode.SUPERSEDED else ErrorCode.SEND_FAILED
+            }
+            Diagnostics.push(DiagnosticStage.PUSH_CLEAR, code, 1)
         }
         detach(key, forget = true)
     }
@@ -424,19 +447,28 @@ class PushRegistrar(
             // only the FIRST attempt of a prompting round may prompt: a dialog re-appearing on a silent
             // retry is the single most obnoxious thing this machine could do
             val request = ++tokenRequestSeq
+            Diagnostics.push(DiagnosticStage.PUSH_TOKEN, ErrorCode.STARTED, attempt)
             when (val r = awaitTokenAttempt(request) { platform.requestToken(prompt && attempt == 1, request) }) {
                 is TokenAttempt.Got -> return // the token collector owns the transition to AVAILABLE
-                is TokenAttempt.Failed -> when (r.failure) {
-                    PushRegistrationFailure.DENIED, PushRegistrationFailure.UNSUPPORTED -> {
-                        blockDevice(r.failure)
-                        return
+                is TokenAttempt.Failed -> {
+                    Diagnostics.push(DiagnosticStage.PUSH_TOKEN, when (r.failure) {
+                        PushRegistrationFailure.NETWORK -> ErrorCode.NETWORK_FAILED
+                        PushRegistrationFailure.UNKNOWN -> ErrorCode.NATIVE_FAILED
+                        PushRegistrationFailure.UNSUPPORTED -> ErrorCode.UNSUPPORTED
+                        PushRegistrationFailure.DENIED -> ErrorCode.PERMISSION_DENIED
+                    }, attempt)
+                    when (r.failure) {
+                        PushRegistrationFailure.DENIED, PushRegistrationFailure.UNSUPPORTED -> {
+                            blockDevice(r.failure)
+                            return
+                        }
+                        else -> {} // NETWORK / UNKNOWN: spend an attempt
                     }
-                    else -> {} // NETWORK / UNKNOWN: spend an attempt
                 }
                 TokenAttempt.TimedOut ->
                     // the platform never called back at all. Not an error stream event: an unreachable
                     // APNs/FCM is an environment fact the retry budget already handles.
-                    Diagnostics.report(ErrorPath.PUSH, DiagnosticStage.REQUEST, ErrorCode.TIMEOUT, isError = false)
+                    Diagnostics.push(DiagnosticStage.PUSH_TOKEN, ErrorCode.TIMEOUT, attempt)
             }
             if (attempt < config.attemptsPerRound) delay(config.attemptWaitsMs.getOrElse(attempt - 1) { config.attemptWaitsMs.last() })
         }
@@ -447,8 +479,8 @@ class PushRegistrar(
             nextRetryAt = epochMillis() + cooldownFor(rounds),
         )
         saveDeviceState()
-        Diagnostics.report(ErrorPath.PUSH, DiagnosticStage.WAIT, ErrorCode.UNAVAILABLE, isError = true,
-            metrics = SafeMetrics(totalCount = rounds.toLong()))
+        Diagnostics.push(DiagnosticStage.PUSH_TOKEN, ErrorCode.RETRY_EXHAUSTED, config.attemptsPerRound,
+            metrics = SafeMetrics(totalCount = rounds.toLong()), isError = true)
         scheduleWake()
         recomputeStatus()
     }
@@ -468,7 +500,7 @@ class PushRegistrar(
             }
                 recomputeStatus()
             }
-            Diagnostics.report(ErrorPath.PUSH, DiagnosticStage.REQUEST, ErrorCode.PERMISSION_DENIED, isError = false)
+            Diagnostics.push(DiagnosticStage.PUSH_AUTHORIZATION, ErrorCode.PERMISSION_DENIED)
         }
         links.values.forEach { link ->
             states[link.key]?.let { update(link.key, it.copy(status = PairingStatus.BLOCKED, failure = failure.name)) }
@@ -555,6 +587,7 @@ class PushRegistrar(
     private suspend fun runRound(link: PairingLink, gen: Int) {
         val key = link.key
         val want = link.desiredEnabled.value
+        val diagnosticStage = if (want) DiagnosticStage.PUSH_REGISTER else DiagnosticStage.PUSH_CLEAR
         val token = platform.token.value
         if (want && token == null) return
         val platformTag = token?.platform ?: lastPlatformTag() ?: UNKNOWN_PLATFORM
@@ -579,6 +612,7 @@ class PushRegistrar(
                     if (generations[key] != gen) return@run
                     attempt++
                     trace?.stage(DiagnosticStage.REQUEST)
+                    Diagnostics.push(diagnosticStage, ErrorCode.STARTED, attempt)
                     val requestId = newRequestId()
                     val outcome = try {
                         gate.withPermit { link.submit(RegisterPush(platformTag, body, requestId), config.ackTimeoutMs) }
@@ -589,14 +623,36 @@ class PushRegistrar(
                         markStaleWritten(key)
                         throw c
                     } catch (e: Throwable) {
+                        Diagnostics.push(diagnosticStage, ErrorCode.SEND_FAILED, attempt, isError = true, error = e)
                         SubmitOutcome.Failed(FailReason.SEND_FAILED)
                     }
-                    if (outcome !is SubmitOutcome.Failed || outcome.written) { wroteSomething = true; trace?.stage(DiagnosticStage.WRITE) }
+                    if (outcome !is SubmitOutcome.Failed || outcome.written) {
+                        wroteSomething = true
+                        trace?.stage(DiagnosticStage.WRITE)
+                        Diagnostics.push(diagnosticStage, ErrorCode.SENT, attempt)
+                    }
                     when (outcome) {
                         is SubmitOutcome.Acked -> {
                             trace?.stage(DiagnosticStage.ACK)
                             val r = outcome.result
-                            if (r.requestId != requestId) continue // a receipt for a superseded attempt
+                            if (r.requestId != requestId) {
+                                Diagnostics.push(diagnosticStage, ErrorCode.ACK_MISMATCH, attempt)
+                                continue
+                            }
+                            Diagnostics.push(diagnosticStage, when (r.result) {
+                                PushRegistrationOutcome.STORED -> ErrorCode.STORED
+                                PushRegistrationOutcome.CLEARED -> ErrorCode.CLEARED
+                                PushRegistrationOutcome.REJECTED -> when (r.code) {
+                                    "bad_request" -> ErrorCode.BAD_REQUEST
+                                    "forbidden" -> ErrorCode.FORBIDDEN
+                                    else -> ErrorCode.REJECTED
+                                }
+                                PushRegistrationOutcome.FAILED -> when (r.code) {
+                                    NO_DEVICE -> ErrorCode.NOT_FOUND
+                                    "store_failed" -> ErrorCode.STORE_FAILED
+                                    else -> ErrorCode.UNEXPECTED
+                                }
+                            }, attempt, isError = r.result == PushRegistrationOutcome.FAILED)
                             when (r.result) {
                                 expected -> {
                                     if (confirm(key, link, expectedGen, trace, attempt)) return@run
@@ -627,6 +683,7 @@ class PushRegistrar(
                             }
                         }
                         SubmitOutcome.SentLegacy -> {
+                            Diagnostics.push(diagnosticStage, ErrorCode.FALLBACK_USED, attempt)
                             // written, but this relay cannot answer. Honest state, not a failure: the next
                             // CONNECTED against an upgraded relay turns it back into PENDING.
                             update(key, (states[key] ?: PairingState()).copy(
@@ -639,6 +696,7 @@ class PushRegistrar(
                         }
                         is SubmitOutcome.Failed -> when (outcome.reason) {
                             FailReason.AUTH_REJECTED -> {
+                                Diagnostics.push(diagnosticStage, ErrorCode.REJECTED, attempt)
                                 update(key, (states[key] ?: PairingState()).copy(
                                     status = PairingStatus.BLOCKED, failure = "auth", desiredEnabled = want))
                                 trace?.finish(Outcome.FAILURE, DiagnosticStage.WRITE, ErrorCode.REJECTED,
@@ -646,8 +704,16 @@ class PushRegistrar(
                                 return@run
                             }
                             // nothing to write to: waiting for a route is not a failed attempt
-                            FailReason.NO_ROUTE -> { attempt--; link.connected.first { it } }
-                            FailReason.ACK_TIMEOUT, FailReason.SEND_FAILED -> trace?.retry()
+                            FailReason.NO_ROUTE -> {
+                                Diagnostics.push(diagnosticStage, ErrorCode.NO_ROUTE, attempt)
+                                attempt--; link.connected.first { it }
+                            }
+                            FailReason.ACK_TIMEOUT, FailReason.SEND_FAILED -> {
+                                val code = if (outcome.reason == FailReason.ACK_TIMEOUT) ErrorCode.ACK_TIMEOUT else ErrorCode.SEND_FAILED
+                                trace?.stage(DiagnosticStage.ACK, code)
+                                Diagnostics.push(diagnosticStage, code, attempt)
+                                trace?.retry()
+                            }
                         }
                     }
                     if (attempt in 1 until config.attemptsPerRound) {
@@ -662,12 +728,13 @@ class PushRegistrar(
                     nextRetryAt = epochMillis() + cooldownFor(failedRounds)))
                 trace?.finish(Outcome.FAILURE, DiagnosticStage.WRITE, ErrorCode.SEND_FAILED,
                     metrics = SafeMetrics(totalCount = attempt.toLong()))
-                Diagnostics.report(ErrorPath.PUSH, DiagnosticStage.WAIT, ErrorCode.UNAVAILABLE, isError = true,
-                    metrics = SafeMetrics(totalCount = failedRounds.toLong()))
+                Diagnostics.push(diagnosticStage, ErrorCode.RETRY_EXHAUSTED, attempt,
+                    metrics = SafeMetrics(totalCount = failedRounds.toLong()), isError = true)
                 scheduleWake()
             }
         } catch (c: CancellationException) {
             if (wroteSomething) markStaleWritten(key)
+            Diagnostics.push(diagnosticStage, ErrorCode.SUPERSEDED, attempt)
             trace?.finish(Outcome.CANCELLED, DiagnosticStage.WRITE, ErrorCode.SUPERSEDED)
             throw c
         } finally {
@@ -680,7 +747,9 @@ class PushRegistrar(
      *  Returns false when that extra round-trip failed — the caller counts it as a failed attempt. */
     private suspend fun confirm(key: PairingKey, link: PairingLink, gen: Int, trace: dev.ccpocket.observability.OperationTrace?, attempt: Int): Boolean {
         val prev = states[key] ?: PairingState()
+        val diagnosticStage = if (link.desiredEnabled.value) DiagnosticStage.PUSH_REGISTER else DiagnosticStage.PUSH_CLEAR
         if (prev.staleWrittenPossible) {
+            Diagnostics.push(diagnosticStage, ErrorCode.RECONFIRMING, attempt)
             update(key, prev.copy(staleWrittenPossible = false))
             delay(STALE_RECONFIRM_DELAY_MS)
             val want = link.desiredEnabled.value
@@ -694,6 +763,11 @@ class PushRegistrar(
             }.getOrNull()
             val ok = again is SubmitOutcome.Acked && again.result.requestId == rid && again.result.result == expected
             if (!ok) {
+                Diagnostics.push(diagnosticStage, when (again) {
+                    is SubmitOutcome.Failed -> if (again.reason == FailReason.ACK_TIMEOUT) ErrorCode.ACK_TIMEOUT else ErrorCode.SEND_FAILED
+                    is SubmitOutcome.Acked -> ErrorCode.ACK_MISMATCH
+                    else -> ErrorCode.UNAVAILABLE
+                }, attempt)
                 // still unproven: the next ack this round earns has to pass the same double-check
                 update(key, (states[key] ?: prev).copy(status = PairingStatus.IN_FLIGHT, staleWrittenPossible = true))
                 return false
@@ -704,9 +778,10 @@ class PushRegistrar(
             status = PairingStatus.CONFIRMED, desiredEnabled = link.desiredEnabled.value,
             lastConfirmedAt = epochMillis(), confirmedGen = gen, failedRounds = 0, nextRetryAt = null,
             failure = null, staleWrittenPossible = false))
+        Diagnostics.push(diagnosticStage, ErrorCode.CONFIRMED, attempt)
         trace?.finish(Outcome.SUCCESS, DiagnosticStage.COMPLETE, ErrorCode.OK,
             metrics = SafeMetrics(totalCount = attempt.toLong()))
-        if (recovering) trace?.recovered()
+        if (recovering) Diagnostics.push(diagnosticStage, ErrorCode.RECOVERED, attempt)
         return true
     }
 

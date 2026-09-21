@@ -2,6 +2,8 @@
 
 本目录维护诊断配置、事件口径、可靠性和发布方法。2026 年 9 月的实施过程、任务计划及验收回执已移到[历史归档](../archive/observability-2026-09/README.md)；旧任务的暂停与授权不作为当前任务指令。
 
+推送故障请按 [推送诊断指南](PUSH-DIAGNOSTICS.md) 获取手机本地过程记录、关联 Sentry，并区分 token 获取、登记、清空和实际投递。
+
 | 任务 | 入口 |
 |---|---|
 | 理解设计与采集边界 | [总体方案](../design/OBSERVABILITY.md)、[核心错误路径](ERROR-PATHS.md)、[可靠性](RELIABILITY.md) |
