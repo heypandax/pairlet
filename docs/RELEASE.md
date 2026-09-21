@@ -43,11 +43,13 @@ daemon 自动更新只查询镜像 `latest.json` 和 GitHub `/releases/latest`�
 或 Actions 产物。安装脚本本身从 `main` 获取，镜像任务也会同步脚本，因此推送会让新脚本
 对外可见；重新安装时下载的程序仍由正式 Release 决定，不会自动取得预演版。
 
-## 当前全平台主流程
+## 发布模式
 
-### 仅准备 iOS TestFlight
+### iOS TestFlight：仅构建与外部用户交付
 
-使用已确认版本且通过定向验证的提交，运行：
+给外部反馈用户发 TF 时，按[反馈排障与测试版本交付](observability/FEEDBACK-DIAGNOSTICS.md)完成外测组和 Beta 审核提交；下方仅构建命令不是该场景的完整交付。新构建要继续外测时，将 `distribute_testflight` 设为 `true`；已有 VALID 构建时只补跑 `testflight-public-link.yml`，不要重复归档。正式商店提审仍保持关闭，除非本次另有明确要求。
+
+仅当明确要求只构建/上传时，使用已确认版本且通过定向验证的提交运行：
 
 ```bash
 gh workflow run ios-release.yml --ref <发布提交所在的固定-ref> \
@@ -57,8 +59,8 @@ gh workflow run ios-release.yml --ref <发布提交所在的固定-ref> \
 
 此模式仍验证归档中的 Sentry 配置、上传对应 dSYM、签名上传，并等待**本次版本和 build**
 在 ASC 处理为 `VALID`；跳过商店元数据同步、商店版本绑定、正式审核与公开测试组分发。
-build 号使用 ios-release 的 run number。只有工作流成功且确认目标 build 可用，才能报告
-TestFlight 构建准备完成；外部用户安装仍取决于测试组分配及 Beta App Review 状态。
+build 号使用 ios-release 的 run number。工作流成功且目标 build 为 VALID，只能报告
+构建上传/处理完成；外测提交完成与外部用户已可安装仍须分别核实测试组和 Beta App Review 状态。
 
 ### 全平台协调发布
 
