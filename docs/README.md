@@ -8,6 +8,7 @@
 | 管理本期 Issue 修复与交付 | [2026-09-13 本期任务管理](iterations/2026-09-13-issue-delivery.md) |
 | 交给 Claude Code 独立实施后续 Issue | [2026-09-14 任务目录与方案](iterations/2026-09-14-claude-code/README.md) |
 | 实施本轮八项 Issue 修复（不含 #352／#381／#342） | [2026-09-19 批次规划与逐项方案](iterations/2026-09-19-claude-code/README.md) |
+| 2.1.2 全平台发布与验收 | [2026-09-22 发布记录](iterations/2026-09-22-release/RELEASE-2.1.2.md) |
 | 了解使用方式与运行链路 | [使用说明](USAGE.md)、[运行说明](RUN.md)、[贡献指南](../CONTRIBUTING.md) |
 | 构建、发版、iOS 提审 | [发布流程](RELEASE.md)、[拒审案例与检查](APP-STORE-REJECTIONS.md)、[构建链](BUILD-TOOLCHAIN-UPGRADE.md)、[iOS 设备](ios-device.md) |
 | 修改产品或界面 | [设计索引](design/README.md)、[UI 设计说明](design/claude-design-handoff/README.md) |

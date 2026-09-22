@@ -1,12 +1,12 @@
 {
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Pairlet (formerly CC Pocket) daemon.",
   "homepage": "https://github.com/heypandax/cc-pocket",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/heypandax/cc-pocket/releases/download/v2.1.1/cc-pocket-daemon-2.1.1-windows-x86_64.zip",
-      "hash": "537e8292147eab8c3ca276169b92c5a36dc475e60f3f922c93c4a9ef5bec3962"
+      "url": "https://github.com/heypandax/cc-pocket/releases/download/v2.1.2/cc-pocket-daemon-2.1.2-windows-x86_64.zip",
+      "hash": "d7d327e8bb13d67a18698387b38a12d06e11dc019ae67e4e82a8b774bdeb592a"
     }
   },
   "extract_dir": "cc-pocket-daemon",
