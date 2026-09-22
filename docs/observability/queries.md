@@ -34,6 +34,25 @@
 
 查询语法已由当前 Sentry 编辑器接受并保存。新字段的实际生产数据仍须在新包验收时逐项展开核对。未创建通知、定时任务或告警接收者。
 
+## Codex / Claude Code 的 Sentry MCP 查询入口
+
+诊断查询使用 [Sentry 官方远程 MCP](https://mcp.sentry.dev/)，限制到 Pairlet 组织，便于同时检查 iOS、daemon 和 relay。客户端 DSN 仅用于上报，CI 的 `org:ci` token 仅用于符号上传，都不能代替查询授权。个人 OAuth 凭据不写入仓库。
+
+Codex 本机接入：先运行 `codex mcp get sentry` 检查已有地址；没有配置时执行：
+
+```bash
+codex mcp add sentry --url https://mcp.sentry.dev/mcp/pairlet
+# 若添加时没有完成浏览器授权：
+codex mcp login sentry
+codex mcp list
+```
+
+排障只需授权页的 **Inspect Issues & Events**。仅在任务明确包含其他操作时授权 Seer、Triage 或项目管理。配置保存在本机 `~/.codex/config.toml`，Codex 桌面和 CLI 共享；Claude Code 的配置不会自动迁移。新增连接后，按 [Codex MCP 文档](https://developers.openai.com/codex/mcp/) 在设置中重新加载 MCP；运行中的旧任务可能仍需重新打开才能取得新工具。不要为加载工具另起同一任务的写入者。
+
+连接验收必须区分三步：`mcp list` 显示 enabled / OAuth → 原生客户端成功发现工具 → `find_projects` 实际返回 Pairlet 项目。只有前两步不能报告业务数据已读通。Sentry 的工具目录可能随服务更新；未直接提供的只读操作先通过 `search_sentry_tools` 查实际 schema，再调用。
+
+推送排查从 `search_issues` 和 `search_events` 开始：组织已由 URL 限定，项目先选 `pairlet-ios`，条件 `error_path:EP-28`，同时查 errors 与 logs，并核对版本、环境和时间窗。再按需要检查 relay。阶段含义和 `diag_trace_id` 关联限制见[推送诊断指南](PUSH-DIAGNOSTICS.md)。邮件标题只是线索；须读取真实事件后，才能判断是原生 token 失败、登记失败、连接异常还是投递失败。原始响应只保存在已忽略的 `_local/`。
+
 ## 最近五分钟打不开会话
 
 1. 先记录发生时间、时区、平台、App/daemon 版本与现象。将 Sentry 时间窗设为最近五分钟；随后扩大至一小时检查迟到。发生时间和后台首次可查询时间是两列证据。
