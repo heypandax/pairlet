@@ -208,6 +208,7 @@ object TranscriptScanner {
                         assistantModel(obj)?.let { model = it } // skips sidechain + <synthetic>, last wins
                         contextOf(obj)?.let { contextTokens = it } // last MAIN-chain turn carrying usage wins
                     }
+                    "system" -> if (isCompactBoundary(obj)) contextTokens = compactContextTokens(obj)
                     "ai-title" -> aiTitle = obj.str("aiTitle")
                     "custom-title" -> customTitle = obj.str("customTitle")
                     "last-prompt" -> if (lastPrompt == null) lastPrompt = obj.str("lastPrompt")
@@ -280,6 +281,10 @@ object TranscriptScanner {
                 val line = raw.trim()
                 if (line.isEmpty()) continue
                 val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                if (isCompactBoundary(obj)) {
+                    last = compactContextTokens(obj)
+                    continue
+                }
                 if (obj.str("type") != "assistant") continue
                 if (obj.bool("isSidechain") == true) continue // Task-subagent turns share the file; their usage is the SUBAGENT's window, not this session's
                 val usage = (obj["message"] as? JsonObject)?.get("usage") as? JsonObject ?: continue
@@ -339,10 +344,15 @@ object TranscriptScanner {
         return streak
     }
 
+    private fun isCompactBoundary(obj: JsonObject): Boolean =
+        obj.str("type") == "system" && obj.str("subtype") == "compact_boundary" && obj.bool("isSidechain") != true
+
+    private fun compactContextTokens(obj: JsonObject): Long? =
+        (obj["compactMetadata"] as? JsonObject)?.long("postTokens")?.takeIf { it >= 0 }
+
     /** Context occupancy an assistant line leaves in the window, or null when it doesn't count: a
      *  Task-subagent turn (isSidechain — that usage describes the SUBAGENT's window), a line with no
-     *  `message.usage`, or a zero sum. Same rules as [lastContextTokens], which is deliberately left
-     *  untouched (many callers); `ResumeSeedParityTest` pins the two against each other. */
+     *  `message.usage`, or a zero sum. Same rules as [lastContextTokens], which shares compact-boundary invalidation; `ResumeSeedParityTest` pins the two against each other. */
     private fun contextOf(obj: JsonObject): Long? {
         if (obj.bool("isSidechain") == true) return null
         val usage = (obj["message"] as? JsonObject)?.get("usage") as? JsonObject ?: return null
@@ -364,6 +374,7 @@ object TranscriptScanner {
 
     /** A real user turn has no `toolUseResult` and content is not a `tool_result` array. (C5) */
     private fun isRealUserTurn(obj: JsonObject): Boolean {
+        if (obj.bool("isCompactSummary") == true) return false
         if (obj.containsKey("toolUseResult")) return false
         val content = (obj["message"] as? JsonObject)?.get("content")
         if (content is JsonArray && content.isNotEmpty()) {

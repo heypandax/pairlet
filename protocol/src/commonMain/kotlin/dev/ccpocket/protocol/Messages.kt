@@ -914,6 +914,12 @@ data class SessionLive(
     /** Informational session limitation, never model output or prompt-delivery evidence.
      * Additive: older clients ignore it; older daemons omit it. */
     val notice: String? = null,
+    /** True: contextUsed is a current snapshot, including null = unknown after compaction.
+     * False/absent preserves older daemons' seed-only semantics. */
+    val contextUsedAuthoritative: Boolean = false,
+    /** One-shot harness summary carried by a full live snapshot. Old clients ignore it, without
+     * interpreting it as assistant output or settling a pending prompt. Null on ordinary announces. */
+    val compactSummary: String? = null,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
@@ -1389,6 +1395,8 @@ data class HistoryMessage(
      *  optional both ways: an old daemon omits it (no rewind entry, same probe as [seq]), an old client
      *  ignores it. Null on ASSISTANT/TOOL rows and on backends other than Claude. */
     val uuid: String? = null,
+    /** Claude-generated continuation summary, not a user-authored prompt. Old peers ignore it. */
+    val compactSummary: Boolean = false,
 )
 
 /**

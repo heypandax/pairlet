@@ -1,3 +1,6 @@
 What's new in 2.1.2
 
-Improved notification diagnostics to help investigate missing alerts. When diagnostic sharing is enabled, you can copy push diagnostics from Settings and share them with support.
+- Clearer separation between your messages and agent replies.
+- Conversation summaries now stay collapsed until you expand them, with an option to copy the full summary.
+- Context usage refreshes correctly after conversation compression.
+- Corrected push notification signing configuration and improved notification diagnostics. When diagnostic sharing is enabled, you can copy push diagnostics from Settings to share with support.

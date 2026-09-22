@@ -188,6 +188,11 @@ class ChatMasterV2UiTest {
      * A user turn is a full-width list entry. It used to be a right-aligned bubble capped at 300dp, so a
      * pasted log reflowed into a narrow ribbon while the agent's reply beside it read at full measure —
      * two grammars for one conversation, and the one thing Chat Master v2 names explicitly.
+     *
+     * Issue #397 put the turn on a neutral raised container so it reads apart from the agent's reply; that costs
+     * the container's own 12dp text inset on top of the transcript gutter, which is what the leading bound
+     * below allows. What it must NEVER allow back is the bubble: the width and spill assertions are the
+     * ones that carry the Chat Master v2 contract, and they are unchanged.
      */
     @Test
     fun aUserTurnIsFullWidthAndCarriesNoBubble() = baseline(
@@ -198,7 +203,7 @@ class ChatMasterV2UiTest {
     ) {
         val b = onAllNodes(hasText(LONG_PROMPT)).onFirst().getUnclippedBoundsInRoot()
         val w = (b.right - b.left).value
-        assertTrue(b.left.value <= 20f, "the turn starts at the transcript's own gutter, not inset by a bubble (${b.left})")
+        assertTrue(b.left.value <= 32f, "the turn starts at the transcript's gutter plus the #397 container inset, not inset by a bubble (${b.left})")
         assertTrue(w > 300f, "the turn owns the column: ${w}pt would still fit the retired 300dp bubble cap")
         assertTrue(b.right.value <= W + 0.5f, "…and still nothing spills the 402pt viewport")
     }
@@ -216,6 +221,27 @@ class ChatMasterV2UiTest {
         assertTrue(
             kotlin.math.abs((label.right - body.right).value) < 2f,
             "the source label stays flush with the turn's trailing edge (${label.right} vs ${body.right})",
+        )
+    }
+
+    @Test
+    fun theUserLabelStaysAboveTheMessage() = assertUserLabelAboveMessage(fontScale = 1f)
+
+    @Test
+    fun theUserLabelStaysAboveTheMessageAtLargeFontScale() = assertUserLabelAboveMessage(fontScale = 1.6f)
+
+    private fun assertUserLabelAboveMessage(fontScale: Float) = baseline(
+        fontScale = fontScale,
+        seed = {
+            receiveForTest(live())
+            receiveForTest(ConvoHistory(convo, listOf(HistoryMessage(ChatRole.USER, LONG_PROMPT))))
+        },
+    ) {
+        val label = onAllNodes(hasText(str(Res.string.chat_you).uppercase())).onFirst().getUnclippedBoundsInRoot()
+        val body = onAllNodes(hasText(LONG_PROMPT)).onFirst().getUnclippedBoundsInRoot()
+        assertTrue(
+            (body.top - label.bottom).value >= 6.5f,
+            "the source label needs its own row and 7dp gap above the body: label=$label, body=$body",
         )
     }
 

@@ -65,6 +65,12 @@ class ChatTranscript {
         streaming.value = false
     }
 
+    fun appendCompactSummary(text: String) {
+        // A replay/live echo is the same complete summary, never a new answer or prompt receipt.
+        if (messages.lastOrNull().let { it is ChatItem.User && it.compactSummary && it.text == text }) return
+        messages.add(ChatItem.User(text, compactSummary = true))
+    }
+
     fun appendChunk(c: AssistantChunk) {
         streaming.value = true
         when (val p = c.piece) {
@@ -254,8 +260,9 @@ internal fun historyItem(h: HistoryMessage): ChatItem = when (h.role) {
         images = h.images.mapNotNull { runCatching { Base64.Default.decode(it.base64) }.getOrNull() },
         imagesTruncated = h.imagesTruncated,
         // rewind/fork anchor coordinates (issue #282) — carried verbatim, including their absence
-        seq = h.seq,
-        uuid = h.uuid,
+        seq = if (h.compactSummary) null else h.seq,
+        uuid = if (h.compactSummary) null else h.uuid,
+        compactSummary = h.compactSummary,
     )
     // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65).
     // Attribution follows the placeholder text so the replay reads the same as the daemon live prompt:

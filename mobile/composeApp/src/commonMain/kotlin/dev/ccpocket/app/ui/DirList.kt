@@ -1,5 +1,6 @@
 package dev.ccpocket.app.ui
 
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -8,11 +9,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.agentFilterIsAll
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
 
@@ -77,23 +81,75 @@ private val DRIVE_PREFIX = Regex("""^[A-Za-z]:[\\/].*""")
  *  popover); the daemon stays the authority on whether the dir is actually usable. */
 fun looksAbsolutePath(s: String): Boolean = s.startsWith("/") || s.startsWith("~") || DRIVE_PREFIX.matches(s)
 
+/** The shortest tail [fitTailPath] will ever fall back to when not even that fits — below this the
+ *  string stops naming a file at all, so the Text is left to clip instead. */
+private const val MIN_TAIL_CHARS = 4
+
+/** What [TailPathText] currently renders, and the available width it was fitted for. */
+private data class TailFit(val width: Int, val shown: String)
+
+/**
+ * The longest tail of [full] that still fits [maxWidth] px, prefixed with "…" once anything had to go.
+ * [widthOf] measures a candidate in the very style the caller renders it with — a CJK name or an emoji
+ * is not "one char wide", so the fit is MEASURED, never counted.
+ *
+ * Pure and monotone in [maxWidth] (a wider pane can only return a longer-or-equal tail), which is the
+ * whole point: issue #392's truncation only ever grew, so a pane that got narrow once stayed narrow.
+ */
+fun fitTailPath(full: String, maxWidth: Int, widthOf: (String) -> Int): String {
+    if (full.isEmpty() || maxWidth <= 0 || widthOf(full) <= maxWidth) return full
+    // fits() is monotone decreasing in keep → binary search the largest keep that still fits
+    fun candidate(keep: Int): String {
+        var start = (full.length - keep).coerceIn(0, full.length)
+        // never start on the low half of a surrogate pair (an emoji in the name would render as ￼)
+        if (start in 1 until full.length && full[start].isLowSurrogate() && full[start - 1].isHighSurrogate()) start++
+        return "…" + full.substring(start)
+    }
+    var lo = MIN_TAIL_CHARS.coerceAtMost(full.length) // floor, not known to fit
+    var hi = full.length - 1
+    var best = -1
+    while (lo <= hi) {
+        val mid = (lo + hi) / 2
+        if (widthOf(candidate(mid)) <= maxWidth) { best = mid; lo = mid + 1 } else hi = mid - 1
+    }
+    return candidate(if (best >= 0) best else MIN_TAIL_CHARS.coerceAtMost(full.length))
+}
+
 /**
  * A one-line monospace path that overflows from the FRONT — the project folder (the tail) is what
  * identifies a workdir, so a long path renders as "…app/cc-pocket" instead of "/Users/yourname/…".
- * Compose 1.7 has no TextOverflow.StartEllipsis; this trims via onTextLayout until the tail fits.
+ * Compose 1.7 has no TextOverflow.StartEllipsis, so the tail is fitted here ([fitTailPath]) against
+ * the width the layout actually offers, and REFITTED whenever that width changes — widening a pane
+ * gives the path its characters back (issue #392), narrowing takes exactly as many as it must.
+ *
+ * [tight] for the callers that sit shoulder-to-shoulder with chips/icons in a centered Row (AGENTS.md's
+ * tightCenter rule); the default keeps the stacked list rows' natural line box.
  */
 @Composable
-fun TailPathText(path: String, modifier: Modifier = Modifier, color: Color = Tok.tx2, fontSize: TextUnit = 11.sp) {
+fun TailPathText(
+    path: String,
+    modifier: Modifier = Modifier,
+    color: Color = Tok.tx2,
+    fontSize: TextUnit = 11.sp,
+    tight: Boolean = false,
+) {
     val full = tilde(path)
-    var drop by remember(full) { mutableStateOf(0) }
-    val shown = if (drop <= 0) full else "…" + full.takeLast((full.length - drop).coerceAtLeast(4))
+    val measurer = rememberTextMeasurer()
+    // ONE style object for both the rendering and the measuring: a metric difference between the two
+    // (theme letter spacing, line height) would fit the tail against a width the Text doesn't have.
+    val base = LocalTextStyle.current
+    val style = remember(base, fontSize, color, tight) {
+        base.merge(TextStyle(color = color, fontFamily = FontFamily.Monospace, fontSize = fontSize))
+            .let { if (tight) it.merge(tightCenter(fontSize)) else it }
+    }
+    var fit by remember(full, style) { mutableStateOf(TailFit(width = -1, shown = full)) }
     Text(
-        shown, color = color, fontFamily = FontFamily.Monospace, fontSize = fontSize,
+        fit.shown, style = style,
         maxLines = 1, softWrap = false,
         onTextLayout = { r ->
-            // monospace → proportional first jump, then settle in a couple of passes
-            if (r.hasVisualOverflow && drop < full.length - 4) {
-                drop = (drop + (full.length / 6).coerceAtLeast(2)).coerceAtMost(full.length - 4)
+            val avail = r.layoutInput.constraints.maxWidth
+            if (avail != fit.width) {
+                fit = TailFit(avail, fitTailPath(full, avail) { s -> measurer.measure(s, style, softWrap = false, maxLines = 1).size.width })
             }
         },
         modifier = modifier,

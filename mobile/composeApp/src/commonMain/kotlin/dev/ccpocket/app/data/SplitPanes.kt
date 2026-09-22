@@ -814,6 +814,7 @@ class SidePanes(
         pane.gone.value = false
         // Same metadata lifecycle as the focused conversation, including updates and null clearing.
         pane.transcript.setSessionNotice(f.notice)
+        f.compactSummary?.let(pane.transcript::appendCompactSummary)
         f.model?.let { pane.model.value = it } // daemon truth corrects the optimistic switchModel guess too
         // daemon truth beats the local guess, exactly as the focused path takes it — the stamp included:
         // a turn killed MID-THINKING has no TurnDone coming to close its block, so a reattach that reports

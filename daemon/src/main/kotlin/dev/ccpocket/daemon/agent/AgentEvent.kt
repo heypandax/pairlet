@@ -66,6 +66,10 @@ sealed interface AgentEvent {
         val outputTokens: Long? = null,
     ) : AgentEvent
 
+    /** Successful main-chain compaction. Missing postTokens invalidates the old occupancy. */
+    data class CompactBoundary(val postTokens: Long?) : AgentEvent
+    data class CompactSummary(val text: String) : AgentEvent
+
     /** a tool/command result — carries the originating tool_use id + (text) content.
      *  [parentId] set = this result belongs to a tool INSIDE a sub-agent, not the main chain.
      *

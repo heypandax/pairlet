@@ -9,7 +9,6 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -163,7 +162,6 @@ private fun WinCell(icon: ImageVector, onClick: () -> Unit) {
 
 /** 28dp square hit target with the mock's rounded-6 raised plate on hover; [enabled] false takes the
  *  hover plate AND the tooltip away, so a disabled arrow can't look like it is offering something. */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun ChromeButton(
     tooltip: String,
@@ -183,22 +181,8 @@ private fun ChromeButton(
         ) { glyph() }
     }
     if (!enabled) { cell(); return }
-    TooltipArea(tooltip = { TooltipCapsule(tooltip, shortcut) }, delayMillis = 500) { cell() }
-}
-
-/** The mock's tooltip: a raised hairline capsule carrying the label and its shortcut (mock:323-330). */
-@Composable
-private fun TooltipCapsule(label: String, shortcut: String) {
-    Row(
-        Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.raised)
-            .border(1.dp, Tok.hair, RoundedCornerShape(5.dp))
-            .padding(horizontal = 7.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
-        Text(shortcut, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp))
-    }
+    // the shared desktop tooltip ([DesktopTooltip]) — this cluster grew it, the file viewer reuses it
+    DesktopTooltip(tooltip, shortcut) { cell() }
 }
 
 /** The panel-left glyph (mock:44-47): a 15×13 rounded outline with a rail line at x=5. [filled] shades the

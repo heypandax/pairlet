@@ -580,6 +580,7 @@
     <!-- ── file export / native preview (issues #67/#79) ────────── -->
     <string name="file_share">Share</string>
     <string name="file_save_as">Save As…</string>
+    <string name="file_show_full_path">Show full file path</string>
     <string name="file_open">Open</string>
     <string name="file_preview">Preview</string>
     <string name="file_no_inline_preview">No inline preview for this file type</string>
@@ -622,6 +623,16 @@
     <string name="diff_unchanged_lines">⋯ %1$d unchanged lines</string>
     <string name="diff_collapsed_lines">%1$d lines</string>
     <string name="diff_soft_wrap">Soft wrap</string>
+
+    <!-- ── file viewer hover tooltips (issue #393) ────────── -->
+    <string name="file_tip_wrap_on">Soft wrap is on — click to let long lines run off the edge</string>
+    <string name="file_tip_wrap_off">Soft wrap is off — click to wrap long lines</string>
+    <string name="file_tip_view_diff">Showing this session\'s changes — click File for the whole file</string>
+    <string name="file_tip_view_file">Showing the whole file — click Diff for this session\'s changes</string>
+    <string name="file_tip_status_write">Created in this session</string>
+    <string name="file_tip_status_edit">Edited in this session</string>
+    <string name="file_tip_status_delete">Deleted in this session</string>
+    <string name="file_tip_status_notebook">Notebook edited in this session</string>
 
     <!-- ── paired devices (multi-device) ─────────────────────────── -->
     <string name="devices_section">PAIRED DEVICES</string>
@@ -2197,4 +2208,5 @@
     <string name="managed_sessions_enable_required">Turn this on for %1$s before importing its sessions.</string>
     <string name="diagnostic_copy_push">Copy push diagnostics</string>
     <string name="diagnostic_push_history_description">Includes the latest notification setup results from this app launch. Contains no notification tokens or message content.</string>
+    <string name="compact_summary">Context summary</string>
 </resources>

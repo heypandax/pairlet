@@ -13,6 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.io.TempDir
@@ -113,17 +114,70 @@ class UpdateProgressTest {
         assertEquals("downloading a.tar.gz\n  0 B downloaded — waiting for network…\n", piped.text)
     }
 
+    // ── which mode: it must hinge on STDERR, not on stdin/stdout ───────────────────────────────────
+
+    /** A POSIX box: nothing is known about Windows, `[ -t 2 ]` answered. */
+    private fun posix(
+        consolePresent: Boolean = true,
+        consoleIsTerminal: Boolean? = null,
+        term: String? = "xterm",
+        ci: Boolean = false,
+        stderrTty: Boolean? = true,
+    ) = StderrCapabilities(
+        windows = false, consolePresent = consolePresent, consoleIsTerminal = consoleIsTerminal,
+        term = term, ci = ci, windowsStderrConsole = null, posixStderrTty = stderrTty,
+    )
+
+    /** A Windows box: `[ -t 2 ]` is never run, GetConsoleMode(stderr) answered (null = could not ask). */
+    private fun windows(
+        stderrConsole: Boolean?,
+        consolePresent: Boolean = true,
+        consoleIsTerminal: Boolean? = null,
+        term: String? = null,
+        ci: Boolean = false,
+    ) = StderrCapabilities(
+        windows = true, consolePresent = consolePresent, consoleIsTerminal = consoleIsTerminal,
+        term = term, ci = ci, windowsStderrConsole = stderrConsole, posixStderrTty = null,
+    )
+
     @Test
-    fun interactive_only_when_stderr_is_positively_a_terminal() {
-        val yes = { true }
-        assertTrue(TerminalUpdateProgress.decideInteractive(true, null, "xterm", windows = false, stderrTty = yes))
-        assertTrue(TerminalUpdateProgress.decideInteractive(true, true, "xterm", windows = false, stderrTty = yes))
-        assertFalse(TerminalUpdateProgress.decideInteractive(true, null, "xterm", windows = false, stderrTty = { false })) // 2> file
-        assertFalse(TerminalUpdateProgress.decideInteractive(false, null, "xterm", windows = false, stderrTty = yes))
-        assertFalse(TerminalUpdateProgress.decideInteractive(true, false, "xterm", windows = false, stderrTty = yes)) // JDK 22+ redirected
-        assertFalse(TerminalUpdateProgress.decideInteractive(true, null, "dumb", windows = false, stderrTty = yes))
-        // Windows: stderr cannot be confirmed (update 2> err.txt keeps a console) → plain lines
-        assertFalse(TerminalUpdateProgress.decideInteractive(true, true, null, windows = true, stderrTty = yes))
+    fun posix_is_interactive_only_when_stderr_is_positively_a_terminal() {
+        assertTrue(TerminalUpdateProgress.decideInteractive(posix()))
+        assertTrue(TerminalUpdateProgress.decideInteractive(posix(consoleIsTerminal = true)))
+        assertFalse(TerminalUpdateProgress.decideInteractive(posix(stderrTty = false)))   // update 2> err.txt
+        assertFalse(TerminalUpdateProgress.decideInteractive(posix(stderrTty = null)))    // probe failed
+        assertFalse(TerminalUpdateProgress.decideInteractive(posix(consolePresent = false)))
+        assertFalse(TerminalUpdateProgress.decideInteractive(posix(consoleIsTerminal = false))) // JDK 22+ redirected
+        assertFalse(TerminalUpdateProgress.decideInteractive(posix(term = "dumb")))
+        assertFalse(TerminalUpdateProgress.decideInteractive(posix(ci = true)))
+    }
+
+    /** Issue #381's actual bug: Windows was hard-coded non-interactive, so a console user watched
+     *  `1%  1.4 MB / 107.6 MB` scroll past instead of one line refreshing. */
+    @Test
+    fun windows_console_stderr_redraws_in_place() {
+        assertTrue(TerminalUpdateProgress.decideInteractive(windows(stderrConsole = true)))
+        // Windows Terminal / PowerShell redirect stdout only → System.console() is null, stderr is still a console
+        assertTrue(TerminalUpdateProgress.decideInteractive(windows(stderrConsole = true, consolePresent = false)))
+        assertTrue(TerminalUpdateProgress.decideInteractive(windows(stderrConsole = true, consoleIsTerminal = false)))
+    }
+
+    @Test
+    fun windows_redirected_or_unknowable_stderr_keeps_plain_lines() {
+        // `update 2> err.txt` / `2>&1 | more`: GetConsoleMode fails even though a console exists for stdout
+        assertFalse(TerminalUpdateProgress.decideInteractive(windows(stderrConsole = false, consoleIsTerminal = true)))
+        // native probe unavailable (no JNA, odd host) → conservative: control codes must never reach a log file
+        assertFalse(TerminalUpdateProgress.decideInteractive(windows(stderrConsole = null, consolePresent = true)))
+        // env vetoes still win over a real console handle
+        assertFalse(TerminalUpdateProgress.decideInteractive(windows(stderrConsole = true, term = "dumb")))
+        assertFalse(TerminalUpdateProgress.decideInteractive(windows(stderrConsole = true, ci = true)))
+    }
+
+    /** The real probe (System.console(), $TERM, `[ -t 2 ]`, and on Windows the native call) must never
+     *  throw on any host — a broken probe must cost at most the redraw, never the update. */
+    @Test
+    fun the_real_stderr_probe_is_safe_to_run_here() {
+        assertNotNull(TerminalUpdateProgress.forStderr())
     }
 
     @Test
@@ -154,6 +208,32 @@ class UpdateProgressTest {
         val out = c.text
         assertTrue(out.endsWith("\r   25%  1.0 KB / 4.0 KB\ndownload failed — nothing was switched\n"), out)
         assertFalse(out.contains("updated") || out.contains("verifying"), out)
+    }
+
+    @Test
+    fun a_shorter_line_fully_erases_the_longer_one_it_replaces() {
+        val c = Capture(interactive = true)
+        c.renderer.onPhase(UpdatePhase.DOWNLOAD, "a.tar.gz")
+        c.at(0, 1024, 4096)                  // "   25%  1.0 KB / 4.0 KB"
+        c.at(3_100, 1024, 4096)              // + " — waiting for network…"  (longer)
+        c.at(3_400, 2048, 4096)              // back to the short form (shorter)
+        val frames = c.text.split("\r").drop(1)
+        val long = frames.first { it.contains("waiting") }
+        val short = frames.last()
+        assertTrue(short.startsWith("   50%  2.0 KB / 4.0 KB"), short)
+        assertEquals(long.length, short.length, "a shorter frame must be padded over the longer one: '$short'")
+        assertTrue(short.endsWith(" "), "padding is spaces, not an ANSI erase: '$short'")
+    }
+
+    @Test
+    fun aborting_mid_line_leaves_the_cursor_on_a_fresh_line() {
+        val c = Capture(interactive = true)
+        c.renderer.onPhase(UpdatePhase.DOWNLOAD, "a.tar.gz")
+        c.at(0, 1024, 4096)
+        c.renderer.endLine()                 // what the shutdown hook does on Ctrl-C
+        c.renderer.endLine()                 // idempotent: no second blank line
+        assertTrue(c.text.endsWith("KB / 4.0 KB\n"), c.text)
+        assertFalse(c.text.endsWith("\n\n"), c.text)
     }
 
     // ── apply() wiring against a local HTTP fixture ─────────────────────────────────────────────────

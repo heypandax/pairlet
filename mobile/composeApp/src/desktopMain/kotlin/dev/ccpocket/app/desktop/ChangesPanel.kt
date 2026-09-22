@@ -71,10 +71,21 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.close
 import dev.ccpocket.app.resources.copy_path
+import dev.ccpocket.app.resources.diff_binary
+import dev.ccpocket.app.resources.diff_none
 import dev.ccpocket.app.resources.diff_stale_hint
 import dev.ccpocket.app.resources.diff_stale_title
+import dev.ccpocket.app.resources.file_deleted
 import dev.ccpocket.app.resources.file_open
 import dev.ccpocket.app.resources.file_save_as
+import dev.ccpocket.app.resources.file_tip_status_delete
+import dev.ccpocket.app.resources.file_tip_status_edit
+import dev.ccpocket.app.resources.file_tip_status_notebook
+import dev.ccpocket.app.resources.file_tip_status_write
+import dev.ccpocket.app.resources.file_tip_view_diff
+import dev.ccpocket.app.resources.file_tip_view_file
+import dev.ccpocket.app.resources.file_tip_wrap_off
+import dev.ccpocket.app.resources.file_tip_wrap_on
 import dev.ccpocket.app.resources.files_dir_empty
 import dev.ccpocket.app.resources.files_dir_error
 import dev.ccpocket.app.resources.files_empty
@@ -94,6 +105,7 @@ import dev.ccpocket.app.resources.files_reveal_generic
 import dev.ccpocket.app.resources.key_close
 import dev.ccpocket.app.resources.key_collapse_hunk
 import dev.ccpocket.app.resources.key_switch_file
+import dev.ccpocket.app.resources.path_copied
 import dev.ccpocket.app.share.exportBytesOf
 import dev.ccpocket.app.share.previewFile
 import dev.ccpocket.app.share.shareFile
@@ -665,7 +677,8 @@ private fun SelectedFilePane(model: DesktopModel, path: String, file: ChangedFil
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
-        Box(Modifier.weight(1f)) { TailPathText(path, fontSize = 12.sp, color = Tok.tx2) }
+        // Hover previews the full path; click keeps it open for scrolling and selection.
+        FilePathTitle(path, Modifier.weight(1f))
         // copy · open · save-as as ONE tight right-aligned group (chat-cards handoff, §2.5):
         // muted at rest, each lifts to a raised chip on hover
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -674,28 +687,35 @@ private fun SelectedFilePane(model: DesktopModel, path: String, file: ChangedFil
             val content = model.selectedContent
             val exportable = remember(content) { exportBytesOf(content) }
             if (exportable != null) {
-                HeaderIconButton(Icons.Rounded.OpenInNew, stringResource(Res.string.file_open)) {
-                    previewFile(fileNameOf(path), exportable, content?.mediaType)
-                }
+                HeaderIconButton(
+                    Icons.Rounded.OpenInNew, stringResource(Res.string.file_open),
+                    tooltip = stringResource(Res.string.files_open_default),
+                ) { previewFile(fileNameOf(path), exportable, content?.mediaType) }
                 HeaderIconButton(Icons.Rounded.Download, stringResource(Res.string.file_save_as)) {
                     shareFile(fileNameOf(path), exportable, content?.mediaType)
                 }
             }
         }
-        file?.let { StatusChip(it.op) }
+        file?.let { DesktopTooltip(statusTooltip(it.op)) { StatusChip(it.op) } }
         val (adds, dels) = shownStats(file, diff)
         if (!isImage && (adds != null || dels != null)) DiffStatText(adds, dels, fontSize = 12.sp)
         if (wrapApplies(diffTab, diff, model.selectedContent, ext, isImage)) {
             val active = if (diffTab) wrap.diff else wrap.file
-            WrapToggle(on = active.value) { active.value = !active.value }
+            val on = active.value
+            DesktopTooltip(stringResource(if (on) Res.string.file_tip_wrap_on else Res.string.file_tip_wrap_off)) {
+                WrapToggle(on = on) { active.value = !on }
+            }
         }
-        DiffFileToggle(
-            diffSelected = diffTab,
-            isImage = isImage,
-            deleted = deleted,
-            noDiff = diffUnavailable(diff),
-            onPick = { diffTab = it },
-        )
+        val noDiff = diffUnavailable(diff)
+        DesktopTooltip(viewToggleTooltip(diffTab, isImage, deleted, noDiff)) {
+            DiffFileToggle(
+                diffSelected = diffTab,
+                isImage = isImage,
+                deleted = deleted,
+                noDiff = noDiff,
+                onPick = { diffTab = it },
+            )
+        }
     }
     Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
 
@@ -713,29 +733,71 @@ private fun SelectedFilePane(model: DesktopModel, path: String, file: ChangedFil
 private fun CopyPathButton(path: String) {
     val (copied, copy) = rememberCopied()
     val label = stringResource(Res.string.copy_path)
-    HeaderIconBox(label, onClick = { copy(path) }) { hovered ->
+    // the tooltip follows the button's own state: it says "Copied" exactly while the check mark shows
+    val tip = stringResource(if (copied) Res.string.path_copied else Res.string.files_copy_full_path)
+    HeaderIconBox(label, onClick = { copy(path) }, tooltip = tip) { hovered ->
         if (copied) Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(14.dp))
         else Icon(Icons.Rounded.ContentCopy, label, tint = if (hovered) Tok.tx2 else Tok.muted, modifier = Modifier.size(14.dp))
     }
 }
 
-/** Quiet header action sharing [CopyPathButton]'s footprint and hover treatment. */
+/** Quiet header action sharing [CopyPathButton]'s footprint and hover treatment. [tooltip] defaults to
+ *  the accessibility [label]; pass it when the hover text should say more than the label can (issue #393). */
 @Composable
-private fun HeaderIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    HeaderIconBox(label, onClick) { hovered ->
+private fun HeaderIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tooltip: String = label,
+    onClick: () -> Unit,
+) {
+    HeaderIconBox(label, onClick, tooltip = tooltip) { hovered ->
         Icon(icon, label, tint = if (hovered) Tok.tx2 else Tok.muted, modifier = Modifier.size(14.dp))
     }
 }
 
-/** The handoff's .hicon hit target: 26dp rounded square, transparent at rest, raised on hover. */
+/** The handoff's .hicon hit target: 26dp rounded square, transparent at rest, raised on hover — plus the
+ *  hover tooltip these icon-only buttons need to be readable at all (issue #393). */
 @Composable
-private fun HeaderIconBox(label: String, onClick: () -> Unit, content: @Composable (hovered: Boolean) -> Unit) {
+private fun HeaderIconBox(
+    label: String,
+    onClick: () -> Unit,
+    tooltip: String = label,
+    content: @Composable (hovered: Boolean) -> Unit,
+) {
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
-    Box(
-        Modifier.size(26.dp).clip(RoundedCornerShape(7.dp))
-            .background(if (hovered) Tok.raised else Color.Transparent)
-            .hoverable(src).clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { content(hovered) }
+    DesktopTooltip(tooltip) {
+        Box(
+            Modifier.size(26.dp).clip(RoundedCornerShape(7.dp))
+                .background(if (hovered) Tok.raised else Color.Transparent)
+                .hoverable(src).clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) { content(hovered) }
+    }
 }
+
+/** The "A/M/D/N" chip's hover text — the one place that says what the letter MEANS (issue #393).
+ *  Mirrors [dev.ccpocket.app.ui.statusLetter]'s mapping, so a new op lands in both or neither. */
+@Composable
+private fun statusTooltip(op: String): String = stringResource(
+    when (op) {
+        "write" -> Res.string.file_tip_status_write
+        "delete" -> Res.string.file_tip_status_delete
+        "notebook" -> Res.string.file_tip_status_notebook
+        else -> Res.string.file_tip_status_edit
+    },
+)
+
+/** The [DiffFileToggle]'s hover text. When a segment is disabled the tooltip says WHY (that is the same
+ *  reason its caption gives); otherwise it names the current view and what clicking the other one does. */
+@Composable
+private fun viewToggleTooltip(diffTab: Boolean, isImage: Boolean, deleted: Boolean, noDiff: Boolean): String =
+    stringResource(
+        when {
+            isImage -> Res.string.diff_binary
+            deleted -> Res.string.file_deleted
+            noDiff -> Res.string.diff_none
+            diffTab -> Res.string.file_tip_view_diff
+            else -> Res.string.file_tip_view_file
+        },
+    )

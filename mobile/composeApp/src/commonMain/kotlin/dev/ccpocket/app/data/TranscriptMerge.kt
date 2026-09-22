@@ -181,7 +181,7 @@ object TranscriptMerge {
             // a row re-merged from a daemon that cannot rewind has to LOSE them: keeping stale ones alive
             // across a reconnect to an older build (a rollback, or the two-daemons-on-one-machine case)
             // would leave the entry showing and send an anchor that daemon silently drops.
-            .copy(seq = r.seq, uuid = r.uuid)
+            .copy(seq = r.seq, uuid = r.uuid, compactSummary = r.compactSummary)
 
     /** Rows the transcript never contains — carried through a merge, invisible to pairing. */
     private fun isLocalOnly(item: ChatItem): Boolean = when (item) {
@@ -258,7 +258,8 @@ object TranscriptMerge {
     }
 
     private fun userTextsMatch(local: ChatItem.User, replay: ChatItem.User): Boolean =
-        local.text == replay.text || localWireText(local) == replay.text
+        local.compactSummary == replay.compactSummary &&
+            (local.text == replay.text || localWireText(local) == replay.text)
 
     private fun localWireText(user: ChatItem.User): String {
         if (user.files.isEmpty()) return user.text

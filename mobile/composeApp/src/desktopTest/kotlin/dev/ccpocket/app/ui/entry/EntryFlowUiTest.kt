@@ -164,7 +164,7 @@ class EntryFlowUiTest {
         advanceFrameAndWait()
         onAllNodes(hasText(str(Res.string.pair_route_scan))).onFirst().performClick()
         advanceFrameAndWait()
-        assertTrue(present(str(Res.string.scan_without_camera)), "the scanner is entered on purpose")
+        onAllNodes(hasText(str(Res.string.scan_without_camera), ignoreCase = true)).onFirst().assertExists()
         // …and the scanner is not a dead end: it states that the digits survived and repeats both routes
         assertTrue(present(str(Res.string.scan_kept_many, 2)), "the entered digits are preserved and said so")
         assertTrue(present(str(Res.string.scan_use_code)), "the code route is repeated here, not linked away")
@@ -599,7 +599,7 @@ class EntryFlowUiTest {
             advanceFrameAndWait()
             // the confirmation names the agent, the workdir and the computer — all real
             assertTrue(present(str(Res.string.cfm_title)), "Start on Full access opens the confirmation")
-            assertTrue(present(str(Res.string.cfm_workdir)))
+            onAllNodes(hasText(str(Res.string.cfm_workdir), ignoreCase = true)).onFirst().assertExists()
             assertTrue(present("alex-macbook", substring = true), "…and names the computer it reaches")
             assertEquals(0, picks, "the confirmation has not started anything yet")
 

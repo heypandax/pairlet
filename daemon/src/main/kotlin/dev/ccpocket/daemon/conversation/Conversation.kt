@@ -504,6 +504,9 @@ class Conversation(
     /** The turn's most recent per-call usage (see [AgentEvent.AssistantUsage]) — consumed and cleared by
      *  the TurnResult branch, which prefers it over the result event's across-calls sum. */
     private var lastCallUsage: AgentEvent.AssistantUsage? = null
+    // A result aggregates calls on BOTH sides of compact; never use that sum after a boundary.
+    private var awaitingPostCompactUsage = false
+    private var sawLiveContextUsage = false // guarded by runtimeMetaLock; blocks stale disk backfill
 
     // Reasoning effort the BACKEND reported for itself (dsh's `request/header.config.reasoningEffort`) —
     // issue #320. Distinct from [effort], which is what the USER asked for: a session opened without an
@@ -849,6 +852,7 @@ class Conversation(
             // Claude window and a self-reported dsh window can never be in play for the same session.
             contextWindow = claudeWindow() ?: runtimeContextWindow,
             contextUsed = resumeContextUsed, agent = backend.kind,
+            contextUsedAuthoritative = true,
             degraded = degraded(),
             origin = origin, // "via <bridge>" label (issue #91); null for interactive sessions
             permissionMode = permissionMode,
@@ -1028,7 +1032,7 @@ class Conversation(
             if (resumeId != null) {
                 val diskUsed = runCatching { backend.resumeContextTokens(workdir.toString(), resumeId) }.getOrNull()
                 synchronized(runtimeMetaLock) {
-                    if (resumeContextUsed == null) diskUsed?.takeIf { it > 0 }?.let { resumeContextUsed = it }
+                    if (!sawLiveContextUsage && resumeContextUsed == null) diskUsed?.takeIf { it >= 0 }?.let { resumeContextUsed = it }
                 }
             }
             // seed the degraded flag from the transcript's tail: a session that died over its context
@@ -2089,7 +2093,36 @@ class Conversation(
                     is AgentEvent.WorkflowProgress -> {
                         if (workflows.onProgress(ev.taskId, ev.toolUseId, ev.items, System.currentTimeMillis())) emitWorkflow(ev.taskId)
                     }
-                    is AgentEvent.AssistantUsage -> lastCallUsage = ev
+                    is AgentEvent.CompactBoundary -> {
+                        synchronized(runtimeMetaLock) {
+                            sawLiveContextUsage = true
+                            resumeContextUsed = ev.postTokens
+                        }
+                        lastCallUsage = null
+                        awaitingPostCompactUsage = true
+                        sink.emit(live(sessionId))
+                    }
+                    is AgentEvent.CompactSummary -> sink.emit(live(sessionId).copy(
+                        // 500 KB raw text stays below 3 MB even with worst-case JSON escaping,
+                        // leaving space for the full live snapshot + encrypted envelope (relay: 4 MiB).
+                        compactSummary = dev.ccpocket.daemon.disk.ReplayBudget.fit(
+                            listOf(dev.ccpocket.protocol.HistoryMessage(dev.ccpocket.protocol.ChatRole.USER, ev.text)), maxBytes = 500_000L,
+                        ).single().text,
+                    ))
+                    is AgentEvent.AssistantUsage -> {
+                        lastCallUsage = ev
+                        if (awaitingPostCompactUsage) {
+                            val used = TokenUsage(ev.inputTokens, ev.outputTokens ?: 0,
+                                ev.cacheCreationInputTokens, ev.cacheReadInputTokens).contextTokens
+                            if (used > 0) {
+                                synchronized(runtimeMetaLock) {
+                                    sawLiveContextUsage = true
+                                    resumeContextUsed = used
+                                }
+                                sink.emit(live(sessionId))
+                            }
+                        }
+                    }
                     // Session metadata the backend measured on its own wire AFTER init (issue #320). dsh
                     // names its model/effort/window on `request/context`, `request/header` and every
                     // `assistant/message` — never on the init that SessionLive was stamped from — so the
@@ -2169,12 +2202,19 @@ class Conversation(
                         val last = lastCallUsage
                         lastCallUsage = null
                         val usage = when {
-                            last != null -> TokenUsage(last.inputTokens, last.outputTokens ?: ev.usage?.outputTokens ?: 0, last.cacheCreationInputTokens, last.cacheReadInputTokens)
+                            last != null -> TokenUsage(last.inputTokens, last.outputTokens ?: (if (awaitingPostCompactUsage) 0 else ev.usage?.outputTokens ?: 0), last.cacheCreationInputTokens, last.cacheReadInputTokens)
+                            awaitingPostCompactUsage -> null
                             else -> ev.usage
                         }
+                        if (last != null) awaitingPostCompactUsage = false
                         // keep the resume seed current: a mid-session reconnect then seeds the latest
                         // occupancy, not the stale open-time snapshot (same value the phone shows live).
-                        usage?.contextTokens?.takeIf { it > 0 }?.let { resumeContextUsed = it }
+                        usage?.contextTokens?.takeIf { it > 0 }?.let {
+                            synchronized(runtimeMetaLock) {
+                                sawLiveContextUsage = true
+                                resumeContextUsed = it
+                            }
+                        }
                         // The turn's real outcome (issue #65). A synthetic placeholder means every API call
                         // failed — say so instead of letting "No response requested." pass for an answer.
                         // A user-cancelled turn (■ / desktop Esc) is not a failure at all, and the CLI answers
@@ -2866,6 +2906,8 @@ class Conversation(
         // fresh window — the live(null) below (and the init backfill announce) must not carry the wiped
         // session's occupancy, which re-seeded the phone's "Context NN%" statusline post-clear (issue #149)
         resumeContextUsed = null
+        awaitingPostCompactUsage = false
+        sawLiveContextUsage = false
         lastCallUsage = null // nor may a killed mid-flight turn's usage leak into the fresh session's first TurnDone
         // the backend re-reports these on the new session's first frames (issue #320); carrying them over
         // would state as fact what the fresh process has not said yet

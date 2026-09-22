@@ -9,6 +9,7 @@
 优先读 [Mobile UI 2.0](mobile-ui-2.0/README.md) 和其中的 [supersession map](mobile-ui-2.0/supersession-map.md)，再读具体场景；不能把旧项目中的相似画面直接当作最新实现依据。
 
 - [Chat Master v2](chat-master-v2/README.md)：聊天主视图。
+- [Chat Roles v1](chat-roles-v1/README.md)：#397 用户消息的中性容器、来源标签及跨端区分。
 - [Entry Flow UI 2.0](entry-flow-ui-2.0/README.md) 与 [Implementation Brief](entry-flow-ui-2.0/IMPLEMENTATION_BRIEF.md)：入口流程。
 - [Supporting Surfaces UI 2.0](supporting-surfaces-ui-2.0/README.md)：辅助页面。
 - [Chat Quick Actions UI 2.0](chat-quick-actions-ui-2.0/README.md)：聊天快捷操作。
@@ -30,6 +31,7 @@
 | `changed-files-diff` | [Changed files v2 — git-grade diff review（设计 handoff）](changed-files-diff/README.md) |
 | `chat-cards` | [Chat cards — SubagentCard 与 DocumentCard（设计 handoff）](chat-cards/README.md) |
 | `chat-master-v2` | [Chat Master v2 — design handoff](chat-master-v2/README.md) |
+| `chat-roles-v1` | [Chat Roles v1 — 用户与 Agent 消息区分](chat-roles-v1/README.md) |
 | `chat-quick-actions-ui-2.0` | [Chat Quick Actions UI 2.0](chat-quick-actions-ui-2.0/README.md) |
 | `context-statusline` | [上下文占用指示器入驻 composer 设计交付](context-statusline/README.md) |
 | `defaults-voice-results-ui-2.1` | [Defaults + Voice + Results UI 2.1 — Claude Design handoff](defaults-voice-results-ui-2.1/README.md) |

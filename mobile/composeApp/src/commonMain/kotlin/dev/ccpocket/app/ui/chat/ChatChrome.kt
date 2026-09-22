@@ -3,6 +3,7 @@ package dev.ccpocket.app.ui.chat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,15 +25,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
@@ -278,13 +284,48 @@ fun ChatStateBlock(ui: ChatStateUi, modifier: Modifier = Modifier) {
  * without a permanent timeline rail or a card stack.
  */
 @Composable
-fun TurnSourceLabel(label: String, modifier: Modifier = Modifier, alignEnd: Boolean = false) {
+fun TurnSourceLabel(label: String, modifier: Modifier = Modifier, alignEnd: Boolean = false, color: Color = Tok.tx2) {
     Text(
-        label.uppercase(), color = Tok.tx2, fontSize = 11.sp, lineHeight = 15.sp,
+        label.uppercase(), color = color, fontSize = 11.sp, lineHeight = 15.sp,
         fontWeight = FontWeight.Medium, letterSpacing = 0.9.sp,
         modifier = modifier.then(if (alignEnd) Modifier.fillMaxWidth() else Modifier),
         textAlign = if (alignEnd) androidx.compose.ui.text.style.TextAlign.End else null,
     )
+}
+
+/** Chat Roles v1 source row. Callers align it to the trailing edge without forcing short bubbles wide. */
+@Composable
+fun UserTurnSourceLabel(label: String, modifier: Modifier = Modifier) {
+    Text(
+        label.uppercase(), color = Tok.userTurnLabel, fontSize = 11.sp, lineHeight = 15.sp,
+        fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium, letterSpacing = 1.3.sp,
+        textAlign = TextAlign.End, modifier = modifier,
+    )
+}
+
+const val USER_TURN_CONTAINER_TAG = "user-turn-container"
+
+/** Chat Roles v1 (#397): neutral raised surface and a closed hairline; Agent prose keeps the base.
+ *  Shared by mobile and both desktop alignment preferences. Geometry and content behavior stay intact. */
+@Composable
+fun UserTurnContainer(
+    modifier: Modifier = Modifier,
+    radius: Dp = 12.dp,
+    horizontalPadding: Dp = 12.dp,
+    verticalPadding: Dp = 10.dp,
+    content: @Composable () -> Unit,
+) {
+    val shape = RoundedCornerShape(radius)
+    // The source label and message body are separate children on mobile. Give each its own
+    // vertical space; a Box would paint the first body row over the label.
+    Column(
+        modifier
+            .testTag(USER_TURN_CONTAINER_TAG)
+            .clip(shape)
+            .background(Tok.userTurnBg)
+            .border(1.dp, Tok.userTurnBorder, shape)
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+    ) { content() }
 }
 
 /**

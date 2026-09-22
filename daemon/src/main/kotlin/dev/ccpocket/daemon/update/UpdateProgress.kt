@@ -28,10 +28,36 @@ interface UpdateProgressListener {
 }
 
 /**
+ * What this process can observe about **its own stderr** — gathered by [probeStderr] so the
+ * verdict ([decideInteractive]) stays a pure function that a macOS unit test can drive.
+ *
+ * Every field is "what we saw", never "what we decided". Unknown is `null`, not `false`.
+ */
+internal data class StderrCapabilities(
+    /** `os.name` says Windows. */
+    val windows: Boolean,
+    /** `System.console() != null` — on JDK 17 this only reflects stdin/stdout. */
+    val consolePresent: Boolean,
+    /** JDK 22+ `Console.isTerminal()`; null when the method does not exist (JDK 17 here). */
+    val consoleIsTerminal: Boolean?,
+    /** `$TERM` (`dumb` = a terminal that cannot redraw). */
+    val term: String?,
+    /** `$CI` is set to something truthy — output is being captured. */
+    val ci: Boolean,
+    /** Windows only: Win32 says the **stderr** handle is a console screen buffer.
+     *  null = could not ask (non-Windows, or the native call failed). */
+    val windowsStderrConsole: Boolean?,
+    /** POSIX only: `[ -t 2 ]` on our inherited stderr. null = not asked. */
+    val posixStderrTty: Boolean?,
+)
+
+/**
  * Human progress for `cc-pocket-daemon update`, written to stderr so the command's stdout lines stay as
  * they were. Two modes:
- *  - [interactive] (a terminal): one line redrawn in place with `\r` (no ANSI, so old Windows consoles
- *    render it too), at most every [redrawMs]; a percentage only with a trusted total;
+ *  - [interactive] (stderr is a real terminal — see [decideInteractive]): one line redrawn in place with
+ *    `\r` plus right-padding to erase a longer previous line. Deliberately no ANSI: classic conhost
+ *    without VT processing renders `\r` fine but would print `ESC[K` literally. At most every [redrawMs];
+ *    a percentage only with a trusted total;
  *  - otherwise (redirected / piped): plain independent lines, at most every [lineMs], no carriage returns.
  * No new bytes for [waitingMs] shows "waiting for network" instead of a frozen number.
  */
@@ -87,7 +113,7 @@ class TerminalUpdateProgress(
 
     @Synchronized
     override fun onFailed(phase: UpdatePhase?, error: Throwable) {
-        if (lineOpen) { out.println(); lineOpen = false } // never leave the cursor on a half-drawn line
+        endLine() // never leave the cursor on a half-drawn line
         out.println("${label(phase)} failed — nothing was switched")
         out.flush()
         this.phase = null
@@ -95,15 +121,28 @@ class TerminalUpdateProgress(
 
     @Synchronized
     override fun onSwitched(version: String) {
-        if (lineOpen) { out.println(); lineOpen = false }
+        endLine()
         phase = null
+    }
+
+    /**
+     * Close a redrawn line with a newline if one is on screen, so whatever prints next (a shell prompt
+     * after Ctrl-C included) starts clean. Idempotent and safe to call from a shutdown hook.
+     */
+    @Synchronized
+    fun endLine() {
+        if (!lineOpen) return
+        out.println()
+        out.flush()
+        lineOpen = false
+        lastWidth = 0
     }
 
     /** Download done: draw the final count (so a finished known-length download reads 100%) and end the line. */
     private fun finishDownloadLine() {
         val last = latest
         if (last != null && (interactive || last != lastPrinted)) draw(last, waiting = false, final = true)
-        if (lineOpen) { out.println(); lineOpen = false }
+        endLine()
         latest = null
     }
 
@@ -151,26 +190,31 @@ class TerminalUpdateProgress(
             else -> "$n B"
         }
 
-        /** Progress for this process's stderr, redrawn in place only when stderr really is a terminal. */
-        fun forStderr(): TerminalUpdateProgress = TerminalUpdateProgress(System.err, interactive = stderrIsTerminal())
+        /**
+         * Progress for this process's stderr, redrawn in place only when stderr really is a terminal.
+         * The dangling-line guard also runs on an abrupt exit (Ctrl-C / System.exit), so the shell prompt
+         * never lands on top of a half-drawn progress line.
+         */
+        fun forStderr(): TerminalUpdateProgress {
+            val renderer = TerminalUpdateProgress(System.err, interactive = decideInteractive(probeStderr()))
+            runCatching { Runtime.getRuntime().addShutdownHook(Thread(renderer::endLine, "update-progress-endline")) }
+            return renderer
+        }
 
-        private fun stderrIsTerminal(): Boolean = runCatching {
-            val console = System.console()
-            decideInteractive(
+        private fun probeStderr(): StderrCapabilities {
+            val windows = runCatching { System.getProperty("os.name").lowercase().contains("win") }.getOrDefault(false)
+            val console = runCatching { System.console() }.getOrNull()
+            return StderrCapabilities(
+                windows = windows,
                 consolePresent = console != null,
                 consoleIsTerminal = console?.let(::consoleIsTerminal),
-                term = System.getenv("TERM"),
-                windows = System.getProperty("os.name").lowercase().contains("win"),
-                stderrTty = {
-                    // the JDK has no isatty(2); ask the shell, handing it our real stderr
-                    ProcessBuilder("sh", "-c", "[ -t 2 ]")
-                        .redirectInput(ProcessBuilder.Redirect.INHERIT)
-                        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                        .redirectError(ProcessBuilder.Redirect.INHERIT)
-                        .start().waitFor() == 0
-                },
+                term = runCatching { System.getenv("TERM") }.getOrNull(),
+                ci = runCatching { System.getenv("CI") }.getOrNull()
+                    ?.let { it.isNotBlank() && !it.equals("false", true) && it != "0" } ?: false,
+                windowsStderrConsole = if (windows) windowsStderrIsConsole() else null,
+                posixStderrTty = if (windows) null else runCatching { posixStderrTty() }.getOrNull(),
             )
-        }.getOrDefault(false)
+        }
 
         /** JDK 22+ `Console.isTerminal()` (there System.console() may be non-null even when redirected);
          *  null on older JDKs where the method does not exist. */
@@ -178,23 +222,56 @@ class TerminalUpdateProgress(
             java.io.Console::class.java.getMethod("isTerminal").invoke(console) as Boolean
         }.getOrNull()
 
+        /** The JDK has no isatty(2) — ask the shell, handing it our real stderr. */
+        private fun posixStderrTty(): Boolean =
+            ProcessBuilder("sh", "-c", "[ -t 2 ]")
+                .redirectInput(ProcessBuilder.Redirect.INHERIT)
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.INHERIT)
+                .start().waitFor() == 0
+
         /**
-         * Redraw in place only when stderr is positively a terminal. JDK 17's System.console() only reflects
-         * stdin/stdout, so `update 2> err.txt` would still look interactive; on Windows there is no way to ask
-         * about stderr without native code, so Windows conservatively gets plain lines.
+         * The decision: redraw in place, or log plain lines (issue #381).
+         *
+         * Windows used to be a blanket `false` — every `cc-pocket-daemon update` there scrolled a new
+         * `1%  1.4 MB / 107.6 MB` line every few seconds. The missing piece was a way to ask about
+         * **stderr specifically**: `System.console()` describes stdin/stdout, so trusting it would redraw
+         * into `update 2> err.txt`. Win32 can answer exactly — [windowsStderrIsConsole] — so Windows now
+         * follows that answer and nothing else. When the native probe cannot run at all (null) the verdict
+         * stays the old conservative `false`: plain lines in a console are ugly, control codes in a log file
+         * are unreadable. Same reason mintty/MSYS (stderr is a pipe) keeps plain lines.
+         *
+         * `TERM=dumb` and `$CI` can only ever veto; they never promote a non-terminal to interactive.
          */
-        internal fun decideInteractive(
-            consolePresent: Boolean,
-            consoleIsTerminal: Boolean?,
-            term: String?,
-            windows: Boolean,
-            stderrTty: () -> Boolean,
-        ): Boolean = when {
-            !consolePresent -> false
-            consoleIsTerminal == false -> false
-            term == "dumb" -> false
-            windows -> false
-            else -> stderrTty()
+        internal fun decideInteractive(caps: StderrCapabilities): Boolean = when {
+            caps.term == "dumb" -> false
+            caps.ci -> false
+            // Windows: the Win32 stderr answer is the whole verdict. consolePresent is deliberately
+            // ignored here — it goes false when only *stdout* is redirected, which must not cost the redraw.
+            caps.windows -> caps.windowsStderrConsole == true
+            !caps.consolePresent -> false
+            caps.consoleIsTerminal == false -> false
+            else -> caps.posixStderrTty == true
         }
+
+        // ── Win32: is the stderr handle a console? ───────────────────────────────────────────────────
+        // GetConsoleMode() succeeds only for a real console screen buffer, so it fails for `2> file`,
+        // `2>&1 | more` and for a pty emulator's pipe. JNA is already a daemon dependency (issue #302's
+        // ProcessCwd), so this adds no new one. Non-Windows never gets here.
+        private const val STD_ERROR_HANDLE = -12
+        private const val INVALID_HANDLE = -1L
+
+        private interface Kernel32Console : com.sun.jna.win32.StdCallLibrary {
+            fun GetStdHandle(which: Int): com.sun.jna.Pointer?
+            fun GetConsoleMode(handle: com.sun.jna.Pointer, mode: com.sun.jna.ptr.IntByReference): Boolean
+        }
+
+        /** True = stderr is a Windows console; false = redirected/piped/no handle; null = could not ask. */
+        private fun windowsStderrIsConsole(): Boolean? = runCatching {
+            val k32 = com.sun.jna.Native.load("kernel32", Kernel32Console::class.java)
+            val handle = k32.GetStdHandle(STD_ERROR_HANDLE) ?: return@runCatching false // NULL = no stderr
+            if (com.sun.jna.Pointer.nativeValue(handle) == INVALID_HANDLE) return@runCatching false
+            k32.GetConsoleMode(handle, com.sun.jna.ptr.IntByReference())
+        }.getOrNull()
     }
 }

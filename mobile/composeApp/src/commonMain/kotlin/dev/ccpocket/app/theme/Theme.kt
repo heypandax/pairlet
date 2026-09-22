@@ -150,6 +150,13 @@ object Tok {
     val warn: Color get() = current.warn
     val danger: Color get() = current.danger
     val info: Color get() = current.info
+
+    /** Chat Roles v1 (#397): a neutral enclosure distinguishes human prompts from open Agent prose.
+     *  Keep role identity independent of the accent preference and reserve accent for actions/states. */
+    val userTurnBg: Color get() = raised
+    val userTurnBorder: Color get() = hair
+    /** Required role text stays readable on the raised surface in both themes (never muted). */
+    val userTurnLabel: Color get() = tx2
 }
 
 /** Chat text scale (issue #8), provided once at the app root from PocketRepository.fontScale; 1.0 = design default. */

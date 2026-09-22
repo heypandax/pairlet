@@ -68,7 +68,7 @@ class AgentPresetRowTest {
 
     @Test
     fun an_advertised_catalogue_renders_the_preset_rows_with_the_backend_own_copy() = sheet {
-        onAllNodes(hasText(str(Res.string.cfg_preset), substring = true)).onFirst().assertExists()
+        onAllNodes(hasText(str(Res.string.cfg_preset), substring = true, ignoreCase = true)).onFirst().assertExists()
         // labels and details are the BACKEND's, verbatim — a preset this build never heard of still reads
         onAllNodes(hasText("Standard")).onFirst().assertExists()
         onAllNodes(hasText("bash + str_replace_editor only.")).onFirst().assertExists()
@@ -81,7 +81,7 @@ class AgentPresetRowTest {
     fun an_unadvertised_agent_shows_no_preset_row_at_all() = sheet(advertised = emptyList()) {
         assertEquals(
             0,
-            onAllNodes(hasText(str(Res.string.cfg_preset), substring = true)).fetchSemanticsNodes().size,
+            onAllNodes(hasText(str(Res.string.cfg_preset), substring = true, ignoreCase = true)).fetchSemanticsNodes().size,
             "a daemon that never advertised presets would silently drop the choice",
         )
     }
@@ -89,12 +89,12 @@ class AgentPresetRowTest {
     /** …and neither does an agent whose daemon answer carries none, even while a sibling agent's does. */
     @Test
     fun switching_to_an_agent_without_presets_removes_the_row() = sheet {
-        onAllNodes(hasText(str(Res.string.cfg_preset), substring = true)).onFirst().assertExists()
+        onAllNodes(hasText(str(Res.string.cfg_preset), substring = true, ignoreCase = true)).onFirst().assertExists()
         onAllNodes(hasText("Claude")).onFirst().performSemanticsAction(SemanticsActions.OnClick)
         waitForIdle()
         assertEquals(
             0,
-            onAllNodes(hasText(str(Res.string.cfg_preset), substring = true)).fetchSemanticsNodes().size,
+            onAllNodes(hasText(str(Res.string.cfg_preset), substring = true, ignoreCase = true)).fetchSemanticsNodes().size,
         )
     }
 

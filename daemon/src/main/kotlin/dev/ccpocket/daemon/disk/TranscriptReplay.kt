@@ -119,7 +119,8 @@ object TranscriptReplay {
                             attachSubagentResults(obj, out, taskIdx, lineNo)
                             attachQuestionAnswers(obj, out, questionIdx, lineNo)
                             attachToolResults(obj, out, toolIdx, lineNo)
-                            if (isRealUserTurn(obj)) userContent(obj)
+                            val compactSummary = (obj["isCompactSummary"] as? JsonPrimitive)?.booleanOrNull == true
+                            if (compactSummary || isRealUserTurn(obj)) userContent(obj)
                                 // an IMAGE-ONLY prompt has no text at all (issue #254) — keeping the row
                                 // on its attachments is why this is no longer a bare isNotBlank() gate
                                 .takeIf { (it.text.isNotBlank() || it.images.isNotEmpty()) && !TranscriptNoise.isNoiseUserText(it.text) }
@@ -129,7 +130,9 @@ object TranscriptReplay {
                                     out += MutableRow(
                                         HistoryMessage(
                                             ChatRole.USER, it.text, images = it.images,
-                                            seq = lineNo, uuid = obj.str("uuid"),
+                                            seq = if (compactSummary) null else lineNo,
+                                            uuid = if (compactSummary) null else obj.str("uuid"),
+                                            compactSummary = compactSummary,
                                         ),
                                         lineNo, obj.str("parentUuid"),
                                     )

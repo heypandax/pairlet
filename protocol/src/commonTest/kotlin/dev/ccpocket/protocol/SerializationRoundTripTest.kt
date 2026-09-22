@@ -53,6 +53,22 @@ private data class OldToolEvent(
 )
 
 class SerializationRoundTripTest {
+    @Test fun compactMetadataPreservesEnvelopesAndUnknownNestedFields() {
+        val oldBody = """{"t":"pocket/session.live","convoId":"c","workdir":"/w"}"""
+        val oldEnvelope = """{"id":"fixture","ts":0,"body":$oldBody}"""
+        assertEquals(SessionLive("c", "/w"), PocketJson.decodeFromString<Envelope>(oldEnvelope).body)
+        val unknown = oldBody.dropLast(1) + """, "futureCompact":{"items":[{"nested":true},null]}}"""
+        assertEquals(SessionLive("c", "/w"), PocketJson.decodeFromString<Envelope>(
+            """{"id":"fixture","ts":0,"body":$unknown}""").body)
+        for (body in listOf<Frame>(
+            SessionLive("c", "/w", contextUsedAuthoritative = true, compactSummary = "summary"),
+            ConvoHistory("c", listOf(HistoryMessage(ChatRole.USER, "summary", compactSummary = true))),
+        )) {
+            val env = Envelope("fixture", 0, body = body)
+            assertEquals(env, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(env)))
+        }
+    }
+
     @Test fun diagnosticTailFieldsKeepEveryOldEnvelopeAndUnknownNestedSkipPath() {
         val context = DiagnosticContext("1234567890abcdef1234567890abcdef", 1, "1234567890abcdef")
         val cases = listOf<Triple<String, Frame, Frame>>(

@@ -40,6 +40,10 @@ object StreamParser {
         // background-task lifecycle (backgrounded shells): claude emits these as system events, NOT in the
         // tool_result. They carry session_id too, so they must be matched on subtype BEFORE the init fallback.
         when (root.str("subtype")) {
+            "compact_boundary" -> return if (root.str("parent_tool_use_id") == null) {
+                AgentEvent.CompactBoundary((root["compact_metadata"] as? JsonObject)
+                    .long("post_tokens")?.takeIf { it >= 0 })
+            } else AgentEvent.Ignored("subagent/compact_boundary")
             "task_started" -> root.str("task_id")?.let {
                 return AgentEvent.BackgroundTaskStarted(
                     it, root.str("tool_use_id"), root.str("description"), root.str("task_type"),
@@ -111,6 +115,7 @@ object StreamParser {
             inputTokens = usage.long("input_tokens") ?: 0,
             cacheCreationInputTokens = usage.long("cache_creation_input_tokens"),
             cacheReadInputTokens = usage.long("cache_read_input_tokens"),
+            outputTokens = usage.long("output_tokens"),
         )
     }
 
@@ -121,10 +126,25 @@ object StreamParser {
     private fun parseUser(root: JsonObject): List<AgentEvent> {
         val parentId = root.str("parent_tool_use_id")
         val rawContent = (root["message"] as? JsonObject)?.get("content")
+        val text = when (rawContent) {
+            is JsonPrimitive -> rawContent.contentOrNull
+            is JsonArray -> rawContent.mapNotNull {
+                (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text")
+            }.joinToString("\n")
+            else -> null
+        }
+        // CLI 2.1.278 maps its internal isCompactSummary to isSynthetic on stream-json.
+        // Require harness provenance as well as its continuation preamble: a user's quotation is ordinary text.
+        val summary = root["isCompactSummary"]?.let { (it as? JsonPrimitive)?.booleanOrNull } == true ||
+            ((root["isSynthetic"] as? JsonPrimitive)?.booleanOrNull == true &&
+                text?.startsWith("This session is being continued from a previous conversation that ran out of context.") == true)
+        if (summary) return if (parentId == null && !text.isNullOrBlank()) listOf(AgentEvent.CompactSummary(text))
+            else listOf(AgentEvent.Ignored("subagent/compact_summary"))
         val content = rawContent as? JsonArray
             // a plain-string content is the common replay shape for a text-only prompt — carry the text
             // so the Conversation's unconsumed-prompt ledger can settle the matching entry (issue #122)
-            ?: return listOf(AgentEvent.UserReplay(text = (rawContent as? JsonPrimitive)?.contentOrNull, parentId = parentId))
+            ?: return if ((root["isSynthetic"] as? JsonPrimitive)?.booleanOrNull == true) emptyList()
+            else listOf(AgentEvent.UserReplay(text = (rawContent as? JsonPrimitive)?.contentOrNull, parentId = parentId))
         val results = content.mapNotNull { el ->
             val block = el as? JsonObject ?: return@mapNotNull null
             if (block.str("type") != "tool_result") return@mapNotNull null
@@ -155,6 +175,7 @@ object StreamParser {
                 }
             }
         val all = if (launch != null) results + launch else results
+        if (all.isEmpty() && (root["isSynthetic"] as? JsonPrimitive)?.booleanOrNull == true) return emptyList()
         return all.ifEmpty {
             val text = content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }
                 .joinToString("\n")

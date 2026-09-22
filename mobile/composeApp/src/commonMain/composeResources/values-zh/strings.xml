@@ -580,6 +580,7 @@
     <!-- ── 文件导出 / 原生预览（issues #67/#79）──────── -->
     <string name="file_share">分享</string>
     <string name="file_save_as">另存为…</string>
+    <string name="file_show_full_path">查看完整文件路径</string>
     <string name="file_open">打开</string>
     <string name="file_preview">预览</string>
     <string name="file_no_inline_preview">此文件类型无法内嵌预览</string>
@@ -622,6 +623,16 @@
     <string name="diff_unchanged_lines">⋯ %1$d 行未改动</string>
     <string name="diff_collapsed_lines">%1$d 行</string>
     <string name="diff_soft_wrap">自动换行</string>
+
+    <!-- ── 文件查看器悬停说明（issue #393）─────── -->
+    <string name="file_tip_wrap_on">自动换行已开启——点击后长行改为横向滚动</string>
+    <string name="file_tip_wrap_off">自动换行已关闭——点击后长行自动折行</string>
+    <string name="file_tip_view_diff">当前只看本会话改动——点「文件」看完整文件</string>
+    <string name="file_tip_view_file">当前看完整文件——点「改动」只看本会话改动</string>
+    <string name="file_tip_status_write">本会话中新建</string>
+    <string name="file_tip_status_edit">本会话中修改</string>
+    <string name="file_tip_status_delete">本会话中删除</string>
+    <string name="file_tip_status_notebook">本会话中修改了 Notebook</string>
 
     <!-- ── 已配对设备（多设备）───────────────────────────────────── -->
     <string name="devices_section">已配对设备</string>
@@ -2188,4 +2199,5 @@
     <string name="managed_sessions_enable_required">为 %1$s 开启后才能导入它的会话。</string>
     <string name="diagnostic_copy_push">复制推送诊断</string>
     <string name="diagnostic_push_history_description">包含本次启动以来最近的通知注册结果，不包含通知 token 或消息内容。</string>
+    <string name="compact_summary">上下文摘要</string>
 </resources>

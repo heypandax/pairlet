@@ -195,6 +195,8 @@ import dev.ccpocket.app.ui.session.forkParentTitle
 import dev.ccpocket.app.ui.session.rewoundSuccessorTitle
 import dev.ccpocket.app.ui.session.splitRewound
 import dev.ccpocket.app.ui.chat.TurnSourceLabel
+import dev.ccpocket.app.ui.chat.UserTurnContainer
+import dev.ccpocket.app.ui.chat.UserTurnSourceLabel
 import dev.ccpocket.app.ui.chat.chatStateUi
 import dev.ccpocket.app.ui.fleet.attentionAsk
 import dev.ccpocket.app.ui.fleet.crossMachineAttention
@@ -3935,7 +3937,7 @@ private fun MessageItem(
         // iOS text path (issue #5) and the project's selection contract is load-bearing, so a long press
         // landing on the glyphs themselves still starts a selection. Indication is suppressed and the
         // tap arm left empty so the row keeps behaving exactly as before for every non-long gesture.
-        is ChatItem.User -> Column(
+        is ChatItem.User -> if (m.compactSummary) CompactSummaryCard(m.text) else Column(
             Modifier.fillMaxWidth().let { base ->
                 if (onLongPressUser == null) base else base.combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -3945,30 +3947,36 @@ private fun MessageItem(
                 )
             },
         ) {
-            TurnSourceLabel(stringResource(Res.string.chat_you), alignEnd = true)
-            Column(
-                Modifier.fillMaxWidth().padding(top = 7.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // images ride the turn whether it was composed here or at the computer (issue #254:
-                // the replay carries them now); imagesTruncated still renders with no tiles at all,
-                // because an image-ONLY prompt the budget shed would otherwise read as an empty turn
-                if (m.images.isNotEmpty() || m.imagesTruncated) {
-                    SentImages(m.images, m.imagesTruncated) { i -> onOpenImages(m.images, i) }
-                }
-                // uploaded files (issue #90): chip per file with its @inbox landing path. Videos (issue
-                // #98) render as a 16:9 card that opens the player; both share the "in workspace" grammar.
-                m.files.forEach { f ->
-                    if (isVideoAttachment(f.mediaType, f.name)) SentVideoCard(f) { onOpenVideo(f) } else SentFileChip(f)
-                }
-                if (m.text.isNotBlank()) {
-                    // renderClip: this row is a single Text paragraph — an ~800 KB replayed prompt
-                    // (skill injection) OOM'd iOS on open; render a prefix, copy keeps the whole thing
-                    val shown = renderClip(m.text)
-                    SelectionContainer { Text(shown, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
-                    if (shown.length < m.text.length) TruncatedNote(m.text.length)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        CopyChip(m.text) // one-tap copy — the reliable path on iOS where select-to-copy has no menu (issue #5)
+            // issue #397: users read their own prompts and the agent's replies as one undifferentiated
+            // stream ("都混在一起，不容易分辨"). The turn keeps every affordance and its full measure — the
+            // neutral enclosure marks "mine" without reopening the Chat Master v2 layout
+            // above (still no 300dp cap: a pasted log reflows at the same width as the agent's answer).
+            UserTurnContainer(Modifier.fillMaxWidth()) {
+                UserTurnSourceLabel(stringResource(Res.string.chat_you), Modifier.fillMaxWidth())
+                Column(
+                    Modifier.fillMaxWidth().padding(top = 7.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // images ride the turn whether it was composed here or at the computer (issue #254:
+                    // the replay carries them now); imagesTruncated still renders with no tiles at all,
+                    // because an image-ONLY prompt the budget shed would otherwise read as an empty turn
+                    if (m.images.isNotEmpty() || m.imagesTruncated) {
+                        SentImages(m.images, m.imagesTruncated) { i -> onOpenImages(m.images, i) }
+                    }
+                    // uploaded files (issue #90): chip per file with its @inbox landing path. Videos (issue
+                    // #98) render as a 16:9 card that opens the player; both share the "in workspace" grammar.
+                    m.files.forEach { f ->
+                        if (isVideoAttachment(f.mediaType, f.name)) SentVideoCard(f) { onOpenVideo(f) } else SentFileChip(f)
+                    }
+                    if (m.text.isNotBlank()) {
+                        // renderClip: this row is a single Text paragraph — an ~800 KB replayed prompt
+                        // (skill injection) OOM'd iOS on open; render a prefix, copy keeps the whole thing
+                        val shown = renderClip(m.text)
+                        SelectionContainer { Text(shown, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
+                        if (shown.length < m.text.length) TruncatedNote(m.text.length)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            CopyChip(m.text) // one-tap copy — the reliable path on iOS where select-to-copy has no menu (issue #5)
+                        }
                     }
                 }
             }

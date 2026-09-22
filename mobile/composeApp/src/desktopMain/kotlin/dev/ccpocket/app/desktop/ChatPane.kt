@@ -118,6 +118,8 @@ import dev.ccpocket.app.ui.chat.ProcessGroupRow
 import dev.ccpocket.app.ui.chat.rememberChatPresentationState
 import dev.ccpocket.app.ui.chat.LineageBanner
 import dev.ccpocket.app.ui.chat.RewindErrorBar
+import dev.ccpocket.app.ui.chat.UserTurnContainer
+import dev.ccpocket.app.ui.chat.UserTurnSourceLabel
 import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.ImgState
 import dev.ccpocket.app.data.OpenFailure
@@ -1351,19 +1353,24 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
     }
 }
 
-// chat-stream alignment (issue #213): in LEFT (default) this is a pass-through, so the user turn renders
-// exactly as before (byte-for-byte, no wrapper). In BUBBLES it hugs the content to the right inside a raised
-// bubble — only presentation moves; the inner Column (label, attachments, text, delivery state) is untouched.
+// chat-stream alignment (issue #213) + role distinction (issue #397): the user turn now carries the same
+// neutral raised container under BOTH preferences, so whose turn it is reads at a glance either way — users
+// reported the bare stream "all mixed together, hard to tell apart". LEFT (default) keeps the full-width
+// document flow: a container, but no bubble and no width cap, so a pasted log still reflows at the agent's
+// measure. BUBBLES keeps hugging right at max 520dp. Both use Chat Roles v1's hairline and source label;
+// attachments, text and delivery state keep their existing order and behavior.
 @Composable
 private fun UserTurn(bubbles: Boolean, content: @Composable () -> Unit) {
     if (!bubbles) {
-        content()
+        UserTurnContainer(Modifier.fillMaxWidth()) { content() }
         return
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Box(
-            Modifier.widthIn(max = 520.dp).clip(RoundedCornerShape(14.dp))
-                .background(Tok.raised).padding(horizontal = 14.dp, vertical = 11.dp),
+        UserTurnContainer(
+            Modifier.widthIn(max = 520.dp),
+            radius = 14.dp,
+            horizontalPadding = 14.dp,
+            verticalPadding = 11.dp,
         ) { content() }
     }
 }
@@ -1391,10 +1398,12 @@ private fun MessageRow(
         // own ContextMenuArea. Entries appear ONLY when the row carries transcript coordinates — with a
         // pre-#282 daemon or a non-Claude backend the menu isn't built at all, so the user turn keeps
         // exactly its previous behaviour (no empty menu on right-click either).
-        is ChatItem.User -> RewindMenuArea(item, onRewind) { CopyableBlock(item.text) {
+        is ChatItem.User -> if (item.compactSummary) dev.ccpocket.app.ui.CompactSummaryCard(item.text)
+        else RewindMenuArea(item, onRewind) { CopyableBlock(item.text) {
             UserTurn(bubbles) {
-                Column {
-                Text(stringResource(Res.string.chat_you), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
+                Column(if (bubbles) Modifier else Modifier.fillMaxWidth()) {
+                // Align the label inside the measured content, so a short right-bubble still hugs text.
+                UserTurnSourceLabel(stringResource(Res.string.chat_you), Modifier.align(Alignment.End))
                 Spacer(Modifier.height(7.dp))
                 // sent attachments (issue #85): the compressed JPEG bytes ride ChatItem.User.images from
                 // send (sendPrompt), so an image-only prompt no longer renders as a blank turn. Reuses the

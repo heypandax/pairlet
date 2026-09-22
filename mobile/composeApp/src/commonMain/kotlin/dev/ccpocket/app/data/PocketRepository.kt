@@ -439,6 +439,7 @@ sealed interface ChatItem {
          *  verify. */
         val seq: Long? = null,
         val uuid: String? = null,
+        val compactSummary: Boolean = false,
     ) : ChatItem
     data class Assistant(val text: String) : ChatItem
 
@@ -3781,9 +3782,11 @@ class PocketRepository(
                 // would otherwise pin a custom model at the CLI's 200k fallback — issue #60). Resolved against the
                 // model THIS session is running (#169), so switching sessions switches denominators with it.
                 contextWindow.value = contextWindowOverrideFor(f.model ?: model.value) ?: f.contextWindow ?: (if (claudeish) contextWindowFor(f.model ?: model.value) else null)
-                // seed the usage statusline on resume (before the first new turn). Only when we have no
-                // value yet — a TurnDone this session is fresher than the daemon's transcript snapshot.
-                if (contextUsed.value == null) f.contextUsed?.let { contextUsed.value = it }
+                // New daemons send a current snapshot, including unknown after compact. Older daemons
+                // only send a resume seed, which must not overwrite a newer TurnDone.
+                f.compactSummary?.let(transcript::appendCompactSummary)
+                if (f.contextUsedAuthoritative) contextUsed.value = f.contextUsed
+                else if (contextUsed.value == null) f.contextUsed?.let { contextUsed.value = it }
                 upgradeWindowIfProven()
                 // daemon truth beats the local guess: a turn that ended (or started) while the link was
                 // down would otherwise leave the ■/mic button stuck; null = old daemon, keep local state
