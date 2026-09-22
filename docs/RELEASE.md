@@ -290,8 +290,9 @@ cloud-managed signing、上传、提交审核及 TestFlight 公测；本机 Xcod
   `APPSTORE_API_ISSUER_ID` 与 `GOOGLE_SERVICE_INFO_PLIST`。
 - 本地兜底时，Xcode → Settings（⌘,）→ Accounts 登录该账号；本地自动签名依赖这个会话。
 - 自动签名已写进 `iosApp/project.yml`（`CODE_SIGN_STYLE: Automatic`、`DEVELOPMENT_TEAM: SC9S2SJ42G`）。
+- 推送权限绑定也必须写进 `iosApp/project.yml` 的 `CODE_SIGN_ENTITLEMENTS`；CI 会重新生成工程，只修改本地 `.xcodeproj` 会在发布时丢失。源码 entitlement 保留 `development`，由 Xcode 根据签名 profile 在分发导出时选择 `production`。
 - 发布证书是 **Apple 云端托管**，**不会**出现在本机 `security find-identity -v -p codesigning` 里——看不到属正常，不代表缺证书。
-- `build/ios/ExportOptions.plist` 已在仓库里：`method=app-store-connect`、`destination=upload`、`teamID=SC9S2SJ42G`、`uploadSymbols`。
+- CI 使用已跟踪的 `iosApp/ExportOptions.plist`：`method=app-store-connect`、`destination=export`、自动签名；先导出并验收 IPA，再上传同一个文件。
 
 > `.env` 里的 `APPLE_ID` / `APPLE_APP_PASSWORD` 是给 **daemon 公证**（notarytool）用的，与 App Store iOS 上传**无关**，别混。
 
@@ -306,6 +307,10 @@ gh workflow run ios-release.yml --ref v1.8.0
 workflow 会归档、上传、等待处理、同步 metadata、提交 App Review，并把同一 build 挂到稳定的
 TestFlight 公测链接。只有要把新 build 附到另一个仍开放的版本列车时，才显式传
 `marketing_version`。
+
+推送签名有两道上传前门禁：归档的签名及 profile 必须包含 `aps-environment=development`；导出 IPA 中的应用签名及 profile 必须包含 `aps-environment=production`，且应用/团队一致、不可调试。检查脚本为 `scripts/check-ios-push-entitlements.py`。任何一项不满足都阻止上传，不能用 archive/export 成功标志代替权限检查。最终仍需用目标 TestFlight build 验证 APNs token 注册、relay 登记和真机通知展示。
+
+仅验证云签名构建时，在明确的待验收分支上触发同一工作流并传 `verify_only=true`。该模式完成归档、符号匹配、生产 IPA 导出与签名检查，并输出 IPA SHA-256；跳过 Sentry 符号上传、ASC 上传、审核及 TestFlight 分发。构建通过仅证明包的签名配置，不证明真机通知恢复。
 
 ## 本地手动兜底
 
@@ -324,16 +329,21 @@ TestFlight 公测链接。只有要把新 build 附到另一个仍开放的版�
    ```
    - archive 的 `Compile Kotlin Framework` build phase 会自动跑 `./gradlew :mobile:composeApp:embedAndSignAppleFrameworkForXcode`；Release 的 Kotlin/Native 编译较慢，**几分钟正常**。
 
-3. **导出 + 直传 App Store Connect**：
+3. **导出、验证推送签名，再上传**：
    ```bash
+   python3 scripts/check-ios-push-entitlements.py \
+     build/ios/CCPocket.xcarchive/Products/Applications/cc-pocket.app --environment development
    xcodebuild -exportArchive \
      -archivePath build/ios/CCPocket.xcarchive \
-     -exportOptionsPlist build/ios/ExportOptions.plist \
+     -exportOptionsPlist iosApp/ExportOptions.plist \
      -exportPath build/ios/export \
      -allowProvisioningUpdates
+   ditto -x -k build/ios/export/cc-pocket.ipa build/ios/ipa-check
+   python3 scripts/check-ios-push-entitlements.py \
+     build/ios/ipa-check/Payload/cc-pocket.app --environment production
    ```
-   - 因为 ExportOptions 里 `destination=upload`，这条会**签名后直接上传**（不落 IPA 到磁盘，`build/ios/export/` 为空属正常）。
-   - **成功标志**：日志出现 `Progress 100%: Upload succeeded.` + `** EXPORT SUCCEEDED **` + `Uploaded iosApp`。
+   - 全部命令成功后，用 Transporter 上传已检查的 `build/ios/export/cc-pocket.ipa`；不要再从 archive 重新导出并直传另一个未验收的包。命令行上传可复用 CI 的 `altool` 与 App Store Connect API key 配置。
+   - `** EXPORT SUCCEEDED **` 仅证明导出完成；上传成功及 Apple 处理为 `VALID` 分别取证。
    - `Upload Symbols Failed`（Firebase / Google 第三方框架缺 dSYM）是**非致命告警**，可忽略（只影响这些框架的崩溃符号化）。
 
 4. **等 Apple 处理**：约 10–30 分钟，构建在 App Store Connect 从 “Processing” 变为可选。

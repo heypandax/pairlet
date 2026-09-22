@@ -20,6 +20,10 @@ name: ios-release
 on:
   workflow_dispatch:
     inputs:
+      verify_only:
+        description: "Archive, export and verify the signed IPA only. Do not upload, submit for review, or distribute."
+        type: boolean
+        default: false
       testflight_only:
         description: "Upload and wait for TestFlight processing only; skip App Store metadata, build attachment and App Review. External distribution still requires distribute_testflight=true."
         type: boolean
@@ -59,6 +63,7 @@ jobs:
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_IOS }}
 
       - name: Require symbol upload credentials before archiving
+        if: ${{ !inputs.verify_only }}
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.PAIRLET_SENTRY_AUTH_TOKEN }}
         run: |
@@ -68,6 +73,7 @@ jobs:
           fi
 
       - name: Install verified Sentry CLI 3.7.0
+        if: ${{ !inputs.verify_only }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -204,12 +210,23 @@ jobs:
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_IOS }}
           artifact: ${{ runner.temp }}/CCPocket.xcarchive
 
-      - name: Verify archive symbols and wait for Sentry processing
+      - name: Verify archived APNs signing entitlement
+        # The archive is intentionally development-signed; export must switch to production.
+        run: |
+          python3 scripts/check-ios-push-entitlements.py \
+            "$RUNNER_TEMP/CCPocket.xcarchive/Products/Applications/cc-pocket.app" \
+            --environment development
+
+      - name: Verify archive symbols (upload on release)
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.PAIRLET_SENTRY_AUTH_TOKEN }}
-        run: bash scripts/observability-symbols.sh "$RUNNER_TEMP/CCPocket.xcarchive" --upload
+          VERIFY_ONLY: ${{ inputs.verify_only }}
+        run: |
+          MODE=--check
+          if [ "$VERIFY_ONLY" != true ]; then MODE=--upload; fi
+          bash scripts/observability-symbols.sh "$RUNNER_TEMP/CCPocket.xcarchive" "$MODE"
 
-      - name: Export & upload to App Store Connect
+      - name: Export distribution-signed IPA
         env:
           ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
@@ -223,8 +240,33 @@ jobs:
             -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" | tee "$RUNNER_TEMP/export.log"
-          # destination=upload means success is the upload, not an IPA on disk; gate on the marker
           grep -q "EXPORT SUCCEEDED" "$RUNNER_TEMP/export.log"
+
+      - name: Verify production APNs entitlement in exported IPA
+        id: verify_ipa
+        run: |
+          IPAS=("$RUNNER_TEMP/export/"*.ipa)
+          if [ "${#IPAS[@]}" -ne 1 ] || [ ! -f "${IPAS[0]}" ]; then
+            echo "::error::Expected exactly one exported IPA; refusing to upload."
+            exit 1
+          fi
+          ditto -x -k "${IPAS[0]}" "$RUNNER_TEMP/ipa-check"
+          python3 scripts/check-ios-push-entitlements.py \
+            "$RUNNER_TEMP/ipa-check/Payload/cc-pocket.app" --environment production
+          shasum -a 256 "${IPAS[0]}"
+          echo "path=${IPAS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload verified IPA to App Store Connect
+        if: ${{ !inputs.verify_only }}
+        env:
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          IPA_PATH: ${{ steps.verify_ipa.outputs.path }}
+        run: |
+          set -o pipefail
+          xcrun altool --upload-package "$IPA_PATH" \
+            --api-key "$ASC_KEY_ID" --api-issuer "$ASC_ISSUER_ID" \
+            --p8-file-path "$RUNNER_TEMP/AuthKey.p8" | tee "$RUNNER_TEMP/upload.log"
 
   # The App-Store half runs on a CHEAP ubuntu runner: fastlane deliver is pure ASC-API work (no Xcode),
   # and waiting out build processing (5-30min, sometimes more) on the 10x-billed macOS runner would be
@@ -232,6 +274,7 @@ jobs:
   # pushes fastlane/metadata (What's New + review notes), attaches the build to the version (creating the
   # version record when absent), and — unless submit_for_review=false — submits it for App Review.
   submit:
+    if: ${{ !inputs.verify_only }}
     needs: ios
     runs-on: ubuntu-latest
     steps:
@@ -330,7 +373,7 @@ jobs:
   # the build is processed by the time the reused workflow looks for it. The public-link group is reused, so
   # the shared link (testflight.apple.com/join/…) never changes. Skip with distribute_testflight=false.
   testflight:
-    if: ${{ inputs.distribute_testflight }}
+    if: ${{ !inputs.verify_only && inputs.distribute_testflight }}
     needs: [ios, submit]
     uses: ./.github/workflows/testflight-public-link.yml
     with:

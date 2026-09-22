@@ -38,6 +38,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.panda.ccpocket
         PRODUCT_NAME: cc-pocket
         CODE_SIGN_STYLE: Automatic
+        # CI regenerates the project: preserve the APNs capability from the local .xcodeproj.
+        # Xcode selects development/production when signing with the corresponding profile.
+        CODE_SIGN_ENTITLEMENTS: iosApp/iosApp.entitlements
         DEVELOPMENT_TEAM: SC9S2SJ42G  # 当前账号 team；写进来让 xcodegen generate 后不用重选
         INFOPLIST_FILE: iosApp/Info.plist
         SWIFT_VERSION: "5.0"
