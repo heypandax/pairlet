@@ -23,6 +23,10 @@ on:
         description: "List matching development certificates without revoking them."
         type: boolean
         default: false
+      certificate_id:
+        description: "Limit maintenance to this CI-created development certificate. Empty selects all matching CI certificates."
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -37,6 +41,7 @@ jobs:
           ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
           DRY_RUN: ${{ inputs.dry_run }}
+          CERTIFICATE_ID: ${{ inputs.certificate_id }}
         run: |
           pip install --quiet PyJWT cryptography
           python3 - <<'PY'
@@ -71,6 +76,12 @@ jobs:
           # development cert stays, so local device debugging keeps working untouched
           targets = [c for c in certs if c["attributes"]["certificateType"] in DEV_TYPES
                      and "Created via API" in (c["attributes"].get("name") or "")]
+          requested_id = os.environ.get("CERTIFICATE_ID", "").strip()
+          if requested_id:
+              targets = [c for c in targets if c["id"] == requested_id]
+              if len(targets) != 1:
+                  print("::error::Requested ID is not a CI-created development certificate; nothing revoked.")
+                  sys.exit(1)
           # public repo → public Actions logs: list only the CI-minted certs being revoked,
           # never the account's full certificate inventory
           for c in targets:
