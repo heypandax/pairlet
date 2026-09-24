@@ -176,6 +176,10 @@ class Conversation(
      *  home anchor, never the daemon's canonicalized absolute form). Announced in SessionLive verbatim so
      *  the guard matches; null → fall back to the canonical [workdir] (pre-#219 behaviour). */
     private val announcedWorkdir: String? = null,
+    // issue #389: bounds on a turn-complete push held back behind background sub-agents (see [heldTurnPush]);
+    // knobs only so tests can exercise the fallbacks without waiting minutes
+    private val heldPushMaxMs: Long = HELD_PUSH_MAX_MS,
+    private val heldPushSettleGraceMs: Long = HELD_PUSH_SETTLE_GRACE_MS,
 ) {
     // ── approval design M2 §5.4: the task boundary a TASK grant binds to ──────────────────────────
     // One task per top-level user prompt: rotated when a prompt STARTS a new turn (mid-turn queued
@@ -195,6 +199,40 @@ class Conversation(
         // sweep-on-rotate invariant above ever regressed. promptId stays a log-side correlation tag only.
         currentTaskId = "task-" + java.util.UUID.randomUUID()
         if (promptId != null) log.info("$convoId task $currentTaskId ← prompt ${promptId.take(8)}…")
+    }
+
+    /** Issue #389: park a clean turn's push behind still-running background sub-agents. The first hold of a
+     *  chain arms a [heldPushMaxMs] backstop, so a sub-agent whose completion never arrives costs one late
+     *  push rather than a silent phone; later holds keep the chain's start and just take the newer text. */
+    private fun holdTurnPush(finalText: String?) {
+        val previous = heldTurnPush.getAndUpdate { HeldTurnPush(finalText, it?.heldAt ?: System.currentTimeMillis()) }
+        if (previous != null) return
+        val chainStart = heldTurnPush.get()?.heldAt ?: return
+        log.info("$convoId turn push held: background sub-agents still running (#389)")
+        scope.launch {
+            delay(heldPushMaxMs)
+            releaseHeldPush("background sub-agents still running after ${heldPushMaxMs / 1000}s") { it.heldAt == chainStart }
+        }
+    }
+
+    /** The last background agent settled (pump side — [jobs] is pump-only). Normally the CLI's continuation
+     *  turn follows within a second and its own result decides the push; if [heldPushSettleGraceMs] later no
+     *  turn is running and nothing re-held or pushed meanwhile, release the held one. */
+    private fun maybeReleaseHeldPush() {
+        val held = heldTurnPush.get() ?: return
+        if (jobs.hasRunningBackgroundAgents()) return
+        scope.launch {
+            delay(heldPushSettleGraceMs)
+            if (!isExecuting()) releaseHeldPush("no continuation turn followed") { it === held }
+        }
+    }
+
+    /** Send the held push once, and only while it is still the entry [stillOwned] expects. */
+    private fun releaseHeldPush(why: String, stillOwned: (HeldTurnPush) -> Boolean) {
+        val held = heldTurnPush.get()?.takeIf(stillOwned) ?: return
+        if (!heldTurnPush.compareAndSet(held, null)) return
+        log.info("$convoId held turn push released: $why")
+        pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, held.finalText, null) } }
     }
 
     /** §18.1 P1-4: a task ends at the STABLE turn boundary, not at the next prompt — called after every
@@ -625,6 +663,14 @@ class Conversation(
     // for a short window after one, `!executing` is NOT proof the process is safe to kill
     @Volatile
     private var lastTurnEndedMs = 0L
+
+    // issue #389: a clean turn ended while background sub-agents were still running. Each of them wakes
+    // the main agent again when it finishes (a new turn, a new result), so pushing every one of those
+    // results rang the phone once per returning sub-agent. The "complete" push is held here instead and
+    // goes out with the turn that ends with no background agent left — or via the fallbacks in
+    // [holdTurnPush] / [maybeReleaseHeldPush] if that turn never comes. Errors are never held.
+    private data class HeldTurnPush(val finalText: String?, val heldAt: Long)
+    private val heldTurnPush = AtomicReference<HeldTurnPush?>(null)
 
     // healSessionLock already fired for the current prompt — one heal per user action, so a fork that
     // somehow gets refused too can't relaunch-loop. Re-armed by the next sendPrompt.
@@ -2080,6 +2126,7 @@ class Conversation(
                             // atomic snapshot until this replacement installs grace + the new job state.
                             syncBackgroundWork(expectContinuation = true)
                             emitJobs()
+                            maybeReleaseHeldPush()
                         }
                     }
                     // Workflow orchestration (issue #106): the launch ack ties the chat card's tool_use to
@@ -2260,7 +2307,14 @@ class Conversation(
                         // so a control-plane send never stalls stdout parsing. A failed turn carries [error]
                         // separately so the push is worded as a failure (usage-limit hits included — #138),
                         // never as a normal turn-complete.
-                        pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, ev.finalText, error) } }
+                        // A clean result while background sub-agents still run is not the end of the task
+                        // (issue #389) — hold it; the turn that ends with none left pushes instead.
+                        if (error == null && jobs.hasRunningBackgroundAgents()) {
+                            holdTurnPush(ev.finalText)
+                        } else {
+                            heldTurnPush.set(null)
+                            pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, ev.finalText, error) } }
+                        }
                         // §18.1 P1-4: the STABLE turn boundary ends the task — unless background work,
                         // a pending ask or a continuation grace legitimately keeps it alive. Between
                         // here and the next prompt the quick terminal re-asks.
@@ -2389,6 +2443,9 @@ class Conversation(
             // stderr rides as the error summary (a usage-limit refusal printed there words the push).
             // NOT within [DEATH_PUSH_QUIET_MS] of a TurnResult: a fatal turn error routinely kills the
             // process right after its result — that failure was already pushed, don't alert it twice.
+            // A held completion (issue #389) is settled here too: the death push supersedes it, and a
+            // death inside the quiet window releases it — the background agents it waited for died too.
+            val held = heldTurnPush.getAndSet(null)
             if (System.currentTimeMillis() - lastTurnEndedMs > DEATH_PUSH_QUIET_MS) {
                 // the cleartext relay push must NOT carry raw process stderr (stack traces / absolute
                 // paths / a value the CLI echoed into an error): NotifyPush rides the TEXT plane
@@ -2398,6 +2455,8 @@ class Conversation(
                 val pushReason = if (dev.ccpocket.daemon.relay.PushPolicy.isUsageLimit(summary)) summary
                     else "agent process ended (exit ${p.exitCode() ?: "?"})"
                 pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, null, pushReason) } }
+            } else if (held != null) {
+                pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, held.finalText, null) } }
             }
         }
     }
@@ -2985,6 +3044,7 @@ class Conversation(
         syncBackgroundWork()
         requestInterrupt()
         emitJobs() // reflect KILLED in the panel now (also stamps lastActivityMs)
+        maybeReleaseHeldPush()
     }
 
     /** Default semantics: kill the current process tree and start a fresh session in the new cwd. */
@@ -3058,6 +3118,7 @@ class Conversation(
     private suspend fun stopProcess(preservePendingBridgeGrantToken: String? = null) {
         intentionalStop = true
         clearTurnWork() // any in-flight turn and continuation grace die with the process
+        heldTurnPush.set(null) // a deliberate stop/relaunch — the owner is acting on this session right now
         revokeAllBridgeGrants(preservePendingToken = preservePendingBridgeGrantToken)
         bridgeRequestPermit.set(false)
         bridge?.cancelAll()
@@ -3309,6 +3370,14 @@ class Conversation(
         // a process death this soon after a TurnResult is the SAME failure the turn's push already
         // reported (a fatal error result is often followed by the CLI exiting) — no second alert (#138)
         private const val DEATH_PUSH_QUIET_MS = 10_000L
+
+        // issue #389: a turn-complete push held behind background sub-agents goes out anyway after this
+        // long — the backstop for a completion event that never arrives on a live process
+        const val HELD_PUSH_MAX_MS = 30 * 60 * 1000L
+
+        // …or this long after the last background agent settled when no continuation turn is running
+        // (the CLI normally starts one within ~0.1s, and that turn's result pushes instead)
+        const val HELD_PUSH_SETTLE_GRACE_MS = 60_000L
 
         /** True when a conversation's agent must launch CLEAN-ROOM (no MCP, no settings sources — the
          *  daemon is the sole permission authority). Exactly the restricted-credential conversations:

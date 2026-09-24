@@ -164,6 +164,12 @@ class BackgroundJobRegistry {
 
     fun hasRunning(): Boolean = jobs.values.any { it.status == JobStatus.RUNNING }
 
+    /** A backgrounded sub-agent or Workflow run is still RUNNING (issue #389). Each one wakes the main agent
+     *  for another turn when it finishes, so a turn ending now is not the end of the task. Background shells
+     *  and monitors are deliberately excluded: a dev server may never finish. */
+    fun hasRunningBackgroundAgents(): Boolean =
+        jobs.values.any { it.status == JobStatus.RUNNING && it.background && it.kind == JobKind.SUBAGENT }
+
     fun snapshot(): List<BackgroundJob> =
         jobs.values.map { BackgroundJob(it.key, it.kind, it.label, it.status, it.startedAt, it.lastUpdate) }
 
