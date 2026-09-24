@@ -56,16 +56,21 @@ class CcPocketMessagingService : FirebaseMessagingService() {
         const val CHANNEL_ID = "task_complete"
         const val APPROVALS_CHANNEL_ID = "approvals" // P2-4: independent sound/vibration settings
 
-        /** Create the notification channels if absent. minSdk 26 → NotificationChannel always available. */
+        /** Create the notification channels if absent. minSdk 26 → NotificationChannel always available.
+         *  Vibration is explicit (issue #389): a channel's default is sound only, which is easy to miss.
+         *  Android freezes a channel's settings once created, so this reaches new installs only; existing
+         *  users keep whatever the system settings for the channel say. */
         fun ensureChannel(nm: NotificationManager) {
             if (nm.getNotificationChannel(CHANNEL_ID) == null) {
                 nm.createNotificationChannel(
-                    NotificationChannel(CHANNEL_ID, "Task complete", NotificationManager.IMPORTANCE_HIGH),
+                    NotificationChannel(CHANNEL_ID, "Task complete", NotificationManager.IMPORTANCE_HIGH)
+                        .apply { enableVibration(true) },
                 )
             }
             if (nm.getNotificationChannel(APPROVALS_CHANNEL_ID) == null) {
                 nm.createNotificationChannel(
-                    NotificationChannel(APPROVALS_CHANNEL_ID, "Approvals", NotificationManager.IMPORTANCE_HIGH),
+                    NotificationChannel(APPROVALS_CHANNEL_ID, "Approvals", NotificationManager.IMPORTANCE_HIGH)
+                        .apply { enableVibration(true) },
                 )
             }
         }

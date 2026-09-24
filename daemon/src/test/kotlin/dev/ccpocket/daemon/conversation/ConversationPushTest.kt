@@ -42,7 +42,9 @@ import kotlin.test.assertTrue
  *  - a #367 REMOTE-EXECUTION conversation (pathScope set AND an `execution:` origin) DOES fire it, naming
  *    the source the owner authorised — the opposite of a guest, because nobody on the far side can answer;
  *  - an error-terminated turn hands the PushHook its error text (usage-limit wording included);
- *  - an unexpected agent-process death fires the PushHook with the exit summary.
+ *  - an unexpected agent-process death fires the PushHook with the exit summary;
+ *  - issue #389: a clean turn that ends while background sub-agents still run holds its push for the turn
+ *    that ends with none left (or a bounded fallback), so a fan-out rings the phone once, not per agent.
  */
 class ConversationPushTest {
 
@@ -102,6 +104,8 @@ class ConversationPushTest {
         askOriginLabel: String? = null, // #367 LOW-3
         headlessSink: Boolean = false, // the sole sink is the scheduler's non-watching black hole (C1)
         askPushResult: () -> Boolean = { true },
+        heldPushMaxMs: Long = Conversation.HELD_PUSH_MAX_MS,
+        heldPushSettleGraceMs: Long = Conversation.HELD_PUSH_SETTLE_GRACE_MS,
         body: suspend Harness.() -> Unit,
     ) = runBlocking {
         val dir = Files.createTempDirectory("ccp-push-fx")
@@ -130,6 +134,8 @@ class ConversationPushTest {
             },
             pathScope = pathScope,
             askOriginLabel = askOriginLabel,
+            heldPushMaxMs = heldPushMaxMs,
+            heldPushSettleGraceMs = heldPushSettleGraceMs,
         )
         try {
             convo.open(resumeId = null, model = null)
@@ -321,6 +327,81 @@ class ConversationPushTest {
             val pushed = turnCalls.first().error
             assertFalse(pushed?.contains(secret) == true, "stderr leaked into the push body: $pushed")
             assertTrue(pushed?.startsWith("agent process ended") == true, "got: $pushed")
+        }
+    }
+
+    // ── issue #389: one push per task, not per returning background sub-agent ─────────────────────────
+    private fun bgAgent(id: String) =
+        """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"$id","name":"Agent","input":{"subagent_type":"general-purpose","description":"scan $id","prompt":"p","run_in_background":true}}]}}"""
+    private fun agentStarted(id: String) =
+        """{"type":"system","subtype":"task_started","task_id":"t-$id","tool_use_id":"$id","description":"scan $id","task_type":"local_agent"}"""
+    private fun agentDone(id: String) =
+        """{"type":"system","subtype":"task_notification","task_id":"t-$id","tool_use_id":"$id","status":"completed","summary":"ok"}"""
+    private fun result(text: String) =
+        """{"type":"result","subtype":"success","is_error":false,"result":"$text","usage":{"input_tokens":1,"output_tokens":1}}"""
+
+    @Test
+    fun a_background_fan_out_pushes_once_when_the_last_agent_returns() {
+        if (isWindows()) return
+        // the main agent launches two background sub-agents and ends its turn; each returning agent wakes
+        // it for another turn. Only the turn that ends with no agent left is the task's completion.
+        val stage = listOf(
+            init, bgAgent("a1"), bgAgent("a2"), agentStarted("a1"), agentStarted("a2"), result("launched two"),
+            agentDone("a1"), init, result("got a1, waiting for a2"),
+            agentDone("a2"), init, result("all done"),
+        )
+        harness(stages = listOf(stage)) {
+            await("the final push") { turnCalls.isNotEmpty() }
+            delay(300) // grace for a wrong extra push to surface
+            assertEquals(listOf(TurnCall("all done", null)), turnCalls.toList())
+            assertEquals(3, synchronized(frames) { frames.count { it is TurnDone } }, "every turn still reaches the app")
+        }
+    }
+
+    @Test
+    fun a_failed_turn_is_pushed_even_while_background_agents_run() {
+        if (isWindows()) return
+        harness(stages = listOf(listOf(init, bgAgent("a1"), agentStarted("a1"), limitResult))) {
+            await("the failure push") { turnCalls.isNotEmpty() }
+            assertTrue(turnCalls.single().error?.contains("usage limit reached") == true)
+        }
+    }
+
+    @Test
+    fun background_shells_never_hold_the_push() {
+        if (isWindows()) return
+        // a dev server started with run_in_background may never finish — it must not swallow the push
+        val devServer = """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"sh1","name":"Bash","input":{"command":"npm run dev","run_in_background":true}}]}}"""
+        harness(stages = listOf(listOf(init, devServer, result("server is up")))) {
+            await("turn push") { turnCalls.isNotEmpty() }
+            assertEquals(TurnCall("server is up", null), turnCalls.single())
+        }
+    }
+
+    @Test
+    fun a_held_push_is_released_when_no_continuation_turn_follows() {
+        if (isWindows()) return
+        // the last agent settled but the CLI never started its follow-up turn: the held text goes out
+        harness(
+            stages = listOf(listOf(init, bgAgent("a1"), agentStarted("a1"), result("launched"), agentDone("a1"))),
+            heldPushSettleGraceMs = 200,
+        ) {
+            await("released push") { turnCalls.isNotEmpty() }
+            assertEquals(TurnCall("launched", null), turnCalls.single())
+        }
+    }
+
+    @Test
+    fun a_held_push_is_released_by_the_backstop_if_an_agent_never_reports() {
+        if (isWindows()) return
+        harness(
+            stages = listOf(listOf(init, bgAgent("a1"), agentStarted("a1"), result("launched"))),
+            heldPushMaxMs = 300,
+        ) {
+            delay(100)
+            assertTrue(turnCalls.isEmpty(), "held while the sub-agent runs")
+            await("backstop push") { turnCalls.isNotEmpty() }
+            assertEquals(TurnCall("launched", null), turnCalls.single())
         }
     }
 }
