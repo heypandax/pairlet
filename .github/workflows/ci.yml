@@ -84,6 +84,8 @@ jobs:
   # real windows-latest runner so the PEB offsets self-verify (ProcessCwd.selfCheck reads THIS process's
   # cwd and compares user.dir). A red here is the "user feedback" loop, mechanized: it means the blind
   # offsets are wrong and the fallback must stay UNKNOWN. Non-blocking on the required `test` job.
+  # Same idea for issue #381's JNA stderr-console probe (`*WinConsole*`): a silent failure there means
+  # Windows consoles fall back to scrolling progress lines.
   windows-cwd-probe:
     runs-on: windows-latest
     timeout-minutes: 25
@@ -100,5 +102,5 @@ jobs:
           $parseErrors = $null
           [System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/install.ps1", [ref]$null, [ref]$parseErrors) | Out-Null
           if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
-      - name: Daemon Windows cwd probe and CLI compatibility
-        run: ./gradlew --no-daemon :daemon:test --tests "*WinCwd*" --tests "*CliAliasesTest"
+      - name: Daemon Windows cwd probe, update-progress console probe and CLI compatibility
+        run: ./gradlew --no-daemon :daemon:test --tests "*WinCwd*" --tests "*WinConsole*" --tests "*CliAliasesTest"

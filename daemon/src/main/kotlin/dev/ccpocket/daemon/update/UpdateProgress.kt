@@ -201,7 +201,7 @@ class TerminalUpdateProgress(
             return renderer
         }
 
-        private fun probeStderr(): StderrCapabilities {
+        internal fun probeStderr(): StderrCapabilities {
             val windows = runCatching { System.getProperty("os.name").lowercase().contains("win") }.getOrDefault(false)
             val console = runCatching { System.console() }.getOrNull()
             return StderrCapabilities(
