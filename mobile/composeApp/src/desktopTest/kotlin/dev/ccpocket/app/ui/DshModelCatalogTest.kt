@@ -20,7 +20,7 @@ class DshModelCatalogTest {
 
     @Test
     fun dsh_rows_come_from_the_daemon_verbatim() {
-        val choices = modelChoicesFor(AgentKind.DSH, daemonRows, gatewayUrl = null)
+        val choices = modelChoicesFor(AgentKind.DSH, daemonRows)
         assertEquals(daemonRows, choices.map { it.pick })
         // the id the user SEES is the id that goes on the wire — no provider prefix invented here
         assertEquals(daemonRows, choices.map { it.id })
@@ -30,8 +30,8 @@ class DshModelCatalogTest {
     /** No static fallback: an invented catalogue would offer models the user's providers cannot route. */
     @Test
     fun dsh_has_no_static_fallback_when_the_daemon_has_not_answered() {
-        assertTrue(modelChoicesFor(AgentKind.DSH, null, gatewayUrl = null).isEmpty())
-        assertTrue(modelChoicesFor(AgentKind.DSH, emptyList(), gatewayUrl = null).isEmpty())
+        assertTrue(modelChoicesFor(AgentKind.DSH, null).isEmpty())
+        assertTrue(modelChoicesFor(AgentKind.DSH, emptyList()).isEmpty())
     }
 
     /**

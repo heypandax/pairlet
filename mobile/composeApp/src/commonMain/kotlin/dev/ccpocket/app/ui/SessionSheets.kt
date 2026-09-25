@@ -75,7 +75,6 @@ import dev.ccpocket.protocol.JobKind
 import dev.ccpocket.protocol.JobStatus
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
-import dev.ccpocket.protocol.CLAUDE_OPUS_5
 import dev.ccpocket.protocol.CODEX_MODEL_IDS
 import dev.ccpocket.protocol.ModelsList
 import dev.ccpocket.protocol.isModelCompatibleWithAgent
@@ -90,16 +89,12 @@ internal val CODEX_MODEL_OPTIONS = CODEX_MODEL_IDS // Codex sessions get Codex m
 // user configured (free catalogs also rotate weekly) — a hardcoded list is someone else's setup
 // and every wrong row is a launch failure. The picker shows the daemon's `opencode models` answer
 // (FetchModels) or an explicit empty/error state, never a guess.
-// Display name → what `--model` gets. Aliases everywhere EXCEPT Opus: the CLI's bare `opus` still
-// resolves to 4.8, so reaching Opus 5 needs the full id (which `--model` passes through verbatim).
-// Deliberately only ONE Opus row — 4.8 is not offered; anyone still wanting it types it in Custom.
-internal val CLAUDE_MODEL_OPTIONS = listOf("Fable" to "fable", "Opus" to CLAUDE_OPUS_5, "Sonnet" to "sonnet", "Haiku" to "haiku") // shared by both shells' pickers
-
-/** The pick a Claude preset row actually sends. On a gateway the Opus row degrades back to the bare
- *  alias: compatible endpoints map opus/sonnet/haiku onto their own tiers (issue #167), and a native
- *  id sent there rots or 404s (#168) — the full Opus 5 id is only right on the official endpoint. */
-internal fun claudeRowPick(pick: String, gatewayUrl: String?): String =
-    if (gatewayUrl != null && pick == CLAUDE_OPUS_5) "opus" else pick
+// Display name → what `--model` gets: always the bare alias, so each row follows whatever the installed
+// CLI currently resolves it to (its catalog moved Opus 5 → 5.5 without any change here). Pinning a full id
+// is the user's call alone — they type it in Custom, and that explicit id goes through verbatim. Aliases
+// are also what gateways expect: compatible endpoints map opus/sonnet/haiku onto their own tiers (issue
+// #167), whereas a native id sent there rots or 404s (#168).
+internal val CLAUDE_MODEL_OPTIONS = listOf("Fable" to "fable", "Opus" to "opus", "Sonnet" to "sonnet", "Haiku" to "haiku") // shared by both shells' pickers
 
 /** A daemon-wide gateway hint belongs exclusively to Claude's Anthropic-compatible transport.
  * Keeping this decision outside composition prevents a newly added backend from accidentally
@@ -690,14 +685,14 @@ data class ModelChoice(val name: String, val id: String, val pick: String, val c
 /**
  * THE model-row list for an agent — one definition, shared by the live-session [ModelPicker] and the
  * new-session picker (issue #199), so "which models can I pick" never forks between the two moments.
- * [daemonModels] is the daemon's own list (`ModelsList.models`, null/empty = not answered yet) and
- * [gatewayUrl] the third-party ANTHROPIC_BASE_URL, which degrades the Opus row to the bare alias (#167/#168).
+ * [daemonModels] is the daemon's own list (`ModelsList.models`, null/empty = not answered yet). A gateway
+ * (third-party ANTHROPIC_BASE_URL) changes nothing here: Claude's rows are bare aliases either way (#167/#168).
  *
  * Claude keeps its static alias table (the daemon's list for Claude is config-default + the same aliases);
  * Codex falls back to the static trio until the daemon answers; OpenCode has NO static fallback on purpose
  * — an invented catalog would offer models the user's providers can't run, so an empty list is the truth.
  */
-internal fun modelChoicesFor(agent: AgentKind, daemonModels: List<String>?, gatewayUrl: String?): List<ModelChoice> = when (agent) {
+internal fun modelChoicesFor(agent: AgentKind, daemonModels: List<String>?): List<ModelChoice> = when (agent) {
     AgentKind.CODEX -> (daemonModels?.takeIf { it.isNotEmpty() } ?: CODEX_MODEL_OPTIONS).map { ModelChoice(it, it, it, "", false) }
     AgentKind.OPENCODE -> (daemonModels ?: emptyList()).map { ModelChoice(it, it, it, "", false) }
     // KIMI (issue #206): daemon-fed aliases from `kimi provider list --json` (FetchModels channel)
@@ -716,17 +711,16 @@ internal fun modelChoicesFor(agent: AgentKind, daemonModels: List<String>?, gate
         .map { ModelChoice(it, it, it, "", false) }
     // window pill derives from the protocol table, so registering a new alias THERE is the only edit
     AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { (name, alias) ->
-        val pick = claudeRowPick(alias, gatewayUrl)
-        val big = contextWindowFor(pick) == LARGE_CONTEXT_WINDOW
-        ModelChoice(name, pick, pick, if (big) "1M" else "200K", big)
+        val big = contextWindowFor(alias) == LARGE_CONTEXT_WINDOW
+        ModelChoice(name, alias, alias, if (big) "1M" else "200K", big)
     }
 }
 
 /** The repo-fed form of [modelChoicesFor] for the NEW-session step (issue #199) — reads the daemon's
- *  cached list for [agent] plus the gateway url, exactly like the live-session picker does. Called from
- *  composition, so both snapshot reads recompose the sheet when the daemon's ModelsList lands. */
+ *  cached list for [agent], exactly like the live-session picker does. Called from composition, so the
+ *  snapshot read recomposes the sheet when the daemon's ModelsList lands. */
 internal fun PocketRepository.newSessionModelChoices(agent: AgentKind): List<ModelChoice> =
-    modelChoicesFor(agent, agentModels[agent]?.models, if (agent == AgentKind.CLAUDE) gatewayBaseUrl.value else null)
+    modelChoicesFor(agent, agentModels[agent]?.models)
 
 /** Context-window pill — filled terracotta for a 1M window, muted outline otherwise. (internal: the
  *  new-session model rows in Permissions.kt wear the same pill, issue #199.) */
@@ -760,7 +754,7 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
     val gatewayUrl = modelPickerGatewayUrl(agent, repo.gatewayBaseUrl.value)
     // daemon list first for codex (real cache: configured default leads, includes ids the static trio
     // lacks); a list may ride WITH an error (last-good + failed refresh). See [modelChoicesFor].
-    val choices = modelChoicesFor(agent, agentModels?.models, gatewayUrl)
+    val choices = modelChoicesFor(agent, agentModels?.models)
     val selected = if (claude) modelAlias(repo.model.value) else repo.model.value
     var switchingTo by remember { mutableStateOf<String?>(null) }
     // close once the daemon confirms the switch (model re-announced through SessionLive)…

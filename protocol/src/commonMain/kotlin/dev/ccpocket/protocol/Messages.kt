@@ -1216,13 +1216,48 @@ data class TurnDone(
 @SerialName("pocket/prompt.ack")
 data class PromptAck(val convoId: String, val promptId: String) : ToPhone
 
-/** An error surfaced to the phone. convoId null = connection-level. */
+/** An error surfaced to the phone. convoId null = connection-level.
+ *
+ *  [repair] (dsh incomplete-install auto-repair): non-null when this error was caused by a broken agent
+ *  CLI install that the daemon can fix by reinstalling it — the app shows a one-tap "repair" button that
+ *  sends [AgentRepairStart]. Trailing optional both ways: an old daemon never sends it, an old app ignores
+ *  the unknown key (no button, graceful degrade). Only a client that understands [AgentRepairProgress]
+ *  acts on it, and that client is exactly the one that sends [AgentRepairStart]. */
 @Serializable
 @SerialName("pocket/error")
 data class PocketError(
     val code: String,
     val message: String,
     val convoId: String? = null,
+    val repair: AgentRepairOffer? = null,
+) : ToPhone
+
+/** An offer to auto-repair a broken agent CLI install. Rides [PocketError.repair] when a turn/session
+ *  died because the agent's install is missing files (e.g. dsh's `npm i -g` dropped a nested dependency
+ *  and Node crashes with `ERR_MODULE_NOT_FOUND` / `Cannot find package` / `failed to import loader entry`).
+ *  [reason] is a short human explanation; [command] is the exact shell the daemon will run, shown in the
+ *  confirm affordance so the tap is never a blind action. */
+@Serializable
+data class AgentRepairOffer(
+    val agent: AgentKind,
+    val reason: String,
+    val command: String,
+)
+
+/** daemon -> phone: progress of an [AgentRepairStart]. [line] is a stdout/stderr tail line to show live
+ *  (null on pure status ticks); [done] flips true when the reinstall finished, [ok] whether it succeeded,
+ *  [error] the failure summary when it did not. Sent only to the client that asked (the reply to its
+ *  [AgentRepairStart]) — an old client that never sends the request never receives this, and one that does
+ *  necessarily understands it. */
+@Serializable
+@SerialName("pocket/agent.repair.progress")
+data class AgentRepairProgress(
+    val convoId: String,
+    val agent: AgentKind = AgentKind.DSH,
+    val line: String? = null,
+    val done: Boolean = false,
+    val ok: Boolean = false,
+    val error: String? = null,
 ) : ToPhone
 
 /**
@@ -2114,6 +2149,17 @@ data class ClientCaps(
 ) : ToDaemon
 
 // ── agent model listing ─────────────────────────────────────────────────
+
+/** phone -> daemon: run the auto-repair offered by [PocketError.repair] — reinstall the agent CLI so its
+ *  missing files come back, after which the next prompt relaunches it clean. The daemon streams
+ *  [AgentRepairProgress] back to the asking client. Only a client that renders the offer sends this; an
+ *  old daemon drops the unknown frame (no repair, the manual reinstall path in the message still stands). */
+@Serializable
+@SerialName("pocket/agent.repair")
+data class AgentRepairStart(
+    val convoId: String,
+    val agent: AgentKind = AgentKind.DSH,
+) : ToDaemon
 
 /** client -> daemon: fetch the model list for one backend from the Mac daemon. */
 @Serializable

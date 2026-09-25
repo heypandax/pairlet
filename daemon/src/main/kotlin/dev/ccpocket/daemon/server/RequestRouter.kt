@@ -37,6 +37,9 @@ import dev.ccpocket.protocol.ApprovalGrantMutationResult
 import dev.ccpocket.protocol.FetchApprovalHistory
 import dev.ccpocket.protocol.RevokeGrant
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AgentRepairStart
+import dev.ccpocket.protocol.AgentRepairProgress
+import dev.ccpocket.daemon.dsh.DshRepairService
 import dev.ccpocket.protocol.AGENT_WIRE_DSH
 import dev.ccpocket.protocol.AGENT_WIRE_KIMI
 import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
@@ -868,6 +871,19 @@ class RequestRouter(
             }
             is SwitchMode -> registry.switchMode(frame)
             is SwitchServiceTier -> registry.switchServiceTier(frame)
+            // dsh incomplete-install one-tap repair (rides [PocketError.repair]): reinstall the CLI whose
+            // broken npm install crashed the session, then the next prompt respawns it clean. OWNER-only —
+            // a global `npm i -g` is a machine-wide side effect no guest/bridge/collaborator credential may
+            // trigger (their capability whitelists already default-deny this unknown frame; this is the
+            // in-router echo of that boundary). Off the inbound loop like RunShellCommand: the reinstall
+            // takes minutes and must never wedge the shared socket.
+            is AgentRepairStart -> if (origin == null && guestScope == null && collabScope == null) {
+                if (frame.agent == AgentKind.DSH) {
+                    scope.launch(Dispatchers.IO) { DshRepairService.repair(frame.convoId, sink::emit) }
+                } else {
+                    sink.emit(AgentRepairProgress(frame.convoId, frame.agent, done = true, ok = false, error = "auto-repair is only available for DeepSeek Harness"))
+                }
+            }
             // §18.1 P1-7: "clear this rule" must reach BOTH stores that can hold it — the conversation's
             // agent allowRules AND the quick terminal's — or tightening leaves a shadow rule auto-running
             is ClearAllowRule -> {

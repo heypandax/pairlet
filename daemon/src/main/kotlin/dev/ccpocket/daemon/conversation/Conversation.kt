@@ -35,6 +35,8 @@ import dev.ccpocket.protocol.PendingApproval
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
+import dev.ccpocket.protocol.AgentRepairOffer
+import dev.ccpocket.daemon.dsh.DshLauncher
 import dev.ccpocket.protocol.PromptAck
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.StreamPiece
@@ -2433,11 +2435,20 @@ class Conversation(
             // init (bad session id, context overflow) used to surface as a bare "agent process ended",
             // and a multi-line runtime crash used to surface as only its version footer (issue #328)
             val why = p.stderrDiagnostic()?.let { " — $it" } ?: ""
-            val summary = "agent process ended (exit ${p.exitCode() ?: "?"})$why".take(MAX_EXIT_SUMMARY_CHARS)
+            // dsh incomplete-install (confirmed on a real Windows box, 2026-09): a `npm i -g` that dropped a
+            // nested dependency makes dsh's node process crash at boot with an ERR_MODULE_NOT_FOUND / loader
+            // failure. It is repairable by reinstalling dsh, so ride a one-tap [AgentRepairOffer] on the same
+            // error the user already sees, instead of the bare cryptic stderr. Scan the whole retained tail:
+            // the decisive line is often above the version footer stderrDiagnostic surfaces.
+            val dshRepair = if (backend.kind == AgentKind.DSH &&
+                DshLauncher.looksLikeIncompleteInstall(p.stderrTail().joinToString("\n")))
+                AgentRepairOffer(AgentKind.DSH, DshLauncher.incompleteInstallHint(), DshLauncher.REPAIR_COMMAND) else null
+            val summary = ((if (dshRepair != null) DshLauncher.incompleteInstallHint() + " " else "") +
+                "agent process ended (exit ${p.exitCode() ?: "?"})$why").take(MAX_EXIT_SUMMARY_CHARS)
             Diagnostics.report(ErrorPath.TURN, Stage.EXIT, ErrorCode.PROCESS_EXITED,
                 metrics = SafeMetrics(exitCode = p.exitCode(), backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }), isError = true)
             promptDiagnostics.processExited(generation)
-            sink.emit(PocketError("process_exited", summary, convoId))
+            sink.emit(PocketError("process_exited", summary, convoId, repair = dshRepair))
             // an UNEXPECTED death is exactly what a locked phone must hear about (issue #138): the
             // session died with no TurnDone push coming. Same hook + presence gate as a failed turn;
             // stderr rides as the error summary (a usage-limit refusal printed there words the push).

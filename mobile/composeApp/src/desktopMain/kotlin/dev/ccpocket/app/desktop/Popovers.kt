@@ -103,7 +103,6 @@ import dev.ccpocket.app.ui.AutoSizeSingleLineText
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
-import dev.ccpocket.app.ui.claudeRowPick
 import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
 import dev.ccpocket.app.ui.GatewayModelPreset
 import dev.ccpocket.app.ui.GatewayVendorMonogram
@@ -613,8 +612,7 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
             AgentKind.DSH -> model.modelsForAgent(AgentKind.DSH).map { it to it }
             // Claude keeps its static alias rows (labels + the 1M/200K semantics live in the shared
             // table) — the daemon's list for Claude is config-default + the same aliases anyway.
-            // claudeRowPick: on a gateway the Opus row degrades to the bare alias (#167/#168).
-            AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { (label, pick) -> label to claudeRowPick(pick, model.gatewayBaseUrl) }
+            AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { (label, alias) -> label to alias }
         }
         if (model.chatAgent == AgentKind.OPENCODE && options.isEmpty()) {
             Text(

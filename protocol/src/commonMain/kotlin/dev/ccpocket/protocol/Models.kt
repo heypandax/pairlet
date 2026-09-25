@@ -84,18 +84,11 @@ val DAEMON_SUPPORTED_AGENT_WIRES = listOf(
  * populated dynamically; these current family ids only prevent an empty picker on a fresh/offline install. */
 val CODEX_MODEL_IDS = listOf("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
 
-/** Claude alias set — the ONE id family that is meaningless to the other backends. */
+/** Claude alias set — the ONE id family that is meaningless to the other backends. The picker rows send
+ *  these bare aliases and let the CLI's own catalog resolve them (Opus 5 → 5.5 happened inside the CLI;
+ *  we never pin a full id on the user's behalf). A concrete id only ever reaches `--model` when the user
+ *  typed it in Custom — that explicit pick is honoured verbatim, on the official endpoint and gateways alike. */
 val CLAUDE_MODEL_ALIAS_IDS = setOf("fable", "opus", "sonnet", "haiku")
-
-/** The full id the Opus picker row sends on the official endpoint: the CLI's bare `opus` alias still
- *  resolves to Opus 4.8, so reaching Opus 5 needs the id `--model` passes through verbatim. */
-const val CLAUDE_OPUS_5 = "claude-opus-5"
-
-/** Legacy bare "opus" written by older builds (picker rows, persisted defaults, per-session params)
- *  follows the Opus row forward to Opus 5. Callers keep gateways exempt: there the alias is the
- *  contract — vendors map it onto their own tiers, while a native id rots (#167/#168). */
-fun migrateLegacyClaudeModel(model: String?): String? =
-    if (model.equals("opus", ignoreCase = true)) CLAUDE_OPUS_5 else model
 
 /** OpenCode model ids must include their provider prefix, e.g. "opencode/deepseek-v4-flash-free". */
 fun isOpenCodeModelId(model: String?): Boolean = model?.trim()?.let { '/' in it && it.substringBefore('/').isNotBlank() && it.substringAfter('/').isNotBlank() } == true

@@ -959,6 +959,9 @@
     <string name="limit_autocontinue">Auto-continue</string>
     <string name="limit_confirmed">Will continue at %1$s</string>
     <string name="limit_undo">Undo</string>
+    <string name="repair_banner">DeepSeek Harness install is incomplete</string>
+    <string name="repair_button">Repair</string>
+    <string name="repair_running">Reinstalling DeepSeek Harness…</string>
 
     <!-- ── desktop shell (issue #181) ─────────────────────────────── -->
     <!-- generic actions & tokens -->

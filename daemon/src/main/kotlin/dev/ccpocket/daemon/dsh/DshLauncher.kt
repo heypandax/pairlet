@@ -132,6 +132,38 @@ object DshLauncher {
         "this DeepSeek Harness has no `acp` profile — cc-pocket needs dsh $MIN_VERSION or newer " +
             "(npm i -g @deepseek-ai/dsh@latest, Node >= 22.12)."
 
+    /**
+     * True when dsh's stderr shows an INCOMPLETE npm install — a file inside its own node_modules is
+     * missing, so Node aborts loading a plugin. Confirmed on a real Windows box (2026-09): a `npm i -g`
+     * that dropped the nested `@earendil-works/pi-ai` package makes dsh crash at boot with exactly this
+     * chain, and reinstalling dsh fixes it. The same dsh/Node/OS with a COMPLETE install runs fine, so
+     * this is neither a version nor a launch-flag problem — it is repairable by reinstalling.
+     *
+     * Signatures, any of which is decisive:
+     *  - `ERR_MODULE_NOT_FOUND` / `Cannot find package` — Node's own resolver giving up on a real file,
+     *  - `failed to import loader entry` / `failed to apply loader entry` — dsh's cordis loader reporting
+     *    the same underneath, which is what the user actually sees first.
+     *
+     * Deliberately NOT matched: `unknown profile` / `no app` (that is a too-old dsh → [outdatedHint], not
+     * a missing file a reinstall of the SAME version would restore) and plain engine errors ([launchHint]).
+     */
+    fun looksLikeIncompleteInstall(stderr: String?): Boolean {
+        val s = stderr?.lowercase() ?: return false
+        return "err_module_not_found" in s ||
+            "cannot find package" in s ||
+            "cannot find module" in s ||
+            "failed to import loader entry" in s ||
+            "failed to apply loader entry" in s
+    }
+
+    /** What to tell a user whose dsh install is incomplete, paired with [repairCommand] as the one-tap fix. */
+    fun incompleteInstallHint(): String =
+        "this DeepSeek Harness install is incomplete — a file inside its package is missing, so it can't " +
+            "start. Reinstalling it fixes this."
+
+    /** The exact command the one-tap repair runs (and what the message names so the tap is never blind). */
+    const val REPAIR_COMMAND: String = "npm i -g @deepseek-ai/dsh@latest"
+
     /** Default permission ceiling for a dsh session. `workspace-write` matches dsh's own default. */
     const val DEFAULT_PERMISSION_MODE = "workspace-write"
 }

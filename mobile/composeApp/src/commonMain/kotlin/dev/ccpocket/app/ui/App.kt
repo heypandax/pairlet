@@ -3431,6 +3431,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     horizontalAlignment = wideColumnAlignment,
                 ) {
                     LimitResetBanner(repo) // usage-limit hit → one-tap "auto-continue after reset" (issue #137)
+                    AgentRepairBanner(repo) // dsh incomplete install → one-tap reinstall
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
                     val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
                     LaunchedEffect(capturing) { if (capturing) attachSheet = false }

@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -65,6 +66,9 @@ import dev.ccpocket.app.resources.limit_banner
 import dev.ccpocket.app.resources.limit_confirmed
 import dev.ccpocket.app.resources.limit_resets
 import dev.ccpocket.app.resources.limit_undo
+import dev.ccpocket.app.resources.repair_banner
+import dev.ccpocket.app.resources.repair_button
+import dev.ccpocket.app.resources.repair_running
 import dev.ccpocket.app.resources.schedule_confirm
 import dev.ccpocket.app.resources.schedule_confirm_daily
 import dev.ccpocket.app.resources.schedule_custom_time
@@ -484,6 +488,50 @@ fun LimitResetBanner(repo: PocketRepository) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         if (confirmed != null) LimitConfirmedContent(repo, confirmed) else LimitOfferContent(repo, offer!!)
+    }
+}
+
+/**
+ * dsh one-tap auto-repair banner: shown when a session died on an incomplete agent-CLI install the daemon
+ * offered to fix ([PocketRepository.repairOffer]). Same slim card frame as [LimitResetBanner]. Tapping
+ * "Repair" runs the reinstall; while it runs the card flips to a spinner + the newest npm output line.
+ */
+@Composable
+fun AgentRepairBanner(repo: PocketRepository) {
+    val convo = repo.convoId.value
+    val offer = repo.repairOffer.value?.takeIf { it.convoId == convo }
+    val running = repo.repairProgress.value?.takeIf { it.convoId == convo && it.running }
+    if (offer == null && running == null) return
+    Row(
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 2.dp)
+            .heightIn(min = 52.dp).clip(RoundedCornerShape(12.dp))
+            .background(Tok.warn.copy(alpha = 0.13f))
+            .border(1.dp, Tok.warn.copy(alpha = 0.33f), RoundedCornerShape(12.dp))
+            .padding(start = 14.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
+        if (running != null) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Tok.warn)
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(Res.string.repair_running), color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                running.lastLine?.let {
+                    Text(it, color = Tok.tx2, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        } else {
+            Icon(HourglassGlyph, null, tint = Tok.warn, modifier = Modifier.size(17.dp))
+            Text(
+                stringResource(Res.string.repair_banner), color = Tok.tx, fontSize = 13.5.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+            )
+            Row(
+                Modifier.height(34.dp).clip(RoundedCornerShape(9.dp)).background(Tok.accent)
+                    .clickable { repo.startAgentRepair() }.padding(horizontal = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(stringResource(Res.string.repair_button), color = Tok.base, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
     }
 }
 

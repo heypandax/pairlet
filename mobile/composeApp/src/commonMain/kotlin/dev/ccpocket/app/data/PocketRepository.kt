@@ -217,6 +217,8 @@ import dev.ccpocket.protocol.ReadFile
 import dev.ccpocket.protocol.ReadFileDiff
 import dev.ccpocket.protocol.SessionFiles
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AgentRepairStart
+import dev.ccpocket.protocol.AgentRepairProgress
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PeerPresence
@@ -255,7 +257,6 @@ import dev.ccpocket.protocol.AuthLoginCode
 import dev.ccpocket.protocol.AuthLogout
 import dev.ccpocket.protocol.AuthState
 import dev.ccpocket.protocol.compatibleModelForAgent
-import dev.ccpocket.protocol.migrateLegacyClaudeModel
 import dev.ccpocket.protocol.isModelCompatibleWithAgent
 import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.DeletePreset
@@ -764,9 +765,8 @@ class PocketRepository(
     private val defaultDshModel = mutableStateOf(SecureStore.getString(K_DEFAULT_DSH_MODEL)?.takeIf { it.isNotEmpty() })
 
     fun defaultModelFor(agent: AgentKind): String? = when (agent) {
-        // legacy persisted bare "opus" follows the Opus row to Opus 5. Official endpoint only: on a
-        // gateway the alias IS the contract (#167 — vendors map it onto their own tiers).
-        AgentKind.CLAUDE -> defaultModel.value.let { if (gatewayBaseUrl.value == null) migrateLegacyClaudeModel(it) else it }
+        // stored verbatim: a bare alias follows the CLI's own resolution, a full id is the user's explicit pin
+        AgentKind.CLAUDE -> defaultModel.value
         AgentKind.CODEX -> defaultCodexModel.value
         AgentKind.OPENCODE -> defaultOpenCodeModel.value
         AgentKind.KIMI -> defaultKimiModel.value
@@ -4012,7 +4012,16 @@ class PocketRepository(
             // §6: the daemon accepts exactly REVIEW + REVIEW_READ_ONLY in v1 and refuses every other known
             // (but not yet fully implemented) combination by name. Route it to the handoff surfaces instead
             // of dropping an "error:" line into an unrelated transcript.
-            is PocketError -> if (f.code == "handoff_not_supported") {
+            is PocketError -> {
+                // dsh incomplete-install one-tap repair (rides PocketError.repair): capture the offer for
+                // THIS conversation regardless of which error sub-branch renders the text below. The error
+                // row still shows; the offer just arms the repair banner (see startAgentRepair).
+                f.repair?.let { r ->
+                    if (f.convoId == null || f.convoId == convoId.value) {
+                        repairOffer.value = RepairOffer(f.convoId ?: convoId.value ?: "", r.agent, r.reason, r.command)
+                    }
+                }
+                if (f.code == "handoff_not_supported") {
                 handoffCreating.value = false
                 handoffAccepting.value = null
                 handoffError.value = f.message
@@ -4045,6 +4054,26 @@ class PocketRepository(
                     promptEvidence(exactPrompt = true)
                     finishThinking(); streaming.value = false
                     noteCurrentSettledSeen(sessionKey.value ?: currentSessionId)
+                }
+            }
+            }
+            // dsh one-tap repair progress (see startAgentRepair): npm's live output → a status line; the
+            // terminal frame flips ok/error and, on success, re-drives the prompt the crash lost.
+            is AgentRepairProgress -> if (f.convoId == null || f.convoId == convoId.value) {
+                val cid = f.convoId ?: convoId.value ?: ""
+                val cur = repairProgress.value
+                if (f.done) {
+                    repairProgress.value = (cur ?: RepairProgress(cid, f.agent, running = false))
+                        .copy(running = false, done = true, ok = f.ok, error = f.error)
+                    if (f.ok) {
+                        messages.add(ChatItem.Sys("${f.agent.name.lowercase()} reinstalled — retrying your message…"))
+                        resendAfterRepair()
+                    } else {
+                        messages.add(ChatItem.Sys("couldn't reinstall ${f.agent.name.lowercase()}: ${f.error ?: "unknown error"}. As a fallback, run `npm i -g @deepseek-ai/dsh@latest` in a terminal."))
+                    }
+                } else {
+                    repairProgress.value = (cur ?: RepairProgress(cid, f.agent, running = true))
+                        .copy(running = true, lastLine = f.line ?: cur?.lastLine)
                 }
             }
             // The daemon no longer holds this conversation (idle-reaped during a link drop / daemon restart).
@@ -4981,6 +5010,30 @@ class PocketRepository(
      *  (design: scheduled-prompts.jsx C2) with its Undo. Cleared wherever [limitOffer] is. */
     val limitConfirmed = mutableStateOf<LimitOffer?>(null)
 
+    /** One-tap agent-CLI auto-repair (dsh incomplete install): set when a turn died with a
+     *  [PocketError.repair] offer — the daemon confirmed the crash is a broken install it can reinstall.
+     *  The banner offers [startAgentRepair]; cleared on session switch and when a manual send moves on. */
+    data class RepairOffer(
+        val convoId: String,
+        val agent: AgentKind,
+        val reason: String,
+        val command: String,
+    )
+    val repairOffer = mutableStateOf<RepairOffer?>(null)
+
+    /** Live progress of an in-flight [startAgentRepair]: null when idle. [running] is true while npm is
+     *  reinstalling; [lastLine] mirrors the newest npm output line; on finish [done] flips with [ok]/[error]. */
+    data class RepairProgress(
+        val convoId: String,
+        val agent: AgentKind,
+        val running: Boolean,
+        val lastLine: String? = null,
+        val done: Boolean = false,
+        val ok: Boolean = false,
+        val error: String? = null,
+    )
+    val repairProgress = mutableStateOf<RepairProgress?>(null)
+
     private fun armScheduleDeadline() {
         scheduleError.value = null
         scheduleDeadline?.cancel()
@@ -5080,6 +5133,37 @@ class PocketRepository(
         }?.let { cancelSchedule(it.id) }
         limitConfirmed.value = null
         limitOffer.value = offer
+    }
+
+    /**
+     * One-tap dsh auto-repair: ask the daemon to reinstall the broken agent CLI ([AgentRepairStart]).
+     * Progress streams back as [AgentRepairProgress] into [repairProgress]; on success the last prompt is
+     * auto-resent (the reinstalled CLI respawns on the next send). Returns false when there is no offer.
+     */
+    fun startAgentRepair(): Boolean {
+        val offer = repairOffer.value ?: return false
+        repairOffer.value = null
+        repairProgress.value = RepairProgress(offer.convoId, offer.agent, running = true)
+        messages.add(ChatItem.Sys("reinstalling ${offer.agent.name.lowercase()} — this can take a minute…"))
+        scope.launch { send(AgentRepairStart(offer.convoId, offer.agent)) }
+        return true
+    }
+
+    /** Re-drive the last prompt after a successful repair (mirrors [resendStalledPrompt] without the
+     *  turn-stalled guard): the crashed CLI is gone, so a fresh send lazily respawns the now-complete
+     *  install. No new "You" bubble — the original send's bubble is still on screen. */
+    private fun resendAfterRepair() {
+        val c = convoId.value ?: return
+        val retry = promptRetry ?: return
+        val freshId = newPromptId()
+        promptRetry = PromptRetry(retry.text, retry.images, retry.workdir, freshId)
+        activePromptId = freshId
+        promptResendArmed = false
+        promptPending = true
+        promptQueued = false
+        streaming.value = true
+        scope.launch { send(SendPrompt(c, retry.text, retry.images, promptId = freshId)) }
+        armPromptWatchdog()
     }
 
     // ── folder-share (issue #115): OWNER control plane + GUEST redeem ──
@@ -6284,6 +6368,7 @@ class PocketRepository(
         turnStartMark = null // …nor stamp its send time onto this session's TurnEnded duration / stop-refill window
         clearAskQueue()
         limitOffer.value = null; limitConfirmed.value = null // the auto-continue offer belongs to the session that hit the limit (#137)
+        repairOffer.value = null; repairProgress.value = null // the dsh repair offer belongs to the crashed session
         chatTitle.value = title // resumed sessions carry their list title; new sessions fill in from the first prompt
         autoFocusComposer.value = resumeId == null // a just-created session opens on an empty composer — pop the keyboard right away
         // restore the session's last-known launch flags: shows the right badge immediately (no default flash)
@@ -6299,11 +6384,9 @@ class PocketRepository(
             startPermissionMode?.takeIf { openAgent == AgentKind.CLAUDE && it == CLAUDE_PERMISSION_MODE_AUTO }
         // Each backend seeds from its own persisted default. The compatibility guard is the final defence against
         // an old/corrupt preference crossing agent families; null means that CLI chooses its configured default.
-        // a session saved under an older build may carry bare "opus" — that now means Opus 5 on the
-        // official endpoint (defaultModelFor applies the same migration to the persisted default)
-        val savedModel = saved?.model?.let {
-            if (openAgent == AgentKind.CLAUDE && gatewayBaseUrl.value == null) migrateLegacyClaudeModel(it) else it
-        }
+        // the saved model is restored verbatim: a bare alias ("opus") follows whatever the installed CLI
+        // resolves it to today, a full id was the user's explicit pin and stays exactly that
+        val savedModel = saved?.model
         // an explicit new-session pick (issue #199) leads: it was made for THIS open, so it outranks both
         // the session's remembered model and the Settings default. Same compatibility guard as the rest.
         val openModel = compatibleModelForAgent(openAgent, startModel)
@@ -6680,6 +6763,7 @@ class PocketRepository(
         promptQueued = streaming.value // a send into a running turn gets QUEUED by the CLI — flavors the ack→turn watchdog
         streaming.value = true
         limitOffer.value = null; limitConfirmed.value = null // a manual send supersedes the auto-continue offer (#137)
+        repairOffer.value = null // a manual send supersedes the repair offer (the user chose to move on)
         promptRetry = workdir.value?.let { PromptRetry(outText, images, it, promptId) }
         promptResendArmed = false
         Telemetry.track(TelEvent.PromptSent, demoTag())
@@ -7852,12 +7936,9 @@ class PocketRepository(
             // still restore per-session, same as openSession.
             val saved = sessionParams[sid]
             val agent = saved?.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
-            // A session saved under an older build may carry bare "opus" — resume it through the same legacy
-            // migration openSession applies (Opus 5 on the official endpoint), or "Continue here" relaunches
-            // on Opus 4.8. Migrate BEFORE the compatibility guard, exactly as openSession does.
-            val savedModel = saved?.model?.let {
-                if (agent == AgentKind.CLAUDE && gatewayBaseUrl.value == null) migrateLegacyClaudeModel(it) else it
-            }
+            // Restored verbatim, exactly as openSession does: an alias follows the CLI's current resolution,
+            // a full id is the user's explicit pin.
+            val savedModel = saved?.model
             val takeoverModel = compatibleModelForAgent(agent, savedModel)
             val requestedEffort = saved?.effort ?: if (agent == AgentKind.CODEX) null else defaultEffortFor(agent)
             val supportedEfforts = supportedReasoningEfforts(agent, takeoverModel)

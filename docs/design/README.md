@@ -9,6 +9,7 @@
 | [UI 设计说明](claude-design-handoff/README.md) | 按主题检索整理后的设计记录、移动端 2.0 及后续修订；原型来源也在这里 |
 | [Mobile UI 2.0 取代关系](claude-design-handoff/mobile-ui-2.0/supersession-map.md) | 区分现用方向与已被取代的早期稿 |
 | [桌面 UI 优化评估](DESKTOP-UI-OPTIMIZATION-EVALUATING.md) | 桌面信息层级与导航优化的评估 |
+| [核心列表与会话体验 v1](claude-design-handoff/core-list-chat-v1/README.md) | 移动端列表／会话设计提案与功能优化方案（未实施） |
 | [Android](android/) / [iOS](ios/) | 平台专项设计 |
 | [macOS 菜单栏](macos-app-menu-bar.md) | 桌面菜单栏设计 |
 | [早期 UI 规格](UI-DESIGN.md)、[早期设计 prompt](CLAUDE-DESIGN-PROMPT.md)、[V1 审计](V1-DESIGN-AUDIT.md)、[V1 补充](V1-DESIGN-SUPPLEMENT.md) | V1 背景资料；视觉取代关系优先参考 Mobile UI 2.0 |

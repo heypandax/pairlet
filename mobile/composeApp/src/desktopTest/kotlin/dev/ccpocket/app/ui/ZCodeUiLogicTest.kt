@@ -40,10 +40,9 @@ class ZCodeUiLogicTest {
             modelChoicesFor(
                 AgentKind.ZCODE,
                 listOf("zai/glm-5", "deepseek-v4-pro", "sonnet", "bigmodel/glm-5"),
-                gatewayUrl = null,
             ).map { it.id },
         )
-        assertEquals(emptyList(), modelChoicesFor(AgentKind.ZCODE, null, gatewayUrl = null))
+        assertEquals(emptyList(), modelChoicesFor(AgentKind.ZCODE, null))
     }
 
     @Test
@@ -54,10 +53,10 @@ class ZCodeUiLogicTest {
         assertEquals(null, modelPickerGatewayUrl(AgentKind.ZCODE, claudeGateway))
         assertEquals(null, modelPickerGatewayUrl(AgentKind.KIMI, claudeGateway))
 
-        // Gateway presence must not rewrite or add anything to ZCode's provider/model catalog.
+        // ZCode's provider/model catalog is daemon truth only — nothing gateway-shaped is mixed in.
         assertEquals(
             listOf("zai/glm-5"),
-            modelChoicesFor(AgentKind.ZCODE, listOf("zai/glm-5"), gatewayUrl = claudeGateway).map { it.pick },
+            modelChoicesFor(AgentKind.ZCODE, listOf("zai/glm-5")).map { it.pick },
         )
     }
 

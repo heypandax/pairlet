@@ -295,7 +295,7 @@ fun DesktopApp(
                     model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
                     // same table the live-session picker reads (issue #199) — one definition of "which models"
                     modelsFor = { a ->
-                        dev.ccpocket.app.ui.modelChoicesFor(a, model.modelsForAgent(a), if (a == AgentKind.CLAUDE) model.gatewayBaseUrl else null)
+                        dev.ccpocket.app.ui.modelChoicesFor(a, model.modelsForAgent(a))
                     },
                     defaultModelFor = { a -> model.defaultModelFor(a) },
                     // #333: the same daemon answer the model rows come from — empty means no preset row

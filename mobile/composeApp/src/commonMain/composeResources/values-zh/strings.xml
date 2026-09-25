@@ -956,6 +956,9 @@
     <string name="limit_autocontinue">自动继续</string>
     <string name="limit_confirmed">将于 %1$s 自动继续</string>
     <string name="limit_undo">撤销</string>
+    <string name="repair_banner">DeepSeek Harness 安装不完整</string>
+    <string name="repair_button">一键修复</string>
+    <string name="repair_running">正在重装 DeepSeek Harness…</string>
 
     <!-- ── 桌面端（issue #181）──────────────────────────────────── -->
     <!-- 通用动作与状态词 -->

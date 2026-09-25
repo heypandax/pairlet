@@ -28,7 +28,7 @@ private val KNOWN_1M_MODELS = listOf(
  * Bare aliases the phone/daemon can legitimately hold as the "model" before init resolves the real id
  * (`/model opus` pre-first-turn, the picker's optimistic set). Substring matching can't handle these —
  * `"opus"` alone would also match the 200k opus-4-5/4-1 — so they get an exact-match table. Values track
- * what each alias currently resolves to (Opus → 4.8, Sonnet → 5: both natively 1M; Haiku → 200k).
+ * what each alias currently resolves to (Opus → 5.5, Sonnet → 5: both natively 1M; Haiku → 200k).
  */
 private val ALIAS_WINDOWS = mapOf(
     "opus" to LARGE_CONTEXT_WINDOW,

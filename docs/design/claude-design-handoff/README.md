@@ -10,6 +10,7 @@
 
 - [Chat Master v2](chat-master-v2/README.md)：聊天主视图。
 - [Chat Roles v1](chat-roles-v1/README.md)：#397 用户消息的中性容器、来源标签及跨端区分。
+- [Core List Chat v1](core-list-chat-v1/README.md)：核心列表与会话体验设计提案、功能优先级及验收规则（未实施）。
 - [Entry Flow UI 2.0](entry-flow-ui-2.0/README.md) 与 [Implementation Brief](entry-flow-ui-2.0/IMPLEMENTATION_BRIEF.md)：入口流程。
 - [Supporting Surfaces UI 2.0](supporting-surfaces-ui-2.0/README.md)：辅助页面。
 - [Chat Quick Actions UI 2.0](chat-quick-actions-ui-2.0/README.md)：聊天快捷操作。
