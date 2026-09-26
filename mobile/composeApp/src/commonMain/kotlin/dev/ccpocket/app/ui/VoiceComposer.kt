@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -113,11 +114,14 @@ fun ComposerField(
         modifier.heightIn(min = 44.dp).clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape),
         contentAlignment = Alignment.CenterStart,
     ) {
+        // The state IS the IME's buffer (no value round trip); a write held behind a live composition
+        // lands the moment the IME releases the field — see ComposerState.
+        LandPendingWrites(state)
         BasicTextField(
-            state.field, state::onValueChange,
+            state = state.state,
             textStyle = TextStyle(color = Tok.tx, fontSize = 15.sp, lineHeight = 21.sp),
             cursorBrush = SolidColor(Tok.accent),
-            maxLines = 4,
+            lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4),
             modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = textEndInset, top = 11.dp, bottom = 11.dp)
                 .let { m -> focusRequester?.let { m.focusRequester(it) } ?: m },
         )

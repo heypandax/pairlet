@@ -92,7 +92,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -113,6 +112,7 @@ import androidx.compose.ui.draganddrop.awtTransferable
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ChatRow
 import dev.ccpocket.app.ui.contextStatusUi
+import dev.ccpocket.app.ui.LandPendingWrites
 import dev.ccpocket.app.ui.chat.KeepChatReadingPosition
 import dev.ccpocket.app.ui.chat.ProcessGroupRow
 import dev.ccpocket.app.ui.chat.rememberChatPresentationState
@@ -1771,7 +1771,9 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                 // "@file" completion (issue #75): browse the session cwd via the daemon, filter by the typed
                 // leaf, drill into folders. sep is the daemon host's separator (Windows-safe, #19/#22).
                 val sep = model.pathSep
-                val atToken = remember(composer.field.text, composer.field.selection) { atTokenAt(composer.field.text, composer.field.selection.min) }
+                val composerText = composer.text
+                val composerSelection = composer.selection
+                val atToken = remember(composerText, composerSelection) { atTokenAt(composerText, composerSelection.min) }
                 val atDir = atToken?.let { atDirOf(it.query, sep) } ?: ""
                 val atLeaf = atToken?.let { atLeafOf(it.query, sep) } ?: ""
                 // re-list only when the directory part changes — typing the leaf just filters client-side
@@ -1790,8 +1792,8 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                     val token = atToken ?: return
                     val insert = atInsertText(atDir, entry, sep)
                     val from = token.at + 1
-                    val newText = composer.field.text.replaceRange(from, token.end, insert)
-                    composer.update(TextFieldValue(newText, TextRange(from + insert.length)))
+                    val newText = composer.text.replaceRange(from, token.end, insert)
+                    composer.update(newText, TextRange(from + insert.length))
                     if (!entry.isDir) atClosedAt = insert // the just-completed query — don't reopen on this exact value
                 }
                 if (model.pendingFiles.isNotEmpty()) PendingFilesRow(model)
@@ -1829,11 +1831,11 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                         if (model.composer.isEmpty()) {
                             Text(stringResource(Res.string.message_agent_hint, agentName(model.chatAgent)), style = fieldStyle.copy(color = Tok.muted))
                         }
-                        // the model's ComposerState is the ONE source of truth: onValueChange is the only
-                        // path user/IME edits take, and external writes call its explicit methods directly.
+                        // the model's ComposerState is the ONE source of truth: its TextFieldState IS the
+                        // buffer the IME edits, and external writes call its explicit methods directly.
+                        LandPendingWrites(composer)
                         BasicTextField(
-                            value = composer.field,
-                            onValueChange = composer::onValueChange,
+                            state = composer.state,
                             textStyle = fieldStyle,
                             cursorBrush = SolidColor(Tok.accent),
                             modifier = Modifier.fillMaxWidth().focusRequester(composerFocus)
@@ -1884,9 +1886,8 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                                     }
                                     e.key != Key.Enter || e.type != KeyEventType.KeyDown -> false
                                     e.isShiftPressed -> { // ⇧⏎ newline, as the hint row below promises
-                                        val cur = composer.field
-                                        val sel = cur.selection
-                                        composer.update(TextFieldValue(cur.text.replaceRange(sel.min, sel.max, "\n"), TextRange(sel.min + 1)))
+                                        val sel = composer.selection
+                                        composer.update(composer.text.replaceRange(sel.min, sel.max, "\n"), TextRange(sel.min + 1))
                                         true
                                     }
                                     else -> { submit(); true }
