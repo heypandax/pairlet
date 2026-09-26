@@ -26,9 +26,8 @@ object CodexTranscriptReplay {
     fun read(file: Path, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> =
         slice(file, sinceSeq = null, maxMessages = maxMessages, maxFrameTextBytes = maxFrameTextBytes).messages
 
-    /** The (re)open replay with cursor metadata (issue #147) — a DELTA past [sinceSeq] when it can be
-     *  honored, else the full tail window. Codex rows are never patched after the fact, so the shared
-     *  slicer's cross-patch fallback simply never triggers here. */
+    /** A late tool completion patches its original row. The shared slicer falls back to a full window
+     *  when that row was already delivered, so a reconnect cannot lose the outcome in an empty delta. */
     fun slice(
         file: Path,
         sinceSeq: Long?,
@@ -57,6 +56,13 @@ object CodexTranscriptReplay {
     private fun parse(file: Path): ReplayRead<ReplaySlicer.Row> {
         if (!file.exists()) return ReplayRead(emptyList(), 0L, "unavailable")
         val out = ArrayList<ReplaySlicer.Row>()
+        val toolIndices = HashMap<String, Int>()
+        val completions = HashMap<String, Pair<Boolean, Long>>()
+        fun patch(id: String, ok: Boolean, line: Long) {
+            val index = toolIndices[id] ?: return
+            val row = out[index]
+            if (row.msg.ok != ok) out[index] = row.copy(msg = row.msg.copy(ok = ok), patchLine = line)
+        }
         var lineNo = 0L
         var malformed = 0L
         var lastMalformed = -1L
@@ -72,8 +78,16 @@ object CodexTranscriptReplay {
                         malformed++; lastMalformed = lineNo
                         if (firstError == null) firstError = it
                     }.getOrNull() as? JsonObject ?: continue
-                    if (obj.str("type") != "response_item") continue
                     val p = obj.obj("payload") ?: continue
+                    if (obj.str("type") == "event_msg" && p.str("type") == "item_completed") {
+                        val item = p.obj("item") ?: continue
+                        val id = item.str("id") ?: continue
+                        val ok = codexCompletedToolOutcome(item) ?: continue
+                        completions[id] = ok to lineNo
+                        patch(id, ok, lineNo)
+                        continue
+                    }
+                    if (obj.str("type") != "response_item") continue
                     when (p.str("type")) {
                         "message" -> {
                             val text = codexMessageText(p)?.takeIf { it.isNotBlank() } ?: continue
@@ -83,11 +97,26 @@ object CodexTranscriptReplay {
                                 else -> {}
                             }
                         }
-                        "function_call" ->
-                            out += ReplaySlicer.Row(HistoryMessage(ChatRole.TOOL, (p.str("arguments") ?: "").take(1000), tool = p.str("name") ?: "tool"), lineNo)
-                        "web_search_call" -> out += ReplaySlicer.Row(HistoryMessage(ChatRole.TOOL, "", tool = "WebSearch"), lineNo)
-                        "custom_tool_call" ->
-                            out += ReplaySlicer.Row(HistoryMessage(ChatRole.TOOL, (p.str("input") ?: "").take(1000), tool = p.str("name") ?: "tool"), lineNo)
+                        "function_call", "custom_tool_call" -> {
+                            val id = p.str("call_id")
+                            if (id != null) toolIndices[id] = out.size
+                            val completion = completions[id]
+                            val input = if (p.str("type") == "function_call") p.str("arguments") else p.str("input")
+                            out += ReplaySlicer.Row(
+                                HistoryMessage(ChatRole.TOOL, input.orEmpty().take(1000), tool = p.str("name") ?: "tool", ok = completion?.first),
+                                lineNo, completion?.second ?: 0L,
+                            )
+                        }
+                        "web_search_call" -> out += ReplaySlicer.Row(
+                            HistoryMessage(ChatRole.TOOL, "", tool = "WebSearch", ok = codexToolStatus(p.str("status"))), lineNo,
+                        )
+                        "function_call_output", "custom_tool_call_output" -> {
+                            val id = p.str("call_id") ?: continue
+                            if (id in completions) continue // typed completion is authoritative
+                            val index = toolIndices[id] ?: continue
+                            val ok = codexRolloutToolOutcome(out[index].msg.tool.orEmpty(), p) ?: continue
+                            patch(id, ok, lineNo)
+                        }
                     }
                 }
             }

@@ -531,7 +531,9 @@ class CodexBackend(
                 val path = captureFileChange(item)
                 listOf(AgentEvent.AssistantToolUse(id, "Edit", buildJsonObject { path?.let { put("file_path", it) } }))
             }
-            "mcpToolCall" -> listOf(AgentEvent.AssistantToolUse(id, item.str("toolName") ?: "tool", null))
+            "mcpToolCall", "dynamicToolCall" -> listOf(
+                AgentEvent.AssistantToolUse(id, item.str("tool") ?: item.str("toolName") ?: "tool", item.obj("arguments")),
+            )
             "webSearch" -> listOf(AgentEvent.AssistantToolUse(id, "WebSearch", null))
             else -> emptyList() // agentMessage/reasoning flow through deltas; other item kinds are not surfaced
         }
@@ -562,12 +564,16 @@ class CodexBackend(
                 // deltas already streamed this message → don't double-emit; only emit if no delta arrived
                 if (text != null && (id == null || id !in deltaSeen)) listOf(AgentEvent.AssistantText(text)) else emptyList()
             }
-            "commandExecution" -> listOf(
-                AgentEvent.ToolResult(id, item.str("aggregatedOutput"), isError = item.str("status") == "failed"),
-            )
-            "fileChange" -> {
-                val status = item.str("status")
-                listOf(AgentEvent.ToolResult(id, "patch ${status ?: "applied"}", isError = status == "failed" || status == "declined"))
+            "commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall", "webSearch" -> {
+                val ok = codexCompletedToolOutcome(item) ?: return emptyList()
+                val output = when (item.str("type")) {
+                    "commandExecution" -> item.str("aggregatedOutput")
+                    "fileChange" -> "patch ${item.str("status")}"
+                    "mcpToolCall" -> item.obj("error")?.str("message") ?: codexToolOutputText(item.obj("result")?.get("content"))
+                    "dynamicToolCall" -> codexToolOutputText(item["contentItems"])
+                    else -> null
+                }
+                listOf(AgentEvent.ToolResult(id, output, isError = !ok))
             }
             else -> emptyList()
         }

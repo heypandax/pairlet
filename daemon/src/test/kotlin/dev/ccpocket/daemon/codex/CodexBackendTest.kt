@@ -490,6 +490,43 @@ class CodexBackendTest {
     }
 
     @Test
+    fun mcp_and_dynamic_tools_keep_their_name_and_finish_with_an_outcome() = runBlocking {
+        val b = ready(mutableListOf())
+        for (type in listOf("mcpToolCall", "dynamicToolCall")) {
+            val start = b.parse("""{"method":"item/started","params":{"item":{"type":"$type","id":"m1","tool":"read_file","arguments":{"path":"src/a.kt"},"status":"inProgress"}}}""")
+            val use = assertIs<AgentEvent.AssistantToolUse>(start.single())
+            assertEquals("read_file", use.name)
+            assertEquals("src/a.kt", use.input?.str("path"))
+            val done = b.parse("""{"method":"item/completed","params":{"item":{"type":"$type","id":"m1","status":"completed"}}}""")
+            val result = assertIs<AgentEvent.ToolResult>(done.single())
+            assertEquals("m1", result.toolUseId)
+            assertFalse(result.isError)
+        }
+        val search = b.parse("""{"method":"item/completed","params":{"item":{"type":"webSearch","id":"w1","query":"Kotlin"}}}""")
+        assertFalse(assertIs<AgentEvent.ToolResult>(search.single()).isError)
+    }
+
+    @Test
+    fun unsuccessful_tools_never_report_success_for_folding() = runBlocking {
+        val b = ready(mutableListOf())
+        val cases = listOf(
+            """{"type":"commandExecution","status":"declined"}""",
+            """{"type":"commandExecution","status":"completed","exitCode":2}""",
+            """{"type":"fileChange","status":"failed"}""",
+            """{"type":"mcpToolCall","status":"failed","error":{"message":"offline"}}""",
+            """{"type":"mcpToolCall","status":"completed","result":{"isError":true,"content":[]}}""",
+            """{"type":"dynamicToolCall","status":"completed","success":false}""",
+        )
+        for (item in cases) {
+            val result = b.parse("""{"method":"item/completed","params":{"item":$item}}""")
+            assertTrue(assertIs<AgentEvent.ToolResult>(result.single()).isError, item)
+        }
+        for (status in listOf("inProgress", "futureStatus")) {
+            assertTrue(b.parse("""{"method":"item/completed","params":{"item":{"type":"mcpToolCall","id":"m1","status":"$status"}}}""").isEmpty())
+        }
+    }
+
+    @Test
     fun plan_mode_maps_to_read_only_and_bypass_to_never() = runBlocking {
         val wPlan = mutableListOf<String>()
         ready(wPlan, PermissionMode.PLAN).sendPrompt("x", emptyList())
