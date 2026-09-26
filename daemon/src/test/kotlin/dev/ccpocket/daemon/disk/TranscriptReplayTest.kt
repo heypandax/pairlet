@@ -184,6 +184,28 @@ class TranscriptReplayTest {
     }
 
     @Test
+    fun interrupt_placeholder_replays_as_nothing_and_api_failure_still_as_error() {
+        // the CLI writes the SAME "<synthetic>" placeholder to close an interrupted turn (user stop / killed
+        // process), tagged isApiErrorMessage:false. The live path shows nothing for a cancelled turn; the
+        // replay must not paint it as "API request failed". A true API failure (isApiErrorMessage:true, or the
+        // field absent on an older CLI) keeps its error row.
+        val f = tmpFile("stopped.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"用中文"}}""",
+                """{"type":"assistant","isApiErrorMessage":false,"message":{"model":"<synthetic>","content":[{"type":"text","text":"No response requested."}]}}""",
+                """{"type":"user","message":{"role":"user","content":"again"}}""",
+                """{"type":"assistant","isApiErrorMessage":true,"message":{"model":"<synthetic>","content":[{"type":"text","text":"You've hit your session limit"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(listOf("用中文", "again", "You've hit your session limit"), msgs.map { it.text })
+        assertTrue(msgs[2].error)
+    }
+
+    @Test
     fun askuserquestion_replays_as_answered_row_not_raw_json() {
         // issue #110: a resumed/observed AskUserQuestion must replay as the compact (question → answer)
         // row the live path leaves — not the raw questions JSON that read like a Bash dump

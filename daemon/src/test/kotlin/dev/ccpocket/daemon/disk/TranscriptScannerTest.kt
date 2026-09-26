@@ -163,6 +163,25 @@ class TranscriptScannerTest {
         )
         assertEquals(2, TranscriptScanner.syntheticTailStreak(f))
 
+        // two user STOPS in a row leave two placeholders tagged isApiErrorMessage:false — not a dead session
+        val stopped = dir.resolve("sess-stopped.jsonl")
+        stopped.writeText(
+            listOf(
+                """{"type":"assistant","isApiErrorMessage":false,"message":{"model":"<synthetic>","content":[{"type":"text","text":"No response requested."}]}}""",
+                """{"type":"assistant","isApiErrorMessage":false,"message":{"model":"<synthetic>","content":[{"type":"text","text":"No response requested."}]}}""",
+            ).joinToString("\n"),
+        )
+        assertEquals(0, TranscriptScanner.syntheticTailStreak(stopped))
+        // …while a stop followed by a real API failure counts from the failure only
+        val mixed = dir.resolve("sess-mixed.jsonl")
+        mixed.writeText(
+            listOf(
+                """{"type":"assistant","isApiErrorMessage":false,"message":{"model":"<synthetic>","content":[{"type":"text","text":"No response requested."}]}}""",
+                """{"type":"assistant","isApiErrorMessage":true,"message":{"model":"<synthetic>","content":[{"type":"text","text":"limit"}]}}""",
+            ).joinToString("\n"),
+        )
+        assertEquals(1, TranscriptScanner.syntheticTailStreak(mixed))
+
         val healthy = dir.resolve("sess-ok.jsonl")
         healthy.writeText("""{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"hi"}]}}""")
         assertEquals(0, TranscriptScanner.syntheticTailStreak(healthy))

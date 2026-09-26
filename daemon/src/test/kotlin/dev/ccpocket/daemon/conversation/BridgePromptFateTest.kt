@@ -123,10 +123,12 @@ class BridgePromptFateTest {
         // 冷恢复现场：init → 孤儿通知 → 空终态。请求的 prompt 尚无 UserReplay。
         harness(listOf(listOf(init, leftoverNotification, settlementResult))) { convo, frames ->
             convo.sendPrompt("修复登录页", promptId = "req-1")
-            val done = awaitTurnDones(1, frames)
-            assertTrue(done.single().finalText.isNullOrBlank(), "结算轮必须是空文本终态才构成 #285 现场")
-            // 归属凭证：终态帧到了，但请求未开始执行——引擎的归属门凭这个 PENDING 拒绝结算/释放。
-            // （进程保活由引擎侧负责：槽位安装即 cancelRelease，未消费期间不再武装新的释放任务。）
+            // 结算轮的空文本 result 现在在 daemon 侧就被识别为「非回合结束」：不出 TurnDone、不清 executing
+            // （手机的转圈不停、关闭会话也不会误杀正在请求的进程）。请求本身仍是 PENDING。
+            withTimeout(10_000) { while (!convo.isExecuting()) delay(20) }
+            delay(1_500) // 给一个（错误的）TurnDone 足够时间冒出来
+            assertTrue(frames().none { it is TurnDone }, "结算轮不得作为回合结束发给客户端")
+            assertTrue(convo.isBusy(), "请求尚未被消费，进程必须保活")
             assertEquals(PromptFate.PENDING, convo.promptFate("req-1"))
         }
     }
@@ -138,9 +140,9 @@ class BridgePromptFateTest {
         val segments = listOf(listOf(init, leftoverNotification, settlementResult, replay("修复登录页"), result("已修好")))
         harness(segments) { convo, frames ->
             convo.sendPrompt("修复登录页", promptId = "req-1")
-            val done = awaitTurnDones(2, frames)
+            val done = awaitTurnDones(1, frames)
             assertEquals(PromptFate.CONSUMED, convo.promptFate("req-1"), "UserReplay 是消费凭证")
-            assertEquals("已修好", done.last().finalText, "真实终态必须还在、且可归属给这条请求")
+            assertEquals("已修好", done.single().finalText, "真实终态必须还在、且可归属给这条请求；结算噪音不占一帧")
         }
     }
 

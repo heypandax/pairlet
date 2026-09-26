@@ -1957,6 +1957,12 @@ class Conversation(
 
     private suspend fun pump(p: AgentProcess, b: PermissionBridge, generation: Long) {
         var turnCompleted = false
+        // has THIS process echoed a top-level user message yet? Until it has, no `result` it emits can be the
+        // answer to a prompt of ours — see the leftover-task settlement rule in the TurnResult branch.
+        var sawUserReplay = false
+        // …and did it deliver leftover task_notifications before that first echo? That batch is what the
+        // settlement's empty `result` closes; without it an early empty result is not one we recognise.
+        var leftoverTasksSettling = false
         for (line in p.stdout) {
             lastActivityMs = System.currentTimeMillis()
             for (ev in backend.parse(line)) {
@@ -2110,6 +2116,7 @@ class Conversation(
                         }
                     }
                     is AgentEvent.BackgroundTaskUpdated -> {
+                        if (!sawUserReplay) leftoverTasksSettling = true
                         finishSubagentFromTask(ev)
                         val now = System.currentTimeMillis()
                         if (workflows.onTaskSettled(ev.taskId, ev.status, now)) {
@@ -2205,6 +2212,26 @@ class Conversation(
                         lastSyntheticText = ev.text // issue #208: retain for error attribution
                     }
                     is AgentEvent.TurnResult -> {
+                        // A resumed Claude CLI first settles the previous process's leftover background tasks:
+                        // a task_notification batch followed by an EMPTY-text `result` — before it echoes (and
+                        // starts) the prompt that launched it (probed 2.1.206; the bridge's PromptFate ledger
+                        // already refuses to attribute it, #285). Treating it as a turn end anyway was worse
+                        // than noise: it emitted a TurnDone (the phone stopped its spinner on a prompt that
+                        // had not started), pushed a "complete" for nothing, and cleared `executing` — so a
+                        // phone that closed the chat on that "done" found the conversation idle and KILLED
+                        // the process mid-request (the 23:26 "用中文" that never got an answer). Signature:
+                        // this process has echoed no user message yet, the text is blank, and it is not an
+                        // error/interrupt/API-failure placeholder (those must always surface — a bad resume
+                        // id fails exactly here) — and it follows a leftover task_notification batch, which is
+                        // the only thing the CLI settles this way (an early empty result with no such batch is
+                        // left alone: fixtures and unknown CLI paths keep today's behaviour). Claude-only: the
+                        // settlement is a Claude CLI behaviour; other backends' ordering is not probed.
+                        if (leftoverTasksSettling && !sawUserReplay && ev.finalText.isNullOrBlank() && !ev.isError &&
+                            !interruptRequested && !sawSyntheticThisTurn && backend.kind == AgentKind.CLAUDE
+                        ) {
+                            log.info("$convoId pre-replay empty result: leftover-task settlement, not a turn end")
+                            continue
+                        }
                         turnCompleted = true
                         // Revoke only the ACTIVE lease. A grant staged for a later queued prompt must survive
                         // a phantom/continuation result from the prior turn, but it still grants NOTHING until
@@ -2324,6 +2351,7 @@ class Conversation(
                     // matching prompt reached the model — settle its ledger entry. A parent-tagged
                     // replay is a sub-agent's inner user line, never one of ours.
                     is AgentEvent.UserReplay -> if (ev.parentId == null) {
+                        sawUserReplay = true
                         // Consumption is first-class start evidence for a queued turn. Install executing
                         // before removing its pending-prompt shield so no directory reader can see a gap.
                         markExecuting()

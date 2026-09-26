@@ -326,6 +326,11 @@ object TranscriptScanner {
      * API call failing, typically past its context window — ends in [user, synthetic]+ pairs, so a
      * streak ≥ 2 seeds [dev.ccpocket.protocol.SessionLive.degraded] on resume: the phone warns before
      * the user pours more prompts into a transcript that can only bloat (issue #65).
+     *
+     * Only API-FAILURE placeholders count (`isApiErrorMessage` true, or absent on an older CLI). The
+     * placeholder the CLI writes to close an interrupted turn carries `isApiErrorMessage: false` and is
+     * evidence of neither health nor rot — it resets the run like a real reply, so two user stops in a
+     * row can't seed a healthy session as degraded (the live path's interrupt rule, mirrored).
      */
     fun syntheticTailStreak(file: Path): Int {
         if (!file.exists()) return 0
@@ -338,7 +343,8 @@ object TranscriptScanner {
                 if (obj.str("type") != "assistant") continue
                 if (obj.bool("isSidechain") == true) continue // subagent turns share the file but aren't this session's replies
                 val model = (obj["message"] as? JsonObject)?.str("model")
-                streak = if (model == "<synthetic>") streak + 1 else 0
+                val apiFailure = model == "<synthetic>" && obj.bool("isApiErrorMessage") != false
+                streak = if (apiFailure) streak + 1 else 0
             }
         }
         return streak

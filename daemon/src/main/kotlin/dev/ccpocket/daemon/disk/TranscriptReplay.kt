@@ -180,10 +180,14 @@ object TranscriptReplay {
     private fun assistantBlocks(obj: JsonObject): List<Pair<HistoryMessage, String?>> {
         val message = obj["message"] as? JsonObject
         val content = message?.get("content") as? JsonArray ?: return emptyList()
-        // `<synthetic>` = the CLI's API-failure placeholder, not a real reply — flag it so the phone
-        // replays it as an error row instead of a normal answer (issue #65; live turns get the same
-        // treatment via StreamParser). Old clients ignore the flag and render the text as before.
+        // `<synthetic>` = a CLI-written placeholder, not a real reply. Two kinds share the model tag, told
+        // apart by the record's `isApiErrorMessage`: true = every API call failed (replay as an error row —
+        // issue #65; live turns get the same treatment via StreamParser); false = the CLI closing an
+        // INTERRUPTED turn ("No response requested." after a user stop / a killed process). The live path
+        // shows nothing for a cancelled turn, so the replay shows nothing either — painting it as "API
+        // request failed" told users their own stop was an outage. Absent field (older CLI) = error, as before.
         val synthetic = message.str("model") == "<synthetic>"
+        if (synthetic && obj.bool("isApiErrorMessage") == false) return emptyList()
         val items = ArrayList<Pair<HistoryMessage, String?>>()
         for (el in content) {
             val block = el as? JsonObject ?: continue
@@ -391,4 +395,5 @@ object TranscriptReplay {
     }
 
     private fun JsonObject?.str(key: String): String? = (this?.get(key) as? JsonPrimitive)?.contentOrNull
+    private fun JsonObject?.bool(key: String): Boolean? = (this?.get(key) as? JsonPrimitive)?.booleanOrNull
 }
