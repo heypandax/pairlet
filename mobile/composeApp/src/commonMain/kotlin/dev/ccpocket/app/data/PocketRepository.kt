@@ -6734,10 +6734,10 @@ class PocketRepository(
         // an evaluation, and an unregistered link never delays the prompt itself.
         registrar.trigger(TriggerReason.PROMPT_SENT)
         val c = convoId.value ?: return false
+        openSessionId()?.let(PushDismissal::dismiss) // issue #389: typing here = looking here; clear its tray alerts
         if (includeAttachments && uploadsBusy()) return false // sends with attachments wait for uploads
         val ready = if (includeAttachments) pendingImages.filter { it.state == ImgState.Ready }.map { it.bytes } else emptyList()
         val landed = if (includeAttachments) pendingFiles.filter { it.state == FileUpState.Landed && it.path != null } else emptyList()
-        openSessionId()?.let(PushDismissal::dismiss) // issue #389: typing here = looking here; clear its tray alerts
         if (text.isBlank() && ready.isEmpty() && landed.isEmpty()) return false
         // slash commands bypass the gate — /clear and /compact are exactly how a dead session heals
         if (sessionDegraded.value && !degradedSendArmed && !text.trimStart().startsWith("/")) {
@@ -7552,10 +7552,10 @@ class PocketRepository(
     ) {
         val a = pendingAsk.value ?: return
         val c = convoId.value ?: return
+        openSessionId()?.let(PushDismissal::dismiss) // issue #389: answered in the open chat — its tray alerts are stale
         advanceAsk()
         pendingApprovals.remove(ApprovalKey(a.convoId, a.askId))
         if (decision == Decision.ALLOW && (remember || grantScope == "session")) a.rule?.let { r ->
-        openSessionId()?.let(PushDismissal::dismiss) // issue #389: answered in the open chat — its tray alerts are stale
             if (r !in allowRules) allowRules.add(r)
             messages.add(ChatItem.RuleChip(r)) // drop the "always allowing X" chip into the stream
         }
@@ -7700,10 +7700,10 @@ class PocketRepository(
     fun answerQuestions(answers: Map<String, String>?, response: String? = null) {
         val a = pendingAsk.value ?: return
         val c = convoId.value ?: return
+        openSessionId()?.let(PushDismissal::dismiss) // issue #389: answered in the open chat — its tray alerts are stale
         advanceAsk()
         messages.add(ChatItem.QuestionsAnswered(answeredItems(a, answers, response)))
         Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to "answered"))
-        openSessionId()?.let(PushDismissal::dismiss) // issue #389: answered in the open chat — its tray alerts are stale
         scope.launch { send(PermissionVerdict(c, a.askId, Decision.ALLOW, answers = answers, response = response)) }
     }
 
