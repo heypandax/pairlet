@@ -2,7 +2,12 @@
 
 本文件是仓库共享 Agent 规则的唯一维护入口；[CLAUDE.md](CLAUDE.md)通过导入本文件复用规则。新增或更新共享约定写在这里，避免两份副本漂移。
 
-手机 App 通过零知识 E2E relay 驱动本机 AI 编程 Agent（Claude Code、Codex 等）的伴侣工具。组成：`mobile/`（Compose Multiplatform App）、`daemon/`（本机 Kotlin/JVM 守护进程）、`relay/`（云端 Ktor 中转，源站地址在 `.env` 的 `RELAY_HOST`，Cloudflare 前置 `pocket.ark-nexus.cc`）、`protocol/`（共享 wire 协议）。
+手机 App 通过零知识 E2E relay 驱动本机 AI 编程 Agent（Claude Code、Codex 等）的伴侣工具。组成：`mobile/`（Compose Multiplatform App）、`daemon/`（本机 Kotlin/JVM 守护进程）、`relay/`（云端 Ktor 中转，源站地址在 `.env` 的 `RELAY_HOST_HK`，Cloudflare 前置 `pocket.ark-nexus.cc`；`RELAY_HOST` 是 2026-07-08 已停用的旧机器，别连）、`protocol/`（共享 wire 协议）。
+
+## 沟通语言
+
+- 面向用户的输出（回复、汇报、提问、计划说明、commit/PR 描述里的说明性文字）一律用中文；代码、标识符、命令、日志和引用的原文保持原样。
+- 引用英文报错或文档时可保留原文，但解释和结论用中文。
 
 ## 仓库内容与归档
 
@@ -68,9 +73,9 @@ tail -f ~/Library/Logs/cc-pocket/daemon.err.log
 
 ## relay（云端中转）
 
-- 部署：改完 `relay/` 代码后 `JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :relay:installDist` 再 `bash scripts/redeploy-relay.sh`（读 `.env` 的 `RELAY_HOST` / `SSHPASS`）。
+- 部署：改完 `relay/` 代码后 `JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :relay:installDist` 再 `bash scripts/redeploy-relay.sh`（读 `.env` 的 `RELAY_HOST_HK` / `SSHPASS_HK`）。
 - 坑：relay 的 `MAX_FRAME` 曾是 256KB，大会话历史帧（>256KB）会被 `FrameTooBigException` 踢断连接；源码已改 4MB，**改完记得重新部署**，否则线上仍是旧值。
-- 只读排查：`sshpass -e ssh -o PubkeyAuthentication=no root@$RELAY_HOST 'journalctl -u cc-pocket-relay -n 50'`（`RELAY_HOST` 读 `.env`）。
+- 只读排查：`ssh root@$RELAY_HOST_HK 'journalctl -u cc-pocket-relay -n 50'`（`RELAY_HOST_HK` 读 `.env`；本机 ssh key 已加到服务器，密码登录会被拒。服务器时区 Asia/Shanghai，`[conn] reason=…` 行是每次断连/拒连的原因；连续几次认证失败会被锁约 30 秒，别循环重试）。
 
 ## Compose UI 铁律：文本垂直对齐必须 tightCenter
 
