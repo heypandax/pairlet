@@ -47,7 +47,15 @@ object ReplaySlicer {
      *  that mutated this row after the fact (a sub-agent's tool_result, an AskUserQuestion's answers)
      *  — 0 when never patched. A patch that lands PAST a client's cursor while its target row sits
      *  BEFORE it makes a pure-append delta unable to represent the mutation → full fallback. */
-    data class Row(val msg: HistoryMessage, val line: Long, val patchLine: Long = 0L)
+    data class Row(val msg: HistoryMessage, val line: Long, val patchLine: Long = 0L) {
+        /** The row as it goes on the wire: its transcript cursor stamped into [HistoryMessage.seq] when the
+         *  backend left it unset (only the Claude replay stamps its own, for #282 rewind anchors). Every replay
+         *  frame's `firstSeq` is a row line, so a consumer that has to re-anchor a window on a row — the
+         *  per-client frame fitter dropping its oldest rows — needs the same number on the row itself, for
+         *  any backend that pages. A compact summary stays unstamped on purpose: it is never a rewind anchor
+         *  and the fitter drops it rather than anchor on it. */
+        fun stamped(): HistoryMessage = if (msg.seq == null && !msg.compactSummary) msg.copy(seq = line) else msg
+    }
 
     /**
      * The (re)open replay: a DELTA continuation when [sinceSeq] can be honored cleanly, else the same
@@ -76,7 +84,7 @@ object ReplaySlicer {
             val crossPatched = rows.any { it.line <= sinceSeq && it.patchLine > sinceSeq }
             val fresh = rows.filter { it.line > sinceSeq }
             if (!crossPatched && fresh.size <= maxMessages) {
-                val msgs = ReplayBudget.fit(fresh.map { it.msg }, maxBytes)
+                val msgs = ReplayBudget.fit(fresh.map { it.stamped() }, maxBytes)
                 if (msgs.size == fresh.size) {
                     return ReplaySlice(
                         msgs,
@@ -90,7 +98,7 @@ object ReplaySlicer {
             // fall through: the cursor can't be honored cleanly — full window below
         }
         val capped = if (rows.size > maxMessages) rows.subList(rows.size - maxMessages, rows.size) else rows
-        val msgs = ReplayBudget.fit(capped.map { it.msg }, maxBytes)
+        val msgs = ReplayBudget.fit(capped.map { it.stamped() }, maxBytes)
         val kept = capped.subList(capped.size - msgs.size, capped.size)
         return ReplaySlice(
             msgs,
@@ -107,7 +115,7 @@ object ReplaySlicer {
     fun page(rows: List<Row>, beforeSeq: Long, limit: Int, maxBytes: Long): ReplaySlice {
         val older = rows.filter { it.line < beforeSeq }
         val capped = if (older.size > limit) older.subList(older.size - limit, older.size) else older
-        val msgs = ReplayBudget.fit(capped.map { it.msg }, maxBytes)
+        val msgs = ReplayBudget.fit(capped.map { it.stamped() }, maxBytes)
         val kept = capped.subList(capped.size - msgs.size, capped.size)
         return ReplaySlice(
             msgs,

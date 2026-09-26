@@ -133,6 +133,17 @@ class RequestRouterManagedSessionsTest {
     )
 
     @Test
+    fun the_client_caps_declaration_sets_the_frame_cap() = runBlocking {
+        val r = router(service())
+        val caps = RequestRouter.ClientCapsHolder()
+        assertEquals(dev.ccpocket.protocol.LEGACY_CLIENT_MAX_FRAME_BYTES, caps.maxFrameBytes) // undeclared: the shipped-iOS assumption
+        r.handle(ClientCaps(maxFrameBytes = dev.ccpocket.protocol.WIRE_MAX_FRAME_BYTES), Conn(caps), caps = caps)
+        assertEquals(dev.ccpocket.protocol.WIRE_MAX_FRAME_BYTES, caps.maxFrameBytes)
+        r.handle(ClientCaps(), Conn(caps), caps = caps) // a re-declaration without the field falls back, never inherits
+        assertEquals(dev.ccpocket.protocol.LEGACY_CLIENT_MAX_FRAME_BYTES, caps.maxFrameBytes)
+    }
+
+    @Test
     fun the_client_caps_declaration_sets_the_bit_and_egress_gates_both_frames_per_connection() = runBlocking {
         val r = router(service())
         val caps = RequestRouter.ClientCapsHolder()

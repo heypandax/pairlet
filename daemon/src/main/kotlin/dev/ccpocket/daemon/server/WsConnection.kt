@@ -23,7 +23,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicLong
 import io.ktor.websocket.Frame as WsFrame
@@ -301,11 +300,14 @@ class WsConnection(
                     val refusal = body.requestId != null && body.error != null
                     if (!refusal && body.subscriptionId != caps.pinSubscriptionId) continue
                 }
-                val text = PocketJson.encodeToString(env)
+                // KTOR-6963: a shipped iOS build drops the whole link on any message over 1 MiB, whatever the
+                // relay allows. Shrink what can be shrunk (history windows, tool images, file bodies) to THIS
+                // connection's declared cap right before sealing — the writer is where the size is final.
+                val bytes = FrameFitter.encodeWithin(env, caps.maxFrameBytes) { log.warn("frame cap: $it") }
                 // the writer is the ONLY sealer — the GCM send counter advances strictly in order
                 val ws: WsFrame = if (crypto != null) {
-                    WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, crypto.seal(text.encodeToByteArray())))
-                } else WsFrame.Text(text)
+                    WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, crypto.seal(bytes)))
+                } else WsFrame.Text(bytes.decodeToString())
                 // bounded write: on a zombie phone socket a send stalls forever (TCP buffer fills, no error),
                 // wedging this writer and, once outbox fills, every pump feeding it. Stalled → tear down.
                 if (withTimeoutOrNull(WRITE_TIMEOUT_MS) { session.outgoing.send(ws) } == null) {

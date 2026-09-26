@@ -10,6 +10,7 @@ import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.util.B64Url
 import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.Envelope
+import dev.ccpocket.protocol.WIRE_MAX_FRAME_BYTES
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.LanHello
 import dev.ccpocket.protocol.PocketJson
@@ -57,7 +58,7 @@ class DirectE2EConnection {
     private val client = HttpClient {
         install(WebSockets) {
             pingIntervalMillis = 20_000
-            maxFrameSize = 4L * 1024 * 1024 // big history replays travel this path too (matches relay cap)
+            maxFrameSize = MAX_FRAME_BYTES // big history replays travel this path too (matches relay cap; see RelayE2EConnection)
         }
     }
     private val outbox = ScopedOutbox()
@@ -199,10 +200,13 @@ class DirectE2EConnection {
         }
     }
 
-    private companion object {
+    companion object {
+        /** Same ceiling as the relay leg — one number the app declares, whichever transport carries the frame. */
+        const val MAX_FRAME_BYTES: Long = WIRE_MAX_FRAME_BYTES
+
         // LAN/loopback: sub-second when reachable. Kept tight so an offline direct address only briefly
         // delays the relay fallback (the user-visible cost of trying direct first).
-        const val DIRECT_HANDSHAKE_TIMEOUT_MS = 3_000L
+        private const val DIRECT_HANDSHAKE_TIMEOUT_MS = 3_000L
     }
 }
 

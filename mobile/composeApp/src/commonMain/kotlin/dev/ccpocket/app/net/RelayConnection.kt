@@ -1,6 +1,7 @@
 package dev.ccpocket.app.net
 
 import dev.ccpocket.protocol.Envelope
+import dev.ccpocket.protocol.WIRE_MAX_FRAME_BYTES
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PocketJson
 import io.ktor.client.HttpClient
@@ -21,7 +22,7 @@ class RelayConnection {
     private val client = HttpClient {
         install(WebSockets) {
             pingIntervalMillis = 20_000
-            maxFrameSize = 4L * 1024 * 1024 // accept big frames forwarded from the daemon (matches relay cap)
+            maxFrameSize = WIRE_MAX_FRAME_BYTES // accept big frames forwarded from the daemon (matches relay cap)
         }
     }
     private val outbox = Channel<Frame>(Channel.BUFFERED)

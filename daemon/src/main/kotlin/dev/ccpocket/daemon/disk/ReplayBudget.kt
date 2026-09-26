@@ -135,8 +135,9 @@ object ReplayBudget {
         return n
     }
 
-    /** Longest prefix of [s] whose UTF-8 size is <= [maxBytes], never splitting a surrogate pair. */
-    private fun takeUtf8(s: String, maxBytes: Long): String {
+    /** Longest prefix of [s] whose UTF-8 size is <= [maxBytes], never splitting a surrogate pair.
+     *  Internal for the per-client frame fitter (server/FrameFitter), which clips a file body the same way. */
+    internal fun takeUtf8(s: String, maxBytes: Long): String {
         var used = 0L
         var i = 0
         while (i < s.length) {

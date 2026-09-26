@@ -988,8 +988,14 @@ class DeviceSessions(
             }
             if (!allowed) return
         }
+        // KTOR-6963: a shipped iOS build drops the whole link on any message over 1 MiB, whatever the relay
+        // allows. The frame is sized to the LIVE connection's declared cap (the newest handshake's holder —
+        // no link means the frame is undeliverable anyway, see below) before it is sealed.
+        val cap = mutex.withLock { sessions[deviceId]?.activeCaps?.maxFrameBytes } ?: return
         val json = try {
-            PocketJson.encodeToString(Envelope(nextId.getAndIncrement().toString(), 0L, body = frame))
+            dev.ccpocket.daemon.server.FrameFitter.encodeWithin(
+                Envelope(nextId.getAndIncrement().toString(), 0L, body = frame), cap,
+            ) { log.warn("frame cap for ${deviceId.take(8)}…: $it") }
         } catch (error: Exception) {
             Diagnostics.report(ErrorPath.PAYLOAD_SEND, DiagnosticStage.ENCODE, ErrorCode.UNEXPECTED, error)
             throw error
@@ -1000,7 +1006,7 @@ class DeviceSessions(
         // means this device never handshook (or was revoked/pruned) — the frame is undeliverable, drop it.
         val payload = mutex.withLock {
             val live = sessions[deviceId]?.active ?: return
-            Wire.payload(Wire.TRANSPORT, live.seal(json.encodeToByteArray()))
+            Wire.payload(Wire.TRANSPORT, live.seal(json))
         }
         try { send(deviceId, payload) } catch (error: Exception) {
             Diagnostics.report(ErrorPath.PAYLOAD_SEND, DiagnosticStage.WRITE, ErrorCode.SEND_FAILED, error,

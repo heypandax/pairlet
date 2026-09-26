@@ -325,6 +325,22 @@ class RequestRouter(
         /** issue #380 live folding: the client wants an outcome-only RESULT for every finished ordinary tool. */
         @Volatile var supportsToolOutcomes: Boolean = false
 
+        /** Largest sealed WebSocket message this connection can receive: the client's declared
+         *  [ClientCaps.maxFrameBytes] (clamped by [frameCap]), else the legacy 1 MiB that shipped iOS builds are
+         *  really bound to (KTOR-6963). Both ingress writers consult it right before sealing — see [FrameFitter]. */
+        @Volatile var maxFrameBytes: Long = dev.ccpocket.protocol.LEGACY_CLIENT_MAX_FRAME_BYTES
+
+        companion object {
+            /** No client can usefully take less than the relay's old 256 KB ceiling, under which everything shipped. */
+            const val MIN_FRAME_BYTES: Long = 256L * 1024
+
+            /** A declared cap made safe: 0/absent (an old build) keeps the legacy assumption; a real value is
+             *  clamped between [MIN_FRAME_BYTES] and the wire ceiling — the relay drops anything larger anyway. */
+            fun frameCap(declared: Long): Long =
+                if (declared <= 0L) dev.ccpocket.protocol.LEGACY_CLIENT_MAX_FRAME_BYTES
+                else declared.coerceIn(MIN_FRAME_BYTES, dev.ccpocket.protocol.WIRE_MAX_FRAME_BYTES)
+        }
+
         /** Whether this peer can decode [agent]. CLAUDE/CODEX are the baseline vocabulary every shipped
          *  client understands; OPENCODE/KIMI are post-baseline additions each guarded by its own cap. */
         fun allows(agent: AgentKind): Boolean = when (agent) {
@@ -525,6 +541,7 @@ class RequestRouter(
                 caps?.supportsProjectPins = frame.supportsProjectPins // #362: gates pocket/pins.state
                 caps?.supportsManagedSessions = frame.supportsManagedSessions // #360: gates pocket/managed.state + .discovered
                 caps?.supportsToolOutcomes = frame.supportsToolOutcomes // #380: gates outcome-only tool RESULTs
+                caps?.maxFrameBytes = ClientCapsHolder.frameCap(frame.maxFrameBytes) // KTOR-6963: sizes every frame sealed to this connection
             }
 
             is ListDirectories ->

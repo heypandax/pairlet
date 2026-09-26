@@ -2665,7 +2665,10 @@ class PocketRepository(
                 // offers addressed to THIS device. Sending the ordinary volley here would be three refusals.
                 send(ListHandoffs())
             } else {
-                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true, supportsManagedSessions = true, supportsToolOutcomes = true))
+                // maxFrameBytes: what the transports really accept (RelayE2EConnection.MAX_FRAME_BYTES). Declaring it is
+                // what lets the daemon send full-size history windows; a daemon that never hears it sizes every frame
+                // for the 1 MiB shipped iOS builds were bound to (KTOR-6963), shedding pictures from big replays.
+                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true, supportsManagedSessions = true, supportsToolOutcomes = true, maxFrameBytes = dev.ccpocket.app.net.RelayE2EConnection.MAX_FRAME_BYTES))
                 send(ListDirectories())
                 send(ListPendingApprovals)
             }

@@ -2119,6 +2119,18 @@ const val MIN_SCHEDULE_INTERVAL_MS: Long = 60_000L
 
 // ── client capability declaration ───────────────────────────────────────
 
+/** The wire's frame ceiling: the relay's `MAX_FRAME` and the `maxFrameSize` every current transport
+ *  configures. A client that can really receive a message this large says so in [ClientCaps.maxFrameBytes]. */
+const val WIRE_MAX_FRAME_BYTES: Long = 4L * 1024 * 1024
+
+/** What the daemon assumes a client accepts until it declares [ClientCaps.maxFrameBytes]: Apple's
+ *  `NSURLSessionWebSocketTask.maximumMessageSize` default. Shipped iOS builds run a Ktor whose Darwin engine
+ *  never applied our 4 MiB `maxFrameSize` (KTOR-6963, fixed in Ktor 3.3.2), so that 1 MiB is what actually
+ *  bounded them — a bigger history replay dropped the phone's link on every reopen. Android and desktop
+ *  builds could always take the full [WIRE_MAX_FRAME_BYTES]; until they declare it they just get the
+ *  smaller windows too. */
+const val LEGACY_CLIENT_MAX_FRAME_BYTES: Long = 1L * 1024 * 1024
+
 /** client -> daemon, once right after connect: which OPTIONAL wire vocabulary this client build
  *  understands. Old builds decode an UNKNOWN enum value as a whole-Envelope failure and silently
  *  drop the frame (their PocketJson predates coerceInputValues) — so the daemon must NOT emit
@@ -2146,6 +2158,12 @@ data class ClientCaps(
     // tool (ok only — [ToolEvent.outcomeOnly]), not just sub-agents and image results. Undeclared
     // connections keep the START-only stream for ordinary tools.
     val supportsToolOutcomes: Boolean = false,
+    /** Largest E2E-sealed WebSocket message this client can receive, in bytes. 0 (an old build never sends
+     *  the field) = unknown, which the daemon treats as [LEGACY_CLIENT_MAX_FRAME_BYTES]; a build whose
+     *  transport really accepts [WIRE_MAX_FRAME_BYTES] declares that and gets full-size history windows,
+     *  tool images and file bodies. Declaring more than the transport takes is the iOS failure this exists
+     *  to prevent, so the claim must track the Ktor engine it ships with. */
+    val maxFrameBytes: Long = 0,
 ) : ToDaemon
 
 // ── agent model listing ─────────────────────────────────────────────────

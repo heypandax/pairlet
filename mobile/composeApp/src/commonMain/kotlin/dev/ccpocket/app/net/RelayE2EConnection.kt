@@ -13,6 +13,7 @@ import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.AuthError
 import dev.ccpocket.protocol.DeviceHello
 import dev.ccpocket.protocol.Envelope
+import dev.ccpocket.protocol.WIRE_MAX_FRAME_BYTES
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PeerPresence
 import dev.ccpocket.protocol.PocketJson
@@ -56,7 +57,9 @@ class RelayE2EConnection {
     private val client = HttpClient {
         install(WebSockets) {
             pingIntervalMillis = 20_000
-            maxFrameSize = 4L * 1024 * 1024 // accept big frames forwarded from the daemon, e.g. long transcript history replays (matches relay cap)
+            // the ceiling the app also DECLARES to the daemon (ClientCaps.maxFrameBytes): on iOS it only takes effect
+            // from Ktor 3.3.2 (KTOR-6963) — WireFrameCapGuardTest pins that dependency
+            maxFrameSize = MAX_FRAME_BYTES // accept big frames forwarded from the daemon, e.g. long transcript history replays (matches relay cap)
         }
     }
     private val outbox = ScopedOutbox()
@@ -341,6 +344,9 @@ class RelayE2EConnection {
         PocketJson.encodeToString(Envelope("h", 0L, to = Route.RELAY, body = frame))
 
     companion object {
+        /** What this transport accepts per message — the relay's cap, and the app's declared [dev.ccpocket.protocol.ClientCaps.maxFrameBytes]. */
+        const val MAX_FRAME_BYTES: Long = WIRE_MAX_FRAME_BYTES
+
         // #146: how many inbound transport frames must fail to decrypt back-to-back before we treat the
         // socket as deaf and force a re-handshake. >1 so a single stray/reordered frame never trips it;
         // small so a passively-observed long turn heals within a few frames.
