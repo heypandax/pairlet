@@ -56,14 +56,15 @@ class ConversationPushTest {
     private val limitResult =
         """{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Claude AI usage limit reached|1720000000"}"""
 
-    /** Plays [stages] one script file per prompt: each `read` gates the next stage on a sendPrompt. */
+    /** Plays [stages] one script per prompt: each `read` gates the next stage on a sendPrompt. A stage is a
+     *  list of files played back to back with a 1s pause between them (a [SLEEP] marker in the test's lines). */
     private class ScriptedBackend(
-        private val stages: List<Path>, private val thenExit: Boolean, private val dyingStderr: String? = null,
+        private val stages: List<List<Path>>, private val thenExit: Boolean, private val dyingStderr: String? = null,
     ) : AgentBackend {
         override val kind = AgentKind.CLAUDE
         private var io: AgentIo? = null
         override fun processBuilder(spec: AgentSpec): ProcessBuilder {
-            val cats = stages.joinToString("; ") { "read go; cat '${it.absolutePathString()}'" }
+            val cats = stages.joinToString("; ") { chunks -> "read go; " + chunks.joinToString("; sleep 1; ") { "cat '${it.absolutePathString()}'" } }
             val die = dyingStderr?.let { "; echo '$it' >&2" } ?: "" // last stderr line before an unexpected exit
             return ProcessBuilder("sh", "-c", if (thenExit) "$cats$die" else "$cats; sleep 30")
         }
@@ -94,6 +95,7 @@ class ConversationPushTest {
     )
 
     private fun isWindows() = System.getProperty("os.name").lowercase().contains("win")
+    private val SLEEP = "SLEEP"
 
     private fun harness(
         stages: List<List<String>>,
@@ -104,13 +106,15 @@ class ConversationPushTest {
         askOriginLabel: String? = null, // #367 LOW-3
         headlessSink: Boolean = false, // the sole sink is the scheduler's non-watching black hole (C1)
         askPushResult: () -> Boolean = { true },
-        heldPushMaxMs: Long = Conversation.HELD_PUSH_MAX_MS,
         heldPushSettleGraceMs: Long = Conversation.HELD_PUSH_SETTLE_GRACE_MS,
         body: suspend Harness.() -> Unit,
     ) = runBlocking {
         val dir = Files.createTempDirectory("ccp-push-fx")
         val files = stages.mapIndexed { i, lines ->
-            dir.resolve("stage$i.jsonl").apply { writeText(lines.joinToString("\n") + "\n") }
+            // SLEEP splits a stage into chunks played 1s apart (a long-running background agent)
+            val chunks = mutableListOf(mutableListOf<String>())
+            for (line in lines) if (line == SLEEP) chunks.add(mutableListOf()) else chunks.last().add(line)
+            chunks.mapIndexed { j, chunk -> dir.resolve("stage$i-$j.jsonl").apply { writeText(chunk.joinToString("\n") + "\n") } }
         }
         val frames = ArrayList<Frame>()
         val askCalls = CopyOnWriteArrayList<AskCall>()
@@ -134,7 +138,6 @@ class ConversationPushTest {
             },
             pathScope = pathScope,
             askOriginLabel = askOriginLabel,
-            heldPushMaxMs = heldPushMaxMs,
             heldPushSettleGraceMs = heldPushSettleGraceMs,
         )
         try {
@@ -392,16 +395,21 @@ class ConversationPushTest {
     }
 
     @Test
-    fun a_held_push_is_released_by_the_backstop_if_an_agent_never_reports() {
+    fun a_long_running_agent_keeps_the_push_held_and_the_final_turn_still_pushes_once() {
         if (isWindows()) return
-        harness(
-            stages = listOf(listOf(init, bgAgent("a1"), agentStarted("a1"), result("launched"))),
-            heldPushMaxMs = 300,
-        ) {
-            delay(100)
-            assertTrue(turnCalls.isEmpty(), "held while the sub-agent runs")
-            await("backstop push") { turnCalls.isNotEmpty() }
-            assertEquals(TurnCall("launched", null), turnCalls.single())
+        // no wall-clock cap: however long the sub-agent runs, nothing is pushed until it returns and the
+        // main agent's follow-up turn ends — and then exactly one push, with that turn's text
+        val stage = listOf(
+            init, bgAgent("a1"), agentStarted("a1"), result("launched"),
+            SLEEP, agentDone("a1"), init, result("finished"),
+        )
+        harness(stages = listOf(stage), heldPushSettleGraceMs = 100) {
+            await("the launch turn's TurnDone") { synchronized(frames) { frames.any { it is TurnDone } } }
+            delay(700) // well past the settle grace — a wrongly armed timer would have pushed by now
+            assertTrue(turnCalls.isEmpty(), "held while the sub-agent runs, no matter how long")
+            await("the final push") { turnCalls.isNotEmpty() }
+            delay(300)
+            assertEquals(listOf(TurnCall("finished", null)), turnCalls.toList())
         }
     }
 }

@@ -178,9 +178,8 @@ class Conversation(
      *  home anchor, never the daemon's canonicalized absolute form). Announced in SessionLive verbatim so
      *  the guard matches; null → fall back to the canonical [workdir] (pre-#219 behaviour). */
     private val announcedWorkdir: String? = null,
-    // issue #389: bounds on a turn-complete push held back behind background sub-agents (see [heldTurnPush]);
-    // knobs only so tests can exercise the fallbacks without waiting minutes
-    private val heldPushMaxMs: Long = HELD_PUSH_MAX_MS,
+    // issue #389: how long after the last background sub-agent settles, with no continuation turn running,
+    // a held turn-complete push is released (see [heldTurnPush]); a knob only so tests need not wait a minute
     private val heldPushSettleGraceMs: Long = HELD_PUSH_SETTLE_GRACE_MS,
 ) {
     // ── approval design M2 §5.4: the task boundary a TASK grant binds to ──────────────────────────
@@ -203,18 +202,11 @@ class Conversation(
         if (promptId != null) log.info("$convoId task $currentTaskId ← prompt ${promptId.take(8)}…")
     }
 
-    /** Issue #389: park a clean turn's push behind still-running background sub-agents. The first hold of a
-     *  chain arms a [heldPushMaxMs] backstop, so a sub-agent whose completion never arrives costs one late
-     *  push rather than a silent phone; later holds keep the chain's start and just take the newer text. */
+    /** Issue #389: park a clean turn's push behind still-running background sub-agents. A later held turn
+     *  replaces the text; nothing else happens until the chain ends (see [heldTurnPush]). */
     private fun holdTurnPush(finalText: String?) {
-        val previous = heldTurnPush.getAndUpdate { HeldTurnPush(finalText, it?.heldAt ?: System.currentTimeMillis()) }
-        if (previous != null) return
-        val chainStart = heldTurnPush.get()?.heldAt ?: return
-        log.info("$convoId turn push held: background sub-agents still running (#389)")
-        scope.launch {
-            delay(heldPushMaxMs)
-            releaseHeldPush("background sub-agents still running after ${heldPushMaxMs / 1000}s") { it.heldAt == chainStart }
-        }
+        val previous = heldTurnPush.getAndSet(HeldTurnPush(finalText))
+        if (previous == null) log.info("$convoId turn push held: background sub-agents still running (#389)")
     }
 
     /** The last background agent settled (pump side — [jobs] is pump-only). Normally the CLI's continuation
@@ -669,9 +661,13 @@ class Conversation(
     // issue #389: a clean turn ended while background sub-agents were still running. Each of them wakes
     // the main agent again when it finishes (a new turn, a new result), so pushing every one of those
     // results rang the phone once per returning sub-agent. The "complete" push is held here instead and
-    // goes out with the turn that ends with no background agent left — or via the fallbacks in
-    // [holdTurnPush] / [maybeReleaseHeldPush] if that turn never comes. Errors are never held.
-    private data class HeldTurnPush(val finalText: String?, val heldAt: Long)
+    // goes out with the turn that ends with no background agent left. Deliberately NO wall-clock cap on
+    // the hold: a sub-agent may legitimately run for hours, and a "complete" pushed mid-way is exactly the
+    // spurious alert this exists to stop. A live CLI is the authoritative tracker of its own background
+    // tasks (see [reapStaleJobs]), so its task_notification WILL arrive; if the process dies first, the
+    // death path releases or supersedes the hold. Only [maybeReleaseHeldPush]'s short settle grace
+    // remains. Errors are never held.
+    private class HeldTurnPush(val finalText: String?)
     private val heldTurnPush = AtomicReference<HeldTurnPush?>(null)
 
     // healSessionLock already fired for the current prompt — one heal per user action, so a fork that
@@ -3382,12 +3378,10 @@ class Conversation(
         // reported (a fatal error result is often followed by the CLI exiting) — no second alert (#138)
         private const val DEATH_PUSH_QUIET_MS = 10_000L
 
-        // issue #389: a turn-complete push held behind background sub-agents goes out anyway after this
-        // long — the backstop for a completion event that never arrives on a live process
-        const val HELD_PUSH_MAX_MS = 30 * 60 * 1000L
-
-        // …or this long after the last background agent settled when no continuation turn is running
-        // (the CLI normally starts one within ~0.1s, and that turn's result pushes instead)
+        // issue #389: a turn-complete push held behind background sub-agents is released this long after
+        // the last one settled when no continuation turn is running (the CLI normally starts one within
+        // ~0.1s, and that turn's result pushes instead). No wall-clock cap on the hold itself — see
+        // [heldTurnPush] for why.
         const val HELD_PUSH_SETTLE_GRACE_MS = 60_000L
 
         /** True when a conversation's agent must launch CLEAN-ROOM (no MCP, no settings sources — the

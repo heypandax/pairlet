@@ -71,6 +71,9 @@ class ApnsSender(
             .header("apns-topic", topic)
             .header("apns-push-type", "alert")
             .header("apns-priority", "10")
+            // issue #389: one tray entry per session — a newer turn-end push replaces the older one; the app also
+            // cancels by this key (PushDismissal)
+            .apply { collapseId(route)?.let { header("apns-collapse-id", it) } }
             .POST(HttpRequest.BodyPublishers.ofString(payload))
             .build()
         val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
@@ -87,7 +90,12 @@ class ApnsSender(
         else -> false
     }
 
-    private companion object {
-        val FATAL_400_REASONS = listOf("BadDeviceToken", "DeviceTokenNotForTopic", "Unregistered")
+    companion object {
+        private val FATAL_400_REASONS = listOf("BadDeviceToken", "DeviceTokenNotForTopic", "Unregistered")
+
+        /** `apns-collapse-id` for a turn-end push: the session id (APNs caps the header at 64 bytes). Approvals
+         *  and handoff offers never collapse — each one is a distinct thing the user must act on. */
+        internal fun collapseId(route: NotifyRoute?): String? =
+            route?.sessionId?.takeIf { route.kind != "approval" }?.take(64)
     }
 }

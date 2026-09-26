@@ -4,6 +4,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.window.ComposeUIViewController
 import androidx.compose.ui.uikit.OnFocusBehavior
 import dev.ccpocket.app.push.PushController
+import dev.ccpocket.app.push.PushDismissal
 import dev.ccpocket.app.push.PushToken
 import dev.ccpocket.app.telemetry.TelemetrySink
 import dev.ccpocket.app.ui.App
@@ -62,6 +63,10 @@ fun setPushAuthorizationReader(read: ((Int) -> Unit) -> Unit) { PushController.a
  *  recovery an app has once the user denied notifications, since it may not re-prompt. */
 @Suppress("unused")
 fun setPushSettingsOpener(open: () -> Unit) { PushController.settingsOpener = open }
+
+/** Called from iOSApp.swift at launch: removes this session's delivered notifications (issue #389). */
+@Suppress("unused")
+fun setPushDismisser(dismiss: (String) -> Unit) { PushDismissal.dismisser = dismiss }
 
 /** Called from iOSApp.swift right after `FirebaseApp.configure()` to wire the analytics sink. */
 @Suppress("unused")

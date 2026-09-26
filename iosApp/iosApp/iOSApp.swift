@@ -81,6 +81,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         MainViewControllerKt.setPushSettingsOpener {
             DispatchQueue.main.async { AppDelegate.openNotificationSettingsPage() }
         }
+
+        // issue #389: the user is looking at this session — clear its delivered alerts from the tray
+        MainViewControllerKt.setPushDismisser { sid in
+            let center = UNUserNotificationCenter.current()
+            center.getDeliveredNotifications { delivered in
+                let ids = delivered
+                    .filter { ($0.request.content.userInfo["sid"] as? String) == sid }
+                    .map { $0.request.identifier }
+                if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
+            }
+        }
     }
 
     /// iOS 16 added a URL that lands directly on THIS app's notification page; our deployment target is 15.0,

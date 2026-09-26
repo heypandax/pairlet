@@ -6,6 +6,7 @@ import kotlin.concurrent.Volatile // commonMain: Kotlin/Native (iOS) doesn't res
  * The session the phone's chat is showing right now (issue #382), read by the platform push callbacks —
  * iOS `willPresent`, Android `onMessageReceived` — which only run while the App is in the foreground.
  * Written by the UI (App.kt) from the primary repository's open chat; null when no chat is open.
+ * Switching to a session clears that session's delivered tray alerts via [PushDismissal] (issue #389).
  */
 object ForegroundSession {
     @Volatile
@@ -13,7 +14,9 @@ object ForegroundSession {
         private set
 
     fun update(sessionId: String?) {
+        val previous = this.sessionId
         this.sessionId = sessionId
+        if (sessionId != null && sessionId != previous) PushDismissal.dismiss(sessionId)
     }
 
     /** Should a push that arrived while the App is in the foreground show its banner? See [shouldPresentForegroundPush]. */

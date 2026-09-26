@@ -70,28 +70,7 @@ class FcmSender private constructor(
 
     override suspend fun send(token: String, title: String, body: String, route: NotifyRoute?): SendResult {
         val auth = bearer()
-        val payload = buildJsonObject {
-            putJsonObject("message") {
-                put("token", token)
-                putJsonObject("notification") { put("title", title); put("body", body) }
-                // data travels in the tapped launch intent's extras — routes to the right session, or (§3.4,
-                // `hid`) to the offer inbox, which is the only routing an offer alert is allowed to carry
-                route?.let { r ->
-                    putJsonObject("data") {
-                        r.workdir?.let { put("wd", it) }
-                        r.sessionId?.let { put("sid", it) }
-                        r.handoffId?.let { put("hid", it) }
-                        r.kind?.let { put("kind", it) }
-                    }
-                }
-                putJsonObject("android") {
-                    put("priority", "high")
-                    // P2-4: background (system-displayed) approval alerts land on the dedicated channel,
-                    // whose sound/vibration the user configures independently of task-complete
-                    if (route?.kind == "approval") putJsonObject("notification") { put("channel_id", "approvals") }
-                }
-            }
-        }.toString()
+        val payload = payload(token, title, body, route)
         val resp = withContext(Dispatchers.IO) {
             http.send(
                 HttpRequest.newBuilder()
@@ -111,6 +90,44 @@ class FcmSender private constructor(
     }
 
     companion object {
+        /** `android.notification.tag` (issue #389): `<sid>` for a turn-end alert, `approval:<sid>` for an
+         *  approval; null without a session (handoff offers). Mirrored by the app's own posting/cancel keys. */
+        internal fun notificationTag(route: NotifyRoute?): String? =
+            route?.sessionId?.let { if (route.kind == "approval") "approval:$it" else it }
+
+        /** The FCM v1 request body — pure, so the routing/collapse fields are unit-testable without a gateway. */
+        internal fun payload(token: String, title: String, body: String, route: NotifyRoute?): String =
+            buildJsonObject {
+                putJsonObject("message") {
+                    put("token", token)
+                    putJsonObject("notification") { put("title", title); put("body", body) }
+                    // data travels in the tapped launch intent's extras — routes to the right session, or (§3.4,
+                    // `hid`) to the offer inbox, which is the only routing an offer alert is allowed to carry
+                    route?.let { r ->
+                        putJsonObject("data") {
+                            r.workdir?.let { put("wd", it) }
+                            r.sessionId?.let { put("sid", it) }
+                            r.handoffId?.let { put("hid", it) }
+                            r.kind?.let { put("kind", it) }
+                        }
+                    }
+                    putJsonObject("android") {
+                        put("priority", "high")
+                        // P2-4: background (system-displayed) approval alerts land on the dedicated channel,
+                        // whose sound/vibration the user configures independently of task-complete
+                        val channel = if (route?.kind == "approval") "approvals" else null
+                        // issue #389: one tray entry per session and kind — a newer push replaces the older one,
+                        // and the app cancels by the same key once the user is in that session (PushDismissal).
+                        // Approvals get their own key so they never overwrite a turn-end entry (or vice versa).
+                        val tag = notificationTag(route)
+                        if (channel != null || tag != null) putJsonObject("notification") {
+                            channel?.let { put("channel_id", it) }
+                            tag?.let { put("tag", it) }
+                        }
+                    }
+                }
+            }.toString()
+
         /** Build from a service-account JSON file (downloaded from Firebase console → Service accounts). */
         fun fromServiceAccount(json: String): FcmSender {
             val o = PocketJson.parseToJsonElement(json).jsonObject

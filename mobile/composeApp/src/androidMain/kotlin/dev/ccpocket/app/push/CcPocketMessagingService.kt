@@ -49,7 +49,10 @@ class CcPocketMessagingService : FirebaseMessagingService() {
             .setAutoCancel(true)
             .apply { tap?.let(::setContentIntent) }
             .build()
-        nm.notify(message.messageId?.hashCode() ?: 0, notif)
+        // issue #389: post under the same (tag, 0) key FCM's system-tray display uses (relay `notification.tag`:
+        // the session id, or `approval:<sid>`), so a newer alert replaces the older and PushDismissal can cancel it
+        val tag = sid?.let { if (message.data["kind"] == "approval") "approval:$it" else it }
+        if (tag != null) nm.notify(tag, 0, notif) else nm.notify(message.messageId?.hashCode() ?: 0, notif)
     }
 
     companion object {

@@ -53,6 +53,7 @@ import dev.ccpocket.app.pairing.wireReason
 import dev.ccpocket.app.push.FailReason
 import dev.ccpocket.app.push.PairingKey
 import dev.ccpocket.app.push.PairingLink
+import dev.ccpocket.app.push.PushDismissal
 import dev.ccpocket.app.push.PushRegistrar
 import dev.ccpocket.app.push.PushUiStatus
 import dev.ccpocket.app.push.PushTokens
@@ -6733,6 +6734,7 @@ class PocketRepository(
         if (includeAttachments && uploadsBusy()) return false // sends with attachments wait for uploads
         val ready = if (includeAttachments) pendingImages.filter { it.state == ImgState.Ready }.map { it.bytes } else emptyList()
         val landed = if (includeAttachments) pendingFiles.filter { it.state == FileUpState.Landed && it.path != null } else emptyList()
+        openSessionId()?.let(PushDismissal::dismiss) // issue #389: typing here = looking here; clear its tray alerts
         if (text.isBlank() && ready.isEmpty() && landed.isEmpty()) return false
         // slash commands bypass the gate — /clear and /compact are exactly how a dead session heals
         if (sessionDegraded.value && !degradedSendArmed && !text.trimStart().startsWith("/")) {
@@ -7550,6 +7552,7 @@ class PocketRepository(
         advanceAsk()
         pendingApprovals.remove(ApprovalKey(a.convoId, a.askId))
         if (decision == Decision.ALLOW && (remember || grantScope == "session")) a.rule?.let { r ->
+        openSessionId()?.let(PushDismissal::dismiss) // issue #389: answered in the open chat — its tray alerts are stale
             if (r !in allowRules) allowRules.add(r)
             messages.add(ChatItem.RuleChip(r)) // drop the "always allowing X" chip into the stream
         }
@@ -7697,6 +7700,7 @@ class PocketRepository(
         advanceAsk()
         messages.add(ChatItem.QuestionsAnswered(answeredItems(a, answers, response)))
         Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to "answered"))
+        openSessionId()?.let(PushDismissal::dismiss) // issue #389: answered in the open chat — its tray alerts are stale
         scope.launch { send(PermissionVerdict(c, a.askId, Decision.ALLOW, answers = answers, response = response)) }
     }
 
