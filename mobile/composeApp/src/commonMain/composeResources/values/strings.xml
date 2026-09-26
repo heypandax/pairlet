@@ -271,6 +271,12 @@
     <string name="voice_dictation_failed">dictation failed</string>
     <string name="voice_speech_unavailable">speech recognition unavailable</string>
     <string name="voice_audio_engine">audio engine failed to start</string>
+    <string name="voice_setup_transcriber_missing">This computer needs speech recognition software for voice input.</string>
+    <string name="voice_setup_model_missing">This computer needs a speech recognition model for voice input.</string>
+    <string name="voice_setup_converter_missing">This computer needs an audio converter for voice input.</string>
+    <string name="voice_setup_ask_agent">Ask Agent to set up</string>
+    <string name="voice_setup_complete_hint">Check and set up the software, model, and audio converter together.</string>
+    <string name="voice_setup_request">Set up the complete Pairlet local voice input environment on this computer in one task. The diagnostic below reports only the first missing prerequisite. Check all three prerequisites and fix every missing one before finishing; do not stop after fixing only the reported item or ask me to tap setup again.\n\n1. Speech recognition software: check that whisper-cli is available. On macOS, install whisper-cpp with Homebrew if missing (brew install whisper-cpp); use the appropriate installation method on other operating systems.\n2. Speech model: check ~/.cache/cc-pocket/models and ~/.cache/whisper for a usable ggml model. Reuse an existing model or local backup first. If none is available, install ggml-large-v3-turbo-q5_0.bin into ~/.cache/cc-pocket/models/ from https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin. Download to a temporary file, verify completeness and the checksum provided by the source, then enable it. Do not download again when a usable model already exists.\n3. Audio converter: check for afconvert or ffmpeg. Prefer the built-in afconvert on macOS; install ffmpeg only if no usable converter is present.\n\nOnce all three are ready, run a local test covering audio conversion and speech transcription, confirm Pairlet can locate the software and model, and tell me how to retry voice input.\n\nFirst Pairlet diagnostic:\n%1$s</string>
 
     <!-- ── settings (about + paired devices) ─────────────────────── -->
     <string name="settings_title">Settings</string>

@@ -33,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,8 +61,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.data.VoiceSetupIssue
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import org.jetbrains.compose.resources.stringResource
 
 /** Design easing for the recording-bar morph: cubic-bezier(.22,1,.36,1), 220ms. */
@@ -230,7 +233,7 @@ fun ComposerNote(text: String) = ComposerRibbon(text, danger = false)
  * recomposition. Nothing is capped: the text wraps to as many lines as its locale needs.
  */
 @Composable
-private fun ComposerRibbon(text: String, danger: Boolean, modifier: Modifier = Modifier) {
+private fun ComposerRibbon(text: String, danger: Boolean, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
     val shape = RoundedCornerShape(12.dp)
     val line = if (danger) Tok.danger.copy(alpha = 0.33f) else Tok.hair
     Row(
@@ -252,10 +255,13 @@ private fun ComposerRibbon(text: String, danger: Boolean, modifier: Modifier = M
                 Box(Modifier.padding(top = 1.dp).size(6.dp).clip(CircleShape).background(Tok.muted))
             }
         }
-        Text(
-            text, color = if (danger) Tok.danger else Tok.tx2, fontSize = 12.5.sp, lineHeight = 17.sp,
-            fontWeight = if (danger) FontWeight.Medium else FontWeight.Normal,
-        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                text, color = if (danger) Tok.danger else Tok.tx2, fontSize = 12.5.sp, lineHeight = 17.sp,
+                fontWeight = if (danger) FontWeight.Medium else FontWeight.Normal,
+            )
+            action?.invoke()
+        }
     }
 }
 
@@ -449,6 +455,22 @@ fun LiveTranscriptField(final: String, partial: String) {
 @Composable
 fun VoiceErrorChip(message: String) =
     ComposerRibbon(message, danger = true)
+
+/** Setup failures have a short explanation and an explicit send action. The complete diagnostic goes
+ * into the request shown in the conversation, rather than filling the phone with shell commands. */
+@Composable
+fun VoiceSetupChip(issue: VoiceSetupIssue, enabled: Boolean, onRequest: () -> Unit) {
+    val message = stringResource(when (issue) {
+        VoiceSetupIssue.TRANSCRIBER -> Res.string.voice_setup_transcriber_missing
+        VoiceSetupIssue.MODEL -> Res.string.voice_setup_model_missing
+        VoiceSetupIssue.CONVERTER -> Res.string.voice_setup_converter_missing
+    })
+    ComposerRibbon(message + "\n" + stringResource(Res.string.voice_setup_complete_hint), danger = true, action = {
+        TextButton(onClick = onRequest, enabled = enabled, modifier = Modifier.heightIn(min = Metric.touch)) {
+            Text(stringResource(Res.string.voice_setup_ask_agent), style = tightCenter(13.sp), fontWeight = FontWeight.Medium)
+        }
+    })
+}
 
 /** S6: mic permission sheet in the PermissionSheet visual language. */
 @Composable

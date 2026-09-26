@@ -6708,16 +6708,31 @@ class PocketRepository(
      *  or the degraded-session gate (issue #65): the first send into a session whose recent turns were
      *  all API failures is intercepted with an explanation (each such send just bloats the transcript);
      *  sending again goes through. Callers keep the composer text on false. */
+    fun sendPrompt(text: String): Boolean = sendPrompt(text, includeAttachments = true)
+
+    /** An explicit setup action sends its own request, leaving the composer's draft and attachments alone.
+     * Bind the click to the displayed failure and conversation; a stale/double click cannot send elsewhere. */
+    fun requestVoiceSetup(failure: VoiceState.Failed, expectedConvoId: String?, prompt: String): Boolean {
+        if (expectedConvoId == null || convoId.value != expectedConvoId || voice.value !== failure ||
+            failure.setupIssue == null || !connected.value || observing.value || prompt.isBlank()
+        ) return false
+        val handoff = activeHandoff.value
+        if (handoff?.status == HandoffStatus.WAITING ||
+            (handoff?.status == HandoffStatus.IN_PROGRESS && !isHandoffRecipient(handoff))
+        ) return false
+        return sendPrompt(prompt, includeAttachments = false)
+    }
+
     @OptIn(ExperimentalEncodingApi::class)
-    fun sendPrompt(text: String): Boolean {
+    private fun sendPrompt(text: String, includeAttachments: Boolean): Boolean {
         // about to start work whose completion is exactly what a push would announce — a cheap, honest
         // moment to notice that this pairing is not actually registered. Non-blocking: it only enqueues
         // an evaluation, and an unregistered link never delays the prompt itself.
         registrar.trigger(TriggerReason.PROMPT_SENT)
         val c = convoId.value ?: return false
-        if (uploadsBusy()) return false // send waits for uploads to settle (the button shows the spinner)
-        val ready = pendingImages.filter { it.state == ImgState.Ready }.map { it.bytes }
-        val landed = pendingFiles.filter { it.state == FileUpState.Landed && it.path != null }
+        if (includeAttachments && uploadsBusy()) return false // sends with attachments wait for uploads
+        val ready = if (includeAttachments) pendingImages.filter { it.state == ImgState.Ready }.map { it.bytes } else emptyList()
+        val landed = if (includeAttachments) pendingFiles.filter { it.state == FileUpState.Landed && it.path != null } else emptyList()
         if (text.isBlank() && ready.isEmpty() && landed.isEmpty()) return false
         // slash commands bypass the gate — /clear and /compact are exactly how a dead session heals
         if (sessionDegraded.value && !degradedSendArmed && !text.trimStart().startsWith("/")) {
@@ -6758,8 +6773,10 @@ class PocketRepository(
             // so without this it would sit in the switcher under its bare project name forever (#165)
             rememberOpenedSession(workdir.value, sessionKey.value, chatTitle.value, sessionAgent.value)
         }
-        pendingImages.clear()
-        pendingFiles.clear() // landed refs consumed; failed leftovers clear with the send
+        if (includeAttachments) {
+            pendingImages.clear()
+            pendingFiles.clear() // landed refs consumed; failed leftovers clear with the send
+        }
         promptQueued = streaming.value // a send into a running turn gets QUEUED by the CLI — flavors the ack→turn watchdog
         streaming.value = true
         limitOffer.value = null; limitConfirmed.value = null // a manual send supersedes the auto-continue offer (#137)

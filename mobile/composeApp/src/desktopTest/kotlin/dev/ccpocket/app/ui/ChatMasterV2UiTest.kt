@@ -26,6 +26,7 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
@@ -55,6 +56,8 @@ import dev.ccpocket.app.resources.stop
 import dev.ccpocket.app.resources.switcher_open
 import dev.ccpocket.app.resources.transcribing
 import dev.ccpocket.app.resources.voice_transcribe_failed
+import dev.ccpocket.app.resources.voice_setup_ask_agent
+import dev.ccpocket.app.resources.voice_setup_model_missing
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.protocol.ActiveSession
@@ -65,6 +68,7 @@ import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.SessionLive
+import dev.ccpocket.protocol.SendPrompt
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -688,6 +692,40 @@ class ChatMasterV2UiTest {
         assertFullTarget(str(Res.string.retry_voice_input), viewportWidth = 320, minimum = 48f)
         assertEquals(0, controlCount(str(Res.string.dictate)), "the failed action no longer masquerades as Dictate")
         assertEquals(1, controlCount(str(Res.string.send)), "retry remains independent from the staged draft's Send")
+    }
+
+    @Test
+    fun missingVoiceModelCanBeSentToCurrentAgentWithoutTouchingTheDraft() {
+        val diagnostic = "whisper model missing — run on the computer:\nmkdir -p ~/.cache/cc-pocket/models"
+        val sent = mutableListOf<SendPrompt>()
+        baseline(
+            seed = {
+                receiveForTest(live(agent = AgentKind.CODEX, model = "gpt-6-astra"))
+                connected.value = true
+                voice.value = VoiceState.Failed(Res.string.voice_transcribe_failed, diagnostic)
+                onSendForTest = { if (it is SendPrompt) sent += it }
+            },
+            width = 320,
+            fontScale = 1.4f,
+        ) {
+            onAllNodes(hasSetTextAction()).onFirst().performTextInput("keep this draft")
+            advanceFrameAndWait()
+            assertTrue(sent.isEmpty())
+            assertTrue(present(str(Res.string.voice_setup_model_missing), substring = true))
+            assertFalse(present(diagnostic), "the error card explains setup without dumping shell commands")
+            val button = onAllNodes(hasText(str(Res.string.voice_setup_ask_agent)) and hasClickAction()).onFirst()
+            val bounds = button.getUnclippedBoundsInRoot()
+            assertTrue((bounds.bottom - bounds.top).value >= 48f)
+            assertTrue(bounds.left.value >= 0f && bounds.right.value <= 320f)
+            button.performClick()
+            advanceFrameAndWait()
+            assertEquals(1, sent.size)
+            assertEquals(convo, sent.single().convoId)
+            assertTrue(diagnostic in sent.single().text)
+            assertFalse("keep this draft" in sent.single().text)
+            onAllNodes(hasSetTextAction()).onFirst().assertTextContains("keep this draft")
+            assertFalse(present(str(Res.string.voice_setup_ask_agent)), "the accepted request dismisses the setup action")
+        }
     }
 
     /** Failure, upload and streaming may overlap in data, but the composer owns exactly one announcement slot. */

@@ -271,6 +271,12 @@
     <string name="voice_dictation_failed">听写失败</string>
     <string name="voice_speech_unavailable">语音识别不可用</string>
     <string name="voice_audio_engine">音频引擎启动失败</string>
+    <string name="voice_setup_transcriber_missing">这台电脑尚未安装语音识别程序。</string>
+    <string name="voice_setup_model_missing">这台电脑缺少语音识别模型。</string>
+    <string name="voice_setup_converter_missing">这台电脑缺少语音输入所需的音频转换器。</string>
+    <string name="voice_setup_ask_agent">让 Agent 处理</string>
+    <string name="voice_setup_complete_hint">一次检查并补齐程序、模型和音频转换器。</string>
+    <string name="voice_setup_request">请一次性配置好当前电脑上的 Pairlet 本地语音输入环境。下面的报错只代表最先发现的缺项，请完整检查以下三项，补齐所有缺失项后再结束，不要只修复报错里提到的一项，也不要让我再次点击安装。\n\n1. 语音识别程序：检查 whisper-cli 是否可用；macOS 缺失时使用 Homebrew 安装 whisper-cpp（brew install whisper-cpp），其他系统使用适合该系统的安装方式。\n2. 语音模型：检查 ~/.cache/cc-pocket/models 和 ~/.cache/whisper 中是否有可用的 ggml 模型，优先复用已有模型或本地备份。没有时将 ggml-large-v3-turbo-q5_0.bin 安装到 ~/.cache/cc-pocket/models/，下载地址为 https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin。先下载到临时文件，确认完整性并核对来源提供的校验值后再启用；已有可用模型无需重复下载。\n3. 音频转换器：检查 afconvert 或 ffmpeg；macOS 优先使用自带的 afconvert，确实缺少可用转换器时再安装 ffmpeg。\n\n三项都就绪后，做一次包含音频转换和本地语音转写的验证，确认 Pairlet 能找到程序和模型，再告诉我如何重试语音输入。\n\nPairlet 首次诊断信息：\n%1$s</string>
 
     <!-- ── 设置（关于 + 已配对设备）──────────────────────────────── -->
     <string name="settings_title">设置</string>

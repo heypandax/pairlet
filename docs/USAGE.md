@@ -83,8 +83,16 @@ Claude 要执行敏感操作（跑命令、改文件等）时，手机会弹出�
 
 点麦克风开始说话（单段上限 90 秒）：
 
-- **iPhone**：系统级实时听写，文字逐词上屏，不经过网络；
-- **Android／桌面**：录音发回你的 Mac，由 whisper 本地转写（需先 `brew install whisper-cpp`，没装时手机会提示这条命令）。
+- **iPhone**：默认使用系统实时听写；中英混说可在 **设置 → 通用 → 语音输入** 开启 **「用电脑 Whisper 识别」**，说完后由电脑转写；
+- **Android／桌面**：录音发回你的 Mac，由 whisper 本地转写。
+
+使用电脑转写时，如果手机提示缺少语音识别程序、模型或音频转换器，可点 **「让 Agent 处理」**。App 会把完整环境配置请求和诊断发送给当前会话的 Agent，要求它一次检查程序、模型和转换器，补齐所有缺项并验证；已有程序和模型会复用，无需先装程序、再点一次装模型。输入框中的草稿和附件会保留。安装操作仍遵循当前会话的权限设置，完成后点麦克风重试即可。
+
+#### 中英混合识别
+
+在 iPhone 上，先确认 **设置 → 通用 → 语音输入 → 用电脑 Whisper 识别** 已开启。电脑路径默认使用自动语言识别，并传入保留英文原文的提示；默认安装的模型文件为 `ggml-large-v3-turbo-q5_0.bin`，不需要逐个配置英文词的替换规则。
+
+高级设置 `CC_POCKET_WHISPER_LANG` 可指定主语言（默认 `auto`；中文为主可对照测试 `zh`），但固定中文不保证英文拼写更准确。此变量需要设置在运行 daemon 的服务环境中并重启 daemon，仅在终端执行 `export` 不会改变已运行的服务。遇到识别回退，应使用同一段原始录音核对实际引擎、模型、语言、提示词及解码参数；合成语音不能代替用户录音来判断是否修复。
 
 ### 图片附件
 
@@ -138,7 +146,7 @@ cc-pocket-daemon config --isolated-claude-auth on
 |---|---|
 | 手机显示离线／连不上 | 确认电脑开机在线；重启服务：`launchctl unload ~/Library/LaunchAgents/dev.ccpocket.daemon.plist && launchctl load ~/Library/LaunchAgents/dev.ccpocket.daemon.plist` |
 | daemon 找不到 claude | 终端确认 `claude --version` 正常；自定义路径用 `cc-pocket-daemon run --claude-bin /path/to/claude`（或设 `CC_POCKET_CLAUDE_BIN`） |
-| 语音转写报「未安装 whisper」 | 在 Mac 上 `brew install whisper-cpp` 后重试 |
+| 语音转写提示缺程序或模型 | 在提示上点「让 Agent 处理」，完成安装后重试；也可在电脑上手动安装 |
 | 想看 daemon 日志 | 停掉服务后前台跑 `cc-pocket-daemon run`，日志直接打在终端 |
 | 配对码过期 | 重新跑 `cc-pocket-daemon pair`（每次生成限时一次性码） |
 

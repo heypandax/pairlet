@@ -3512,7 +3512,18 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             // and a running turn still keeps Stop below. Stacking multiple polite live regions
                             // here made the same composer announce two competing states (#238).
                             when {
-                                failed != null -> VoiceErrorChip(failed.detail ?: stringResource(failed.res))
+                                failed != null -> {
+                                    val setup = failed.setupIssue
+                                    if (setup == null) {
+                                        VoiceErrorChip(failed.detail ?: stringResource(failed.res))
+                                    } else {
+                                        val prompt = stringResource(Res.string.voice_setup_request, failed.detail.orEmpty())
+                                        val conversation = repo.convoId.value
+                                        VoiceSetupChip(setup, enabled = repo.connected.value && conversation != null) {
+                                            repo.requestVoiceSetup(failed, conversation, prompt)
+                                        }
+                                    }
+                                }
                                 uploadsBusy -> ComposerNote(
                                     stringResource(
                                         Res.string.composer_uploading,
