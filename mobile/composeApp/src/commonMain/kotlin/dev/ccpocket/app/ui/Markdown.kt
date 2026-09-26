@@ -1,9 +1,14 @@
 package dev.ccpocket.app.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,9 +19,17 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.DisableSelection
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,22 +41,38 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.LocalFontScale
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
@@ -220,21 +249,170 @@ fun TruncatedNote(fullChars: Int) {
 
 /**
  * A focused Markdown renderer for assistant output — covers fenced code blocks (language label +
- * copy), inline code, bold, headers, and bullet/numbered lists. Fully themed via [Tok].
+ * copy), GFM tables, `>` blockquotes (with their own copy), headers, bullet lists, inline code and
+ * bold. Fully themed via [Tok].
  */
 @Composable
 fun MarkdownText(text: String, color: Color) {
     val shown = renderClip(text)
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        parseBlocks(shown).forEach { block ->
-            when (block) {
-                is MdBlock.Code -> CodeBlock(block.code, block.lang, block.closed)
-                is MdBlock.Table -> TableBlock(block, color)
-                is MdBlock.Lines -> block.lines.forEach { MdLine(it, color) }
-            }
-        }
+        MdBlocks(parseBlocks(shown), color)
         if (shown.length < text.length) TruncatedNote(text.length)
     }
+}
+
+/** Emits [blocks] into the caller's column — the message body and every [QuoteBlock] body alike.
+ *  [quoteDepth] is how many quotes enclose them, so a nested quote knows it is one. */
+@Composable
+private fun MdBlocks(blocks: List<MdBlock>, color: Color, quoteDepth: Int = 0) {
+    blocks.forEach { block ->
+        when (block) {
+            is MdBlock.Code -> CodeBlock(block.code, block.lang, block.closed)
+            is MdBlock.Table -> TableBlock(block, color)
+            is MdBlock.Quote -> QuoteBlock(block, quoteDepth)
+            is MdBlock.Lines -> block.lines.forEach { MdLine(it, color) }
+        }
+    }
+}
+
+/** Test handle for a quote's copy glyph, which has no text for a matcher to find. */
+internal const val QUOTE_COPY_TAG = "quote-copy"
+
+/**
+ * A `>` blockquote — Chat Quote v1, direction 1a. The quote is part of the Agent's prose, not a card: no
+ * fill, border or radius, just a 2dp muted rule and a 12dp indent, the text in tx2 at body size. The first
+ * version was a filled panel with a bottom-right 复制 — the user turn's own grammar — so a quoted draft read
+ * as a second, louder message. Agents quote the text meant to go elsewhere (a drafted reply), so the quote
+ * keeps a one-tap copy of its own: a glyph floated on its first line, a different form and place from the
+ * reply-level 复制 below. Nested levels get a hair rule, a 10dp indent and no glyph; the outer glyph copies
+ * them along with the rest.
+ */
+@Composable
+private fun QuoteBlock(quote: MdBlock.Quote, depth: Int) {
+    val copyText = remember(quote.text) { mdPlainText(quote.blocks) }
+    val hasGlyph = depth == 0 && copyText.isNotBlank()
+    val (copied, copy) = rememberCopied()
+    // the rule steps up to tx2 while "copied" holds — it marks what was copied — then eases back
+    val ruleColor by animateColorAsState(
+        when { depth > 0 -> Tok.hair; copied -> Tok.tx2; else -> Tok.muted },
+        animationSpec = tween(150),
+    )
+    val indent = if (depth > 0) 10.dp else 12.dp
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val label = when {
+        !hasGlyph -> null
+        copied -> stringResource(Res.string.code_copied)
+        hovered -> stringResource(Res.string.quote_copy)
+        else -> null
+    }
+    val glyph = quoteGlyphMetrics()
+    val labelStyle = tightCenter(12.5.sp * LocalFontScale.current)
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val labelWidth = label?.let { with(density) { measurer.measure(it, labelStyle.copy(fontSize = 12.5.sp * LocalFontScale.current)).size.width.toDp() } }
+    // Room the first line leaves for the float: 8dp from the text, the glyph slot, and the label while
+    // it shows. Compose can't wrap text around a float, so the quote's whole first paragraph narrows,
+    // not only its first visual line.
+    val reserve = if (!hasGlyph) 0.dp else 8.dp + glyph.slot + (labelWidth?.let { it + 6.dp } ?: 0.dp)
+    Box(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.fillMaxWidth()
+                .drawBehind { drawRect(ruleColor, size = Size(2.dp.toPx(), size.height)) }
+                .padding(start = 2.dp + indent),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            val first = quote.blocks.firstOrNull()
+            when {
+                reserve == 0.dp || first == null -> MdBlocks(quote.blocks, Tok.tx2, depth + 1)
+                first is MdBlock.Lines -> {
+                    Box(Modifier.padding(end = reserve)) { MdLine(first.lines.first(), Tok.tx2) }
+                    first.lines.drop(1).forEach { MdLine(it, Tok.tx2) }
+                    MdBlocks(quote.blocks.drop(1), Tok.tx2, depth + 1)
+                }
+                else -> {
+                    Box(Modifier.padding(end = reserve)) { MdBlocks(listOf(first), Tok.tx2, depth + 1) }
+                    MdBlocks(quote.blocks.drop(1), Tok.tx2, depth + 1)
+                }
+            }
+        }
+        if (hasGlyph) {
+            val float = Modifier.align(Alignment.TopEnd)
+            // DisableSelection: a drag-selected turn must not pick up the float's label
+            DisableSelection {
+                QuoteCopyFloat(float, glyph, label, labelStyle, copied, interaction) { copy(copyText) }
+            }
+        }
+    }
+}
+
+/** The quote glyph's geometry; everything steps up once the text is 1.3× or larger. [line] is the body's
+ *  line box, which the float centers on so the glyph sits on the quote's first line. */
+private class QuoteGlyphMetrics(val slot: Dp, val icon: Dp, val disc: Dp, val line: Dp)
+
+@Composable
+private fun quoteGlyphMetrics(): QuoteGlyphMetrics {
+    val density = LocalDensity.current
+    val scale = LocalFontScale.current
+    val large = scale * density.fontScale >= 1.3f
+    // MdLine sets only fontSize, so the body's line box is the ambient style's lineHeight
+    val line = with(density) {
+        LocalTextStyle.current.lineHeight.takeIf { it.isSpecified }?.toDp() ?: (14.sp * scale * 1.5f).toDp()
+    }
+    return if (large) QuoteGlyphMetrics(28.dp, 20.dp, 34.dp, line) else QuoteGlyphMetrics(24.dp, 16.dp, 28.dp, line)
+}
+
+/**
+ * The first-line float: an optional label ("已复制" after a copy, "复制引用" on desktop hover) 6dp before the
+ * glyph slot, both centered on the first line box. The glyph rests in muted and goes tx2 when pressed,
+ * hovered or copied; pressed and hover add a raised disc behind it. The target is 44dp around the glyph
+ * and may reach 10dp into the page gutter. No focus ring (the design's 2dp accent one): a desktop mouse
+ * click focuses the glyph too, so the ring would stay up after every copy — and no other control in the
+ * app draws one.
+ */
+@Composable
+private fun QuoteCopyFloat(
+    modifier: Modifier,
+    glyph: QuoteGlyphMetrics,
+    label: String?,
+    labelStyle: TextStyle,
+    copied: Boolean,
+    interaction: MutableInteractionSource,
+    onCopy: () -> Unit,
+) {
+    val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    val active = pressed || hovered
+    val tint = if (copied || active) Tok.tx2 else Tok.muted
+    val description = stringResource(if (copied) Res.string.quote_copied else Res.string.quote_copy)
+    Row(modifier.height(glyph.line), verticalAlignment = Alignment.CenterVertically) {
+        if (label != null) {
+            Text(
+                label, color = Tok.tx2, style = labelStyle, fontSize = 12.5.sp * LocalFontScale.current,
+                maxLines = 1, softWrap = false,
+                modifier = Modifier.padding(end = 6.dp).semantics { if (copied) liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        Box(
+            Modifier.touchTarget(glyph.slot, 44.dp)
+                .testTag(QUOTE_COPY_TAG)
+                .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onCopy)
+                .semantics { contentDescription = description },
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(Modifier.size(glyph.disc).clip(CircleShape).background(if (active) Tok.raised else Color.Transparent))
+            Icon(if (copied) Icons.Rounded.Check else Icons.Rounded.ContentCopy, null, tint = tint, modifier = Modifier.size(glyph.icon))
+        }
+    }
+}
+
+/** Lays the content out at [hit]×[hit] but reports [slot]×[slot], centering the overflow: a small glyph
+ *  keeps its visual slot in a row while its touch target meets the minimum. */
+private fun Modifier.touchTarget(slot: Dp, hit: Dp) = layout { measurable, _ ->
+    val s = slot.roundToPx()
+    val h = hit.roundToPx()
+    val placeable = measurable.measure(Constraints.fixed(h, h))
+    layout(s, s) { placeable.place((s - h) / 2, (s - h) / 2) }
 }
 
 /** Copy-with-feedback state shared by every copy affordance (mobile [CopyChip], desktop chat's button):
@@ -307,6 +485,19 @@ internal fun mdHeadingLevel(line: String): Int? {
     if (level > 6) return null
     val next = line.getOrNull(level) ?: return level // "##" alone = empty heading
     return if (next == ' ' || next == '\t') level else null
+}
+
+/**
+ * Body of a blockquote line — [line] minus its `>` marker and one following space — or null when the
+ * line isn't quoted. Only a `>` that opens the line counts (`a > b` stays prose). Any indentation is
+ * accepted, unlike CommonMark's three spaces: there a deeper `>` would be an indented code block, which
+ * this renderer doesn't have, while agents do indent a quote under a list item.
+ */
+internal fun mdQuoteBody(line: String): String? {
+    val marker = line.indexOfFirst { it != ' ' && it != '\t' }
+    if (marker < 0 || line[marker] != '>') return null
+    val next = line.getOrNull(marker + 1)
+    return line.substring(if (next == ' ' || next == '\t') marker + 2 else marker + 1)
 }
 
 @Composable
@@ -391,8 +582,32 @@ private fun inline(s: String): AnnotatedString = buildAnnotatedString {
 private sealed interface MdBlock {
     data class Code(val code: String, val lang: String?, val closed: Boolean = true) : MdBlock
     data class Table(val header: List<String>, val rows: List<List<String>>) : MdBlock
+    /** [text] is the quote's body with its markers stripped; [blocks] is that body parsed. */
+    data class Quote(val text: String, val blocks: List<MdBlock>) : MdBlock
     data class Lines(val lines: List<String>) : MdBlock
 }
+
+/**
+ * What a quote's copy chip takes: the body as the panel reads it — no `>`, heading `#` or inline
+ * `**`/`` ` `` markers, code verbatim without its fences, table cells tab-separated. A drafted message
+ * then pastes clean into a chat app instead of carrying Markdown syntax along. List markers stay:
+ * `- ` still reads as a list in plain text.
+ */
+private fun mdPlainText(blocks: List<MdBlock>): String = blocks.joinToString("\n") { block ->
+    when (block) {
+        is MdBlock.Code -> block.code
+        is MdBlock.Quote -> mdPlainText(block.blocks)
+        is MdBlock.Table -> (listOf(block.header) + block.rows).joinToString("\n") { row -> row.joinToString("\t") { inline(it).text } }
+        is MdBlock.Lines -> block.lines.joinToString("\n") { line ->
+            val level = mdHeadingLevel(line)
+            inline(if (level != null) line.drop(level).trim() else line.trimEnd()).text
+        }
+    }
+}
+
+/** Quotes nest at most this deep; a deeper `>` stays literal text. Bounds the parse and composition
+ *  recursion — a line of thousands of `>` can't overflow the stack — and keeps nested rules readable. */
+internal const val MAX_QUOTE_DEPTH = 6
 
 /** Split a GFM table row into trimmed cells, dropping the optional outer pipes and honoring `\|` escapes. */
 private fun tableCells(line: String): List<String> =
@@ -406,7 +621,7 @@ private fun isTableDelim(line: String): Boolean {
     return cells.isNotEmpty() && cells.all { it.isNotEmpty() && it.matches(Regex("""^:?-+:?$""")) }
 }
 
-private fun parseBlocks(text: String): List<MdBlock> {
+private fun parseBlocks(text: String, quoteDepth: Int = 0): List<MdBlock> {
     val blocks = ArrayList<MdBlock>()
     val lines = text.split("\n")
     val buf = ArrayList<String>()
@@ -424,6 +639,18 @@ private fun parseBlocks(text: String): List<MdBlock> {
             val closed = i < lines.size
             if (closed) i++ // skip the closing fence
             blocks += MdBlock.Code(code.joinToString("\n"), lang, closed)
+        } else if (quoteDepth < MAX_QUOTE_DEPTH && mdQuoteBody(lines[i]) != null) {
+            // Blockquote: the run of `>` lines, parsed again as a document of its own so a quote holds
+            // lists, code and further quotes. It ends at the first unmarked line (no CommonMark lazy
+            // continuation — text right after a quote stays outside it). Checked before tables, so
+            // `> a | b` over a `---` line can't be taken for a table header.
+            flush()
+            val body = ArrayList<String>()
+            while (i < lines.size) { val b = mdQuoteBody(lines[i]) ?: break; body += b; i++ }
+            // blank `>` lines at either edge render as nothing in CommonMark; dropping them keeps the
+            // panel's padding even while a streamed quote briefly ends on its `>` separator line
+            val quoted = body.dropWhile { it.isBlank() }.dropLastWhile { it.isBlank() }.joinToString("\n")
+            blocks += MdBlock.Quote(quoted, parseBlocks(quoted, quoteDepth + 1))
         } else if (lines[i].contains('|') && i + 1 < lines.size && isTableDelim(lines[i + 1])) {
             // GFM table: a header row followed by a delimiter row (the delimiter guards against false positives).
             flush()

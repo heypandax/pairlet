@@ -10,6 +10,7 @@
 
 - [Chat Master v2](chat-master-v2/README.md)：聊天主视图。
 - [Chat Roles v1](chat-roles-v1/README.md)：#397 用户消息的中性容器、来源标签及跨端区分。
+- [Chat Quote v1](chat-quote-v1/README.md)：Agent 回复中的引用块，去掉面板改为竖线，引用单独一键复制。
 - [Core List Chat v1](core-list-chat-v1/README.md)：核心列表与会话体验设计提案、功能优先级及验收规则（未实施）。
 - [Entry Flow UI 2.0](entry-flow-ui-2.0/README.md) 与 [Implementation Brief](entry-flow-ui-2.0/IMPLEMENTATION_BRIEF.md)：入口流程。
 - [Supporting Surfaces UI 2.0](supporting-surfaces-ui-2.0/README.md)：辅助页面。
@@ -33,6 +34,7 @@
 | `chat-cards` | [Chat cards — SubagentCard 与 DocumentCard（设计 handoff）](chat-cards/README.md) |
 | `chat-master-v2` | [Chat Master v2 — design handoff](chat-master-v2/README.md) |
 | `chat-roles-v1` | [Chat Roles v1 — 用户与 Agent 消息区分](chat-roles-v1/README.md) |
+| `chat-quote-v1` | [Chat Quote v1 — Agent 回复中的引用块](chat-quote-v1/README.md) |
 | `chat-quick-actions-ui-2.0` | [Chat Quick Actions UI 2.0](chat-quick-actions-ui-2.0/README.md) |
 | `context-statusline` | [上下文占用指示器入驻 composer 设计交付](context-statusline/README.md) |
 | `defaults-voice-results-ui-2.1` | [Defaults + Voice + Results UI 2.1 — Claude Design handoff](defaults-voice-results-ui-2.1/README.md) |
