@@ -12,6 +12,7 @@ import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.ToolEvent
 import dev.ccpocket.protocol.ToolPhase
+import dev.ccpocket.protocol.isSubagentTool
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
@@ -58,6 +59,10 @@ class ChatTranscript {
      */
     val toolOutcomesLive = mutableStateOf(false)
 
+    /** Ids of sub-agents' inner calls this device saw start. Their outcome frames carry no parent id, so this
+     *  is how one is told from a top-level call's when neither matches a card by id (see [onToolEvent]). */
+    private val childCallIds = HashSet<String>()
+
     /** One-shot dedupe armed by a history replay (issue #107) — see [appendChunk] / [onToolEvent]. */
     var replayEcho = false
 
@@ -71,6 +76,7 @@ class ChatTranscript {
         thinkStartMs = null
         streaming.value = false
         toolOutcomesLive.value = false
+        childCallIds.clear()
     }
 
     fun appendCompactSummary(text: String) {
@@ -142,8 +148,18 @@ class ChatTranscript {
             if (taskId == null) -1 else messages.indexOfLast { it is ChatItem.Tool && it.taskId == taskId }
         when {
             f.phase == ToolPhase.RESULT -> {
-                val i = cardIndex(f.toolUseId)
-                // no card on screen (opened mid-run): the reattach history replay carries the outcome instead
+                var i = cardIndex(f.toolUseId)
+                if (i < 0 && f.toolUseId != null && f.toolUseId !in childCallIds) {
+                    // the call was already running when this list attached: its card came from the history
+                    // replay, which carries no call id, so the outcome finds it by name — the newest card of
+                    // this tool still without an outcome or an id — and stamps the id in for anything later.
+                    // A sub-agent's inner call is excluded above: it never has a card of its own to patch.
+                    i = messages.indexOfLast {
+                        it is ChatItem.Tool && it.tool == f.tool && it.ok == null && it.taskId == null && isProcessStep(it)
+                    }
+                    if (i >= 0) messages[i] = (messages[i] as ChatItem.Tool).copy(taskId = f.toolUseId)
+                }
+                // still no card: an inner call's outcome, or a call this list never showed
                 if (i >= 0) {
                     val card = messages[i] as ChatItem.Tool
                     // UPDATE the existing START card — an ordinary tool that returned a screenshot now
@@ -161,11 +177,21 @@ class ChatTranscript {
                 }
             }
             parent != null -> {
-                val i = cardIndex(parent)
+                if (childCallIds.size > 4096) childCallIds.clear() // a very long session: start over
+                f.toolUseId?.let(childCallIds::add)
+                // the parent's card — by id, or, when that card came from the history replay (this list
+                // attached while the sub-agent ran) and so carries no id, the newest sub-agent card still
+                // running, which then adopts the id so its own outcome can find it. An inner call whose
+                // sub-agent this list does not show at all is simply not a row: it never was a step of the
+                // main chain, and a plain row for it read as a top-level tool that never finished.
+                val i = cardIndex(parent).let { byId ->
+                    if (byId >= 0) byId
+                    else messages.indexOfLast { it is ChatItem.Tool && isSubagentTool(it.tool) && it.ok == null && it.taskId == null }
+                }
                 if (i >= 0) {
                     val card = messages[i] as ChatItem.Tool
-                    messages[i] = card.copy(childCount = card.childCount + 1, lastChild = f.tool)
-                } else messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: ""))
+                    messages[i] = card.copy(taskId = card.taskId ?: parent, childCount = card.childCount + 1, lastChild = f.tool)
+                }
             }
             // OpenCode's question tool renders as a read-only question card, not a raw JSON row (issue
             // #210); a parse miss (old truncated preview / malformed) falls back to the plain tool card.
@@ -236,6 +262,12 @@ class ChatTranscript {
         if (displayed != messages) {
             messages.clear()
             messages.addAll(displayed)
+        }
+        // a replay that stamps outcomes on ordinary tool rows comes from a daemon that reports them (#380
+        // patched the replay and the live stream together): the live fold may trust a missing outcome as
+        // missing from the first frame, instead of waiting to see one reported
+        if (!toolOutcomesLive.value && f.messages.any { it.role == ChatRole.TOOL && it.ok != null && it.tool?.let(::isSubagentTool) != true && it.workflowRunId == null && it.answers == null }) {
+            toolOutcomesLive.value = true
         }
         onMerged(local, merged)
         replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race

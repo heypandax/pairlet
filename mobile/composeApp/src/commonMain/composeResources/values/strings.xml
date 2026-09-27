@@ -2159,10 +2159,10 @@
         <item quantity="other">%1$d failed</item>
     </plurals>
     <plurals name="tool_process_unknown">
-        <item quantity="one">%1$d without result</item>
-        <item quantity="other">%1$d without result</item>
+        <item quantity="one">%1$d not returned</item>
+        <item quantity="other">%1$d not returned</item>
     </plurals>
-    <string name="tool_process_unknown_one">No result</string>
+    <string name="tool_process_unknown_one">Not returned</string>
     <plurals name="tool_process_autoruns">
         <item quantity="one">%1$d auto-ran</item>
         <item quantity="other">%1$d auto-ran</item>

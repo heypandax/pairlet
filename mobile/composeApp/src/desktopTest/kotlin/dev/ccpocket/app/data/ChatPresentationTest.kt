@@ -211,14 +211,19 @@ class ChatPresentationTest {
     }
 
     @Test
-    fun aRowNoCallOfThisDeviceStartedIsNeverRunning() {
-        // an orphaned sub-agent child / a replayed tail row: no id, so no outcome frame will ever reach it
-        val orphan = ChatItem.Tool("Grep", "inside a sub-agent")
-        val p = presentLive(ChatRowIdentity(), listOf(ChatItem.User("go"), orphan))
-        val g = p.rows[1] as ChatRow.ProcessGroup
-        assertEquals(emptyList(), g.live?.inFlight)
-        assertEquals(StepState.UNKNOWN, p.stepState(1))
-        assertEquals(1, g.summary.unknown)
+    fun aRowReplayedWhileItsCallRanIsRunningUntilTheTurnEndsThenNotReturned() {
+        // the list attached mid-turn: the history replay carries the running call without an id
+        val replayed = ChatItem.Tool("Bash", "pnpm test")
+        val items = listOf(ChatItem.User("go"), replayed)
+        val live = presentLive(ChatRowIdentity(), items)
+        val g = live.rows[1] as ChatRow.ProcessGroup
+        assertEquals(listOf(1), g.live?.inFlight, "running, id or not — its outcome finds it by name")
+        assertEquals(StepState.RUNNING, live.stepState(1))
+        assertEquals(0, g.summary.unknown)
+        // the turn ended and nothing ever came back for it: only now is it "not returned"
+        val over = presentLive(ChatRowIdentity(), items, live = false)
+        assertEquals(StepState.UNKNOWN, over.stepState(1))
+        assertEquals(1, (over.rows[1] as ChatRow.ProcessGroup).summary.unknown)
     }
 
     @Test

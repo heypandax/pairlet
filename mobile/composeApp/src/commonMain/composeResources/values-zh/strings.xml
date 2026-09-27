@@ -2149,9 +2149,9 @@
         <item quantity="other">%1$d 个失败</item>
     </plurals>
     <plurals name="tool_process_unknown">
-        <item quantity="other">%1$d 个无结果</item>
+        <item quantity="other">%1$d 个未返回</item>
     </plurals>
-    <string name="tool_process_unknown_one">无结果</string>
+    <string name="tool_process_unknown_one">未返回</string>
     <plurals name="tool_process_autoruns">
         <item quantity="other">%1$d 次自动执行</item>
     </plurals>

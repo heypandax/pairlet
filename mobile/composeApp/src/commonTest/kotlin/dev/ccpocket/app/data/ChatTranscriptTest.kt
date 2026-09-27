@@ -202,4 +202,64 @@ class ChatTranscriptTest {
         assertEquals(1, before?.size)
         assertEquals(t.messages.toList(), after)
     }
+
+    // ── Tool Process Live v1: rows the history replay produced while their call ran ─────────────────
+
+    @Test
+    fun anOutcomeForACallReplayedWhileRunningFindsItsCardByName() {
+        val t = ChatTranscript()
+        t.mergeHistory(
+            ConvoHistory(
+                "c",
+                listOf(
+                    HistoryMessage(ChatRole.USER, "go"),
+                    HistoryMessage(ChatRole.TOOL, "a.kt", tool = "Read", ok = true),
+                    HistoryMessage(ChatRole.TOOL, "pnpm test", tool = "Bash", ok = null), // still running at replay time
+                ),
+            ),
+        )
+        assertTrue(t.toolOutcomesLive.value, "a replay that stamps outcomes comes from a daemon that reports them")
+        // the outcome arrives with an id no card carries (the replay has none): matched by name, id adopted
+        t.onToolEvent(ToolEvent("c", 1, ToolPhase.RESULT, "Bash", ok = false, toolUseId = "tu-late", outcomeOnly = true))
+        val bash = t.messages.filterIsInstance<ChatItem.Tool>().last()
+        assertEquals(false, bash.ok)
+        assertEquals("tu-late", bash.taskId)
+        // …and nothing else of that name is touched: the finished Read stays as it was
+        assertEquals(true, t.messages.filterIsInstance<ChatItem.Tool>().first().ok)
+    }
+
+    @Test
+    fun aSubagentsInnerCallJoinsItsReplayedCardAndItsOutcomeNeverPatchesAToolRow() {
+        val t = ChatTranscript()
+        t.mergeHistory(
+            ConvoHistory(
+                "c",
+                listOf(
+                    HistoryMessage(ChatRole.USER, "go"),
+                    HistoryMessage(ChatRole.TOOL, "general-purpose: dig", tool = "Task", ok = null), // running in the background
+                    HistoryMessage(ChatRole.TOOL, "pnpm test", tool = "Bash", ok = null), // and a top-level call running too
+                ),
+            ),
+        )
+        t.onToolEvent(ToolEvent("c", 1, ToolPhase.START, "Bash", inputPreview = "ls", toolUseId = "kid-1", parentToolUseId = "agent-1"))
+        assertEquals(3, t.messages.size, "an inner call is never a row of its own")
+        val card = t.messages[1] as ChatItem.Tool
+        assertEquals("agent-1", card.taskId, "the replayed card adopts the id it had no way to know")
+        assertEquals(1, card.childCount)
+        assertEquals("Bash", card.lastChild)
+        // the inner call's outcome has the SAME tool name as the running top-level Bash — never mistaken for it
+        t.onToolEvent(ToolEvent("c", 2, ToolPhase.RESULT, "Bash", ok = false, toolUseId = "kid-1", outcomeOnly = true))
+        assertNull((t.messages[2] as ChatItem.Tool).ok)
+        // the sub-agent's own outcome now finds its card
+        t.onToolEvent(ToolEvent("c", 3, ToolPhase.RESULT, "Task", ok = true, toolUseId = "agent-1", output = "report"))
+        assertEquals(true, (t.messages[1] as ChatItem.Tool).ok)
+    }
+
+    @Test
+    fun anInnerCallOfASubagentThisListNeverShowedIsNotARow() {
+        val t = ChatTranscript()
+        t.appendChunk(text("hi"))
+        t.onToolEvent(ToolEvent("c", 1, ToolPhase.START, "Grep", inputPreview = "x", toolUseId = "kid-9", parentToolUseId = "agent-9"))
+        assertEquals(1, t.messages.size, "it used to become a top-level row that never finished")
+    }
 }

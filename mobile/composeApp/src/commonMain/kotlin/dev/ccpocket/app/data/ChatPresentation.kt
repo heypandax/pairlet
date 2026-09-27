@@ -40,12 +40,13 @@ fun isProcessStep(item: ChatItem): Boolean = when (item) {
 private fun joinsRun(item: ChatItem): Boolean = item is ChatItem.AutoRun
 
 /**
- * Could [item] be a step still in flight — a call THIS device saw start (it carries its tool-use id) with no
- * outcome yet, or a thinking block still streaming? A replayed or orphaned row without an id never gets an
- * outcome frame, so it can never be told running. Only the live fold asks; see [StepState] for the verdicts.
+ * Could [item] be a step still in flight — a process tool with no outcome yet, or a thinking block still
+ * streaming? Whether it has a call id makes no difference: a row the history replay produced for a call that
+ * was running at the time has none, and its outcome finds it by name when it arrives ([ChatTranscript]).
+ * Only the live fold asks; see [StepState] for the verdicts.
  */
 fun isInFlightProcess(item: ChatItem): Boolean = when (item) {
-    is ChatItem.Tool -> item.ok == null && item.taskId != null && isProcessTool(item)
+    is ChatItem.Tool -> item.ok == null && isProcessTool(item)
     is ChatItem.Thinking -> item.seconds == null
     else -> false
 }
@@ -61,8 +62,8 @@ enum class StepState {
     /** Its outcome arrived: failure (counted on the header as "N failed"). */
     FAILED,
 
-    /** No outcome arrived and none is coming — a replayed or orphaned row, or a call a daemon that reports
-     *  outcomes never finished before the turn ended. Counted as "N without result". */
+    /** The turn is over and no outcome ever arrived, from a daemon that reports them — the call was cut off
+     *  by a stop, a crash or a restart. Counted as "N not returned". */
     UNKNOWN,
 
     /** Started here on a daemon not (yet) seen reporting outcomes: done or not, nobody will say. Counted as a
@@ -423,7 +424,6 @@ class ChatPresentation private constructor(
                             val state = when {
                                 m.ok == true -> StepState.DONE
                                 m.ok == false -> StepState.FAILED
-                                !isInFlightProcess(m) -> StepState.UNKNOWN // no id: nothing will ever report it
                                 isLive -> if (liveOutcomes || k == newestStarted) StepState.RUNNING else StepState.QUIET
                                 // a call of this running turn that a prompt typed mid-turn pushed off the tail
                                 live && liveOutcomes && nearestTail -> StepState.RUNNING

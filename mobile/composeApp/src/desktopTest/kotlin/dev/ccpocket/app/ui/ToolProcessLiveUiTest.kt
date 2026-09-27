@@ -25,6 +25,9 @@ import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.chat_src_tool
 import dev.ccpocket.app.resources.chat_tool_failed
 import dev.ccpocket.app.resources.done
+import dev.ccpocket.app.resources.subagent_tools
+import dev.ccpocket.app.resources.tool_process_unknown
+import dev.ccpocket.app.resources.tool_process_unknown_one
 import dev.ccpocket.app.resources.thinking_streaming
 import dev.ccpocket.app.resources.tool_process_autoruns
 import dev.ccpocket.app.resources.tool_process_expand_one
@@ -285,6 +288,78 @@ class ToolProcessLiveUiTest {
         assertPresent("git diff --stat", substring = true) // the tool and its target, not "Process · 1 tool"
         assertPresent(str(Res.string.tool_process_expand_one))
         assertFalse(present(plural(Res.plurals.tool_process_tools, 1), substring = true))
+    }
+
+    @Test
+    fun aCallRunningWhenTheListAttachedIsRunningAndItsOutcomeFindsItByName() = runComposeUiTest {
+        // the phone attaches mid-turn: the history replay carries the running call without its id
+        val convo = "c-live-attach"
+        var repo: PocketRepository? = null
+        setContent {
+            val scope = rememberCoroutineScope()
+            val r = remember {
+                PocketRepository(scope, account("acct-live-attach")).apply {
+                    receiveForTest(live(convo, executing = false))
+                    receiveForTest(
+                        ConvoHistory(
+                            convo,
+                            listOf(
+                                u(prompt), a("先跑一下测试。"),
+                                HistoryMessage(ChatRole.TOOL, "src/login/a.ts", tool = "Read", ok = true),
+                                HistoryMessage(ChatRole.TOOL, "pnpm test login", tool = "Bash", ok = null),
+                            ),
+                            lastSeq = 4,
+                        ),
+                    )
+                    receiveForTest(live(convo, executing = true))
+                }
+            }
+            repo = r
+            PocketTheme { Box(Modifier.requiredSize(390.dp, 760.dp)) { ChatScreen(r) } }
+        }
+        waitForIdle()
+        assertLive("pnpm test login")
+        assertFalse(present(str(Res.string.tool_process_unknown_one)), "a call still running is never \"not returned\"")
+        assertFalse(present(plural(Res.plurals.tool_process_unknown, 1), substring = true))
+        // its outcome arrives with an id no card has: matched by name, the fold settles it as done
+        repo!!.receiveForTest(ToolEvent(convo, 100, ToolPhase.RESULT, "Bash", ok = true, toolUseId = "tu-late", outcomeOnly = true))
+        waitForIdle()
+        assertLive(str(Res.string.done))
+        repo!!.receiveForTest(dev.ccpocket.protocol.TurnDone(convo))
+        waitForIdle()
+        assertPresent(plural(Res.plurals.tool_process_tools, 2), substring = true)
+        assertFalse(present(plural(Res.plurals.tool_process_unknown, 1), substring = true))
+    }
+
+    @Test
+    fun aSubagentsInnerCallJoinsItsReplayedCardInsteadOfBecomingAStep() = runComposeUiTest {
+        // the phone attached while a sub-agent ran: its card came from the replay, without an id
+        val convo = "c-live-inner"
+        var repo: PocketRepository? = null
+        setContent {
+            val scope = rememberCoroutineScope()
+            val r = remember {
+                PocketRepository(scope, account("acct-live-inner")).apply {
+                    receiveForTest(live(convo, executing = false))
+                    receiveForTest(
+                        ConvoHistory(
+                            convo,
+                            listOf(u(prompt), HistoryMessage(ChatRole.TOOL, "general-purpose: 调查登录失败", tool = "Task", ok = null)),
+                            lastSeq = 2,
+                        ),
+                    )
+                    receiveForTest(live(convo, executing = true))
+                }
+            }
+            repo = r
+            PocketTheme { Box(Modifier.requiredSize(390.dp, 760.dp)) { ChatScreen(r) } }
+        }
+        waitForIdle()
+        repo!!.receiveForTest(ToolEvent(convo, 100, ToolPhase.START, "Grep", inputPreview = "needle", toolUseId = "kid-1", parentToolUseId = "agent-1"))
+        waitForIdle()
+        assertEquals(0, groups(), "an inner call is never a step of the main chain")
+        assertFalse(present("needle", substring = true))
+        assertPresent(str(Res.string.subagent_tools, 1), substring = true) // the sub-agent card counts it
     }
 
     private fun ComposeUiTest.groups() = onAllNodesWithTag(TOOL_PROCESS_GROUP_TAG).fetchSemanticsNodes().size
