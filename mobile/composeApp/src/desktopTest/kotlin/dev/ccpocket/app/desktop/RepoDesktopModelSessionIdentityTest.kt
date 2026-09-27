@@ -46,6 +46,29 @@ class RepoDesktopModelSessionIdentityTest {
         assertEquals("new", model.selectedSessionId)
     }
 
+    /** The daemon echoes paths verbatim: the listing under the ABSOLUTE dir, the announce under the tilde form the
+     *  open was sent with. Same project — the synthesized row must still show until the listing has the session. */
+    @Test
+    fun unlistedSessionSynthesizesAcrossTildeAndAbsoluteFormsOfTheListedDir() = withModel { repo, model ->
+        val abs = "/Users/tester/proj"
+        val old = SessionSummary("old", "Continue", "Continue", 1, abs, 1L)
+        repo.receiveForTest(Sessions(abs, listOf(old)))
+        repo.receiveForTest(SessionLive("convo-new", "~/proj", sessionId = "new", title = "Fresh"))
+
+        assertEquals(listOf("new", "old"), model.sessionGroups.single().sessions.map { it.sessionId })
+        assertEquals("new", model.selectedSessionId)
+    }
+
+    /** Same rule for a trailing separator on the announced workdir. */
+    @Test
+    fun unlistedSessionSynthesizesAcrossATrailingSeparator() = withModel { repo, model ->
+        val abs = "/Users/tester/proj"
+        val old = SessionSummary("old", "Continue", "Continue", 1, abs, 1L)
+        repo.receiveForTest(Sessions(abs, listOf(old)))
+        repo.receiveForTest(SessionLive("convo-new", "$abs/", sessionId = "new", title = "Fresh"))
+        assertEquals(listOf("new", "old"), model.sessionGroups.single().sessions.map { it.sessionId })
+    }
+
     @Test
     fun listedSessionUsesItsIdEvenWhenAnotherRowHasTheSameTitle() = withModel { repo, model ->
         repo.receiveForTest(Sessions(dir, listOf(row("old", branch = "old-branch"), row("new", branch = "new-branch"))))

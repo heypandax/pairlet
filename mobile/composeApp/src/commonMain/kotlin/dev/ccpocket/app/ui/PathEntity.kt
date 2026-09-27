@@ -1,5 +1,9 @@
 package dev.ccpocket.app.ui
 
+import androidx.compose.ui.text.AnnotatedString
+
+internal const val MARKDOWN_LINK_TARGET = "markdown-link-target"
+
 /**
  * Classification of a recognised transcript reference, for the share-side affordance (issue #116).
  * The recognition itself is unchanged (issue #74's [pathRx] / [urlRx]); this only labels each hit so
@@ -14,7 +18,7 @@ enum class EntityKind { OPEN, COPY, URL }
 
 /**
  * One recognised path/URL span in a piece of transcript text. [start]/[end] index the rendered text;
- * [display] is the substring as it appears inline; [copyValue] is the normalized value that share
+ * [display] is the substring as it appears inline; [target] is its destination; [copyValue] is the normalized value that share
  * actually copies — a relative path resolved to an absolute one under the session cwd, or a URL with
  * glued sentence punctuation already stripped (so "所见即所复制": the chip/sheet shows exactly this).
  */
@@ -24,7 +28,26 @@ data class LinkEntity(
     val kind: EntityKind,
     val display: String,
     val copyValue: String,
+    /** Destination differs from the visible label for an explicit Markdown link. */
+    val target: String = display,
 )
+
+/** Explicit Markdown destinations take precedence over auto-detection inside their visible labels. */
+fun recognizeEntities(text: AnnotatedString, cwd: String?, canOpen: (String) -> Boolean): List<LinkEntity> {
+    val explicit = text.getStringAnnotations(MARKDOWN_LINK_TARGET, 0, text.length).map { link ->
+        val target = link.item
+        val kind = when {
+            target.startsWith("https://") || target.startsWith("http://") -> EntityKind.URL
+            canOpen(target) -> EntityKind.OPEN
+            else -> EntityKind.COPY
+        }
+        LinkEntity(link.start, link.end, kind, text.text.substring(link.start, link.end),
+            if (kind == EntityKind.URL) target else normalizePath(target, cwd), target)
+    }
+    return (explicit + recognizeEntities(text.text, cwd, canOpen).filter { auto ->
+        explicit.none { auto.start < it.end && it.start < auto.end }
+    }).sortedBy { it.start }
+}
 
 /**
  * Resolves what a path reference should COPY as. Absolute, `~`, and drive-letter paths are already
@@ -45,7 +68,7 @@ fun normalizePath(display: String, cwd: String?): String {
  * Recognises every path/URL in [text] and labels each (issue #116). Reuses issue #74's regexes and
  * the shared [cleanUrl] boundary — nothing about WHAT is recognised is decided here. [canOpen] decides OPEN vs COPY
  * for a path by the session's machine: on the desktop it is the local exists() gate (a remote
- * session's paths report false → COPY); on the phone it is always false (files live on the computer).
+ * session's paths report false → COPY); mobile's RemotePathOpener permits opening through the daemon.
  * URLs that a path regex would also touch are dropped from the path pass so a link is labelled once.
  */
 fun recognizeEntities(text: String, cwd: String?, canOpen: (String) -> Boolean): List<LinkEntity> {

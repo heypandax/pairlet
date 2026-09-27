@@ -748,6 +748,10 @@
     <string name="questions_unanswered_expand">展开</string>
     <string name="questions_unanswered_collapse">收起</string>
     <string name="path_copy">复制</string>
+    <string name="link_copy_address">复制链接</string>
+    <string name="link_open_file">打开文件</string>
+    <string name="link_address_copied">链接已复制</string>
+    <string name="link_path_copied">路径已复制</string>
     <string name="path_open">在浏览器打开</string>
     <string name="path_copied">已复制</string>
     <string name="path_cwd_hint">已按会话目录解析</string>
@@ -1856,14 +1860,14 @@
     <string name="cfg_mode_plan">计划</string>
     <string name="cfg_mode_plan_body">只读、只提方案。在你退出计划模式之前什么都不改。</string>
     <string name="cfg_mode_full">完全放权</string>
-    <string name="cfg_mode_full_body">从不询问。开始之前需要你确认一次。</string>
+    <string name="cfg_mode_full_body">从不询问。第一次使用前需要你确认一次。</string>
     <string name="cfg_mode_auto">自动判断</string>
     <string name="cfg_mode_auto_body">Claude 自己判断每一步，需要你批准时才会问。</string>
     <string name="cfg_claude_note">只有这台电脑声明支持时，「自动判断」才会出现在这里。</string>
     <string name="cfg_codex_cautious_body">每一步都先问，而且写不出工作目录。</string>
     <string name="cfg_codex_balanced_body">在工作目录里自己干，超出范围的先问你。</string>
     <string name="cfg_codex_autonomous_body">不再询问，但仍被限制在工作目录内。</string>
-    <string name="cfg_codex_full_body">没有沙箱，也没有审批。开始之前需要确认。</string>
+    <string name="cfg_codex_full_body">没有沙箱，也没有审批。第一次使用前需要确认。</string>
     <string name="cfg_codex_note">审批 × 沙箱的组合来自 CODEX_PRESETS</string>
     <string name="cfg_kimi_note">Kimi 没有对应「自动改文件」的档位。</string>
     <string name="cfg_opencode_title">全自动运行</string>
@@ -1879,6 +1883,7 @@
     <string name="cfm_reach_body">%1$s 上从这个目录能触达的一切，包括命令能碰到的目录之外的文件。</string>
     <string name="cfm_reach_body_local">从这个目录能触达的一切，包括命令能碰到的目录之外的文件。</string>
     <string name="cfm_note">这个会话里不会再问你第二次。想换回来，就用别的模式重开一个会话。</string>
+    <string name="cfm_once">这一步只需确认一次，之后以完全放权新建会话会直接开始。</string>
     <string name="cfm_cta">以完全放权开始</string>
 
     <!-- 新任务 composer（issue #260）——项目页的 FAB 与它打开的弹窗 -->

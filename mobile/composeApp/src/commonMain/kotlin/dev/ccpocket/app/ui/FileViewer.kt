@@ -16,6 +16,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -32,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -239,6 +242,9 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
     val diff = repo.viewedFileDiff.value
     val ext = path.substringAfterLast('.', "").lowercase()
 
+    // what the copy buttons hand over: an @-completion or typed path is cwd-relative, so resolve it under
+    // the session's workdir — the clipboard should hold an address that still works outside this viewer
+    val copyPath = normalizePath(path, repo.workdir.value)
     val fileInfo = repo.changedFiles.firstOrNull { it.path == path }
     val isImage = isImagePath(path)
     val deleted = fileInfo?.op == "delete"
@@ -256,6 +262,7 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
                     Text(fileNameOf(path), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     TailPathText(parentDirOf(path), fontSize = 11.sp)
                 }
+                CopyPathIconButton(copyPath)
                 // share/save whatever the viewer holds (issue #67) — text files ride the sheet too
                 val content = repo.viewedFile.value
                 val exportable = remember(content) { exportBytesOf(content) }
@@ -312,7 +319,7 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
                     // reached — a typo, or a Bash file outside the synced workspace the containment gate won't
                     // serve — lands here. Give it the design's graceful "Copy path instead" escape so a failed
                     // tap is never a dead end (the path is still exactly what you'd paste back to the computer).
-                    repo.viewedFile.value?.ok == false -> ({ CopyPathButton(path) })
+                    repo.viewedFile.value?.ok == false -> ({ CopyPathButton(copyPath) })
                     else -> null
                 },
             )
@@ -334,6 +341,22 @@ private fun ExportRequestButton(onClick: () -> Unit) {
         Text(stringResource(Res.string.file_export_request), color = Tok.accent, fontSize = 13.sp)
     }
 }
+
+/** The header's copy-path action, present whatever state the file is in. The glyph turns into a check for
+ *  the confirmation beat, like every other copy in the app. */
+@Composable
+private fun CopyPathIconButton(path: String) {
+    val (copied, copy) = rememberCopied()
+    TextButton({ copy(path) }, Modifier.testTag(FILE_VIEWER_COPY_PATH_TAG)) {
+        Icon(
+            if (copied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
+            stringResource(if (copied) Res.string.path_copied else Res.string.copy_path),
+            tint = if (copied) Tok.ok else Tok.tx2, modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+internal const val FILE_VIEWER_COPY_PATH_TAG = "file-viewer-copy-path"
 
 /** read-doc-inline handoff: the graceful escape under a failed read — copies the file's path so a tap that
  *  couldn't open the file still hands you exactly the address to paste back to the computer. */

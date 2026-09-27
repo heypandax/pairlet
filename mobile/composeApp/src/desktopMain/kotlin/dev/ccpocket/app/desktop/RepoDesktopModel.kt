@@ -629,7 +629,11 @@ class RepoDesktopModel(
         val id = repo.sessionKey.value ?: return null
         val wd = repo.workdir.value ?: return null
         val dir = repo.sessionsDir.value ?: return null
-        if (repo.convoId.value == null || (wd != dir && tilde(wd) != dir)) return null
+        // #58's identity, not a string compare: the daemon echoes both paths VERBATIM (the listing keyed by the
+        // ListSessions request, the announce by the OpenSession request — "may be ~/x"), so an absolute listing
+        // and a tilde open name the same project and still failed `wd != dir && tilde(wd) != dir`. That dropped
+        // the synthesized row, and the brand-new session showed nothing until its first turn persisted.
+        if (repo.convoId.value == null || !sameDirPath(wd, dir)) return null
         if (repo.sessions.any { it.sessionId == id }) return null
         return DkSession(
             sessionId = id, cwd = wd, title = repo.chatTitle.value ?: "Chat",

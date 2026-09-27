@@ -548,8 +548,8 @@ private fun TableRow(cells: List<String>, cols: Int, color: Color, header: Boole
     Row(Modifier.fillMaxWidth().background(bg).height(IntrinsicSize.Min)) {
         for (c in 0 until cols) {
             if (c > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
-            Text(
-                pathLinked(inline(cells.getOrElse(c) { "" }.trim())),
+            LinkifiedText(
+                inline(cells.getOrElse(c) { "" }.trim()),
                 color = color,
                 fontWeight = if (header) FontWeight.Bold else FontWeight.Normal,
                 fontSize = 13.sp * LocalFontScale.current,
@@ -559,11 +559,18 @@ private fun TableRow(cells: List<String>, cols: Int, color: Color, header: Boole
     }
 }
 
-/** Inline **bold** and `code`. */
-private fun inline(s: String): AnnotatedString = buildAnnotatedString {
+/** Inline emphasis/code and labelled links. Destinations remain separate from selectable labels. */
+internal fun inline(s: String): AnnotatedString = buildAnnotatedString {
     var i = 0
     while (i < s.length) {
+        val link = if (s[i] == '[' && (i == 0 || s[i - 1] != '!')) markdownLinkAt(s, i) else null
         when {
+            link != null -> {
+                val start = length
+                append(inline(link.label))
+                addStringAnnotation(MARKDOWN_LINK_TARGET, link.target, start, length)
+                i = link.end
+            }
             s.startsWith("**", i) -> {
                 val e = s.indexOf("**", i + 2)
                 if (e >= 0) { withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(s.substring(i + 2, e)) }; i = e + 2 }
@@ -577,6 +584,60 @@ private fun inline(s: String): AnnotatedString = buildAnnotatedString {
             else -> { append(s[i]); i++ }
         }
     }
+}
+
+private data class InlineLink(val label: String, val target: String, val end: Int)
+
+/** Balanced destinations preserve parentheses, query strings and fragments; <...> permits spaces. */
+private fun markdownLinkAt(s: String, start: Int): InlineLink? {
+    var p = start + 1
+    var brackets = 1
+    while (p < s.length && brackets > 0) {
+        when (s[p]) {
+            '\\' -> { p += 2; continue }
+            '[' -> brackets++
+            ']' -> brackets--
+        }
+        if (brackets > 0) p++
+    }
+    if (p >= s.length || p == start + 1 || s.getOrNull(p + 1) != '(') return null
+    val label = s.substring(start + 1, p)
+    p += 2
+    while (s.getOrNull(p)?.isWhitespace() == true) p++
+    val angle = s.getOrNull(p) == '<'
+    if (angle) p++
+    val targetStart = p
+    var parens = 0
+    while (p < s.length) {
+        val ch = s[p]
+        if (ch == '\\' && s.getOrNull(p + 1) in listOf('(', ')', '<', '>')) { p += 2; continue }
+        if (angle && ch == '>') break
+        if (!angle) {
+            if (ch == '(') parens++
+            if (ch == ')') { if (parens == 0) break else parens-- }
+            if (ch.isWhitespace() && parens == 0) break
+        }
+        p++
+    }
+    if (p >= s.length || p == targetStart) return null
+    val target = s.substring(targetStart, p)
+        .replace("\\(", "(").replace("\\)", ")").replace("\\<", "<").replace("\\>", ">")
+    if (angle) p++
+    while (s.getOrNull(p)?.isWhitespace() == true) p++
+    // Optional Markdown title is presentation metadata, never part of the copied destination.
+    if (s.getOrNull(p) == '"' || s.getOrNull(p) == '\'') {
+        val quote = s[p++]
+        while (p < s.length && s[p] != quote) { if (s[p] == '\\') p++; p++ }
+        if (p >= s.length) return null
+        p++
+        while (s.getOrNull(p)?.isWhitespace() == true) p++
+    }
+    if (s.getOrNull(p) != ')') return null
+    // Only the destinations the app can handle: web URLs and filesystem paths, not custom schemes.
+    val web = target.startsWith("http://") || target.startsWith("https://")
+    val drive = target.length >= 3 && target[0].isLetter() && target[1] == ':' && target[2] in "/\\"
+    if (!web && !drive && (':' in target.substringBefore('/') || target.startsWith('#'))) return null
+    return InlineLink(label, target, p + 1)
 }
 
 private sealed interface MdBlock {

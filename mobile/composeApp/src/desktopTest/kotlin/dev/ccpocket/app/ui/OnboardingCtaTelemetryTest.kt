@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
+import dev.ccpocket.app.GITHUB_REPO_URL
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.close
 import dev.ccpocket.app.resources.fr_cta
@@ -26,6 +27,7 @@ import dev.ccpocket.app.telemetry.TelEvent
 import dev.ccpocket.app.telemetry.TelKey
 import dev.ccpocket.app.telemetry.telemetryTap
 import dev.ccpocket.app.theme.PocketTheme
+import dev.ccpocket.app.webUrlTap
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -45,18 +47,28 @@ import kotlin.test.assertTrue
  * (the route that leads AWAY from pairing, so it must stay separable from the ones that lead into it), and
  * a trust link (added by this change, and the one most likely to be dropped as decoration). Only the enum
  * event and its fixed categorical params are ever read — never a label, a URL, or anything typed.
+ *
+ * Links are observed through [webUrlTap], never opened: the trust link's click hands its URL to the
+ * platform browser, and before the seam existed every run of this class popped the repository page in the
+ * developer's real browser (and, on the desktop actual, still would if the `ccpocket.test` gate were lost).
  */
 @OptIn(ExperimentalTestApi::class)
 class OnboardingCtaTelemetryTest {
 
     private val seen = mutableListOf<Pair<TelEvent, Map<TelKey, Any>>>()
+    private val opened = mutableListOf<String>()
 
     @BeforeTest fun tap() {
         seen.clear()
+        opened.clear()
         telemetryTap = { e, p -> synchronized(seen) { seen += e to p } }
+        webUrlTap = { url -> synchronized(opened) { opened += url } }
     }
 
-    @AfterTest fun untap() { telemetryTap = null }
+    @AfterTest fun untap() {
+        telemetryTap = null
+        webUrlTap = null
+    }
 
     /** Every `onboarding_cta` target recorded so far, in order. */
     private fun targets(): List<Any?> =
@@ -122,6 +134,9 @@ class OnboardingCtaTelemetryTest {
     fun aTrustLinkReportsItsOwnTarget() = guide {
         tapText(str(Res.string.fr_trust_github))
         assertEquals(listOf<Any?>("github"), targets())
+        // the proof behind "open source" is the source itself — and it was observed, not opened
+        assertEquals(listOf(GITHUB_REPO_URL), synchronized(opened) { opened.toList() })
+        assertEquals("true", System.getProperty("ccpocket.test"), "the test runner's browser gate must be armed")
     }
 
     /**

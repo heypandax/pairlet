@@ -781,7 +781,18 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                 snapshotFlow {
                     renderedGroups(model).firstOrNull { g -> g.sessions.any { it.sessionId == selectedId } }?.path
                 }.filterNotNull().first()
-            } ?: return@LaunchedEffect
+            } ?: snapshotFlow {
+                // Past the time box, keep a much cheaper watch: the row for this selection LANDING in the drawn
+                // list. A brand-new session's real row arrives only after its first turn persists and the
+                // completion-edge relist — minutes, not seconds — and the LazyColumn's key anchoring puts a row
+                // inserted above the first visible item ABOVE the viewport whenever the list is scrolled at all,
+                // so a reveal that had already given up left the newest session out of sight. Scans the rows the
+                // list already computed, not every group's sessions, and ends the moment the row shows up.
+                shownRows.firstOrNull { r ->
+                    r is RecentRow.Session && r.session.sessionId == selectedId ||
+                        r is RecentRow.Rewound && r.session.sessionId == selectedId
+                }?.let { (it as? RecentRow.Session)?.path ?: (it as RecentRow.Rewound).path }
+            }.filterNotNull().first()
             limit.revealedSelection = selectedId
             reveal(targetPath, selectedId)
         }

@@ -1797,6 +1797,8 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
                 modePresetsFor = { a -> repo.modePresetsFor(a) },
                 agentPresetsFor = { a -> repo.agentPresetsFor(a) },
+                fullAccessConfirmed = repo.fullAccessConfirmed.value,
+                onFullAccessConfirmed = repo::acknowledgeFullAccess,
                 onAgentPicked = { a -> repo.fetchModels(a) },
                 onPick = { m, a, native, model, preset ->
                     newPathTarget = null
@@ -2681,6 +2683,8 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
                 modePresetsFor = { a -> repo.modePresetsFor(a) },
                 agentPresetsFor = { a -> repo.agentPresetsFor(a) },
+                fullAccessConfirmed = repo.fullAccessConfirmed.value,
+                onFullAccessConfirmed = repo::acknowledgeFullAccess,
                 onAgentPicked = { a -> repo.fetchModels(a) },
                 onPick = { m, a, native, model, preset ->
                     pickMode = false

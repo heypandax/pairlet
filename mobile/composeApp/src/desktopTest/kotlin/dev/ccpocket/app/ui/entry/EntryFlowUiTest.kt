@@ -41,6 +41,7 @@ import dev.ccpocket.app.resources.cfg_opencode_body
 import dev.ccpocket.app.resources.cfg_opencode_title
 import dev.ccpocket.app.resources.cfg_start
 import dev.ccpocket.app.resources.cfm_cta
+import dev.ccpocket.app.resources.cfm_once
 import dev.ccpocket.app.resources.cfm_title
 import dev.ccpocket.app.resources.cfm_workdir
 import dev.ccpocket.app.resources.codex_preset_autonomous
@@ -446,6 +447,8 @@ class EntryFlowUiTest {
         // preset row at all — that is the degradation contract, not a styling default.
         agentPresets: List<dev.ccpocket.protocol.AgentPresetInfo> = emptyList(),
         presetAgent: AgentKind = AgentKind.DSH,
+        fullAccessConfirmed: Boolean = false,
+        onFullAccessConfirmed: () -> Unit = {},
         onPicked: (PermissionMode, AgentKind, String?, String?, String?) -> Unit = { _, _, _, _, _ -> },
         assertions: SkikoComposeUiTest.() -> Unit,
     ) = runDesktopComposeUiTest(W, H) {
@@ -456,6 +459,8 @@ class EntryFlowUiTest {
                         workdir = dir, agent = agent, computer = "alex-macbook",
                         modePresetsFor = { a -> if (a == AgentKind.CODEX) codexPresets else emptyList() },
                         agentPresetsFor = { a -> if (a == presetAgent) agentPresets else emptyList() },
+                        fullAccessConfirmed = fullAccessConfirmed,
+                        onFullAccessConfirmed = onFullAccessConfirmed,
                         onPick = onPicked, onDismiss = {},
                     )
                 }
@@ -614,6 +619,52 @@ class EntryFlowUiTest {
             onAllNodes(hasText(str(Res.string.cfm_cta))).onFirst().performClick()
             advanceFrameAndWait()
             assertEquals(1, picks, "confirming starts exactly one session")
+        }
+    }
+
+    /** The confirmation is shown until it is accepted once: accepting reports it, Cancel does not. */
+    @Test
+    fun acceptingTheFullAccessConfirmationIsReportedAndCancelIsNot() {
+        var picks = 0
+        var accepted = 0
+        configure(onPicked = { _, _, _, _, _ -> picks++ }, onFullAccessConfirmed = { accepted++ }) {
+            onAllNodes(hasText(str(Res.string.cfg_mode_full))).onFirst()
+                .performSemanticsAction(SemanticsActions.OnClick)
+            advanceFrameAndWait()
+            onAllNodes(hasText(str(Res.string.cfg_start), substring = true)).onFirst().performClick()
+            advanceFrameAndWait()
+            assertTrue(present(str(Res.string.cfm_once)), "the confirmation says it is only asked once")
+            onAllNodes(hasText(str(Res.string.cancel))).onFirst().performClick()
+            advanceFrameAndWait()
+            assertEquals(0, accepted, "Cancel is not an acceptance")
+
+            onAllNodes(hasText(str(Res.string.cfg_start), substring = true)).onFirst().performClick()
+            advanceFrameAndWait()
+            onAllNodes(hasText(str(Res.string.cfm_cta))).onFirst().performClick()
+            advanceFrameAndWait()
+            assertEquals(1, accepted, "confirming is reported so the host can remember it")
+            assertEquals(1, picks, "…and starts exactly one session")
+        }
+    }
+
+    /** Once accepted, Start on Full access starts directly — the confirmation does not come back. */
+    @Test
+    fun anAcceptedFullAccessConfirmationIsNotShownAgain() {
+        var picked: PermissionMode? = null
+        var accepted = 0
+        configure(
+            fullAccessConfirmed = true,
+            onFullAccessConfirmed = { accepted++ },
+            onPicked = { m, _, _, _, _ -> picked = m },
+        ) {
+            onAllNodes(hasText(str(Res.string.cfg_mode_full))).onFirst()
+                .performSemanticsAction(SemanticsActions.OnClick)
+            advanceFrameAndWait()
+            onAllNodes(hasText(str(Res.string.cfg_start), substring = true)).onFirst().performClick()
+            advanceFrameAndWait()
+            assertFalse(present(str(Res.string.cfm_title)), "no confirmation once it was accepted")
+            assertEquals(PermissionMode.BYPASS_PERMISSIONS, picked, "Start commits Full access directly")
+            assertEquals(0, accepted, "nothing new was accepted")
         }
     }
 

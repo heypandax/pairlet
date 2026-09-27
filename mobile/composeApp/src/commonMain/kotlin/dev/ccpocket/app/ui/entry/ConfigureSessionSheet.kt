@@ -77,6 +77,7 @@ import dev.ccpocket.app.resources.cfg_start_caption
 import dev.ccpocket.app.resources.cfm_body
 import dev.ccpocket.app.resources.cfm_cta
 import dev.ccpocket.app.resources.cfm_note
+import dev.ccpocket.app.resources.cfm_once
 import dev.ccpocket.app.resources.cfm_reach
 import dev.ccpocket.app.resources.cfm_reach_body
 import dev.ccpocket.app.resources.cfm_reach_body_local
@@ -131,7 +132,8 @@ private const val CONFIGURE_SHEET_HEIGHT_FRACTION = 0.90f
  *    (never to something wider). Start reprints either way — no more starting under a preset the label
  *    never showed;
  *  - Full access opens the existing confirmation, which names the agent, the workdir and the computer;
- *    Cancel returns here with the selection intact and starts nothing;
+ *    Cancel returns here with the selection intact and starts nothing. It is shown until the user has
+ *    confirmed it once ([fullAccessConfirmed]); after that, Start on Full access starts directly;
  *  - a `started` latch makes a double tap (or an overlapping dismiss callback) a no-op.
  *
  * Dismiss, scrim and system back start nothing — they never did, and now neither does a mode row.
@@ -157,6 +159,10 @@ fun ConfigureSessionSheet(
      * would let the user choose something that is silently dropped on the wire and never takes effect.
      */
     agentPresetsFor: (AgentKind) -> List<AgentPresetInfo> = { emptyList() },
+    /** The Full-access confirmation was already accepted once on this device — Start skips it. */
+    fullAccessConfirmed: Boolean = false,
+    /** Fires when the user accepts the Full-access confirmation, so the host can remember it. */
+    onFullAccessConfirmed: () -> Unit = {},
     onAgentPicked: (AgentKind) -> Unit = {},
     onPick: (PermissionMode, AgentKind, String?, String?, String?) -> Unit,
     onDismiss: () -> Unit,
@@ -221,7 +227,7 @@ fun ConfigureSessionSheet(
                     // Cancel returns to configuration with the selection intact — `confirming` is the only
                     // thing that changes, so Full access is still the chosen mode.
                     onCancel = { confirming = false },
-                    onConfirm = { confirming = false; start() },
+                    onConfirm = { confirming = false; onFullAccessConfirmed(); start() },
                 )
                 return@Column
             }
@@ -299,7 +305,7 @@ fun ConfigureSessionSheet(
                     enabled = !started && modeValid,
                 ) {
                     if (!modeValid) Unit
-                    else if (chosenMode.needsFullAccessConfirm(chosenAgent)) {
+                    else if (chosenMode.needsFullAccessConfirm(chosenAgent) && !fullAccessConfirmed) {
                         // #363: the rung on the confirmation is now the user's committed answer. A capability
                         // refresh while it is open may invalidate it (back to the panel, with the reason) but
                         // must never re-seed it into a different rung behind the confirmation.
@@ -580,6 +586,7 @@ private fun FullAccessConfirm(
                 color = Tok.tx2, style = TypeRole.preview,
             )
             EntryNote(stringResource(Res.string.cfm_note), Modifier.padding(top = Metric.gapL))
+            EntryNote(stringResource(Res.string.cfm_once), Modifier.padding(top = Metric.gapS))
         }
         Hairline()
         Row(

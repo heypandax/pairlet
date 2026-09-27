@@ -301,6 +301,9 @@ fun StartSessionModeSheet(
     modePresetsFor: (AgentKind) -> List<AgentModePreset> = { emptyList() },
     /** issue #333 — the daemon's advertised agent presets per agent; empty = no preset row (see the sheet). */
     agentPresetsFor: (AgentKind) -> List<dev.ccpocket.protocol.AgentPresetInfo> = { emptyList() },
+    /** The Full-access confirmation was accepted once already — Start on Full access skips it. */
+    fullAccessConfirmed: Boolean = false,
+    onFullAccessConfirmed: () -> Unit = {},
     onAgentPicked: (AgentKind) -> Unit = {},
     onPick: (PermissionMode, AgentKind, String?, String?, String?) -> Unit,
     onDismiss: () -> Unit,
@@ -316,6 +319,8 @@ fun StartSessionModeSheet(
     defaultModelFor = defaultModelFor,
     modePresetsFor = modePresetsFor,
     agentPresetsFor = agentPresetsFor,
+    fullAccessConfirmed = fullAccessConfirmed,
+    onFullAccessConfirmed = onFullAccessConfirmed,
     onAgentPicked = onAgentPicked,
     onPick = onPick,
     onDismiss = onDismiss,

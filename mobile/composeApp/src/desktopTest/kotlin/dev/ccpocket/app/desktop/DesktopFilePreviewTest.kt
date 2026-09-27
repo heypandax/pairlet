@@ -2,8 +2,11 @@ package dev.ccpocket.app.desktop
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ClipboardManager
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -19,6 +22,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.graphics.asSkiaBitmap
 import dev.ccpocket.app.data.ChatItem
@@ -108,6 +112,36 @@ class DesktopFilePreviewTest {
                 onNodeWithTag("file-preview-refresh").performClick()
                 waitUntil(timeoutMillis = 5_000) { present("file no longer exists") }
                 onNodeWithTag("chat").assertIsDisplayed()
+            }
+        } finally {
+            base.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun headerCopiesTheDocumentsAbsolutePath() {
+        val base = createTempDirectory("ccpocket-md-copy").toFile()
+        try {
+            val doc = File(base, "docs/说明.md").apply { parentFile.mkdirs(); writeText("# Copy my path") }
+            val state = DesktopFilePreviewState().apply { open(doc) }
+            @Suppress("DEPRECATION")
+            val clipboard = object : ClipboardManager {
+                var copied: AnnotatedString? = null
+                override fun getText() = copied
+                override fun setText(annotatedString: AnnotatedString) { copied = annotatedString }
+            }
+            runDesktopComposeUiTest(width = 1000, height = 700) {
+                setContent {
+                    CompositionLocalProvider(LocalClipboardManager provides clipboard) {
+                        PocketTheme {
+                            DesktopFilePreviewLayout(state) { Box(Modifier.fillMaxSize().testTag("chat")) }
+                        }
+                    }
+                }
+                waitUntil(timeoutMillis = 5_000) { present("Copy my path") }
+                onNodeWithTag("file-preview-copy-path").performClick()
+                waitForIdle()
+                assertEquals(doc.absoluteFile.normalize().path, clipboard.copied?.text)
             }
         } finally {
             base.deleteRecursively()

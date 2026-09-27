@@ -748,6 +748,10 @@
     <string name="questions_unanswered_expand">Expand</string>
     <string name="questions_unanswered_collapse">Collapse</string>
     <string name="path_copy">Copy</string>
+    <string name="link_copy_address">Copy link</string>
+    <string name="link_open_file">Open file</string>
+    <string name="link_address_copied">Link copied</string>
+    <string name="link_path_copied">Path copied</string>
     <string name="path_open">Open in browser</string>
     <string name="path_copied">Copied</string>
     <string name="path_cwd_hint">resolved from session cwd</string>
@@ -1861,14 +1865,14 @@
     <string name="cfg_mode_plan">Plan</string>
     <string name="cfg_mode_plan_body">Reads and proposes. Changes nothing until you leave Plan.</string>
     <string name="cfg_mode_full">Full access</string>
-    <string name="cfg_mode_full_body">Never asks. Confirmation required before it starts.</string>
+    <string name="cfg_mode_full_body">Never asks. Confirmation required the first time.</string>
     <string name="cfg_mode_auto">Auto</string>
     <string name="cfg_mode_auto_body">Claude classifies each action and asks when it needs your approval.</string>
     <string name="cfg_claude_note">Auto appears here only when this computer reports that it supports it.</string>
     <string name="cfg_codex_cautious_body">Asks first and cannot write outside the workdir.</string>
     <string name="cfg_codex_balanced_body">Works inside the workdir and asks before anything beyond it.</string>
     <string name="cfg_codex_autonomous_body">Runs without asking, still confined to the workdir.</string>
-    <string name="cfg_codex_full_body">No sandbox and no approvals. Confirmation required.</string>
+    <string name="cfg_codex_full_body">No sandbox and no approvals. Confirmation required the first time.</string>
     <string name="cfg_codex_note">approval × sandbox pairs come from CODEX_PRESETS</string>
     <string name="cfg_kimi_note">Kimi has no accept-edits equivalent.</string>
     <string name="cfg_opencode_title">Runs fully automatically</string>
@@ -1884,6 +1888,7 @@
     <string name="cfm_reach_body">Anything reachable from that directory on %1$s, including files outside it that a command can touch.</string>
     <string name="cfm_reach_body_local">Anything reachable from that directory, including files outside it that a command can touch.</string>
     <string name="cfm_note">You will not be asked again during this session. Change it by starting a new session in another mode.</string>
+    <string name="cfm_once">You only confirm this once. Later full-access sessions start directly.</string>
     <string name="cfm_cta">Start full access</string>
 
     <!-- new-task composer (issue #260) — the Projects FAB and the sheet it opens -->

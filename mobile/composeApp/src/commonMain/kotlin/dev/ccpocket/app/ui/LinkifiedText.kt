@@ -5,16 +5,20 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -31,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,9 +45,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -65,37 +74,78 @@ import androidx.compose.ui.window.PopupProperties
 import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.path_copied
-import dev.ccpocket.app.resources.path_copy
 import dev.ccpocket.app.resources.path_cwd_hint
 import dev.ccpocket.app.resources.path_open
+import dev.ccpocket.app.resources.link_copy_address
+import dev.ccpocket.app.resources.link_open_file
+import dev.ccpocket.app.resources.link_address_copied
+import dev.ccpocket.app.resources.link_path_copied
+import dev.ccpocket.app.resources.menu_copy_path
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
-private fun ActSheet(item: LinkEntity, copyL: String, openL: String, hintL: String, onTake: () -> Unit, onOpen: () -> Unit, onDismiss: () -> Unit) {
-    PocketSheet(onDismiss) {
-        Column(Modifier.padding(horizontal = 20.dp).padding(top = 4.dp, bottom = 8.dp)) {
-            Text(item.copyValue, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp)
-            if (item.kind == EntityKind.COPY && isRel(item.display))
-                Text(hintL, color = Tok.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-        }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-        Row(
-            Modifier.fillMaxWidth().clickable { onTake() }.padding(horizontal = 20.dp, vertical = 15.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Icon(Icons.Rounded.ContentCopy, null, tint = Tok.tx2, modifier = Modifier.size(20.dp))
-            Text(copyL, color = Tok.tx, fontSize = 16.sp)
-        }
-        if (item.kind == EntityKind.URL) Row(
-            Modifier.fillMaxWidth().clickable { onOpen() }.padding(horizontal = 20.dp, vertical = 15.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, tint = Tok.tx2, modifier = Modifier.size(20.dp))
-            Text(openL, color = Tok.tx, fontSize = 16.sp)
+private fun ActSheet(
+    item: LinkEntity, copyL: String, openL: String, hintL: String,
+    onTake: () -> Unit, onOpen: () -> Unit, onDismiss: () -> Unit,
+) {
+    // A transcript line (especially a table cell) is not a full-screen sheet host. Lift the sheet
+    // out of those constraints and out of the stream's selection registrar (#361).
+    Popup(WindowPP, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+        DisableSelection {
+            BoxWithConstraints(Modifier.fillMaxSize().testTag(LINK_ACTION_SHEET_TAG)) {
+                val headerMaxHeight = (maxHeight * 0.45f).coerceAtMost(240.dp)
+                PocketSheet(onDismiss) {
+                    Column(
+                        Modifier.heightIn(max = headerMaxHeight).verticalScroll(rememberScrollState())
+                            .padding(horizontal = 20.dp).padding(top = 4.dp, bottom = 12.dp),
+                    ) {
+                        val title = if (item.display != item.target) item.display
+                            else if (item.kind != EntityKind.URL) fileNameOf(item.target) else null
+                        if (title != null) Text(
+                            title, color = Tok.tx, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                        Text(item.copyValue, color = Tok.tx, fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp, lineHeight = 19.sp)
+                        if (item.kind != EntityKind.URL && item.copyValue != item.target)
+                            Text(hintL, color = Tok.muted, fontSize = 12.sp,
+                                modifier = Modifier.padding(top = 6.dp))
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+                    Row(
+                        Modifier.fillMaxWidth().testTag(LINK_COPY_TAG).clickable { onTake() }
+                            .padding(horizontal = 20.dp, vertical = 15.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Icon(Icons.Rounded.ContentCopy, null, tint = Tok.tx2, modifier = Modifier.size(20.dp))
+                        Text(copyL, color = Tok.tx, style = tightCenter(16.sp))
+                    }
+                    if (item.kind != EntityKind.COPY) Row(
+                        Modifier.fillMaxWidth().testTag(LINK_OPEN_TAG).clickable { onOpen() }
+                            .padding(horizontal = 20.dp, vertical = 15.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, tint = Tok.tx2,
+                            modifier = Modifier.size(20.dp))
+                        Text(openL, color = Tok.tx, style = tightCenter(16.sp))
+                    }
+                }
+            }
         }
     }
+}
+
+internal const val LINK_ACTION_SHEET_TAG = "link-action-sheet"
+internal const val LINK_COPY_TAG = "link-copy"
+internal const val LINK_OPEN_TAG = "link-open"
+
+private object WindowPP : PopupPositionProvider {
+    override fun calculatePosition(anchor: IntRect, window: IntSize, dir: LayoutDirection, size: IntSize) = IntOffset.Zero
 }
 
 @Composable
@@ -133,7 +183,7 @@ private fun Pill(label: String) {
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(16.dp))
-            Text(label, color = Tok.ok, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(label, color = Tok.ok, style = tightCenter(14.sp), fontWeight = FontWeight.SemiBold)
         } }
     }
 }
@@ -159,9 +209,6 @@ private fun hitOf(lr: TextLayoutResult?, items: List<LinkEntity>, p: Offset): Li
     val ok = p.x >= r.left - 2f && p.x <= r.right + 2f && p.y >= r.top && p.y <= r.bottom
     return if (ok) e else null
 }
-
-private fun isRel(s: String): Boolean =
-    !s.startsWith('/') && !s.startsWith('~') && !(s.length >= 2 && s[1] == ':')
 
 private fun styled(src: AnnotatedString, items: List<LinkEntity>, onOpen: (LinkEntity) -> Unit, onTake: (LinkEntity) -> Unit): AnnotatedString {
     if (items.isEmpty()) return src
@@ -189,7 +236,7 @@ fun LinkifiedText(
 ) {
     val opener = LocalPathOpener.current
     val cwd = LocalPathCwd.current
-    val items = remember(source.text, opener, cwd) { recognizeEntities(source.text, cwd) { opener?.exists(it) == true } }
+    val items = remember(source, opener, cwd) { recognizeEntities(source, cwd) { opener?.exists(it) == true } }
     if (items.isEmpty()) {
         Text(source, color = color, fontSize = fontSize, fontWeight = fontWeight, lineHeight = lineHeight, modifier = modifier)
         return
@@ -201,9 +248,15 @@ fun LinkifiedText(
     var shown by remember { mutableStateOf<LinkEntity?>(null) }
     var sheet by remember { mutableStateOf<LinkEntity?>(null) }
     var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
-    val open: (LinkEntity) -> Unit = { e -> if (e.kind == EntityKind.URL) openWebUrl(e.copyValue) else opener?.open(e.display) }
-    val take: (LinkEntity) -> Unit = { e -> put(e.copyValue); if (mouse) shown = e }
-    val styledText = remember(source, items) { styled(source, items, open, take) }
+    var copiedKind by remember { mutableStateOf(EntityKind.COPY) }
+    val haptic = LocalHapticFeedback.current
+    val open by rememberUpdatedState<(LinkEntity) -> Unit> { e ->
+        if (e.kind == EntityKind.URL) openWebUrl(e.target) else opener?.open(e.target)
+    }
+    val take by rememberUpdatedState<(LinkEntity) -> Unit> { e ->
+        copiedKind = e.kind; put(e.copyValue); if (mouse) shown = e
+    }
+    val styledText = remember(source, items) { styled(source, items, { open(it) }, { take(it) }) }
     val muted = Tok.muted
     LaunchedEffect(target) { if (target != null) { delay(350); shown = target } }
     LaunchedEffect(target, overChip) { if (target == null && !overChip) { delay(150); if (target == null && !overChip) shown = null } }
@@ -241,11 +294,45 @@ fun LinkifiedText(
                 }
                 .pointerInput(items) {
                     awaitEachGesture {
-                        val d = awaitFirstDown(requireUnconsumed = false)
-                        if (d.type == PointerType.Touch) {
-                            val e = hitOf(lay, items, d.position)
-                            val lp = if (e != null) awaitLongPressOrCancellation(d.id) else null
-                            if (lp != null && e != null) { lp.consume(); sheet = e }
+                        // Own a touch that STARTS on a link before LinkAnnotation's clickable sees it.
+                        // Its click detector otherwise cancels our long-press and opens on finger-up.
+                        // Mouse/keyboard/accessibility keep the native link annotations; plain text
+                        // never gets consumed, so SelectionContainer retains its normal gestures.
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        if (down.type != PointerType.Touch || down.isConsumed) return@awaitEachGesture
+                        val e = hitOf(lay, items, down.position) ?: return@awaitEachGesture
+                        mouse = false
+                        down.consume()
+                        val result = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            var outcome = LinkTouchOutcome.CANCELLED
+                            while (true) {
+                                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                if (change.isConsumed || ev.changes.any { it.id != down.id && it.pressed } ||
+                                    (change.position - down.position).getDistance() > viewConfiguration.touchSlop) break
+                                if (!change.pressed) {
+                                    change.consume()
+                                    outcome = LinkTouchOutcome.TAP
+                                    break
+                                }
+                                // Let scrolling claim movement. A cancelled candidate never opens.
+                                if (awaitPointerEvent(PointerEventPass.Final).changes.any { it.isConsumed }) break
+                            }
+                            outcome
+                        } ?: LinkTouchOutcome.LONG_PRESS
+                        when (result) {
+                            LinkTouchOutcome.TAP -> if (e.kind == EntityKind.COPY) take(e) else open(e)
+                            LinkTouchOutcome.LONG_PRESS -> {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                sheet = e
+                                // Consume the entire remainder, including UP: closing the sheet must
+                                // never turn this same gesture into a file/browser navigation.
+                                do {
+                                    val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                    ev.changes.forEach { it.consume() }
+                                } while (ev.changes.any { it.pressed })
+                            }
+                            LinkTouchOutcome.CANCELLED -> Unit
                         }
                     }
                 },
@@ -264,9 +351,16 @@ fun LinkifiedText(
         }
         val sh = sheet
         if (sh != null) ActSheet(
-            sh, stringResource(Res.string.path_copy), stringResource(Res.string.path_open), stringResource(Res.string.path_cwd_hint),
+            sh,
+            stringResource(if (sh.kind == EntityKind.URL) Res.string.link_copy_address else Res.string.menu_copy_path),
+            stringResource(if (sh.kind == EntityKind.URL) Res.string.path_open else Res.string.link_open_file),
+            stringResource(Res.string.path_cwd_hint),
             { take(sh); sheet = null }, { open(sh); sheet = null }, { sheet = null },
         )
-        if (done && !mouse) Pill(stringResource(Res.string.path_copied))
+        if (done && !mouse) Pill(stringResource(
+            if (copiedKind == EntityKind.URL) Res.string.link_address_copied else Res.string.link_path_copied,
+        ))
     }
 }
+
+private enum class LinkTouchOutcome { TAP, LONG_PRESS, CANCELLED }

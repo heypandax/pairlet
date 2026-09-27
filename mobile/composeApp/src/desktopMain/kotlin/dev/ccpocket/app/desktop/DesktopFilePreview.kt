@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,14 +48,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.close
+import dev.ccpocket.app.resources.copy_path
 import dev.ccpocket.app.resources.dir_refresh
 import dev.ccpocket.app.resources.file_preview
+import dev.ccpocket.app.resources.files_copy_full_path
+import dev.ccpocket.app.resources.path_copied
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.CopyChip
 import dev.ccpocket.app.ui.FileTabBody
 import dev.ccpocket.app.ui.LocalPathCwd
 import dev.ccpocket.app.ui.LocalPathOpener
 import dev.ccpocket.app.ui.TailPathText
+import dev.ccpocket.app.ui.rememberCopied
 import dev.ccpocket.protocol.FileContent
 import java.awt.Cursor
 import java.io.File
@@ -177,6 +183,7 @@ private fun DesktopFilePreviewPane(state: DesktopFilePreviewState, file: File, m
                         )
                         TailPathText(file.parent.orEmpty(), fontSize = 10.5.sp, color = Tok.muted)
                     }
+                    PreviewCopyPathButton(file.path)
                     IconButton(state::refresh, Modifier.testTag("file-preview-refresh")) {
                         Icon(Icons.Rounded.Refresh, stringResource(Res.string.dir_refresh), tint = Tok.tx2)
                     }
@@ -196,6 +203,21 @@ private fun DesktopFilePreviewPane(state: DesktopFilePreviewState, file: File, m
                 FileTabBody(content, file.extension.lowercase(), dense = true, path = file.path, wrap = true,
                     diagnosticToken = observation.token, onRendered = observation::displayed)
             }
+        }
+    }
+}
+
+/** Copies the previewed document's absolute path ([DesktopFilePreviewState.open] normalized it); the glyph
+ *  and the tooltip both say "Copied" for the confirmation beat. */
+@Composable
+private fun PreviewCopyPathButton(path: String) {
+    val (copied, copy) = rememberCopied()
+    DesktopTooltip(stringResource(if (copied) Res.string.path_copied else Res.string.files_copy_full_path)) {
+        IconButton({ copy(path) }, Modifier.testTag("file-preview-copy-path")) {
+            Icon(
+                if (copied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
+                stringResource(Res.string.copy_path), tint = if (copied) Tok.ok else Tok.tx2,
+            )
         }
     }
 }

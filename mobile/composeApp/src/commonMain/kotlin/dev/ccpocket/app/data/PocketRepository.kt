@@ -709,6 +709,16 @@ class PocketRepository(
         SecureStore.getString(K_DEFAULT_PERMISSION_MODE)?.takeIf { it == CLAUDE_PERMISSION_MODE_AUTO },
     )
 
+    /** The new-session Full-access confirmation was accepted once on this device. From then on a Start on
+     *  Full access goes straight through — the step informs, and a user who has read it has been informed.
+     *  One-way: nothing clears it. The mid-session mode switch keeps its own confirmation regardless. */
+    val fullAccessConfirmed = mutableStateOf(SecureStore.getString(K_FULL_ACCESS_CONFIRMED) == "1")
+    fun acknowledgeFullAccess() {
+        if (fullAccessConfirmed.value) return
+        SecureStore.putString(K_FULL_ACCESS_CONFIRMED, "1")
+        fullAccessConfirmed.value = true
+    }
+
     /** Persisted default reasoning effort for NEW Claude sessions (null = the model's own default). Resumed
      *  sessions keep their own. Before per-agent defaults this key was shared by every backend; construction
      *  migrates that historical value to each new scoped key, then this original key remains Claude's source
@@ -3000,6 +3010,9 @@ class PocketRepository(
         notificationsOn.value = from.notificationsOn.value
         defaultMode.value = from.defaultMode.value
         defaultPermissionMode.value = from.defaultPermissionMode.value
+        // one-way flag: either side having accepted it means it was accepted (a demoted-then-promoted
+        // satellite may be the one that recorded it)
+        fullAccessConfirmed.value = fullAccessConfirmed.value || from.fullAccessConfirmed.value
         defaultEffort.value = from.defaultEffort.value
         defaultCodexEffort.value = from.defaultCodexEffort.value
         defaultOpenCodeEffort.value = from.defaultOpenCodeEffort.value
@@ -8118,6 +8131,7 @@ class PocketRepository(
         const val K_PUSH_PLATFORM = "push_platform_last"
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
         const val K_DEFAULT_PERMISSION_MODE = "default_session_permission_mode" // backend-native mode (`auto`), "" = legacy mode
+        const val K_FULL_ACCESS_CONFIRMED = "full_access_start_confirmed" // SecureStore flag: "1" = the new-session Full-access confirmation was accepted once
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
         const val K_DEFAULT_CODEX_EFFORT = "default_session_effort_codex" // SecureStore: Codex-only effort; never overwrites Claude
         const val K_DEFAULT_OPENCODE_EFFORT = "default_session_effort_opencode" // SecureStore: OpenCode-only effort
