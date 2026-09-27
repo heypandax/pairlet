@@ -1,8 +1,7 @@
-What's new in 2.1.3
+What's new in 2.1.4
 
-- Sessions with a very long history open reliably again instead of reconnecting in a loop.
-- Notifications: one alert per session, no early "complete" while background agents are still working, and alerts clear when you open the session, send a message or answer a question.
-- Finished Codex tool steps now fold away like Claude's, keeping the final reply in view.
-- Quoted passages in agent replies render as proper quotes with one-tap copy.
-- Fixed typing a full-width punctuation mark occasionally erasing the text before it.
-- When a DeepSeek Harness install is incomplete, you can repair it with one tap and your message is resent automatically.
+- The agent's steps now show up the moment the first one starts, with a live line for the current step, so the reply area no longer jumps while work is in progress. Failed and not-returned steps are marked separately in the block title.
+- Chat layout refresh: Copy message sits on the sender line, spacing between turns and paragraphs is clearer, and the header and composer use fewer boxes.
+- Links in replies: tap to open, long-press for Copy link, Open file and copy path. Markdown links open their real destination.
+- Copy a file's path with one tap from the file viewer.
+- The Full access confirmation appears only the first time you start such a session.
