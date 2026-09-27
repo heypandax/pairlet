@@ -24,7 +24,7 @@
 | 工作区 | [Git 面板](GIT-PANEL.md)、[Worktree](WORKTREE-MANAGEMENT.md)、[回退与 fork](REWIND-FORK.md)、[桌面分屏](SPLIT-PANES.md) |
 | 输入 | [语音输入](VOICE-INPUT.md) |
 | 诊断 | [总体方案](OBSERVABILITY.md)、[配置与验证入口](../observability/README.md)、[核心错误路径](../observability/ERROR-PATHS.md)、[产品分析口径](../observability/PRODUCT-INSIGHTS.md) |
-| 评估与历史探索 | [渠道集成评估](CHANNEL-INTEGRATIONS-EVALUATING.md)、[会话打开诊断评估](SESSION-OPEN-DIAGNOSTICS-EVALUATING.md)、[旧观测供应商评估](OBSERVABILITY-EVALUATING.md)、[已暂停的 Peer Call](PEER-CALL.md) |
+| 评估与历史探索 | [渠道集成评估](CHANNEL-INTEGRATIONS-EVALUATING.md)、[会话打开诊断评估](SESSION-OPEN-DIAGNOSTICS-EVALUATING.md)、[旧观测供应商评估](OBSERVABILITY-EVALUATING.md)、[已暂停的 Peer Call](PEER-CALL.md)、[已搁置的直连／中继路径选择与 P2P 评估](TRANSPORT-PATH-SELECTION-EVALUATING.md) |
 
 ## 维护与存档
 

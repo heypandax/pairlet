@@ -16,6 +16,7 @@
 | 排查观测、配置分析与发布诊断 | [观测开发入口](observability/README.md) |
 | 用户反馈未解决、补日志并交付诊断测试包 | [反馈排障与测试版本交付](observability/FEEDBACK-DIAGNOSTICS.md) |
 | 审核推送注册确认与存量用户自动恢复 | [推送恢复方案（待审核）](design/PUSH-REGISTRATION-RECOVERY.md) |
+| 查看直连／中继路径选择与 P2P 的评估结论 | [路径选择与 P2P 评估（已搁置：三段式实施不合理，P2P 不立项；A0 另行跟踪）](design/TRANSPORT-PATH-SELECTION-EVALUATING.md) |
 | 品牌迁移与升级兼容 | [命名](PAIRLET-NAMING.md)、[兼容清单](PAIRLET-COMPATIBILITY.md)、[CLI 兼容](PAIRLET-CLI-COMPATIBILITY.md)、[发布准备](PAIRLET-ROLLOUT.md) |
 | 部署网站与服务 | [部署说明](../deploy/README.md)、[网站部署记录](PAIRLET-WEBSITE-DEPLOYMENT.md)（日期快照） |
 | 支持知识与跨人协作 | [支持知识](SUPPORT-KNOWLEDGE.md)、[协作交接](COLLABORATION-HANDOFF.md)、[飞书菜单](FEISHU-BOT-MENU.md) |
