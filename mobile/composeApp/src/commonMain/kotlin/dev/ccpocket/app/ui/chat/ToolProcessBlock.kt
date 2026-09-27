@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -36,6 +37,8 @@ import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.InfiniteAnimationPolicy
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -75,6 +78,7 @@ import dev.ccpocket.app.resources.tool_process_collapse_one
 import dev.ccpocket.app.resources.tool_process_expand
 import dev.ccpocket.app.resources.tool_process_expand_one
 import dev.ccpocket.app.resources.tool_process_failed
+import dev.ccpocket.app.resources.tool_process_latest
 import dev.ccpocket.app.resources.tool_process_running
 import dev.ccpocket.app.resources.tool_process_unknown
 import dev.ccpocket.app.resources.tool_process_unknown_one
@@ -286,11 +290,15 @@ private fun elapsedSeconds(start: Long): Long = ((epochMillis() - start) / 1000)
 
 private const val TNUM = "tnum"
 
+/** The phone card's corner (Chat Rhythm v1: 10dp); [processSegment]'s own default stays the desktop's 8dp. */
+private val PHONE_PROCESS_RADIUS = 10.dp
+
 /**
  * The fold's header segment: caret, what it holds (counts — or, for a settled single step, the step itself),
  * the failed / outcome-less markers that never truncate, and the action. It closes the card itself when
  * nothing hangs below it, and carries the live line when no opened member does ([ChatRow.ProcessGroup.carriesLive]).
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ProcessBlockHeader(
     group: ChatRow.ProcessGroup,
@@ -314,59 +322,129 @@ fun ProcessBlockHeader(
     )
     val state = if (group.live != null) stringResource(Res.string.tool_process_running, action) else action
     val caret by animateFloatAsState(if (group.expanded) 90f else 0f, tween(150, easing = FastOutSlowInEasing))
-    Column(modifier.fillMaxWidth().processSegment(top = true, bottom = !group.hasMemberRows, fill = Tok.surface, line = Tok.hair)) {
+    Column(modifier.fillMaxWidth().processSegment(top = true, bottom = !group.hasMemberRows, fill = Tok.surface, line = Tok.hair, radius = PHONE_PROCESS_RADIUS)) {
+        // Chat Rhythm v1: the whole row is the toggle and the caret is its only drawn cue — the trailing
+        // "Show steps" word is gone from sight (it stays the row's spoken click label). The count WRAPS rather
+        // than truncates, and the markers wrap onto lines of their own before they would squeeze it, so a 320pt
+        // screen at large type still reads every count, failed and not-returned apart.
         Row(
             Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag(TOOL_PROCESS_GROUP_TAG)
                 .clickable(onClick = onToggle)
                 .semantics { stateDescription = state; onClick(label = action) { onToggle(); true } }
-                .padding(horizontal = 12.dp),
+                // 6dp: at 1× a headline that has to drop its markers to a second line (14 + 4 + 14) still totals
+                // exactly the 44dp minimum, so a marker appearing mid-run never grows the live fold
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Box(Modifier.width(12.dp), contentAlignment = Alignment.Center) {
                 Text("▸", color = Tok.muted, fontSize = 10.sp, style = tightCenter(10.sp), modifier = Modifier.rotate(caret))
             }
-            if (single != null) {
-                ToolChip(chipToken(single.tool), Modifier.capWidth(0.52f))
-                val target = ToolTarget.of(single.preview, cwd)
-                Text(
-                    target, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
-                    maxLines = 1, overflow = targetOverflow(target), style = tightCenter(12.sp), modifier = Modifier.weight(1f),
-                )
-            } else {
-                Text(
-                    thought?.seconds?.let { stringResource(Res.string.thought_for, it) } ?: processSummaryLabel(summary),
-                    color = Tok.tx2, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = tightCenter(12.5.sp).copy(fontFeatureSettings = TNUM), modifier = Modifier.weight(1f),
-                )
-            }
-            if (summary.failed > 0) {
-                FoldMarker(
-                    if (single != null) stringResource(Res.string.chat_tool_failed)
-                    else pluralStringResource(Res.plurals.tool_process_failed, summary.failed, summary.failed),
-                    Tok.danger,
-                ) { StateSquare(Tok.danger) }
-            }
-            if (summary.unknown > 0) {
-                FoldMarker(
-                    if (single != null) stringResource(Res.string.tool_process_unknown_one)
-                    else pluralStringResource(Res.plurals.tool_process_unknown, summary.unknown, summary.unknown),
-                    Tok.tx2,
-                ) { StateRing(Tok.muted) }
-            }
-            if (summary.autoRuns > 0) {
-                // grant-covered auto-decisions stay visible on the fold (approval design §9.6); opening it shows
-                // each audit chip with its Tighten action
-                FoldMarker(pluralStringResource(Res.plurals.tool_process_autoruns, summary.autoRuns, summary.autoRuns), Tok.tx2) {
-                    Text("⚡", fontSize = 10.sp, style = tightCenter(10.sp))
-                }
-            }
-            Text(action, color = Tok.muted, fontSize = 11.sp, maxLines = 1, style = tightCenter(11.sp))
+            val hasMarkers = summary.failed > 0 || summary.unknown > 0 || summary.autoRuns > 0
+            FoldHeadline(
+                leadShrinks = single != null,
+                modifier = Modifier.weight(1f),
+                lead = {
+                    if (single != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ToolChip(chipToken(single.tool), Modifier.capWidth(0.52f))
+                            val target = ToolTarget.of(single.preview, cwd)
+                            Text(
+                                target, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+                                maxLines = 1, overflow = targetOverflow(target), style = tightCenter(12.sp), modifier = Modifier.weight(1f, fill = false),
+                            )
+                        }
+                    } else {
+                        Text(
+                            thought?.seconds?.let { stringResource(Res.string.thought_for, it) } ?: processSummaryLabel(summary),
+                            color = Tok.tx2, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                            style = tightCenter(12.5.sp).copy(fontFeatureSettings = TNUM),
+                        )
+                    }
+                },
+                markers = if (!hasMarkers) null else ({
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (summary.failed > 0) {
+                            FoldMarker(
+                                if (single != null) stringResource(Res.string.chat_tool_failed)
+                                else pluralStringResource(Res.plurals.tool_process_failed, summary.failed, summary.failed),
+                                Tok.danger,
+                            ) { StateSquare(Tok.danger) }
+                        }
+                        if (summary.unknown > 0) {
+                            FoldMarker(
+                                if (single != null) stringResource(Res.string.tool_process_unknown_one)
+                                else pluralStringResource(Res.plurals.tool_process_unknown, summary.unknown, summary.unknown),
+                                Tok.tx2,
+                            ) { StateRing(Tok.muted) }
+                        }
+                        if (summary.autoRuns > 0) {
+                            // grant-covered auto-decisions stay visible on the fold (approval design §9.6); opening it
+                            // shows each audit chip with its Tighten action
+                            FoldMarker(pluralStringResource(Res.plurals.tool_process_autoruns, summary.autoRuns, summary.autoRuns), Tok.tx2) {
+                                Text("⚡", fontSize = 10.sp, style = tightCenter(10.sp))
+                            }
+                        }
+                    }
+                }),
+            )
         }
         if (liveLine != null) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
             ProcessLiveLine(liveLine)
+        }
+    }
+}
+
+/**
+ * The fold header's text line (Chat Rhythm v1): what the fold holds, then its markers at the trailing edge.
+ *
+ * One line whenever the two fit at their natural widths — so an ordinary phone never grows the header when a marker
+ * appears mid-run (Tool Process Live v1: the live fold must not change height). Only when they cannot both fit does
+ * the count take the whole first line (wrapping rather than truncating) and the markers drop below it, still at the
+ * trailing edge and wrapping among themselves. [leadShrinks]: a single step's target ellipsizes instead — its
+ * markers stay on the line unless they alone need more than half of it.
+ */
+@Composable
+private fun FoldHeadline(
+    leadShrinks: Boolean,
+    lead: @Composable () -> Unit,
+    markers: (@Composable () -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    Layout(
+        contents = listOf(lead, markers ?: {}),
+        modifier = modifier,
+    ) { (leadM, markM), constraints ->
+        val w = constraints.maxWidth
+        val gap = 8.dp.roundToPx()
+        val lineGap = 4.dp.roundToPx()
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val mark = markM.firstOrNull()
+        if (mark == null) {
+            val p = leadM.first().measure(loose)
+            return@Layout layout(w, p.height) { p.place(0, 0) }
+        }
+        val markNatural = mark.maxIntrinsicWidth(Constraints.Infinity)
+        val inline = if (leadShrinks) markNatural <= w / 2 else leadM.first().maxIntrinsicWidth(Constraints.Infinity) + gap + markNatural <= w
+        if (inline) {
+            val mp = mark.measure(loose.copy(maxWidth = markNatural))
+            val lp = leadM.first().measure(loose.copy(maxWidth = (w - gap - mp.width).coerceAtLeast(0)))
+            val h = maxOf(lp.height, mp.height)
+            layout(w, h) {
+                lp.place(0, (h - lp.height) / 2)
+                mp.place(w - mp.width, (h - mp.height) / 2)
+            }
+        } else {
+            val lp = leadM.first().measure(loose)
+            val mp = mark.measure(loose)
+            layout(w, lp.height + lineGap + mp.height) {
+                lp.place(0, 0)
+                mp.place(w - mp.width, lp.height + lineGap)
+            }
         }
     }
 }
@@ -380,7 +458,7 @@ fun ProcessMemberSegment(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    Column(modifier.fillMaxWidth().processSegment(top = false, bottom = last, fill = Tok.surface, line = Tok.hair)) {
+    Column(modifier.fillMaxWidth().processSegment(top = false, bottom = last, fill = Tok.surface, line = Tok.hair, radius = PHONE_PROCESS_RADIUS)) {
         Box(Modifier.fillMaxWidth().padding(start = 32.dp, end = 12.dp, top = 9.dp, bottom = 10.dp)) { content() }
         if (liveLine != null) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -397,7 +475,9 @@ fun ProcessMemberSegment(
  */
 @Composable
 fun ProcessLiveLine(state: LiveLineState, modifier: Modifier = Modifier) {
-    val height = max(31.dp, with(LocalDensity.current) { 20.sp.toDp() } + 11.dp)
+    // Chat Rhythm v1: 36dp is the FLOOR, not a clamp — the line holds one row of single-line content, so it
+    // still never changes height between states, but grown type is never cut off by a fixed box
+    val height = max(36.dp, with(LocalDensity.current) { 20.sp.toDp() } + 11.dp)
     val failed = state.kind == LiveLineState.Kind.FINISHED && state.outcome == StepState.FAILED
     val a11y = when {
         state.kind == LiveLineState.Kind.WAITING -> stringResource(Res.string.tool_process_a11y_waiting, state.tool.orEmpty(), state.target)
@@ -405,7 +485,7 @@ fun ProcessLiveLine(state: LiveLineState, modifier: Modifier = Modifier) {
         else -> null
     }
     Row(
-        modifier.fillMaxWidth().height(height).testTag(TOOL_PROCESS_LIVE_TAG)
+        modifier.fillMaxWidth().heightIn(min = height).testTag(TOOL_PROCESS_LIVE_TAG)
             .semantics(mergeDescendants = true) {
                 if (a11y != null) {
                     contentDescription = a11y
@@ -420,6 +500,13 @@ fun ProcessLiveLine(state: LiveLineState, modifier: Modifier = Modifier) {
     ) {
         Box(Modifier.width(12.dp), contentAlignment = Alignment.Center) { EcgGlyph(Tok.muted, 11.dp) }
         val quiet = state.kind == LiveLineState.Kind.THINKING || state.kind == LiveLineState.Kind.IDLE
+        // a held, finished step says it is the LATEST step's result — its 失败 is that step's, not the turn's
+        if (state.kind == LiveLineState.Kind.FINISHED) {
+            Text(
+                stringResource(Res.string.tool_process_latest), color = Tok.muted, fontSize = 11.sp, maxLines = 1,
+                style = tightCenter(11.sp),
+            )
+        }
         if (!quiet && state.tool != null) ToolChip(chipToken(state.tool), Modifier.capWidth(0.48f))
         if (!quiet && state.more != null) {
             Text(

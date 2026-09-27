@@ -20,6 +20,7 @@ import androidx.compose.ui.test.SkikoComposeUiTest
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
@@ -32,7 +33,6 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.PendingFile
 import dev.ccpocket.app.data.PocketRepository
@@ -62,6 +62,8 @@ import dev.ccpocket.app.resources.voice_setup_ask_agent
 import dev.ccpocket.app.resources.voice_setup_model_missing
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
+import dev.ccpocket.app.ui.chat.TURN_COPY_TAG
+import dev.ccpocket.app.ui.chat.TURN_SOURCE_ROW_TAG
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ChatRole
@@ -214,7 +216,11 @@ class ChatMasterV2UiTest {
         assertTrue(b.right.value <= W + 0.5f, "…and still nothing spills the 402pt viewport")
     }
 
-    /** The label is what says "you" now, so it keeps its trailing edge — the container no longer does. */
+    /**
+     * The label is what says "you" now, so it keeps its trailing edge — the container no longer does. Chat Rhythm
+     * v1 closes the same row with the whole-turn copy glyph, so the label ends just before it and the glyph's
+     * 28dp disc ends on the turn's trailing edge.
+     */
     @Test
     fun theUserLabelStillReadsFromTheTrailingEdge() = baseline(
         seed = {
@@ -224,9 +230,17 @@ class ChatMasterV2UiTest {
     ) {
         val label = onAllNodes(hasText(str(Res.string.chat_you).uppercase())).onFirst().getUnclippedBoundsInRoot()
         val body = onAllNodes(hasText(LONG_PROMPT)).onFirst().getUnclippedBoundsInRoot()
+        // the copy target is a 44dp square sharing the 28dp disc's bottom-trailing corner
+        val copy = onAllNodes(hasTestTag(TURN_COPY_TAG)).onFirst().getUnclippedBoundsInRoot()
+        val discRight = copy.right.value
+        val discLeft = discRight - 28f
         assertTrue(
-            kotlin.math.abs((label.right - body.right).value) < 2f,
-            "the source label stays flush with the turn's trailing edge (${label.right} vs ${body.right})",
+            kotlin.math.abs(discRight - body.right.value) < 2f,
+            "the copy glyph closes the row at the turn's trailing edge ($discRight vs ${body.right})",
+        )
+        assertTrue(
+            label.right.value <= discLeft + 0.5f && discLeft - label.right.value < 6f,
+            "the source label reads from the trailing edge, right before the glyph (${label.right} vs $discLeft)",
         )
     }
 
@@ -236,6 +250,7 @@ class ChatMasterV2UiTest {
     @Test
     fun theUserLabelStaysAboveTheMessageAtLargeFontScale() = assertUserLabelAboveMessage(fontScale = 1.6f)
 
+    /** Chat Rhythm v1: the label owns a 28dp source row and the body starts 2dp under that row, at any type size. */
     private fun assertUserLabelAboveMessage(fontScale: Float) = baseline(
         fontScale = fontScale,
         seed = {
@@ -244,11 +259,11 @@ class ChatMasterV2UiTest {
         },
     ) {
         val label = onAllNodes(hasText(str(Res.string.chat_you).uppercase())).onFirst().getUnclippedBoundsInRoot()
+        val row = onAllNodes(hasTestTag(TURN_SOURCE_ROW_TAG)).onFirst().getUnclippedBoundsInRoot()
         val body = onAllNodes(hasText(LONG_PROMPT)).onFirst().getUnclippedBoundsInRoot()
-        assertTrue(
-            (body.top - label.bottom).value >= 6.5f,
-            "the source label needs its own row and 7dp gap above the body: label=$label, body=$body",
-        )
+        assertTrue(label.bottom <= row.bottom && label.top >= row.top, "the label sits inside its source row: label=$label, row=$row")
+        assertTrue((row.bottom - row.top).value >= 27.5f, "the source row is at least 28dp: $row")
+        assertEquals(2f, (body.top - row.bottom).value, 0.5f, "the body starts 2dp under the source row: row=$row, body=$body")
     }
 
     /** The compact transcript keeps two wrapping lines, then the existing band tap reveals the literal command. */
@@ -446,8 +461,9 @@ class ChatMasterV2UiTest {
                     kotlin.math.abs((stop.right - stop.left).value - (send.right - send.left).value) < 0.5f,
                     "stacked Stop and Send must split the row equally at ${viewport}pt: $stop / $send",
                 )
-                assertTrue(stop.left.value <= 6.5f, "stacked actions start at the lane gutter: $stop")
-                assertTrue(send.right.value >= viewport - 8.5f, "stacked actions end at the lane gutter: $send")
+                // Chat Rhythm v1: the lane lives inside the composer's one container (16dp in from the viewport)
+                assertTrue(stop.left.value <= COMPOSER_INSET + 6.5f, "stacked actions start at the lane gutter: $stop")
+                assertTrue(send.right.value >= viewport - COMPOSER_INSET - 8.5f, "stacked actions end at the lane gutter: $send")
             }
         }
     }
@@ -543,20 +559,19 @@ class ChatMasterV2UiTest {
     }
 
     /**
-     * The wrap decision itself, as data (design master · "Wrapping rule · one predicate"). A rule this
-     * layout depends on should be provable without measuring pixels in eight scenes.
+     * The wrap decision itself, as data (design master · "Wrapping rule · one predicate"; Chat Rhythm v1 decides it
+     * on measured widths). The model label is the one thing that gives, and only down to its floor.
      */
     @Test
-    fun theLaneWrapPredicateStacksOnceTheWholeGroupsStopFitting() {
-        // 402 pt phone, no switcher, Stop + Send: still inline
-        assertTrue(composerLaneFitsInline(388.dp, switcherVisible = false, actionCount = 2, fontScale = 1f))
-        // …the same phone once a cross-session switcher joins the leading group: the actions move below
-        assertFalse(composerLaneFitsInline(388.dp, switcherVisible = true, actionCount = 2, fontScale = 1f))
-        // idle at the narrowest supported width still fits — nothing wraps that does not need to
-        assertTrue(composerLaneFitsInline(266.dp, switcherVisible = false, actionCount = 0, fontScale = 1f))
-        assertFalse(composerLaneFitsInline(266.dp, switcherVisible = false, actionCount = 2, fontScale = 1f))
-        // 200% type never packs inline, however wide the screen is
-        assertFalse(composerLaneFitsInline(1000.dp, switcherVisible = false, actionCount = 0, fontScale = 1.5f))
+    fun theLaneLabelCapKeepsOneRowUntilEvenTheFloorLabelDoesNotFit() {
+        // everything fits at the natural label: nothing is squeezed
+        assertEquals(120, composerLaneLabelCap(room = 300, leadAtFloor = 200, leadNatural = 272, floor = 48, labelMax = 120, fontScale = 1f))
+        // 20px short at the natural label: the label gives exactly those 20px (floor + the room left at the floor)
+        assertEquals(100, composerLaneLabelCap(room = 252, leadAtFloor = 200, leadNatural = 272, floor = 48, labelMax = 120, fontScale = 1f))
+        // not even the floor label fits: the whole trailing group stacks
+        assertEquals(null, composerLaneLabelCap(room = 190, leadAtFloor = 200, leadNatural = 272, floor = 48, labelMax = 120, fontScale = 1f))
+        // past 1.5× type nothing packs inline, however wide the screen is
+        assertEquals(null, composerLaneLabelCap(room = 2000, leadAtFloor = 200, leadNatural = 272, floor = 48, labelMax = 120, fontScale = 1.5f))
     }
 
     /**
@@ -868,6 +883,9 @@ class ChatMasterV2UiTest {
 
         /** The composer field's own horizontal inset from the viewport, in pt (mobile-composer.jsx). */
         const val FIELD_GUTTER = 16f
+
+        /** Chat Rhythm v1: the one composer container's inset from the viewport, in pt. */
+        const val COMPOSER_INSET = 16f
 
         val LONG_PROMPT =
             "here is the failing run: the relay drops the socket about forty seconds after the phone " +

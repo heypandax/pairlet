@@ -80,6 +80,7 @@ import dev.ccpocket.protocol.ModelsList
 import dev.ccpocket.protocol.isModelCompatibleWithAgent
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
@@ -547,7 +548,18 @@ fun QuickActionsSheet(
  * box — desktop's 34dp composer slot — measures exactly as it did before.
  */
 @Composable
-internal fun ModelChip(label: String, open: Boolean, enabled: Boolean, contentDescription: String, labelMax: Dp = 82.dp, onClick: () -> Unit) {
+internal fun ModelChip(
+    label: String,
+    open: Boolean,
+    enabled: Boolean,
+    contentDescription: String,
+    labelMax: Dp = 82.dp,
+    // Chat Rhythm v1 phone: inside the one composer container the chip is a plain text control — no resting fill or
+    // hairline. The press still ripples across its 48dp target, and an open picker still gets the raised pill with
+    // its accent edge. Desktop keeps the pill.
+    flat: Boolean = false,
+    onClick: () -> Unit,
+) {
     val chev by animateFloatAsState(if (open) 180f else 0f, label = "chipChevron")
     val cd = contentDescription
     Box(
@@ -558,10 +570,13 @@ internal fun ModelChip(label: String, open: Boolean, enabled: Boolean, contentDe
         contentAlignment = Alignment.Center,
     ) {
         Row(
-            Modifier.height(30.dp).clip(RoundedCornerShape(999.dp)).background(Tok.raised)
-                .border(1.dp, if (open) Tok.accent else Tok.hair, RoundedCornerShape(999.dp))
-                .alpha(if (enabled) 1f else 0.42f)
-                .padding(start = 10.dp, end = 8.dp),
+            Modifier.height(30.dp).clip(RoundedCornerShape(999.dp))
+                .then(if (!flat || open) Modifier.background(Tok.raised).border(1.dp, if (open) Tok.accent else Tok.hair, RoundedCornerShape(999.dp)) else Modifier)
+                // flat (Chat Rhythm v1 phone): a constant layer, so the dim/undim flip changes only its alpha, not
+                // the modifier chain's structure; the default path keeps Modifier.alpha as it always was
+                .then(if (flat) Modifier.graphicsLayer { this.alpha = if (enabled) 1f else 0.42f } else Modifier.alpha(if (enabled) 1f else 0.42f))
+                // flat: the 48dp target around it is the touch area, so the label needs no pill inset of its own
+                .padding(start = if (flat) 4.dp else 10.dp, end = if (flat) 2.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(

@@ -137,6 +137,10 @@
     <string name="code_copy">copy</string>
     <string name="code_copied">copied</string>
     <string name="quote_copy">copy quote</string>
+    <!-- Chat Rhythm v1: the whole-turn copy on the source row (an icon, so these are its spoken names) -->
+    <string name="chat_copy_message">Copy message</string>
+    <string name="chat_copy_message_done">Message copied</string>
+    <string name="chat_copy_message_failed">Copy failed</string>
     <string name="quote_copied">quote copied</string>
     <string name="text_render_truncated">long content clipped for display · full text ≈%1$s chars · copy gets everything</string>
     <string name="jump_to_latest">Jump to latest</string>
@@ -2178,6 +2182,8 @@
     <string name="tool_process_waiting">Needs approval</string>
     <string name="tool_process_a11y_waiting">Waiting for your approval: %1$s %2$s</string>
     <string name="tool_process_a11y_failed">%1$s %2$s failed</string>
+    <!-- Chat Rhythm v1: prefixes a finished step on the live line — the latest step's result, not the turn's -->
+    <string name="tool_process_latest">Latest</string>
     <!-- context status (issue #320-A): name the evidence shape, never guess a value or claim "unsupported" -->
     <string name="context_status_no_data">No context data yet</string>
     <string name="context_status_no_data_detail">The backend hasn\'t returned a usable value for this session yet. This doesn\'t mean it\'s unsupported.</string>

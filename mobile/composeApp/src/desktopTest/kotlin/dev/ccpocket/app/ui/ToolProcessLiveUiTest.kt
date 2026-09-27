@@ -7,6 +7,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ComposeUiTest
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasTestTag
@@ -286,7 +288,13 @@ class ToolProcessLiveUiTest {
         waitForIdle()
         assertEquals(1, groups())
         assertPresent("git diff --stat", substring = true) // the tool and its target, not "Process · 1 tool"
-        assertPresent(str(Res.string.tool_process_expand_one))
+        // Chat Rhythm v1: the whole row is the toggle and says what a tap does to a screen reader; the word is no
+        // longer drawn beside the caret
+        assertEquals(
+            str(Res.string.tool_process_expand_one),
+            onNodeWithTag(TOOL_PROCESS_GROUP_TAG).fetchSemanticsNode().config.getOrNull(SemanticsActions.OnClick)?.label,
+        )
+        assertFalse(present(str(Res.string.tool_process_expand_one)), "no trailing action word on the fold")
         assertFalse(present(plural(Res.plurals.tool_process_tools, 1), substring = true))
     }
 

@@ -137,6 +137,10 @@
     <string name="code_copy">复制</string>
     <string name="code_copied">已复制</string>
     <string name="quote_copy">复制引用</string>
+    <!-- Chat Rhythm v1：来源行上的整条复制（图标按钮，以下为读屏名称） -->
+    <string name="chat_copy_message">复制整条消息</string>
+    <string name="chat_copy_message_done">已复制整条消息</string>
+    <string name="chat_copy_message_failed">复制失败</string>
     <string name="quote_copied">已复制引用</string>
     <string name="text_render_truncated">内容过长，已截断显示 · 全文约 %1$s 字符 · 复制仍为全文</string>
     <string name="jump_to_latest">回到最新</string>
@@ -2166,6 +2170,8 @@
     <string name="tool_process_waiting">等你批准</string>
     <string name="tool_process_a11y_waiting">等待你批准：%1$s %2$s</string>
     <string name="tool_process_a11y_failed">%1$s %2$s 失败</string>
+    <!-- Chat Rhythm v1：实时行上已结束步骤的前缀——这是最近一步的结果，不是整个回合的 -->
+    <string name="tool_process_latest">最近</string>
     <!-- 上下文状态（issue #320-A）：说明拿到了哪些数据，不猜数值、不断言“不支持” -->
     <string name="context_status_no_data">尚未获得上下文数据</string>
     <string name="context_status_no_data_detail">后端还没有返回这个会话的可用数值，这并不代表它不支持。</string>

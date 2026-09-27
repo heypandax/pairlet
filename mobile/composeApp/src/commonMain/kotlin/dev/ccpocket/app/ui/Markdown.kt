@@ -275,6 +275,10 @@ private fun MdBlocks(blocks: List<MdBlock>, color: Color, quoteDepth: Int = 0) {
     }
 }
 
+/** The blank line between paragraphs. With the body's 3dp block spacing on both sides the default reads as 9dp;
+ *  the phone transcript provides 4dp for Chat Rhythm v1's 10dp paragraph step. Desktop keeps the default. */
+val LocalMdParagraphGap = staticCompositionLocalOf { 3.dp }
+
 /** Test handle for a quote's copy glyph, which has no text for a matcher to find. */
 internal const val QUOTE_COPY_TAG = "quote-copy"
 
@@ -426,6 +430,26 @@ fun rememberCopied(): Pair<Boolean, (String) -> Unit> {
     return copied to { s: String -> clipboard.setText(AnnotatedString(s)); copied = true }
 }
 
+/** What the last copy did, for affordances that must never claim a write that did not happen. */
+enum class CopyOutcome { IDLE, COPIED, FAILED }
+
+/**
+ * [rememberCopied] with an honest failure arm (Chat Rhythm v1's whole-turn copy): the confirmation shows only
+ * when the clipboard write returned; a write that throws reports [CopyOutcome.FAILED] for the same beat. Nothing
+ * is read back — reading the pasteboard on iOS raises the system paste banner.
+ */
+@Composable
+fun rememberCopyOutcome(): Pair<CopyOutcome, (String) -> Unit> {
+    val clipboard = LocalClipboardManager.current
+    var outcome by remember { mutableStateOf(CopyOutcome.IDLE) }
+    var attempt by remember { mutableStateOf(0) }
+    LaunchedEffect(attempt) { if (attempt > 0) { delay(1500); outcome = CopyOutcome.IDLE } }
+    return outcome to { s: String ->
+        outcome = if (runCatching { clipboard.setText(AnnotatedString(s)) }.isSuccess) CopyOutcome.COPIED else CopyOutcome.FAILED
+        attempt++
+    }
+}
+
 /** A small "copy/copied" affordance that copies [text] to the clipboard and flashes confirmation. */
 @Composable
 fun CopyChip(text: String, modifier: Modifier = Modifier) {
@@ -507,7 +531,7 @@ private fun MdLine(raw: String, color: Color) {
     val scale = LocalFontScale.current
     val body = 14.sp * scale // explicit so the chat text scale (issue #8) reaches plain body/list lines too
     when {
-        line.isBlank() -> Spacer(Modifier.height(3.dp))
+        line.isBlank() -> Spacer(Modifier.height(LocalMdParagraphGap.current))
         mdHeadingLevel(line) != null -> {
             val level = mdHeadingLevel(line)!!
             LinkifiedText(

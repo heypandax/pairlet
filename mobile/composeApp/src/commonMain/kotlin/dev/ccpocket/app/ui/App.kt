@@ -56,6 +56,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -199,7 +200,9 @@ import dev.ccpocket.app.ui.session.rewoundSuccessorTitle
 import dev.ccpocket.app.ui.session.splitRewound
 import dev.ccpocket.app.ui.chat.TurnSourceLabel
 import dev.ccpocket.app.ui.chat.UserTurnContainer
-import dev.ccpocket.app.ui.chat.UserTurnSourceLabel
+import dev.ccpocket.app.ui.chat.ChatContextPanel
+import dev.ccpocket.app.ui.chat.TURN_SOURCE_BODY_GAP
+import dev.ccpocket.app.ui.chat.TurnSourceRow
 import dev.ccpocket.app.ui.chat.chatStateUi
 import dev.ccpocket.app.ui.fleet.attentionAsk
 import dev.ccpocket.app.ui.fleet.crossMachineAttention
@@ -3047,13 +3050,13 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             val contextLines = buildList {
                 // what is answering, under which rules, as which model. The model joins only once it is
                 // known — a pre-first-turn session (lazy start #61) has none until init names it (#96).
+                // Chat Rhythm v1: the collapsed header leaves the model out — the composer's model chip is where
+                // it is read and changed, so saying it twice only crowded the header; expanded still states it.
+                val identity = listOf(agentName(repo.sessionAgent.value ?: AgentKind.CLAUDE), modeLabel)
                 add(
                     ContextLine(
-                        listOfNotNull(
-                            agentName(repo.sessionAgent.value ?: AgentKind.CLAUDE),
-                            modeLabel,
-                            modelLabel.takeIf { it.isNotBlank() },
-                        ).joinToString(CONTEXT_SEP),
+                        (identity + listOfNotNull(modelLabel.takeIf { it.isNotBlank() })).joinToString(CONTEXT_SEP),
+                        collapsedText = identity.joinToString(CONTEXT_SEP),
                     ),
                 )
                 // where this conversation lives: computer, then project folder. Still one control — switch
@@ -3081,6 +3084,10 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 onToggleContext = { contextExpanded = !contextExpanded },
                 onBack = { repo.saveDraft(repo.workdir.value, composer.text); repo.backToBrowse() },
                 onSessionInfo = { showSessionInfo = true },
+                // Chat Rhythm v1: the expanded facts float over the stream (drawn in the list's box below)
+                // instead of pushing it down — at 320pt and large type the inline region left no transcript
+                panelInline = false,
+                summaryMaxLines = 1,
             ) {
                 if (!repo.observing.value) {
                     // handoff status chip (design 3b/7/9): WAITING mute · IN PROGRESS pulse · RETURNED green.
@@ -3191,7 +3198,12 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 val pathOpener = remember(repo) { RemotePathOpener { repo.openChangedFile(it) } }
                 CompositionLocalProvider(LocalPathCwd provides repo.workdir.value, LocalPathOpener provides pathOpener) {
                 LazyColumn(
-                    Modifier.fillMaxSize().padding(16.dp).testTag(dev.ccpocket.app.ui.chat.CHAT_STREAM_TAG)
+                    // Chat Rhythm v1: the top/bottom 16dp gutter is CONTENT padding, not an outer inset — at rest the
+                    // rows sit exactly where they did, but a turn's copy square, which rises 12–16dp out of its source
+                    // row, stays inside the list's clip and hit area even on the first row; scrolled, rows pass through
+                    // the gutter as ordinary content. The square grows up and inward (toward the label) only, never past
+                    // the text column, so the 16dp side gutters stay outside the list as before.
+                    Modifier.fillMaxSize().padding(horizontal = 16.dp).testTag(dev.ccpocket.app.ui.chat.CHAT_STREAM_TAG)
                         .observeHistoryLayout({ repo.contentLayoutToken.takeIf { landed } }) { token ->
                             val offset = if (historyLoaderVisible) 1 else 0
                             // #380: display rows → SOURCE indices. A folded group proves content landed, but
@@ -3202,12 +3214,14 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         }
                         .graphicsLayer { alpha = if (landed) 1f else 0f }
                         .pointerInput(Unit) { detectTapGestures { focus.clearFocus() } },
-                    state = listState, verticalArrangement = Arrangement.spacedBy(10.dp),
+                    // Chat Rhythm v1: 12dp between rows of one turn; each row adds its own step above it on top
+                    // (rhythmExtraAbove: 24dp where the speaker changes, 16dp above a copy-bearing source row)
+                    state = listState, verticalArrangement = Arrangement.spacedBy(12.dp),
                     // #334: on a tablet the turns are capped at a readable measure and this centres
                     // them; on a phone the alignment is Start and every row is fillMaxWidth, so the
                     // property is inert there
                     horizontalAlignment = wideColumnAlignment,
-                    contentPadding = PaddingValues(bottom = bottomGutter),
+                    contentPadding = PaddingValues(top = 16.dp, bottom = 16.dp + bottomGutter),
                 ) {
                     // scroll-to-top loader (issue #147). The REQUEST no longer rides this row's composition
                     // (see the effect above ChatScreen's list): a transcript lands through clear()+addAll(),
@@ -3227,7 +3241,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     val seamRow = shown.seamRow(historySeamAt)
                     itemsIndexed(shown.rows, key = { _, row -> row.key }) { ri, row ->
                         if (row is ChatRow.ProcessGroup) {
-                            Column(Modifier.readableMeasure(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Column(Modifier.readableMeasure().padding(top = shown.rhythmExtraAbove(ri)), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 if (ri == seamRow) EarlierMessagesSeam(repo.historyPrependGen.value)
                                 ProcessBlockHeader(
                                     row, shown.items,
@@ -3257,7 +3271,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             ProcessMemberSegment(
                                 last = orig.last,
                                 liveLine = liveGroup?.let { liveLineState(shown, it, repo.pendingAsk.value?.takeUnless(repo::askTimedOut), repo.workdir.value) },
-                                modifier = Modifier.joinPreviousSegment(10.dp).readableMeasure(),
+                                modifier = Modifier.joinPreviousSegment(12.dp).readableMeasure(),
                             ) {
                                 MessageItem(
                                     m,
@@ -3276,7 +3290,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         // say so under the bubble instead of letting it look sent (issue #41 — frames queue
                         // silently offline)
                         val undelivered = m is ChatItem.User && m.pending && (repo.phase.value != ConnPhase.Ready || repo.sendStalled.value)
-                        Column(Modifier.readableMeasure(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(Modifier.readableMeasure().padding(top = shown.rhythmExtraAbove(ri)), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             // seam (0714 handoff B3): for a beat after a page of older history lands,
                             // mark where the old window began so the reader keeps their place
                             if (ri == seamRow) EarlierMessagesSeam(repo.historyPrependGen.value)
@@ -3360,6 +3374,16 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     onReview = onOpenInbox,
                     modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp).padding(top = 8.dp),
                 )
+                // the header's expanded context, as an overlay bounded by this box: it covers the top of the
+                // stream rather than shrinking it, and never reaches the composer below the box
+                if (contextExpanded) {
+                    ChatContextPanel(
+                        summary = contextLines,
+                        workdir = repo.workdir.value,
+                        modifier = Modifier.align(Alignment.TopCenter),
+                        onSessionInfo = { showSessionInfo = true },
+                    )
+                }
             }
             // session health (issue #65) no longer gets its own strip here: `sessionDegraded` is the
             // Failure rung of the shared state ladder, so the pinned block above states it once, in the
@@ -3579,113 +3603,128 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 repo.streaming.value -> ComposerNote(stringResource(Res.string.message_queued_hint))
                             }
                             val stagedContent = input.isNotBlank() || hasReady || hasLanded
-                            ComposerField(
-                                composer,
-                                // the placeholder names the REAL backend of this session — a Codex/OpenCode/Kimi
-                                // conversation invited you to "Message Claude…" for as long as it was hardcoded
-                                placeholder = if (repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty()) {
-                                    stringResource(Res.string.add_message_hint)
-                                } else {
-                                    stringResource(Res.string.message_agent_hint, agentName(repo.sessionAgent.value ?: AgentKind.CLAUDE))
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                                focusRequester = composerFocus,
-                                // #238: neither Send nor Stop may evict voice. Mic lives inside the
-                                // full-width field rather than competing for the accessory lane's width, so
-                                // the ordinary composer offers it in every state it is shown — idle, staged,
-                                // uploading, and mid-turn with nothing typed, which is precisely when you
-                                // want to dictate the message the ribbon above promises to queue.
-                                trailingAction = {
-                                    VoiceActionButton(failed != null) { if (failed != null) repo.retryVoice() else repo.startVoice() }
-                                },
-                            )
-                            // one tap to any other session you're juggling, across projects (issue #165).
-                            // Came DOWN here from the header, which had no width left to give and made a
-                            // bare count square read as a badge — same cure the model chip got, so the two
-                            // shallow entrances share the lane.
-                            val workingSet = repo.workingSet()
-                            // uploads still moving → send WAITS: the landing must finish before the
-                            // @-references exist. Staged content earns Send even mid-turn, because Claude's
-                            // stream-json input queues a mid-turn user message and weaves it into the
-                            // running turn at the next tool boundary (verified on 2.1.201).
-                            val showSend = stagedContent && !uploadsBusy
-                            val showStop = repo.streaming.value
-                            ComposerAccessoryLane(
-                                switcherVisible = workingSet.otherCount > 0,
-                                actionCount = (if (showStop) 1 else 0) + (if (uploadsBusy || showSend) 1 else 0),
-                                leading = {
-                                    val attachInteraction = remember { MutableInteractionSource() }
-                                    val attachPressed by attachInteraction.collectIsPressedAsState()
-                                    // "+" now opens the attach sheet (Photo · File) and rotates into "×" while
-                                    // it's up (issue #90, design: file-attach.jsx); the image flow is one tap
-                                    // deeper but unchanged. The glyph is drawn, so the button has to carry the
-                                    // name itself — icon-only actions get an accessible name (Chat Master v2).
-                                    val attachLabel = stringResource(Res.string.attach_menu)
-                                    IconButton(
-                                        onClick = { attachSheet = !attachSheet }, interactionSource = attachInteraction,
-                                        modifier = Modifier.size(Metric.touch).semantics { contentDescription = attachLabel },
-                                    ) {
-                                        AttachPlusGlyph(
-                                            open = attachSheet,
-                                            tint = if (attachSheet || repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
-                                        )
-                                    }
-                                    // model chip (issue #157): the high-frequency switch rides the composer — one tap
-                                    // straight to the picker (the ⋯ → Model path stays; this is the shallow entrance).
-                                    // Dimmed mid-turn: the running turn keeps its model, so the entrance rests until
-                                    // the next turn can take a switch.
-                                    ModelChip(
-                                        label = modelChipLabel(repo.model.value).ifBlank { stringResource(Res.string.value_model_default) },
-                                        open = showModelSheet,
-                                        enabled = !repo.streaming.value,
-                                        contentDescription = stringResource(Res.string.qa_model),
-                                        labelMax = 120.dp, // relaxed on the accessory row (mobile-composer.jsx); desktop keeps 82
-                                    ) { showModelSheet = true }
-                                    SessionStackChip(workingSet.otherCount, workingSet.attention) { showSessions = true }
-                                    // context occupancy came IN here from a pill that floated over the message
-                                    // tail — unreadable as a control, and it covered the last line (design:
-                                    // context-occupancy.jsx, Option C). Last in the leading group, so it is the
-                                    // first thing to WRAP — never the first thing to be dropped.
-                                    ContextGauge(
-                                        repo.contextUsed.value,
-                                        repo.contextWindow.value,
-                                        // the actions are a sibling group with their own width now, so nothing
-                                        // outside this group is hidden from the gauge's own constraints
-                                        reserveEnd = 0.dp,
-                                    ) { showSessionInfo = true }
-                                },
-                                actions = { actionModifier ->
-                                    // the ■ stays put while a turn runs; typed text adds Send NEXT TO it instead
-                                    // of replacing it — mirrors Claude Code, where interrupt (Esc) and
-                                    // queue-a-message (Enter) coexist
-                                    if (showStop) StopButton(actionModifier) { repo.cancelTurn() }
-                                    if (uploadsBusy) {
-                                        UploadStatusSlot(
-                                            stringResource(
-                                                Res.string.composer_uploading,
-                                                repo.pendingFiles.count { it.state == FileUpState.Uploading || it.state == FileUpState.Queued },
-                                                repo.pendingFiles.size,
-                                            ),
-                                            modifier = actionModifier,
-                                        )
-                                    } else if (showSend) {
-                                        val sendLabel = stringResource(Res.string.send)
-                                        ComposerLaneActionButton(
-                                            onClick = {
-                                                // read the state at TAP time (composer.text), not the composition-captured
-                                                // `input` — a same-frame IME commit racing the tap must still be sent
-                                                val t = composer.text.trim()
-                                                // a gated send (degraded session, issue #65) returns false — keep the text for the retry
-                                                if ((t.isNotBlank() || hasReady || hasLanded) && repo.sendPrompt(t)) { composer.clear(); repo.clearDraft(draftKey) }
-                                            },
-                                            filled = true, contentDescription = sendLabel, modifier = actionModifier,
-                                            // long-press → schedule this message for later (issue #137). Text-only:
-                                            // images/files can't ride a schedule (nothing is uploaded at fire time).
-                                            onLongClick = { if (composer.text.isNotBlank()) showScheduleSheet = true },
-                                        )
-                                    }
-                                },
-                            )
+                            // Chat Rhythm v1: field and tool row share ONE surface/hairline container (16dp radius)
+                            // instead of a bordered field over a lane of bordered pills — every control stays, the
+                            // repeated frames go. Its 16dp inset keeps the field's trailing Mic flush with the edge.
+                            val composerShape = RoundedCornerShape(16.dp)
+                            Column(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(composerShape)
+                                    .background(Tok.surface).border(1.dp, Tok.hair, composerShape),
+                            ) {
+                                ComposerField(
+                                    composer,
+                                    // the placeholder names the REAL backend of this session — a Codex/OpenCode/Kimi
+                                    // conversation invited you to "Message Claude…" for as long as it was hardcoded
+                                    placeholder = if (repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty()) {
+                                        stringResource(Res.string.add_message_hint)
+                                    } else {
+                                        stringResource(Res.string.message_agent_hint, agentName(repo.sessionAgent.value ?: AgentKind.CLAUDE))
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    focusRequester = composerFocus,
+                                    framed = false,
+                                    // #238: neither Send nor Stop may evict voice. Mic lives inside the
+                                    // full-width field rather than competing for the accessory lane's width, so
+                                    // the ordinary composer offers it in every state it is shown — idle, staged,
+                                    // uploading, and mid-turn with nothing typed, which is precisely when you
+                                    // want to dictate the message the ribbon above promises to queue.
+                                    trailingAction = {
+                                        VoiceActionButton(failed != null) { if (failed != null) repo.retryVoice() else repo.startVoice() }
+                                    },
+                                )
+                                // one tap to any other session you're juggling, across projects (issue #165).
+                                // Came DOWN here from the header, which had no width left to give and made a
+                                // bare count square read as a badge — same cure the model chip got, so the two
+                                // shallow entrances share the lane.
+                                val workingSet = repo.workingSet()
+                                // uploads still moving → send WAITS: the landing must finish before the
+                                // @-references exist. Staged content earns Send even mid-turn, because Claude's
+                                // stream-json input queues a mid-turn user message and weaves it into the
+                                // running turn at the next tool boundary (verified on 2.1.201).
+                                val showSend = stagedContent && !uploadsBusy
+                                val showStop = repo.streaming.value
+                                ComposerAccessoryLane(
+                                    actionCount = (if (showStop) 1 else 0) + (if (uploadsBusy || showSend) 1 else 0),
+                                    leading = {
+                                        val attachInteraction = remember { MutableInteractionSource() }
+                                        val attachPressed by attachInteraction.collectIsPressedAsState()
+                                        // "+" now opens the attach sheet (Photo · File) and rotates into "×" while
+                                        // it's up (issue #90, design: file-attach.jsx); the image flow is one tap
+                                        // deeper but unchanged. The glyph is drawn, so the button has to carry the
+                                        // name itself — icon-only actions get an accessible name (Chat Master v2).
+                                        val attachLabel = stringResource(Res.string.attach_menu)
+                                        IconButton(
+                                            onClick = { attachSheet = !attachSheet }, interactionSource = attachInteraction,
+                                            modifier = Modifier.size(Metric.touch).semantics { contentDescription = attachLabel },
+                                        ) {
+                                            AttachPlusGlyph(
+                                                open = attachSheet,
+                                                tint = if (attachSheet || repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
+                                            )
+                                        }
+                                        // model chip (issue #157): the high-frequency switch rides the composer — one tap
+                                        // straight to the picker (the ⋯ → Model path stays; this is the shallow entrance).
+                                        // Dimmed mid-turn: the running turn keeps its model, so the entrance rests until
+                                        // the next turn can take a switch.
+                                        ModelChip(
+                                            label = modelChipLabel(repo.model.value).ifBlank { stringResource(Res.string.value_model_default) },
+                                            open = showModelSheet,
+                                            enabled = !repo.streaming.value,
+                                            contentDescription = stringResource(Res.string.qa_model),
+                                            // relaxed on the accessory row (mobile-composer.jsx; desktop keeps 82), and
+                                            // lowered by the lane itself when that keeps the tool row on one line
+                                            labelMax = LocalComposerModelLabelMax.current,
+                                            flat = true, // Chat Rhythm v1: a text control inside the one container
+                                        ) { showModelSheet = true }
+                                        SessionStackChip(workingSet.otherCount, workingSet.attention, flat = true) { showSessions = true }
+                                        // context occupancy came IN here from a pill that floated over the message
+                                        // tail — unreadable as a control, and it covered the last line (design:
+                                        // context-occupancy.jsx, Option C). Last in the leading group, so it is the
+                                        // first thing to WRAP — never the first thing to be dropped.
+                                        ContextGauge(
+                                            repo.contextUsed.value,
+                                            repo.contextWindow.value,
+                                            // the actions are a sibling group with their own width now, so nothing
+                                            // outside this group is hidden from the gauge's own constraints
+                                            reserveEnd = 0.dp,
+                                            flat = true,
+                                        ) { showSessionInfo = true }
+                                    },
+                                    actions = { actionModifier ->
+                                        // the ■ stays put while a turn runs; typed text adds Send NEXT TO it instead
+                                        // of replacing it — mirrors Claude Code, where interrupt (Esc) and
+                                        // queue-a-message (Enter) coexist
+                                        if (showStop) StopButton(actionModifier) { repo.cancelTurn() }
+                                        if (uploadsBusy) {
+                                            UploadStatusSlot(
+                                                stringResource(
+                                                    Res.string.composer_uploading,
+                                                    repo.pendingFiles.count { it.state == FileUpState.Uploading || it.state == FileUpState.Queued },
+                                                    repo.pendingFiles.size,
+                                                ),
+                                                modifier = actionModifier,
+                                            )
+                                        } else if (showSend) {
+                                            val sendLabel = stringResource(Res.string.send)
+                                            ComposerLaneActionButton(
+                                                onClick = {
+                                                    // read the state at TAP time (composer.text), not the composition-captured
+                                                    // `input` — a same-frame IME commit racing the tap must still be sent
+                                                    val t = composer.text.trim()
+                                                    // a gated send (degraded session, issue #65) returns false — keep the text for the retry
+                                                    if ((t.isNotBlank() || hasReady || hasLanded) && repo.sendPrompt(t)) { composer.clear(); repo.clearDraft(draftKey) }
+                                                },
+                                                filled = true, contentDescription = sendLabel, modifier = actionModifier,
+                                                // long-press → schedule this message for later (issue #137). Text-only:
+                                                // images/files can't ride a schedule (nothing is uploaded at fire time).
+                                                onLongClick = { if (composer.text.isNotBlank()) showScheduleSheet = true },
+                                            )
+                                        }
+                                    },
+                                    // inside the container: its border is the edge, so the 48dp slots sit close to it
+                                    contentPadding = PaddingValues(start = 2.dp, end = 4.dp, bottom = 4.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -4013,10 +4052,15 @@ private fun MessageItem(
             // stream ("都混在一起，不容易分辨"). The turn keeps every affordance and its full measure — the
             // neutral enclosure marks "mine" without reopening the Chat Master v2 layout
             // above (still no 300dp cap: a pasted log reflows at the same width as the agent's answer).
-            UserTurnContainer(Modifier.fillMaxWidth()) {
-                UserTurnSourceLabel(stringResource(Res.string.chat_you), Modifier.fillMaxWidth())
+            // Chat Rhythm v1: the whole-turn copy rides the source row's trailing end instead of a 复制 line under
+            // the text. Unclipped, so the copy target may rise into the gap above the container (see TurnCopyButton);
+            // the smaller top inset centres the 28dp row where the old label sat.
+            UserTurnContainer(Modifier.fillMaxWidth(), clipContent = false, topPadding = 4.dp) {
+                // one-tap copy of the ORIGINAL text, whole — the reliable path on iOS where select-to-copy has no
+                // menu (issue #5); renderClip below trims only what is drawn
+                TurnSourceRow(stringResource(Res.string.chat_you), copyText = m.text.takeIf { it.isNotBlank() }, user = true)
                 Column(
-                    Modifier.fillMaxWidth().padding(top = 7.dp),
+                    Modifier.fillMaxWidth().padding(top = TURN_SOURCE_BODY_GAP),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     // images ride the turn whether it was composed here or at the computer (issue #254:
@@ -4034,21 +4078,27 @@ private fun MessageItem(
                         // renderClip: this row is a single Text paragraph — an ~800 KB replayed prompt
                         // (skill injection) OOM'd iOS on open; render a prefix, copy keeps the whole thing
                         val shown = renderClip(m.text)
-                        SelectionContainer { Text(shown, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
-                        if (shown.length < m.text.length) TruncatedNote(m.text.length)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            CopyChip(m.text) // one-tap copy — the reliable path on iOS where select-to-copy has no menu (issue #5)
+                        SelectionContainer { // drag-select to copy (no native toolbar on iOS)
+                            Text(shown, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current, lineHeight = CHAT_BODY_LINE * LocalFontScale.current)
                         }
+                        if (shown.length < m.text.length) TruncatedNote(m.text.length)
                     }
                 }
             }
         }
         // the agent flows in the base surface: no container at all, so long prose reads as prose
+        // Chat Rhythm v1: the source row carries the one-tap copy of the whole turn — the raw text as received so
+        // far, Markdown included (a quote's own glyph copies plain text, a code block's its code). The body follows
+        // 2dp under it, 14/22 with a 10dp paragraph step.
         is ChatItem.Assistant -> Column {
-            TurnSourceLabel(agentName(agent ?: AgentKind.CLAUDE), Modifier.padding(bottom = 7.dp))
-            SelectionContainer { MarkdownText(m.text, Tok.tx) } // drag-select any span to copy
-            if (m.text.isNotBlank()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                CopyChip(m.text) // one-tap copy of the whole turn
+            TurnSourceRow(agentName(agent ?: AgentKind.CLAUDE), copyText = m.text.takeIf { it.isNotBlank() })
+            Spacer(Modifier.height(TURN_SOURCE_BODY_GAP))
+            val scale = LocalFontScale.current
+            CompositionLocalProvider(
+                LocalTextStyle provides LocalTextStyle.current.copy(lineHeight = CHAT_BODY_LINE * scale),
+                LocalMdParagraphGap provides 4.dp,
+            ) {
+                SelectionContainer { MarkdownText(m.text, Tok.tx) } // drag-select any span to copy
             }
         }
         is ChatItem.Thinking -> ThinkingRow(m)
@@ -4120,6 +4170,27 @@ private fun MessageItem(
         }
     }
 }
+
+/**
+ * Chat Rhythm v1 list rhythm: the space display row [ri] adds above itself, on top of the list's 12dp in-turn step.
+ * Where the speaker changes (user ↔ agent side) it makes 24dp. Above a turn with a source row it makes at least
+ * 16dp: that row's copy target is a 44dp square rising 16dp out of the 28dp row (TurnCopyButton), and the gap is
+ * what keeps it off the row above — the one deliberate step past the 12dp in-turn spec.
+ */
+private fun dev.ccpocket.app.data.ChatPresentation.rhythmExtraAbove(ri: Int): Dp {
+    if (ri <= 0) return 0.dp
+    fun itemOf(r: ChatRow?) = (r as? ChatRow.Original)?.takeIf { it.groupKey == null }?.let { items.getOrNull(it.sourceIndex) }
+    val cur = itemOf(rows.getOrNull(ri))
+    val prev = itemOf(rows.getOrNull(ri - 1))
+    return when {
+        (cur is ChatItem.User) != (prev is ChatItem.User) -> 12.dp
+        (cur is ChatItem.User && !cur.compactSummary) || cur is ChatItem.Assistant -> 4.dp
+        else -> 0.dp
+    }
+}
+
+/** Chat Rhythm v1 body line height (with the 14sp body); multiplied by the chat text scale like the size is. */
+private val CHAT_BODY_LINE = 22.sp
 
 /** The built-in tools whose ToolMeta preview is a file path (ToolMeta.kt) — the ones whose transcript
  *  card can turn its path into an openable chip (read-doc-inline handoff, Component 2). */

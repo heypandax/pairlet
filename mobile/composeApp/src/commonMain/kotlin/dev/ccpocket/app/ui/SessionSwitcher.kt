@@ -76,7 +76,7 @@ import org.jetbrains.compose.resources.stringResource
  * back to exactly the shipped attach · chip · action layout with no gap.
  */
 @Composable
-fun SessionStackChip(count: Int, attention: Boolean, onClick: () -> Unit) {
+fun SessionStackChip(count: Int, attention: Boolean, flat: Boolean = false, onClick: () -> Unit) {
     if (count <= 0) return
     val cd = stringResource(Res.string.switcher_open)
     // the pill stays 30dp; the TARGET is the [Metric.touch] minimum (Chat Master v2), transparent around
@@ -90,9 +90,11 @@ fun SessionStackChip(count: Int, attention: Boolean, onClick: () -> Unit) {
     ) {
         Box {
             Row(
-                Modifier.height(30.dp).clip(RoundedCornerShape(999.dp)).background(Tok.raised)
-                    .border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
-                    .padding(start = 9.dp, end = 10.dp),
+                Modifier.height(30.dp).clip(RoundedCornerShape(999.dp))
+                    // Chat Rhythm v1: [flat] inside the one composer container — glyph + count as a plain control, no
+                    // resting pill; the press ripples across the 48dp target like every other lane control
+                    .then(if (flat) Modifier else Modifier.background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(999.dp)))
+                    .padding(start = if (flat) 6.dp else 9.dp, end = if (flat) 6.dp else 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 SessionStackGlyph(Tok.tx2, Modifier.size(13.dp))

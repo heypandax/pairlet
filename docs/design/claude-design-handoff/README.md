@@ -12,6 +12,7 @@
 - [Chat Roles v1](chat-roles-v1/README.md)：#397 用户消息的中性容器、来源标签及跨端区分。
 - [Chat Quote v1](chat-quote-v1/README.md)：Agent 回复中的引用块，去掉面板改为竖线，引用单独一键复制。
 - [Tool Process Live v1](tool-process-live-v1/README.md)：执行过程折叠块随第一步诞生，卡片内固定一行显示正在执行的步骤，运行中不再跳动；失败留在块内由标题标出。
+- [Chat Rhythm v1](chat-rhythm-v1/README.md)：移动端会话详情排版整理，保留一键复制（原型已通过，Opus 已实现，完成自动化与渲染验收，已开发同步到桌面端和 iPhone）。
 - [Core List Chat v1](core-list-chat-v1/README.md)：核心列表与会话体验设计提案、功能优先级及验收规则（未实施）。
 - [Entry Flow UI 2.0](entry-flow-ui-2.0/README.md) 与 [Implementation Brief](entry-flow-ui-2.0/IMPLEMENTATION_BRIEF.md)：入口流程。
 - [Supporting Surfaces UI 2.0](supporting-surfaces-ui-2.0/README.md)：辅助页面。

@@ -14,9 +14,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +36,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -102,6 +106,9 @@ fun ComposerField(
     focusRequester: FocusRequester? = null,
     /** Optional independent action inside the full-width field, e.g. Mic while text is already staged. */
     trailingAction: (@Composable () -> Unit)? = null,
+    /** false inside a host that already frames the composer (Chat Rhythm v1's one container): no fill, no
+     *  hairline of its own — one border around field and tools instead of a frame inside a frame. */
+    framed: Boolean = true,
 ) {
     val shape = RoundedCornerShape(14.dp)
     // The TEXT owns the field's inset, not the field itself. A shared outer `horizontal = 14.dp` also
@@ -111,7 +118,8 @@ fun ComposerField(
     // leaves the same optical gap between the last glyph and the plate that it had before.
     val textEndInset = if (trailingAction == null) 14.dp else Metric.touch + 4.dp
     Box(
-        modifier.heightIn(min = 44.dp).clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape),
+        modifier.heightIn(min = 44.dp)
+            .then(if (framed) Modifier.clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape) else Modifier),
         contentAlignment = Alignment.CenterStart,
     ) {
         // The state IS the IME's buffer (no value round trip); a write held behind a live composition
@@ -223,7 +231,27 @@ fun ComposerLaneActionButton(
  * explanation vanished at exactly the moment it became true — the first character you typed mid-turn.
  */
 @Composable
-fun ComposerNote(text: String) = ComposerRibbon(text, danger = false)
+fun ComposerNote(text: String) {
+    // Chat Rhythm v1: the running / uploading note is a quiet written line, not one more bordered capsule stacked
+    // over the composer. Same slot, same single polite live region (#238); the voice failure keeps its ribbon.
+    Row(
+        Modifier.fillMaxWidth().padding(start = 18.dp, end = 16.dp, bottom = 8.dp)
+            .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+    ) {
+        // the dot centres on the FIRST line box (the note may wrap): a box one line tall, and a centred line
+        // style so that line box means the same thing on every platform font (tightCenter, AGENTS.md)
+        val line = 17.sp
+        Box(Modifier.height(with(LocalDensity.current) { line.toDp() }).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(6.dp).clip(CircleShape).background(Tok.muted))
+        }
+        Text(
+            text, color = Tok.tx2, fontSize = 12.5.sp, style = tightCenter(12.5.sp).copy(lineHeight = line),
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
 
 /**
  * The ONE state ribbon above the composer field (#238 · V3): queue, upload and voice failure all arrive
@@ -269,82 +297,104 @@ private fun ComposerRibbon(text: String, danger: Boolean, modifier: Modifier = M
     }
 }
 
-/**
- * Does the accessory lane still fit on one line? (design master · "Wrapping rule · one predicate")
- *
- * Pure, so the wrap decision is testable without a screenshot. [contentWidth] is the lane's own width —
- * the screen minus its gutters. The floors are what the WHOLE controls need: a control is never shrunk to
- * buy the fit, the lane grows in height instead. Past 1.5× type nothing fits inline, so the check short-
- * circuits rather than pretending 48 dp targets still fit beside a doubled model chip.
- */
-internal fun composerLaneFitsInline(
-    contentWidth: Dp,
-    switcherVisible: Boolean,
-    actionCount: Int,
-    fontScale: Float,
-): Boolean {
-    val leadNeed = 196.dp + if (switcherVisible) 82.dp else 0.dp
-    val actNeed = 92.dp * actionCount
-    return fontScale < 1.5f && contentWidth >= leadNeed + actNeed
-}
+/** How wide the composer's model label may draw. The lane lowers it (never below [MODEL_LABEL_FLOOR]) when that is
+ *  what keeps the tool row on one line; the model chip's call site reads it as its `labelMax`. */
+val LocalComposerModelLabelMax = compositionLocalOf { 120.dp }
+
+/** The narrowest the lane squeezes the model label to stay inline — about seven mono characters at 11sp. */
+internal val MODEL_LABEL_FLOOR = 48.dp
 
 /**
- * The composer's accessory lane: one LEADING group (attach, model, cross-session switcher, context) and
- * one TRAILING group (stop, send, upload status), each a [FlowRow] of whole controls (#238 · V3).
+ * The inline-or-stack decision (Chat Rhythm v1 · design master "Wrapping rule · one predicate"), on MEASURED widths.
  *
- * This replaces a fixed `Row` plus a hand-written second lane that only existed while streaming. That
- * shape had two failure modes: at 320 dp the single row overflowed as soon as the switcher appeared, and
- * the special-case lane meant two states drew the same buttons from two places. Here the pressure has one
- * outlet — [composerLaneFitsInline] moves the complete trailing group below, and each group re-wraps
- * internally after that. No control is hidden, shrunk or clipped to manufacture space; nothing moves into
- * an overflow menu.
+ * [room] is what the leading group may use once the trailing actions and their gap are taken; [leadAtFloor] and
+ * [leadNatural] are the leading group's measured widths with the model label capped at [floor] and at [labelMax].
+ * Returns the label cap to draw inline, or null to stack the whole trailing group below. The only thing that ever
+ * gives is the model LABEL — which ellipsizes — never a control's target or its type; past 1.5× type nothing packs
+ * inline. Pure (pixels in, pixels out), so the rule is provable without a screenshot.
+ */
+internal fun composerLaneLabelCap(room: Int, leadAtFloor: Int, leadNatural: Int, floor: Int, labelMax: Int, fontScale: Float): Int? = when {
+    fontScale >= 1.5f || leadAtFloor > room -> null
+    leadNatural <= room -> labelMax
+    // the chip is linear in its label, so the label grows from the floor by exactly the room left over at the floor
+    else -> (floor + (room - leadAtFloor)).coerceIn(floor, labelMax)
+}
+
+private enum class LaneSlot { Actions, LeadFloor, LeadNatural, Final }
+
+/**
+ * The composer's accessory lane: one LEADING group (attach, model, cross-session switcher, context) and one TRAILING
+ * group (stop, send, upload status).
+ *
+ * Chat Rhythm v1: the fit is decided on what the controls actually measure ([composerLaneLabelCap]) rather than on
+ * fixed floors — the standard phone keeps field + ONE tool row even with a switcher, a context number and Stop, by
+ * ellipsizing the model label first. When even the floor label does not fit (320pt, large type) the complete
+ * trailing group moves below: two or more actions share that row evenly; a single Stop or Send stays a compact
+ * button at the trailing edge, as on the design board. No control is hidden, shrunk or moved into a menu.
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ComposerAccessoryLane(
-    switcherVisible: Boolean,
     actionCount: Int,
     // The lane owns the modifier because only it knows whether the complete trailing group stacked. In
-    // that branch every action receives the same weight; inline, its own 84 dp floor remains authoritative.
+    // that branch paired actions receive the same weight; otherwise each keeps its own 84 dp floor.
     leading: @Composable () -> Unit,
     actions: @Composable (Modifier) -> Unit,
+    /** The lane's inset. The default suits a lane under a free-standing field; Chat Rhythm v1's one composer
+     *  container passes its own (the container's border already sets the edge). */
+    contentPadding: PaddingValues = PaddingValues(start = 6.dp, end = 8.dp, top = 6.dp),
+    labelMax: Dp = 120.dp,
 ) {
     val fontScale = LocalDensity.current.fontScale
-    // start 6 / end 8: every slot is the 48dp accessibility minimum around a 44dp circle / 30dp pill, so
-    // the extra transparent ring replaces row padding and the glyphs stay optically on the field's edge
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(start = 6.dp, end = 8.dp, top = 6.dp)) {
-        val inline = composerLaneFitsInline(maxWidth, switcherVisible, actionCount, fontScale)
-        val gap = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)
-        if (inline) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                FlowRow(
-                    Modifier.weight(1f),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
-                    verticalArrangement = gap,
-                ) { leading() }
-                if (actionCount > 0) {
-                    FlowRow(
-                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-                        verticalArrangement = gap,
-                    ) { actions(Modifier) }
+    // 4dp between the leading controls: each already carries a transparent ring to its 48dp target
+    val leadGap = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)
+    val actGap = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+    val lineGap = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)
+    @Composable
+    fun leadRow(cap: Dp, modifier: Modifier = Modifier) = CompositionLocalProvider(LocalComposerModelLabelMax provides cap) {
+        Row(modifier, horizontalArrangement = leadGap, verticalAlignment = Alignment.CenterVertically) { leading() }
+    }
+    SubcomposeLayout(Modifier.fillMaxWidth().padding(contentPadding)) { constraints ->
+        val unbounded = Constraints()
+        // measuring probes: composed and measured, never placed — and cleared from semantics, or a screen reader
+        // (and every test) would find each lane control three times
+        fun widthOf(slot: LaneSlot, content: @Composable () -> Unit) =
+            subcompose(slot) { Box(Modifier.clearAndSetSemantics {}) { content() } }.maxOfOrNull { it.measure(unbounded).width } ?: 0
+        val actionsW = if (actionCount > 0) widthOf(LaneSlot.Actions) { Row(horizontalArrangement = actGap) { actions(Modifier) } } else 0
+        val room = constraints.maxWidth - actionsW - (if (actionCount > 0) 8.dp.roundToPx() else 0)
+        val floorPx = MODEL_LABEL_FLOOR.roundToPx()
+        val maxPx = labelMax.roundToPx()
+        val atFloor = widthOf(LaneSlot.LeadFloor) { leadRow(MODEL_LABEL_FLOOR) }
+        val cap = composerLaneLabelCap(
+            room, atFloor,
+            // only measured when the floor fits at all — otherwise the lane stacks and the natural width is moot
+            leadNatural = if (fontScale < 1.5f && atFloor <= room) widthOf(LaneSlot.LeadNatural) { leadRow(labelMax) } else Int.MAX_VALUE,
+            floor = floorPx, labelMax = maxPx, fontScale = fontScale,
+        )
+        val placeables = subcompose(LaneSlot.Final) {
+            if (cap != null) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    leadRow(cap.toDp(), Modifier.weight(1f))
+                    if (actionCount > 0) Row(horizontalArrangement = actGap, verticalAlignment = Alignment.CenterVertically) { actions(Modifier) }
+                }
+            } else {
+                Column(Modifier.fillMaxWidth()) {
+                    CompositionLocalProvider(LocalComposerModelLabelMax provides labelMax) {
+                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = leadGap, verticalArrangement = lineGap) { leading() }
+                    }
+                    if (actionCount == 1) {
+                        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
+                            actions(Modifier)
+                        }
+                    } else if (actionCount > 1) {
+                        FlowRow(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = actGap, verticalArrangement = lineGap) {
+                            actions(Modifier.weight(1f))
+                        }
+                    }
                 }
             }
-        } else {
-            Column(Modifier.fillMaxWidth()) {
-                FlowRow(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
-                    verticalArrangement = gap,
-                ) { leading() }
-                if (actionCount > 0) {
-                    FlowRow(
-                        Modifier.fillMaxWidth().padding(top = 4.dp),
-                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-                        verticalArrangement = gap,
-                    ) { actions(Modifier.weight(1f)) }
-                }
-            }
-        }
+        }.map { it.measure(constraints.copy(minWidth = 0, minHeight = 0)) }
+        layout(constraints.maxWidth, placeables.maxOfOrNull { it.height } ?: 0) { placeables.forEach { it.place(0, 0) } }
     }
 }
 

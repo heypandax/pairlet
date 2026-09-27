@@ -29,10 +29,10 @@ import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.chat_tool_failed
 import dev.ccpocket.app.resources.chat_you
-import dev.ccpocket.app.resources.code_copy
 import dev.ccpocket.app.resources.rewind_menu_rewind
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
+import dev.ccpocket.app.ui.chat.TURN_COPY_TAG
 import dev.ccpocket.app.ui.chat.CHAT_STREAM_TAG
 import dev.ccpocket.app.ui.chat.TOOL_PROCESS_GROUP_TAG
 import dev.ccpocket.app.ui.chat.TOOL_PROCESS_LIVE_TAG
@@ -334,7 +334,8 @@ class ToolProcessCollapseUiTest {
         )
         waitForIdle()
         assertEquals(1, groups())
-        assertEquals(2, onAllNodesWithText(str(Res.string.code_copy)).fetchSemanticsNodes().size, "copy chips on the prompt and the reply")
+        // Chat Rhythm v1: each turn's copy rides its source row as a glyph (no 复制 text under the body)
+        assertEquals(2, onAllNodesWithTag(TURN_COPY_TAG).fetchSemanticsNodes().size, "whole-turn copy on the prompt and the reply")
 
         onAllNodesWithText(str(Res.string.chat_you), substring = true, ignoreCase = true).onFirst()
             .performTouchInput { longClick() }

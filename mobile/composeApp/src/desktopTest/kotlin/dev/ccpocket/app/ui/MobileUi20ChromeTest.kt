@@ -25,6 +25,8 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runDesktopComposeUiTest
@@ -46,6 +48,7 @@ import dev.ccpocket.app.resources.deny
 import dev.ccpocket.app.resources.done
 import dev.ccpocket.app.resources.fl_switch_computer
 import dev.ccpocket.app.resources.message_queued_hint
+import dev.ccpocket.app.resources.qa_model
 import dev.ccpocket.app.resources.mode_auto_short
 import dev.ccpocket.app.resources.new_session_cta
 import dev.ccpocket.app.resources.ses_active
@@ -147,10 +150,13 @@ class MobileUi20ChromeTest {
         permissionMode = CLAUDE_PERMISSION_MODE_AUTO,
     )
 
-    /** The two compact rows those facts must collapse into, and the one line they read as when hidden. */
-    private val identityRow get() = "Claude$CONTEXT_SEP${str(Res.string.mode_auto_short)}${CONTEXT_SEP}fable"
+    /** The two compact rows those facts must collapse into, and the one line they read as when hidden. Chat Rhythm
+     *  v1: the collapsed line leaves the model out — the composer's model chip states it — while the expanded
+     *  identity row still carries it. */
+    private val collapsedIdentity get() = "Claude$CONTEXT_SEP${str(Res.string.mode_auto_short)}"
+    private val identityRow get() = "$collapsedIdentity${CONTEXT_SEP}fable"
     private val placeRow = "alex-macbook${CONTEXT_SEP}cc-pocket"
-    private val collapsedRow get() = "$identityRow$CONTEXT_SEP$placeRow"
+    private val collapsedRow get() = "$collapsedIdentity$CONTEXT_SEP$placeRow"
 
     /**
      * Compose [content] against a paired repository in a real 402 × 874 pt scene at [fontScale].
@@ -490,6 +496,10 @@ class MobileUi20ChromeTest {
     ) {
         // collapsed: one dot-separated statement of every fact that exists, and only those
         assertTrue(present(collapsedRow), "collapsed, the summary states the real facts on one line")
+        // Chat Rhythm v1: the model is written once — by the composer's chip — not again in the header
+        assertEquals(1, onAllNodes(hasText("fable", substring = true)).fetchSemanticsNodes().size, "the model appears only in the composer")
+        onAllNodes(hasContentDescription(str(Res.string.qa_model)), useUnmergedTree = true).onFirst()
+            .assert(hasAnyDescendant(hasText("fable", substring = true)))
         onAllNodes(hasText(collapsedRow)).onFirst().performClick()
         advanceFrameAndWait()
 
@@ -546,7 +556,7 @@ class MobileUi20ChromeTest {
         seed = { receiveForTest(ordinarySession("/Users/alex/Desktop/Project/app/cc-pocket-android-client/app/src/main/kotlin")) },
         content = { ChatScreen(it) },
     ) {
-        onAllNodes(hasText(identityRow, substring = true)).onFirst().performClick()
+        onAllNodes(hasText(collapsedIdentity, substring = true)).onFirst().performClick()
         advanceFrameAndWait()
         val path = "~/Desktop/Project/app/cc-pocket-android-client/app/src/main/kotlin"
         assertTrue(present(path), "the path is still rendered whole, never shrunk or truncated")

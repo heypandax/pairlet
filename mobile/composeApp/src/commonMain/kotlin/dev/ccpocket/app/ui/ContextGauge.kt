@@ -95,6 +95,9 @@ fun ContextGauge(
     window: Long?,
     reserveEnd: Dp,
     modifier: Modifier = Modifier,
+    /** Chat Rhythm v1 phone: no capsule fill inside the one composer container — the ring (and its number) read as
+     *  a plain control there; the press still ripples across the 48dp target. Default keeps the capsule. */
+    flat: Boolean = false,
     onOpenInfo: () -> Unit,
 ) {
     // #320-A: no occupancy yet (first turn pending / older daemon / a backend that hasn't reported) used to
@@ -124,8 +127,8 @@ fun ContextGauge(
                 // bare: a 30x30 slot with the ring centred. With a number it grows rightward only.
                 .then(if (showNumber) Modifier else Modifier.width(CAPSULE))
                 .clip(RoundedCornerShape(999.dp))
-                .background(Tok.raised)
-                .then(if (showNumber) Modifier.padding(start = 9.dp, end = 10.dp) else Modifier),
+                .then(if (flat) Modifier else Modifier.background(Tok.raised))
+                .then(if (showNumber) Modifier.padding(start = if (flat) 6.dp else 9.dp, end = if (flat) 6.dp else 10.dp) else Modifier),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
