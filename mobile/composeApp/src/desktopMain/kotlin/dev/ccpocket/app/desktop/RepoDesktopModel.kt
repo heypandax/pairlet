@@ -1464,6 +1464,7 @@ class RepoDesktopModel(
     override val lastHistoryPrependCount: Int get() = repo.lastHistoryPrependCount
     override fun loadOlderHistory() = repo.loadOlderHistory()
     override val streaming: Boolean get() = repo.streaming.value
+    override val toolOutcomesLive: Boolean get() = repo.toolOutcomesLive.value
     // mirrors mobile's under-bubble cue: link not Ready, or receipts stalled on a Ready-looking link (#78)
     override val sendUndelivered: Boolean get() = repo.phase.value != ConnPhase.Ready || repo.sendStalled.value
     // delivered but no turn started within the deadline (issue #104) — the resend cue's driver

@@ -22,6 +22,8 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.performClick
@@ -259,8 +261,12 @@ class ChatMasterV2UiTest {
             )
         },
     ) {
+        // Tool Process Live v1: a lone finished tool is a one-step fold naming the call on one line; opening it
+        // shows the ordinary band, whose own preview is what this checks (the band is the LAST node with the text)
+        onNodeWithTag(dev.ccpocket.app.ui.chat.TOOL_PROCESS_GROUP_TAG).performClick()
+        advanceFrameAndWait()
         fun layout(): TextLayoutResult {
-            val node = onAllNodes(hasText(LONG_COMMAND), useUnmergedTree = true).onFirst().fetchSemanticsNode()
+            val node = onAllNodes(hasText(LONG_COMMAND), useUnmergedTree = true).onLast().fetchSemanticsNode()
             return mutableListOf<TextLayoutResult>().also {
                 node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(it)
             }.first()
@@ -270,7 +276,7 @@ class ChatMasterV2UiTest {
         assertTrue(collapsed.hasVisualOverflow, "a long tool starts as the compact preview")
         assertEquals(2, collapsed.lineCount, "the preview wraps within two lines")
 
-        onAllNodes(hasText(LONG_COMMAND) and hasClickAction()).onFirst().performClick()
+        onAllNodes(hasText(LONG_COMMAND) and hasClickAction()).onLast().performClick()
         advanceFrameAndWait()
         val expanded = layout()
         assertFalse(expanded.hasVisualOverflow, "expanding reveals the literal payload with no horizontal clip")

@@ -69,6 +69,8 @@ class SidePaneModel(
     override val toolProcessScope: dev.ccpocket.app.data.ToolProcessScope
         get() = dev.ccpocket.app.data.ToolProcessScope(base.toolProcessScope?.accountId, pane.agent, pane.sessionId, pane.convoId.value)
     override val streaming: Boolean get() = pane.streaming.value
+    // this column's own daemon evidence, like its own streaming bit above (Tool Process Live v1)
+    override val toolOutcomesLive: Boolean get() = pane.transcript.toolOutcomesLive.value
     // this column's OWN delivery-receipt + stall cues (issue #329), read straight off SidePane like
     // openFailed above — NOT delegated: a stalled prompt in ONE column must not light the cue in another.
     // ChatPane renders these verbatim, so a column now shows "not delivered" / "no response — resend" /

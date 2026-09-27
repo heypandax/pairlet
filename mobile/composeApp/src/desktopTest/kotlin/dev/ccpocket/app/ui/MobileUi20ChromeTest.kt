@@ -38,6 +38,7 @@ import dev.ccpocket.app.resources.ap_required
 import dev.ccpocket.app.resources.chat_context
 import dev.ccpocket.app.resources.chat_session_info
 import dev.ccpocket.app.resources.chat_src_tool
+import dev.ccpocket.app.resources.tool_process_group
 import dev.ccpocket.app.resources.chat_tool_failed
 import dev.ccpocket.app.resources.chat_you
 import dev.ccpocket.app.resources.copy_path
@@ -596,12 +597,12 @@ class MobileUi20ChromeTest {
         waitForIdle()
         assertTrue(present(str(Res.string.chat_you).uppercase()), "the user turn names its source")
         assertTrue(present("CLAUDE"), "the agent turn names the REAL backend, not a generic \"assistant\"")
-        assertTrue(present(str(Res.string.chat_src_tool).uppercase()), "and a tool call says so")
-        // …but a RUN of tool calls says so once: each band's own tool chip already names its call, so the
-        // label repeating between consecutive bands was pure air
+        // Tool Process Live v1: a run of tool calls is labeled ONCE, by its fold's own header — the bands inside
+        // the opened card carry no "Tool" source label of their own (each chip already names its call)
+        assertTrue(present(str(Res.string.tool_process_group), substring = true), "and the tool calls say so, on their fold")
         assertEquals(
-            1, onAllNodes(hasText(str(Res.string.chat_src_tool).uppercase())).fetchSemanticsNodes().size,
-            "consecutive tool turns share one source label",
+            0, onAllNodes(hasText(str(Res.string.chat_src_tool).uppercase())).fetchSemanticsNodes().size,
+            "no per-band source label inside the fold's card",
         )
         assertTrue(present("Bash"), "the tool token is the daemon's own")
         assertTrue(present("./gradlew :protocol:test"), "the payload is the literal command, never a summary")

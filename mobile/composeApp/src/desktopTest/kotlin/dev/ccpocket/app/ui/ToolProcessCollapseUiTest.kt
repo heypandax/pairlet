@@ -27,6 +27,7 @@ import dev.ccpocket.app.data.ProcessSummary
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.chat_tool_failed
 import dev.ccpocket.app.resources.chat_you
 import dev.ccpocket.app.resources.code_copy
 import dev.ccpocket.app.resources.rewind_menu_rewind
@@ -34,6 +35,10 @@ import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.ui.chat.CHAT_STREAM_TAG
 import dev.ccpocket.app.ui.chat.TOOL_PROCESS_GROUP_TAG
+import dev.ccpocket.app.ui.chat.TOOL_PROCESS_LIVE_TAG
+import dev.ccpocket.app.resources.tool_process_failed
+import dev.ccpocket.app.resources.tool_process_tools
+import dev.ccpocket.app.resources.tool_process_unknown
 import dev.ccpocket.app.ui.chat.processSummaryLabel
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ChatRole
@@ -75,6 +80,11 @@ class ToolProcessCollapseUiTest {
     private fun tool(preview: String, ok: Boolean? = true) = HistoryMessage(ChatRole.TOOL, preview, tool = "Bash", ok = ok)
 
     private fun ComposeUiTest.groups() = onAllNodesWithTag(TOOL_PROCESS_GROUP_TAG).fetchSemanticsNodes().size
+
+    private fun plural(res: org.jetbrains.compose.resources.PluralStringResource, n: Int) =
+        kotlinx.coroutines.runBlocking { org.jetbrains.compose.resources.getPluralString(res, n, n) }
+
+    private fun pluralCount(res: org.jetbrains.compose.resources.PluralStringResource, n: Int) = plural(res, n)
 
     /** A paired repository showing [history] in a [height]-tall phone scene, list parked where it lands. */
     private fun ComposeUiTest.mount(
@@ -159,7 +169,7 @@ class ToolProcessCollapseUiTest {
     }
 
     @Test
-    fun failuresUnknownOutcomesAndTheApprovalStayVisible() = runComposeUiTest {
+    fun failuresAndUnknownOutcomesAreNamedOnTheFoldAndTheApprovalStaysVisible() = runComposeUiTest {
         val repo = mount(
             "acct-380-attn", "c-attn",
             listOf(
@@ -169,14 +179,22 @@ class ToolProcessCollapseUiTest {
         )
         repo.receiveForTest(PermissionAsk("c-attn", "ask-380", "Bash", "git push --force", title = "Force push 380"))
         waitForIdle()
-        assertEquals(2, groups(), "two separate runs — the failure and the unknown outcome cut between them")
-        assertPresent("rm -rf build", substring = true)
-        assertPresent("outcome unknown", substring = true)
+        // Tool Process Live v1: the failure and the missing outcome no longer cut the run in three — they stay
+        // inside, and the fold's own row names them so they are still seen without opening it
+        assertEquals(1, groups())
+        assertPresent(plural(Res.plurals.tool_process_failed, 1), substring = true)
+        assertPresent(plural(Res.plurals.tool_process_unknown, 1), substring = true)
+        assertFalse(present("rm -rf build", substring = true))
         // the phone pins a pending approval above the stream by its title (the decision sheet itself lives at
         // the app root, outside this list) — folding must not have displaced it
         assertTrue(repo.pendingAsk.value != null)
         assertPresent("Force push 380", substring = true)
-        assertFalse(present("read one", substring = true))
+
+        onNodeWithTag(TOOL_PROCESS_GROUP_TAG).performClick()
+        waitForIdle()
+        assertPresent("rm -rf build", substring = true)
+        assertPresent("outcome unknown", substring = true)
+        assertPresent(str(Res.string.chat_tool_failed), substring = true)
     }
 
     @Test
@@ -263,19 +281,45 @@ class ToolProcessCollapseUiTest {
     }
 
     @Test
-    fun aReplayThatFillsInOutcomesFoldsTheLiveToolCards() = runComposeUiTest {
+    fun aReplayThatFillsInOutcomesSettlesTheLiveSteps() = runComposeUiTest {
         val repo = mount("acct-380-merge", "c-merge", listOf(u("go")))
-        repo.receiveForTest(ToolEvent("c-merge", 1, ToolPhase.START, "Bash", inputPreview = "live one", toolUseId = "tu-1"))
-        repo.receiveForTest(ToolEvent("c-merge", 2, ToolPhase.START, "Bash", inputPreview = "live two", toolUseId = "tu-2"))
+        // a first call whose outcome is reported: this daemon says when calls finish (#380 outcome frames)
+        repo.receiveForTest(ToolEvent("c-merge", 1, ToolPhase.START, "Read", inputPreview = "warm up", toolUseId = "tu-0"))
+        repo.receiveForTest(ToolEvent("c-merge", 2, ToolPhase.RESULT, "Read", ok = true, toolUseId = "tu-0", outcomeOnly = true))
+        repo.receiveForTest(ToolEvent("c-merge", 3, ToolPhase.START, "Bash", inputPreview = "live one", toolUseId = "tu-1"))
+        repo.receiveForTest(ToolEvent("c-merge", 4, ToolPhase.START, "Bash", inputPreview = "live two", toolUseId = "tu-2"))
         waitForIdle()
-        assertEquals(0, groups(), "live START cards carry no outcome yet — never folded as if they succeeded")
-        assertPresent("live one", substring = true)
+        // a tool starting is a turn in flight: both calls are the live line's — never folded as if they succeeded
+        assertTrue(repo.streaming.value)
+        assertEquals(1, groups())
+        assertEquals(1, onAllNodesWithTag(TOOL_PROCESS_LIVE_TAG).fetchSemanticsNodes().size)
+        assertPresent("×2", substring = true)
+        assertPresent("live one · live two", substring = true)
 
         // the reattach replay carries ok=true for both; TranscriptMerge enriches the same cards in place
-        repo.receiveForTest(ConvoHistory("c-merge", listOf(u("go"), tool("live one"), tool("live two")), lastSeq = 3))
+        repo.receiveForTest(ConvoHistory("c-merge", listOf(u("go"), tool("warm up"), tool("live one"), tool("live two")), lastSeq = 5))
         waitForIdle()
         assertEquals(1, groups())
-        assertFalse(present("live one", substring = true))
+        assertFalse(present("live one", substring = true), "both finished: counted on the fold, not running on its line")
+        assertPresent(pluralCount(Res.plurals.tool_process_tools, 3), substring = true)
+    }
+
+    @Test
+    fun onADaemonThatNeverReportsOutcomesOnlyTheNewestCallRunsAndNothingIsMarkedWithoutResult() = runComposeUiTest {
+        // before 2.1.1 a daemon sends START only for ordinary tools
+        val repo = mount("acct-380-old", "c-old", listOf(u("go")))
+        repo.receiveForTest(ToolEvent("c-old", 1, ToolPhase.START, "Read", inputPreview = "first.kt", toolUseId = "o-1"))
+        repo.receiveForTest(ToolEvent("c-old", 2, ToolPhase.START, "Grep", inputPreview = "needle", toolUseId = "o-2"))
+        repo.receiveForTest(ToolEvent("c-old", 3, ToolPhase.START, "Edit", inputPreview = "last.kt", toolUseId = "o-3"))
+        waitForIdle()
+        assertPresent("last.kt", substring = true)
+        assertFalse(present("+2", substring = true), "the earlier calls are not \"still running\" forever")
+        assertPresent(pluralCount(Res.plurals.tool_process_tools, 2), substring = true)
+        repo.receiveForTest(dev.ccpocket.protocol.TurnDone("c-old"))
+        waitForIdle()
+        assertEquals(0, onAllNodesWithTag(TOOL_PROCESS_LIVE_TAG).fetchSemanticsNodes().size)
+        assertFalse(present(plural(Res.plurals.tool_process_unknown, 3), substring = true), "no \"without result\" noise")
+        assertPresent(pluralCount(Res.plurals.tool_process_tools, 3), substring = true)
     }
 
     @Test

@@ -27,6 +27,12 @@ import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.SidePane
 import dev.ccpocket.app.data.ToolProcessScope
 import dev.ccpocket.app.present
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.chat_tool_failed
+import dev.ccpocket.app.resources.tool_process_failed
+import dev.ccpocket.app.resources.tool_process_unknown
+import dev.ccpocket.app.resources.tool_process_unknown_one
+import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.ui.chat.CHAT_STREAM_TAG
 import dev.ccpocket.app.ui.chat.TOOL_PROCESS_GROUP_TAG
@@ -74,6 +80,9 @@ class ToolProcessPaneUiTest {
     }
 
     private fun ComposeUiTest.groups() = onAllNodesWithTag(TOOL_PROCESS_GROUP_TAG).fetchSemanticsNodes().size
+
+    private fun plural(res: org.jetbrains.compose.resources.PluralStringResource, n: Int) =
+        kotlinx.coroutines.runBlocking { org.jetbrains.compose.resources.getPluralString(res, n, n) }
 
     private fun ComposeUiTest.fullyVisibleText(text: String): Boolean {
         val nodes = onAllNodesWithText(text, substring = true)
@@ -132,13 +141,22 @@ class ToolProcessPaneUiTest {
         )
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
-        assertEquals(1, groups(), "only the run of two finished reads folds")
-        assertPresent("ls first", substring = true) // a lone finished tool isn't worth a fold
-        assertPresent("rm -rf build", substring = true)
-        assertPresent("gradle test", substring = true)
+        // Tool Process Live v1: the failure and the outcome that never arrived stay inside the run and are
+        // named on the fold's own row; the error notice and the approval card are still their own rows
+        assertEquals(1, groups())
+        assertPresent(plural(Res.plurals.tool_process_failed, 1), substring = true)
+        assertPresent(plural(Res.plurals.tool_process_unknown, 1), substring = true)
         assertPresent("upstream exploded", substring = true)
         assertPresent("git push --force", substring = true)
+        assertFalse(present("rm -rf build", substring = true))
         assertFalse(present("one.kt", substring = true))
+
+        onNodeWithTag(TOOL_PROCESS_GROUP_TAG).performClick()
+        waitForIdle()
+        assertPresent("rm -rf build", substring = true)
+        assertPresent("gradle test", substring = true)
+        assertPresent(str(Res.string.chat_tool_failed), substring = true)
+        assertPresent(str(Res.string.tool_process_unknown_one), substring = true)
     }
 
     @Test

@@ -114,7 +114,9 @@ import dev.ccpocket.app.data.ChatRow
 import dev.ccpocket.app.ui.contextStatusUi
 import dev.ccpocket.app.ui.LandPendingWrites
 import dev.ccpocket.app.ui.chat.KeepChatReadingPosition
-import dev.ccpocket.app.ui.chat.ProcessGroupRow
+import dev.ccpocket.app.data.StepState
+import dev.ccpocket.app.ui.chat.joinPreviousSegment
+import dev.ccpocket.app.ui.chat.liveLineState
 import dev.ccpocket.app.ui.chat.rememberChatPresentationState
 import dev.ccpocket.app.ui.chat.LineageBanner
 import dev.ccpocket.app.ui.chat.RewindErrorBar
@@ -126,6 +128,9 @@ import dev.ccpocket.app.data.OpenFailure
 import dev.ccpocket.app.data.PendingFile
 import dev.ccpocket.app.data.SentFile
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.chat_tool_failed
+import dev.ccpocket.app.resources.done
+import dev.ccpocket.app.resources.tool_process_unknown_one
 import dev.ccpocket.app.resources.split_pane_close
 import dev.ccpocket.app.resources.split_pane_focus
 import dev.ccpocket.app.resources.ho_continuing
@@ -395,6 +400,9 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                 source = { model.messages },
                 // finished tool steps always fold (the per-session switch was removed 2026-09-15 by user decision)
                 collapse = { true },
+                // a running turn's trailing steps are one live fold from the first step (Tool Process Live v1)
+                live = { model.streaming },
+                liveOutcomes = { model.toolOutcomesLive },
             )
             val shownRows = toolProcess.presentation.rows.size
             LaunchedEffect(model.messages.size, model.streaming, model.ask?.askId, shownRows) {
@@ -456,20 +464,37 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                     val shown = toolProcess.presentation
                     val seamRow = shown.seamRow(historySeamAt)
                     itemsIndexed(shown.rows, key = { _, row -> row.key }) { ri, row ->
-                        CenteredStreamRow {
+                        // an opened fold's member sits flush under the segment above it, inside the fold's card
+                        val member = (row as? ChatRow.Original)?.takeIf { it.groupKey != null }
+                        CenteredStreamRow(if (member != null) Modifier.joinPreviousSegment(18.dp) else Modifier) {
                             Column(Modifier.fillMaxWidth()) {
                                 // seam (0714 handoff B3): for a beat after a page of older history lands,
                                 // mark where the old window began so the reader keeps their place
                                 if (ri == seamRow) EarlierMessagesSeam(model.historyPrependGen, monoFamily = Dk.mono)
                                 if (row is ChatRow.ProcessGroup) {
-                                    ProcessGroupRow(row.summary, row.expanded, fontFamily = Dk.ui, onToggle = {
-                                        // a fold above the end is being read, not followed (see the phone twin) —
-                                        // unless the pane cannot scroll: the desktop has no jump-to-latest, so an
-                                        // unpinned short pane would only recover by switching sessions
-                                        val scrollable = listState.canScrollForward || listState.canScrollBackward
-                                        if (pinned && scrollable && !toolProcess.isLastRow(row.groupKey)) pinned = false
-                                        toolProcess.toggle(row.groupKey)
-                                    })
+                                    DesktopProcessHeader(
+                                        row, shown.items,
+                                        liveLine = if (row.carriesLive) liveLineState(shown, row, model.ask?.takeUnless { model.askTimedOut }, model.chatWorkdir.takeIf { it.isNotEmpty() }) else null,
+                                        cwd = model.chatWorkdir.takeIf { it.isNotEmpty() },
+                                        onToggle = {
+                                            // a fold above the end is being read, not followed (see the phone twin) —
+                                            // unless the pane cannot scroll: the desktop has no jump-to-latest, so an
+                                            // unpinned short pane would only recover by switching sessions
+                                            val scrollable = listState.canScrollForward || listState.canScrollBackward
+                                            if (pinned && scrollable && !toolProcess.isLastRow(row.groupKey)) pinned = false
+                                            toolProcess.toggle(row.groupKey)
+                                        },
+                                    )
+                                } else if (member != null) {
+                                    val liveGroup = if (member.liveTail) {
+                                        shown.rows.firstOrNull { it is ChatRow.ProcessGroup && it.groupKey == member.groupKey } as? ChatRow.ProcessGroup
+                                    } else null
+                                    val item = shown.items[member.sourceIndex]
+                                    DesktopProcessMember(
+                                        item, last = member.last,
+                                        liveLine = liveGroup?.let { liveLineState(shown, it, model.ask?.takeUnless { model.askTimedOut }, model.chatWorkdir.takeIf { it.isNotEmpty() }) },
+                                        step = shown.stepState(member.sourceIndex),
+                                    ) { MessageRow(item, onTightenAutoRun = model::tightenAutoRun) }
                                 } else {
                                 val i = (row as ChatRow.Original).sourceIndex
                                 val m = shown.items[i]
@@ -489,6 +514,9 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 }
                             }
                         }
+                    }
+                    val liveFoldAtEnd = shown.rows.lastOrNull().let {
+                        (it as? ChatRow.ProcessGroup)?.live != null || (it as? ChatRow.Original)?.liveTail == true
                     }
                     item(key = "tail") {
                         CenteredStreamRow {
@@ -577,7 +605,8 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                     fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp),
                                     modifier = Modifier.padding(vertical = 3.dp, horizontal = 6.dp),
                                 )
-                            } else if (model.streaming) {
+                            } else if (model.streaming && !liveFoldAtEnd) {
+                                // (a live fold ending the stream carries its own pulse — Tool Process Live v1)
                                 Box(Modifier.size(width = 7.dp, height = 15.dp).clip(RoundedCornerShape(1.dp)).blinkAccent())
                             }
                         }
@@ -761,8 +790,8 @@ private fun SessionHealthStrip(model: DesktopModel) {
 
 /** Keeps every stream row centered at the readable column cap inside the full-width lazy viewport. */
 @Composable
-private fun CenteredStreamRow(content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+private fun CenteredStreamRow(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         Box(Modifier.widthIn(max = Dk.maxStreamWidth).fillMaxWidth()) { content() }
     }
 }
@@ -1557,7 +1586,12 @@ fun ToolRow(
     /** Pictures the RESULT returned (issue #332) - shown in the expanded details, phone parity. */
     images: List<ByteArray> = emptyList(),
     imagesTruncated: Boolean = false,
+    /** Set for a member inside an opened process fold's card (Tool Process Live v1) — the fold's verdict on the
+     *  call. The card is its frame, so the row drops its own, lines its mark up in the card's dot column and
+     *  names a known outcome in words; a call still running, or one nobody will report on, claims nothing. */
+    blockStep: StepState? = null,
 ) {
+    val inBlock = blockStep != null
     val col = when (status) {
         ToolStatus.OK -> Tok.ok
         ToolStatus.FAIL -> Tok.danger
@@ -1565,6 +1599,8 @@ fun ToolRow(
         ToolStatus.UNKNOWN -> Tok.muted
     }
     var expanded by remember { mutableStateOf(false) }
+    val hover = remember { MutableInteractionSource() }
+    val hovered by hover.collectIsHoveredAsState()
     // one visual line at 12sp mono inside the stream column holds ~70 chars — beyond that (or any
     // newline) the ellipsis hides content. A replayed tool result also makes the row expandable: before
     // #306 desktop threw that output field away even though the daemon had preserved it.
@@ -1582,20 +1618,40 @@ fun ToolRow(
         }
     }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+        if (inBlock) Modifier.fillMaxWidth()
+        else Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
             .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)),
     ) {
         Row(
             Modifier.fillMaxWidth().testTag(TOOL_ROW_TAG)
+                .then(
+                    if (inBlock) Modifier.heightIn(min = 38.dp).hoverable(hover)
+                        .background(if (hovered) Tok.raised else Color.Transparent)
+                    else Modifier,
+                )
                 .then(if (expandable) Modifier.clickable { expanded = !expanded } else Modifier)
-                .padding(horizontal = 12.dp, vertical = 9.dp),
+                .then(
+                    if (inBlock) Modifier.padding(start = 33.dp, end = 14.dp)
+                    else Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                ),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (inBlock) 10.dp else 9.dp),
         ) {
-            Dot(col, 7.dp)
-            Text(name, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+            when (blockStep) {
+                null -> Dot(col, 7.dp)
+                StepState.DONE -> Dot(Tok.ok, 7.dp)
+                StepState.FAILED -> dev.ccpocket.app.ui.chat.StateSquare(Tok.danger)
+                StepState.UNKNOWN -> dev.ccpocket.app.ui.chat.StateRing(Tok.muted)
+                StepState.RUNNING -> Dot(Tok.accent, 7.dp)
+                StepState.QUIET -> Dot(Tok.muted, 7.dp)
+            }
             Text(
-                cmd.lineSequence().first(), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,
+                name, color = Tok.tx, fontFamily = Dk.ui,
+                fontSize = if (inBlock) 13.sp else 12.5.sp, fontWeight = if (inBlock) FontWeight.Bold else FontWeight.SemiBold,
+                maxLines = if (inBlock) 1 else Int.MAX_VALUE,
+            )
+            Text(
+                cmd.lineSequence().first(), color = Tok.tx2, fontFamily = Dk.mono, fontSize = if (inBlock) 12.5.sp else 12.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
             if (images.isNotEmpty()) {
@@ -1612,7 +1668,18 @@ fun ToolRow(
                     modifier = Modifier.size(14.dp).rotate(if (expanded) 180f else 0f),
                 )
             }
-            when (status) {
+            if (blockStep != null) {
+                // inside the fold a KNOWN outcome is a word in its state ink; running / unreported claim nothing
+                val word = when (blockStep) {
+                    StepState.DONE -> stringResource(Res.string.done) to Tok.ok
+                    StepState.FAILED -> stringResource(Res.string.chat_tool_failed) to Tok.danger
+                    StepState.UNKNOWN -> stringResource(Res.string.tool_process_unknown_one) to Tok.tx2
+                    StepState.RUNNING, StepState.QUIET -> null
+                }
+                word?.let { (text, ink) ->
+                    Text(text, color = ink, fontFamily = Dk.ui, fontSize = 12.sp, maxLines = 1, style = tightCenter(12.sp))
+                }
+            } else when (status) {
                 ToolStatus.OK -> Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(14.dp))
                 ToolStatus.FAIL -> Icon(Icons.Rounded.Close, null, tint = Tok.danger, modifier = Modifier.size(14.dp))
                 ToolStatus.RUN, ToolStatus.UNKNOWN -> {}

@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.tool_process_unknown_one
 import dev.ccpocket.app.resources.chat_context
 import dev.ccpocket.app.resources.chat_context_collapse
 import dev.ccpocket.app.resources.chat_context_collapsed
@@ -348,13 +349,19 @@ fun ToolTurnBand(
      *  A slot rather than an images parameter so the band keeps knowing nothing about image decoding —
      *  and so it stays exactly as it was for the ~all tools that return only text. */
     footerSlot: (@Composable () -> Unit)? = null,
+    /** false inside a process fold's card (Tool Process Live v1): the card's own hairlines and padding
+     *  bound the member, so the band drops its rules and vertical padding. */
+    framed: Boolean = true,
+    /** With no [status]: the fold's verdict that this call's outcome will never arrive — said as "No result",
+     *  the same words the fold's header counts it under. Never set for a call that may still be running. */
+    unknownOutcome: Boolean = false,
 ) {
     Column(modifier.fillMaxWidth()) {
-        Hairline()
+        if (framed) Hairline()
         Column(
             Modifier.fillMaxWidth()
                 .then(if (onToggle != null) Modifier.clickable(onClick = onToggle) else Modifier)
-                .padding(vertical = 11.dp),
+                .padding(vertical = if (framed) 11.dp else 0.dp),
             verticalArrangement = Arrangement.spacedBy(Metric.gapS),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -364,7 +371,7 @@ fun ToolTurnBand(
                         .padding(horizontal = 7.dp, vertical = 5.dp),
                 )
                 Spacer(Modifier.weight(1f))
-                if (status != null) ToolStatus(status)
+                if (status != null) ToolStatus(status) else if (unknownOutcome) UnknownOutcome()
             }
             if (previewSlot != null) previewSlot()
             else if (preview.isNotBlank()) {
@@ -380,7 +387,19 @@ fun ToolTurnBand(
             }
             footerSlot?.invoke()
         }
-        Hairline()
+        if (framed) Hairline()
+    }
+}
+
+/** ○ No result — a call whose outcome never arrived (Tool Process Live v1), in the fold header's words. */
+@Composable
+private fun UnknownOutcome() {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        StateRing(Tok.muted)
+        Text(
+            stringResource(Res.string.tool_process_unknown_one),
+            color = Tok.tx2, style = TypeRole.captionMono, fontWeight = FontWeight.Medium,
+        )
     }
 }
 

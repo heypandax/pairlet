@@ -2144,6 +2144,23 @@
     <string name="tool_process_images_truncated">部分图片未载入</string>
     <string name="tool_process_expand">展开过程</string>
     <string name="tool_process_collapse">收起过程</string>
+    <!-- Tool Process Live v1：折叠行的失败 / 无结果标记、单步折叠的操作词，以及实时行 -->
+    <plurals name="tool_process_failed">
+        <item quantity="other">%1$d 个失败</item>
+    </plurals>
+    <plurals name="tool_process_unknown">
+        <item quantity="other">%1$d 个无结果</item>
+    </plurals>
+    <string name="tool_process_unknown_one">无结果</string>
+    <plurals name="tool_process_autoruns">
+        <item quantity="other">%1$d 次自动执行</item>
+    </plurals>
+    <string name="tool_process_expand_one">展开</string>
+    <string name="tool_process_collapse_one">收起</string>
+    <string name="tool_process_running">正在运行，%1$s</string>
+    <string name="tool_process_waiting">等你批准</string>
+    <string name="tool_process_a11y_waiting">等待你批准：%1$s %2$s</string>
+    <string name="tool_process_a11y_failed">%1$s %2$s 失败</string>
     <!-- 上下文状态（issue #320-A）：说明拿到了哪些数据，不猜数值、不断言“不支持” -->
     <string name="context_status_no_data">尚未获得上下文数据</string>
     <string name="context_status_no_data_detail">后端还没有返回这个会话的可用数值，这并不代表它不支持。</string>

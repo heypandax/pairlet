@@ -10,32 +10,77 @@ import dev.ccpocket.protocol.isWorkflowTool
  * keep consuming the raw `messages`; only the two chat lists (phone/iPad [dev.ccpocket.app.ui.ChatScreen]
  * and the desktop ChatPane) render through this, and they share this one algorithm so the two cannot drift.
  *
- * What folds (always — the per-session switch was removed 2026-09-15): a run of at least [MIN_GROUP]
- * CONSECUTIVE rows that
- * are each [isFoldableProcess] — an ordinary tool whose outcome is known to be success, or a finished
- * thinking block. Everything else stays its own row AND ends the run: prose (User / Assistant), a failed,
- * running or outcome-unknown tool (`ok == null` is never read as success), sub-agent / workflow / plan
- * cards, errors and notices, approvals' audit chips, question residue and turn dividers. Rows are never
+ * What folds (always — the per-session switch was removed 2026-09-15; the rules below are Tool Process Live
+ * v1, docs/design/claude-design-handoff/tool-process-live-v1): every run of CONSECUTIVE [isProcessStep]
+ * rows — an ordinary tool call, whatever its outcome, or a thinking block — however short. A failed step and
+ * one whose outcome never arrived stay inside and are counted on the fold's own row ([ProcessSummary.failed],
+ * [ProcessSummary.unknown]), so a failing test the agent then fixes no longer cuts the process in three. The
+ * audit chip a grant-covered step leaves ([ChatItem.AutoRun]) joins the run it lands in and is counted there
+ * too ([ProcessSummary.autoRuns]) — approval design §9.6 lets the stream group a run of auto-decisions, as long
+ * as they stay visible — rather than cutting a running turn's fold at every auto-approved step.
+ * Everything else stays its own row AND ends the run: prose (User / Assistant), sub-agent / workflow / plan
+ * cards, errors and notices, remembered-rule chips, question residue and turn dividers. Rows are never
  * moved together across one of those. There is no guess at a "final answer" — no backend marks one.
+ *
+ * While the turn runs, its trailing run is the LIVE fold: born with its first step, its steps still in flight
+ * are shown by the fold's live line instead of rows of their own — which is what used to make the stream
+ * bounce (a step appeared as a full band, then folded away a moment later).
  */
-
-/** Fewer rows than this are not worth a fold: a single tool row is already one line. */
-const val MIN_PROCESS_GROUP = 2
 
 private val PLAN_TOOLS = setOf("ExitPlanMode", "exit_plan_mode")
 
-/** May [item] join a folded process run? See the file doc for why each exclusion exists. */
-fun isFoldableProcess(item: ChatItem): Boolean = when (item) {
-    is ChatItem.Tool -> item.ok == true &&
-        item.workflowRunId == null &&
+/** Does [item] belong in a process fold? See the file doc for why each exclusion exists. */
+fun isProcessStep(item: ChatItem): Boolean = when (item) {
+    is ChatItem.Tool -> isProcessTool(item)
+    is ChatItem.Thinking -> true
+    else -> false
+}
+
+/** Does [item] ride along in a run it lands inside of, without ever starting one? */
+private fun joinsRun(item: ChatItem): Boolean = item is ChatItem.AutoRun
+
+/**
+ * Could [item] be a step still in flight — a call THIS device saw start (it carries its tool-use id) with no
+ * outcome yet, or a thinking block still streaming? A replayed or orphaned row without an id never gets an
+ * outcome frame, so it can never be told running. Only the live fold asks; see [StepState] for the verdicts.
+ */
+fun isInFlightProcess(item: ChatItem): Boolean = when (item) {
+    is ChatItem.Tool -> item.ok == null && item.taskId != null && isProcessTool(item)
+    is ChatItem.Thinking -> item.seconds == null
+    else -> false
+}
+
+/**
+ * How a fold presents one of its tool calls — the header's counts and an opened member's status word read the
+ * same verdict, so the two can never disagree.
+ */
+enum class StepState {
+    /** Its outcome arrived: success. */
+    DONE,
+
+    /** Its outcome arrived: failure (counted on the header as "N failed"). */
+    FAILED,
+
+    /** No outcome arrived and none is coming — a replayed or orphaned row, or a call a daemon that reports
+     *  outcomes never finished before the turn ended. Counted as "N without result". */
+    UNKNOWN,
+
+    /** Started here on a daemon not (yet) seen reporting outcomes: done or not, nobody will say. Counted as a
+     *  step with no claim either way — marking every such call "without result" would only be noise. */
+    QUIET,
+
+    /** Still running: the live fold's line shows it, or a prompt typed mid-turn pushed it off the tail. Not
+     *  counted until its outcome arrives. */
+    RUNNING,
+}
+
+/** An ordinary tool call — not a card with its own presentation (sub-agent, workflow, plan, question). */
+private fun isProcessTool(item: ChatItem.Tool): Boolean =
+    item.workflowRunId == null &&
         !isWorkflowTool(item.tool) &&
         !isSubagentTool(item.tool) &&
         item.tool !in PLAN_TOOLS &&
         item.tool != ASK_QUESTION_TOOL
-    // a streaming block (no duration yet) keeps its live feedback on screen
-    is ChatItem.Thinking -> item.seconds != null
-    else -> false
-}
 
 /**
  * Client-only OCCURRENCE identity for transcript rows.
@@ -156,29 +201,69 @@ class ChatRowIdentity {
     }
 }
 
-/** What a folded run holds — rendered as "Process · 8 tools · 2 thoughts · ▣ 3". Counts only, read from
- *  fields the rows already carry; nothing is parsed or summarized. */
-data class ProcessSummary(val tools: Int, val thoughts: Int, val images: Int, val imagesTruncated: Boolean)
+/** What a folded run holds — rendered as "Process · 8 tools · 2 thoughts · 3 images", with the failed,
+ *  outcome-less and auto-approved steps named beside it. Counts FINISHED steps only (a live fold's in-flight
+ *  ones are in its live line), read from fields the rows already carry; nothing is parsed or summarized.
+ *  [failed] and [unknown] are among [tools]; [autoRuns] counts the grant audit chips in the run. */
+data class ProcessSummary(
+    val tools: Int,
+    val thoughts: Int,
+    val images: Int,
+    val imagesTruncated: Boolean,
+    val failed: Int = 0,
+    val unknown: Int = 0,
+    val autoRuns: Int = 0,
+)
 
 /** One display row. [key] is a stable lazy-list key: it survives in-place updates and prepends. */
 sealed interface ChatRow {
     val key: String
 
-    /** A transcript row shown as itself. [groupKey] is set when it is a member of an EXPANDED fold. */
-    data class Original(val sourceIndex: Int, val sourceKey: Long, val groupKey: String? = null) : ChatRow {
+    /**
+     * A transcript row shown as itself. [groupKey] is set when it is a member of an EXPANDED fold — drawn
+     * inside the fold's card, [last] closing it. The last member of an expanded LIVE fold also carries the
+     * fold's live line under it ([liveTail]): an opened fold keeps its live line at the bottom.
+     */
+    data class Original(
+        val sourceIndex: Int,
+        val sourceKey: Long,
+        val groupKey: String? = null,
+        val last: Boolean = false,
+        val liveTail: Boolean = false,
+    ) : ChatRow {
         override val key: String get() = "m:$sourceKey"
     }
 
-    /** The fold's own row. Expanded, it is a header followed by its members as [Original] rows. */
+    /**
+     * The fold's own row — its header. Expanded, it is followed by its finished members as [Original] rows.
+     *
+     * [live] is set on the LIVE fold — the trailing run of a turn that is still running. [summary] then counts
+     * only its finished members; the ones still in flight are named by [ProcessLive.inFlight] and shown by the
+     * live line, which this row carries itself unless an expanded fold has a finished member to hang it under.
+     */
     data class ProcessGroup(
         val groupKey: String,
         val sourceIndices: IntRange,
         val summary: ProcessSummary,
         val expanded: Boolean,
+        val live: ProcessLive? = null,
     ) : ChatRow {
         override val key: String get() = groupKey
+
+        /** Finished members listed under an expanded header — none for a live fold whose steps all run. */
+        val hasMemberRows: Boolean get() = expanded && sourceIndices.count() > (live?.inFlight?.size ?: 0)
+
+        /** Does this row draw the live line (and so close the fold's card itself)? */
+        val carriesLive: Boolean get() = live != null && !hasMemberRows
     }
 }
+
+/**
+ * What a live fold's live line shows: the SOURCE indices of its members still in flight (running tools, a
+ * thinking block still streaming), in transcript order. Empty between steps — the agent is working out the
+ * next one, and the fold stays live until prose, a card or the end of the turn closes the run.
+ */
+data class ProcessLive(val inFlight: List<Int>)
 
 /** First visible source row + pixel offset: the reading position, in coordinates a projection change can't move. */
 data class ReadingAnchor(val sourceKey: Long, val onGroupHeader: Boolean, val offset: Int)
@@ -197,8 +282,12 @@ class ChatPresentation private constructor(
     val rows: List<ChatRow>,
     private val ids: LongArray,
     private val rowOfSourceIndex: IntArray,
+    private val stepStates: Array<StepState?>,
 ) {
     val sourceSize: Int get() = items.size
+
+    /** The verdict for source row [sourceIndex] when it is a tool call inside a fold; null otherwise. */
+    fun stepState(sourceIndex: Int): StepState? = stepStates.getOrNull(sourceIndex)
 
     private val sourceOfKey: Map<Long, Int> by lazy {
         HashMap<Long, Int>(ids.size * 2).also { m -> ids.forEachIndexed { i, id -> m[id] = i } }
@@ -241,12 +330,15 @@ class ChatPresentation private constructor(
     }
 
     /** The display row an "earlier messages" seam above SOURCE row [sourceIndex] belongs on (its fold's row
-     *  when folded, the fold header when it OPENS an expanded fold); -1 when there is no such row. */
+     *  when folded, the fold header for any member of an expanded fold — the members sit inside the fold's
+     *  card, and a seam cannot cut it); -1 when there is no such row. */
     fun seamRow(sourceIndex: Int): Int {
         if (sourceIndex !in 0 until sourceSize) return -1
-        val r = rowOfSourceIndex[sourceIndex]
-        val header = rows.getOrNull(r - 1)
-        return if (header is ChatRow.ProcessGroup && header.expanded && header.sourceIndices.first == sourceIndex) r - 1 else r
+        var r = rowOfSourceIndex[sourceIndex]
+        if ((rows[r] as? ChatRow.Original)?.groupKey != null) {
+            while (r > 0 && rows[r] !is ChatRow.ProcessGroup) r--
+        }
+        return r
     }
 
     fun layoutEvidence(visibleRows: Iterable<Int>, items: List<ChatItem> = this.items): LayoutEvidence {
@@ -259,7 +351,8 @@ class ChatPresentation private constructor(
                     if (m is ChatItem.User || m is ChatItem.Assistant || m is ChatItem.Tool) content = true
                     if (m is ChatItem.Assistant || m is ChatItem.Tool) lastOutput = maxOf(lastOutput, r.sourceIndex)
                 }
-                is ChatRow.ProcessGroup -> if (r.summary.tools > 0) content = true
+                // a live fold whose only tool is still running is content on screen too
+                is ChatRow.ProcessGroup -> if (r.summary.tools > 0 || r.sourceIndices.any { items.getOrNull(it) is ChatItem.Tool }) content = true
                 null -> Unit
             }
         }
@@ -274,6 +367,14 @@ class ChatPresentation private constructor(
          * [expandedMembers]. The member form is what a list uses: a fold the reader opened stays open when
          * it grows at the tail, gains a new head (a page of older tools, an earlier call finishing late) or
          * is re-keyed for any other reason — the records they opened are still in it.
+         *
+         * [live] says the turn is still running. When the transcript ends on a step, that trailing run is the
+         * live fold ([ChatRow.ProcessGroup.live]) from its very first step: its in-flight steps are the live
+         * line's, never rows of their own, so a step starting or finishing changes no row's height.
+         *
+         * [liveOutcomes] says the conversation's daemon has been seen reporting tool outcomes live. Until then a
+         * started call with no outcome may simply be done on a daemon that never says, so only the live fold's
+         * newest such call counts as running, and the rest stay [StepState.QUIET].
          */
         fun build(
             items: List<ChatItem>,
@@ -282,48 +383,95 @@ class ChatPresentation private constructor(
             collapse: Boolean,
             expanded: Set<String> = emptySet(),
             expandedMembers: Set<Long> = emptySet(),
+            live: Boolean = false,
+            liveOutcomes: Boolean = true,
         ): ChatPresentation {
             require(ids.size == items.size) { "ids (${ids.size}) must align with items (${items.size})" }
             val n = items.size
             val rows = ArrayList<ChatRow>(n)
             val rowOf = IntArray(n)
+            val states = arrayOfNulls<StepState>(n)
+            // only the fold nearest the tail can hold a call a prompt typed mid-turn pushed off the tail
+            val lastStep = if (live) items.indexOfLast(::isProcessStep) else -1
             var i = 0
             while (i < n) {
-                if (!collapse || !isFoldableProcess(items[i])) {
+                if (!collapse || !isProcessStep(items[i])) {
                     rowOf[i] = rows.size
                     rows += ChatRow.Original(i, ids[i])
                     i++
                     continue
                 }
                 var j = i
+                while (j < n && (isProcessStep(items[j]) || joinsRun(items[j]))) j++
+                val isLive = live && j == n
+                val nearestTail = lastStep in i until j
+                // without outcome reports only the newest started call can be told running
+                val newestStarted = if (isLive && !liveOutcomes) {
+                    (j - 1 downTo i).firstOrNull { items[it] is ChatItem.Tool && isInFlightProcess(items[it]) } ?: -1
+                } else -1
                 var tools = 0
                 var thoughts = 0
                 var images = 0
                 var truncated = false
-                while (j < n && isFoldableProcess(items[j])) {
-                    when (val m = items[j]) {
-                        is ChatItem.Tool -> { tools++; images += m.images.size; truncated = truncated || m.imagesTruncated }
-                        is ChatItem.Thinking -> thoughts++
+                var failed = 0
+                var unknown = 0
+                var autoRuns = 0
+                val inFlight = ArrayList<Int>(0)
+                for (k in i until j) {
+                    when (val m = items[k]) {
+                        is ChatItem.Tool -> {
+                            val state = when {
+                                m.ok == true -> StepState.DONE
+                                m.ok == false -> StepState.FAILED
+                                !isInFlightProcess(m) -> StepState.UNKNOWN // no id: nothing will ever report it
+                                isLive -> if (liveOutcomes || k == newestStarted) StepState.RUNNING else StepState.QUIET
+                                // a call of this running turn that a prompt typed mid-turn pushed off the tail
+                                live && liveOutcomes && nearestTail -> StepState.RUNNING
+                                // an outcome that never arrived is unknown — never a success
+                                liveOutcomes -> StepState.UNKNOWN
+                                else -> StepState.QUIET
+                            }
+                            states[k] = state
+                            if (state == StepState.RUNNING) {
+                                if (isLive) inFlight += k
+                                continue
+                            }
+                            tools++
+                            images += m.images.size
+                            truncated = truncated || m.imagesTruncated
+                            if (state == StepState.FAILED) failed++ else if (state == StepState.UNKNOWN) unknown++
+                        }
+                        is ChatItem.Thinking -> if (isLive && m.seconds == null) inFlight += k else thoughts++
+                        is ChatItem.AutoRun -> autoRuns++
                         else -> Unit
                     }
-                    j++
-                }
-                if (j - i < MIN_PROCESS_GROUP) {
-                    for (k in i until j) { rowOf[k] = rows.size; rows += ChatRow.Original(k, ids[k]) }
-                    i = j
-                    continue
                 }
                 val key = "g:$generation:${ids[i]}"
                 val open = key in expanded ||
                     (expandedMembers.isNotEmpty() && (i until j).any { ids[it] in expandedMembers })
                 val header = rows.size
-                rows += ChatRow.ProcessGroup(key, i until j, ProcessSummary(tools, thoughts, images, truncated), open)
-                for (k in i until j) {
-                    if (open) { rowOf[k] = rows.size; rows += ChatRow.Original(k, ids[k], key) } else rowOf[k] = header
+                rows += ChatRow.ProcessGroup(
+                    key, i until j, ProcessSummary(tools, thoughts, images, truncated, failed, unknown, autoRuns), open,
+                    live = if (isLive) ProcessLive(inFlight) else null,
+                )
+                if (open) {
+                    // finished members only: the in-flight ones are the live line's, which hangs under the last
+                    var lastMember = -1
+                    for (k in i until j) {
+                        if (k in inFlight) continue
+                        rowOf[k] = rows.size
+                        lastMember = rows.size
+                        rows += ChatRow.Original(k, ids[k], key)
+                    }
+                    if (lastMember >= 0) rows[lastMember] = (rows[lastMember] as ChatRow.Original).copy(last = true, liveTail = isLive)
+                    val carrier = if (lastMember >= 0 && isLive) lastMember else header
+                    inFlight.forEach { rowOf[it] = carrier }
+                } else {
+                    for (k in i until j) rowOf[k] = header
                 }
                 i = j
             }
-            return ChatPresentation(generation, collapse, items, rows, ids, rowOf)
+            return ChatPresentation(generation, collapse, items, rows, ids, rowOf, states)
         }
     }
 }

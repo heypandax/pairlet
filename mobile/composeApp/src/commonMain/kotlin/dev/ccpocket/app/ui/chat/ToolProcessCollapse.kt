@@ -1,15 +1,6 @@
 package dev.ccpocket.app.ui.chat
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
@@ -17,39 +8,24 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.onClick
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ChatPresentation
 import dev.ccpocket.app.data.ChatRow
 import dev.ccpocket.app.data.ChatRowIdentity
 import dev.ccpocket.app.data.ProcessSummary
 import dev.ccpocket.app.resources.Res
-import dev.ccpocket.app.resources.tool_process_collapse
-import dev.ccpocket.app.resources.tool_process_expand
 import dev.ccpocket.app.resources.tool_process_group
 import dev.ccpocket.app.resources.tool_process_images
 import dev.ccpocket.app.resources.tool_process_images_truncated
 import dev.ccpocket.app.resources.tool_process_thoughts
 import dev.ccpocket.app.resources.tool_process_tools
-import dev.ccpocket.app.theme.Tok
-import dev.ccpocket.app.theme.tightCenter
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
  * Issue #380 — the Compose half of "collapse tool process", shared by the phone/iPad list and the desktop
- * pane. The algorithm lives in [ChatPresentation]; this file only holds per-list state and the fold row.
+ * pane. The algorithm lives in [ChatPresentation]; this file holds per-list state and the fold's count label —
+ * the fold itself (card, header, live line) is drawn by ToolProcessBlock (Tool Process Live v1).
  */
 
 /** Test tag on every fold row. */
@@ -68,13 +44,17 @@ const val CHAT_STREAM_TAG = "chat-stream"
  * the later ones) stays open, and closing it closes every member it now holds. Identities are unique per
  * process and never reused, so a replaced history cannot inherit anything.
  *
- * [source] and [collapse] must read snapshot state only: they are captured once, and [presentation]
- * re-derives whenever what they read changes — never per recomposition.
+ * [source], [collapse], [live] and [liveOutcomes] must read snapshot state only: they are captured once, and
+ * [presentation] re-derives whenever what they read changes — never per recomposition. [live] is "this list's
+ * turn is still running": it makes the transcript's trailing steps one live fold (Tool Process Live v1);
+ * [liveOutcomes] is "this conversation's daemon reports tool outcomes live" (see [ChatPresentation.build]).
  */
 @Stable
 class ChatPresentationState(
     private val source: () -> List<ChatItem>,
     private val collapse: () -> Boolean,
+    private val live: () -> Boolean = { false },
+    private val liveOutcomes: () -> Boolean = { true },
 ) {
     private val identity = ChatRowIdentity()
     private val expandedMembers = mutableStateMapOf<Long, Unit>()
@@ -82,7 +62,10 @@ class ChatPresentationState(
     val presentation: ChatPresentation by derivedStateOf {
         val items = source().toList()
         val ids = identity.assign(items)
-        ChatPresentation.build(items, ids, identity.generation, collapse(), expandedMembers = expandedMembers.keys.toSet())
+        ChatPresentation.build(
+            items, ids, identity.generation, collapse(),
+            expandedMembers = expandedMembers.keys.toSet(), live = live(), liveOutcomes = liveOutcomes(),
+        )
     }
 
     /** Open / close one fold. Remembered members that left the transcript are dropped on the way. */
@@ -107,7 +90,9 @@ fun rememberChatPresentationState(
     key: Any?,
     source: () -> List<ChatItem>,
     collapse: () -> Boolean,
-): ChatPresentationState = remember(key) { ChatPresentationState(source, collapse) }
+    live: () -> Boolean = { false },
+    liveOutcomes: () -> Boolean = { true },
+): ChatPresentationState = remember(key) { ChatPresentationState(source, collapse, live, liveOutcomes) }
 
 /**
  * Keep the reader's place when the projection changes UNDER them — the switch flipped, a fold opened or
@@ -169,41 +154,3 @@ fun processSummaryLabel(summary: ProcessSummary): String = buildList {
     if (summary.images > 0) add(pluralStringResource(Res.plurals.tool_process_images, summary.images, summary.images))
     if (summary.imagesTruncated) add(stringResource(Res.string.tool_process_images_truncated))
 }.joinToString(" · ")
-
-/**
- * The fold's own row. Expanded, the members render beneath it as their ordinary rows (with their existing
- * tool/thinking renderers, image viewers included); this row stays as the way to close them again.
- */
-@Composable
-fun ProcessGroupRow(
-    summary: ProcessSummary,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    modifier: Modifier = Modifier,
-    fontFamily: FontFamily? = null,
-    fontSize: Float = 12.5f,
-) {
-    val action = stringResource(if (expanded) Res.string.tool_process_collapse else Res.string.tool_process_expand)
-    val size = fontSize.sp
-    val shape = RoundedCornerShape(8.dp)
-    Row(
-        modifier.fillMaxWidth().testTag(TOOL_PROCESS_GROUP_TAG)
-            .clip(shape).background(Tok.surface).border(1.dp, Tok.hair, shape)
-            .clickable(onClick = onToggle)
-            .semantics { stateDescription = action; onClick(label = action) { onToggle(); true } }
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            if (expanded) "▾" else "▸", color = Tok.muted, fontSize = size, fontFamily = fontFamily,
-            style = tightCenter(size),
-        )
-        Text(
-            processSummaryLabel(summary), color = Tok.tx2, fontSize = size, fontFamily = fontFamily,
-            fontWeight = FontWeight.Medium, style = tightCenter(size),
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
-        )
-        Text(action, color = Tok.muted, fontSize = (fontSize - 1.5f).sp, fontFamily = fontFamily, style = tightCenter((fontSize - 1.5f).sp))
-    }
-}

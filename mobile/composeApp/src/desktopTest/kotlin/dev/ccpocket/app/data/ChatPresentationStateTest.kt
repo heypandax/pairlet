@@ -33,17 +33,20 @@ class ChatPresentationStateTest {
     }
 
     @Test
-    fun anOpenFoldStaysOpenWhenAToolAheadOfItFinishesLate() {
+    fun anOpenFoldStaysOpenWhenAToolInItFinishesLate() {
         val running = ChatItem.Tool("Bash", "slow", taskId = "t-slow")
         val list = mutableStateListOf<ChatItem>(ChatItem.User("go"), running, ok("A"), ok("B"))
         val state = ChatPresentationState({ list }, { true })
-        val open = state.group(2)
+        val open = state.group(1)
+        // Tool Process Live v1: a step with no outcome yet is a member of the run, never a cut in it
+        assertTrue(open.sourceIndices == 1..3)
         state.toggle(open.groupKey)
 
         list[1] = running.copy(ok = true) // the earlier call completes after the later ones
         val merged = state.group(1)
         assertTrue(merged.sourceIndices == 1..3)
         assertTrue(merged.expanded)
+        assertTrue(merged.summary.unknown == 0, "its outcome arrived: nothing is unknown any more")
     }
 
     @Test

@@ -859,6 +859,9 @@ interface DesktopModel {
     val lastHistoryPrependCount: Int get() = 0
     fun loadOlderHistory() {}
     val streaming: Boolean
+    /** Whether this conversation's daemon has been seen reporting tool outcomes live (Tool Process Live v1):
+     *  until it has, the live fold can only tell its newest started call running. Seeds default to reporting. */
+    val toolOutcomesLive: Boolean get() = true
     /** True when a sent prompt can't be confirmed delivered — the link is down, or it claims healthy but
      *  the delivery receipt stalled past its deadline (issue #78, common with several computers connected).
      *  ChatPane turns the pending cue from a benign "sending…" into an honest warning on it. */

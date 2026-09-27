@@ -300,9 +300,10 @@ private fun CrossGlyph(color: Color, size: Dp) = Canvas(Modifier.size(size)) {
     drawPath(Path().apply { moveTo(13 * u, 5 * u); lineTo(5 * u, 13 * u) }, color, style = stroke)
 }
 
-/** ECG activity trace "⌁" for the progress line — replaces the old ⚒ emoji (handoff viewBox 14). */
+/** ECG activity trace "⌁" for the progress line — replaces the old ⚒ emoji (handoff viewBox 14). Also the
+ *  process fold's live line mark (Tool Process Live v1), so the two live objects rhyme. */
 @Composable
-private fun EcgGlyph(color: Color, size: Dp) = Canvas(Modifier.size(size)) {
+internal fun EcgGlyph(color: Color, size: Dp) = Canvas(Modifier.size(size)) {
     val u = this.size.width / 14f
     drawPath(
         Path().apply {

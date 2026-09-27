@@ -51,6 +51,13 @@ class ChatTranscript {
     /** Mid-turn right now. Kept here because [appendChunk] is what flips it on. */
     val streaming = mutableStateOf(false)
 
+    /**
+     * Has this conversation's daemon been seen reporting an ordinary tool's outcome live (#380 outcome frames,
+     * daemon 2.1.1+)? Until it has, a started call with no outcome can't be told "still running" from "done on a
+     * daemon that never says", so the live fold treats only the newest such call as running (Tool Process Live v1).
+     */
+    val toolOutcomesLive = mutableStateOf(false)
+
     /** One-shot dedupe armed by a history replay (issue #107) — see [appendChunk] / [onToolEvent]. */
     var replayEcho = false
 
@@ -63,6 +70,7 @@ class ChatTranscript {
         replayEcho = false
         thinkStartMs = null
         streaming.value = false
+        toolOutcomesLive.value = false
     }
 
     fun appendCompactSummary(text: String) {
@@ -106,6 +114,17 @@ class ChatTranscript {
         // would leave an un-stamped "Thinking…" row that the NEXT turn stamps with an absurd duration.
         finishThinking()
         val parent = f.parentToolUseId
+        if (f.phase == ToolPhase.START && parent == null) {
+            // …and a top-level tool starting is a turn in flight — the same evidence a chunk is in [appendChunk]. A
+            // turn begun elsewhere can open with a tool before any prose (Codex does), and the live fold (Tool
+            // Process Live v1) must see it running rather than as a step whose outcome never arrived. Top-level
+            // START only: a late RESULT, or a background sub-agent's inner call after the turn ended, must never
+            // revive a turn that is over.
+            streaming.value = true
+            // the live line's clock counts from first SIGHT, which is now — not from whenever the line is next drawn
+            f.toolUseId?.let { ProcessStepClock.startOf(stepClockKeyOf(it)) }
+        }
+        if (f.phase == ToolPhase.RESULT && f.outcomeOnly) toolOutcomesLive.value = true
         // one-shot replay-echo dedupe (issue #107), tool flavor: a START right after a merged
         // ConvoHistory may duplicate the replayed tail card (which has no taskId). Fold into it —
         // patching the live toolUseId in even upgrades the card for later RESULT correlation.

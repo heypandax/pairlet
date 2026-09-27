@@ -1579,6 +1579,8 @@ class PocketRepository(
     private var lastOpenAttempt: OpenAttempt? = null
     val autoFocusComposer = mutableStateOf(false)            // brand-new session: ChatScreen raises the keyboard once on landing (consumed there)
     val streaming get() = transcript.streaming
+    /** Whether this conversation's daemon has been seen reporting tool outcomes live — see [ChatTranscript.toolOutcomesLive]. */
+    val toolOutcomesLive get() = transcript.toolOutcomesLive
     val observing = mutableStateOf(false) // viewing a session running outside the daemon (read-only tail)
     private var currentSessionId: String? = null
 

@@ -171,7 +171,10 @@ import dev.ccpocket.app.supportPlatformLabel
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ChatRow
 import dev.ccpocket.app.ui.chat.KeepChatReadingPosition
-import dev.ccpocket.app.ui.chat.ProcessGroupRow
+import dev.ccpocket.app.ui.chat.ProcessBlockHeader
+import dev.ccpocket.app.ui.chat.ProcessMemberSegment
+import dev.ccpocket.app.ui.chat.joinPreviousSegment
+import dev.ccpocket.app.ui.chat.liveLineState
 import dev.ccpocket.app.ui.chat.rememberChatPresentationState
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.FileUpState
@@ -2934,6 +2937,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
         source = { repo.messages },
         // finished tool steps always fold (the per-session switch was removed 2026-09-15 by user decision)
         collapse = { true },
+        // a running turn's trailing steps are one live fold from the first step (Tool Process Live v1)
+        live = { repo.streaming.value },
+        liveOutcomes = { repo.toolOutcomesLive.value },
     )
     // the Jump-to-latest scroll must survive the pill leaving composition. The pill's onClick sets
     // pinned=true, and that same recomposition removes the `if (!pinned)` block below — a
@@ -3219,20 +3225,48 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         if (row is ChatRow.ProcessGroup) {
                             Column(Modifier.readableMeasure(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 if (ri == seamRow) EarlierMessagesSeam(repo.historyPrependGen.value)
-                                ProcessGroupRow(row.summary, row.expanded, onToggle = {
-                                    // opening/closing a fold ABOVE the end is reading, not following: unpin so
-                                    // the reading-position keeper holds the header where it is. The last row
-                                    // keeps following the end — and so does a list that cannot scroll at all,
-                                    // where nothing moved and no gesture would ever re-pin it.
-                                    val scrollable = listState.canScrollForward || listState.canScrollBackward
-                                    if (pinned && scrollable && !toolProcess.isLastRow(row.groupKey)) pinned = false
-                                    toolProcess.toggle(row.groupKey)
-                                })
+                                ProcessBlockHeader(
+                                    row, shown.items,
+                                    liveLine = if (row.carriesLive) liveLineState(shown, row, repo.pendingAsk.value?.takeUnless(repo::askTimedOut), repo.workdir.value) else null,
+                                    cwd = repo.workdir.value,
+                                    onToggle = {
+                                        // opening/closing a fold ABOVE the end is reading, not following: unpin so
+                                        // the reading-position keeper holds the header where it is. The last row
+                                        // keeps following the end — and so does a list that cannot scroll at all,
+                                        // where nothing moved and no gesture would ever re-pin it.
+                                        val scrollable = listState.canScrollForward || listState.canScrollBackward
+                                        if (pinned && scrollable && !toolProcess.isLastRow(row.groupKey)) pinned = false
+                                        toolProcess.toggle(row.groupKey)
+                                    },
+                                )
                             }
                             return@itemsIndexed
                         }
-                        val mi = (row as ChatRow.Original).sourceIndex
+                        val orig = row as ChatRow.Original
+                        val mi = orig.sourceIndex
                         val m = shown.items[mi]
+                        if (orig.groupKey != null) {
+                            // a member of an opened fold: inside the fold's card, flush under the segment above
+                            val liveGroup = if (orig.liveTail) {
+                                shown.rows.firstOrNull { it is ChatRow.ProcessGroup && it.groupKey == orig.groupKey } as? ChatRow.ProcessGroup
+                            } else null
+                            ProcessMemberSegment(
+                                last = orig.last,
+                                liveLine = liveGroup?.let { liveLineState(shown, it, repo.pendingAsk.value?.takeUnless(repo::askTimedOut), repo.workdir.value) },
+                                modifier = Modifier.joinPreviousSegment(10.dp).readableMeasure(),
+                            ) {
+                                MessageItem(
+                                    m,
+                                    agent = repo.sessionAgent.value,
+                                    onOpenImages = { imgs, i -> viewer = imgs to i },
+                                    onOpenVideo = { videoViewer = it },
+                                    onTightenAutoRun = repo::tightenAutoRun,
+                                    inProcessBlock = true,
+                                    processStep = shown.stepState(mi),
+                                )
+                            }
+                            return@itemsIndexed
+                        }
                         // a prompt the daemon hasn't acknowledged while the link is down — or while the link
                         // CLAIMS up but receipts stalled past the deadline (issue #78, multi-computer links):
                         // say so under the bubble instead of letting it look sent (issue #41 — frames queue
@@ -3249,9 +3283,11 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 // short-circuit keeps non-tool rows from reading the list in their own
                                 // recompose scope — a whole-list read here re-runs every visible row on
                                 // every streaming delta
-                                // (display-row neighbour: a tool right after a fold row gets its own label)
+                                // (display-row neighbour: a tool right after a fold — its header or an opened
+                                // member inside its card — gets its own label)
                                 toolSourceLabeled = m !is ChatItem.Tool ||
-                                    (shown.rows.getOrNull(ri - 1) as? ChatRow.Original)?.let { shown.items[it.sourceIndex] } !is ChatItem.Tool,
+                                    (shown.rows.getOrNull(ri - 1) as? ChatRow.Original)?.takeIf { it.groupKey == null }
+                                        ?.let { shown.items[it.sourceIndex] } !is ChatItem.Tool,
                                 onOpenWorkflow = repo::openWorkflow,
                                 onOpenImages = { imgs, i -> viewer = imgs to i },
                                 onOpenVideo = { videoViewer = it },
@@ -3290,13 +3326,18 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     // session) doesn't move on its own, so without this the screen looks dead.
                     val last = repo.messages.lastOrNull()
                     val liveContent = (last is ChatItem.Thinking && last.seconds == null) || last is ChatItem.Assistant
+                    // a live fold ending the stream carries its own pulse (Tool Process Live v1): a second live
+                    // signal under it would only repeat it
+                    val liveFoldAtEnd = shown.rows.lastOrNull().let {
+                        (it as? ChatRow.ProcessGroup)?.live != null || (it as? ChatRow.Original)?.liveTail == true
+                    }
                     when {
                         // delivered, but the agent produced no turn within the deadline (issue #104): the prompt
                         // was swallowed (wedged / mid-relaunch). Offer a resend instead of an endless spinner.
                         repo.turnStalled.value -> item { NoResponseRow { repo.resendStalledPrompt() } }
                         // sent mid-turn and the running turn has gone quiet: the prompt is queued, not swallowed
                         repo.turnQueued.value -> item { QueuedRow() }
-                        repo.streaming.value -> item { if (liveContent) PulseDot(Tok.accent) else WorkingRow() }
+                        repo.streaming.value && !liveFoldAtEnd -> item { if (liveContent) PulseDot(Tok.accent) else WorkingRow() }
                     }
                 }
                 }
@@ -3936,6 +3977,11 @@ private fun MessageItem(
     // caller passes null when the row has no transcript coordinates (old daemon / non-Claude backend),
     // so the affordance is absent rather than present-and-broken.
     onLongPressUser: ((ChatItem.User) -> Unit)? = null,
+    // a member of an opened process fold (Tool Process Live v1): drawn inside the fold's card, whose header is
+    // its label and whose hairlines are its rules — so no "Tool" source label and an unframed band
+    inProcessBlock: Boolean = false,
+    // …and the fold's verdict on a tool member, so the band says "No result" exactly when the header counts it so
+    processStep: dev.ccpocket.app.data.StepState? = null,
 ) {
     when (m) {
         // Mobile UI 2.0: a quiet uppercase source label above each ordinary turn is all the structure the
@@ -4016,8 +4062,10 @@ private fun MessageItem(
             val opener = LocalPathOpener.current
             val openablePath = m.tool in TOOL_FILE_PATH_TOOLS && opener != null && looksLikePath(m.preview)
             Column {
-                if (toolSourceLabeled) TurnSourceLabel(stringResource(Res.string.chat_src_tool), Modifier.padding(bottom = 7.dp))
+                if (toolSourceLabeled && !inProcessBlock) TurnSourceLabel(stringResource(Res.string.chat_src_tool), Modifier.padding(bottom = 7.dp))
                 ToolTurnBand(
+                    framed = !inProcessBlock,
+                    unknownOutcome = processStep == dev.ccpocket.app.data.StepState.UNKNOWN,
                     // the real tool token, verbatim — "Plan" is the one rename, because that is what
                     // ExitPlanMode's payload actually is
                     tool = if (isPlan) "Plan" else m.tool,

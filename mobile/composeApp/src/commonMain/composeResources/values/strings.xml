@@ -2153,6 +2153,26 @@
     <string name="tool_process_images_truncated">some images not loaded</string>
     <string name="tool_process_expand">Show steps</string>
     <string name="tool_process_collapse">Hide steps</string>
+    <!-- Tool Process Live v1: the fold's failure / missing-outcome markers, its one-step action, and the live line -->
+    <plurals name="tool_process_failed">
+        <item quantity="one">%1$d failed</item>
+        <item quantity="other">%1$d failed</item>
+    </plurals>
+    <plurals name="tool_process_unknown">
+        <item quantity="one">%1$d without result</item>
+        <item quantity="other">%1$d without result</item>
+    </plurals>
+    <string name="tool_process_unknown_one">No result</string>
+    <plurals name="tool_process_autoruns">
+        <item quantity="one">%1$d auto-ran</item>
+        <item quantity="other">%1$d auto-ran</item>
+    </plurals>
+    <string name="tool_process_expand_one">Show</string>
+    <string name="tool_process_collapse_one">Hide</string>
+    <string name="tool_process_running">Running, %1$s</string>
+    <string name="tool_process_waiting">Needs approval</string>
+    <string name="tool_process_a11y_waiting">Waiting for your approval: %1$s %2$s</string>
+    <string name="tool_process_a11y_failed">%1$s %2$s failed</string>
     <!-- context status (issue #320-A): name the evidence shape, never guess a value or claim "unsupported" -->
     <string name="context_status_no_data">No context data yet</string>
     <string name="context_status_no_data_detail">The backend hasn\'t returned a usable value for this session yet. This doesn\'t mean it\'s unsupported.</string>

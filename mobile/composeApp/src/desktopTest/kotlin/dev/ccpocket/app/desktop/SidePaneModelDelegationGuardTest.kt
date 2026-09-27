@@ -48,6 +48,8 @@ class SidePaneModelDelegationGuardTest {
         // the column's own conversation identity — what per-conversation docks (file preview) key on
         "conversationKey",
         "messages", "streaming", "selectedSessionId",
+        // Tool Process Live v1: whether THIS column's daemon has reported tool outcomes live
+        "toolOutcomesLive",
         // #380: the collapse-tool-process switch belongs to the column's own session + agent
         "toolProcessScope",
         // this column's OWN delivery receipt + stall cues and its per-pane resend (issue #329): read off

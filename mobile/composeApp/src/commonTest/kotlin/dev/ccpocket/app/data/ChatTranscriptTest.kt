@@ -9,6 +9,7 @@ import dev.ccpocket.protocol.ToolEvent
 import dev.ccpocket.protocol.ToolPhase
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -22,6 +23,30 @@ class ChatTranscriptTest {
 
     private fun text(s: String) = AssistantChunk("c", 1, StreamPiece.Text(s))
     private fun thinking(s: String) = AssistantChunk("c", 1, StreamPiece.Thinking(s))
+
+    @Test
+    fun aTopLevelToolStartIsATurnInFlightButAChildCallOrALateResultIsNot() {
+        val t = ChatTranscript()
+        t.onToolEvent(ToolEvent("c", 1, ToolPhase.START, "Bash", inputPreview = "ls", toolUseId = "top-1"))
+        assertTrue(t.streaming.value, "a turn begun elsewhere can open with a tool before any prose")
+        t.streaming.value = false // the turn ended
+        t.onToolEvent(ToolEvent("c", 2, ToolPhase.START, "Grep", inputPreview = "x", toolUseId = "kid-1", parentToolUseId = "sub-1"))
+        assertFalse(t.streaming.value, "a background sub-agent's inner call never revives a finished turn")
+        t.onToolEvent(ToolEvent("c", 3, ToolPhase.RESULT, "Bash", ok = true, toolUseId = "top-1", outcomeOnly = true))
+        assertFalse(t.streaming.value, "…and neither does a late outcome")
+    }
+
+    @Test
+    fun outcomeReportsAreRememberedPerConversationAndAStartStartsItsClock() {
+        val t = ChatTranscript()
+        t.onToolEvent(ToolEvent("c", 1, ToolPhase.START, "Bash", inputPreview = "ls", toolUseId = "clock-tu-1"))
+        assertNotNull(ProcessStepClock.seen(stepClockKeyOf("clock-tu-1")), "first sight is recorded when the call starts")
+        assertFalse(t.toolOutcomesLive.value, "nothing has reported an outcome yet")
+        t.onToolEvent(ToolEvent("c", 2, ToolPhase.RESULT, "Bash", ok = true, toolUseId = "clock-tu-1", outcomeOnly = true))
+        assertTrue(t.toolOutcomesLive.value)
+        t.reset()
+        assertFalse(t.toolOutcomesLive.value, "the next conversation may run on another daemon")
+    }
 
     @Test
     fun consecutiveTextChunksGrowOneBubble() {
