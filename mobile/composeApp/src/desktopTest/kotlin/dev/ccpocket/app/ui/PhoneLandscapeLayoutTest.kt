@@ -75,8 +75,9 @@ import kotlin.test.assertTrue
  * What these are, honestly: offscreen Compose-desktop fixtures. They prove the layout decision, that the chat
  * stays the same composition, and what that composition keeps. They are NOT device acceptance: that a real
  * Android Activity does stay put through a rotation, a split-screen resize or a fold, the platform readings of
- * the device class (Android display metrics, the iOS idiom), the real keyboard inset (a plain padding stands in
- * for the root's imePadding) and touch scrolling are not exercised.
+ * the device class (Android display metrics and its fold — the hinge sensor and WindowManager's FoldingFeature —
+ * and the iOS idiom), the real keyboard inset (a plain padding stands in for the root's imePadding) and touch
+ * scrolling are not exercised.
  */
 @OptIn(ExperimentalTestApi::class)
 class PhoneLandscapeLayoutTest {
@@ -319,9 +320,71 @@ class PhoneLandscapeLayoutTest {
         // Android's smallest-width line: handsets and a folded foldable's cover screen stay phones…
         assertEquals(LayoutDeviceClass.PHONE, layoutDeviceClassForSmallestWidth(360.dp))
         assertEquals(LayoutDeviceClass.PHONE, layoutDeviceClassForSmallestWidth(599.dp))
-        // …a 7" tablet and an unfolded inner screen do not
+        // …a 7" tablet does not — and by width alone neither would an unfolded inner screen, which is why the
+        // fold is read before the width (anUnfoldedFoldableKeepsOneColumnTurnedSideways)
         assertEquals(LayoutDeviceClass.LARGE_SCREEN, layoutDeviceClassForSmallestWidth(600.dp))
         assertEquals(LayoutDeviceClass.LARGE_SCREEN, layoutDeviceClassForSmallestWidth(701.dp))
+
+        // the fold: a foldable is a phone at any width; without one the same screen is the tablet it measures as
+        assertEquals(LayoutDeviceClass.PHONE, layoutDeviceClassFor(FOLDABLE_INNER.width, foldable = true))
+        assertEquals(LayoutDeviceClass.PHONE, layoutDeviceClassFor(1024.dp, foldable = true))
+        assertEquals(LayoutDeviceClass.LARGE_SCREEN, layoutDeviceClassFor(FOLDABLE_INNER.width, foldable = false))
+        assertEquals(LayoutDeviceClass.PHONE, layoutDeviceClassFor(FOLDABLE_COVER.width, foldable = false), "the cover screen has no fold in its window, and is a phone by width")
+    }
+
+    /**
+     * The second #378 report: a foldable's inner screen clears sw600dp, so by width alone it was a LARGE_SCREEN whose
+     * ~690dp portrait stayed one column and whose ~830dp landscape split. The device class here comes out of the same
+     * classification the Android actual feeds ([layoutDeviceClassFor], with the fold read as true), not a hand-picked
+     * PHONE, and the scene walks the reported path: unfolded upright → turned sideways → folded to the cover screen.
+     */
+    @Test
+    fun anUnfoldedFoldableKeepsOneColumnTurnedSideways() {
+        val unfolded = WideLayoutPolicy(layoutDeviceClassFor(FOLDABLE_INNER.width, foldable = true))
+        scene(unfolded, FOLDABLE_INNER, "unfolded") { s ->
+            assertEquals(false, s.wide, "the unfolded inner screen upright is one column")
+            val draft = "keep this draft through the turn and the fold"
+            composer().performTextInput(draft)
+            parkMidTranscript(s)
+            val convo = s.repo.convoId.value
+
+            fun sameChat(moment: String) {
+                advanceFrameAndWait()
+                assertEquals(false, s.wide, "$moment: a foldable stays one column")
+                assertFalse(listPaneShowing() || placeholderShowing(), "$moment: no list is pinned beside the chat")
+                assertEquals(convo, s.repo.convoId.value, "$moment: the same conversation is open")
+                assertEquals(draft, composerText(), "$moment: the unsent draft is still in the field")
+                assertEquals(READ_AT, s.listState.firstVisibleItemIndex, "$moment: the reader is still on the same message")
+            }
+
+            s.size = FOLDABLE_INNER_LANDSCAPE
+            sameChat("unfolded, turned sideways")
+            assertEquals(
+                FOLDABLE_INNER_LANDSCAPE.width.value.toInt() - TRANSCRIPT_INSETS, s.listState.layoutInfo.viewportSize.width,
+                "the chat takes the whole ${FOLDABLE_INNER_LANDSCAPE.width.value.toInt()}dp, which clears the 700dp line a tablet splits at",
+            )
+            s.size = FOLDABLE_COVER_LANDSCAPE
+            sameChat("folded to the cover screen, sideways")
+            s.size = FOLDABLE_COVER
+            sameChat("cover screen upright")
+            s.size = FOLDABLE_INNER
+            sameChat("unfolded again")
+        }
+    }
+
+    /** The contrast: the fix is the fold, not one column for every large screen — a tablet this size still splits. */
+    @Test
+    fun aTabletTheSizeOfAnInnerScreenStillSplitsSideways() {
+        val tablet = WideLayoutPolicy(layoutDeviceClassFor(FOLDABLE_INNER.width, foldable = false))
+        scene(tablet, FOLDABLE_INNER, "tabletish") { s ->
+            assertEquals(false, s.wide, "under 700dp upright, one column")
+            s.size = FOLDABLE_INNER_LANDSCAPE
+            advanceFrameAndWait()
+            advanceFrameAndWait()
+            assertEquals(true, s.wide, "sideways it clears the line, and a tablet takes its two panes")
+            assertTrue(listPaneShowing(), "…the list beside the chat")
+            assertFalse(placeholderShowing())
+        }
     }
 
     /**
@@ -382,6 +445,12 @@ class PhoneLandscapeLayoutTest {
         val PHONE_LANDSCAPE = DpSize(844.dp, 390.dp)
         val TABLET_LANDSCAPE = DpSize(1024.dp, 768.dp)
         val TABLET_NARROW = DpSize(600.dp, 960.dp)
+
+        /** A Galaxy Z Fold-class inner screen (1812×2176px at 2.625) and its cover screen (904×2316px), both ways up. */
+        val FOLDABLE_INNER = DpSize(690.dp, 829.dp)
+        val FOLDABLE_INNER_LANDSCAPE = DpSize(829.dp, 690.dp)
+        val FOLDABLE_COVER = DpSize(344.dp, 882.dp)
+        val FOLDABLE_COVER_LANDSCAPE = DpSize(882.dp, 344.dp)
         const val READ_AT = 12
 
         /** ChatScreen pads its transcript 16dp on each side. */

@@ -15,6 +15,7 @@ composeMaterial3 = "1.9.0"
 agp = "9.2.1"
 androidActivityCompose = "1.9.3"
 androidxBiometric = "1.1.0"
+androidxWindow = "1.4.0"
 androidMinSdk = "26"
 androidCompileSdk = "37"
 androidTargetSdk = "35"
@@ -54,6 +55,7 @@ ktor-network-tls-certificates = { module = "io.ktor:ktor-network-tls-certificate
 
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidActivityCompose" }
 androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "androidxBiometric" } # App Lock (issue #109): BiometricPrompt (brings androidx.fragment for FragmentActivity)
+androidx-window = { module = "androidx.window:window", version.ref = "androidxWindow" } # Jetpack WindowManager: the fold inside the window tells an unfolded foldable from a tablet (issue #378)
 
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }

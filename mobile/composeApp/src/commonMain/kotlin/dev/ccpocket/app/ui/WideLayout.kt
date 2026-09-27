@@ -72,10 +72,14 @@ val SHEET_MEASURE_MAX = 560.dp
  * from the platform ([platformLayoutDeviceClass]), never from the window's height, which a keyboard shrinks.
  */
 internal enum class LayoutDeviceClass {
-    /** A handset, a folded foldable included: one column in every orientation — rotating only widens it. */
+    /**
+     * A handset, a foldable on either of its screens included: one column in every orientation — rotating only
+     * widens it. An unfolded inner screen measures like a small tablet, and it is the fold that keeps it here
+     * ([layoutDeviceClassFor]).
+     */
     PHONE,
 
-    /** A tablet, an unfolded foldable or a resizable window: two panes wherever the width holds them. */
+    /** A tablet or a resizable window: two panes wherever the width holds them. */
     LARGE_SCREEN,
 }
 

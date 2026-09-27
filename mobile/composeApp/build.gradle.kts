@@ -75,6 +75,7 @@ kotlin {
             implementation(project(":observability-sentry"))
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.biometric) // App Lock (issue #109): BiometricPrompt + FragmentActivity
+            implementation(libs.androidx.window) // fold-aware device class (issue #378): an unfolded foldable stays a phone
             implementation(libs.ktor.client.cio)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.cryptography.provider.jdk) // E2E crypto provider (registers on this target)
