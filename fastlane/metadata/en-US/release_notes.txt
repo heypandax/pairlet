@@ -1,7 +1,5 @@
-What's new in 2.1.4
+What's new in 2.1.5
 
-- The agent's steps now show up the moment the first one starts, with a live line for the current step, so the reply area no longer jumps while work is in progress. Failed and not-returned steps are marked separately in the block title.
-- Chat layout refresh: Copy message sits on the sender line, spacing between turns and paragraphs is clearer, and the header and composer use fewer boxes.
-- Links in replies: tap to open, long-press for Copy link, Open file and copy path. Markdown links open their real destination.
-- Copy a file's path with one tap from the file viewer.
-- The Full access confirmation appears only the first time you start such a session.
+- Fixed a crash when previewing PDF, Word, Excel or PowerPoint files from a session.
+- Tapping a document now opens it straight in the system preview. A small progress card appears only if loading takes a moment, and you can cancel it. When a file cannot be previewed, the viewer explains why.
+- Previews wait until the app is unlocked and in the foreground.
