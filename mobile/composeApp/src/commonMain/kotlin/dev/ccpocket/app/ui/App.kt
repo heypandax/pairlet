@@ -507,6 +507,8 @@ fun App(scope: CoroutineScope) {
             LaunchedEffect(repo.pendingAsk.value?.convoId, repo.pendingAsk.value?.askId) {
                 if (repo.pendingAsk.value != null) rootFocus.clearFocus()
             }
+            // tap a document → native preview, over whatever screen it was tapped on; below the approval sheet
+            DocumentOpener(repo)
             // AskUserQuestion (ask.questions != null) renders as the docked QuestionCard inside
             // ChatScreen instead — questions are conversation, not a safety gate, and the user
             // should be able to scroll the chat for context while answering.
@@ -2915,7 +2917,8 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
         }
         return
     }
-    if (repo.viewedFilePath.value != null) { // changed-file viewer (issue #36); back → the still-open files list, ✕ → chat (issue #53)
+    // a tapped document still on its way to the native preview keeps the current screen (DocumentOpener)
+    if (repo.viewedFilePath.value != null && !repo.viewerDeferred.value) { // changed-file viewer (issue #36); back → the still-open files list, ✕ → chat (issue #53)
         NavBarPadded { FileViewerScreen(repo, onExit = if (showChangedFiles) ({ repo.closeFileViewer(); showChangedFiles = false }) else null) { repo.closeFileViewer() } }
         return
     }
@@ -3195,7 +3198,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 // assistant markdown / tool cards become tappable — the phone can't stat a local disk, so
                 // this opener is optimistic (every regex-matched path lights up) and hands taps to the
                 // daemon read, which opens the same full-screen viewer the changed-files list uses.
-                val pathOpener = remember(repo) { RemotePathOpener { repo.openChangedFile(it) } }
+                val pathOpener = remember(repo) { RemotePathOpener { repo.openTappedFile(it) } }
                 CompositionLocalProvider(LocalPathCwd provides repo.workdir.value, LocalPathOpener provides pathOpener) {
                 LazyColumn(
                     // Chat Rhythm v1: the top/bottom 16dp gutter is CONTENT padding, not an outer inset — at rest the
@@ -3511,7 +3514,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             atFileMatches, atDir, atSep,
                             // issue #133: the quiet eye on a file row opens it in the viewer (the daemon
                             // now serves any path inside the session's project tree, not just changed ones)
-                            onView = { entry -> repo.openChangedFile((if (atDir.isEmpty()) "" else atDir + atSep) + entry.name) },
+                            onView = { entry -> repo.openTappedFile((if (atDir.isEmpty()) "" else atDir + atSep) + entry.name) },
                         ) { entry ->
                             atToken?.let { composer.setText(input.substring(0, it.at + 1) + atInsertText(atDir, entry, atSep) + input.substring(it.end)) }
                         }
@@ -3868,7 +3871,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
         }
         // the composer chip's direct model sheet (issue #157) — same picker, no quick-actions detour
         if (showModelSheet) ModelSheet(repo) { showModelSheet = false }
-        if (showChangedFiles) ChangedFilesSheet(repo, onOpen = { repo.openChangedFile(it) }) { showChangedFiles = false }
+        if (showChangedFiles) ChangedFilesSheet(repo, onOpen = { repo.openTappedFile(it) }) { showChangedFiles = false }
         if (showBgJobs) BackgroundJobsSheet(repo.backgroundJobs, onStop = { repo.stopBackgroundJob(it.id) }) { showBgJobs = false }
         if (showSwitcher) dev.ccpocket.app.ui.fleet.MachineSwitcherSheet(repo, onDismiss = { showSwitcher = false }, onManage = onOpenFleet)
         // #165: leaving for another session saves this one's draft first — same contract as the back button,

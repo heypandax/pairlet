@@ -1352,6 +1352,7 @@ class PocketRepository(
     val changedFilesLoading = mutableStateOf(false)
     val changedFilesUnavailable = mutableStateOf(false)       // no reply (old daemon silently drops the frame) — distinct from "no files"
     val viewedFilePath = mutableStateOf<String?>(null)        // non-null = file viewer open (content may still be loading)
+    val viewerDeferred = mutableStateOf(false)                // …but kept off screen: a tapped document heading straight for the native previewer (FileViewer.kt DocumentOpener)
     val viewedFile = mutableStateOf<FileContent?>(null)       // the loaded content; ok=false carries a user-facing error
     val viewedFileProgress = mutableStateOf<Pair<Long, Long>?>(null) // received/total bytes of an in-flight chunked read (#134 · 0714 A1 determinate bar)
     val viewedFileDiff = mutableStateOf<FileDiff?>(null)      // the loaded line-level diff; ok=false = none/too-old daemon
@@ -6942,14 +6943,17 @@ class PocketRepository(
      *  binaries, issue #134) and, when its transcript has line-level data, a [FileDiff] — both requested
      *  up front because the viewer's default tab is the diff and the flip to full content should be
      *  instant. Images get no [ReadFileDiff]: there is no text diff, and the request would cost the
-     *  daemon a full transcript re-scan just to say so. */
-    fun openChangedFile(path: String) {
+     *  daemon a full transcript re-scan just to say so. [deferViewer] = the phone's tap-to-open for a
+     *  previewable document: the same read, but the viewer only surfaces if the bytes can't go straight
+     *  to the native previewer ([viewerDeferred]). */
+    fun openChangedFile(path: String, deferViewer: Boolean = false) {
         val wd = workdir.value ?: return
         val sid = sessionKey.value ?: currentSessionId ?: return
         val wantDiff = !isImageFile(path)
         fileViewObservation?.cancel()
         val observation = FileViewObservation(productDimensions()).also { fileViewObservation = it }
         viewedFilePath.value = path
+        viewerDeferred.value = deferViewer
         viewedFile.value = null // show the loading state, not the previous file
         viewedFileDiff.value = null
         dropChunkStream() // a fresh read owes nothing to a prior chunk stream
@@ -7165,6 +7169,7 @@ class PocketRepository(
         exportDeadline?.cancel(); exportWaiting.value = false
         dropChunkStream()
         viewedFilePath.value = null; viewedFile.value = null; viewedFileDiff.value = null
+        viewerDeferred.value = false
     }
 
     /** Ask the daemon to export the viewer's current path even though this session never changed it

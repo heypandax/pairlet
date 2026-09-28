@@ -79,7 +79,7 @@ private class QlSource(val item: QLPreviewItemProtocol) : NSObject(), QLPreviewC
 internal fun quickLookItem(name: String, bytes: ByteArray): QLPreviewItemProtocol? = tempFileUrl(name, bytes)?.let(::QlItem)
 
 /** QuickLook (issue #79): native xlsx/docx/pptx/pdf rendering — no home-grown office viewer. */
-actual fun previewFile(name: String, bytes: ByteArray, mediaType: String?): Boolean {
+actual fun previewFile(name: String, bytes: ByteArray, mediaType: String?, onShown: () -> Unit): Boolean {
     val item = quickLookItem(name, bytes) ?: return false
     if (!QLPreviewController.canPreviewItem(item)) return false
     val top = topViewController() ?: return false
@@ -87,6 +87,6 @@ actual fun previewFile(name: String, bytes: ByteArray, mediaType: String?): Bool
     activeQlSource = source
     val ql = QLPreviewController()
     ql.dataSource = source
-    top.presentViewController(ql, animated = true, completion = null)
+    top.presentViewController(ql, animated = true, completion = onShown)
     return true
 }

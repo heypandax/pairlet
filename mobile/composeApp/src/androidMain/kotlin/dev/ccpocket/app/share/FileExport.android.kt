@@ -36,7 +36,7 @@ actual fun shareFile(name: String, bytes: ByteArray, mediaType: String?) {
 }
 
 /** ACTION_VIEW = whatever office/pdf viewer the device has (issue #79); false when none can. */
-actual fun previewFile(name: String, bytes: ByteArray, mediaType: String?): Boolean {
+actual fun previewFile(name: String, bytes: ByteArray, mediaType: String?, onShown: () -> Unit): Boolean {
     val ctx = appContext ?: return false
     val uri = exportUri(ctx, name, bytes) ?: return false
     return runCatching {
@@ -47,5 +47,5 @@ actual fun previewFile(name: String, bytes: ByteArray, mediaType: String?): Bool
             },
         )
         true
-    }.getOrDefault(false)
+    }.getOrDefault(false).also { if (it) onShown() }
 }

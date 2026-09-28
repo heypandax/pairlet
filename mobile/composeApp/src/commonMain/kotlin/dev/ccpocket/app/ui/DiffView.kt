@@ -40,6 +40,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.WrapText
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.IosShare
@@ -61,14 +62,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.DiffHunk
@@ -482,8 +486,8 @@ private fun DiffLineRow(line: DiffLine, dense: Boolean, wrap: Boolean, hScroll: 
 
 // ── the shared viewer surface (mobile full-screen viewer + desktop Changes pane) ──
 
-/** The [ Diff | File ] selection (true = Diff), with the shared default + auto-flip policy: images
- *  and HTML land on File, everything else on Diff; a diff that comes back empty-for-real
+/** The [ Diff | File ] selection (true = Diff), with the shared default + auto-flip policy: images,
+ *  HTML and documents land on File, everything else on Diff; a diff that comes back empty-for-real
  *  (not the stale-daemon state) flips to File — except deleted files, where the diff is the only
  *  thing left to show. */
 @Composable
@@ -496,7 +500,7 @@ fun rememberDiffTab(path: String, isImage: Boolean, deleted: Boolean, diff: File
 }
 
 internal fun defaultDiffTab(path: String, isImage: Boolean, deleted: Boolean): Boolean =
-    !isImage && (deleted || !isHtmlPath(path))
+    !isImage && (deleted || !(isHtmlPath(path) || isDocumentPath(path)))
 
 /** 回复已到、但这个文件没有逐行改动可看（≠「还在加载」，也≠「daemon 太旧」）。「全部」视角点开
  *  一个本会话没改过的文件，走的就是这条——查看器落到全文、Diff 段置灰。 */
@@ -716,6 +720,21 @@ private fun docFamilyOf(ext: String) = when (ext) {
  *  — the set whose in-flight bytes earn the loading-card treatment instead of a bare spinner. */
 private val documentExts = setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip")
 
+/** The documents a native previewer really renders — the phone's viewer opens these straight away.
+ *  zip rides the same channel, but its preview is a bare icon: it keeps the card's Share instead. */
+private val nativePreviewExts = documentExts - "zip"
+
+private fun extOfPath(path: String) = fileNameOf(path).substringAfterLast('.', "").lowercase()
+
+internal fun isDocumentPath(path: String): Boolean = extOfPath(path) in documentExts
+
+/** A tap on this path skips the phone's viewer screen: the bytes go straight to the native previewer. */
+internal fun isNativePreviewPath(path: String): Boolean = extOfPath(path) in nativePreviewExts
+
+/** A served document the phone hands straight to the native previewer instead of parking on its card. */
+internal fun opensNatively(content: FileContent?, ext: String): Boolean =
+    content?.ok == true && content.base64 != null && ext.lowercase() in nativePreviewExts
+
 /** Family-tinted type tile with a mono extension and a folded top-right corner — the paper cue that
  *  reads "document object" rather than "sorry, can't show this". [muted] is the too-large card's
  *  neutral variant (0714 chat-components handoff A2): the family tint gives way to raised/hairline
@@ -837,30 +856,7 @@ private fun DocumentTooLargeCard(path: String, error: String, dense: Boolean) {
 @Composable
 private fun DocumentLoadingCard(path: String, dense: Boolean, progress: Pair<Long, Long>? = null) {
     DocCardFrame(path, dense) {
-        val barShape = RoundedCornerShape(999.dp)
-        Box(
-            Modifier.padding(top = 12.dp).fillMaxWidth().height(5.dp)
-                .clip(barShape).background(Tok.raised),
-        ) {
-            val fill = if (progress != null) {
-                val frac by animateFloatAsState((progress.first.toFloat() / progress.second).coerceIn(0f, 1f))
-                frac
-            } else {
-                val sweep by rememberInfiniteTransition().animateFloat(
-                    initialValue = 0.18f, targetValue = 0.82f,
-                    animationSpec = infiniteRepeatable(tween(850), RepeatMode.Reverse),
-                )
-                sweep
-            }
-            Box(Modifier.fillMaxWidth(fill).fillMaxHeight().clip(barShape).background(Tok.accent))
-        }
-        Text(
-            if (progress != null)
-                stringResource(Res.string.file_transfer_progress, formatFileSize(progress.first), formatFileSize(progress.second))
-            else stringResource(Res.string.file_transferring),
-            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 7.dp),
-        )
+        TransferReadout(progress)
         Row(
             Modifier.padding(top = if (dense) 9.dp else 11.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -875,6 +871,70 @@ private fun DocumentLoadingCard(path: String, dense: Boolean, progress: Pair<Lon
                 if (exportIsSaveDialog) Icons.Rounded.Download else Icons.Rounded.IosShare,
                 primary = false, dense = dense, enabled = false,
             ) {}
+        }
+    }
+}
+
+/** The bar + caption both in-flight surfaces share: determinate when [progress] carries received/total,
+ *  a sweep otherwise, the mono byte caption under it. The track is [Tok.raised] — keep it on a surface. */
+@Composable
+private fun TransferReadout(progress: Pair<Long, Long>?, barTop: Dp = 12.dp) {
+    val barShape = RoundedCornerShape(999.dp)
+    Box(
+        Modifier.padding(top = barTop).fillMaxWidth().height(5.dp)
+            .clip(barShape).background(Tok.raised),
+    ) {
+        val fill = if (progress != null) {
+            val frac by animateFloatAsState((progress.first.toFloat() / progress.second).coerceIn(0f, 1f))
+            frac
+        } else {
+            val sweep by rememberInfiniteTransition().animateFloat(
+                initialValue = 0.18f, targetValue = 0.82f,
+                animationSpec = infiniteRepeatable(tween(850), RepeatMode.Reverse),
+            )
+            sweep
+        }
+        Box(Modifier.fillMaxWidth(fill).fillMaxHeight().clip(barShape).background(Tok.accent))
+    }
+    Text(
+        if (progress != null)
+            stringResource(Res.string.file_transfer_progress, formatFileSize(progress.first), formatFileSize(progress.second))
+        else stringResource(Res.string.file_transferring),
+        color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
+        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 7.dp),
+    )
+}
+
+internal const val DOCUMENT_OPENING_HUD_TAG = "document-opening-hud"
+internal const val DOCUMENT_OPENING_CANCEL_TAG = "document-opening-cancel"
+
+/** A tapped document in flight on the phone (FileViewer.kt [DocumentOpener]): the loading card's badge,
+ *  name and readout, compact and floating over wherever the file was tapped — no viewer screen between
+ *  the tap and the native preview. No Preview/Share chips: the preview opens by itself; ✕ abandons it. */
+@Composable
+fun DocumentOpeningHud(path: String, progress: Pair<Long, Long>?, onCancel: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(13.dp)
+    Row(
+        modifier.testTag(DOCUMENT_OPENING_HUD_TAG).padding(horizontal = 24.dp).widthIn(max = 320.dp)
+            .shadow(12.dp, shape).clip(shape).background(Tok.surface).border(1.dp, Tok.hair, shape)
+            .padding(start = 11.dp, top = 11.dp, bottom = 11.dp, end = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DocTypeBadge(extOfPath(path), dense = true)
+        Column(Modifier.weight(1f)) {
+            Text(
+                fileNameOf(path), color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            TransferReadout(progress, barTop = 8.dp)
+        }
+        Box(
+            Modifier.size(36.dp).clip(RoundedCornerShape(999.dp)).clickable(onClick = onCancel)
+                .testTag(DOCUMENT_OPENING_CANCEL_TAG),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Rounded.Close, stringResource(Res.string.cancel), tint = Tok.tx2, modifier = Modifier.size(18.dp))
         }
     }
 }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -46,11 +47,15 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.share.exportBytesOf
+import dev.ccpocket.app.share.previewFile
 import dev.ccpocket.app.share.shareFile
+import dev.ccpocket.app.telemetry.ProductResult
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.tightCenter
+import dev.ccpocket.observability.ErrorCode
 import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.FileContent
+import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
 // ════════════════════════════════════════════════════════════════════
@@ -230,10 +235,12 @@ private fun ChangedFileRow(f: ChangedFile, onClick: () -> Unit) {
 
 /**
  * Full-screen viewer for one changed file (replaces the chat screen like [TerminalScreen] does).
- * HTML and images open on File; other changed files default to the line-level Diff. The File tab
- * renders HTML in an embedded browser. The panes and tab policy are shared in DiffView.kt; content
- * state lives in the repo ([PocketRepository.viewedFile] + [PocketRepository.viewedFileDiff]), so
- * a reply landing after a reconnect still finds its way here.
+ * HTML, images and documents open on File; other changed files default to the line-level Diff. The
+ * File tab renders HTML in an embedded browser. A document the platform previews normally never shows
+ * here: [DocumentOpener] takes it from the tap to the native preview, and this screen only surfaces for
+ * what that can't take (errors, refusals, formats nothing renders). The panes and tab policy are shared
+ * in DiffView.kt; content state lives in the repo ([PocketRepository.viewedFile] +
+ * [PocketRepository.viewedFileDiff]), so a reply landing after a reconnect still finds its way here.
  */
 @Composable
 fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBack: () -> Unit) {
@@ -241,6 +248,8 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
     val path = repo.viewedFilePath.value ?: return
     val diff = repo.viewedFileDiff.value
     val ext = path.substringAfterLast('.', "").lowercase()
+    val content = repo.viewedFile.value
+    val exportable = remember(content) { exportBytesOf(content) }
 
     // what the copy buttons hand over: an @-completion or typed path is cwd-relative, so resolve it under
     // the session's workdir — the clipboard should hold an address that still works outside this viewer
@@ -264,8 +273,6 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
                 }
                 CopyPathIconButton(copyPath)
                 // share/save whatever the viewer holds (issue #67) — text files ride the sheet too
-                val content = repo.viewedFile.value
-                val exportable = remember(content) { exportBytesOf(content) }
                 if (exportable != null) TextButton({ shareFile(fileNameOf(path), exportable, content?.mediaType) }) {
                     Icon(Icons.Rounded.IosShare, stringResource(Res.string.file_share), tint = Tok.tx2, modifier = Modifier.size(18.dp))
                 }
@@ -307,7 +314,12 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
             else FileTabBody(
                 repo.viewedFile.value, ext, path = path, wrap = wrap.file.value,
                 diagnosticToken = repo.fileViewToken,
-                onRendered = { result, code, partial -> repo.fileViewToken?.let { repo.onFileDisplayed(it, result, code, partial) } },
+                onRendered = { result, code, partial ->
+                    // a document bound for the native previewer is settled by that hand-off (DocumentOpener), not its card
+                    if (!(result == ProductResult.UNKNOWN && opensNatively(content, ext))) {
+                        repo.fileViewToken?.let { repo.onFileDisplayed(it, result, code, partial) }
+                    }
+                },
                 // chunked-read progress (issue #134): drives the loading card's determinate bar
                 progress = repo.viewedFileProgress.value,
                 // a path the changed-set refused can still leave through the owner's approval gate
@@ -323,6 +335,64 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
                     else -> null
                 },
             )
+        }
+    }
+}
+
+/** How every phone entry point opens a file: a document the platform previews skips the viewer screen —
+ *  [DocumentOpener] takes it from the tap straight to the native preview. */
+fun PocketRepository.openTappedFile(path: String) = openChangedFile(path, deferViewer = isNativePreviewPath(path))
+
+/** A fetch quicker than this shows nothing between the tap and the preview. */
+private const val OPENING_HUD_GRACE_MS = 300L
+
+/**
+ * Tap a document, see the document — mounted once at the phone's app root, under the approval sheet and
+ * App Lock. When the viewed file's bytes land and the platform renders the format, they go straight to
+ * [open] (QuickLook / ACTION_VIEW); once that is up the viewer state closes, so dismissing the preview
+ * lands exactly where the file was tapped. While a tapped document is still loading
+ * ([PocketRepository.viewerDeferred]) the only thing on screen is [DocumentOpeningHud], after a short
+ * grace; anything the previewer can't take (a failure, a refusal, undecodable bytes) reveals the viewer,
+ * which explains it. One attempt per load. Held while backgrounded — Android blocks background activity
+ * starts, and a transfer that finished while away should open on return — and while App Lock covers the
+ * app: its gate is a Compose layer, and a UIKit-presented preview would sit on top of it.
+ */
+@Composable
+fun DocumentOpener(
+    repo: PocketRepository,
+    open: (name: String, bytes: ByteArray, mediaType: String?, onShown: () -> Unit) -> Boolean = ::previewFile,
+) {
+    val path = repo.viewedFilePath.value ?: return
+    val content = repo.viewedFile.value
+    val bytes = remember(path, content) {
+        content?.takeIf { opensNatively(it, path.substringAfterLast('.', "")) }?.let(::exportBytesOf)
+    }
+    val unlocked = !repo.appLock.locked.value && !repo.appLock.covered.value
+    var foreground by remember { mutableStateOf(true) }
+    dev.ccpocket.app.OnAppForeground { foreground = true }
+    dev.ccpocket.app.OnAppBackground { foreground = false }
+    // such a document's view outcome is settled here, not by its card (FileViewerScreen skips the card's)
+    fun settle(result: ProductResult, code: ErrorCode = ErrorCode.OK, partial: Boolean = false) {
+        repo.fileViewToken?.let { repo.onFileDisplayed(it, result, code, partial) }
+    }
+    var attempted by remember(path, content) { mutableStateOf(false) }
+    LaunchedEffect(path, content, foreground, unlocked) {
+        if (content == null || attempted) return@LaunchedEffect
+        if (bytes == null) { repo.viewerDeferred.value = false; return@LaunchedEffect } // not the previewer's to take
+        if (!foreground || !unlocked) return@LaunchedEffect
+        attempted = true
+        val handedOff = open(fileNameOf(path), bytes, content.mediaType) {
+            // the preview answers from a UIKit callback — only close if that same file is still the open one
+            if (repo.viewedFilePath.value == path) { settle(ProductResult.SUCCESS); repo.closeFileViewer() }
+        }
+        if (!handedOff) { settle(ProductResult.UNKNOWN, ErrorCode.FALLBACK_USED, partial = true); repo.viewerDeferred.value = false }
+    }
+    if (repo.viewerDeferred.value) {
+        dev.ccpocket.app.SystemBackHandler(enabled = true) { repo.closeFileViewer() }
+        var graceOver by remember(path) { mutableStateOf(false) }
+        LaunchedEffect(path) { delay(OPENING_HUD_GRACE_MS); graceOver = true }
+        if (graceOver) Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.Center) {
+            DocumentOpeningHud(path, repo.viewedFileProgress.value, onCancel = { repo.closeFileViewer() })
         }
     }
 }

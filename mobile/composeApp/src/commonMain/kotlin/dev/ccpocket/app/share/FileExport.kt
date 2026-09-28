@@ -21,8 +21,9 @@ expect fun shareFile(name: String, bytes: ByteArray, mediaType: String?)
 
 /** Open the file in the platform's native previewer: QuickLook on iOS, ACTION_VIEW on Android,
  *  the default app on desktop. Returns false when nothing here can show it, so callers can fall
- *  back to [shareFile]. */
-expect fun previewFile(name: String, bytes: ByteArray, mediaType: String?): Boolean
+ *  back to [shareFile]. [onShown] fires once the previewer covers the app (iOS: when QuickLook's
+ *  present animation completes; elsewhere: right after the hand-off) — never on a false return. */
+expect fun previewFile(name: String, bytes: ByteArray, mediaType: String?, onShown: () -> Unit = {}): Boolean
 
 /** The viewer payload as raw bytes, or null when there is nothing exportable (loading / error).
  *  Truncated text exports the shown prefix — the viewer's banner already says so. */

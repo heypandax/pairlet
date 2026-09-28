@@ -20,10 +20,10 @@ actual fun shareFile(name: String, bytes: ByteArray, mediaType: String?) {
 }
 
 /** "Open with the system app" IS the desktop preview (#79): a temp copy handed to Desktop.open. */
-actual fun previewFile(name: String, bytes: ByteArray, mediaType: String?): Boolean = runCatching {
+actual fun previewFile(name: String, bytes: ByteArray, mediaType: String?, onShown: () -> Unit): Boolean = runCatching {
     val file = File(Files.createTempDirectory("cc-pocket-export").toFile(), File(name).name)
     file.writeBytes(bytes)
     file.deleteOnExit()
     java.awt.Desktop.getDesktop().open(file)
     true
-}.getOrDefault(false)
+}.getOrDefault(false).also { if (it) onShown() }
