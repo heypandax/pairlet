@@ -43,6 +43,30 @@ class ZCodeLauncherTest {
         assertEquals("1", pb.environment()["ELECTRON_RUN_AS_NODE"])
     }
 
+    /** ZCode ≥ 3.14 ships `<resources>/config/provider/zcode-builtin.json` but its standalone lookup walks five
+     *  levels up from `glm/` and misses it (macOS: `/config/…`; Windows: the drive root). The desktop hands the
+     *  CLI the path through this env var, and so must we. */
+    @Test
+    fun `bundle shipping the provider config gets it passed the way the desktop passes it`() {
+        val root = Files.createTempDirectory("zcode-app")
+        val (_, cjs) = officialBundle(root)
+        val provider = cjs.parent.parent.resolve("config/provider/zcode-builtin.json")
+            .also { it.parent.createDirectories(); it.createFile() }
+
+        val pb = ZCodeLauncher.processBuilder(cjs, AgentSpec(root))
+        assertEquals(provider.toString(), pb.environment()[ZCodeLauncher.BUILTIN_PROVIDER_CONFIG_ENV])
+    }
+
+    /** An older bundle without the file keeps the launch exactly as before — no dangling path handed over. */
+    @Test
+    fun `bundle without the provider config leaves the variable unset`() {
+        val root = Files.createTempDirectory("zcode-app")
+        val (_, cjs) = officialBundle(root)
+
+        val pb = ZCodeLauncher.processBuilder(cjs, AgentSpec(root))
+        assertNull(pb.environment()[ZCodeLauncher.BUILTIN_PROVIDER_CONFIG_ENV])
+    }
+
     @Test
     fun `a complete bundle answers with its node entry so the native agent binary never wins`() {
         val root = Files.createTempDirectory("zcode-both")

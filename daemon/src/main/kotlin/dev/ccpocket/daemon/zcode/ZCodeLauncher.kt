@@ -259,9 +259,32 @@ object ZCodeLauncher {
             // The official bundle exposes Resources/glm/zcode.cjs rather than a shell wrapper. Its own
             // Electron binary is the matching embedded Node runtime; this flag makes it execute the CJS
             // entry without depending on launchd's PATH or a separately-installed node.
-            if (electron != null) environment()["ELECTRON_RUN_AS_NODE"] = "1"
+            if (electron != null) {
+                environment()["ELECTRON_RUN_AS_NODE"] = "1"
+                // Hand the CLI its built-in provider config the way ZCode's own desktop does (read out of
+                // the 3.14.3 app.asar: `createNodeProviderRuntimePathEnv` puts `<resourcesPath>/config/
+                // provider/zcode-builtin.json` into this variable for every CLI it spawns). Without it the
+                // CLI falls back to its standalone lookup (`fQi` in zcode.cjs), which tries
+                // `<glm>/provider/…` and a hard-coded `<glm>/../../../../../config/provider/…` — five levels
+                // up, which on the macOS bundle (`Contents/Resources/glm`) lands on `/config/…` and on a
+                // Windows install on the drive root. The file itself is present two levels up, so the CLI
+                // exits at boot with "无法定位 CLI ZCode Built-in Provider Config". Verified on this machine:
+                // the same launch with this variable set boots and serves the protocol. Only set when the
+                // bundle really holds the file (an older layout keeps today's behaviour), and never over a
+                // value the user placed in the daemon's environment themselves.
+                bundledProviderConfig(exe)?.let { environment().putIfAbsent(BUILTIN_PROVIDER_CONFIG_ENV, it.toString()) }
+            }
         }
     }
+
+    /** The env var ZCode's desktop uses to pass the CLI its built-in provider config path (see [processBuilder]). */
+    const val BUILTIN_PROVIDER_CONFIG_ENV = "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE"
+
+    /** `<resources>/config/provider/zcode-builtin.json` of the bundle [cjs] lives in (`<resources>/glm/zcode.cjs`),
+     *  or null when that bundle does not ship it. */
+    internal fun bundledProviderConfig(cjs: Path): Path? =
+        cjs.parent?.parent?.resolve("config")?.resolve("provider")?.resolve("zcode-builtin.json")
+            ?.takeIf { it.isRegularFile() }
 
     /**
      * The `zcode.cjs` that belongs to [dir], but only when [dir] really is a complete official bundle —
