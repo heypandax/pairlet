@@ -38,6 +38,7 @@
 | `chat-roles-v1` | [Chat Roles v1 — 用户与 Agent 消息区分](chat-roles-v1/README.md) |
 | `chat-quote-v1` | [Chat Quote v1 — Agent 回复中的引用块](chat-quote-v1/README.md) |
 | `tool-process-live-v1` | [Tool Process Live v1 — 执行过程折叠的实时行](tool-process-live-v1/README.md) |
+| `recent-row-actions-v1` | [Recent Row Actions v1 — 桌面侧栏「最近」项目行操作簇](recent-row-actions-v1/README.md) |
 | `chat-quick-actions-ui-2.0` | [Chat Quick Actions UI 2.0](chat-quick-actions-ui-2.0/README.md) |
 | `context-statusline` | [上下文占用指示器入驻 composer 设计交付](context-statusline/README.md) |
 | `defaults-voice-results-ui-2.1` | [Defaults + Voice + Results UI 2.1 — Claude Design handoff](defaults-voice-results-ui-2.1/README.md) |

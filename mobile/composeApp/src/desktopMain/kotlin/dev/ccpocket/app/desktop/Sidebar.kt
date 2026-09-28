@@ -1,7 +1,9 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -14,6 +16,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -85,6 +88,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
@@ -100,6 +104,7 @@ import dev.ccpocket.app.SUPPORT_URL
 import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.dir_refresh
 import dev.ccpocket.app.resources.rewind_group_rewound
 import dev.ccpocket.app.resources.add_device
 import dev.ccpocket.app.resources.archive_remove_from_recents
@@ -136,6 +141,7 @@ import dev.ccpocket.app.resources.status_reconnecting
 import dev.ccpocket.app.resources.switcher_all_projects
 import dev.ccpocket.app.resources.switcher_recent
 import dev.ccpocket.app.resources.new_session_here
+import dev.ccpocket.app.resources.shared_badge
 import dev.ccpocket.app.resources.pin_project
 import dev.ccpocket.app.resources.recent_forget_project
 import dev.ccpocket.app.resources.this_machine
@@ -1172,13 +1178,13 @@ private fun RecentLimitToggle(
 }
 
 /**
- * A RECENT group header: folder + project name (mono, muted) · ＋ new session here · hover pin/refresh ·
- * running pulse · collapse chevron.
+ * A RECENT group header: leading fold caret · folder + project name (mono) · "open now" / running dot /
+ * shared tag · the pin · refresh · ＋ slot cluster (layout in [GroupHeaderBody]).
  *
  * The ＋ (issue #199) is the one affordance here that does NOT hide at rest: it is the reason to look at
  * this list ("that project — start something there"), and a hover-only entry would leave the path from
  * RECENT to a new session as invisible as it was before. Pin joins the hover cluster instead, next to
- * refresh — it's a preference, not a call to action, and it wears the same glyphs the session rows use.
+ * refresh — it's a preference, not a call to action.
  *
  * Right-click reaches the two verbs a PROJECT owns (issue #359), in the same navigate → edit → file →
  * remove order the session rows use: pin/unpin (edit) and "Remove from recents" (remove). The session
@@ -1219,6 +1225,24 @@ private fun GroupHeader(
     )
 }
 
+/**
+ * Recent Row Actions v1 (claude design, 2026-09-28): the header reads as structure on the left and ONE calm
+ * button cluster on the right.
+ *
+ * - Fold state is a leading caret column — structure, not a button (no hover fill of its own); the whole row
+ *   still toggles.
+ * - Trailing: three equal 22dp slots, pin · refresh · ＋, 2dp apart, 6dp from the sidebar edge. The slots are
+ *   ALWAYS laid out and hover only fades their opacity, so the row never reflows and the ＋ never moves out
+ *   from under the pointer (the Compose 1.12 mouse-input trap the old hover-only slots guarded against).
+ * - One glyph size (12dp), one 1.5 stroke, one rest color; the ＋ is the row's only terracotta.
+ * - "Open now" is no longer a pill: the name lifts to primary/medium and a muted mono label follows it,
+ *   giving way (ellipsis) before the name drops under 60dp.
+ *
+ * Deliberate departure from the board: a guest's shared folder keeps its pin and refresh slots (the board
+ * assumed neither applies to another user's folder, but both work there today). At rest those two slots step
+ * out of the layout so the "Shared · who · time left" trail has room; hovering brings them back and the trail
+ * ellipsizes, while the ＋ keeps its place.
+ */
 @Composable
 private fun GroupHeaderBody(
     g: DkSessionGroup,
@@ -1234,76 +1258,261 @@ private fun GroupHeaderBody(
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     Row(
-        Modifier.fillMaxWidth().height(28.dp).hoverable(src).hoverFill().clickable(onClick = onToggle).padding(horizontal = 12.dp),
+        Modifier.fillMaxWidth().height(28.dp).hoverable(src).hoverFill().clickable(onClick = onToggle)
+            .padding(start = 10.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Icon(Icons.Outlined.Folder, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                g.name, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
-                style = tightCenter(11.5.sp),
-            )
-            // #211: the currently-listed dir is always present (it re-enters as the synthetic live group
-            // even after "clear"), which read as "the last row won't clear". This quiet chip names it as
-            // the open directory instead — a distinct affordance, not a leftover RECENT entry.
-            if (current) {
-                Spacer(Modifier.width(6.dp))
+        val caretTurn by animateFloatAsState(if (closed) -90f else 0f, tween(120, easing = FastOutSlowInEasing))
+        Box(Modifier.width(16.dp).height(22.dp), contentAlignment = Alignment.Center) {
+            Icon(RowCaretIcon, null, tint = Tok.muted, modifier = Modifier.size(12.dp).rotate(caretTurn))
+        }
+        Icon(
+            RowFolderIcon, null, tint = Tok.muted,
+            modifier = Modifier.padding(start = 1.dp, end = 7.dp).width(12.dp).height(10.dp),
+        )
+        val running = closed && g.sessions.any { it.running } // running stays visible when folded
+        NameWithTrail(
+            name = {
                 Text(
-                    stringResource(Res.string.group_current_dir), color = Tok.accent, fontFamily = Dk.ui,
-                    fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, style = tightCenter(9.sp),
-                    modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Tok.accent.copy(alpha = 0.12f))
-                        .border(1.dp, Tok.accent.copy(alpha = 0.32f), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
+                    g.name, color = if (current) Tok.tx else Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp,
+                    fontWeight = if (current) FontWeight.Medium else FontWeight.Normal,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(11.5.sp),
                 )
+            },
+            trail = if (!current && !running && g.sharedBy == null) null else ({
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // #211: the currently-listed dir is always present (it re-enters as the synthetic live group
+                    // even after "clear"); this quiet label names it as the open directory, not a leftover entry
+                    if (current) Text(
+                        stringResource(Res.string.group_current_dir).lowercase(), color = Tok.muted, fontFamily = Dk.mono,
+                        fontSize = 9.5.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.2.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(9.5.sp),
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (running) PulseDot(Tok.ok, 5.dp)
+                    if (g.sharedBy != null) {
+                        // a guest's shared folder (issue #115): a neutral hairline tag — provenance, not
+                        // attention — plus "who · how long"
+                        Text(
+                            stringResource(Res.string.shared_badge), color = Tok.tx2, fontFamily = Dk.mono,
+                            fontSize = 9.sp, fontWeight = FontWeight.Medium, maxLines = 1, style = tightCenter(9.sp),
+                            modifier = Modifier.border(1.dp, Tok.hair, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 2.dp),
+                        )
+                        val left = g.shareExpiresAt?.let { expiryLeftText(expiryLeft(it, epochMillis())) }
+                        Text(
+                            listOfNotNull(g.sharedBy, left).joinToString(" · "),
+                            color = Tok.muted, fontFamily = Dk.mono, fontSize = 9.5.sp, style = tightCenter(9.5.sp),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                }
+            }),
+            trailGap = if (current) 7.dp else 8.dp,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+            // A shared folder's "who · time left" needs the room the two hidden slots hold, so on that row a hidden
+            // slot leaves the layout instead of fading in place. Only the name side reflows; the ＋ stays put.
+            val shared = g.sharedBy != null
+            val pinLabel = stringResource(if (pinned) Res.string.unpin_project else Res.string.pin_project)
+            if (!shared || hovered || pinned) RowActionSlot(
+                label = pinLabel, visible = hovered || pinned, onClick = onTogglePin,
+            ) { slotHovered ->
+                when {
+                    pinned && slotHovered -> Icon(RowPinSlashIcon, pinLabel, tint = Tok.tx, modifier = Modifier.size(12.dp))
+                    pinned -> Icon(RowPinFilledIcon, pinLabel, tint = if (hovered) Tok.tx2 else Tok.muted, modifier = Modifier.size(12.dp))
+                    else -> Icon(RowPinIcon, pinLabel, tint = if (slotHovered) Tok.tx else Tok.tx2, modifier = Modifier.size(12.dp))
+                }
             }
-        }
-        NewSessionHere(onNewSession)
-        // Keep hover actions' slots stable: otherwise entering the row moves the ＋ out from
-        // under the pointer before its click is dispatched (Compose 1.12 mouse input).
-        Box(Modifier.size(13.dp), contentAlignment = Alignment.Center) {
-            if (hovered) Icon(
-                if (pinned) PinSlashIcon else PinIcon,
-                stringResource(if (pinned) Res.string.unpin_project else Res.string.pin_project),
-                tint = if (pinned) Tok.tx2 else Tok.accent,
-                modifier = Modifier.size(13.dp).clickable(onClick = onTogglePin),
-            ) else if (pinned) Icon(PinIcon, null, tint = Tok.muted, modifier = Modifier.size(11.dp))
-        }
-        if (g.sharedBy != null) {
-            // a guest's shared folder (issue #115): the same neutral hairline pill as mobile — provenance,
-            // not attention — plus "who · how long" at rest. Hover hands that space to the refresh icon
-            // (the SessionRow model-label precedent), so the affordances never fight over 28dp.
-            SharedPill()
-            if (!hovered && !refreshing) {
-                val left = g.shareExpiresAt?.let { expiryLeftText(expiryLeft(it, epochMillis())) }
-                Text(
-                    listOfNotNull(g.sharedBy, left).joinToString(" · "),
-                    color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 110.dp),
-                )
-            }
-        }
-        Box(Modifier.size(13.dp), contentAlignment = Alignment.Center) {
-            when {
-                refreshing -> {
-                    val angle by rememberInfiniteTransition().animateFloat(
+            val refreshLabel = stringResource(Res.string.dir_refresh)
+            if (!shared || hovered || refreshing) RowActionSlot(
+                label = refreshLabel, visible = hovered || refreshing,
+                // a click while the list is already on its way would only queue a second round trip
+                onClick = { if (!refreshing) onRefresh() },
+            ) { slotHovered ->
+                val angle = if (refreshing) {
+                    val a by rememberInfiniteTransition().animateFloat(
                         initialValue = 0f, targetValue = 360f,
                         animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
                     )
-                    Icon(Icons.Rounded.Refresh, null, tint = Tok.tx2, modifier = Modifier.size(13.dp).rotate(angle))
-                }
-                hovered -> Icon(
-                    Icons.Rounded.Refresh, null, tint = Tok.tx2,
-                    modifier = Modifier.size(13.dp).clickable(onClick = onRefresh),
+                    a
+                } else 0f
+                Icon(
+                    RowRefreshIcon, refreshLabel, tint = if (slotHovered || refreshing) Tok.tx else Tok.tx2,
+                    modifier = Modifier.size(12.dp).rotate(angle),
                 )
             }
+            RowActionSlot(
+                label = stringResource(Res.string.new_session_here), visible = true, accent = true, onClick = onNewSession,
+            ) { _ ->
+                // content description kept on the glyph: UI tests find the ＋ by it
+                Icon(RowPlusIcon, stringResource(Res.string.new_session_here), tint = Tok.accent, modifier = Modifier.size(12.dp))
+            }
         }
-        if (closed && g.sessions.any { it.running }) PulseDot(Tok.ok, 5.dp) // running stays visible when folded
-        Icon(
-            Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted,
-            modifier = Modifier.size(13.dp).rotate(if (closed) -90f else 0f),
-        )
     }
+}
+
+/**
+ * The project name and what trails it ("open now", the running dot, the shared tag). When both do not fit they
+ * shrink the way the board's flexbox does: in proportion to their widths, the trail [TRAIL_SHRINK] times as
+ * fast, and the name never below [NAME_MIN] (or its full width if shorter). Fills the width it is given, so it
+ * also serves as the row's spacer.
+ */
+@Composable
+private fun NameWithTrail(
+    name: @Composable () -> Unit,
+    trail: (@Composable () -> Unit)?,
+    trailGap: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Layout(
+        content = { Box { name() }; if (trail != null) Box { trail() } },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        val w = constraints.maxWidth
+        val h0 = constraints.maxHeight
+        val nameM = measurables[0]
+        val trailM = measurables.getOrNull(1)
+        val nameFull = nameM.maxIntrinsicWidth(h0)
+        val trailFull = trailM?.maxIntrinsicWidth(h0) ?: 0
+        val gap = if (trailFull > 0) trailGap.roundToPx() else 0
+        var nameW = nameFull
+        var trailW = trailFull
+        val overflow = nameFull + gap + trailFull - w
+        if (overflow > 0) {
+            val nameFloor = minOf(nameFull, NAME_MIN.roundToPx())
+            val weighted = nameFull + TRAIL_SHRINK * trailFull
+            nameW = (nameFull - overflow * nameFull / weighted.coerceAtLeast(1f)).toInt().coerceAtLeast(nameFloor)
+            trailW = (w - gap - nameW).coerceIn(0, trailFull)
+            nameW = (w - gap - trailW).coerceAtMost(nameFull).coerceAtLeast(0)
+        }
+        val nameP = nameM.measure(androidx.compose.ui.unit.Constraints(maxWidth = nameW, maxHeight = h0))
+        val trailP = if (trailM != null && trailW > 0) {
+            trailM.measure(androidx.compose.ui.unit.Constraints(maxWidth = trailW, maxHeight = h0))
+        } else null
+        val h = maxOf(nameP.height, trailP?.height ?: 0)
+        layout(w, h) {
+            nameP.place(0, (h - nameP.height) / 2)
+            trailP?.place(nameP.width + gap, (h - trailP.height) / 2)
+        }
+    }
+}
+
+private const val TRAIL_SHRINK = 4f
+private val NAME_MIN = 60.dp
+
+/**
+ * One 22dp action slot of the RECENT header: radius 6, transparent at rest, a lifted fill on hover and a
+ * firmer one while pressed. Always in layout — [visible] only fades it (80ms in, 120ms out), so neighbours
+ * never move. [accent] gives the ＋ its terracotta-tinted fills. A 500ms hover tooltip names the action.
+ */
+@Composable
+private fun RowActionSlot(
+    label: String,
+    visible: Boolean,
+    onClick: () -> Unit,
+    accent: Boolean = false,
+    content: @Composable (hovered: Boolean) -> Unit,
+) {
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    val pressed by src.collectIsPressedAsState()
+    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(if (visible) 80 else 120))
+    val fill = when {
+        !visible -> Color.Transparent
+        accent && pressed -> Tok.accent.copy(alpha = 0.20f)
+        accent && hovered -> Tok.accent.copy(alpha = 0.12f)
+        pressed -> Tok.hair
+        hovered -> Tok.hair.copy(alpha = 0.6f)
+        else -> Color.Transparent
+    }
+    val shape = RoundedCornerShape(6.dp)
+    // drawn even while hidden so the fade-out has something to fade; a hidden slot takes no clicks
+    DesktopTooltip(label) {
+        Box(
+            Modifier.size(22.dp).alpha(alpha).clip(shape).background(fill).hoverable(src)
+                .clickable(enabled = visible, interactionSource = src, indication = null, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) { content(hovered && visible) }
+    }
+}
+
+// Recent Row Actions v1 glyphs: a 12-unit box, 1.5 stroke, round caps — one weight for the whole cluster.
+private fun rowGlyph(name: String, w: Float = 12f, h: Float = 12f) = ImageVector.Builder(
+    name = name, defaultWidth = w.dp, defaultHeight = h.dp, viewportWidth = w, viewportHeight = h,
+)
+
+private fun ImageVector.Builder.line15(block: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit) =
+    path(
+        stroke = SolidColor(Color.White), strokeLineWidth = 1.5f,
+        strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null,
+        pathBuilder = block,
+    )
+
+/** Disclosure caret: points down when open; the header rotates it −90° when folded. */
+private val RowCaretIcon: ImageVector by lazy {
+    rowGlyph("DkRowCaret").apply { line15 { moveTo(3.5f, 4.75f); lineTo(6f, 7.25f); lineTo(8.5f, 4.75f) } }.build()
+}
+
+/** Folder, 12×10: body with a small tab on its top-left. */
+private val RowFolderIcon: ImageVector by lazy {
+    rowGlyph("DkRowFolder", 12f, 10f).apply {
+        line15 {
+            moveTo(2f, 2.75f); lineTo(10f, 2.75f)
+            quadTo(11.25f, 2.75f, 11.25f, 4f); lineTo(11.25f, 8f)
+            quadTo(11.25f, 9.25f, 10f, 9.25f); lineTo(2f, 9.25f)
+            quadTo(0.75f, 9.25f, 0.75f, 8f); lineTo(0.75f, 4f)
+            quadTo(0.75f, 2.75f, 2f, 2.75f); close()
+        }
+        line15 {
+            moveTo(1.75f, 2.75f); lineTo(1.75f, 1.75f)
+            quadTo(1.75f, 0.75f, 2.75f, 0.75f); lineTo(4.75f, 0.75f)
+            quadTo(5.75f, 0.75f, 5.75f, 1.75f); lineTo(5.75f, 2.75f)
+        }
+    }.build()
+}
+
+private fun ImageVector.Builder.pinShape(filledHead: Boolean) = apply {
+    if (filledHead) path(fill = SolidColor(Color.White)) {
+        moveTo(3.25f, 6.25f); lineTo(3.25f, 2f); quadTo(3.25f, 1.25f, 4f, 1.25f)
+        lineTo(8f, 1.25f); quadTo(8.75f, 1.25f, 8.75f, 2f); lineTo(8.75f, 6.25f); close()
+    }
+    line15 {
+        moveTo(3.25f, 6.25f); lineTo(3.25f, 2f); quadTo(3.25f, 1.25f, 4f, 1.25f)
+        lineTo(8f, 1.25f); quadTo(8.75f, 1.25f, 8.75f, 2f); lineTo(8.75f, 6.25f)
+    }
+    line15 { moveTo(1.75f, 6.25f); lineTo(10.25f, 6.25f) }
+    line15 { moveTo(6f, 6.25f); lineTo(6f, 10.75f) }
+}
+
+/** Pin (outline) — offered on hover over an unpinned project. */
+private val RowPinIcon: ImageVector by lazy { rowGlyph("DkRowPin").pinShape(filledHead = false).build() }
+
+/** Pinned marker at rest — the same pin with a filled head, muted, in the pin slot itself. */
+private val RowPinFilledIcon: ImageVector by lazy { rowGlyph("DkRowPinFilled").pinShape(filledHead = true).build() }
+
+/** Unpin — the pinned marker with a slash, shown while the pointer is on a pinned row's pin slot. */
+private val RowPinSlashIcon: ImageVector by lazy {
+    rowGlyph("DkRowPinSlash").pinShape(filledHead = false).apply { line15 { moveTo(1.5f, 1.5f); lineTo(10.5f, 10.5f) } }.build()
+}
+
+/** Refresh — an open clockwise ring with its arrowhead at the top right. */
+private val RowRefreshIcon: ImageVector by lazy {
+    rowGlyph("DkRowRefresh").apply {
+        line15 {
+            moveTo(10.5f, 6f)
+            arcToRelative(4.5f, 4.5f, 0f, isMoreThanHalf = true, isPositiveArc = true, dx1 = -4.5f, dy1 = -4.5f)
+            curveToRelative(1.26f, 0f, 2.465f, 0.5f, 3.37f, 1.37f)
+            lineTo(10.5f, 4f)
+        }
+        line15 { moveTo(10.5f, 1.5f); lineTo(10.5f, 4f); lineTo(8f, 4f) }
+    }.build()
+}
+
+/** ＋ new session here. */
+private val RowPlusIcon: ImageVector by lazy {
+    rowGlyph("DkRowPlus").apply { line15 { moveTo(6f, 1.25f); lineTo(6f, 10.75f); moveTo(1.25f, 6f); lineTo(10.75f, 6f) } }.build()
 }
 
 // ── issue #119: custom session-group sections inside a project ──────────────────────────────────────
