@@ -35,6 +35,6 @@ relay、protocol 无变化。
 
 ## 收尾
 
-- 镜像：`latest.json` 在本记录写就时（2026-09-28 18:50 UTC）仍为 2.1.4。HK 机 `cc-pocket-mirror-sync.timer` 01:57 CST 那次因 SHA256SUMS 尚未上传被脚本按设计拒绝；02:29 CST 这轮已在拉取 2.1.5 五种 daemon 包，但从 GitHub 到 HK 只有约 110 KB/s，单包 115 MB 接近 `--max-time 1500` 上限，需靠 `.partial/` 断点续传跨几个定时周期完成。无需手动干预，全部包校验通过后 `latest.json` 才切到 2.1.5；daemon 自动更新在此之前仍会看到 2.1.4。
+- 镜像：`latest.json` 已为 2.1.5（定时同步自动完成，未手动触发，2026-09-28 20:07 UTC 回读），五种 daemon 指向 `dl/v2.1.5/` 下的源站缓存，macOS arm64 包返回 HTTP 200 且大小与 GitHub 一致（111,656,710 字节）。过程说明：HK 机 `cc-pocket-mirror-sync.timer` 01:57 CST 那次因 SHA256SUMS 尚未上传被脚本按设计拒绝；02:29 CST 这轮以约 110 KB/s 从 GitHub 拉取五个 115 MB 包，靠 `.partial/` 断点续传在约 1.5 小时内完成。
 - 本机三端（桌面 App、daemon、Pandaa iPhone）本次未从发布包重新安装；本机 daemon 是 2026-09-28 00:58 的工作区构建，早于 ZCode 修复提交，需要时用 `scripts/update-local-daemon.sh` 或 `/update-devices` 同步。
 - Issue 回访：#386（ZCode Windows 无法发消息）本版包含同源修复，待发布后回复报告者在 2.1.5 daemon 上复测；#378／#399／#352 仍等报告者反馈，本版未改动。
