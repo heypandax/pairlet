@@ -1,6 +1,6 @@
 # Chat Rhythm v1 — 移动端会话详情排版
 
-状态：用户已确认原型，已由 Opus 实现；完成相关自动化验证与 Compose 渲染画面复查，并已按用户要求同步到本机桌面 App 与指定 iPhone，未发版。
+状态：用户已确认原型，已由 Opus 实现；完成相关自动化验证与 Compose 渲染画面复查，并已按用户要求同步到本机桌面 App 与指定 iPhone；已随 2.1.4（2026-09-27，提交 d6289b01）发出。
 
 - 日期：2026-09-27。
 - [在线原型：Chat Rhythm v1](https://claude.ai/design/p/eb401868-d618-47f7-b8d4-4641117d566d?file=Chat+Rhythm+v1.dc.html)。
