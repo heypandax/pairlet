@@ -63,20 +63,27 @@ actual fun shareFile(name: String, bytes: ByteArray, mediaType: String?) {
 // (replaced on the next preview; a stale one is a few hundred bytes, not a leak class).
 private var activeQlSource: QlSource? = null
 
-private class QlSource(val url: NSURL) : NSObject(), QLPreviewControllerDataSourceProtocol {
-    override fun numberOfPreviewItemsInPreviewController(controller: QLPreviewController): NSInteger = 1
-    @Suppress("CAST_NEVER_SUCCEEDS") // NSURL conforms to QLPreviewItem via a QuickLook category
-    override fun previewController(controller: QLPreviewController, previewItemAtIndex: NSInteger): QLPreviewItemProtocol =
-        url as QLPreviewItemProtocol
+/** A QLPreviewItem that DECLARES the protocol. NSURL only conforms through a QuickLook header category,
+ *  and Kotlin/Native checks `url as QLPreviewItemProtocol` at runtime (conformsToProtocol:) — iOS says NO,
+ *  so that cast threw TypeCastException and aborted the app on every Preview tap (the PDF crash). */
+private class QlItem(private val url: NSURL) : NSObject(), QLPreviewItemProtocol {
+    override fun previewItemURL(): NSURL? = url
 }
+
+private class QlSource(val item: QLPreviewItemProtocol) : NSObject(), QLPreviewControllerDataSourceProtocol {
+    override fun numberOfPreviewItemsInPreviewController(controller: QLPreviewController): NSInteger = 1
+    override fun previewController(controller: QLPreviewController, previewItemAtIndex: NSInteger): QLPreviewItemProtocol = item
+}
+
+/** The bytes materialized as a QuickLook item (null when the temp file can't be written). */
+internal fun quickLookItem(name: String, bytes: ByteArray): QLPreviewItemProtocol? = tempFileUrl(name, bytes)?.let(::QlItem)
 
 /** QuickLook (issue #79): native xlsx/docx/pptx/pdf rendering — no home-grown office viewer. */
 actual fun previewFile(name: String, bytes: ByteArray, mediaType: String?): Boolean {
-    val url = tempFileUrl(name, bytes) ?: return false
-    @Suppress("CAST_NEVER_SUCCEEDS")
-    if (!QLPreviewController.canPreviewItem(url as QLPreviewItemProtocol)) return false
+    val item = quickLookItem(name, bytes) ?: return false
+    if (!QLPreviewController.canPreviewItem(item)) return false
     val top = topViewController() ?: return false
-    val source = QlSource(url)
+    val source = QlSource(item)
     activeQlSource = source
     val ql = QLPreviewController()
     ql.dataSource = source
