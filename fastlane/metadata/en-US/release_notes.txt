@@ -1,5 +1,4 @@
-What's new in 2.1.5
+What's new in 2.2.0
 
-- Fixed a crash when previewing PDF, Word, Excel or PowerPoint files from a session.
-- Tapping a document now opens it straight in the system preview. A small progress card appears only if loading takes a moment, and you can cancel it. When a file cannot be previewed, the viewer explains why.
-- Previews wait until the app is unlocked and in the foreground.
+- New experimental feature, Voice memo to tasks: turn it on in Settings > General, then talk through a few things. The recording is sent end-to-end encrypted to your own computer, transcribed there locally, and organised into to-dos by the Claude or Codex tool on that computer; without an organiser the transcript is kept for you to split by hand. Organising never runs anything, and each to-do is sent to the session you choose only after you review and confirm it. Before the first recording, the app explains where the data goes and asks for your consent.
+- The back button in the top-left corner is now the same control on every page, at the same position, and screen readers announce where it leads.
