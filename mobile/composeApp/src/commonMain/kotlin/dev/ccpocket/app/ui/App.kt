@@ -69,7 +69,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.filled.PushPin
@@ -492,6 +491,21 @@ fun App(scope: CoroutineScope) {
                             }
                             // fleet overlays ride ABOVE the gate: the fleet view is exactly where you
                             // want to be while this machine is reconnecting or another one has news
+                            // voice memo → tasks: shown whenever it is open and no chat is. Entering the target
+                            // chat to dispatch and coming back from it therefore need no route of their own, and
+                            // stored memos stay readable while the computer is away (it rides above the gate).
+                            if (repo.memoOpen.value && repo.memoFeatureOn.value && repo.convoId.value == null) {
+                                val memoState by repo.memo.state.collectAsState()
+                                val memoLevel by repo.memo.levels.collectAsState()
+                                Surface(Modifier.fillMaxSize(), color = Tok.base) {
+                                    dev.ccpocket.app.ui.memo.VoiceMemoScreen(
+                                        state = memoState,
+                                        level = memoLevel,
+                                        onAction = repo.memo::accept,
+                                        onExit = { repo.closeMemos() },
+                                    )
+                                }
+                            }
                             if (fleetOpen) NavBarPadded { dev.ccpocket.app.ui.fleet.FleetHomeScreen(repo, onBack = { fleetOpen = false }, onOpenInbox = { inboxOpen = true }) }
                             if (inboxOpen) NavBarPadded { dev.ccpocket.app.ui.fleet.AttentionInboxScreen(repo) { inboxOpen = false } }
                             // registered after the fleet surfaces, so its back handler wins while it is up.
@@ -826,6 +840,7 @@ private fun ProjectsHeader(
     onOpenComputers: () -> Unit,
     onHelp: () -> Unit,
     onSettings: () -> Unit,
+    onMemos: (() -> Unit)? = null,
     // ── inline search (issue #260) ──
     // The always-on filter field is gone from under the header: it cost a permanent row for a control most
     // sessions never touch, and the list is what the screen is for. It lives here now as a 48dp icon that
@@ -944,6 +959,7 @@ private fun ProjectsHeader(
             onHelp = { menuOpen = false; onHelp() },
             onSettings = { menuOpen = false; onSettings() },
             onDismiss = { menuOpen = false },
+            onMemos = onMemos?.let { open -> { menuOpen = false; open() } },
         )
     }
 }
@@ -1022,6 +1038,8 @@ private fun ProjectsOverflowMenu(
     onHelp: () -> Unit,
     onSettings: () -> Unit,
     onDismiss: () -> Unit,
+    // voice memo → tasks: present only while the experimental switch is on (null = no row at all)
+    onMemos: (() -> Unit)? = null,
 ) {
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onDismiss() }
     val shape = RoundedCornerShape(Metric.radius)
@@ -1032,6 +1050,14 @@ private fun ProjectsOverflowMenu(
                 .widthIn(min = 196.dp, max = 280.dp)
                 .clip(shape).background(Tok.raised).border(Metric.hairline, Tok.hair, shape),
         ) {
+            if (onMemos != null) {
+                OverflowMenuRow(
+                    stringResource(Res.string.memo_host_menu_entry),
+                    note = stringResource(Res.string.memo_host_menu_experimental),
+                    onClick = onMemos,
+                )
+                Hairline()
+            }
             OverflowMenuRow(stringResource(Res.string.proj_help), onClick = onHelp)
             Hairline()
             // the version nudge is repeated here in WORDS — the dot on the trigger only points at it
@@ -1571,6 +1597,7 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
         onOpenComputers = onOpenFleet,
         onHelp = { showHelp = true },
         onSettings = { showSettings = true },
+        onMemos = if (repo.memoFeatureOn.value) ({ repo.openMemos() }) else null,
         searchOpen = search.open,
         query = query,
         onQueryChange = { search = search.typed(it) },
@@ -2410,12 +2437,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton({ repo.backToDirectories() }, modifier = Modifier.size(Metric.touch)) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.ArrowBack, stringResource(Res.string.ses_projects),
-                        tint = Tok.tx2, modifier = Modifier.size(20.dp),
-                    )
-                }
+                BackTarget({ repo.backToDirectories() })
                 Spacer(Modifier.weight(1f))
                 if (repo.archiveSupported.value) {
                     IconButton({ showArchived = true }, modifier = Modifier.size(Metric.touch)) {
@@ -2758,6 +2780,14 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     // re-reading the ≤400ms-stale draft then yanked the live text out from under the IME — on the iOS pinyin
     // keyboard that committed the space-segmented marked text as raw letters, "claude"→"c l a u d e" (#108,
     // #93's wild signature). The debounced saver below re-homes the text under the flipped key.
+    // voice memo → tasks: nothing is collected (and the memo repository is never even created) while the
+    // experimental switch is off
+    val memoDispatch = if (repo.memoFeatureOn.value) {
+        val memoState by repo.memo.state.collectAsState()
+        memoState.dispatch?.takeIf { it.convoId != null && it.convoId == repo.convoId.value }
+    } else null
+    val memoSending = memoDispatch?.phase == dev.ccpocket.app.memo.MemoDispatchPhase.SENDING
+
     val draftKey = repo.composerKey()
     val composer = remember(repo.composerEpoch.value) { ComposerState(repo.draftFor(draftKey)) }
     val input = composer.text // reads track the field; writes go through composer's explicit methods
@@ -3118,6 +3148,13 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             repo.sessionLineage.value
                 ?.takeIf { it.convoId == repo.convoId.value }
                 ?.let { LineageBanner(it.mode, it.fromTitle) }
+            // voice memo → tasks: the batch dispatched into THIS chat — delivery only, never execution
+            memoDispatch?.let { batch ->
+                dev.ccpocket.app.ui.memo.MemoDispatchNotice(
+                    batch,
+                    onReturnToMemo = { repo.memo.accept(dev.ccpocket.app.memo.MemoAction.ReturnToMemo) },
+                )
+            }
             // ── the one pinned state, chosen by the shared ladder from real facts only ────────────────
             // Approval/Answer lead; a streaming turn under them is demoted to a qualifying line, and
             // streaming ALONE pins nothing — the composer note + Stop write it once, where the user acts.
@@ -3292,7 +3329,8 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         // CLAIMS up but receipts stalled past the deadline (issue #78, multi-computer links):
                         // say so under the bubble instead of letting it look sent (issue #41 — frames queue
                         // silently offline)
-                        val undelivered = m is ChatItem.User && m.pending && (repo.phase.value != ConnPhase.Ready || repo.sendStalled.value)
+                        // (a memo bubble says its own delivery state; it has no resend and is never "queued offline")
+                        val undelivered = m is ChatItem.User && m.pending && m.memoTodo == null && (repo.phase.value != ConnPhase.Ready || repo.sendStalled.value)
                         Column(Modifier.readableMeasure().padding(top = shown.rhythmExtraAbove(ri)), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             // seam (0714 handoff B3): for a beat after a page of older history lands,
                             // mark where the old window began so the reader keeps their place
@@ -3318,6 +3356,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 onLongPressUser = if (m is ChatItem.User && repo.canRewind(m)) {
                                     { u -> rewindMenuFor = u }
                                 } else null,
+                                memoSending = memoSending,
                             )
                             when {
                                 undelivered -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -4028,6 +4067,8 @@ private fun MessageItem(
     inProcessBlock: Boolean = false,
     // …and the fold's verdict on a tool member, so the band says "No result" exactly when the header counts it so
     processStep: dev.ccpocket.app.data.StepState? = null,
+    // voice memo → tasks: a batch is sending into this chat right now — what a still-pending memo bubble means
+    memoSending: Boolean = false,
 ) {
     when (m) {
         // Mobile UI 2.0: a quiet uppercase source label above each ordinary turn is all the structure the
@@ -4061,7 +4102,12 @@ private fun MessageItem(
             UserTurnContainer(Modifier.fillMaxWidth(), clipContent = false, topPadding = 4.dp) {
                 // one-tap copy of the ORIGINAL text, whole — the reliable path on iOS where select-to-copy has no
                 // menu (issue #5); renderClip below trims only what is drawn
-                TurnSourceRow(stringResource(Res.string.chat_you), copyText = m.text.takeIf { it.isNotBlank() }, user = true)
+                TurnSourceRow(
+                    stringResource(if (m.memoTodo != null) Res.string.memo_host_bubble_source else Res.string.chat_you),
+                    // a memo bubble copies what the user confirmed, not the fixed prefix it was sent with
+                    copyText = (m.memoTodo ?: m.text).takeIf { it.isNotBlank() },
+                    user = true,
+                )
                 Column(
                     Modifier.fillMaxWidth().padding(top = TURN_SOURCE_BODY_GAP),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -4077,14 +4123,26 @@ private fun MessageItem(
                     m.files.forEach { f ->
                         if (isVideoAttachment(f.mediaType, f.name)) SentVideoCard(f) { onOpenVideo(f) } else SentFileChip(f)
                     }
-                    if (m.text.isNotBlank()) {
+                    val body = m.memoTodo ?: m.text
+                    if (body.isNotBlank()) {
                         // renderClip: this row is a single Text paragraph — an ~800 KB replayed prompt
                         // (skill injection) OOM'd iOS on open; render a prefix, copy keeps the whole thing
-                        val shown = renderClip(m.text)
+                        val shown = renderClip(body)
                         SelectionContainer { // drag-select to copy (no native toolbar on iOS)
                             Text(shown, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current, lineHeight = CHAT_BODY_LINE * LocalFontScale.current)
                         }
-                        if (shown.length < m.text.length) TruncatedNote(m.text.length)
+                        if (shown.length < body.length) TruncatedNote(body.length)
+                    }
+                    if (m.memoTodo != null) {
+                        // Delivery only. A bubble proven unsent is removed, so one that is still pending after
+                        // its batch stopped is exactly "submitted, no receipt" — never offered for resend here.
+                        dev.ccpocket.app.ui.memo.MemoDeliveryMark(
+                            when {
+                                m.delivered || !m.pending -> dev.ccpocket.app.memo.MemoTodoState.DELIVERED
+                                memoSending -> dev.ccpocket.app.memo.MemoTodoState.SENDING
+                                else -> dev.ccpocket.app.memo.MemoTodoState.UNKNOWN
+                            },
+                        )
                     }
                 }
             }

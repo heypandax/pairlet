@@ -38,6 +38,8 @@ import dev.ccpocket.app.data.midTruncatePath
 import dev.ccpocket.app.data.parseUnifiedDiff
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
+import dev.ccpocket.app.ui.BackTarget
 import dev.ccpocket.app.ui.rememberWrapState
 import dev.ccpocket.protocol.GIT_OP_REVERT
 import org.jetbrains.compose.resources.stringResource
@@ -69,16 +71,13 @@ fun GitDiffScreen(
     Box(Modifier.fillMaxSize().background(Tok.base)) {
         Column(Modifier.fillMaxSize()) {
             Row(
-                Modifier.fillMaxWidth().padding(start = 6.dp, end = 7.dp),
+                Modifier.fillMaxWidth().padding(start = 4.dp, end = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    Modifier.size(44.dp).clip(RoundedCornerShape(999.dp)).clickable(onClick = onBack),
-                    contentAlignment = Alignment.Center,
-                ) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
+                BackTarget(onBack)
                 Text(
                     remember(path) { midTruncatePath(path, 30) },
-                    color = Tok.tx, fontSize = 16.5.sp, fontWeight = FontWeight.SemiBold,
+                    color = Tok.tx, fontSize = 16.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(16.5.sp),
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
                 Box(

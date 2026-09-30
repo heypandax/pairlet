@@ -1,5 +1,6 @@
 package dev.ccpocket.app.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,13 +18,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.Res
@@ -46,19 +49,54 @@ import org.jetbrains.compose.resources.stringResource
 /**
  * The standard back affordance: a real 48 dp target that NAMES itself.
  *
- * The chevron is a drawing, not a word — without the merged description a screen reader reads this control
- * out as "‹". The description is on the node that takes the tap, so what you can hear is what you can press.
+ * It is the ONLY top-left back on the phone — pushed pages, sheet pages and flows alike — and every host puts
+ * it 4 dp from the screen's leading edge, so the chevron sits on the same line wherever it appears. Nothing
+ * rides next to it: the page's own title says where you are, and the chevron only ever means "back".
+ *
+ * The chevron is DRAWN, centred on the target — not the "‹" character it replaces. A glyph's ink sits where its
+ * font puts it: SF Pro's "‹" landed 2.6 dp below the line's centre, so beside any title the back read as
+ * dropped by 2–3 dp, and no line-height setting reaches the ink. A path has no font metrics to disagree with.
+ *
+ * Nothing here is a word, so without the merged description a screen reader would have nothing to say. The
+ * description is on the node that takes the tap, so what you can hear is what you can press. [description]
+ * replaces the generic "Back" only where the destination adds something worth hearing.
  */
 @Composable
-fun BackTarget(onBack: () -> Unit, modifier: Modifier = Modifier) {
-    val label = stringResource(Res.string.action_back)
+fun BackTarget(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    description: String? = null,
+    enabled: Boolean = true,
+) {
+    val label = description ?: stringResource(Res.string.action_back)
+    val tint = if (enabled) Tok.accent else Tok.muted
     Box(
         modifier.size(Metric.touch).clip(RoundedCornerShape(Metric.radiusS))
             .semantics(mergeDescendants = true) { contentDescription = label }
-            .clickable(role = Role.Button, onClick = onBack),
+            .clickable(enabled = enabled, role = Role.Button, onClick = onBack),
         contentAlignment = Alignment.Center,
-    ) { Text("‹", color = Tok.accent, fontSize = 26.sp, fontWeight = FontWeight.Light) }
+    ) {
+        Canvas(Modifier.size(BackChevronWidth, BackChevronHeight)) {
+            val stroke = BackChevronStroke.toPx()
+            val inset = stroke / 2
+            drawPath(
+                Path().apply {
+                    moveTo(size.width - inset, inset)
+                    lineTo(inset, size.height / 2)
+                    lineTo(size.width - inset, size.height - inset)
+                },
+                tint,
+                style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
+        }
+    }
 }
+
+// matched to the SF Pro Light 26 sp "‹" it replaced (weight, angle, size): round caps need a touch more height
+// than that glyph's flat-cut ends to cover the same ink
+private val BackChevronWidth = 6.5.dp
+private val BackChevronHeight = 11.5.dp
+private val BackChevronStroke = 1.8.dp
 
 /**
  * Back, then the screen's own name, then at most ONE line of facts about it.

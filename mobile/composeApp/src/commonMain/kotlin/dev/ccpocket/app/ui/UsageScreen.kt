@@ -22,7 +22,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -134,10 +133,20 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit, embedded: Boolean = 
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         // header
         Column(Modifier.fillMaxWidth().background(Tok.base)) {
-            Row(Modifier.fillMaxWidth().padding(start = if (embedded) 16.dp else 4.dp, end = 12.dp, top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // phone: the 48 dp back target sets the row's height, so it needs less padding than the embedded row
+            Row(
+                Modifier.fillMaxWidth().padding(
+                    start = if (embedded) 16.dp else 4.dp, end = 12.dp,
+                    top = if (embedded) 14.dp else 10.dp, bottom = if (embedded) 8.dp else 4.dp,
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 if (!embedded) {
-                    TextButton({ onBack() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
-                    Text(stringResource(Res.string.usage_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    BackTarget(onBack)
+                    Text(
+                        stringResource(Res.string.usage_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                        style = tightCenter(18.sp),
+                    )
                 }
                 Spacer(Modifier.weight(1f))
                 Row(Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(999.dp)).padding(2.dp)) {

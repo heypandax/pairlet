@@ -16,6 +16,7 @@ import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.bridge.PathScope
 import dev.ccpocket.daemon.server.RequestRouter
 import dev.ccpocket.daemon.conversation.OutboundSink
+import dev.ccpocket.daemon.memo.withVoiceMemo
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.identity.PairedDevices
 import dev.ccpocket.daemon.util.logger
@@ -252,6 +253,8 @@ class DeviceSessions(
         // #362: its pin push slot too — delivery already re-checks membership, this keeps the table bounded
         core.projectPins.detach("${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$deviceId")
         core.router.managedSessionService?.detach("${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$deviceId") // #360
+        // its memo jobs stop and its cached transcripts go: a re-paired device is a new owner, not this one
+        runCatching { core.router.revokeVoiceMemoDevice(deviceId) }
         persist()
         // force-close the revoked credential's convos NOW (kills their process trees) — the owner's revoke
         // promise is "their sessions end", not "their link drops". Covers guests (#115) AND bridges (#91):
@@ -405,7 +408,7 @@ class DeviceSessions(
                 // #348: the backends whose subscription allowance this daemon can read. Same source as the
                 // LAN transport's copy (WsConnection) — the router owns the readers, so it owns the answer.
                 quotaAgents = core.router.quotaAgentWires(),
-            ),
+            ).withVoiceMemo(core.router.voiceMemoCapability()),
         )
 
     /**

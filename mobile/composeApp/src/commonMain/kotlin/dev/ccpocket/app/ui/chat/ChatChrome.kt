@@ -78,6 +78,7 @@ import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
 import dev.ccpocket.app.theme.tightCenter
+import dev.ccpocket.app.ui.BackTarget
 import dev.ccpocket.app.ui.CopyOutcome
 import dev.ccpocket.app.ui.PulseDot
 import dev.ccpocket.app.ui.rememberCopyOutcome
@@ -155,10 +156,7 @@ fun ChatHeader(
 ) {
     Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.Top) {
-            Box(
-                Modifier.size(Metric.touch).clickable(role = Role.Button, onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) { Text("‹", color = Tok.accent, fontSize = 26.sp, fontWeight = FontWeight.Light) }
+            BackTarget(onBack)
             // no fixed-height row: the title leads and is allowed three lines before it may ellipsize
             Text(
                 title, color = Tok.tx, style = TypeRole.rowTitle,

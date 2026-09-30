@@ -60,6 +60,8 @@ import dev.ccpocket.app.data.worktreeLocationPreview
 import dev.ccpocket.app.data.worktreeRemovable
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
+import dev.ccpocket.app.ui.BackTarget
 import dev.ccpocket.app.ui.DiffEmptyState
 import dev.ccpocket.app.ui.PocketSheet
 import dev.ccpocket.app.ui.relativeTime
@@ -108,15 +110,12 @@ fun WorktreesScreen(repo: PocketRepository, onOpenSessionHere: (String) -> Unit,
     Box(Modifier.fillMaxSize().background(Tok.base)) {
         Column(Modifier.fillMaxSize()) {
             Row(
-                Modifier.fillMaxWidth().padding(start = 6.dp, end = 7.dp),
+                Modifier.fillMaxWidth().padding(start = 4.dp, end = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    Modifier.size(44.dp).clip(RoundedCornerShape(999.dp)).clickable(onClick = onBack),
-                    contentAlignment = Alignment.Center,
-                ) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
+                BackTarget(onBack)
                 Text(
-                    stringResource(Res.string.wt_title), color = Tok.tx, fontSize = 16.5.sp,
+                    stringResource(Res.string.wt_title), color = Tok.tx, fontSize = 16.5.sp, style = tightCenter(16.5.sp),
                     fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f),
                 )
                 Box(

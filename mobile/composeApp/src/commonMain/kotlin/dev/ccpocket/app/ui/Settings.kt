@@ -386,6 +386,15 @@ private fun GeneralPage(repo: PocketRepository) {
             onChange = { repo.setVoiceWhisper(it) },
         )
     }
+
+    // Experimental: voice memo → tasks. Off by default; the switch only enables the entry — it records,
+    // uploads and dispatches nothing by itself.
+    SectionLabel(stringResource(Res.string.memo_host_experimental_section))
+    val memoReadiness by repo.memoHost.readiness.collectAsState()
+    dev.ccpocket.app.ui.memo.MemoExperimentalSection(
+        readiness = memoReadiness,
+        onToggle = { repo.setMemoFeature(it) },
+    )
 }
 
 // ══ Agent & session defaults ═══════════════════════════════════════════════════════════════════════

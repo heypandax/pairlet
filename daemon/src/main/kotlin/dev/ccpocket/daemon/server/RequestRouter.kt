@@ -229,6 +229,8 @@ class RequestRouter(
     /** Managed session list (issue #360). Null = not wired: a capable owner's managed request answers
      *  `managed_unsupported`, and [managedSessionAgentWires] advertises nothing. */
     private val managedSessions: dev.ccpocket.daemon.session.ManagedSessionService? = null,
+    /** Voice memo → tasks. Null = not wired: nothing is advertised and every memo frame is dropped. */
+    private val voiceMemo: dev.ccpocket.daemon.memo.VoiceMemoService? = null,
 ) {
     /** Both transports attach their owner push targets through the router they already hold (issue #360). */
     internal val managedSessionService: dev.ccpocket.daemon.session.ManagedSessionService? get() = managedSessions
@@ -258,6 +260,15 @@ class RequestRouter(
 
     /** [dev.ccpocket.protocol.DaemonInfo.managedAgents]: empty when the managed list is not wired. */
     fun managedSessionAgentWires(): List<String> = managedSessions?.agentWires().orEmpty()
+
+    /** What [dev.ccpocket.protocol.DaemonInfo] says about voice memos: the LOCAL prerequisites only — binaries
+     *  and model files. Not wired, or the check itself failing, advertises nothing. */
+    fun voiceMemoCapability(): dev.ccpocket.daemon.memo.MemoCapability =
+        runCatching { voiceMemo?.capability() }.getOrNull()
+            ?: dev.ccpocket.daemon.memo.MemoCapability(0, emptyList(), dev.ccpocket.protocol.VoiceMemoStatus.UNKNOWN)
+
+    /** A pairing was revoked: its memo jobs stop and its cached transcripts go. */
+    suspend fun revokeVoiceMemoDevice(deviceId: String) { voiceMemo?.revokeDevice(deviceId) }
 
     /** The LAN transport attaches its per-socket pin subscriber through the router it already holds, so the pin
      *  plane reaches both transports without another server-construction seam. */
@@ -324,6 +335,9 @@ class RequestRouter(
 
         /** issue #380 live folding: the client wants an outcome-only RESULT for every finished ordinary tool. */
         @Volatile var supportsToolOutcomes: Boolean = false
+
+        /** voice memo → tasks: this connection decodes pocket/memo.state. Replies and pushes are both gated on it. */
+        @Volatile var supportsVoiceMemo: Boolean = false
 
         /** Largest sealed WebSocket message this connection can receive: the client's declared
          *  [ClientCaps.maxFrameBytes] (clamped by [frameCap]), else the legacy 1 MiB that shipped iOS builds are
@@ -412,6 +426,9 @@ class RequestRouter(
             // issue #380 live folding: a bare outcome RESULT only reaches a connection that asked for it; sub-agent
             // and image RESULTs (outcomeOnly = false) keep flowing to every client as before
             frame is dev.ccpocket.protocol.ToolEvent && frame.outcomeOnly -> caps?.supportsToolOutcomes == true
+            // voice memo → tasks: a memo snapshot carries a transcript — it only reaches a connection that declared
+            // it can read one; a null / not-yet-declared holder fails closed
+            frame is dev.ccpocket.protocol.VoiceMemoState -> caps?.supportsVoiceMemo == true
             else -> true
         }
 
@@ -541,6 +558,7 @@ class RequestRouter(
                 caps?.supportsProjectPins = frame.supportsProjectPins // #362: gates pocket/pins.state
                 caps?.supportsManagedSessions = frame.supportsManagedSessions // #360: gates pocket/managed.state + .discovered
                 caps?.supportsToolOutcomes = frame.supportsToolOutcomes // #380: gates outcome-only tool RESULTs
+                caps?.supportsVoiceMemo = frame.supportsVoiceMemo // gates pocket/memo.state
                 caps?.maxFrameBytes = ClientCapsHolder.frameCap(frame.maxFrameBytes) // KTOR-6963: sizes every frame sealed to this connection
             }
 
@@ -997,6 +1015,16 @@ class RequestRouter(
                 null -> scope.launch { registry.rewind(frame, sink) }
                 else -> sink.emit(handoffDenied(deny, frame.convoId))
             }
+
+            // voice memo → tasks: OWNER-ONLY and deliberately NOT launched — a start must be registered before its
+            // chunks, and both transports hand frames over in receive order. Restricted credentials never reach
+            // here (GuestCaps / BridgeCaps / CollaboratorCaps / ExecutionCaps default-deny all four types); the
+            // checks in [voiceMemoRequest] are the second door.
+            is dev.ccpocket.protocol.VoiceMemoStart,
+            is dev.ccpocket.protocol.VoiceMemoAudio,
+            is dev.ccpocket.protocol.VoiceMemoGet,
+            is dev.ccpocket.protocol.VoiceMemoCancel ->
+                voiceMemoRequest(frame as dev.ccpocket.protocol.ToDaemon, sink, origin, guestScope, collabScope, caps, deviceId)
 
             // voice capture: buffer fast here; whisper runs on the service's own scope
             is AudioChunk -> transcribe.onChunk(frame, sink)
@@ -1463,6 +1491,38 @@ class RequestRouter(
 
     private fun isOwner(origin: String?, guestScope: GuestScope?, collab: CollaboratorScope?) =
         origin == null && guestScope == null && collab == null
+
+
+    /**
+     * Voice memo admission. A memo holds a recording and its transcript, so the request is served only when ALL
+     * of these hold, and is dropped in silence otherwise — a refusal frame would itself be a `pocket/memo.state`,
+     * which an undeclared or restricted peer must never receive:
+     *  1. the three-way owner test (no bridge origin, no guest scope, no collaborator scope);
+     *  2. a TRANSPORT-authenticated device id — the plaintext `--local` socket and in-process callers have
+     *     none, and the [LOCAL_DEVICE_ID] fallback is not an identity a recording may be filed under;
+     *  3. the connection declared [ClientCapsHolder.supportsVoiceMemo];
+     *  4. the service is wired.
+     * The job's owner is the authenticated id, never a frame field. Snapshots go back through THIS connection's
+     * sink, whose own [allowedForCaps] gate re-checks the declaration on every frame.
+     */
+    private suspend fun voiceMemoRequest(
+        frame: dev.ccpocket.protocol.ToDaemon,
+        sink: OutboundSink,
+        origin: String?,
+        guestScope: GuestScope?,
+        collab: CollaboratorScope?,
+        caps: ClientCapsHolder?,
+        deviceId: String?,
+    ) {
+        if (!isOwner(origin, guestScope, collab)) return
+        val device = deviceId?.takeIf { it.isNotBlank() && it != LOCAL_DEVICE_ID } ?: return
+        if (caps == null || !caps.supportsVoiceMemo) return
+        val service = voiceMemo ?: return
+        val reply = dev.ccpocket.daemon.memo.MemoReplyTarget { state ->
+            caps.supportsVoiceMemo && runCatching { sink.emit(state) }.isSuccess
+        }
+        service.handle(dev.ccpocket.daemon.memo.MemoOwner(device), frame, reply)
+    }
 
     /**
      * One project-pin request (issue #362). Every authority fact comes from the transport, never the frame: the

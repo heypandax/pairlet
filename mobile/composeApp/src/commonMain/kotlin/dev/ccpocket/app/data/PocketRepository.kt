@@ -425,6 +425,9 @@ sealed interface ChatItem {
         val pending: Boolean = false,
         val promptId: String? = null,
         val delivered: Boolean = false,
+        /** Set on a bubble a voice memo dispatched: the to-do as the user confirmed it. [text] stays the
+         *  text actually sent (fixed prefix included) so a replayed transcript row still matches it. */
+        val memoTodo: String? = null,
         /** Files uploaded to the session's workspace inbox and referenced by this turn (issue #90) —
          *  rendered as file chips with their `@` landing path. Client-side only (unlike [images],
          *  the transcript has no record of them). */
@@ -2681,7 +2684,7 @@ class PocketRepository(
                 // maxFrameBytes: what the transports really accept (RelayE2EConnection.MAX_FRAME_BYTES). Declaring it is
                 // what lets the daemon send full-size history windows; a daemon that never hears it sizes every frame
                 // for the 1 MiB shipped iOS builds were bound to (KTOR-6963), shedding pictures from big replays.
-                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true, supportsManagedSessions = true, supportsToolOutcomes = true, maxFrameBytes = dev.ccpocket.app.net.RelayE2EConnection.MAX_FRAME_BYTES))
+                send(clientCaps())
                 send(ListDirectories())
                 send(ListPendingApprovals)
             }
@@ -2770,6 +2773,9 @@ class PocketRepository(
     /** App came to the foreground (iOS suspends sockets in background) — reconnect NOW; the backoff
      *  ladder deliberately survives the return (#144 — resetting it here let a flapping link hammer). */
     fun onAppBackground() {
+        memoHost.onBackground()
+        // (the memo repository is created on first use; with the switch off it never is)
+        if (memoFeatureOn.value && pinnedTo == null) memo.accept(dev.ccpocket.app.memo.MemoAction.Background)
         promptOutcomes.background()
         connectionDiagnostic?.finish(Outcome.CANCELLED, DiagnosticStage.WAIT, ErrorCode.CANCELLED)
         connectionDiagnostic = null; connectionDiagnosticEnded = false
@@ -2785,6 +2791,8 @@ class PocketRepository(
 
     fun onAppForeground() {
         appIsForeground.value = true
+        memoHost.onForeground()
+        if (memoFeatureOn.value && pinnedTo == null) memo.accept(dev.ccpocket.app.memo.MemoAction.Foreground)
         // a return to the foreground is when a stalled registration gets its cheapest chance to heal:
         // the OS is willing to call back again, and the token wait only counts foreground time anyway
         PushRegistrar.appForeground.value = true
@@ -3188,6 +3196,25 @@ class PocketRepository(
         else -> null
     }
 
+    /** What this build declares to the daemon. One definition, because it is sent from two places. */
+    private fun clientCaps() =
+        ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true, supportsManagedSessions = true, supportsToolOutcomes = true, maxFrameBytes = dev.ccpocket.app.net.RelayE2EConnection.MAX_FRAME_BYTES, supportsVoiceMemo = true)
+
+    /**
+     * Declare the capabilities again, on the session that just proved itself live.
+     *
+     * The declaration in [launchTransport] is queued before the new connection exists, and the PREVIOUS
+     * connection's writer can still be running at that moment: it takes the frame and writes it under the old
+     * session, where a daemon that restarted has nothing to open it with. The new session then starts with a
+     * fresh, undeclared holder — and the daemon silently drops every capability-gated frame, which is what
+     * left a voice memo "uploading" for ever (2026-09-29). A [DaemonInfo] is the daemon's first frame on a
+     * handshaken session, so answering it cannot miss.
+     */
+    private fun redeclareCaps() {
+        if (isCollaboratorInbox || demoMode.value) return
+        scope.launch { send(clientCaps()) }
+    }
+
     /** All outbound frames funnel here; a throw means the link is dead — trigger the reconnect path. */
     private suspend fun send(request: Frame) {
         // Reconnect, SessionGone recovery and split panes also resume through this seam. Restore the
@@ -3491,6 +3518,13 @@ class PocketRepository(
         // that branch is filtered to the currently-open conversation (chat-state bookkeeping) and would
         // miss a turn finishing in another session/window on the same machine.
         if (f is PromptAck) promptOutcomes.acknowledged(f.convoId, f.promptId)
+        // voice memo → tasks: a memo prompt's receipt and a memo job's snapshot are matched by id, never by
+        // whichever chat is on screen — tapped here, ahead of the conversation filters below
+        if (f is PromptAck) memoHost.onReceipt(f)
+        if (f is dev.ccpocket.protocol.VoiceMemoState) memoHost.onRemoteState(f)
+        // a session list the memo target picker asked for stays with the picker — unless it is the project the
+        // user is looking at, whose page wants the same rows
+        if (f is Sessions && memoHost.onSessions(f) && f.workdir != browseIntentDir && f.workdir != sessionsDir.value) return
         if (f is TurnDone) turnCompletions.value++
         // #311: a split pane's conversation is not this repository's conversation, so every branch below
         // filters it out. Mirror it into its pane FIRST, then let the branches run exactly as they always
@@ -3697,6 +3731,7 @@ class PocketRepository(
             // address that already answered with the WRONG daemon key stays blacklisted — the daemon
             // re-advertises the same value on every handshake, which must not resurrect a dead probe.
             is DaemonInfo -> {
+                redeclareCaps() // before anything below can queue a capability-gated frame
                 paired.value?.let { p ->
                     if (p.directUrl != f.lanUrl && (f.lanUrl == null || f.lanUrl != badDirectUrl[p.accountId])) {
                         rememberDirectUrl(p.accountId, f.lanUrl)
@@ -3738,6 +3773,7 @@ class PocketRepository(
                 }
                 // #362: this connection's advertisement is the only thing that starts pin sync with this computer
                 pinLink.onDaemonInfo(f.supportsProjectPins, paired.value, pairedTransport = useRelay && !demoMode.value, outbound = capturePinOutbound())
+                memoHost.onDaemonInfo(f) // voice memo: this connection's advertisement, and the connection itself
                 if (daemonOwnsPromptRecovery) clearTurnWatchdogState()
                 // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
                 // the fields — "unknown" must not be shown as the previous machine's numbers
@@ -4063,6 +4099,7 @@ class PocketRepository(
                     openDiagnostic = null
                 }
                 // …and a failed switch must release the router, or the chat would hold an empty screen
+                if (opening.value) memoHost.onOpenRefused(f.code) // a memo dispatch waiting on this open hears it now, not at the deadline
                 openJob?.cancel(); openJob = null
                 opening.value = false; switchingSession.value = false // a failed open re-enables the one-tap entries right away
                 pendingNewOpenWd = null // #219: the failed open's marker must not admit a later background announce
@@ -6745,6 +6782,7 @@ class PocketRepository(
 
     @OptIn(ExperimentalEncodingApi::class)
     private fun sendPrompt(text: String, includeAttachments: Boolean): Boolean {
+        memoHost.onManualSend() // a message of the user's own pauses whatever a memo batch had left to send
         // about to start work whose completion is exactly what a push would announce — a cheap, honest
         // moment to notice that this pairing is not actually registered. Non-blocking: it only enqueues
         // an evaluation, and an unregistered link never delays the prompt itself.
@@ -7271,11 +7309,174 @@ class PocketRepository(
         scope.launch { send(ListPathEntries(anchor, subPath)) }
     }
 
+    // ── voice memo → tasks: host seam ─────────────────────────────────────
+    // The memo feature owns its own state machine (app/memo). What lives here is only what it cannot reach
+    // from outside: the transports, the chat's message list, the recorder and the prompt path's guards.
+
+    /** Settings → General → Experimental. Off by default, stored on this device only. */
+    val memoFeatureOn = mutableStateOf(SecureStore.getString(K_MEMO_FEATURE) == "1")
+
+    /** The memo surface is up. It shows whenever no chat is open, so entering a target chat to dispatch —
+     *  and coming back from it — needs no route of its own. */
+    val memoOpen = mutableStateOf(false)
+
+    internal val memoHost = MemoHost(this, scope)
+
+    /** Test seam: a store that never touches the machine's real memo library. */
+    internal var memoStoreForTest: dev.ccpocket.app.memo.VoiceMemoStore? = null
+
+    val memo: dev.ccpocket.app.memo.VoiceMemoRepository by lazy {
+        dev.ccpocket.app.memo.DefaultVoiceMemoRepository(
+            scope, memoStoreForTest ?: dev.ccpocket.app.memo.defaultVoiceMemoStore(), memoHost, memoHost.recorder, memoHost,
+            memoHost.prefs, memoHost.clock, newPromptId = ::newPromptId,
+        )
+    }
+
+    fun setMemoFeature(on: Boolean) {
+        if (memoFeatureOn.value == on) return
+        memoFeatureOn.value = on
+        SecureStore.putString(K_MEMO_FEATURE, if (on) "1" else "0")
+        if (!on) {
+            memoHost.onFeatureOff()
+            if (memoOpen.value) closeMemos()
+        }
+    }
+
+    fun openMemos() {
+        if (!memoFeatureOn.value || pinnedTo != null) return // a fleet satellite shares the library; it never opens it
+        memoOpen.value = true
+        memo.accept(dev.ccpocket.app.memo.MemoAction.Opened)
+    }
+
+    fun closeMemos() {
+        memoOpen.value = false
+        memo.accept(dev.ccpocket.app.memo.MemoAction.Closed)
+    }
+
+    /** Test seam: stands in for the captured connection's writer, after every repository and fence check. */
+    internal var memoWriterForTest: ((Frame) -> dev.ccpocket.app.net.TransientDisposition)? = null
+
+    /** The E2E connection a memo frame may be queued on right now, or null. Plain LAN, demo mode and a
+     *  non-owner binding have none. */
+    internal fun memoTransport(): MemoTransport? {
+        if (!useRelay || demoMode.value || !connected.value) return null
+        val target = paired.value?.takeIf { it.role == BindingRole.OWNER } ?: return null
+        val viaDirect = directE2E.connected && directE2E.account == target.accountId
+        val connection = when {
+            memoWriterForTest != null -> TEST_MEMO_CONNECTION
+            viaDirect -> directE2E.liveConnection
+            else -> relay.liveConnection
+        }
+        if (connection == 0) return null
+        return MemoTransport(target.accountId, target.deviceId, viaDirect, connection, transportLaunches)
+    }
+
+    /** Queue [frame] on exactly [transport]'s connection. Never buffered for, or re-routed to, another one. */
+    internal fun memoEnqueue(
+        transport: MemoTransport,
+        frame: Frame,
+        fence: dev.ccpocket.app.net.TransientDispatchFence,
+    ): dev.ccpocket.app.net.TransientTicket {
+        onSendForTest?.invoke(frame)
+        val guarded = dev.ccpocket.app.net.TransientDispatchFence {
+            val now = paired.value
+            transportLaunches == transport.launch && useRelay && !demoMode.value &&
+                now != null && now.accountId == transport.accountId && now.deviceId == transport.deviceId && fence.isValid()
+        }
+        memoWriterForTest?.let { writer ->
+            val outcome = if (guarded.isValid()) writer(frame) else dev.ccpocket.app.net.TransientDisposition.NOT_WRITTEN
+            return dev.ccpocket.app.net.TransientTicket.settled(outcome)
+        }
+        return if (transport.viaDirect) directE2E.tryEnqueueTransient(frame, guarded, transport.connection)
+        else relay.tryEnqueueTransient(frame, guarded, transport.connection)
+    }
+
+    /** Whether [target]'s session is the chat on screen, live and writable. */
+    internal fun memoTargetOpen(target: dev.ccpocket.app.memo.MemoTarget): Boolean =
+        alreadyOpen(target.workdir, target.sessionId) && !observing.value && !opening.value &&
+            (sessionAgent.value ?: AgentKind.CLAUDE) == target.agent
+
+    /** Why the chat on screen cannot take a memo prompt, or null when it can. The same gates an ordinary
+     *  send passes; a refusal here is "not submitted", never "unknown". */
+    internal fun memoSendRefusal(convo: String): String? {
+        val handoff = activeHandoff.value
+        return when {
+            convoId.value != convo -> "left_chat"
+            !connected.value -> "offline"
+            observing.value -> "observing"
+            handoff?.status == HandoffStatus.WAITING -> "handoff"
+            handoff?.status == HandoffStatus.IN_PROGRESS && !isHandoffRecipient(handoff) -> "handoff"
+            sessionDegraded.value -> "degraded"
+            else -> null
+        }
+    }
+
+    /** The memo prompt's bubble. No retry copy, no receipt watchdog, no reconnect: nothing the ordinary
+     *  send arms to re-deliver a prompt may ever touch this one. */
+    internal fun memoAddBubble(convo: String, wireText: String, todo: String, promptId: String): Boolean {
+        if (memoSendRefusal(convo) != null) return false
+        messages.add(ChatItem.User(wireText, pending = true, promptId = promptId, memoTodo = todo))
+        if (chatTitle.value == null && todo.isNotBlank()) {
+            // a session the memo created: its first to-do names it, like a first prompt does
+            chatTitle.value = todo.take(48)
+            rememberOpenedSession(workdir.value, memoCurrentSessionId(), chatTitle.value, sessionAgent.value)
+        }
+        return true
+    }
+
+    /** The memo prompt was proven not sent: its bubble goes, so the chat never shows a message that does not exist. */
+    internal fun memoRemoveBubble(promptId: String) {
+        val i = messages.indexOfLast { it is ChatItem.User && it.promptId == promptId && it.memoTodo != null }
+        if (i >= 0) messages.removeAt(i)
+    }
+
+    internal val memoRecorder: VoiceRecorder get() = recorder
+    internal val memoForeground: Boolean get() = appIsForeground.value
+
+    internal fun memoListSessions(workdir: String) { scope.launch { send(ListSessions(workdir)) } }
+
+    /** The picker's rows changed after it was drawn: have the memo read them again. */
+    internal fun memoTargetsChanged() {
+        if (memoFeatureOn.value && pinnedTo == null) memo.accept(dev.ccpocket.app.memo.MemoAction.RefreshTargets)
+    }
+
+    /** The session id of the chat on screen, once the daemon has named it; null = no chat, or not named yet
+     *  (a session that was just created). Not [sessionKey]: that one outlives the chat as the draft key. */
+    internal fun memoCurrentSessionId(): String? = currentSessionId?.takeIf { convoId.value != null && it.isNotBlank() }
+
+    /** Whether the chat on screen is [target]: its project and agent, writable, and — once both sides know
+     *  one — its session id. A session created a moment ago has none yet. */
+    internal fun memoChatIs(target: dev.ccpocket.app.memo.MemoTarget): Boolean {
+        if (convoId.value == null || observing.value || opening.value) return false
+        if (!sameDirPath(workdir.value, target.workdir)) return false
+        if ((sessionAgent.value ?: AgentKind.CLAUDE) != target.agent) return false
+        val here = memoCurrentSessionId()
+        return target.sessionId.isBlank() || here == null || here == target.sessionId
+    }
+
+    /** Whether the chat on screen is [target]'s session or its project — i.e. something a memo dispatch opened. */
+    internal fun memoChatIsAbout(target: dev.ccpocket.app.memo.MemoTarget): Boolean =
+        sessionKey.value == target.sessionId || sameDirPath(workdir.value, target.workdir)
+
+    /** End a capture whose page is gone, the way leaving the foreground does. */
+    internal fun memoInterruptCapture() {
+        if (!memoFeatureOn.value || pinnedTo != null) return
+        memo.accept(dev.ccpocket.app.memo.MemoAction.Background)
+        memo.accept(dev.ccpocket.app.memo.MemoAction.Foreground)
+    }
+
+    /** Leave the chat for the memo surface. The session is left running — see [backToBrowse]. */
+    internal fun memoLeaveChat() {
+        memoOpen.value = true
+        if (convoId.value != null) backToBrowse()
+    }
+
     // ── voice input actions ───────────────────────────────────────────────
 
     /** Mic tap (S1). Picks the engine: iOS native streaming dictation, else record→daemon-whisper. */
     fun startVoice() {
         if (convoId.value == null) return
+        if (memoHost.holdsMicrophone) return // one recorder: a memo capture is using the microphone
         if (voice.value !is VoiceState.Idle && voice.value !is VoiceState.Failed) return
         clearNotice()
         voiceLevels.clear()
@@ -7850,6 +8051,7 @@ class PocketRepository(
     /** Send a daemon-intercepted relaunch command and hold the "switching" affordance until the next SessionLive. */
     private fun switchViaCommand(command: String) {
         val c = convoId.value ?: return
+        memoHost.onManualSend() // a command of the user's own, like a message, pauses a memo batch
         switching.value = true
         scope.launch {
             send(SendPrompt(c, command))
@@ -7860,6 +8062,7 @@ class PocketRepository(
     /** Clear the conversation — the daemon starts a fresh session (keeps model/effort/mode) and wipes history. */
     fun clearConversation() {
         val c = convoId.value ?: return
+        memoHost.onManualSend() // nothing more of a memo batch may go into a conversation that is being wiped
         clearPromptLifecycleState()
         transcript.clearMessages(); chatTitle.value = null; contextUsed.value = null
         resetHistoryPaging() // #147: the wiped transcript's cursor dies with it
@@ -7906,6 +8109,7 @@ class PocketRepository(
 
     fun backToBrowse() {
         fenceSessionNavigation()
+        memoHost.onLeftChat() // leaving the target chat pauses what a memo batch had left to send
         val c = convoId.value
         val dir = sessionsDir.value // non-null = we land on the session list: re-pull it so the rows reflect this session's run
         // #349: landing on that list IS a browse intent, so its re-list answer is wanted. (dir == sessionsDir
@@ -7914,7 +8118,9 @@ class PocketRepository(
         browseIntentDir = dir
         // observing or idle -> reclaim; still executing -> leave it running in the background.
         // One coroutine for both sends: the re-list must see the close, not race it.
-        val closeConvo = c?.takeIf { observing.value || !streaming.value }
+        // a memo batch just delivered into this chat: its first output may not have arrived yet, so "not
+        // streaming" does not mean idle — reclaiming now would close the session under the task
+        val closeConvo = c?.takeIf { (observing.value || !streaming.value) && !memoHost.fedRecently(it) }
         scope.launch {
             closeConvo?.let { send(CloseSession(it)) }
             dir?.let { send(ListSessions(it)) }
@@ -8157,6 +8363,9 @@ class PocketRepository(
         const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | one agent key | comma-joined keys — project/session filter (#31/#188/#248, see AgentFilter.kt)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
         const val K_PINNED = "pinned_projects"                 // SecureStore, pre-#362 and now read-only: '\n'-joined device-global pins, kept as the migration backup
+        private const val TEST_MEMO_CONNECTION = -1
+        const val K_MEMO_FEATURE = "memo_feature_on"           // SecureStore: "1" = Settings ▸ Experimental ▸ voice memo → tasks is on (default off)
+        const val K_MEMO_CONSENT_PREFIX = "memo_consent:"      // SecureStore: "memo_consent:<accountId>:<deviceId>" → accepted disclosure version
         const val K_WORKING_SET_PREFIX = "working_set_mru:"    // SecureStore: "working_set_mru:<accountId>" → TSV dirKey\tsessionId\ttitle\tproject\tat\tagent — that computer's switcher MRU (issue #165)
         const val K_DRAFT_PREFIX = "draft:"                    // SecureStore: "draft:<sessionId|convoId|workdir>" → unsent composer text for that conversation
         const val K_SESSION_PARAMS = "session_params"          // SecureStore: TSV sid\tmode\tmodel\teffort\tagent per line (last 100 sessions)

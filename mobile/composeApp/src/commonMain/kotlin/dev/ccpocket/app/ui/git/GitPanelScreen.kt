@@ -65,6 +65,8 @@ import dev.ccpocket.app.data.gitPushBlockedByRemote
 import dev.ccpocket.app.data.gitSections
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
+import dev.ccpocket.app.ui.BackTarget
 import dev.ccpocket.app.ui.DiffEmptyState
 import dev.ccpocket.protocol.GIT_OP_COMMIT
 import dev.ccpocket.protocol.GIT_OP_FETCH
@@ -186,15 +188,12 @@ fun GitPanelScreen(
 @Composable
 private fun GitNavRow(title: String, onBack: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 6.dp, end = 20.dp),
+        Modifier.fillMaxWidth().padding(start = 4.dp, end = 20.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier.size(44.dp).clip(RoundedCornerShape(999.dp)).clickable(onClick = onBack),
-            contentAlignment = Alignment.Center,
-        ) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
+        BackTarget(onBack)
         Text(
-            title, color = Tok.tx, fontSize = 16.5.sp, fontWeight = FontWeight.SemiBold,
+            title, color = Tok.tx, fontSize = 16.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(16.5.sp),
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
     }

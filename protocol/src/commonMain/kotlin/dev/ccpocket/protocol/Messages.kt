@@ -1362,6 +1362,19 @@ data class DaemonInfo(
      */
     val supportsManagedSessions: Boolean = false,
     val managedAgents: List<String> = emptyList(),
+    /**
+     * Capability advertisement (voice memo → tasks): [voiceMemoVersion] is the HIGHEST memo contract this
+     * daemon serves, and it serves every one below it too (0 = none) — a client uses the feature when the
+     * value is at least its own [VoiceMemoLimits.VERSION]. [voiceMemoAgents] the organiser adapters it can launch
+     * (`"claude"`, `"codex"`, …), in the daemon's order of preference; EMPTY is fine — the memo is then
+     * transcribed only, and the to-dos are written by hand. [voiceMemoStatus] is a [VoiceMemoStatus] word for
+     * the LOCAL transcription prerequisites; `ready` means the binaries and model files are in place — it is
+     * not a promise that any agent's account is signed in. A client records when version and status allow it;
+     * a status word it does not recognise reads as "not usable". ABSENT (older daemon) decodes to 0 / empty / "unknown".
+     */
+    val voiceMemoVersion: Int = 0,
+    val voiceMemoAgents: List<String> = emptyList(),
+    val voiceMemoStatus: String = "unknown",
 ) : ToPhone
 
 @Serializable
@@ -2164,6 +2177,9 @@ data class ClientCaps(
      *  tool images and file bodies. Declaring more than the transport takes is the iOS failure this exists
      *  to prevent, so the claim must track the Ktor engine it ships with. */
     val maxFrameBytes: Long = 0,
+    // voice memo → tasks (trailing optional): this connection decodes pocket/memo.state. The daemon never
+    // sends that frame — not even a reply — to a connection that did not declare it.
+    val supportsVoiceMemo: Boolean = false,
 ) : ToDaemon
 
 // ── agent model listing ─────────────────────────────────────────────────

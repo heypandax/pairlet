@@ -233,6 +233,7 @@ class RelayE2EConnection {
                 } finally {
                     if (liveGen == gen) liveGen = 0
                     writer.cancel(); pinger.cancel()
+                    outbox.retire(gen) // what this connection never wrote is reported as such, not left waiting
                 }
             } finally {
                 // every exit — handshake timeout with the computer offline, supersede, socket loss — ends
@@ -282,6 +283,11 @@ class RelayE2EConnection {
     /** Queue a project-pin frame for connection [expectedConnection] only, without suspending (#362). */
     fun tryEnqueuePin(frame: SyncProjectPins, fence: PinDispatchFence, expectedConnection: Int): PinEnqueueResult =
         outbox.tryEnqueuePin(frame, fence, expectedConnection) { liveGen }
+
+    /** Queue a transient frame for connection [expectedConnection] only, without suspending. The ticket's outcome
+     *  says whether it was written; it is never buffered for, or re-routed to, another connection. */
+    fun tryEnqueueTransient(frame: Frame, fence: TransientDispatchFence, expectedConnection: Int): TransientTicket =
+        outbox.tryEnqueueTransient(frame, fence, expectedConnection) { liveGen }
 
     /** Frames queued but not yet written. The outbox deliberately buffers across reconnects to the SAME
      *  daemon; a machine SWITCH must drain it instead — leftover frames would otherwise flush into the

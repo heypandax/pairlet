@@ -263,10 +263,10 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         Column(Modifier.fillMaxWidth().background(Tok.surface)) {
             Row(
-                Modifier.fillMaxWidth().padding(start = 6.dp, end = 12.dp, top = 10.dp),
+                Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton({ onBack() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
+                BackTarget(onBack)
                 Column(Modifier.weight(1f)) {
                     Text(fileNameOf(path), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     TailPathText(parentDirOf(path), fontSize = 11.sp)
@@ -276,7 +276,7 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
                 if (exportable != null) TextButton({ shareFile(fileNameOf(path), exportable, content?.mediaType) }) {
                     Icon(Icons.Rounded.IosShare, stringResource(Res.string.file_share), tint = Tok.tx2, modifier = Modifier.size(18.dp))
                 }
-                // ← goes back UP one level (the changed-files list when that's where we came from);
+                // ‹ goes back UP one level (the changed-files list when that's where we came from);
                 // ✕ skips the list and drops straight to the chat (issue #53's "一键返回").
                 onExit?.let { TextButton(it) { Text("✕", color = Tok.tx2, fontSize = 16.sp) } }
             }

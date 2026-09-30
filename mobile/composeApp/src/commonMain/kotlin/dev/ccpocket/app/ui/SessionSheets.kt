@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
@@ -67,6 +68,7 @@ import dev.ccpocket.app.ui.handoff.toHistoryItem
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import dev.ccpocket.protocol.contextWindowFor
 import dev.ccpocket.protocol.BackgroundJob
@@ -673,9 +675,10 @@ private fun ActionRow(
 
 @Composable
 private fun OptionPicker(title: String, options: List<String>, selected: String?, onBack: () -> Unit, onPick: (String) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("‹ ", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(onClick = onBack).padding(end = 4.dp))
-        Text(title, color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+    // the quick-actions sheet pads 16 dp; pulling the row back by 12 puts the target on the phone's shared 4 dp inset
+    Row(Modifier.offset(x = (-12).dp), verticalAlignment = Alignment.CenterVertically) {
+        BackTarget(onBack)
+        Text(title, color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold, style = tightCenter(20.sp))
     }
     Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         options.forEach { opt ->
@@ -792,10 +795,11 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
         val bounded = constraints.hasBoundedHeight
         val scroll = rememberScrollState()
         Column(if (bounded) Modifier.heightIn(max = maxHeight * 0.86f) else Modifier) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // chip-direct opens (ModelSheet) have no quick-actions page to go back to — the title stands alone
-                if (onBack != null) Text("‹ ", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(enabled = switchingTo == null, onClick = onBack).padding(end = 4.dp))
-                Text(stringResource(Res.string.qa_model), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            // chip-direct opens (ModelSheet) have no quick-actions page to go back to — the title stands alone.
+            // Under quick actions the row is pulled back like [OptionPicker]'s, onto the shared 4 dp inset.
+            Row(if (onBack != null) Modifier.offset(x = (-12).dp) else Modifier, verticalAlignment = Alignment.CenterVertically) {
+                if (onBack != null) BackTarget(onBack, enabled = switchingTo == null)
+                Text(stringResource(Res.string.qa_model), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold, style = tightCenter(20.sp))
             }
             // the scroll rides WITH the cap: a scrollable container measured with infinite max height
             // throws outright (checkScrollableContainerConstraints), so an unbounded host gets the plain

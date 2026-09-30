@@ -24,7 +24,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,10 +64,10 @@ fun TerminalScreen(repo: PocketRepository, onBack: () -> Unit) {
     }
     Column(Modifier.fillMaxSize().background(Tok.base).imePadding()) {
         Row(
-            Modifier.fillMaxWidth().background(Tok.surface).padding(start = 6.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+            Modifier.fillMaxWidth().background(Tok.surface).padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton({ onBack() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
+            BackTarget(onBack)
             Column(Modifier.weight(1f)) {
                 Text(stringResource(Res.string.terminal_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 TailPathText(repo.workdir.value ?: "", fontSize = 11.sp)

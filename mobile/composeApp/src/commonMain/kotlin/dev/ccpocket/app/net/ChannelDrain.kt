@@ -51,14 +51,3 @@ internal fun dedupeReconnectMask(frames: List<Frame>): BooleanArray {
         }
     }
 }
-
-/** Put back what a connection outbox kept after its post-handshake dedupe — reporting anything that no longer fit. */
-internal fun <T> Channel<T>.requeueRetained(retained: List<T>) {
-    var dropped = 0L
-    retained.forEach { if (trySend(it).isFailure) dropped++ }
-    if (dropped > 0) dev.ccpocket.observability.Diagnostics.report(
-        dev.ccpocket.observability.ErrorPath.OUTBOX, dev.ccpocket.observability.Stage.QUEUE,
-        dev.ccpocket.observability.ErrorCode.QUEUE_CLOSED,
-        metrics = dev.ccpocket.observability.SafeMetrics(totalCount = retained.size.toLong(), failedCount = dropped),
-    )
-}

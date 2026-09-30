@@ -73,25 +73,28 @@ internal fun WorkflowRunScreen(repo: PocketRepository, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         // ── header: back · tile · name + runId · status pill ──
         Row(
-            Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
+            Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Box(Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
-                ChevronLeft(Tok.tx2, 17.dp)
+            BackTarget(onBack)
+            Row(
+                Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                WorkflowTile(WorkflowUi.variant(run), 26.dp, 7.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        run.name, color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        run.runId.take(10) + "…", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                WorkflowStatusPill(run)
             }
-            WorkflowTile(WorkflowUi.variant(run), 26.dp, 7.dp)
-            Column(Modifier.weight(1f)) {
-                Text(
-                    run.name, color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    run.runId.take(10) + "…", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-            }
-            WorkflowStatusPill(run)
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
 
@@ -561,18 +564,6 @@ private fun ReturnZone(failed: Boolean, a: WorkflowAgentSnap, result: String?) {
         }
     }
 }
-
-/** Left chevron (handoff viewBox 18). */
-@Composable
-internal fun ChevronLeft(color: androidx.compose.ui.graphics.Color, size: androidx.compose.ui.unit.Dp) =
-    androidx.compose.foundation.Canvas(Modifier.size(size)) {
-        val u = this.size.width / 18f
-        drawPath(
-            androidx.compose.ui.graphics.Path().apply { moveTo(11 * u, 3 * u); lineTo(5 * u, 9 * u); lineTo(11 * u, 15 * u) },
-            color,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round),
-        )
-    }
 
 /** Down chevron (handoff viewBox 18). */
 @Composable

@@ -102,8 +102,8 @@ import dev.ccpocket.app.resources.schedule_wd_4
 import dev.ccpocket.app.resources.schedule_wd_5
 import dev.ccpocket.app.resources.schedule_wd_6
 import dev.ccpocket.app.resources.schedule_wd_7
-import dev.ccpocket.app.resources.settings_title
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.protocol.ScheduleInfo
 import dev.ccpocket.protocol.ScheduleRepeat
 import kotlin.math.roundToInt
@@ -190,9 +190,6 @@ private val ChevronRightGlyph: ImageVector by lazy {
 }
 private val ChevronDownGlyph: ImageVector by lazy {
     scheduleGlyph("SchedChevD", 20f, 1.9f) { moveTo(4f, 7f); lineTo(10f, 13f); lineTo(16f, 7f) }
-}
-private val ChevronLeftGlyph: ImageVector by lazy {
-    scheduleGlyph("SchedChevL", 20f, 1.9f) { moveTo(13f, 4f); lineTo(7f, 10f); lineTo(13f, 16f) }
 }
 
 /**
@@ -577,19 +574,13 @@ fun ScheduleScreen(repo: PocketRepository, onBack: () -> Unit) {
     LaunchedEffect(Unit) { while (true) { delay(30_000); now = epochMillis() } }
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
-        // nav (design TasksNav): accent back chevron + "Settings", centered title, hairline bottom rule
+        // nav (design TasksNav): the shared back target, centered title, hairline bottom rule
         Box(Modifier.fillMaxWidth().height(48.dp)) {
-            Row(
-                Modifier.align(Alignment.CenterStart).clip(RoundedCornerShape(8.dp)).clickable(onClick = onBack)
-                    .padding(start = 6.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Icon(ChevronLeftGlyph, null, tint = Tok.accent, modifier = Modifier.size(20.dp))
-                Text(stringResource(Res.string.settings_title), color = Tok.accent, fontSize = 15.sp)
-            }
+            BackTarget(onBack, Modifier.align(Alignment.CenterStart).padding(start = 4.dp))
             Text(
                 stringResource(Res.string.schedule_tasks_title), color = Tok.tx,
-                fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Center),
+                fontSize = 16.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(16.sp),
+                modifier = Modifier.align(Alignment.Center),
             )
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))

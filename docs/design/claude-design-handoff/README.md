@@ -77,6 +77,7 @@
 | `site-mobile` | [site-mobile —— 官网移动端整页设计（Site 1.5）](site-mobile/README.md) |
 | `site-restructure` | [site-restructure —— 官网 IA 重构 section 设计（Site 1.4）](site-restructure/README.md) |
 | `supporting-surfaces-ui-2.0` | [Supporting Surfaces UI 2.0 handoff](supporting-surfaces-ui-2.0/README.md) |
+| `voice-memo-tasks` | [Voice Memo to Tasks v2 — 语音备忘转任务](voice-memo-tasks/README.md)（UI v2.1 已验收，旧 v1 稿不采用） |
 | `user-manual` | [CC Pocket 用户手册设计交接](user-manual/README.md) |
 | `win-tray-flyout-292` | [Windows 托盘浮层（Tray Flyout）· issue #292](win-tray-flyout-292/README.md) |
 | `workflow-view` | [Workflow 编排视图 — 运行卡片／进度树／journal 回看／桌面停靠面板（设计 handoff）](workflow-view/README.md) |

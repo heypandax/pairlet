@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.session.distinctPreview
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.SessionSummary
@@ -63,19 +64,19 @@ internal fun ArchivedSessionsScreen(repo: PocketRepository, onBack: () -> Unit) 
 
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            Modifier.fillMaxWidth().padding(start = 4.dp, end = 14.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            BackTarget(onBack)
             Text(
-                "‹", color = Tok.tx, fontSize = 24.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onBack).padding(horizontal = 8.dp),
+                stringResource(Res.string.archive_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                style = tightCenter(18.sp),
             )
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(Res.string.archive_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             if (rows.isNotEmpty()) {
                 Spacer(Modifier.width(8.dp))
                 Text(
                     "${rows.size}", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                    style = tightCenter(11.sp),
                     modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(Tok.surface)
                         .padding(horizontal = 7.dp, vertical = 2.dp),
                 )

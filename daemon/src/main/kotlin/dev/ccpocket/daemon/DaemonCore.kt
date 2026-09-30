@@ -78,6 +78,10 @@ class DaemonCore(
     managedSessionRoot: java.io.File = dev.ccpocket.daemon.disk.ManagedSessionStore.defaultRoot(),
     /** #367 run-journal root. Read lazily (see [executionRuns]); tests hand in a temp directory. */
     private val executionRunRoot: java.io.File = dev.ccpocket.daemon.execution.RunJournal.defaultRoot(),
+    /** Voice memo scratch directory, emptied at start (see [dev.ccpocket.daemon.memo.MemoWorkDir]). Null — the
+     *  default, so unit tests and embedded cores never touch ~/.cc-pocket — keeps per-job directories in the
+     *  system temp directory. Production passes the daemon's own. */
+    voiceMemoWorkRoot: java.io.File? = null,
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + kotlinx.coroutines.CoroutineExceptionHandler { _, error ->
         Diagnostics.report(ErrorPath.ASYNC_WORKER, Stage.EXECUTE, ErrorCode.UNEXPECTED, error)
@@ -249,6 +253,24 @@ class DaemonCore(
         scope.launch(Dispatchers.IO) { runCatching { svc.recoverPending() } }
     }
 
+    /**
+     * Voice memo → tasks: a recording from the owner's phone is transcribed by a one-shot whisper-cli and organised
+     * by a one-shot, tool-less claude that shares the main backend's [claudeRuntime]. Neither touches the chat
+     * dictation's resident whisper-server, a project directory, or a session.
+     */
+    private val voiceMemoScratch = voiceMemoWorkRoot?.let { dev.ccpocket.daemon.memo.MemoWorkDir.prepare(it) }
+    val voiceMemo = dev.ccpocket.daemon.memo.VoiceMemoService(
+        scope,
+        dev.ccpocket.daemon.memo.MemoCliTranscriber(tempRoot = voiceMemoScratch),
+        // organisers in preference order — the phone picks its default agent when listed, else the first
+        dev.ccpocket.daemon.memo.MemoSummarizers(
+            listOf(
+                dev.ccpocket.daemon.memo.ClaudeMemoSummarizer(claudeRuntime, tempRoot = voiceMemoScratch),
+                dev.ccpocket.daemon.memo.CodexMemoSummarizer(codexBin, tempRoot = voiceMemoScratch),
+            ),
+        ),
+    )
+
     val router = RequestRouter(
         registry, dirs, transcribe, inbox, shell, exports, scope, auth, prefs, presets, scheduler,
         // presetEnv shares PresetStore with the DaemonInfo gateway pill (Main.kt): the host we ask for a
@@ -266,6 +288,7 @@ class DaemonCore(
         reviewOwner = reviewOwner,
         projectPins = projectPins,
         managedSessions = managedSessions, // issue #360: without this the router advertises and serves nothing
+        voiceMemo = voiceMemo,
         git = git,
         codexQuota = dev.ccpocket.daemon.codex.CodexQuotaService(codexBin),
     )
@@ -391,7 +414,10 @@ class DaemonCore(
     /** One refusal ledger for every execution layer (target bind, transport gate, run plane). */
     val executionRefusals = dev.ccpocket.daemon.execution.ExecutionRefusals()
 
-    suspend fun shutdown() = registry.closeAll()
+    suspend fun shutdown() {
+        runCatching { voiceMemo.close() }
+        registry.closeAll()
+    }
 
     private companion object {
         /** Cadence of the periodic spawned-session sweep (issue #216 ②). Convergence for crash/orphan

@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.conversation.OutboundSink
+import dev.ccpocket.daemon.memo.withVoiceMemo
 import dev.ccpocket.daemon.relay.dispatchOwnerControl
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.identity.PairedDevices
@@ -230,7 +231,7 @@ class WsConnection(
                                 // router owns the answer because it owns the readers; absent (an older
                                 // daemon) decodes to empty = "Claude only, legacy behaviour".
                                 quotaAgents = router.quotaAgentWires(),
-                            ),
+                            ).withVoiceMemo(router.voiceMemoCapability()),
                         ),
                     )
                     log.info("direct E2E session established with ${id.take(8)}…")
@@ -292,6 +293,11 @@ class WsConnection(
                             (body is PocketError && body.code == dev.ccpocket.daemon.session.ManagedSessionService.REGISTER_FAILED)
                         )
                 ) {
+                    if (!deviceStillAllowListed()) error("device revoked — closing live direct link")
+                }
+                // voice memo → tasks: a snapshot carries a transcript. The job may have been registered in the
+                // instant before its device was revoked; the socket that is still open must not be handed the result.
+                if (crypto != null && body is dev.ccpocket.protocol.VoiceMemoState) {
                     if (!deviceStillAllowListed()) error("device revoked — closing live direct link")
                 }
                 if (crypto != null && body is dev.ccpocket.protocol.ProjectPinsState) {
@@ -358,6 +364,20 @@ class WsConnection(
                         } catch (e: Exception) {
                             if (e is kotlinx.coroutines.CancellationException) throw e
                             log.warn("handle SyncProjectPins failed: ${e::class.simpleName}")
+                        }
+                        continue
+                    }
+                    // voice memo → tasks: in receive order as well, like the relay's inline route — a start must be
+                    // registered before its first chunk, or that chunk is answered "unknown job", dropped, and the
+                    // upload then waits out its idle timeout holding the device's only slot.
+                    if (env.body is dev.ccpocket.protocol.VoiceMemoStart || env.body is dev.ccpocket.protocol.VoiceMemoAudio ||
+                        env.body is dev.ccpocket.protocol.VoiceMemoGet || env.body is dev.ccpocket.protocol.VoiceMemoCancel
+                    ) {
+                        try {
+                            router.handle(env.body, sink, caps = caps, deviceId = gatedDeviceId)
+                        } catch (e: Exception) {
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            log.warn("handle ${env.body::class.simpleName} failed: ${e::class.simpleName}")
                         }
                         continue
                     }

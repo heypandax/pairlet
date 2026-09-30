@@ -148,15 +148,12 @@ fun PairingScreen(repo: PocketRepository, firstRun: Boolean = false) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Metric.gutter),
     ) {
         // the way back to step 1. Not shown while ADDING, where Cancel below already owns the back path and
-        // a second one would offer two different retreats from the same screen.
-        if (!adding) Row(
-            Modifier.fillMaxWidth().padding(top = Metric.gapXs),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            EntryQuietAction("‹ " + stringResource(Res.string.ob_title), color = Tok.accent) {
-                showOnboarding = true
-            }
-        }
+        // a second one would offer two different retreats from the same screen. The column pads a gutter; the
+        // target is pulled back onto the phone's shared 4 dp inset.
+        if (!adding) BackTarget(
+            { showOnboarding = true },
+            Modifier.offset(x = 4.dp - Metric.gutter).padding(top = Metric.gapXs),
+        )
         // added from an existing binding: a real way back, and the current computer stays connected
         if (adding) Row(
             Modifier.fillMaxWidth().padding(top = Metric.gapXs),
@@ -288,9 +285,7 @@ internal fun PairScanRoute(
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Metric.gutter),
     ) {
-        Row(Modifier.fillMaxWidth().padding(top = Metric.gapXs), verticalAlignment = Alignment.CenterVertically) {
-            EntryQuietAction("‹ " + stringResource(Res.string.close), color = Tok.accent) { onBack() }
-        }
+        BackTarget(onBack, Modifier.offset(x = 4.dp - Metric.gutter).padding(top = Metric.gapXs))
         EntryTitle(stringResource(Res.string.scan_title), null, Modifier.padding(top = Metric.gapS))
 
         Box(Modifier.padding(top = 20.dp).align(Alignment.CenterHorizontally)) {

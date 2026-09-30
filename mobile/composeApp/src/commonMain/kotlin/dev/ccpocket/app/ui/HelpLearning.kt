@@ -30,7 +30,6 @@ import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -92,6 +91,7 @@ import dev.ccpocket.app.telemetry.TelEvent
 import dev.ccpocket.app.telemetry.TelKey
 import dev.ccpocket.app.telemetry.Telemetry
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -196,15 +196,16 @@ internal fun HelpCenterScreen(
 
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         Row(
-            Modifier.fillMaxWidth().background(Tok.surface).padding(horizontal = 6.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().background(Tok.surface).padding(start = 4.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onBack) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
+            BackTarget(onBack)
             Text(
                 stringResource(Res.string.support_title),
                 color = Tok.tx,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold,
+                style = tightCenter(18.sp),
             )
         }
         LazyColumn(

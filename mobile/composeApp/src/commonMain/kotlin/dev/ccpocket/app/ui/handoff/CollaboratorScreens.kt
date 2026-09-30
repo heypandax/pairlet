@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -47,6 +48,8 @@ import dev.ccpocket.app.SystemBackHandler
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
+import dev.ccpocket.app.ui.BackTarget
 import dev.ccpocket.protocol.Collaborator
 import dev.ccpocket.protocol.CollaboratorDirection
 import dev.ccpocket.protocol.CollaboratorInvite
@@ -73,9 +76,13 @@ fun CollaboratorPickerPage(
     // draft instead of throwing the half-filled draft away.
     SystemBackHandler(enabled = true) { onBack() }
     Column(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("‹ ", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(onClick = onBack).padding(end = 4.dp))
-            Text(stringResource(Res.string.co_picker_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        // the host sheet pads 16 dp; pulling the row back by 12 puts the target on the phone's shared 4 dp inset
+        Row(Modifier.offset(x = (-12).dp), verticalAlignment = Alignment.CenterVertically) {
+            BackTarget(onBack)
+            Text(
+                stringResource(Res.string.co_picker_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(18.sp),
+            )
         }
         // eligibility, not merely "still connected": a REVIEW contact is a colleague's daemon and
         // binding a handoff to it is refused by the daemon (§13.3) — never offer it as a recipient
@@ -154,11 +161,12 @@ fun ConnectColleagueScreen(
     // and it does exactly what the ‹ does.
     SystemBackHandler(enabled = true) { onClose() }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
-        Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
-                Text("‹", color = Tok.tx2, fontSize = 20.sp)
-            }
-            Text(stringResource(Res.string.co_connect_cta), color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            BackTarget(onClose)
+            Text(
+                stringResource(Res.string.co_connect_cta), color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(15.sp),
+            )
         }
         if (connected != null) {
             // success sub-state: green = the binding SUCCEEDED (a completion, not a presence light)
@@ -367,9 +375,12 @@ fun CollaboratorsScreen(
     }
     var query by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
-        Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clickable(onClick = onBack), contentAlignment = Alignment.Center) { Text("‹", color = Tok.tx2, fontSize = 20.sp) }
-            Text(stringResource(Res.string.co_screen_title), color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            BackTarget(onBack)
+            Text(
+                stringResource(Res.string.co_screen_title), color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(15.sp), modifier = Modifier.weight(1f),
+            )
             Box(Modifier.size(44.dp).clickable(onClick = onConnectNew), contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.QrCode2, null, tint = Tok.tx2, modifier = Modifier.size(20.dp))
             }
@@ -439,9 +450,12 @@ fun CollaboratorDetailScreen(
     // this handler is registered after that screen's, so LIFO gives it the first refusal.
     SystemBackHandler(enabled = true) { onBack() }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
-        Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clickable(onClick = onBack), contentAlignment = Alignment.Center) { Text("‹", color = Tok.tx2, fontSize = 20.sp) }
-            Text(stringResource(Res.string.co_screen_title), color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            BackTarget(onBack)
+            Text(
+                stringResource(Res.string.co_screen_title), color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(15.sp),
+            )
         }
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 24.dp),

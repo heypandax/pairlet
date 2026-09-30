@@ -8,6 +8,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SkikoComposeUiTest
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
@@ -16,7 +17,7 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
 import dev.ccpocket.app.GITHUB_REPO_URL
 import dev.ccpocket.app.resources.Res
-import dev.ccpocket.app.resources.close
+import dev.ccpocket.app.resources.action_back
 import dev.ccpocket.app.resources.fr_cta
 import dev.ccpocket.app.resources.fr_enter_code
 import dev.ccpocket.app.resources.fr_install_pkg
@@ -95,13 +96,12 @@ class OnboardingCtaTelemetryTest {
      * [hasClickAction] is not decoration: `hasText` alone also matches the scrollable Column that MERGES the
      * label into its own semantics, and clicking that hits the container, not the control.
      *
-     * [scrolled] is false for the chrome that sits OUTSIDE the scroller (the close row, the docked footer):
-     * `performScrollTo` on a node with no scrollable ancestor throws rather than no-opping. Everything in
-     * the guide's body needs it, because the guide is taller than the 402 × 874 viewport.
+     * Only for controls in the guide's scrolling body, which is taller than the 402 × 874 viewport:
+     * `performScrollTo` on a node with no scrollable ancestor throws rather than no-opping.
      */
-    private fun SkikoComposeUiTest.tapText(text: String, scrolled: Boolean = true) {
+    private fun SkikoComposeUiTest.tapText(text: String) {
         val node = onAllNodes(hasText(text, substring = true) and hasClickAction()).onFirst()
-        if (scrolled) node.performScrollTo()
+        node.performScrollTo()
         node.performClick()
         waitForIdle()
     }
@@ -155,7 +155,9 @@ class OnboardingCtaTelemetryTest {
     /** Closing is an outcome too — the guide's own dismissal must not be the one silent control left. */
     @Test
     fun closingTheGuideIsRecorded() = guide {
-        tapText("‹ " + str(Res.string.close), scrolled = false)
+        // the shared back target: a chevron that names itself "Back", outside the scroller
+        onAllNodes(hasContentDescription(str(Res.string.action_back)) and hasClickAction()).onFirst().performClick()
+        waitForIdle()
         assertEquals(listOf<Any?>("close"), targets())
     }
 }

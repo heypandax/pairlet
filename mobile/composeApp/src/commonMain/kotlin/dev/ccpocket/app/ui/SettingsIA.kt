@@ -39,6 +39,7 @@ enum class SettingsDest {
     TEXT_SIZE,
     NOTIFICATIONS,
     VOICE_WHISPER,
+    VOICE_MEMO,
 
     // ── agent & session defaults ──
     DEFAULT_MODE,
@@ -76,7 +77,8 @@ val SettingsDest.category: SettingsCategory?
     get() = when (this) {
         SettingsDest.USAGE, SettingsDest.SCHEDULES -> null
 
-        SettingsDest.APPEARANCE, SettingsDest.TEXT_SIZE, SettingsDest.NOTIFICATIONS, SettingsDest.VOICE_WHISPER ->
+        SettingsDest.APPEARANCE, SettingsDest.TEXT_SIZE, SettingsDest.NOTIFICATIONS, SettingsDest.VOICE_WHISPER,
+        SettingsDest.VOICE_MEMO ->
             SettingsCategory.GENERAL
 
         SettingsDest.DEFAULT_MODE, SettingsDest.DEFAULT_MODEL, SettingsDest.DEFAULT_EFFORT, SettingsDest.FAST_MODE,

@@ -22,7 +22,7 @@
 | 协作 | [异步评审请求](REVIEW-REQUEST.md)、[运行时接力](SESSION-HANDOFF.md)、[接力实现复审](SESSION-HANDOFF-IMPLEMENTATION-REVIEW.md)、[飞书评审信任](FEISHU-REVIEWED-TRUST.md) |
 | 后端 | [Codex 多 Agent](CODEX-MULTI-AGENT.md)、[DSH ACP](DSH-ACP-TRANSPORT.md)、[DSH 提问桥接](DSH-ASK-BRIDGE.md)、[Kimi 设计](kimi-backend-design.md) |
 | 工作区 | [Git 面板](GIT-PANEL.md)、[Worktree](WORKTREE-MANAGEMENT.md)、[回退与 fork](REWIND-FORK.md)、[桌面分屏](SPLIT-PANES.md) |
-| 输入 | [语音输入](VOICE-INPUT.md) |
+| 输入 | [语音输入](VOICE-INPUT.md)、[语音备忘总体方案](VOICE-MEMO-TO-TASK.md)、[代码设计](VOICE-MEMO-CODE-DESIGN.md)、[UI 交接](claude-design-handoff/voice-memo-tasks/README.md)（UI v2.1 已验收，旧 v1 稿不采用；实现状态以代码为准） |
 | 诊断 | [总体方案](OBSERVABILITY.md)、[配置与验证入口](../observability/README.md)、[核心错误路径](../observability/ERROR-PATHS.md)、[产品分析口径](../observability/PRODUCT-INSIGHTS.md) |
 | 评估与历史探索 | [渠道集成评估](CHANNEL-INTEGRATIONS-EVALUATING.md)、[会话打开诊断评估](SESSION-OPEN-DIAGNOSTICS-EVALUATING.md)、[旧观测供应商评估](OBSERVABILITY-EVALUATING.md)、[已暂停的 Peer Call](PEER-CALL.md)、[已搁置的直连／中继路径选择与 P2P 评估](TRANSPORT-PATH-SELECTION-EVALUATING.md) |
 

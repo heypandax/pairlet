@@ -167,6 +167,7 @@ class DirectE2EConnection {
         } finally {
             connected = false
             if (liveGen == gen) liveGen = 0
+            outbox.retire(gen) // what this connection never wrote is reported as such, not left waiting
         }
     }
 
@@ -175,6 +176,11 @@ class DirectE2EConnection {
     /** Queue a project-pin frame for connection [expectedConnection] only, without suspending (#362). */
     fun tryEnqueuePin(frame: SyncProjectPins, fence: PinDispatchFence, expectedConnection: Int): PinEnqueueResult =
         outbox.tryEnqueuePin(frame, fence, expectedConnection) { liveGen }
+
+    /** Queue a transient frame for connection [expectedConnection] only, without suspending. The ticket's outcome
+     *  says whether it was written; it is never buffered for, or re-routed to, another connection. */
+    fun tryEnqueueTransient(frame: Frame, fence: TransientDispatchFence, expectedConnection: Int): TransientTicket =
+        outbox.tryEnqueueTransient(frame, fence, expectedConnection) { liveGen }
 
     /** Frames queued but not yet written (the socket never came up / died first) — the caller re-routes
      *  them to the relay so nothing silently evaporates in a direct→relay fallback. Pin frames are dropped

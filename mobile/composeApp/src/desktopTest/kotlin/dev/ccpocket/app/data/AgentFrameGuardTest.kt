@@ -58,7 +58,7 @@ class AgentFrameGuardTest {
     fun every_agent_scoped_frame_is_blocked_after_daemon_omits_its_agent() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val sent = mutableListOf<Frame>()
-        val repo = PocketRepository(scope).apply { onSendForTest = { sent += it } }
+        val repo = PocketRepository(scope).apply { onSendForTest = { if (it !is dev.ccpocket.protocol.ClientCaps) sent += it } } // the caps re-declaration that answers a DaemonInfo is not an agent-scoped frame
         try {
             repo.receiveForTest(DaemonInfo(supportedAgents = listOf("claude", "codex")))
             zcodeFrames.forEach { repo.sendForTest(it) }
@@ -73,7 +73,7 @@ class AgentFrameGuardTest {
     fun all_agent_usage_request_remains_unscoped() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val sent = mutableListOf<Frame>()
-        val repo = PocketRepository(scope).apply { onSendForTest = { sent += it } }
+        val repo = PocketRepository(scope).apply { onSendForTest = { if (it !is dev.ccpocket.protocol.ClientCaps) sent += it } } // the caps re-declaration that answers a DaemonInfo is not an agent-scoped frame
         try {
             repo.receiveForTest(DaemonInfo(supportedAgents = listOf("claude", "codex")))
             repo.sendForTest(FetchUsage(agent = null))

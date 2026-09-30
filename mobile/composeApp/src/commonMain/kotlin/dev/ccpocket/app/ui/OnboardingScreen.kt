@@ -184,10 +184,7 @@ fun OnboardingScreen(
 
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         if (compact) CollapsedHead(onBack)
-        else if (onBack != null) Row(
-            Modifier.fillMaxWidth().padding(horizontal = Metric.gapS).padding(top = Metric.gapXs),
-            verticalAlignment = Alignment.CenterVertically,
-        ) { EntryQuietAction("‹ " + stringResource(Res.string.close), color = Tok.accent) { cta(CTA_CLOSE); onBack() } }
+        else if (onBack != null) BackTarget({ cta(CTA_CLOSE); onBack() }, Modifier.padding(start = 4.dp, top = Metric.gapXs))
 
         Column(
             Modifier.weight(1f).verticalScroll(scroll)
@@ -312,22 +309,21 @@ private const val WORDMARK = "Pairlet"
 private fun CollapsedHead(onBack: (() -> Unit)?) {
     Column(Modifier.fillMaxWidth().background(Tok.base)) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = Metric.gutter).heightIn(min = 40.dp)
-                .padding(bottom = Metric.gap),
+            // with a way back the row starts at the shared 4 dp inset, and the target's own width is the gap
+            Modifier.fillMaxWidth().padding(start = if (onBack != null) 4.dp else Metric.gutter, end = Metric.gutter)
+                .heightIn(min = 40.dp).padding(bottom = Metric.gap),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Metric.gap),
         ) {
-            if (onBack != null) Text(
-                "‹", color = Tok.accent, style = TypeRole.title,
-                modifier = Modifier.clickable(role = Role.Button) { cta(CTA_CLOSE); onBack() },
-            )
+            if (onBack != null) BackTarget({ cta(CTA_CLOSE); onBack() })
             Text(
                 WORDMARK, color = Tok.muted,
-                style = TypeRole.label.copy(fontFamily = FontFamily.Monospace, letterSpacing = 1.7.sp),
+                style = TypeRole.label.copy(fontFamily = FontFamily.Monospace, letterSpacing = 1.7.sp)
+                    .merge(tightCenter(TypeRole.label.fontSize)),
+                modifier = Modifier.padding(end = Metric.gap),
             )
             Text(
                 stringResource(Res.string.ob_title), color = Tok.tx,
-                style = TypeRole.rowTitle.copy(fontSize = 16.sp), modifier = Modifier.weight(1f),
+                style = TypeRole.rowTitle.copy(fontSize = 16.sp).merge(tightCenter(16.sp)), modifier = Modifier.weight(1f),
             )
         }
         Hairline()

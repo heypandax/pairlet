@@ -35,6 +35,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -47,7 +50,10 @@ import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.pairing.encode
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
+import dev.ccpocket.app.ui.BackTarget
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.DirectoryEntry
@@ -308,16 +314,26 @@ private fun shortCode(blob: String): String {
 @Composable
 internal fun ShareTopBar(title: String, onBack: () -> Unit, closeGlyph: Boolean = false) {
     Row(
-        Modifier.fillMaxWidth().background(Tok.base).border(0.dp, Color.Transparent).padding(horizontal = 8.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().background(Tok.base).border(0.dp, Color.Transparent).padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            if (closeGlyph) "✕" else "‹", color = Tok.tx2, fontSize = if (closeGlyph) 17.sp else 22.sp,
-            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onBack).padding(horizontal = 10.dp, vertical = 4.dp),
-        )
+        if (closeGlyph) CloseTarget(onBack) else BackTarget(onBack)
         Spacer(Modifier.weight(1f))
-        Text(title, color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text(title, color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(15.sp))
         Spacer(Modifier.weight(1f))
-        Spacer(Modifier.width(34.dp))
+        // as wide as the leading target, so the title sits on the bar's true centre
+        Spacer(Modifier.width(Metric.touch))
     }
+}
+
+/** ✕ for a share screen that ends its flow rather than stepping back — the same 48 dp slot as [BackTarget]. */
+@Composable
+private fun CloseTarget(onClose: () -> Unit) {
+    val label = stringResource(Res.string.close)
+    Box(
+        Modifier.size(Metric.touch).clip(RoundedCornerShape(Metric.radiusS))
+            .semantics(mergeDescendants = true) { contentDescription = label }
+            .clickable(role = Role.Button, onClick = onClose),
+        contentAlignment = Alignment.Center,
+    ) { Text("✕", color = Tok.tx2, fontSize = 17.sp, style = tightCenter(17.sp)) }
 }
