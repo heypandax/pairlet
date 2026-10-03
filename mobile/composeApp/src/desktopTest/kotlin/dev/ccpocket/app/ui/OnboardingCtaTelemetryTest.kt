@@ -108,10 +108,16 @@ class OnboardingCtaTelemetryTest {
 
     @Test
     fun theThreeExitsEachNameThemselves() = guide {
-        // the screen's own exposure event still fires, and carries no params (deliberately unchanged)
+        // the screen's own exposure event still fires; since #342 it carries exactly one param, the
+        // visit bucket (first | return | return_many) — and nothing else
         assertTrue(
-            synchronized(seen) { seen.any { it.first == TelEvent.OnboardingShown && it.second.isEmpty() } },
-            "onboarding_shown must survive this change unparameterised, saw $seen",
+            synchronized(seen) {
+                seen.any {
+                    it.first == TelEvent.OnboardingShown && it.second.keys == setOf(TelKey.Value) &&
+                        it.second[TelKey.Value] in setOf("first", "return", "return_many")
+                }
+            },
+            "onboarding_shown must fire with only its visit bucket, saw $seen",
         )
 
         tapText(str(Res.string.fr_cta))
