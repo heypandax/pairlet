@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -89,6 +90,10 @@ fun QuestionCard(
     val otherTexts = remember(ask.askId) { mutableStateMapOf<Int, String>() }
     var freeform by remember(ask.askId) { mutableStateOf(false) }
     var freeformText by remember(ask.askId) { mutableStateOf("") }
+    // #402: the card can take most of a phone screen, leaving a line or two of the transcript it is asking
+    // about. Collapsed it is one header + one line of the question, and every selection made so far is
+    // kept (the state above lives outside the collapsed branch).
+    var collapsed by remember(ask.askId) { mutableStateOf(false) }
 
     // a question's outgoing answer: selected labels in option order, "Other…" text last, comma-joined
     fun answerOf(i: Int): String? {
@@ -122,16 +127,35 @@ fun QuestionCard(
                 .background(Brush.horizontalGradient(listOf(Tok.accent.copy(alpha = 0f), Tok.accent.copy(alpha = 0.75f), Tok.accent.copy(alpha = 0f)))),
         )
         Column(Modifier.padding(start = 15.dp, end = 15.dp, top = 14.dp, bottom = 15.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            val toggleLabel = stringResource(if (collapsed) Res.string.question_expand else Res.string.question_collapse)
+            Row(
+                Modifier.clip(RoundedCornerShape(8.dp))
+                    .clickable(onClickLabel = toggleLabel, role = Role.Button) {
+                        collapsed = !collapsed
+                        if (collapsed) onOwnsInput(false) // a hidden field can't keep the composer away
+                    },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
                 QBadge(28.dp)
-                Text(stringResource(Res.string.question_header), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(stringResource(Res.string.question_header), color = Tok.tx2, fontSize = 13.sp, style = tightCenter(13.sp), modifier = Modifier.weight(1f))
                 if (multiQ) {
                     Text(
                         stringResource(Res.string.question_progress, qIndex + 1, questions.size),
-                        color = Tok.muted, fontSize = 11.5.sp,
+                        color = Tok.muted, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, letterSpacing = 0.3.sp,
                     )
                 }
+                Icon(
+                    if (collapsed) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                    toggleLabel, tint = Tok.tx2, modifier = Modifier.size(20.dp),
+                )
+            }
+            if (collapsed) {
+                Text(
+                    questions[qIndex].question, color = Tok.tx, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 10.dp).fillMaxWidth().clickable(onClickLabel = toggleLabel) { collapsed = false },
+                )
+                return@Column
             }
             if (multiQ && !freeform) {
                 Row(

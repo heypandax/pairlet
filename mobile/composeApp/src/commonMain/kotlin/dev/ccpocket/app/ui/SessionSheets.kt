@@ -821,6 +821,11 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
                     }
                 }
             }
+            // Codex keeps its static fallback, so an error never empties the list — without this line the
+            // built-in trio is indistinguishable from the user's real catalog ("is the list trimmed?").
+            if (agent == AgentKind.CODEX) agentModels?.error?.let {
+                Text(it, color = Tok.muted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 10.dp))
+            }
             // ZCode has no static fallback: distinguish an in-flight fetch from a completed empty answer,
             // and preserve a refresh error even when last-good provider/model rows remain visible.
             modelCatalogNotice(agent, agentModels, choices.isNotEmpty())?.let { notice ->

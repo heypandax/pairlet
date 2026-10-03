@@ -11,6 +11,8 @@ import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.LEGACY_CLIENT_MAX_FRAME_BYTES
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PocketJson
+import dev.ccpocket.protocol.SessionSummary
+import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.ToolEvent
 import dev.ccpocket.protocol.ToolPhase
 import dev.ccpocket.protocol.WIRE_MAX_FRAME_BYTES
@@ -142,6 +144,29 @@ class FrameFitterTest {
         val got = decode(out) as FileContent
         assertTrue(got.truncated)
         assertTrue(got.text!!.length in 1 until 1_200_000)
+    }
+
+    /** A project listing over the cap used to be sent as it was: the link dropped on every tap of that
+     *  project and the list never opened. Previews go first, then the oldest rows (rows are newest-first). */
+    @Test
+    fun a_session_list_over_the_cap_sheds_previews_then_its_oldest_rows() {
+        fun summary(i: Int, prompt: String) =
+            SessionSummary("s$i", "title $i", prompt, messageCount = 1, cwd = "/w", lastModified = 10_000L - i)
+        val previews = Sessions("/w", (0 until 40).map { summary(it, "p".repeat(60_000)) })
+        val reports = mutableListOf<String>()
+        val out = FrameFitter.encodeWithin(env(previews), legacy) { reports += it }
+        assertTrue(sealed(out) <= legacy)
+        val got = decode(out) as Sessions
+        assertEquals(40, got.items.size)
+        assertTrue(got.items.all { it.firstPrompt.isEmpty() && it.title.isNotEmpty() })
+        assertTrue("shrunk" in reports.single(), reports.single())
+
+        val many = Sessions("/w", (0 until 12_000).map { summary(it, "") })
+        val fitted = FrameFitter.encodeWithin(env(many), legacy)
+        assertTrue(sealed(fitted) <= legacy)
+        val kept = (decode(fitted) as Sessions).items
+        assertTrue(kept.size in 1 until 12_000)
+        assertEquals("s0", kept.first().sessionId)
     }
 
     @Test

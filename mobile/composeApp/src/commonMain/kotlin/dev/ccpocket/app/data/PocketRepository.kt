@@ -2148,6 +2148,7 @@ class PocketRepository(
         if (convoId.value != null && currentSessionId == t.sessionId) return // already in this session — don't churn it
         sessionsDir.value = null // drop any half-open session list so the chat is what shows
         browseIntentDir = null // …and its #349 intent with it, or that half-open list's reply reinstates it
+        clearSessionsOpening()
         openSession(t.workdir, t.sessionId, title = t.title, agent = t.agent)
     }
 
@@ -2925,6 +2926,7 @@ class PocketRepository(
         convoId.value = null
         sessionsDir.value = null
         browseIntentDir = null // #349: a browse intent belongs to the link/machine that accepted the tap
+        clearSessionsOpening()
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
         clearAskQueue()
         pendingApprovals.clear()
@@ -3085,6 +3087,7 @@ class PocketRepository(
         convoId.value = null; currentSessionId = null; sessionKey.value = null
         workdir.value = null // same reason as disconnect(): a stale path must not leak into a later ⌘N (issue #56)
         sessionsDir.value = null; sessions.clear(); browseIntentDir = null // #349: same rule as disconnect()
+        clearSessionsOpening()
         legacySessions = emptyList(); managedListLoading.value = false // #360: the daemon rows leave with the list
         chatTitle.value = null; observing.value = false; streaming.value = false
         opening.value = false; openTimedOut.value = false; switching.value = false; switchingSession.value = false
@@ -3565,6 +3568,7 @@ class PocketRepository(
                     renameSupported.value = f.renameSupported // #158: false from an older daemon / a guest
                     archiveSupported.value = f.archiveSupported // #202: same contract as renameSupported
                 }
+                if (f.workdir == sessionsOpening.value?.dir) clearSessionsOpening()
                 // Even a DROPPED reply ends the spinner that may have asked for it — a stranded
                 // sessionsRefreshing would greet the user with a dead indicator on the next visit.
                 sessionsRefreshing.value = false
@@ -5850,8 +5854,33 @@ class PocketRepository(
         // #349: recorded SYNCHRONOUSLY, like the #235 open claim — the tap is the navigation decision, and a
         // fence armed only inside the coroutine below would already have lost the race against the send.
         browseIntentDir = wd
+        trackSessionsOpening(wd)
         return scope.launch { send(ListSessions(wd)) }
     }
+
+    /** A project tap whose session list has not arrived yet. The tap itself navigates nothing — the route
+     *  only moves when the daemon's `Sessions` reply lands — so without this the Projects screen gave no
+     *  sign that anything was asked, and a reply that never came (slow scan, dropped link) read as a dead
+     *  row. [timedOut] flips after [sessionsOpenTimeoutMs]; the request stays live and a late reply still
+     *  opens the list. */
+    data class SessionsOpening(val dir: String, val timedOut: Boolean = false)
+
+    val sessionsOpening = mutableStateOf<SessionsOpening?>(null)
+    private var sessionsOpeningJob: Job? = null
+    internal var sessionsOpenTimeoutMs: Long = 12_000L
+
+    private fun trackSessionsOpening(wd: String) {
+        sessionsOpeningJob?.cancel()
+        // re-listing the list already on screen (group edits, the desktop sidebar) is not a navigation
+        if (sessionsDir.value == wd) { sessionsOpening.value = null; return }
+        sessionsOpening.value = SessionsOpening(wd)
+        sessionsOpeningJob = scope.launch {
+            delay(sessionsOpenTimeoutMs)
+            if (sessionsOpening.value?.dir == wd) sessionsOpening.value = SessionsOpening(wd, timedOut = true)
+        }
+    }
+
+    private fun clearSessionsOpening() { sessionsOpeningJob?.cancel(); sessionsOpening.value = null }
 
     // ── #360 stage 2: managed session list ──────────────────────────────────────────────────────────────────
 
@@ -8246,6 +8275,7 @@ class PocketRepository(
         if (convoId.value != null) backToBrowse()
         fenceSessionNavigation()
         browseIntentDir = null // #349: BACK retires the browse intent, so a reply still in flight can't re-enter the list
+        clearSessionsOpening()
         sessionsDir.value = null
         sessions.clear()
         // #360: the daemon rows went with the list — a managed read landing now must not resurrect them

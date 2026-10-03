@@ -64,6 +64,8 @@
     <string name="history_badge">历史</string>
     <string name="dir_open_sessions">进行中的会话</string>
     <string name="dir_projects">项目</string>
+    <string name="dir_sessions_opening">正在打开 %1$s…</string>
+    <string name="dir_sessions_open_timeout">还没有收到电脑对 %1$s 的回复。会话很多或网络较慢时可能需要更久，点这里重试。</string>
     <string name="dir_active">进行中</string>
     <string name="dir_pinned">置顶</string>
     <string name="dir_current_project">当前项目</string>
@@ -742,6 +744,8 @@
     <string name="question_answer">回答</string>
     <string name="question_skip">跳过</string>
     <string name="question_skip_message">User skipped the questions</string>
+    <string name="question_collapse">收起提问</string>
+    <string name="question_expand">展开提问</string>
     <string name="opencode_question_header">OpenCode 有问题想确认</string>
     <string name="opencode_question_readonly">OpenCode 会话暂不支持作答</string>
     <string name="questions_answered_one">回答了 %1$d 个问题</string>

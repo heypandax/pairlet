@@ -59,6 +59,53 @@ class CodexModelServiceTest {
         assertNull(result.modelCapabilities.single { it.model == "gpt-5.5" }.defaultReasoningEffort)
     }
 
+    /** One entry in a shape this daemon has not seen must cost that entry's field, not the whole list —
+     *  a throw here used to replace the real catalog with the three built-in fallbacks. */
+    @Test
+    fun fetch_keeps_the_catalog_when_one_entry_has_an_unexpected_shape() = runBlocking {
+        val dir = Files.createTempDirectory("codex-model-shape-test")
+        val cache = dir.resolve("models_cache.json")
+        val config = dir.resolve("config.toml")
+        Files.writeString(
+            cache,
+            """
+            {
+              "models": [
+                { "slug": "gpt-6-sol", "visibility": "list", "priority": { "rank": 1 },
+                  "default_reasoning_level": { "effort": "max" },
+                  "supported_reasoning_levels": [ { "effort": ["max"] }, { "effort": "ultra" } ],
+                  "service_tiers": [ { "id": "priority", "name": { "en": "Fast" }, "description": [] } ] },
+                { "slug": { "id": "broken" }, "visibility": "list", "priority": 2 },
+                { "slug": "gpt-6-luna", "visibility": ["list"], "priority": 3 },
+                { "slug": "gpt-6-astra", "visibility": "list", "priority": 4, "upgrade": null }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        val result = CodexModelService(cachePath = cache, configPath = config).fetch()
+
+        assertNull(result.error)
+        assertEquals(listOf("gpt-6-astra", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"), result.models)
+        val sol = result.modelCapabilities.single { it.model == "gpt-6-sol" }
+        assertEquals(listOf("ultra"), sol.reasoningEfforts)
+        assertNull(sol.defaultReasoningEffort)
+        assertEquals("priority", sol.serviceTiers.single().name)
+    }
+
+    /** Without the cache the list is only the built-in fallback; the reply must say so. */
+    @Test
+    fun fetch_reports_a_missing_cache_instead_of_passing_the_fallback_off_as_the_catalog() = runBlocking {
+        val dir = Files.createTempDirectory("codex-model-missing-test")
+        val config = dir.resolve("config.toml")
+        Files.writeString(config, "model = \"gpt-6-sol\"\n")
+
+        val result = CodexModelService(cachePath = dir.resolve("models_cache.json"), configPath = config).fetch()
+
+        assertEquals(listOf("gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"), result.models)
+        assertTrue(result.error.orEmpty().contains("models_cache.json"))
+    }
+
     @Test
     fun fetch_bounds_cache_capabilities_before_they_reach_the_wire() = runBlocking {
         val dir = Files.createTempDirectory("codex-model-bounds-test")

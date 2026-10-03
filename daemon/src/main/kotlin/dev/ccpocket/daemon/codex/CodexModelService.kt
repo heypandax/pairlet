@@ -12,11 +12,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Path
 
 /** Reads the Codex CLI's local model cache. This mirrors the Mac app/CLI without network calls. */
@@ -41,6 +42,10 @@ class CodexModelService(
                 models = models,
                 modelCapabilities = cached.map { it.capabilities },
                 modePresets = MODE_PRESETS,
+                // A missing cache used to look exactly like a real three-model catalog: say why the list is
+                // only the built-in fallback, so the picker can tell the user instead of looking trimmed.
+                error = if (cachePath.toFile().isFile) null
+                else "Codex model cache not found at $cachePath — showing built-in models only. Run the Codex CLI once on this computer to refresh it.",
             )
         }.getOrElse { e ->
             val configured = CodexDefaultModel.resolve(configPath)
@@ -59,34 +64,35 @@ class CodexModelService(
         val models = root["models"] as? JsonArray ?: return emptyList()
         return models.asSequence().mapNotNull { element ->
             val obj = element as? JsonObject ?: return@mapNotNull null
-            val slug = obj["slug"]?.jsonPrimitive?.contentOrNull
+            val slug = obj["slug"].text()
                 ?.trim()
                 ?.takeIf { usableWireString(it, MAX_MODEL_ID_LEN) }
                 ?: return@mapNotNull null
-            val visible = obj["visibility"]?.jsonPrimitive?.contentOrNull == "list"
+            val visible = obj["visibility"].text() == "list"
             // Current caches encode `upgrade` as an object (or null), not a string. Treat every non-null
-            // shape as superseded; calling jsonPrimitive on the object aborts the whole model listing.
+            // shape as superseded. Every field below is read shape-tolerantly ([text]/[int]) for the same
+            // reason: one entry in an unexpected shape must cost that field, not the whole model listing.
             val upgrade = obj["upgrade"]?.takeUnless { it is JsonNull }
             if (!visible || upgrade != null) return@mapNotNull null
             val efforts = (obj["supported_reasoning_levels"] as? JsonArray).orEmpty().mapNotNull { level ->
-                (level as? JsonObject)?.get("effort")?.jsonPrimitive?.contentOrNull
+                (level as? JsonObject)?.get("effort").text()
                     ?.trim()
                     ?.takeIf { usableWireString(it, MAX_EFFORT_LEN) }
             }.distinct().take(MAX_EFFORTS)
             val tiers = (obj["service_tiers"] as? JsonArray).orEmpty().mapNotNull { tier ->
                 val t = tier as? JsonObject ?: return@mapNotNull null
-                val id = t["id"]?.jsonPrimitive?.contentOrNull
+                val id = t["id"].text()
                     ?.trim()
                     ?.takeIf { usableWireString(it, MAX_TIER_ID_LEN) }
                     ?: return@mapNotNull null
                 ModelServiceTier(
                     id = id,
-                    name = t["name"]?.jsonPrimitive?.contentOrNull
+                    name = t["name"].text()
                         ?.trim()
                         ?.takeIf(String::isNotEmpty)
                         ?.take(MAX_TIER_NAME_LEN)
                         ?: id,
-                    description = t["description"]?.jsonPrimitive?.contentOrNull
+                    description = t["description"].text()
                         ?.trim()
                         ?.takeIf(String::isNotEmpty)
                         ?.take(MAX_TIER_DESCRIPTION_LEN),
@@ -94,11 +100,11 @@ class CodexModelService(
             }.distinctBy { it.id }.take(MAX_SERVICE_TIERS)
             CacheModel(
                 slug = slug,
-                priority = obj["priority"]?.jsonPrimitive?.intOrNull ?: Int.MAX_VALUE,
+                priority = obj["priority"].int() ?: Int.MAX_VALUE,
                 capabilities = ModelCapabilities(
                     model = slug,
                     reasoningEfforts = efforts,
-                    defaultReasoningEffort = obj["default_reasoning_level"]?.jsonPrimitive?.contentOrNull
+                    defaultReasoningEffort = obj["default_reasoning_level"].text()
                         ?.trim()
                         ?.takeIf { usableWireString(it, MAX_EFFORT_LEN) },
                     serviceTiers = tiers,
@@ -143,6 +149,9 @@ class CodexModelService(
         private const val MAX_TIER_ID_LEN = 64
         private const val MAX_TIER_NAME_LEN = 64
         private const val MAX_TIER_DESCRIPTION_LEN = 160
+
+        private fun JsonElement?.text(): String? = (this as? JsonPrimitive)?.contentOrNull
+        private fun JsonElement?.int(): Int? = (this as? JsonPrimitive)?.intOrNull
 
         private fun usableWireString(value: String, maxLength: Int): Boolean =
             value.isNotEmpty() && value.length <= maxLength && value.none(Char::isISOControl)

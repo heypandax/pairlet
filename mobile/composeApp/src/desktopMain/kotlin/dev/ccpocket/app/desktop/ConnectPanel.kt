@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.ui.PAIR_COMMAND
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.decodeShareInvite
 import dev.ccpocket.app.pairing.displayName
@@ -216,7 +217,7 @@ private fun PairHint() {
     Text(
         buildAnnotatedString {
             append(stringResource(Res.string.run_code_prefix) + " ")
-            withStyle(SpanStyle(fontFamily = Dk.mono, fontSize = 12.sp, background = Tok.surface, color = Tok.tx2)) { append(" cc-pocket pair ") }
+            withStyle(SpanStyle(fontFamily = Dk.mono, fontSize = 12.sp, background = Tok.surface, color = Tok.tx2)) { append(" $PAIR_COMMAND ") }
             append(" " + stringResource(Res.string.run_code_suffix))
         },
         color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, lineHeight = 19.sp, textAlign = TextAlign.Center,

@@ -396,6 +396,12 @@ class RequestRouter(
          *  and leaving it unbounded is how one machine-wide frame overruns the relay's 4MB limit. */
         const val ARCHIVE_PROMPT_CLIP = 200
 
+        /** Per-row clip for a project listing's [SessionSummary.firstPrompt]. The apps render it as a
+         *  two-line preview under the title, so a few hundred characters is all that is ever seen — while
+         *  the untruncated text (a pasted log, a skill injection) put a busy project's `Sessions` frame
+         *  over the client's frame cap, which drops the link instead of opening the list. */
+        const val SESSION_PROMPT_CLIP = 400
+
         /** §18.2 P2-3: frames only an approvalV2-declaring client should receive — ingress sinks drop
          *  them for undeclared peers instead of relying on the client's unknown-type tolerance. */
         fun approvalV2Only(frame: Frame): Boolean =
@@ -1699,6 +1705,7 @@ class RequestRouter(
         if (archived.isNotEmpty()) items = items.filter { it.sessionId !in archived }
         // wire-compat (ClientCaps): an undeclared client would drop this WHOLE frame on one opencode/kimi row
         items = items.filter { capsAllow(caps, it.agent) }
+        items = items.map { if (it.firstPrompt.length > SESSION_PROMPT_CLIP) it.copy(firstPrompt = it.firstPrompt.take(SESSION_PROMPT_CLIP)) else it }
         val groups = if (guestScope != null) null else SessionGroups.groupsFor(wd)
         // renameSupported (issue #158) / archiveSupported (issue #202): owner-only — a guest's frame is
         // capability-denied anyway, so its client must not show the entry

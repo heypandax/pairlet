@@ -1619,6 +1619,7 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                 onSegment = { i -> repo.browsePath.value = segs.getOrNull(i)?.second?.takeIf { it != root } },
             )
         }
+        SessionsOpeningStrip(repo)
         // weight instead of fillMaxSize so the docked allowance strip below can claim its 48dp. With the
         // strip absent (no snapshot) this is the identical measurement: a lone weighted child in a Column
         // gets exactly the remaining height fillMaxSize was taking.
@@ -1975,6 +1976,36 @@ private fun ImeFollower(listState: LazyListState, repo: PocketRepository, pinned
         }
     }
 }
+
+/** The Projects screen's answer to "I tapped a project and nothing happened": the tap only sends the
+ *  request, so say it is in flight, and say so plainly when the computer has not answered in time. A reply
+ *  that lands within [SESSIONS_OPENING_GRACE_MS] never shows the strip at all. */
+@Composable
+private fun SessionsOpeningStrip(repo: PocketRepository) {
+    val opening = repo.sessionsOpening.value ?: return
+    var shown by remember(opening.dir) { mutableStateOf(false) }
+    LaunchedEffect(opening.dir) { delay(SESSIONS_OPENING_GRACE_MS); shown = true }
+    if (!shown && !opening.timedOut) return
+    val name = opening.dir.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifBlank { opening.dir }
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+            .then(if (opening.timedOut) Modifier.clickable { repo.listSessions(opening.dir) } else Modifier)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (!opening.timedOut) {
+            CircularProgressIndicator(Modifier.size(14.dp), color = Tok.accent, strokeWidth = 2.dp)
+            Spacer(Modifier.width(10.dp))
+        }
+        Text(
+            stringResource(if (opening.timedOut) Res.string.dir_sessions_open_timeout else Res.string.dir_sessions_opening, name),
+            color = if (opening.timedOut) Tok.tx2 else Tok.muted, fontSize = 12.5.sp, lineHeight = 17.sp,
+            style = tightCenter(12.5.sp), modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+private const val SESSIONS_OPENING_GRACE_MS = 400L
 
 /** Tap a project: jump straight into its live session when one is running, else open its session list.
  *  The resume pins the session's OWN backend (liveAgent) — the default-agent preference must not decide

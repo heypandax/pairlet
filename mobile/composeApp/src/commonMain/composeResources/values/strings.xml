@@ -64,6 +64,8 @@
     <string name="history_badge">history</string>
     <string name="dir_open_sessions">Open Sessions</string>
     <string name="dir_projects">Projects</string>
+    <string name="dir_sessions_opening">Opening %1$s…</string>
+    <string name="dir_sessions_open_timeout">No reply from your computer yet for %1$s. A project with many sessions or a slow link can take longer — tap to try again.</string>
     <string name="dir_active">Active</string>
     <string name="dir_pinned">Pinned</string>
     <string name="dir_current_project">Current project</string>
@@ -742,6 +744,8 @@
     <string name="question_answer">Answer</string>
     <string name="question_skip">Skip</string>
     <string name="question_skip_message">User skipped the questions</string>
+    <string name="question_collapse">Collapse question</string>
+    <string name="question_expand">Expand question</string>
     <string name="opencode_question_header">OpenCode has a question</string>
     <string name="opencode_question_readonly">Answering isn\'t supported in OpenCode sessions yet</string>
     <string name="questions_answered_one">Answered %1$d question</string>

@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
@@ -29,6 +30,8 @@ import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.getString
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.question_answer
+import dev.ccpocket.app.resources.question_collapse
+import dev.ccpocket.app.resources.question_expand
 import dev.ccpocket.app.resources.question_freeform_link
 import dev.ccpocket.app.resources.question_other
 import dev.ccpocket.app.resources.questions_unanswered_collapse
@@ -51,6 +54,26 @@ class QuestionCardUiTest {
         "Which sections?", header = "Sections", multiSelect = true,
         options = listOf(AskOption("Intro", "start"), AskOption("Body", "middle"), AskOption("End", "close")),
     )
+
+    /** #402: collapsing frees the transcript behind the card; the pick made before collapsing survives. */
+    @Test
+    fun collapse_hides_the_options_and_expand_brings_back_the_selection() = runComposeUiTest {
+        var got: Map<String, String>? = null
+        setContent { PocketTheme { QuestionCard(ask(color), onAnswer = { a, _ -> got = a }, onSkip = {}) } }
+        val collapse = runBlocking { getString(Res.string.question_collapse) }
+        val expand = runBlocking { getString(Res.string.question_expand) }
+        val answer = runBlocking { getString(Res.string.question_answer) }
+        onAllNodes(hasText("Red")).onFirst().performClick()
+
+        onAllNodes(hasContentDescription(collapse)).onFirst().performClick()
+        onAllNodes(hasText("Red")).assertCountEquals(0)
+        onAllNodes(hasText(answer)).assertCountEquals(0)
+        onAllNodes(hasText("Which color?")).onFirst().assertIsDisplayed()
+
+        onAllNodes(hasContentDescription(expand)).onFirst().performClick()
+        onAllNodes(hasText(answer)).onFirst().performClick()
+        assertEquals(mapOf("Which color?" to "Red"), got)
+    }
 
     @Test
     fun singleSelect_pick_then_answer_sends_label_keyed_by_question() = runComposeUiTest {

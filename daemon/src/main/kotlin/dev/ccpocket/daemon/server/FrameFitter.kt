@@ -8,6 +8,7 @@ import dev.ccpocket.protocol.FileContent
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.PocketJson
+import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.ToolEvent
 
 /**
@@ -24,7 +25,8 @@ import dev.ccpocket.protocol.ToolEvent
  * Shrinking is per frame type, cheapest loss first: a history window sheds row extras (images, sub-agent
  * reports) before rows, and drops rows oldest-first with its cursor metadata re-anchored so the phone pages
  * the rest in on demand; a tool event loses its images; a file body over the cap becomes the same "too
- * large" refusal the daemon already gives for files over its own cap. Anything else is sent as it is and
+ * large" refusal the daemon already gives for files over its own cap; a project's session list loses its
+ * prompt previews, then its oldest rows. Anything else is sent as it is and
  * reported through [encodeWithin]'s callback, so a new oversized frame type shows up in the daemon log
  * instead of as a silent reconnect loop.
  */
@@ -96,7 +98,28 @@ object FrameFitter {
                 body.copy(text = ReplayBudget.takeUtf8(text, room / 2), truncated = true)
             }
         }
+        is Sessions -> fitSessions(env, maxFrameBytes, body)
         else -> null
+    }
+
+    /**
+     * A session list that fits. The rows arrive newest-first and already carry clipped previews
+     * ([RequestRouter.SESSION_PROMPT_CLIP]), so this only fires for a project with thousands of sessions or
+     * a client with a small cap: the previews go first (the title still names every row), then the oldest
+     * rows. The frame has no "truncated" field, so the loss is only logged — a list missing its oldest
+     * rows still opens, where the oversized frame dropped the link on every tap.
+     */
+    private fun fitSessions(env: Envelope, maxFrameBytes: Long, body: Sessions): Frame {
+        val target = jsonBudget(maxFrameBytes)
+        fun measure(candidate: Sessions): Int = encode(env.copy(body = candidate)).size
+        var kept = body.copy(items = body.items.map { it.copy(firstPrompt = "") })
+        var encoded = measure(kept)
+        var passes = 0
+        while (encoded > target && passes++ < MAX_PASSES && kept.items.isNotEmpty()) {
+            kept = kept.copy(items = kept.items.take((kept.items.size * target.toDouble() / encoded * 0.9).toInt()))
+            encoded = measure(kept)
+        }
+        return kept
     }
 
     /**
