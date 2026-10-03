@@ -13,7 +13,8 @@ import kotlin.io.path.isDirectory
  * ├── session_index.jsonl            # one {sessionId, sessionDir, workDir} line per session (global index)
  * └── sessions/<workDirKey>/<sessionId>/
  *     ├── state.json                 # title, lastPrompt, timestamps, forkedFrom
- *     └── agents/main/wire.jsonl     # the main agent's full wire event stream (replay source)
+ *     ├── agents/main/wire.jsonl     # the main agent's full wire event stream (replay source)
+ *     └── agents/main/tasks/<id>.json  # one record per background task; `status` is its completion signal
  * ```
  *
  * We NEVER compute `workDirKey` ourselves (its slug rule is undocumented and cwds with `_`/`.` are the
@@ -32,6 +33,19 @@ object KimiPaths {
 
     /** The main agent's wire log inside a session dir (`agents/main/wire.jsonl`) — the replay/resume source. */
     fun mainWireLog(sessionDir: Path): Path = sessionDir.resolve("agents").resolve("main").resolve("wire.jsonl")
+
+    /** One background task's record inside a session (`agents/main/tasks/<taskId>.json`, probe 2.1.1) —
+     *  `{taskId, status, exitCode, …}`, rewritten by the CLI when the task ends. Null when the session's
+     *  directory is unknown; the file itself may not exist yet. */
+    fun taskFile(sessionId: String, taskId: String): Path? =
+        sessionDir(sessionId)?.resolve("agents")?.resolve("main")?.resolve("tasks")?.resolve("$taskId.json")
+
+    /** The `status` of a task record, or null when the file is missing, mid-write or not a task record. */
+    fun taskStatus(file: Path): String? = runCatching {
+        val root = kotlinx.serialization.json.Json.parseToJsonElement(java.nio.file.Files.readString(file))
+        ((root as? kotlinx.serialization.json.JsonObject)?.get("status") as? kotlinx.serialization.json.JsonPrimitive)
+            ?.takeIf { it.isString }?.content
+    }.getOrNull()
 
     /** Resolve a sessionId's on-disk directory via the index's recorded `sessionDir`. Falls back to a bounded
      *  walk of `sessions/` only when the index has no hit (older/renamed layouts). Never throws. */

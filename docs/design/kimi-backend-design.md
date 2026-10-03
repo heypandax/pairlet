@@ -264,6 +264,19 @@ probe 脚本 `scripts/probe-kimi-wire.py` 假设 `kimi --wire`，实测该 flag 
 | V-win | **PASS** | `irm …/install.ps1 | iex` → `%USERPROFILE%\.kimi-code\bin\kimi.exe`（0.34.0），Git Bash 下 ACP 拉起正常，daemon 无需特殊处理。 |
 | V-auth | **PASS（反向）** | 已登录下 `session/new` 正常返回 `sessionId` + `configOptions`（model/thinking/mode 选项——P2 可用它做会话内模型/模式切换，无需 relaunch）。`initialize` 响应带 `authMethods=[login]` 与 `agentCapabilities.auth.logout`。 |
 
+### probe 实测结果（2026-10-03，kimi 2.1.1，脚本 `scripts/probe-kimi-bgtask.py`，issue #391）
+
+后台 shell（`Bash` 带 `run_in_background=true`）的完成信号。探针用本地假模型驱动 CLI，不需要 Kimi 账号。
+
+| 项 | 结果 | 结论 |
+|---|---|---|
+| 启动回执 | **PASS** | `tool_call_update` 立即 `completed`，`rawOutput` 首行 `task_id: bash-xxxxxxxx`，随后 `status: running`。 |
+| ACP 完成通知 | **不存在** | 任务结束后 ACP 没有任何帧；ACP 适配层没有任务事件对应的 update 类型。 |
+| 落盘记录 | **PASS** | `<sessionDir>/agents/main/tasks/<taskId>.json` 的 `status` 从 `running` 变为终态（`completed`／`failed`／`timed_out`／`killed`／`lost`）。 |
+
+落地：`KimiBackend` 在启动回执里取 `task_id`，合成 `BackgroundTaskStarted` 关联到该次工具调用，并轮询任务记录；读到终态后经 `AgentIo.inject` 送入同一条泵，转成 `BackgroundTaskUpdated`。进程结束或重启时停止轮询，之后由 Conversation 的过期任务清理接手。升级 kimi 后与 `probe-kimi-acp.py` 一起重跑。
+
+
 ### 人工补测项（脚本外）
 
 - V-win：Windows 真机——install.ps1 安装路径、可执行后缀（`.exe`？）、Git Bash 依赖对 daemon 子进程拉起的影响、`%USERPROFILE%\.kimi-code` 路径。

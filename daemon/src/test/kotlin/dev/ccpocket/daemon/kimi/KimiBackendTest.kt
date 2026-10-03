@@ -10,6 +10,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -132,6 +133,108 @@ class KimiBackendTest {
         val events = b.parse("""{"jsonrpc":"2.0","id":3,"error":{"code":-32001,"message":"auth required"}}""")
         assertEquals("first", (events.first { it is AgentEvent.UserReplay } as AgentEvent.UserReplay).text)
         assertTrue(events.any { it is AgentEvent.TurnResult && it.isError })
+    }
+
+    // ---- background tasks (issue #391) — frames and task record copied from the 2.1.1 probe ----
+
+    private val bgLaunchOutput = "task_id: bash-gbmpt89x\npid: 12411\ndescription: probe bg task\nstatus: running\n" +
+        "automatic_notification: true\nnext_step: Use TaskStop only if the task must be cancelled."
+
+    private fun taskRecord(status: String) =
+        """{"taskId":"bash-gbmpt89x","description":"probe bg task","status":"$status","detached":true,"kind":"process","pid":12411,"exitCode":null,"parentToolCallId":"call_probe1"}"""
+
+    /** A live session on a backend whose task records live in [dir]; drives one backgrounded Bash launch. */
+    private suspend fun launchBackground(dir: Path, injected: MutableList<String>): Pair<KimiBackend, List<AgentEvent>> {
+        val b = KimiBackend(null, taskPollMs = 10, taskFile = { _, taskId -> dir.resolve("$taskId.json") })
+        b.attach(
+            AgentIo(writeLine = {}, emit = {}, inject = { synchronized(injected) { injected += it } }),
+            AgentSpec(Path.of("/repo"), mode = PermissionMode.DEFAULT),
+        )
+        b.parse("""{"jsonrpc":"2.0","id":1,"result":{}}""")
+        b.parse("""{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s1"}}""")
+        b.parse(update("""{"sessionUpdate":"tool_call","toolCallId":"0:call_probe1","title":"Bash","kind":"execute","status":"pending","content":[{"type":"content","content":{"type":"text","text":"{\"command\": \"sleep 6\", \"run_in_background\": true, \"description\": \"probe bg task\"}"}}]}"""))
+        b.parse(update("""{"sessionUpdate":"tool_call_update","toolCallId":"0:call_probe1","status":"in_progress","content":[{"type":"content","content":{"type":"text","text":"{\"command\":\"sleep 6\",\"run_in_background\":true,\"description\":\"probe bg task\"}"}}]}"""))
+        val settled = b.parse(update(buildJsonObject {
+            put("sessionUpdate", "tool_call_update"); put("toolCallId", "0:call_probe1"); put("status", "completed")
+            put("rawOutput", bgLaunchOutput)
+        }.toString()))
+        return b to settled
+    }
+
+    private suspend fun awaitInjected(injected: List<String>): String? {
+        repeat(200) {
+            synchronized(injected) { injected.firstOrNull() }?.let { return it }
+            kotlinx.coroutines.delay(10)
+        }
+        return null
+    }
+
+    @Test
+    fun `a backgrounded launch links its task and reports completion from the task record`() = runBlocking {
+        val dir = java.nio.file.Files.createTempDirectory("kimi-tasks")
+        val injected = mutableListOf<String>()
+        java.nio.file.Files.writeString(dir.resolve("bash-gbmpt89x.json"), taskRecord("running"))
+        val (b, settled) = launchBackground(dir, injected)
+        // the launch ack, then the link between kimi's task id and the tool call that created the job
+        assertEquals("0:call_probe1", (settled[0] as AgentEvent.ToolResult).toolUseId)
+        val started = settled[1] as AgentEvent.BackgroundTaskStarted
+        assertEquals("bash-gbmpt89x", started.taskId)
+        assertEquals("0:call_probe1", started.toolUseId)
+        // still running on disk → the watcher stays quiet
+        kotlinx.coroutines.delay(80)
+        assertTrue(synchronized(injected) { injected.isEmpty() }, "a running task must not settle")
+        // kimi rewrites the record when the task ends — ACP itself says nothing (probe 2.1.1)
+        java.nio.file.Files.writeString(dir.resolve("bash-gbmpt89x.json"), taskRecord("completed"))
+        val frame = awaitInjected(injected)
+        assertNotNull(frame, "completion must reach the pump")
+        val updated = b.parse(frame).single() as AgentEvent.BackgroundTaskUpdated
+        assertEquals("bash-gbmpt89x", updated.taskId)
+        assertEquals("completed", updated.status)
+        kotlinx.coroutines.delay(60)
+        assertEquals(1, synchronized(injected) { injected.size }, "one completion per task")
+    }
+
+    @Test
+    fun `the job the launch created settles through the registry`() = runBlocking {
+        val dir = java.nio.file.Files.createTempDirectory("kimi-tasks")
+        val injected = mutableListOf<String>()
+        java.nio.file.Files.writeString(dir.resolve("bash-gbmpt89x.json"), taskRecord("killed"))
+        val (b, settled) = launchBackground(dir, injected)
+        val jobs = dev.ccpocket.daemon.conversation.BackgroundJobRegistry()
+        jobs.onToolUse("0:call_probe1", "Bash", buildJsonObject { put("command", "sleep 6"); put("run_in_background", true) }, 1)
+        val result = settled[0] as AgentEvent.ToolResult
+        jobs.onToolResult(result.toolUseId, result.content, result.isError, 2)
+        val started = settled[1] as AgentEvent.BackgroundTaskStarted
+        jobs.onTaskStarted(started.taskId, started.toolUseId, started.description, started.taskType, 3)
+        assertTrue(jobs.hasRunning())
+        val updated = b.parse(assertNotNull(awaitInjected(injected))).single() as AgentEvent.BackgroundTaskUpdated
+        assertTrue(jobs.onTaskUpdated(updated.taskId, updated.status, 4))
+        assertEquals(dev.ccpocket.protocol.JobStatus.KILLED, jobs.snapshot().single().status)
+        assertTrue(!jobs.hasRunning())
+    }
+
+    @Test
+    fun `a dead or relaunched process stops watching its tasks`() = runBlocking {
+        val dir = java.nio.file.Files.createTempDirectory("kimi-tasks")
+        val injected = mutableListOf<String>()
+        java.nio.file.Files.writeString(dir.resolve("bash-gbmpt89x.json"), taskRecord("running"))
+        val (b, _) = launchBackground(dir, injected)
+        b.onProcessEnded("s1")
+        java.nio.file.Files.writeString(dir.resolve("bash-gbmpt89x.json"), taskRecord("completed"))
+        kotlinx.coroutines.delay(120)
+        assertTrue(synchronized(injected) { injected.isEmpty() }, "no frame for a process that is gone")
+    }
+
+    @Test
+    fun `only kimi's known terminal statuses settle a job, and only a real task id is watched`() {
+        assertEquals("completed", KimiBackend.settledStatus("completed"))
+        assertEquals("killed", KimiBackend.settledStatus("killed"))
+        listOf("failed", "timed_out", "lost").forEach { assertEquals("failed", KimiBackend.settledStatus(it)) }
+        listOf("running", "awaiting_approval", "something-new", null).forEach { assertEquals(null, KimiBackend.settledStatus(it)) }
+        assertEquals("bash-gbmpt89x", KimiBackend.launchedTaskId(bgLaunchOutput))
+        assertEquals(null, KimiBackend.launchedTaskId("task_id: ../../etc/passwd\nstatus: running"))
+        assertEquals(null, KimiBackend.launchedTaskId("hello-from-probe\n"))
+        assertEquals(null, KimiBackend.launchedTaskId(null))
     }
 
     @Test

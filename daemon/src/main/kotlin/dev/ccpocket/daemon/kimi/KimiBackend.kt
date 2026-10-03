@@ -12,6 +12,13 @@ import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.SessionSummary
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
@@ -52,6 +59,8 @@ import java.util.concurrent.atomic.AtomicLong
 class KimiBackend(
     private val kimiBin: String?,
     private val modelService: KimiModelService = KimiModelService(),
+    private val taskPollMs: Long = TASK_POLL_MS,
+    private val taskFile: (sessionId: String, taskId: String) -> Path? = KimiPaths::taskFile,
 ) : AgentBackend {
     private val log = logger("KimiBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -105,8 +114,23 @@ class KimiBackend(
     // JSON streams as cumulative text in in_progress `tool_call_update`s; the output arrives as `rawOutput`
     // on the settled update. The START event is therefore emitted only once the input parses complete —
     // an earlier emission produced the phone's empty Bash/Read cards.
-    private class ToolAccum(val name: String, val title: String?, var inputText: String, var started: Boolean)
+    private class ToolAccum(val name: String, val title: String?, var inputText: String, var started: Boolean) {
+        var background = false // the Bash call asked for run_in_background (issue #391)
+        var description: String? = null
+    }
     private val toolCalls = ConcurrentHashMap<String, ToolAccum>()
+
+    // BACKGROUND TASKS (issue #391, probe 2.1.1 via scripts/probe-kimi-bgtask.py). A Bash call with
+    // run_in_background settles at once with `task_id: bash-xxxxxxxx … status: running`, and ACP then says
+    // NOTHING more about it: no update kind exists for task completion, and with no turn in flight the
+    // stream stays silent after the task ends. The CLI's own record is the only completion signal —
+    // `<sessionDir>/agents/main/tasks/<taskId>.json`, whose `status` leaves "running" when the task ends.
+    // So each launched task gets a watcher that polls that file and, on a terminal status, feeds a synthetic
+    // frame through the pump; [parse] turns it into the same BackgroundTaskUpdated a Claude task_notification
+    // produces. Without this the job stayed RUNNING for as long as the kimi process lived (the stale-job
+    // reaper deliberately trusts a live agent to report completion). Watchers die with the process.
+    private val taskScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val taskWatchers = ConcurrentHashMap<String, Job>()
 
     private data class Prompt(val text: String, val images: List<ImageData>)
     private data class PendingApproval(val rpcId: JsonElement, val options: JsonArray)
@@ -129,6 +153,7 @@ class KimiBackend(
         imagePrompts = false
         bootstrap.withLock { promptQueue.clear() }
         promptIds.clear(); pendingApprovals.clear(); toolCalls.clear()
+        stopTaskWatchers() // the previous process's tasks are no longer this conversation's jobs
         // kick off the ACP handshake — session open happens when the initialize response lands
         initializeId = rpcRequest("initialize", buildJsonObject {
             put("protocolVersion", 1)
@@ -145,6 +170,10 @@ class KimiBackend(
             ?: return listOf(AgentEvent.Unparseable(t))
         // our own refusal (see sendPrompt) — the one frame on this pump kimi did not write
         if (root.str("type") == SYNTHETIC_REFUSAL) return settleRefusal(root)
+        if (root.str("type") == SYNTHETIC_TASK_SETTLED) {
+            val taskId = root.str("taskId") ?: return emptyList()
+            return listOf(AgentEvent.BackgroundTaskUpdated(taskId, root.str("status")))
+        }
         val method = root.str("method")
         val idEl = root["id"]?.takeIf { it !is JsonNull }
         return runCatching {
@@ -288,6 +317,11 @@ class KimiBackend(
             val input = runCatching { json.parseToJsonElement(accum.inputText) as? JsonObject }.getOrNull()
             if (input != null || settled) {
                 accum.started = true
+                if (accum.name == "Bash" && input != null) {
+                    val flag = input["run_in_background"] as? JsonPrimitive
+                    accum.background = flag?.booleanOrNull ?: (flag?.contentOrNull == "true")
+                    accum.description = input.str("description") ?: input.str("command")
+                }
                 out += AgentEvent.AssistantToolUse(
                     id, accum.name,
                     input ?: buildJsonObject { accum.title?.let { put("description", it) } },
@@ -297,11 +331,16 @@ class KimiBackend(
         if (settled) {
             toolCalls.remove(id)
             // output: rawOutput is a plain STRING (probe 0.34.0), else the settled content text
-            out += AgentEvent.ToolResult(
-                id,
-                update.str("rawOutput") ?: toolCallContentText(update["content"]),
-                isError = status == "failed",
-            )
+            val output = update.str("rawOutput") ?: toolCallContentText(update["content"])
+            out += AgentEvent.ToolResult(id, output, isError = status == "failed")
+            // a backgrounded launch answers with the task's id — link it to the job the tool_use created and
+            // start watching the CLI's task record for its completion (see [taskWatchers])
+            if (accum.background && status == "completed") {
+                launchedTaskId(output)?.let { taskId ->
+                    out += AgentEvent.BackgroundTaskStarted(taskId, id, accum.description, "local_bash")
+                    watchTask(taskId)
+                }
+            }
         }
         return out
     }
@@ -475,7 +514,35 @@ class KimiBackend(
         return relaunch
     }
 
-    override suspend fun onProcessEnded(sessionId: String?) {} // kimi self-manages its session store
+    // kimi self-manages its session store. A dead process cannot take a completion frame any more (inject
+    // drops it), so stop watching — Conversation's stale-job reaper owns the jobs of a dead agent.
+    override suspend fun onProcessEnded(sessionId: String?) { stopTaskWatchers() }
+
+    // ---- background task completion (issue #391) ----
+
+    private fun watchTask(taskId: String) {
+        val sid = sessionId ?: return
+        val owner = io ?: return
+        taskWatchers[taskId]?.cancel()
+        taskWatchers[taskId] = taskScope.launch {
+            var file: Path? = null
+            while (isActive && io === owner) {
+                delay(taskPollMs)
+                val f = file ?: runCatching { taskFile(sid, taskId) }.getOrNull()?.also { file = it } ?: continue
+                val settled = settledStatus(KimiPaths.taskStatus(f)) ?: continue
+                owner.inject(buildJsonObject {
+                    put("type", SYNTHETIC_TASK_SETTLED); put("taskId", taskId); put("status", settled)
+                }.toString())
+                break
+            }
+            taskWatchers.remove(taskId, coroutineContext[Job])
+        }
+    }
+
+    private fun stopTaskWatchers() {
+        taskWatchers.values.forEach { it.cancel() }
+        taskWatchers.clear()
+    }
 
     // ---- disk: ~/.kimi-code session scanning + replay (filtered by recorded workDir; no process launch) ----
 
@@ -531,8 +598,30 @@ class KimiBackend(
     private fun syntheticRefusal(id: Long, message: String): String =
         buildJsonObject { put("type", SYNTHETIC_REFUSAL); put("id", id); put("message", message) }.toString()
 
-    private companion object {
+    internal companion object {
         /** Namespaced so it can never collide with a real kimi frame. */
-        const val SYNTHETIC_REFUSAL = "cc-pocket/kimi-prompt-refused"
+        private const val SYNTHETIC_REFUSAL = "cc-pocket/kimi-prompt-refused"
+        private const val SYNTHETIC_TASK_SETTLED = "cc-pocket/kimi-task-settled"
+        const val TASK_POLL_MS = 2_000L
+
+        // kimi's own task-id shape (its VALID_TASK_ID, read out of the 2.1.1 bundle). The id becomes a file
+        // name under the session dir, so anything else — a path, a `..` — is refused rather than resolved.
+        private val TASK_ID = Regex("^[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-z]{8}$")
+        private val TASK_ID_LINE = Regex("(?m)^task_id:[ \\t]*(\\S+)[ \\t]*$")
+
+        /** The task id a backgrounded launch reports (`task_id: bash-gbmpt89x`, probe 2.1.1), or null. */
+        internal fun launchedTaskId(output: String?): String? =
+            output?.let { TASK_ID_LINE.find(it) }?.groupValues?.get(1)?.takeIf { TASK_ID.matches(it) }
+
+        /** kimi's task `status` → the status word [dev.ccpocket.daemon.conversation.BackgroundJobRegistry]
+         *  settles on, or null while the task is still going. Only kimi's KNOWN terminal statuses settle a
+         *  job (running / completed / failed / timed_out / killed / lost on 2.1.1): an unreadable record or
+         *  a status a later CLI invents must not end a job that may still be running. */
+        internal fun settledStatus(status: String?): String? = when (status) {
+            "completed" -> "completed"
+            "killed" -> "killed"
+            "failed", "timed_out", "lost" -> "failed"
+            else -> null
+        }
     }
 }
