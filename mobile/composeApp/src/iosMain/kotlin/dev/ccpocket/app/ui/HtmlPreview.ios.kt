@@ -53,8 +53,10 @@ internal actual fun HtmlPreview(document: String, modifier: Modifier, onError: (
             }
         },
         onRelease = { view -> view.navigationDelegate = null; view.stopLoading(); view.loadHTMLString("", baseURL = null) },
-        // DRAFT for #390, never compiled or run on a device — see docs/iterations/2026-09-19-claude-code/
-        // issue-390-html-scroll.md. The default interop mode is Cooperative: Compose holds a touch that
+        // Issue #390 — see docs/iterations/2026-09-19-claude-code/issue-390-html-scroll.md. Verified on the
+        // iOS 26.5 simulator (2026-10-03) with real swipe gestures from a UI test: all five htmlpreview
+        // samples scroll to their bottom markers in this mode. Not yet confirmed on a physical device or on
+        // the reporter's own file. The default interop mode is Cooperative: Compose holds a touch that
         // lands on this view for a moment to see whether a Compose ancestor wants it, and only then
         // replays it to WKWebView. Nothing above this preview competes for a drag (the file viewer is a
         // full-screen route; every ancestor is a plain Box/Column and the chat list is not composed at

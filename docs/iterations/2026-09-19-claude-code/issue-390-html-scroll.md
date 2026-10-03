@@ -64,3 +64,15 @@
 ## 2.1.1 发布补记（2026-09-19）
 
 iOS 已提审，待真机验收；[GitHub 状态回执](https://github.com/heypandax/pairlet/issues/390#issuecomment-5744963521) 已写回并核对。完整构建、生产部署和剩余验收范围见 [2.1.1 发布记录](RELEASE-2.1.1.md)。上文未推送／未发布等描述保留为当时的实施快照。
+
+## 模拟器实测补记（2026-10-03）
+
+此前本文所有结论都没有 iOS 侧的运行证据。本次在 iPhone 17 模拟器（iOS 26.5）上补了两层实测，产品代码未改，只更正了 `HtmlPreview.ios.kt` 里“从未编译／运行”的过期注释。
+
+- **网页层**：把 `htmlPreviewDocument()` 的真实包装页放进模拟器 Safari 测量。iframe 高度等于视口（714），内层文档高 9640，`scrollTo` 生效。iframe 没有被撑开，外层 `overflow:hidden` 不是故障原因。
+- **触摸层**：用独立的 UI 测试工程对真实 App 构建做手势滑动并截图。宿主布局与 `FileViewerScreen` 同形（带内边距的根 Box → Column → 头部 → 占剩余高度的 Box → `HtmlFileBody`）。
+  - `long-text`、`nested-scroll`、`dynamic-growth`、`viewport-fixed`、`wide-content` 五个样例在 `NonCooperative`（现行）模式下都滑到了各自的底部标记。
+  - 长正文在 `Cooperative`（2.1.0 的默认模式）下同样能滚动，慢拖和快滑都生效。
+- **含义**：普通长 HTML 在 2.1.0 的模式下也能在模拟器滚动，所以反馈者遇到的现象没有被复现，原始原因仍未确定。可能与其具体 HTML 文件或真机环境有关。
+- **仍未覆盖**：真机、反馈者的原文件、iPad、横竖屏切换。模拟器通过不等于真机验收。
+
