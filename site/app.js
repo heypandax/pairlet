@@ -15,7 +15,7 @@
   // ── live GitHub star count (never a fabricated number) ──
   // Pills ship hidden; we reveal them only once we have a real count from the API.
   const starPills = [...document.querySelectorAll('.star-pill')];
-  fetch('https://api.github.com/repos/heypandax/cc-pocket')
+  fetch('https://api.github.com/repos/heypandax/pairlet')
     .then(r => r.ok ? r.json() : null)
     .then(d => {
       const n = d && d.stargazers_count;
@@ -269,7 +269,7 @@
       new QRCode(box, { text: url, width: 148, height: 148, colorDark: '#0E0F11', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
     }
   }
-  fetch('https://api.github.com/repos/heypandax/cc-pocket/releases?per_page=100')
+  fetch('https://api.github.com/repos/heypandax/pairlet/releases?per_page=100')
     .then(r => r.ok ? r.json() : null)
     .then(rels => {
       if (!Array.isArray(rels)) return;            // API error/rate-limit → keep the fallback

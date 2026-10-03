@@ -96,7 +96,7 @@ def nav(locale: str, depth: int) -> str:
     <div class="nav-actions">
       <a class="locale-link" href="{manual_root}{alt}/" hreflang="{"zh-CN" if alt == "zh" else "en"}">{alt_label}</a>
       <button class="theme-toggle" type="button" aria-label="{"Toggle theme" if locale == "en" else "切换主题"}">◐</button>
-      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+      <a class="github-link" href="https://github.com/heypandax/pairlet" rel="noopener">GitHub</a>
     </div>
   </div>
 </nav>"""
@@ -214,7 +214,7 @@ def home_page(data: dict, locale: str) -> str:
     <div class="updated-list">{recent}</div>
   </section>
 </main>
-<footer class="manual-footer"><div class="manual-wrap"><span>© 2026 Pairlet · MIT</span><span><a href="../../features.html">{"Features" if locale == "en" else "功能"}</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<footer class="manual-footer"><div class="manual-wrap"><span>© 2026 Pairlet · MIT</span><span><a href="../../features.html">{"Features" if locale == "en" else "功能"}</a><a href="https://github.com/heypandax/pairlet">GitHub</a></span></div></footer>
 <script id="manual-search-index" type="application/json">{index_json}</script>
 <script src="../manual.js"></script>
 </body>
@@ -317,11 +317,11 @@ def article_page(data: dict, article: dict, locale: str) -> str:
     </div>
     {sections}
     <section class="related-articles"><h2>{"Related guides" if locale == "en" else "相关指南"}</h2><div>{related}</div></section>
-    <section class="article-feedback"><strong>{"Still stuck?" if locale == "en" else "问题还没解决？"}</strong><span>{"Open an issue with the steps you tried." if locale == "en" else "把你尝试过的步骤写进 GitHub issue。"}</span><a href="https://github.com/heypandax/cc-pocket/issues/new">{"Open an issue" if locale == "en" else "新建 issue"} →</a></section>
+    <section class="article-feedback"><strong>{"Still stuck?" if locale == "en" else "问题还没解决？"}</strong><span>{"Open an issue with the steps you tried." if locale == "en" else "把你尝试过的步骤写进 GitHub issue。"}</span><a href="https://github.com/heypandax/pairlet/issues/new">{"Open an issue" if locale == "en" else "新建 issue"} →</a></section>
   </article>
   <aside class="article-toc"><strong>{"On this page" if locale == "en" else "本页内容"}</strong>{"".join(f'<a href="#{text(s["id"])}">{text(localized(s["heading"], locale))}</a>' for s in article["sections"])}</aside>
 </main>
-<footer class="manual-footer"><div class="manual-wrap"><span>{canonical}</span><span><a href="../">{"Manual home" if locale == "en" else "手册首页"}</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<footer class="manual-footer"><div class="manual-wrap"><span>{canonical}</span><span><a href="../">{"Manual home" if locale == "en" else "手册首页"}</a><a href="https://github.com/heypandax/pairlet">GitHub</a></span></div></footer>
 <script src="../../manual.js"></script>
 </body>
 </html>"""

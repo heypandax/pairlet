@@ -5805,7 +5805,7 @@ class PocketRepository(
      * only the entry point can tell them apart (issue #278). It changes no routing and no behaviour.
      */
     fun handleIncomingLink(raw: String, allowBareBlob: Boolean = false, fromScan: Boolean = false): IncomingLink {
-        val link = parseIncomingLink(raw, allowBareBlob)
+        val link = parseIncomingLink(dev.ccpocket.app.pairing.canonicalLinkScheme(raw), allowBareBlob)
         when (link) {
             is IncomingLink.Code -> pairWithCode(link.code, fromScan = fromScan)
             is IncomingLink.Pair -> pair(link.url, fromScan = fromScan)

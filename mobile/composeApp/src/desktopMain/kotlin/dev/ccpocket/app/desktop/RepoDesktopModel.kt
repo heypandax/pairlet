@@ -1830,7 +1830,7 @@ class RepoDesktopModel(
     override fun revokeShare(deviceId: String) { repo.revokeShare(deviceId) }
     override fun clearLastShare() { repo.lastShareCreated.value = null }
     override fun redeemShareInvite(blob: String): Boolean {
-        val inv = dev.ccpocket.app.pairing.decodeShareInvite(blob) ?: return false
+        val inv = dev.ccpocket.app.pairing.decodeShareInvite(dev.ccpocket.app.pairing.canonicalLinkScheme(blob)) ?: return false
         repo.redeemShareInvite(inv); return true
     }
 

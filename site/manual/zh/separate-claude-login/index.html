@@ -52,7 +52,7 @@
     <div class="nav-actions">
       <a class="locale-link" href="../../en/" hreflang="en">English</a>
       <button class="theme-toggle" type="button" aria-label="切换主题">◐</button>
-      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+      <a class="github-link" href="https://github.com/heypandax/pairlet" rel="noopener">GitHub</a>
     </div>
   </div>
 </nav>
@@ -73,11 +73,11 @@
     </div>
     <section id="isolated"><h2>哪些内容会隔离</h2><p>daemon 成功准备独立的 <code>CLAUDE_CONFIG_DIR</code> 并报告凭据隔离已开启后，只有凭据存储归 daemon 独立使用。此时在 Pairlet 中登录或退出，只会改变 daemon 的 Claude 凭据，不会替换终端中 Claude 的登录状态。</p></section><section id="shared"><h2>哪些内容仍然共享</h2><ul><li><strong>会话历史</strong>（projects），因此恢复会话和跨设备接续仍然有效。</li><li><strong>CLAUDE.md</strong>、settings、agents、commands、skills、plugins 和 todos。</li><li>保存在 <code>.claude.json</code> 中的 <strong>MCP 服务器配置</strong>与项目信任信息。</li></ul><aside class="article-note">这是“凭据隔离”，不是另建一套 Claude 工作区或多账号会话库。</aside></section><section id="fallback"><h2>如果隔离准备失败</h2><p>daemon 会输出告警并继续以未隔离模式运行。此时不要假定 Pairlet 的登录或退出与终端 Claude 登录相互独立；请先修复 daemon 的隔离准备问题，再切换账号。</p></section>
     <section class="related-articles"><h2>相关指南</h2><div><a href="../choose-agent-and-model/"><strong>选择 Agent 与模型</strong><span>创建会话时选择 Claude Code、Codex 或 OpenCode，再选择支持的模型或网关模型 ID。</span></a><a href="../take-over-a-terminal-session/"><strong>无分叉接管终端会话</strong><span>先只读旁观终端会话；终端不再写入后，再原地接管继续。</span></a></div></section>
-    <section class="article-feedback"><strong>问题还没解决？</strong><span>把你尝试过的步骤写进 GitHub issue。</span><a href="https://github.com/heypandax/cc-pocket/issues/new">新建 issue →</a></section>
+    <section class="article-feedback"><strong>问题还没解决？</strong><span>把你尝试过的步骤写进 GitHub issue。</span><a href="https://github.com/heypandax/pairlet/issues/new">新建 issue →</a></section>
   </article>
   <aside class="article-toc"><strong>本页内容</strong><a href="#isolated">哪些内容会隔离</a><a href="#shared">哪些内容仍然共享</a><a href="#fallback">如果隔离准备失败</a></aside>
 </main>
-<footer class="manual-footer"><div class="manual-wrap"><span>https://pairlet.org/manual/zh/separate-claude-login/</span><span><a href="../">手册首页</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://pairlet.org/manual/zh/separate-claude-login/</span><span><a href="../">手册首页</a><a href="https://github.com/heypandax/pairlet">GitHub</a></span></div></footer>
 <script src="../../manual.js"></script>
 </body>
 </html>

@@ -24,7 +24,7 @@
 {
   "@context": "https://schema.org",
   "@graph": [
-    { "@type": "TechArticle", "headline": "How to use OpenAI Codex from your phone", "description": "A sourced guide to OpenAI's official Codex mobile preview and the open-source Pairlet workflow.", "url": "https://pairlet.org/guides/codex-mobile-remote.html", "datePublished": "2026-07-13", "dateModified": "2026-07-13", "inLanguage": "en", "image": "https://pairlet.org/og-image.png", "author": { "@type": "Organization", "name": "Pairlet contributors", "url": "https://github.com/heypandax/cc-pocket" }, "about": ["OpenAI Codex", "remote coding", "Pairlet"], "citation": ["https://openai.com/index/work-with-codex-from-anywhere/", "https://github.com/heypandax/cc-pocket"] },
+    { "@type": "TechArticle", "headline": "How to use OpenAI Codex from your phone", "description": "A sourced guide to OpenAI's official Codex mobile preview and the open-source Pairlet workflow.", "url": "https://pairlet.org/guides/codex-mobile-remote.html", "datePublished": "2026-07-13", "dateModified": "2026-07-13", "inLanguage": "en", "image": "https://pairlet.org/og-image.png", "author": { "@type": "Organization", "name": "Pairlet contributors", "url": "https://github.com/heypandax/pairlet" }, "about": ["OpenAI Codex", "remote coding", "Pairlet"], "citation": ["https://openai.com/index/work-with-codex-from-anywhere/", "https://github.com/heypandax/pairlet"] },
     { "@type": "BreadcrumbList", "itemListElement": [
       { "@type": "ListItem", "position": 1, "name": "Pairlet", "item": "https://pairlet.org/" },
       { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://pairlet.org/#guides" },
@@ -48,7 +48,7 @@
   <h2 id="cc-pocket">Option 2: Pairlet</h2>
   <p>Pairlet connects its mobile or desktop client to a daemon on your computer. The daemon drives the local Codex CLI; your repository and credentials remain on that computer. In the client you can start or resume sessions, stream events, inspect diffs, interrupt work, and respond to approval requests.</p>
   <ol><li>Install the Pairlet client.</li><li>Install and pair the daemon on the computer that runs Codex.</li><li>Choose Codex when creating a session, then select a project and permission preset.</li></ol>
-  <p>For exact installation commands, use the current <a href="https://github.com/heypandax/cc-pocket#readme" rel="noopener">Pairlet README</a>.</p>
+  <p>For exact installation commands, use the current <a href="https://github.com/heypandax/pairlet#readme" rel="noopener">Pairlet README</a>.</p>
   <figure class="product-figure"><img src="../og-image.png" width="1200" height="630" alt="Pairlet remote client for OpenAI Codex and Claude Code" /><figcaption>The Pairlet client connects to a daemon on your computer; it does not upload the project into a Pairlet cloud IDE.</figcaption></figure>
 
   <h2 id="differences">What is different?</h2>
@@ -65,9 +65,9 @@
   <p>Pairlet's client-to-daemon messages use P-256 ECDH, HKDF, and AES-256-GCM. The relay routes encrypted frames without endpoint private keys. Read the <a href="security.html">security model and limitations</a> for the full boundary.</p>
   <div class="callout limitations"><p><strong>Important:</strong> Pairlet's local daemon is not an operating-system sandbox. Codex executes within the permissions and sandbox policy configured on your computer. Full-auto modes can run commands without a per-step confirmation.</p></div>
 
-  <section class="sources"><h2>Sources</h2><ol><li><a href="https://openai.com/index/work-with-codex-from-anywhere/" rel="noopener">OpenAI — Work with Codex from anywhere</a> (official mobile announcement, availability, and architecture claims).</li><li><a href="https://github.com/heypandax/cc-pocket" rel="noopener">Pairlet source repository</a> (license, installation, architecture, and Codex support).</li></ol><p class="source-note">Availability and plan details can change. Facts above were checked on July 13, 2026.</p></section>
+  <section class="sources"><h2>Sources</h2><ol><li><a href="https://openai.com/index/work-with-codex-from-anywhere/" rel="noopener">OpenAI — Work with Codex from anywhere</a> (official mobile announcement, availability, and architecture claims).</li><li><a href="https://github.com/heypandax/pairlet" rel="noopener">Pairlet source repository</a> (license, installation, architecture, and Codex support).</li></ol><p class="source-note">Availability and plan details can change. Facts above were checked on July 13, 2026.</p></section>
   <section class="related"><h2>Related guides</h2><div class="related-grid"><a class="related-card" href="compare-remote-options.html"><strong>Compare all remote options</strong><span>A side-by-side factual matrix.</span></a><a class="related-card" href="claude-code-mobile-remote.html"><strong>Use Claude Code from your phone</strong><span>Official Remote Control and Pairlet.</span></a></div></section>
 </main>
-<footer class="guide-footer"><div class="wrap"><span>© 2026 Pairlet · MIT</span><span><a href="../manual/en/">Manual</a><a href="../features.html">Features</a><a href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a><a href="../privacy.html">Privacy</a></span></div></footer>
+<footer class="guide-footer"><div class="wrap"><span>© 2026 Pairlet · MIT</span><span><a href="../manual/en/">Manual</a><a href="../features.html">Features</a><a href="https://github.com/heypandax/pairlet" rel="noopener">GitHub</a><a href="../privacy.html">Privacy</a></span></div></footer>
 </body>
 </html>

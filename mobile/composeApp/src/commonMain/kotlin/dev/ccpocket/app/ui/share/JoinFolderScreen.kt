@@ -111,7 +111,7 @@ private fun RedeemScreen(
     // §7: the SAME parser every other entry point uses. This is the one place `allowBareBlob` is on — a
     // human deliberately pasted a code here, whereas a deep link must never be probed as a naked blob.
     fun tryDecode(raw: String) {
-        when (val link = dev.ccpocket.app.pairing.parseIncomingLink(raw, allowBareBlob = true)) {
+        when (val link = dev.ccpocket.app.pairing.parseIncomingLink(dev.ccpocket.app.pairing.canonicalLinkScheme(raw), allowBareBlob = true)) {
             is dev.ccpocket.app.pairing.IncomingLink.Share -> onInvite(link.invite)
             is dev.ccpocket.app.pairing.IncomingLink.Collab -> onCollabInvite(link.invite)
             is dev.ccpocket.app.pairing.IncomingLink.ReviewContact -> onReviewInvite(link.uri)

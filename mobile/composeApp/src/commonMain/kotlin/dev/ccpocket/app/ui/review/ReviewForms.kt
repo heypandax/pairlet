@@ -570,5 +570,5 @@ fun ReviewJoinScreen(
  *  humans compare words first, and returns null for anything that isn't a cc-pocket REVIEW contact URI —
  *  a Session Handoff invite pasted here is somebody's App, not a review peer (REVIEW-REQUEST.md §13.3). */
 internal fun inviteFingerprint(raw: String): String? =
-    dev.ccpocket.app.pairing.decodeReviewContactInvite(raw.trim())
+    dev.ccpocket.app.pairing.decodeReviewContactInvite(dev.ccpocket.app.pairing.canonicalLinkScheme(raw.trim()))
         ?.let { collaboratorFingerprint(it.daemonPub) }

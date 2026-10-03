@@ -68,7 +68,7 @@ class MainActivity : FragmentActivity() {
      *    collaborator and share invites alike) silently did nothing.
      */
     private fun routeFromIntent(intent: Intent?) {
-        intent?.data?.takeIf { it.scheme.equals("ccpocket", ignoreCase = true) }?.let {
+        intent?.data?.takeIf { it.scheme.equals("ccpocket", ignoreCase = true) || it.scheme.equals("pairlet", ignoreCase = true) }?.let {
             DeepLink.handle(it.toString())
             return
         }

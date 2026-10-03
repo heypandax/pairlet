@@ -31,7 +31,7 @@ def main():
     for locale in ("en-US", "zh-Hans"):
         store_name = (ROOT / f"fastlane/metadata/{locale}/name.txt").read_text().strip()
         assert store_name == ios["CFBundleDisplayName"], f"Store and device transition names differ: {locale}"
-    assert ios["CFBundleURLTypes"][0]["CFBundleURLSchemes"] == ["ccpocket"]
+    assert ios["CFBundleURLTypes"][0]["CFBundleURLSchemes"] == ["ccpocket", "pairlet"], "Keep the legacy scheme first; pairlet is additive"
     project = (ROOT / "iosApp/iosApp.xcodeproj/project.pbxproj").read_text()
     app_ids = set()
     for settings in re.findall(r'buildSettings = \{(.*?)\};', project, re.S):

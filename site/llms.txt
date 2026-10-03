@@ -42,7 +42,7 @@ Six backends, four promoted capability columns. They are **not** equivalent.
 
 ## Platforms and distribution
 
-- **Phone / tablet app:** iOS / iPadOS — [App Store](https://apps.apple.com/cn/app/id6778773969), new versions first on [TestFlight](https://testflight.apple.com/join/8z26MWWr). Android — [APK from GitHub Releases](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk).
+- **Phone / tablet app:** iOS / iPadOS — [App Store](https://apps.apple.com/cn/app/id6778773969), new versions first on [TestFlight](https://testflight.apple.com/join/8z26MWWr). Android — [APK from GitHub Releases](https://github.com/heypandax/pairlet/releases/latest/download/cc-pocket-android.apk).
 - **Desktop app:** macOS Apple Silicon and Intel (signed `.dmg`), Windows x86_64 (`.msi`), Linux x86_64 and arm64 (`.deb` and `.rpm`, unsigned; an `.AppImage` is attached when it builds).
 - **Local daemon** (the piece that actually runs the agent): macOS Apple Silicon, macOS Intel, Linux x86_64, Linux arm64, Windows x86_64. Install script, Homebrew or Scoop.
 - **HarmonyOS:** signed HAP, Preview, limited capability.
@@ -100,8 +100,8 @@ Screenshots and the control-loop videos on the website are generated from the re
 - [Security model and limitations](https://pairlet.org/guides/security.html)
 - [Self-hosting architecture](https://pairlet.org/guides/self-hosting.html)
 - [FAQ](https://pairlet.org/guides/faq.html)
-- [GitHub repository](https://github.com/heypandax/cc-pocket)
-- [README / user guide](https://github.com/heypandax/cc-pocket#readme)
-- [Security model](https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md)
+- [GitHub repository](https://github.com/heypandax/pairlet)
+- [README / user guide](https://github.com/heypandax/pairlet#readme)
+- [Security model](https://github.com/heypandax/pairlet/blob/main/docs/SECURITY.md)
 - [Privacy policy](https://pairlet.org/privacy.html)
-- [Latest releases & downloads](https://github.com/heypandax/cc-pocket/releases/latest)
+- [Latest releases & downloads](https://github.com/heypandax/pairlet/releases/latest)

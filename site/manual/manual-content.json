@@ -108,12 +108,12 @@
             {
               "title": {"en": "macOS or Linux", "zh": "macOS 或 Linux"},
               "body": {"en": "The installer verifies the release, installs the daemon, and registers the login service.", "zh": "安装器会校验发行包、安装 daemon，并注册登录后自动启动的服务。"},
-              "code": "curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash"
+              "code": "curl -fsSL https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.sh | bash"
             },
             {
               "title": {"en": "Windows", "zh": "Windows"},
               "body": {"en": "Run PowerShell as your normal user. The installer registers a logon Scheduled Task.", "zh": "用普通用户打开 PowerShell。安装器会注册登录时运行的计划任务。"},
-              "code": "irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex"
+              "code": "irm https://raw.githubusercontent.com/heypandax/pairlet/main/scripts/install.ps1 | iex"
             }
           ]
         },

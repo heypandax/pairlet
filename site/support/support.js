@@ -436,7 +436,7 @@
       if (parsed.protocol !== 'https:' || parsed.username || parsed.password || (parsed.port && parsed.port !== '443')) return false;
       if (['pairlet.org', 'pocket.ark-nexus.cc'].includes(parsed.hostname)) return parsed.pathname.startsWith('/manual/');
       if (parsed.hostname === 'heypandax.github.io') return parsed.pathname.startsWith('/cc-pocket/');
-      if (parsed.hostname === 'github.com') return ['/heypandax/pairlet', '/heypandax/cc-pocket'].some(repo => parsed.pathname === repo || parsed.pathname.startsWith(repo + '/'));
+      if (parsed.hostname === 'github.com') return ['/heypandax/pairlet', '/heypandax/pairlet'].some(repo => parsed.pathname === repo || parsed.pathname.startsWith(repo + '/'));
       return false;
     } catch (error) {
       return false;
@@ -527,7 +527,7 @@
       requestAnswer(question, false);
     });
     const report = document.createElement('a');
-    report.href = 'https://github.com/heypandax/cc-pocket/issues/new/choose';
+    report.href = 'https://github.com/heypandax/pairlet/issues/new/choose';
     report.target = '_blank';
     report.rel = 'noopener';
     report.textContent = text.report;

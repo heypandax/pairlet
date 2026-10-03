@@ -37,6 +37,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="ccpocket" />
+                <data android:scheme="pairlet" />
             </intent-filter>
         </activity>
 

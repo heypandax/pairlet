@@ -52,7 +52,7 @@
     <div class="nav-actions">
       <a class="locale-link" href="../../zh/" hreflang="zh-CN">中文</a>
       <button class="theme-toggle" type="button" aria-label="Toggle theme">◐</button>
-      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+      <a class="github-link" href="https://github.com/heypandax/pairlet" rel="noopener">GitHub</a>
     </div>
   </div>
 </nav>
@@ -73,11 +73,11 @@
     </div>
     <section id="flow"><h2>Where transcription runs</h2><ul><li>The app base64-encodes the completed recording and sends indexed <code>AudioChunk</code> frames to the paired computer.</li><li>The daemon rejoins and decodes those chunks, then invokes the computer’s local <code>whisper.cpp</code> pipeline.</li><li>The transcription result returns to the device that sent the recording; it is not injected into a separate agent process.</li></ul></section><section id="logs-and-files"><h2>Logs and temporary files</h2><ul><li>The implementation does not write audio bytes or transcript text to daemon logs.</li><li>The normal CLI path logs the exit code and duration. If transcription throws, the error path logs the exception type and up to 120 characters of its message.</li><li>Audio and intermediate output live under a temporary directory. A <code>finally</code> block attempts recursive deletion after the run.</li></ul><aside class="article-note">Deletion errors are swallowed, so cleanup is best-effort—not an absolute guarantee that no temporary file can remain after every failure.</aside></section>
     <section class="related-articles"><h2>Related guides</h2><div><a href="../install-and-pair/"><strong>Install and pair a computer</strong><span>Install the Pairlet daemon, print a one-time QR code, and pair the app without creating an account.</span></a><a href="../schedule-a-prompt/"><strong>Schedule a prompt for later</strong><span>Long-press Send, choose a delay or custom time, and let the paired computer run the prompt later.</span></a></div></section>
-    <section class="article-feedback"><strong>Still stuck?</strong><span>Open an issue with the steps you tried.</span><a href="https://github.com/heypandax/cc-pocket/issues/new">Open an issue →</a></section>
+    <section class="article-feedback"><strong>Still stuck?</strong><span>Open an issue with the steps you tried.</span><a href="https://github.com/heypandax/pairlet/issues/new">Open an issue →</a></section>
   </article>
   <aside class="article-toc"><strong>On this page</strong><a href="#flow">Where transcription runs</a><a href="#logs-and-files">Logs and temporary files</a></aside>
 </main>
-<footer class="manual-footer"><div class="manual-wrap"><span>https://pairlet.org/manual/en/whisper-dictation-privacy/</span><span><a href="../">Manual home</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://pairlet.org/manual/en/whisper-dictation-privacy/</span><span><a href="../">Manual home</a><a href="https://github.com/heypandax/pairlet">GitHub</a></span></div></footer>
 <script src="../../manual.js"></script>
 </body>
 </html>

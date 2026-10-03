@@ -113,7 +113,7 @@ private fun JoinSharedFolder(repo: PocketRepository) {
         }
         Spacer(Modifier.height(12.dp))
         PrimaryButton(stringResource(Res.string.join_cta), enabled = blob.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
-            val inv = decodeShareInvite(blob)
+            val inv = decodeShareInvite(dev.ccpocket.app.pairing.canonicalLinkScheme(blob))
             if (inv != null) repo.redeemShareInvite(inv) else error = true
         }
     }

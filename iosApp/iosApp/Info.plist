@@ -37,6 +37,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>ccpocket</string>
+				<string>pairlet</string>
 			</array>
 		</dict>
 	</array>
