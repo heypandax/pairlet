@@ -839,7 +839,16 @@ class DshBackend(
         return relaunch
     }
 
+    // List the session under its project in DSH's own sidebar (issue #388) — see [DshWorkspaceRegistry].
+    override suspend fun onSessionStarted(sessionId: String, workdir: String) {
+        DshWorkspaceRegistry.adopt(sessionId, workdir)
+    }
+
     override suspend fun onProcessEnded(sessionId: String?) {
+        // again at the end: a DSH Web that was running meanwhile may have rewritten the registry from its
+        // own memory and dropped the entry
+        val wd = workdir
+        if (sessionId != null && wd.isNotBlank()) DshWorkspaceRegistry.adopt(sessionId, wd)
         catalog.unpublish(this)
         runCatching { scope?.cancel() }
         scope = null
