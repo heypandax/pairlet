@@ -14,16 +14,18 @@ def main():
     app = args.app.resolve()
     # Refuse a live installation: this hook belongs only to this checkout's build output.
     build = Path(__file__).resolve().parents[1] / "mobile/composeApp/build/compose/binaries"
-    if not app.is_relative_to(build.resolve()) or app.name != "CC Pocket.app":
-        raise ValueError("Expected this checkout's private CC Pocket.app build image")
+    if not app.is_relative_to(build.resolve()) or app.name not in ("CC Pocket.app", "Pairlet.app"):
+        raise ValueError("Expected this checkout's private CC Pocket.app / Pairlet.app build image")
+    base = app.stem
     path = app / "Contents/Info.plist"
     info = plistlib.loads(path.read_bytes())
     assert info["CFBundleIdentifier"] == "dev.ccpocket.app"
-    assert info["CFBundleExecutable"] == "CC Pocket"
+    assert info["CFBundleExecutable"] == base
     # Finder localizes a bundle only when the unlocalized name matches its file-system name.
-    # Keep both base names old and supply the new names in InfoPlist.strings (Apple's bundle contract).
-    info["CFBundleName"] = "CC Pocket"
-    info["CFBundleDisplayName"] = "CC Pocket"
+    # The legacy image keeps both base names old and supplies the new names in InfoPlist.strings (Apple's
+    # bundle contract); the Pairlet image already matches, and gets the same strings for one code path.
+    info["CFBundleName"] = base
+    info["CFBundleDisplayName"] = base
     info["CFBundleDevelopmentRegion"] = "en"
     info["LSHasLocalizedDisplayName"] = True
     path.write_bytes(plistlib.dumps(info, sort_keys=False))
@@ -40,7 +42,7 @@ def main():
         command.append("--timestamp")
     subprocess.run(command + [str(app)], check=True)
     subprocess.run(["codesign", "--verify", "--strict", str(app)], check=True)
-    print("Pairlet bundle metadata finalized and signature verified; legacy path/launcher retained")
+    print(f"Pairlet bundle metadata finalized and signature verified ({app.name})")
 
 
 if __name__ == "__main__":

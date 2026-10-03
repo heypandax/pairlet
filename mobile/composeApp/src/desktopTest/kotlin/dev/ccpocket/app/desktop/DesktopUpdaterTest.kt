@@ -30,6 +30,10 @@ class DesktopUpdaterTest {
         assertEquals("cc-pocket-desktop-macos-arm64.dmg", DesktopUpdater.desktopAssetFor("Mac OS X", "aarch64"))
         assertEquals("cc-pocket-desktop-macos-x86_64.dmg", DesktopUpdater.desktopAssetFor("Mac OS X", "x86_64"))
         assertEquals("cc-pocket-desktop-windows-x86_64.msi", DesktopUpdater.desktopAssetFor("Windows 11", "amd64"))
+        // the Pairlet-named macOS image updates from its own asset; every other root keeps the legacy one
+        assertEquals("pairlet-desktop-macos-arm64.dmg", DesktopUpdater.desktopAssetFor("Mac OS X", "aarch64", appRootName = "Pairlet.app"))
+        assertEquals("cc-pocket-desktop-macos-arm64.dmg", DesktopUpdater.desktopAssetFor("Mac OS X", "aarch64", appRootName = "CC Pocket.app"))
+        assertEquals("cc-pocket-desktop-windows-x86_64.msi", DesktopUpdater.desktopAssetFor("Windows 11", "amd64", appRootName = "Pairlet.app"))
         // no artifacts published for these: Windows-on-arm, Linux, or an arch we don't build
         assertNull(DesktopUpdater.desktopAssetFor("Windows 11", "aarch64"))
         assertNull(DesktopUpdater.desktopAssetFor("Linux", "amd64"))
@@ -42,5 +46,17 @@ class DesktopUpdaterTest {
         assertEquals("scoop update cc-pocket", DesktopUpdater.upgradeCommandFor(DkInstallSource.SCOOP))
         assertNull(DesktopUpdater.upgradeCommandFor(DkInstallSource.STANDALONE)) // it self-updates
         assertNull(DesktopUpdater.upgradeCommandFor(DkInstallSource.UNKNOWN))
+    }
+
+    @Test
+    fun the_legacy_bundle_is_only_reported_to_a_pairlet_named_install() {
+        val dir = java.nio.file.Files.createTempDirectory("legacy-app").toFile()
+        val apps = java.io.File(dir, "Applications").apply { mkdirs() }
+        val pairlet = java.io.File(apps, "Pairlet.app").apply { mkdirs() }
+        assertNull(legacyAppBeside(pairlet, applications = apps))
+        val legacy = java.io.File(apps, "CC Pocket.app").apply { mkdirs() }
+        assertEquals(legacy, legacyAppBeside(pairlet, applications = apps))
+        assertNull(legacyAppBeside(legacy, applications = apps))
+        assertNull(legacyAppBeside(null, applications = apps))
     }
 }

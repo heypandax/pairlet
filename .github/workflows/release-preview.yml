@@ -238,6 +238,18 @@ jobs:
               shutil.copy2(packages[0], f"out/cc-pocket-desktop-{os.environ['PREVIEW_VERSION']}-{os.environ['PLATFORM']}-preview.{extension}")
           PY
           python3 scripts/preview-manifest.py out
+      - name: Rehearse the Pairlet-named macOS image
+        # The release publishes two macOS images (see release.yml macos-desktop): rebuild with the new
+        # package name, run the same packaged-JVM smoke, and keep the dmg beside the legacy one.
+        if: runner.os == 'macOS'
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          rm -rf mobile/composeApp/build/compose/binaries/main/app mobile/composeApp/build/compose/binaries/main/dmg
+          ./gradlew --no-daemon -PdesktopPackageName=Pairlet :mobile:composeApp:packageDmg
+          bash scripts/smoke-desktop-image.sh "mobile/composeApp/build/compose/binaries/main/app/Pairlet.app"
+          cp mobile/composeApp/build/compose/binaries/main/dmg/*.dmg "out/pairlet-desktop-$PREVIEW_VERSION-$PLATFORM-preview.dmg"
+          python3 scripts/preview-manifest.py out
       - name: Build AppImage (best effort, Linux only)
         # The rehearsal is where we learn whether appimagetool's rolling "continuous" build works on
         # these runners without FUSE. It never blocks the deb/rpm rehearsal, and the script deletes any

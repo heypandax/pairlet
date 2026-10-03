@@ -630,6 +630,7 @@ private fun ApplicationScope.PocketShell() {
             ) {
             Column(Modifier.fillMaxSize().background(Tok.base)) {
                 dev.ccpocket.app.ui.BrandNotice(brandTransition)
+                dev.ccpocket.app.desktop.LegacyAppNotice()
                 // Nothing spans the window width any more (desktop chrome v2) — the columns below run to
                 // the window's top edge and carry the chrome themselves. What survives here is the
                 // Win/Linux fullscreen affordance (issue #94): macOS auto-reveals its own menu bar on

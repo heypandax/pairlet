@@ -44,6 +44,31 @@ main 已合入观测模块及发行配置跟进（PR #369、#370）；`2f2dba8b`
 - 后续按 [最新观测验收](archive/observability-2026-09/ACCEPTANCE.md) 处理两种会话超时、手机 GA4 后台回执、iOS 真实错误源码行号等剩余项。Sentry 自动 fatal 尚未迁移，继续保留 Crashlytics；不作为本次更新的已完成功能宣传。
 - 2.0 正式候选仍需原签名旧版升级、旧名称搜索及新旧命令安装渠道验收。网站源文件、App Store 草稿和实际安装包分别记录同步状态。
 
+## 过渡名结束后的迁移安排（2026-10-03）
+
+用户决定：名称统一为 Pairlet（见 [命名决定](PAIRLET-NAMING.md)），其余旧标识分三类处理。本节是源码与流水线状态，不是发布回执；双包流水线尚未在 CI 带签名跑过。
+
+**不迁移（永久保留）**：launchd / systemd / 计划任务的服务 ID、日志与数据目录（`~/.cc-pocket` 等）、Bundle ID、协议常量、Windows 升级码、Scoop 包名 `cc-pocket-daemon`。用户基本看不到，迁移要么丢配对身份，要么制造第二个 daemon。
+
+**先加新名、旧名长期保留**：
+
+| 项 | 现状 | 下一步 |
+| --- | --- | --- |
+| `pairlet://` 链接 | App 各入口已同时接受两种 scheme，iOS / Android 已注册；daemon 仍输出 `ccpocket://` | 接受新 scheme 的 App 版本铺开后，daemon 改为输出 `pairlet://`；旧链接永久可解析 |
+| 官网仓库链接 | 已改为 `heypandax/pairlet`，未部署 | 随官网部署生效 |
+| relay 域名 | `relay.pairlet.org` 已指向同一个 relay，客户端默认值未切 | 中国大陆网络与新旧地址组合验证通过后再切默认；已配对设备保存的地址不改写 |
+| Homebrew 包名 | 草稿在 `packaging/pairlet-candidates/` | 发版时填入真实版本与哈希，用 tap 的 rename map 把 `cc-pocket` 改为 `pairlet`，并实测旧安装升级与卸载 |
+
+**macOS 桌面端：新旧两个包并行发布**
+
+- `release.yml` 的 `macos-desktop` 任务每个架构构建两个镜像：`legacy` → `CC Pocket.app`，资产 `cc-pocket-desktop-*-macos-<arch>.dmg`；`pairlet` → `Pairlet.app`，资产 `pairlet-desktop-*-macos-<arch>.dmg`（`-PdesktopPackageName=Pairlet`）。Bundle ID、数据目录、签名身份相同。
+- 已有安装继续从旧资产原地自更新，不搬路径；`Pairlet.app` 的更新器按自身包名选择 `pairlet-desktop-*` 资产。
+- 官网与 README 的下载链接在**首个包含 `pairlet-desktop-*` 资产的版本发布之后**再切换，提前切会 404。
+- 同一台 Mac 上两个包并存时共用数据，不会丢配对；`Pairlet.app` 首次启动会提示可以删除旧的 `CC Pocket.app`。
+- 观测：比较每个版本两类资产的 `download_count`（`gh api repos/heypandax/pairlet/releases`）。自更新也会下载对应资产，所以它同时反映存量。经镜像下载的不计入，只能看趋势。桌面埋点加维度要改 relay 的校验白名单并重新部署，本次没有做。
+- 退出条件：旧资产下载占比降到很低后，给旧包发最后一版并提示下载新版，之后停止构建 `legacy`。
+- Windows 与 Linux 保持单包：Windows 两个 MSI 共用升级码，安装新包会替换旧包，不存在并存；显示名已是 Pairlet。
+
 ## 回退
 
 新网站有问题只回退站点与新域配置，旧 relay/下载不动。客户端有升级问题暂停分发并以更高版本修复，不重置应用身份。已发版本/资产不覆盖。包管理器迁移失败保持旧入口，不恢复第二个 daemon 服务。

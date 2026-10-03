@@ -359,10 +359,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Two images per arch, published side by side (docs/PAIRLET-ROLLOUT.md):
+          #   legacy  → "CC Pocket.app", cc-pocket-desktop-*.dmg — what every existing install self-updates from
+          #   pairlet → "Pairlet.app",   pairlet-desktop-*.dmg   — what the site hands to new installs
           - arch: arm64
             jdk_arch: aarch64   # native on the Apple Silicon runner
+            variant: legacy
+            asset_prefix: cc-pocket-desktop
           - arch: x86_64
             jdk_arch: x64       # cross-build via Rosetta
+            variant: legacy
+            asset_prefix: cc-pocket-desktop
+          - arch: arm64
+            jdk_arch: aarch64
+            variant: pairlet
+            asset_prefix: pairlet-desktop
+          - arch: x86_64
+            jdk_arch: x64
+            variant: pairlet
+            asset_prefix: pairlet-desktop
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v7
@@ -413,6 +428,7 @@ jobs:
       - name: Build + sign + notarize the DMG
         env:
           CCP_ARCH: ${{ matrix.arch }}   # names the dmg for the JDK's arch (uname -m still says arm64 under Rosetta)
+          DESKTOP_VARIANT: ${{ matrix.variant }}
           DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
@@ -435,10 +451,11 @@ jobs:
         run: |
           VER="${{ inputs.version }}"
           ARCH="${{ matrix.arch }}"
-          VERSIONED="cc-pocket-desktop-${VER}-macos-${ARCH}.dmg"
-          # per-arch version-less permalink: releases/latest/download/cc-pocket-desktop-macos-{arm64,x86_64}.dmg
-          cp "$VERSIONED" "cc-pocket-desktop-macos-${ARCH}.dmg"
-          gh release upload "v${VER}" "$VERSIONED" "cc-pocket-desktop-macos-${ARCH}.dmg" --clobber
+          PREFIX="${{ matrix.asset_prefix }}"
+          VERSIONED="${PREFIX}-${VER}-macos-${ARCH}.dmg"
+          # per-arch version-less permalink: releases/latest/download/<prefix>-macos-{arm64,x86_64}.dmg
+          cp "$VERSIONED" "${PREFIX}-macos-${ARCH}.dmg"
+          gh release upload "v${VER}" "$VERSIONED" "${PREFIX}-macos-${ARCH}.dmg" --clobber
 
   windows-desktop:
     needs: preflight

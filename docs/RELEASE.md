@@ -225,6 +225,8 @@ security find-identity -v -p codesigning
 
 全部都用**无版本号的固定 asset 名**——`cc-pocket-desktop-macos-arm64.dmg`、`cc-pocket-desktop-windows-x86_64.msi`、`cc-pocket-desktop-linux-<arch>.{deb,rpm}`——这样 `https://github.com/heypandax/cc-pocket/releases/latest/download/<asset>` 就是永久有效的「最新版」直链，官网与 README 都引用它。
 
+macOS 桌面端自 2026-10 起每个架构发布两个镜像：`cc-pocket-desktop-macos-<arch>.dmg`（`CC Pocket.app`，存量安装自更新用）与 `pairlet-desktop-macos-<arch>.dmg`（`Pairlet.app`，新安装用）。本地单独构建新包：`DESKTOP_VARIANT=pairlet scripts/release-desktop-macos.sh`。背景与退出条件见 [迁移安排](PAIRLET-ROLLOUT.md)。
+
 > 桌面 App **没有 Homebrew / Scoop 入口**，纯直链下载；只有 daemon 走 cask / scoop。别把它和 daemon 的安装（brew / scoop / curl）搞混。
 
 ## CI（常规路径）

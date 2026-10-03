@@ -2131,6 +2131,7 @@
     <string name="brand_former_name">Pairlet, formerly CC Pocket</string>
     <string name="brand_renamed">CC Pocket is now Pairlet.</string>
     <string name="brand_dismiss">Got it</string>
+    <string name="legacy_app_found">The older CC Pocket app is still on this Mac (%1$s). Both use the same data — you can move the old one to the Trash.</string>
     <string name="diagnostic_sharing_title">Share usage and diagnostics</string>
     <string name="diagnostic_sharing_save_failed">This choice could not be saved for the next launch. Please try again.</string>
     <string name="diagnostic_sharing_description">Firebase receives usage events and crash reports; Sentry receives diagnostic errors and logs to help improve reliability and features. Conversation content, prompts and file content are excluded from diagnostics. Turning this off stops new collection and clears pending reports where supported; reports already received are retained. This setting applies to this app; computer diagnostics are controlled separately.</string>

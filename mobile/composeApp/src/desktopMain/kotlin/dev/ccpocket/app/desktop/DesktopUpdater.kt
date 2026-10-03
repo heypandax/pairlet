@@ -52,6 +52,7 @@ object DesktopUpdater {
     fun desktopAssetFor(
         os: String = osName,
         arch: String = System.getProperty("os.arch"),
+        appRootName: String? = packagedAppRoot()?.name,
     ): String? {
         val a = when (arch.lowercase()) {
             "aarch64", "arm64" -> "arm64"
@@ -60,7 +61,10 @@ object DesktopUpdater {
         }
         val o = os.lowercase()
         return when {
-            o.contains("mac") -> "cc-pocket-desktop-macos-$a.dmg"
+            // Two macOS images are published side by side: "CC Pocket.app" (every pre-rename install) and
+            // "Pairlet.app" (new installs). Each updates from its OWN asset, so neither is ever handed a
+            // bundle whose launcher name differs from the one already on disk.
+            o.contains("mac") -> if (appRootName == "Pairlet.app") "pairlet-desktop-macos-$a.dmg" else "cc-pocket-desktop-macos-$a.dmg"
             o.contains("win") -> if (a == "x86_64") "cc-pocket-desktop-windows-x86_64.msi" else null
             else -> null // no Linux desktop artifact is published
         }

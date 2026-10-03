@@ -10,7 +10,8 @@ APP_IMAGE=${1:?usage: smoke-desktop-image.sh <jpackage-app-image>}
 case "$(uname -s)" in
   Darwin)
     python3 "$(dirname "$0")/check-brand-compatibility.py" --mac-app "$APP_IMAGE"
-    LAUNCHER="$APP_IMAGE/Contents/MacOS/CC Pocket"
+    # "CC Pocket.app" (legacy) or "Pairlet.app" (new installs): the launcher carries the image's own name
+    LAUNCHER="$APP_IMAGE/Contents/MacOS/$(basename "$APP_IMAGE" .app)"
     ;;
   Linux)
     # jpackage's Linux app image is <name>/bin/<name> — the same layout the deb/rpm install under

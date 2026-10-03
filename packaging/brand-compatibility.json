@@ -37,7 +37,7 @@
     },
     {
       "path": "mobile/composeApp/src/desktopMain/kotlin/dev/ccpocket/app/desktop/DesktopUpdater.kt",
-      "sha256": "879f1e5a8bf66286e050c3ccf3c62c2ce5dac4a5fb6cae0677d4533cd3d0ab7c"
+      "sha256": "01d20cd3091b0a88bdc95d0352eaf7e0fd3d8eb59554e9c6a9d00e7907f31d64"
     },
     {
       "path": "harmony/entry/src/main/ets/pocket/crypto/E2ESession.ets",

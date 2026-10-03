@@ -140,6 +140,13 @@ compose.resources {
     packageOfResClass = "dev.ccpocket.app.resources"
 }
 
+// The jpackage identity: the .app directory, launcher and Windows install path. "CC Pocket" is the
+// compatibility default every existing install self-updates in place (docs/PAIRLET-COMPATIBILITY.md).
+// The macOS release ALSO builds a second image with -PdesktopPackageName=Pairlet for new installs
+// (same bundle id and data, published under pairlet-desktop-* asset names) — see docs/PAIRLET-ROLLOUT.md.
+val desktopPackageName = (findProperty("desktopPackageName") as String?)?.takeIf { it.isNotBlank() } ?: "CC Pocket"
+require(desktopPackageName == "CC Pocket" || desktopPackageName == "Pairlet") { "Unknown desktopPackageName: $desktopPackageName" }
+
 compose.desktop {
     application {
         mainClass = "dev.ccpocket.app.MainKt"
@@ -166,7 +173,7 @@ compose.desktop {
             modules("java.net.http", "java.scripting", "jdk.jsobject", "jdk.unsupported", "jdk.unsupported.desktop", "jdk.xml.dom")
             // Compatibility identity: also controls the .app directory, executable and Windows install path.
             // Keep this stable; Pairlet's device name is separate metadata (see docs/PAIRLET-COMPATIBILITY.md).
-            packageName = "CC Pocket"
+            packageName = desktopPackageName
             packageVersion = "2.2.0"
             windows {
                 // From the verified v1.9.8 MSI. Changing the displayed name must not create a second product.
@@ -270,7 +277,7 @@ if (System.getProperty("os.name").lowercase().contains("linux")) {
         doLast {
             packagingExec.exec {
                 commandLine("python3", rootProject.file("scripts/compact-linux-classpath.py"),
-                    layout.buildDirectory.dir("compose/binaries/main/app/CC Pocket").get().asFile)
+                    layout.buildDirectory.dir("compose/binaries/main/app/$desktopPackageName").get().asFile)
             }
         }
     }
@@ -280,7 +287,7 @@ if (System.getProperty("os.name").lowercase().contains("linux")) {
         .matching { it.name == "packageDeb" || it.name == "packageRpm" }
         .configureEach {
             dependsOn("createDistributable")
-            appImage.set(layout.buildDirectory.dir("compose/binaries/main/app/CC Pocket"))
+            appImage.set(layout.buildDirectory.dir("compose/binaries/main/app/$desktopPackageName"))
         }
 }
 
@@ -292,7 +299,7 @@ if (System.getProperty("os.name").lowercase().contains("mac")) {
         doLast {
             packagingExec.exec {
                 commandLine("python3", rootProject.file("scripts/brand-macos-image.py"),
-                    "--app", layout.buildDirectory.dir("compose/binaries/main/app/CC Pocket.app").get().asFile,
+                    "--app", layout.buildDirectory.dir("compose/binaries/main/app/$desktopPackageName.app").get().asFile,
                     "--identity", (findProperty("ccpocketSignId") as String?)?.takeIf { it.isNotBlank() } ?: "-")
             }
         }

@@ -33,6 +33,14 @@ VERSION="${1:-$(grep -E 'val appVersionName *= *"' mobile/composeApp/build.gradl
 # Local builds default to the host arch.
 ARCH="${CCP_ARCH:-$(uname -m)}" # arm64 | x86_64
 NOTARY_PROFILE="${NOTARY_PROFILE:-cc-pocket}"
+# DESKTOP_VARIANT=legacy (default) builds "CC Pocket.app" → cc-pocket-desktop-*.dmg, the image every
+# existing install self-updates from. DESKTOP_VARIANT=pairlet builds "Pairlet.app" → pairlet-desktop-*.dmg
+# for new installs. Same bundle id, same data; only the on-disk name and the asset name differ.
+case "${DESKTOP_VARIANT:-legacy}" in
+  legacy)  ASSET_PREFIX="cc-pocket-desktop"; VARIANT_ARGS=() ;;
+  pairlet) ASSET_PREFIX="pairlet-desktop";   VARIANT_ARGS=(-PdesktopPackageName=Pairlet) ;;
+  *) echo "ERROR: DESKTOP_VARIANT must be legacy or pairlet"; exit 1 ;;
+esac
 
 # Local convenience: gradle.properties pins a Homebrew JDK but the launcher still needs JAVA_HOME.
 # Default it when unset and present; CI sets its own JAVA_HOME (temurin), so this is a no-op there.
@@ -72,11 +80,14 @@ if [ -n "${DEVELOPER_ID:-}" ]; then
   done
 fi
 
-echo "==> gradle :mobile:composeApp:packageDmg  (v$VERSION · $ARCH)"
+# A previous variant's image in the same checkout would otherwise be picked up by the `ls -t` below.
+rm -rf mobile/composeApp/build/compose/binaries/main/app mobile/composeApp/build/compose/binaries/main/dmg
+echo "==> gradle :mobile:composeApp:packageDmg  (v$VERSION · $ARCH · ${DESKTOP_VARIANT:-legacy})"
 ./gradlew :mobile:composeApp:packageDmg --no-daemon -q \
   -Pcompose.desktop.packaging.checkJdkVendor=false \
   ${JAVA_HOME:+-Dorg.gradle.java.home="$JAVA_HOME"} \
-  "${SIGN_ARGS[@]}"
+  ${VARIANT_ARGS[@]+"${VARIANT_ARGS[@]}"} \
+  ${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"}
 
 DMG="$(ls -t mobile/composeApp/build/compose/binaries/main/dmg/*.dmg 2>/dev/null | head -1)"
 [ -n "$DMG" ] && [ -f "$DMG" ] || { echo "ERROR: packageDmg produced no .dmg"; exit 1; }
@@ -101,7 +112,7 @@ else
   xcrun stapler validate "$DMG"
 fi
 
-OUT="cc-pocket-desktop-${VERSION}-macos-${ARCH}.dmg"
+OUT="${ASSET_PREFIX}-${VERSION}-macos-${ARCH}.dmg"
 cp -f "$DMG" "$ROOT/$OUT"
 echo ""
 echo "    artifact : $OUT"
