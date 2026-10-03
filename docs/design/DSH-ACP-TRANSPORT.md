@@ -106,3 +106,13 @@ cc-pocket-daemon config --clear-dsh-bin    # 取消固定，回到自动探测
 
 顺带在同一批修了另一个相邻盲点：解析器原本只认 nvm 的 `~/.nvm/versions/node/vX.Y.Z/bin`（#287），现在也认 fnm 的 `<state>/aliases/default/bin`（`$FNM_DIR`、macOS 的 `~/Library/Application Support/fnm`、Linux 的 `~/.local/share/fnm`、旧版的 `~/.fnm`）。这条对**所有** agent 后端生效，不只 dsh。
 
+
+## 7. 手机建的会话在 DSH Web 侧栏可见（issue #388，2026-10-03）
+
+DSH Web／桌面端按项目分组会话，分组依据是 `$DSH_HOME/storages/workspace.json` 里每个项目的 `sessionIds`，只有创建会话的 DSH 宿主自己会写它。经 ACP 建的会话（手机上新建的全部会话）在共享会话库里，但不属于任何项目，DSH Web 不会收编，重启也不出现（0.1.5-rc.3 与 0.2.0-rc.2 均实测）。
+
+`DshWorkspaceRegistry` 在会话开始和进程结束时，把会话号放到**已有的、路径等于会话目录的项目**的 `sessionIds` 首位。只处理 `unit = {workspace, 2}` 的布局；遇到 `pendingMutation`、未知版本、无对应项目、已归档会话都不动；不新建、不重排、不删除项目；其余字段原样保留，原子替换文件。
+
+实测：Windows + dsh 0.1.5-rc.3，经 daemon 新建的会话写入后，启动 DSH Web 即列在项目 Mind 下；本机 dsh 0.2.0-rc.2 手工写入同样生效。
+
+限制：正在运行的 DSH Web 把登记表放在内存里，要重启后才显示，且它下一次写入可能丢掉这一项；进程结束时的再次登记用于补回。DSH 没有项目的目录不处理（首次启动 DSH Web 会自行按已有会话建项目）。升级 dsh 后若 `workspace.json` 的 `unit.version` 变化，本功能自动停用，需重新核对格式。

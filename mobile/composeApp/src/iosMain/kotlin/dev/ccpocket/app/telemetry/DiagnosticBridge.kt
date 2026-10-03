@@ -28,7 +28,8 @@ internal object DiagnosticBridge {
             while (isActive) { delay(1000); counters?.flush() }
         }
         TelemetrySink.metadata = TelemetryMetadata(Component.IOS,
-            env.takeIf { environment in listOf("production", "staging", "development") })
+            env.takeIf { environment in listOf("production", "staging", "development") },
+            installChannel = installChannel(platform.Foundation.NSBundle.mainBundle.appStoreReceiptURL?.lastPathComponent))
         reporter = DiagnosticReporter(Component.IOS, env, "cc-pocket-ios@$APP_VERSION", DiagnosticSink {
             onRecord(Json.encodeToString(it))
         }, counters = counters)
@@ -60,4 +61,11 @@ internal object DiagnosticBridge {
     }
 
     fun flushCounters() { counters?.flush() }
+}
+
+/** `sandboxReceipt` is what TestFlight and App Review installs carry; an App Store install has `receipt`. */
+internal fun installChannel(receiptName: String?): String = when (receiptName) {
+    null -> "unknown"
+    "sandboxReceipt" -> "sandbox"
+    else -> "store"
 }

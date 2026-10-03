@@ -35,6 +35,10 @@ enum class TelEvent(val id: String) {
     // session without ever pairing. Everything downstream of it already carries [TelKey.Demo]; this marks
     // the entry itself, which nothing did.
     DemoEntered("demo_entered"),
+    // issue #342: the demo's entry was counted but not what came of it. Fired once when a demo walkthrough
+    // ends, with [TelKey.Value] = how far it went (none | opened | prompted) — it separates "tapped in and
+    // left" from "actually tried a session", which decides whether the demo deserves a next-step prompt.
+    DemoExited("demo_exited"),
     PairStarted("pair_started"),
     Paired("paired"),
     PairFailed("pair_failed"),
