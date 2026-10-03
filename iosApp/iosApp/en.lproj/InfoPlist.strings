@@ -1,7 +1,7 @@
 /* iOS system permission dialogs — English (matches the Info.plist defaults). */
 "NSLocalNetworkUsageDescription" = "Pairlet connects to the daemon running on your computer over the local network.";
-"NSCameraUsageDescription" = "Pairlet uses the camera to scan the pairing QR code shown by cc-pocket-daemon pair on your computer.";
+"NSCameraUsageDescription" = "Pairlet uses the camera to scan the pairing QR code shown by pairlet pair on your computer.";
 "NSMicrophoneUsageDescription" = "Pairlet uses the mic to dictate prompts. Audio is transcribed for this message only — nothing is recorded or stored.";
 "NSSpeechRecognitionUsageDescription" = "Pairlet transcribes your dictation on-device so you can speak prompts instead of typing them.";
 
-"CFBundleDisplayName" = "CC Pairlet";
+"CFBundleDisplayName" = "Pairlet";

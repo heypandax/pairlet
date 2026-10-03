@@ -17,7 +17,7 @@ import kotlin.system.exitProcess
  * curl-managed install whose service points at the stable launcher — it downloads, verifies, flips
  * the symlink and EXITS: launchd KeepAlive / systemd Restart=always relaunch straight onto the new
  * version. Windows never auto-applies (a Scheduled Task doesn't restart an exited process);
- * `cc-pocket-daemon update` covers it manually.
+ * `pairlet update` covers it manually.
  */
 object UpdateChecker {
     private val log = logger("Update")
@@ -81,7 +81,7 @@ object UpdateChecker {
         }
         if (!UpdateService.isNewer(latest.version, current)) return
 
-        log.info("update available: $current → ${latest.version} (cc-pocket-daemon update)")
+        log.info("update available: $current → ${latest.version} (pairlet update)")
         val install = UpdateService.managedInstallOf(UpdateService.selfExe())
         val canAuto = autoApply && install != null && install.serviceAnchored &&
             !System.getProperty("os.name").lowercase().contains("win")

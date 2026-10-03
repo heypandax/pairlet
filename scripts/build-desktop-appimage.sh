@@ -60,7 +60,7 @@ ICON_NAME="cc-pocket"
 cat > "$APPDIR/$ICON_NAME.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=CC Pairlet
+Name=Pairlet
 GenericName=AI coding agent companion
 Comment=Drive Claude Code and Codex on your computer from another device
 Exec=AppRun

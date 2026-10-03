@@ -54,13 +54,13 @@ cp iosApp/iosApp/GoogleService-Info.plist.template iosApp/iosApp/GoogleService-I
 1. **daemon 外拨连 relay**（首跑自生成身份并起本地配对回环）：
 
    ```bash
-   daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon run --relay wss://pocket.ark-nexus.cc --claude-bin ~/.local/bin/claude
+   daemon/build/install/cc-pocket-daemon/bin/pairlet run --relay wss://pocket.ark-nexus.cc --claude-bin ~/.local/bin/claude
    ```
 
 2. **配对**：另开一个终端，让 daemon 出一张一次性配对链接：
 
    ```bash
-   daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair
+   daemon/build/install/cc-pocket-daemon/bin/pairlet pair
    # 输出 ccpocket://pair?relay=...&acct=...&dpk=...&ticket=...
    ```
 

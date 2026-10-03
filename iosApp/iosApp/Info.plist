@@ -11,7 +11,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>CC Pairlet</string>
+	<string>Pairlet</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -56,7 +56,7 @@
 		<string>_ccpocket._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Pairlet uses the camera to scan the pairing QR code shown by cc-pocket-daemon pair on your computer.</string>
+	<string>Pairlet uses the camera to scan the pairing QR code shown by pairlet pair on your computer.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Pairlet uses Face ID to lock the app, so only you can open your sessions and approve tool actions.</string>
 	<key>NSLocalNetworkUsageDescription</key>

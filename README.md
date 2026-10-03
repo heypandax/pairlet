@@ -146,7 +146,7 @@ Install the [OpenCode CLI](https://opencode.ai/docs/) on the **computer running 
 
 The daemon probes the standalone install directory `~/.opencode/bin` as well as PATH and package-manager locations, so a background service can find a standard installation without a manually created symlink. This lookup fix is newer than **v1.9.8**; existing v1.9.8 installations need a daemon release containing the fix.
 
-For a custom CLI location or an older daemon, persist its absolute path with `cc-pocket-daemon service-install --apply --opencode-bin /absolute/path/to/opencode`. This restarts the service; finish active sessions first and include any existing custom service options, such as `--relay`. Exporting a variable in a terminal does not change the environment of an already running background service.
+For a custom CLI location or an older daemon, persist its absolute path with `pairlet service-install --apply --opencode-bin /absolute/path/to/opencode`. This restarts the service; finish active sessions first and include any existing custom service options, such as `--relay`. Exporting a variable in a terminal does not change the environment of an already running background service.
 
 ### Works with third-party gateways
 
@@ -181,7 +181,7 @@ Through the relay (off-LAN), the real product path:
 
 ```bash
 ./gradlew :daemon:installDist
-daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon run --relay wss://<your-relay>
+daemon/build/install/cc-pocket-daemon/bin/pairlet run --relay wss://<your-relay>
 daemon/build/install/cc-pocket-daemon/bin/pairlet pair    # in another terminal
 ```
 

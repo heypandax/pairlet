@@ -26,7 +26,7 @@
     <string name="status_pairing">pairing…</string>
     <string name="status_pair_failed">pairing failed: %1$s</string>
     <string name="status_checking_network">checking network access…</string>
-    <string name="status_local_denied">local network denied — allow CC Pairlet in Settings → Privacy → Local Network</string>
+    <string name="status_local_denied">local network denied — allow Pairlet in Settings → Privacy → Local Network</string>
     <string name="status_connecting">connecting…</string>
     <string name="status_reconnecting">reconnecting…</string>
     <string name="status_connected">connected</string>
@@ -426,13 +426,13 @@
     <!-- ── App Lock / security (issue #109) ───────────────────────── -->
     <string name="security_section">SECURITY</string>
     <string name="app_lock_require">Require %1$s</string>
-    <string name="app_lock_require_sub">Unlock with %1$s when you open CC Pairlet.</string>
+    <string name="app_lock_require_sub">Unlock with %1$s when you open Pairlet.</string>
     <string name="app_lock_autolock">Auto-lock</string>
     <string name="app_lock_immediately">Immediately</string>
     <string name="app_lock_after_1min">After 1 minute</string>
-    <string name="app_lock_autolock_hint">How soon CC Pairlet re-locks after you leave it.</string>
+    <string name="app_lock_autolock_hint">How soon Pairlet re-locks after you leave it.</string>
     <string name="app_lock_verifying">Verifying with %1$s to turn on…</string>
-    <string name="app_lock_reason">Unlock CC Pairlet</string>
+    <string name="app_lock_reason">Unlock Pairlet</string>
     <string name="app_lock_enable_reason">Confirm it\'s you to turn on App Lock</string>
     <string name="biometry_face">Face ID</string>
     <string name="biometry_touch">Touch ID</string>
@@ -467,7 +467,7 @@
     <string name="ob_sub">Your phone drives the AI coding agent that runs on your computer.</string>
     <!-- ── first run · connect your computer (issue #278 batch 2) ──── -->
     <string name="fr_step_install">Install Pairlet on the computer</string>
-    <string name="fr_step_pair_body">Run cc-pocket-daemon pair on the computer — it shows a six-digit code and a QR.</string>
+    <string name="fr_step_pair_body">Run pairlet pair on the computer — it shows a six-digit code and a QR.</string>
     <string name="fr_prereq">Needs the Claude Code CLI on that computer</string>
     <string name="fr_prereq_what">What\'s that?</string>
     <string name="fr_prereq_win_body">On Windows the CLI is installed separately, in Windows itself or in WSL. Pairing cannot start without it.</string>
@@ -797,7 +797,7 @@
 
     <!-- owner: invite ready -->
     <string name="share_invite_ready">Invite ready</string>
-    <string name="share_invite_hint">Paste this code into CC Pairlet ▸ Connect to join. It works once.</string>
+    <string name="share_invite_hint">Paste this code into Pairlet ▸ Connect to join. It works once.</string>
     <string name="share_invite_code">Invite code</string>
     <string name="share_invite_copy">Copy code</string>
     <string name="share_invite_copied">Copied</string>
@@ -1034,7 +1034,7 @@
     <string name="term_app_system">System terminal</string>
     <string name="settings_menu_bar">Menu bar</string>
     <string name="settings_menu_bar_sub">A persistent status glyph — approvals and running sessions at a glance, without raising this window.</string>
-    <string name="settings_menu_bar_toggle">Show CC Pairlet in the menu bar</string>
+    <string name="settings_menu_bar_toggle">Show Pairlet in the menu bar</string>
     <string name="settings_menu_bar_win">Tray icon &amp; popover</string>
     <string name="settings_menu_bar_sub_win">A status icon in the notification area with a floating panel — approvals and running sessions at a glance. Turn it off to remove the popover entirely.</string>
     <string name="settings_menu_bar_toggle_win">Show the tray icon and floating panel</string>
@@ -1242,9 +1242,9 @@
     <string name="tray_all_clear">Nothing needs you</string>
     <string name="tray_no_running">No running sessions</string>
     <string name="tray_more_sessions">+%1$d more sessions</string>
-    <string name="tray_open_app">Open CC Pairlet</string>
-    <string name="tray_exit_app">Exit CC Pairlet</string>
-    <string name="tray_more_waiting">+%1$d more waiting — open CC Pairlet</string>
+    <string name="tray_open_app">Open Pairlet</string>
+    <string name="tray_exit_app">Exit Pairlet</string>
+    <string name="tray_more_waiting">+%1$d more waiting — open Pairlet</string>
     <string name="tray_answer_in_session">Answer in session ↗</string>
     <string name="tray_computers_one">%1$d computer</string>
     <string name="tray_computers_many">%1$d computers</string>
@@ -1725,7 +1725,7 @@
     <string name="pair_err_net_title">Can\'t reach the pairing service</string>
     <string name="pair_err_net_body">Check the phone\'s network — a VPN or proxy can block it — then retry.</string>
     <string name="pair_err_link_title">That link isn\'t a pairing link</string>
-    <string name="pair_err_link_body">Scan the QR that cc-pocket-daemon pair prints, or paste the full ccpocket:// link.</string>
+    <string name="pair_err_link_body">Scan the QR that pairlet pair prints, or paste the full ccpocket:// link.</string>
     <string name="pair_err_other_title">Pairing didn\'t finish</string>
     <string name="pair_err_other_body">The attempt was refused, and not for a reason this app recognises. What it reported is below.</string>
     <string name="pair_install_first">Don\'t have Pairlet on the computer yet? Install it first</string>
@@ -2085,9 +2085,9 @@
     <string name="menu_computer">Computer</string>
     <string name="menu_window">Window</string>
     <string name="menu_help">Help</string>
-    <string name="menu_about">About CC Pairlet</string>
+    <string name="menu_about">About Pairlet</string>
     <string name="menu_settings">Settings…</string>
-    <string name="menu_quit">Quit CC Pairlet</string>
+    <string name="menu_quit">Quit Pairlet</string>
     <string name="menu_new_session">New Session…</string>
     <string name="menu_open_folder">Open Folder…</string>
     <string name="menu_all_projects">All Projects…</string>
@@ -2124,12 +2124,12 @@
     <string name="menu_minimize">Minimize</string>
     <string name="menu_zoom">Zoom</string>
     <string name="menu_show_main_window">Show Main Window</string>
-    <string name="menu_help_manual">CC Pairlet Help</string>
+    <string name="menu_help_manual">Pairlet Help</string>
     <string name="menu_help_shortcuts">Keyboard Shortcuts</string>
     <string name="menu_check_updates">Check for Updates…</string>
     <string name="menu_report_issue">Report an Issue…</string>
     <string name="brand_former_name">Pairlet, formerly CC Pocket</string>
-    <string name="brand_renamed">CC Pocket is now Pairlet. Look for CC Pairlet on your device.</string>
+    <string name="brand_renamed">CC Pocket is now Pairlet.</string>
     <string name="brand_dismiss">Got it</string>
     <string name="diagnostic_sharing_title">Share usage and diagnostics</string>
     <string name="diagnostic_sharing_save_failed">This choice could not be saved for the next launch. Please try again.</string>

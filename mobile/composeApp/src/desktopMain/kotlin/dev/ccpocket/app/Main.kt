@@ -123,7 +123,7 @@ fun main(args: Array<String>) {
     // 窗口内容中" the design forbids. No-op on every other platform.
     if (System.getProperty("os.name").lowercase().contains("mac")) {
         System.setProperty("apple.laf.useScreenMenuBar", "true")
-        System.setProperty("apple.awt.application.name", "CC Pairlet")
+        System.setProperty("apple.awt.application.name", "Pairlet")
     }
     application { PocketApplication() }
 }
@@ -154,7 +154,7 @@ private fun ApplicationScope.PocketApplication() {
                         "Pairlet hit an unexpected error and has to close.\n\n" +
                             DesktopCrashGuard.oneLineSummary(DesktopCrashGuard.ERR_WINDOW, t) + "\n\n" +
                             "Details were written to:\n" + DesktopCrashGuard.logFile.path,
-                        "CC Pairlet",
+                        "Pairlet",
                         javax.swing.JOptionPane.ERROR_MESSAGE,
                     )
                 }
@@ -301,7 +301,7 @@ private fun ApplicationScope.PocketShell() {
 
     Window(
         onCloseRequest = closeMainWindow,
-        title = "CC Pairlet",
+        title = "Pairlet",
         // taskbar/window icon on Windows & Linux and the dev-run (gradle :run) Dock icon on macOS;
         // the packaged macOS Dock icon comes from the bundle's .icns (build.gradle.kts iconFile)
         icon = androidx.compose.ui.res.painterResource("app-icon.png"),
@@ -388,7 +388,7 @@ private fun ApplicationScope.PocketShell() {
         // [appMenuSections] fold (asserted in AppMenuModelTest) rather than from checks written here.
         if (mac) {
             // About / Settings / Quit belong to the menu AppKit already draws; handlers replace what those
-            // native entries do instead of drawing a second "CC Pairlet" menu beside it.
+            // native entries do instead of drawing a second "Pairlet" menu beside it.
             InstallMacAppMenuHandlers(
                 onAbout = { openSettings(SettingsTab.ABOUT) },
                 onSettings = { openSettings(SettingsTab.GENERAL) },

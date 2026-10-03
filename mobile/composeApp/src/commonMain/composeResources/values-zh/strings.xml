@@ -26,7 +26,7 @@
     <string name="status_pairing">配对中…</string>
     <string name="status_pair_failed">配对失败：%1$s</string>
     <string name="status_checking_network">正在检查网络权限…</string>
-    <string name="status_local_denied">本地网络访问被拒绝，请在 设置 → 隐私 → 本地网络 中允许 CC Pairlet</string>
+    <string name="status_local_denied">本地网络访问被拒绝，请在 设置 → 隐私 → 本地网络 中允许 Pairlet</string>
     <string name="status_connecting">连接中…</string>
     <string name="status_reconnecting">重连中…</string>
     <string name="status_connected">已连接</string>
@@ -426,13 +426,13 @@
     <!-- ── 应用锁 / 安全（issue #109）─────────────────────────────── -->
     <string name="security_section">安全</string>
     <string name="app_lock_require">需要 %1$s</string>
-    <string name="app_lock_require_sub">打开 CC Pairlet 时用 %1$s 解锁。</string>
+    <string name="app_lock_require_sub">打开 Pairlet 时用 %1$s 解锁。</string>
     <string name="app_lock_autolock">自动锁定</string>
     <string name="app_lock_immediately">立即</string>
     <string name="app_lock_after_1min">离开 1 分钟后</string>
-    <string name="app_lock_autolock_hint">离开 CC Pairlet 多久后重新锁定。</string>
+    <string name="app_lock_autolock_hint">离开 Pairlet 多久后重新锁定。</string>
     <string name="app_lock_verifying">正在用 %1$s 验证以开启……</string>
-    <string name="app_lock_reason">解锁 CC Pairlet</string>
+    <string name="app_lock_reason">解锁 Pairlet</string>
     <string name="app_lock_enable_reason">验证身份以开启应用锁</string>
     <string name="biometry_face">Face ID</string>
     <string name="biometry_touch">Touch ID</string>
@@ -467,7 +467,7 @@
     <string name="ob_sub">手机负责发号施令，干活的 AI 编程助手跑在你自己的电脑上。</string>
     <!-- ── 首启 · 连接你的电脑（issue #278 批次 2） ──── -->
     <string name="fr_step_install">在电脑上装好 Pairlet</string>
-    <string name="fr_step_pair_body">在电脑上跑 cc-pocket-daemon pair，它会给出一个 6 位验证码和一个二维码。</string>
+    <string name="fr_step_pair_body">在电脑上跑 pairlet pair，它会给出一个 6 位验证码和一个二维码。</string>
     <string name="fr_prereq">那台电脑上要先有 Claude Code CLI</string>
     <string name="fr_prereq_what">那是什么？</string>
     <string name="fr_prereq_win_body">Windows 上这个 CLI 得单独装，装在 Windows 里或 WSL 里都行。没有它，配对根本起不来。</string>
@@ -797,7 +797,7 @@
 
     <!-- owner: invite ready -->
     <string name="share_invite_ready">邀请已就绪</string>
-    <string name="share_invite_hint">让对方在 CC Pairlet ▸ 连接 里粘贴此码加入。仅可用一次。</string>
+    <string name="share_invite_hint">让对方在 Pairlet ▸ 连接 里粘贴此码加入。仅可用一次。</string>
     <string name="share_invite_code">邀请码</string>
     <string name="share_invite_copy">复制邀请码</string>
     <string name="share_invite_copied">已复制</string>
@@ -1031,7 +1031,7 @@
     <string name="term_app_system">系统终端</string>
     <string name="settings_menu_bar">菜单栏</string>
     <string name="settings_menu_bar_sub">常驻状态图标——不用唤起窗口，也能一眼看到审批与运行中的会话。</string>
-    <string name="settings_menu_bar_toggle">在菜单栏显示 CC Pairlet</string>
+    <string name="settings_menu_bar_toggle">在菜单栏显示 Pairlet</string>
     <string name="settings_menu_bar_win">托盘图标与悬浮面板</string>
     <string name="settings_menu_bar_sub_win">通知区状态图标＋悬浮面板——一眼看到审批与运行中的会话。不需要可以在这里整个关掉。</string>
     <string name="settings_menu_bar_toggle_win">显示托盘图标和悬浮面板</string>
@@ -1239,9 +1239,9 @@
     <string name="tray_all_clear">没有需要你处理的事</string>
     <string name="tray_no_running">没有运行中的会话</string>
     <string name="tray_more_sessions">还有 %1$d 个会话</string>
-    <string name="tray_open_app">打开 CC Pairlet</string>
-    <string name="tray_exit_app">退出 CC Pairlet</string>
-    <string name="tray_more_waiting">还有 %1$d 个待处理——打开 CC Pairlet</string>
+    <string name="tray_open_app">打开 Pairlet</string>
+    <string name="tray_exit_app">退出 Pairlet</string>
+    <string name="tray_more_waiting">还有 %1$d 个待处理——打开 Pairlet</string>
     <string name="tray_answer_in_session">到会话里回答 ↗</string>
     <string name="tray_computers_one">%1$d 台电脑</string>
     <string name="tray_computers_many">%1$d 台电脑</string>
@@ -1722,7 +1722,7 @@
     <string name="pair_err_net_title">连不上配对服务</string>
     <string name="pair_err_net_body">看看手机的网络——VPN 或代理有可能把它挡了——然后重试。</string>
     <string name="pair_err_link_title">这不是一条配对链接</string>
-    <string name="pair_err_link_body">扫 cc-pocket-daemon pair 打出来的那个二维码，或者把完整的 ccpocket:// 链接粘进来。</string>
+    <string name="pair_err_link_body">扫 pairlet pair 打出来的那个二维码，或者把完整的 ccpocket:// 链接粘进来。</string>
     <string name="pair_err_other_title">配对没走完</string>
     <string name="pair_err_other_body">这次尝试被拒了，但原因不在已知的几种里。下面是它自己报出来的信息。</string>
     <string name="pair_install_first">电脑上还没装 Pairlet？先去装</string>
@@ -2079,9 +2079,9 @@
     <string name="menu_computer">电脑</string>
     <string name="menu_window">窗口</string>
     <string name="menu_help">帮助</string>
-    <string name="menu_about">关于 CC Pairlet</string>
+    <string name="menu_about">关于 Pairlet</string>
     <string name="menu_settings">设置…</string>
-    <string name="menu_quit">退出 CC Pairlet</string>
+    <string name="menu_quit">退出 Pairlet</string>
     <string name="menu_new_session">新建会话…</string>
     <string name="menu_open_folder">打开文件夹…</string>
     <string name="menu_all_projects">全部项目…</string>
@@ -2118,12 +2118,12 @@
     <string name="menu_minimize">最小化</string>
     <string name="menu_zoom">缩放</string>
     <string name="menu_show_main_window">显示主窗口</string>
-    <string name="menu_help_manual">CC Pairlet 帮助</string>
+    <string name="menu_help_manual">Pairlet 帮助</string>
     <string name="menu_help_shortcuts">键盘快捷键</string>
     <string name="menu_check_updates">检查更新…</string>
     <string name="menu_report_issue">反馈问题…</string>
     <string name="brand_former_name">Pairlet，原 CC Pocket</string>
-    <string name="brand_renamed">CC Pocket 现已更名为 Pairlet，设备上显示为 CC Pairlet。</string>
+    <string name="brand_renamed">CC Pocket 现已更名为 Pairlet。</string>
     <string name="brand_dismiss">知道了</string>
     <string name="diagnostic_sharing_title">共享使用与诊断数据</string>
     <string name="diagnostic_sharing_save_failed">未能保存此设置供下次启动使用，请重试。</string>

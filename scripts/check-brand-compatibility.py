@@ -27,7 +27,7 @@ def main():
                   'packageName = "CC Pocket"', f'upgradeUuid = "{contract["windowsUpgradeCode"]}"']:
         assert value in gradle, f"Packaging identity missing: {value}"
     ios = plistlib.loads((ROOT / "iosApp/iosApp/Info.plist").read_bytes())
-    assert ios["CFBundleDisplayName"] == "CC Pairlet"
+    assert ios["CFBundleDisplayName"] == "Pairlet"
     for locale in ("en-US", "zh-Hans"):
         store_name = (ROOT / f"fastlane/metadata/{locale}/name.txt").read_text().strip()
         assert store_name == ios["CFBundleDisplayName"], f"Store and device transition names differ: {locale}"
@@ -45,15 +45,15 @@ def main():
     assert app_ids == {"com.panda.ccpocket"}, "Production iOS bundle identity changed"
     android = ET.parse(ROOT / "mobile/androidApp/src/main/AndroidManifest.xml").getroot()
     ns = "{http://schemas.android.com/apk/res/android}"
-    assert android.find("application").get(ns + "label") == "CC Pairlet"
+    assert android.find("application").get(ns + "label") == "Pairlet"
     assert any(item.get(ns + "scheme") == "ccpocket" for item in android.iter("data"))
     harmony = json.loads((ROOT / "harmony/AppScope/app.json5").read_text())
     assert harmony["app"]["bundleName"] == "com.ccpocket.app"
     for locale in ("values", "values-zh"):
         entries = ET.parse(ROOT / f"mobile/composeApp/src/commonMain/composeResources/{locale}/strings.xml").getroot()
         strings = {item.get("name"): item.text for item in entries if item.tag == "string"}
-        assert "CC Pairlet" in strings["tray_open_app"]
-        assert "cc-pocket-daemon pair" in strings["fr_step_pair_body"]
+        assert "Pairlet" in strings["tray_open_app"]
+        assert "pairlet pair" in strings["fr_step_pair_body"]
         assert "ccpocket://" in strings["paste_pair_link"]
     if args.mac_app:
         app = args.mac_app.resolve()
@@ -65,11 +65,11 @@ def main():
             assert info.get(key) == value, (key, info.get(key), value)
         for locale in ("en", "zh-Hans"):
             localized = (app / f"Contents/Resources/{locale}.lproj/InfoPlist.strings").read_text()
-            assert '\"CFBundleName\" = \"CC Pairlet\";' in localized
-            assert '\"CFBundleDisplayName\" = \"CC Pairlet\";' in localized
+            assert '\"CFBundleName\" = \"Pairlet\";' in localized
+            assert '\"CFBundleDisplayName\" = \"Pairlet\";' in localized
         assert (app / "Contents/MacOS/CC Pocket").is_file()
         config = (app / "Contents/app/CC Pocket.cfg").read_text()
-        assert "CC Pairlet" in config, "Packaged JVM must receive the device name"
+        assert "Pairlet" in config, "Packaged JVM must receive the device name"
     print(f"Pairlet compatibility OK: {len(contract['frozenFiles'])} frozen files, platform identities, labels and legacy commands/links" +
           (", macOS packaged image" if args.mac_app else ""))
 

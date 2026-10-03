@@ -18,7 +18,7 @@ body:
     id: daemon-version
     attributes:
       label: Daemon version / daemon 版本
-      description: "Run `cc-pocket-daemon status` on the computer — it prints the version. / 在电脑上跑 `cc-pocket-daemon status` 可看到。"
+      description: "Run `pairlet status` on the computer — it prints the version. / 在电脑上跑 `pairlet status` 可看到。"
       placeholder: "e.g. 1.3.0"
     validations:
       required: true
@@ -60,5 +60,5 @@ body:
     id: logs
     attributes:
       label: Daemon log excerpt (optional) / 日志片段（可选）
-      description: "macOS: `~/Library/Logs/cc-pocket/daemon.err.log`. Any platform: stop the service, run `cc-pocket-daemon run` in a terminal, reproduce, and paste the output. / 任何平台都可以：停掉服务后在终端前台跑 `cc-pocket-daemon run`，复现后把输出贴上来。"
+      description: "macOS: `~/Library/Logs/cc-pocket/daemon.err.log`. Any platform: stop the service, run `pairlet run` in a terminal, reproduce, and paste the output. / 任何平台都可以：停掉服务后在终端前台跑 `pairlet run`，复现后把输出贴上来。"
       render: text

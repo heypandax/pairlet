@@ -131,7 +131,7 @@ internal fun MenuBarExtra(
     val trayIcon = remember {
         java.awt.TrayIcon(menuBarImage(MenuBarIconSpec(MenuBarKind.IDLE), darkMenuBar = menuBarIsDark())).apply {
             isImageAutoSize = false
-            toolTip = "CC Pairlet"
+            toolTip = "Pairlet"
         }
     }
     DisposableEffect(isWindows) {
@@ -205,7 +205,7 @@ internal fun MenuBarExtra(
             transparent = chrome.transparent,
             resizable = false,
             alwaysOnTop = true,
-            title = "CC Pairlet",
+            title = "Pairlet",
             onPreviewKeyEvent = { e ->
                 when {
                     e.type == KeyEventType.KeyDown && e.key == Key.Escape -> { anchor = null; true }

@@ -113,7 +113,7 @@ private class Root : CliktCommand(name = "pairlet") {
 }
 
 /**
- * `cc-pocket-daemon version` — what's running, how it was installed, and the one command that updates
+ * `pairlet version` — what's running, how it was installed, and the one command that updates
  * it (issue #200). Deliberately offline and daemon-independent: `status` needs the loopback port (and
  * exits 1 when the daemon is down), `update` needs GitHub — but "which version am I on?" must answer
  * on a plane, with the service stopped. `--check` opts into the network round-trip.
@@ -174,7 +174,7 @@ private class RunCmd : CliktCommand(name = "run") {
         "--auto-update",
         help = "force automatic daemon updates on — already the default for installer-managed macOS/Linux " +
             "installs (Homebrew/Scoop/dev builds and Windows always just get a notification). " +
-            "Opt out with `cc-pocket-daemon config --auto-update off`",
+            "Opt out with `pairlet config --auto-update off`",
     ).flag()
 
     override fun run() {
@@ -268,7 +268,7 @@ private class RunCmd : CliktCommand(name = "run") {
             val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl, hostname = hostName, gatewayBaseUrl = gatewayUrl)
             echo("Pairlet daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"} — relay=$relay")
             echo("account id: ${identity.accountId}")
-            echo("(run `cc-pocket-daemon pair` in another terminal to add a phone)")
+            echo("(run `pairlet pair` in another terminal to add a phone)")
             // E2E-gated direct listener beside the relay: paired devices on this machine/LAN connect
             // straight to us (no proxy/relay leg — the fix for flaky-uplink send/receive). Unlike the
             // plaintext --local path this REQUIRES the Noise handshake, so a wide bind stays safe. A bind
@@ -339,7 +339,7 @@ private class RunCmd : CliktCommand(name = "run") {
                 }
                 echo("  LAN server on $url")
                 echo("")
-                echo("  On your phone, open CC Pairlet and tap:")
+                echo("  On your phone, open Pairlet and tap:")
                 echo("    Advanced: Direct LAN")
                 echo("  Then enter: $url")
                 echo("")
@@ -378,9 +378,9 @@ private class TestClientCmd : CliktCommand(name = "test-client") {
 private fun daemonStartHint(): String {
     val os = System.getProperty("os.name").lowercase()
     return when {
-        os.contains("win") -> "start it:  schtasks /Run /TN ${ServiceInstaller.WINDOWS_TASK}    (or run it by hand: cc-pocket-daemon run)"
-        os.contains("mac") -> "start it:  launchctl kickstart -k gui/$(id -u)/dev.ccpocket.daemon    (or run it by hand: cc-pocket-daemon run)"
-        else -> "start it:  systemctl --user start cc-pocket-daemon    (or run it by hand: cc-pocket-daemon run)"
+        os.contains("win") -> "start it:  schtasks /Run /TN ${ServiceInstaller.WINDOWS_TASK}    (or run it by hand: pairlet run)"
+        os.contains("mac") -> "start it:  launchctl kickstart -k gui/$(id -u)/dev.ccpocket.daemon    (or run it by hand: pairlet run)"
+        else -> "start it:  systemctl --user start cc-pocket-daemon    (or run it by hand: pairlet run)"
     }
 }
 
@@ -421,7 +421,7 @@ private class PairCmd : CliktCommand(name = "pair") {
                 val info = runCatching { PocketJson.decodeFromString<LoopbackPair>(body) }.getOrNull()
                 if (info != null) {
                     echo("")
-                    echo("  Open CC Pairlet on your phone and scan this — or type the code (valid ${info.ttlSec}s):")
+                    echo("  Open Pairlet on your phone and scan this — or type the code (valid ${info.ttlSec}s):")
                     echo("")
                     echo(QrTerminal.render("ccpocket://pair?code=${info.code}"))
                     echo("        code:  ${info.code.chunked(3).joinToString(" ")}")
@@ -438,7 +438,7 @@ private class PairCmd : CliktCommand(name = "pair") {
             }
             echo("✗ pairing failed — the daemon can't reach the relay ($lastBody)")
             echo("  likely: no internet, or a proxy/firewall blocking $DEFAULT_RELAY, or the relay is down.")
-            echo("  inspect: cc-pocket-daemon status")
+            echo("  inspect: pairlet status")
         } finally {
             client.close()
         }
@@ -514,7 +514,7 @@ private class PairCmd : CliktCommand(name = "pair") {
                 else -> "  Tier: $tier — file edits under those roots apply WITHOUT prompting you; shell still prompts."
             },
         )
-        echo("  Manage it later:  cc-pocket-daemon bridges   |   cc-pocket-daemon bridges --revoke ${cred.name}")
+        echo("  Manage it later:  pairlet bridges   |   pairlet bridges --revoke ${cred.name}")
     }
 
     private companion object { const val PAIR_RETRY_WINDOW_MS = 60_000L }
@@ -541,7 +541,7 @@ private class BridgesCmd : CliktCommand(name = "bridges") {
             val rows = runCatching { PocketJson.decodeFromString<List<LoopbackBridge>>(body) }.getOrNull()
             when {
                 rows == null -> echo("✗ unexpected reply: $body")
-                rows.isEmpty() -> echo("no bridge credentials — mint one with: cc-pocket-daemon pair --headless --name <n> --workdir <dir>")
+                rows.isEmpty() -> echo("no bridge credentials — mint one with: pairlet pair --headless --name <n> --workdir <dir>")
                 else -> {
                     echo("")
                     rows.forEach { b ->
@@ -551,7 +551,7 @@ private class BridgesCmd : CliktCommand(name = "bridges") {
                         echo("    limits:    ${b.maxSessions} concurrent · ${b.opensPerMin} opens/min · ${b.promptsPerMin} prompts/min")
                     }
                     echo("")
-                    echo("  revoke one:  cc-pocket-daemon bridges --revoke <name|deviceId>")
+                    echo("  revoke one:  pairlet bridges --revoke <name|deviceId>")
                 }
             }
         } finally {
@@ -563,7 +563,7 @@ private class BridgesCmd : CliktCommand(name = "bridges") {
 /**
  * Mint / list / revoke folder-share invites headlessly (issue #115) — the `pair --headless` sibling for
  * granting a guest a scoped, expiring folder credential without opening the app. The minted code is
- * byte-identical to the app's "Create invite": the guest pastes it into CC Pairlet ▸ Connect.
+ * byte-identical to the app's "Create invite": the guest pastes it into Pairlet ▸ Connect.
  */
 private class ShareCmd : CliktCommand(name = "share") {
     private val pairPort by option("--pair-port", help = "loopback port of the running daemon").int().default(8799)
@@ -612,7 +612,7 @@ private class ShareCmd : CliktCommand(name = "share") {
         }
         val leftMs = (minted.expiresAt ?: 0L) - System.currentTimeMillis()
         echo("")
-        echo("  Folder share ready — paste into CC Pairlet ▸ Connect. Works once.")
+        echo("  Folder share ready — paste into Pairlet ▸ Connect. Works once.")
         echo("")
         echo(minted.code)
         echo("")
@@ -620,7 +620,7 @@ private class ShareCmd : CliktCommand(name = "share") {
         echo("  tier:     ${minted.tier}")
         echo("  expires:  in ${humanDuration(leftMs)} (accept within ${minted.ttlSec}s; the share itself lasts the full window)")
         echo("")
-        echo("  manage it:  cc-pocket-daemon share --list   |   cc-pocket-daemon share --revoke <deviceId>")
+        echo("  manage it:  pairlet share --list   |   pairlet share --revoke <deviceId>")
     }
 
     private suspend fun shareList(client: HttpClient) {
@@ -629,7 +629,7 @@ private class ShareCmd : CliktCommand(name = "share") {
         val listing = runCatching { PocketJson.decodeFromString<ShareListing>(body) }.getOrNull()
         when {
             listing == null -> echo("✗ unexpected reply: $body")
-            listing.items.isEmpty() -> echo("no active folder shares — mint one with: cc-pocket-daemon share --workdir <dir>")
+            listing.items.isEmpty() -> echo("no active folder shares — mint one with: pairlet share --workdir <dir>")
             else -> {
                 echo("")
                 listing.items.forEach { s ->
@@ -645,7 +645,7 @@ private class ShareCmd : CliktCommand(name = "share") {
                     echo("    expires:   in ${humanDuration(s.expiresAt - System.currentTimeMillis())}")
                 }
                 echo("")
-                echo("  revoke one:  cc-pocket-daemon share --revoke <deviceId>")
+                echo("  revoke one:  pairlet share --revoke <deviceId>")
             }
         }
     }
@@ -754,14 +754,14 @@ private class StatusCmd : CliktCommand(name = "status") {
             // 2. background service registered?
             val os = System.getProperty("os.name").lowercase()
             val service = when {
-                os.contains("win") -> if (ServiceInstaller.isWindowsTaskInstalled()) "✓ logon Scheduled Task '${ServiceInstaller.WINDOWS_TASK}'" else "✗ no Scheduled Task — cc-pocket-daemon service-install --apply"
+                os.contains("win") -> if (ServiceInstaller.isWindowsTaskInstalled()) "✓ logon Scheduled Task '${ServiceInstaller.WINDOWS_TASK}'" else "✗ no Scheduled Task — pairlet service-install --apply"
                 os.contains("mac") -> {
                     val plist = java.io.File(System.getProperty("user.home"), "Library/LaunchAgents/dev.ccpocket.daemon.plist")
-                    if (plist.exists()) "✓ launchd agent (${plist.path})" else "✗ no launchd agent — cc-pocket-daemon service-install --apply"
+                    if (plist.exists()) "✓ launchd agent (${plist.path})" else "✗ no launchd agent — pairlet service-install --apply"
                 }
                 else -> {
                     val unit = java.io.File(System.getProperty("user.home"), ".config/systemd/user/cc-pocket-daemon.service")
-                    if (unit.exists()) "✓ systemd user unit (${unit.path})" else "✗ no systemd unit — cc-pocket-daemon service-install --apply"
+                    if (unit.exists()) "✓ systemd user unit (${unit.path})" else "✗ no systemd unit — pairlet service-install --apply"
                 }
             }
             echo("  service:  $service")

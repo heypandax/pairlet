@@ -56,7 +56,7 @@ Maintainer-only (need release credentials, signing identities, the production re
 
 ## Reporting
 
-- Bugs / features: use the issue templates — daemon version (`cc-pocket-daemon status`), computer OS, and client platform make most reports diagnosable in one round.
+- Bugs / features: use the issue templates — daemon version (`pairlet status`), computer OS, and client platform make most reports diagnosable in one round.
 - Security: **privately** via [GitHub security advisories](https://github.com/heypandax/cc-pocket/security/advisories/new) — see `docs/SECURITY.md` for the threat model and scope.
 
 ## License

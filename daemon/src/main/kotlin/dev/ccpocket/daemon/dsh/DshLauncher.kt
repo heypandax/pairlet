@@ -53,7 +53,7 @@ object DshLauncher {
             // the actual situation instead.
             "dsh executable not found. Not installed yet? Run: npm i -g @deepseek-ai/dsh (needs Node >= 22.12). " +
                 "Already installed? The daemon runs as a background service and can't see your shell's PATH — " +
-                "re-run `cc-pocket-daemon service-install --apply` from the terminal where `which dsh` works, " +
+                "re-run `pairlet service-install --apply` from the terminal where `which dsh` works, " +
                 "or pass --dsh-bin / set CC_POCKET_DSH_BIN where the service can see it " +
                 "(a plain `export` in your shell won't reach it). " +
                 "Desktop-app builds of dsh bundle a private copy the daemon can't drive — keep the npm install. " +
@@ -64,7 +64,7 @@ object DshLauncher {
                 "`exec npx --yes @deepseek-ai/dsh@latest \"$@\"`, then chmod +x it. The node bin dir is " +
                 "`dirname $(which node)` — a service cannot see your shell's PATH, and npx itself is a " +
                 "`#!/usr/bin/env node` script, so node must be reachable too. Or pin any path permanently " +
-                "with `cc-pocket-daemon config --dsh-bin <path>`.",
+                "with `pairlet config --dsh-bin <path>`.",
         )
 
     /**

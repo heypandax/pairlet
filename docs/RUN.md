@@ -123,7 +123,7 @@ $D test-client --relay ws://127.0.0.1:9000 --daemon-pub "<dpk>" --ticket "<ticke
 - Linux x86_64：<https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-linux-x86_64.deb> · <https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-linux-x86_64.rpm>
 - Linux arm64：<https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-linux-arm64.deb> · <https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-linux-arm64.rpm>
 
-或像上面那样从源码 `./gradlew :mobile:composeApp:run`。它通过和手机端**同一套配对**连到**另一台**机器上的 daemon——桌面端没有摄像头，所以请输入 `cc-pocket-daemon pair` 打印的那 6 位配对码。
+或像上面那样从源码 `./gradlew :mobile:composeApp:run`。它通过和手机端**同一套配对**连到**另一台**机器上的 daemon——桌面端没有摄像头，所以请输入 `pairlet pair` 打印的那 6 位配对码。
 
 ---
 
@@ -133,7 +133,7 @@ $D test-client --relay ws://127.0.0.1:9000 --daemon-pub "<dpk>" --ticket "<ticke
 ./gradlew :daemon:packageDaemon
 open daemon/build/jpackage      # 里面是 cc-pocket-daemon.app（自带 JRE，无需系统 java）
 # 直接用打好的二进制：
-daemon/build/jpackage/cc-pocket-daemon.app/Contents/MacOS/cc-pocket-daemon run --claude-bin ~/.local/bin/claude
+daemon/build/jpackage/cc-pocket-daemon.app/Contents/MacOS/pairlet run --claude-bin ~/.local/bin/claude
 ```
 
 生成后台常驻配置（默认只打印，加 `--apply` 才真正安装）：
@@ -156,7 +156,7 @@ export PATH="$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator"
 emulator -avd ccpocket &
 
 # 2) 起本机 daemon（App 默认连 ws://10.0.2.2:8765 —— 模拟器访问宿主机的别名）
-daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon run --claude-bin ~/.local/bin/claude
+daemon/build/install/cc-pocket-daemon/bin/pairlet run --claude-bin ~/.local/bin/claude
 
 # 3) 构建并安装 APK 到运行中的模拟器/真机
 ./gradlew :mobile:androidApp:installDebug

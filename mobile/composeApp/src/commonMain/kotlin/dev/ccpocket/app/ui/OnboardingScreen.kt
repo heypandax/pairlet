@@ -474,7 +474,7 @@ private fun TrustLine(body: String, link: String?, onLink: (() -> Unit)?) {
 /**
  * [text] with every occurrence of [command] set in monospace.
  *
- * A command quoted inside prose has to LOOK like a command — a user retyping "cc-pocket-daemon pair" from a
+ * A command quoted inside prose has to LOOK like a command — a user retyping "pairlet pair" from a
  * proportional sentence has no way to see where it starts and stops. Localisations keep the command literal,
  * so this works unchanged in both languages; if a translation drops it, the sentence simply renders plain
  * rather than throwing.

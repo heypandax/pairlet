@@ -9,7 +9,7 @@ enum class UpdatePhase { DOWNLOAD, VERIFY, EXTRACT, INSTALL }
 
 /**
  * Observer of [UpdateService.apply] (issue #381). Every method defaults to doing nothing, so the
- * background auto-updater stays silent ([QUIET]) while `cc-pocket-daemon update` plugs in
+ * background auto-updater stays silent ([QUIET]) while `pairlet update` plugs in
  * [TerminalUpdateProgress]. Purely presentational: apply() isolates exceptions thrown from here.
  */
 interface UpdateProgressListener {
@@ -52,7 +52,7 @@ internal data class StderrCapabilities(
 )
 
 /**
- * Human progress for `cc-pocket-daemon update`, written to stderr so the command's stdout lines stay as
+ * Human progress for `pairlet update`, written to stderr so the command's stdout lines stay as
  * they were. Two modes:
  *  - [interactive] (stderr is a real terminal — see [decideInteractive]): one line redrawn in place with
  *    `\r` plus right-padding to erase a longer previous line. Deliberately no ANSI: classic conhost
@@ -233,7 +233,7 @@ class TerminalUpdateProgress(
         /**
          * The decision: redraw in place, or log plain lines (issue #381).
          *
-         * Windows used to be a blanket `false` — every `cc-pocket-daemon update` there scrolled a new
+         * Windows used to be a blanket `false` — every `pairlet update` there scrolled a new
          * `1%  1.4 MB / 107.6 MB` line every few seconds. The missing piece was a way to ask about
          * **stderr specifically**: `System.console()` describes stdin/stdout, so trusting it would redraw
          * into `update 2> err.txt`. Win32 can answer exactly — [windowsStderrIsConsole] — so Windows now

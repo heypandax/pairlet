@@ -30,7 +30,7 @@ def main():
     for locale in ("en", "zh-Hans"):
         localized = app / f"Contents/Resources/{locale}.lproj/InfoPlist.strings"
         localized.parent.mkdir(parents=True, exist_ok=True)
-        localized.write_text('"CFBundleName" = "CC Pairlet";\n"CFBundleDisplayName" = "CC Pairlet";\n')
+        localized.write_text('"CFBundleName" = "Pairlet";\n"CFBundleDisplayName" = "Pairlet";\n')
     # jpackage/Compose already sign the nested runtime and native libraries. Only the outer bundle's
     # plist changes, so re-seal that bundle using the SAME configured identity and preserved metadata.
     # Signed builds remain timestamped; local images remain ad-hoc. Never distribute before this succeeds.
@@ -40,7 +40,7 @@ def main():
         command.append("--timestamp")
     subprocess.run(command + [str(app)], check=True)
     subprocess.run(["codesign", "--verify", "--strict", str(app)], check=True)
-    print("CC Pairlet bundle metadata finalized and signature verified; legacy path/launcher retained")
+    print("Pairlet bundle metadata finalized and signature verified; legacy path/launcher retained")
 
 
 if __name__ == "__main__":

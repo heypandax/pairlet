@@ -378,7 +378,7 @@ class PairLoopback(
                 // local-user authority", which is fine for minting a QR the user is looking at and is
                 // NOT fine for a surface carrying a colleague's brief and a reviewer's result. New
                 // prefix, new rules (token + Content-Type + no browser Origin); the legacy routes keep
-                // working byte-for-byte so no shipped `cc-pocket-daemon pair` breaks.
+                // working byte-for-byte so no shipped `pairlet pair` breaks.
                 core?.let { c -> localControlToken?.let { token ->
                     installLocalControl(
                         LocalControlDeps({ c.collaboratorControl }, c.reviews, c.peerInbox, c.reviewOwner),

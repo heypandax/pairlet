@@ -128,7 +128,7 @@
             },
             {
               "title": {"en": "Scan or type the code", "zh": "扫码或输入配对码"},
-              "body": {"en": "Open CC Pairlet, choose Add computer, and scan the QR. If the camera is unavailable, type the six digits.", "zh": "打开 CC Pairlet，选择“添加电脑”并扫描二维码；相机不可用时可输入 6 位数字。"}
+              "body": {"en": "Open Pairlet, choose Add computer, and scan the QR. If the camera is unavailable, type the six digits.", "zh": "打开 Pairlet，选择“添加电脑”并扫描二维码；相机不可用时可输入 6 位数字。"}
             },
             {
               "title": {"en": "Open a project", "zh": "打开项目"},

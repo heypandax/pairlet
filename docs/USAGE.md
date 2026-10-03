@@ -15,8 +15,8 @@ CC Pocket 让手机成为你电脑上 Claude Code 的遥控器：人不在工位
 
 ```bash
 brew install --cask heypandax/tap/cc-pocket
-cc-pocket-daemon service-install --apply   # 注册为登录自启服务，断线自动重连
-cc-pocket-daemon pair                      # 打出二维码 + 6 位配对码
+pairlet service-install --apply   # 注册为登录自启服务，断线自动重连
+pairlet pair                      # 打出二维码 + 6 位配对码
 ```
 
 - 升级：`brew upgrade --cask heypandax/tap/cc-pocket`（**必须用全名**——Homebrew 官方仓有个不相关的同名 `cc-pocket` cask，裸名会操作到那个包）；
@@ -106,7 +106,7 @@ Claude 要执行敏感操作（跑命令、改文件等）时，手机会弹出�
 
 把一个**任务**交给同事，而不是把电脑交给他：对方用自己的仓库、Agent、账号和审批策略完成评审，再回一份结构化结果；不转移会话控制权，也不让对方进入你的电脑。双方的 App 与桌面端全部关闭时，投递、重试、去重和历史仍由 daemon 承担。
 
-手机与桌面的「评审中心」是控制面，命令行入口是 `cc-pocket-daemon review`（连的是已在跑的 daemon，不会另起进程）。想让 Claude Code 直接驱动它，把随仓库分发的 Skill 拷到自己的 skills 目录：
+手机与桌面的「评审中心」是控制面，命令行入口是 `pairlet review`（连的是已在跑的 daemon，不会另起进程）。想让 Claude Code 直接驱动它，把随仓库分发的 Skill 拷到自己的 skills 目录：
 
 ```bash
 mkdir -p ~/.claude/skills/review-request
@@ -134,7 +134,7 @@ Settings 里可以**解除当前手机的配对**；解除后这台手机需重�
 如果你在手机操控会话的同时，电脑终端里开着的 `claude` 偶尔**被莫名登出**——那是两个 claude 共用同一份凭证、OAuth 刷新令牌轮换互相踩了（issue #69）。开启凭证隔离即可根治：
 
 ```bash
-cc-pocket-daemon config --isolated-claude-auth on
+pairlet config --isolated-claude-auth on
 # 然后重启 daemon（见下方故障排查的重启命令）
 ```
 
@@ -145,10 +145,10 @@ cc-pocket-daemon config --isolated-claude-auth on
 | 现象 | 处理 |
 |---|---|
 | 手机显示离线／连不上 | 确认电脑开机在线；重启服务：`launchctl unload ~/Library/LaunchAgents/dev.ccpocket.daemon.plist && launchctl load ~/Library/LaunchAgents/dev.ccpocket.daemon.plist` |
-| daemon 找不到 claude | 终端确认 `claude --version` 正常；自定义路径用 `cc-pocket-daemon run --claude-bin /path/to/claude`（或设 `CC_POCKET_CLAUDE_BIN`） |
+| daemon 找不到 claude | 终端确认 `claude --version` 正常；自定义路径用 `pairlet run --claude-bin /path/to/claude`（或设 `CC_POCKET_CLAUDE_BIN`） |
 | 语音转写提示缺程序或模型 | 在提示上点「让 Agent 处理」，完成安装后重试；也可在电脑上手动安装 |
-| 想看 daemon 日志 | 停掉服务后前台跑 `cc-pocket-daemon run`，日志直接打在终端 |
-| 配对码过期 | 重新跑 `cc-pocket-daemon pair`（每次生成限时一次性码） |
+| 想看 daemon 日志 | 停掉服务后前台跑 `pairlet run`，日志直接打在终端 |
+| 配对码过期 | 重新跑 `pairlet pair`（每次生成限时一次性码） |
 
 ## 六、卸载
 

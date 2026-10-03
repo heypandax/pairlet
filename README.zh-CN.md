@@ -146,7 +146,7 @@ GitHub 在国内下载很慢，所以安装脚本和 Release 产物都在中继�
 
 daemon 会查找独立安装目录 `~/.opencode/bin`，以及 PATH 和包管理器目录，让后台服务也能发现标准安装，无需用户手动创建链接。这项路径修复在 **v1.9.8 之后**加入；现有 v1.9.8 用户需要升级到包含此修复的 daemon 版本。
 
-自定义 CLI 路径或仍使用旧版 daemon 时，可用 `cc-pocket-daemon service-install --apply --opencode-bin /absolute/path/to/opencode` 持久保存绝对路径。该命令会重启服务，应先结束活跃会话，并带上已有的自定义服务选项，例如 `--relay`。仅在终端里导出环境变量，不会改变已运行的后台服务环境。
+自定义 CLI 路径或仍使用旧版 daemon 时，可用 `pairlet service-install --apply --opencode-bin /absolute/path/to/opencode` 持久保存绝对路径。该命令会重启服务，应先结束活跃会话，并带上已有的自定义服务选项，例如 `--relay`。仅在终端里导出环境变量，不会改变已运行的后台服务环境。
 
 ### 走第三方网关也能用
 
@@ -181,7 +181,7 @@ cp mobile/androidApp/google-services.json.template mobile/androidApp/google-serv
 
 ```bash
 ./gradlew :daemon:installDist
-daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon run --relay wss://<你的中继>
+daemon/build/install/cc-pocket-daemon/bin/pairlet run --relay wss://<你的中继>
 daemon/build/install/cc-pocket-daemon/bin/pairlet pair    # 另开一个终端
 ```
 

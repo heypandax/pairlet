@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert the selected Pairlet raster to platform containers; preserve no-text miniature icons.
+"""Convert the Pairlet icon master to platform containers; preserve the existing miniature icons.
 
 Run on macOS (sips/iconutil). This performs size/format conversion, not artwork generation.
 """
@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "assets/brand/pairlet-pocket-readable-v2.png"
+SOURCE = ROOT / "assets/brand/pairlet-icon-1024.png"
 
 
 def resize(size, destination):
@@ -24,11 +24,10 @@ def main():
         "mobile/composeApp/src/desktopMain/resources/app-icon.png": 256,
         "harmony/AppScope/resources/base/media/app_icon.png": 1024,
         "harmony/entry/src/main/resources/base/media/icon.png": 1024,
-        "mobile/androidApp/src/main/res/drawable/ic_launcher_fg.png": 1024,
         "site/apple-touch-icon.png": 180,
     }
-    for density, size in {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}.items():
-        targets[f"mobile/androidApp/src/main/res/mipmap-{density}/ic_launcher.png"] = size
+    # Android is not regenerated here: its launcher files are the original pre-inset artwork (the adaptive
+    # foreground already sits inside the safe zone), restored from history when the Pocket label was dropped.
     for path, size in targets.items():
         resize(size, ROOT / path)
     with tempfile.TemporaryDirectory(prefix="pairlet-icon-") as directory:

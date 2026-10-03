@@ -24,7 +24,7 @@ import java.util.Base64
  * A browser can send the request; it cannot read `~/.cc-pocket/local-control-token` to sign it.
  *
  * The legacy routes are deliberately left as they are: bolting a token onto them would break every
- * existing `cc-pocket-daemon pair` in the wild for no gain those routes actually need.
+ * existing `pairlet pair` in the wild for no gain those routes actually need.
  */
 object LocalControlToken {
 

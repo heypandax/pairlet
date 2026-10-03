@@ -200,7 +200,7 @@ compose.desktop {
             }
             macOS {
                 bundleID = "dev.ccpocket.app"
-                dockName = "CC Pairlet"
+                dockName = "Pairlet"
                 iconFile.set(project.file("desktop-icons/cc-pocket.icns"))
                 // Developer ID signing — pass -PccpocketSignId="Developer ID Application: … (TEAMID)".
                 // Off by default so unsigned dev builds still work. Notarization is done after packaging

@@ -23,29 +23,29 @@ those fields, never the human text.
 
 ```bash
 # contacts (one-time, per colleague, per direction)
-cc-pocket-daemon collaborator invite --label Frank [--json]
-cc-pocket-daemon collaborator join '<ccpocket://collab#…>' [--label Panda] [--json]
-cc-pocket-daemon collaborator list [--json]
-cc-pocket-daemon collaborator remove <id-or-label> [--json]
+pairlet collaborator invite --label Frank [--json]
+pairlet collaborator join '<ccpocket://collab#…>' [--label Panda] [--json]
+pairlet collaborator list [--json]
+pairlet collaborator remove <id-or-label> [--json]
 
 # sending
-cc-pocket-daemon review send --to <id-or-label> --request '<what you want them to do>' \
+pairlet review send --to <id-or-label> --request '<what you want them to do>' \
   --artifact 'mr:<https url>' | 'document:<https url>' | 'commits:<repo>#<base>..<head>' \
   [--title <text>] [--background <text>] [--focus <text> …] [--risk <text> …] \
   [--done <text> …] [--verified <text> …] [--constraint <text> …] [--definition-of-done <text> …] \
   [--due <ISO-8601>] [--expires <ISO-8601>] [--json]
-cc-pocket-daemon review list [--status <status|all>] [--json]
-cc-pocket-daemon review cancel <request-id> [--json]     # only before they start
-cc-pocket-daemon review close  <request-id> [--json]     # after you've read their result
+pairlet review list [--status <status|all>] [--json]
+pairlet review cancel <request-id> [--json]     # only before they start
+pairlet review close  <request-id> [--json]     # after you've read their result
 
 # receiving
-cc-pocket-daemon review inbox [--status pending|delivered|acknowledged|in_progress|responded|all] [--json]
-cc-pocket-daemon review show <request-id> [--json]       # works for sent AND received
-cc-pocket-daemon review prepare <request-id> --json
-cc-pocket-daemon review acknowledge <request-id> [--json]
-cc-pocket-daemon review start <request-id> [--json]
-cc-pocket-daemon review decline <request-id> [--reason <text>] [--json]
-cc-pocket-daemon review respond <request-id> --result <json-file> [--json]
+pairlet review inbox [--status pending|delivered|acknowledged|in_progress|responded|all] [--json]
+pairlet review show <request-id> [--json]       # works for sent AND received
+pairlet review prepare <request-id> --json
+pairlet review acknowledge <request-id> [--json]
+pairlet review start <request-id> [--json]
+pairlet review decline <request-id> [--reason <text>] [--json]
+pairlet review respond <request-id> --result <json-file> [--json]
 ```
 
 `--artifact` is repeatable. Append ` | <title>` to label one: `--artifact 'mr:https://…/42 | ACK fence'`.
@@ -102,7 +102,7 @@ Write the JSON to a **temp file** (`mktemp`, or `$TMPDIR/review-<id>.json`) — 
 where it would end up in a commit. Then:
 
 ```bash
-cc-pocket-daemon review respond <request-id> --result "$TMPFILE" --json
+pairlet review respond <request-id> --result "$TMPFILE" --json
 ```
 
 Shape (`verdict` and `summary` are required; unknown fields are ignored):

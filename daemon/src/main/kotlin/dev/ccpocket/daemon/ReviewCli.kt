@@ -43,7 +43,7 @@ import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
 /**
- * `cc-pocket-daemon collaborator …` and `cc-pocket-daemon review …` — the CLI half of the
+ * `pairlet collaborator …` and `pairlet review …` — the CLI half of the
  * ReviewRequest M1 loop (REVIEW-REQUEST.md §4). Everything here is a thin shell over the daemon's
  * token-authenticated local control API: no business rule is re-implemented, so the CLI, a Skill and
  * any future UI cannot disagree about what a command means.
@@ -137,7 +137,7 @@ internal fun inviteHumanLines(res: LocalInviteRes, label: String?): List<String>
         add("  fingerprint:  ${res.fingerprint}")
         add("")
     }
-    add("  They run:  cc-pocket-daemon collaborator join '<the line above>'")
+    add("  They run:  pairlet collaborator join '<the line above>'")
     add("  Read the fingerprint out loud. If their words differ, you are not connected to who you think —")
     add("  start over. (It is a mixup check both of you can perform, not a cryptographic proof.)")
 }
@@ -159,7 +159,7 @@ private class CollabJoinCmd : LocalCmd("join", "accept a colleague's invite and 
         echo("    id:           ${c.id}")
         echo("")
         echo("  Read that fingerprint out loud to them — if it doesn't match what they see, remove the link.")
-        echo("  Their review requests will now arrive even with the app closed:  cc-pocket-daemon review inbox")
+        echo("  Their review requests will now arrive even with the app closed:  pairlet review inbox")
     }
 }
 
@@ -169,7 +169,7 @@ private class CollabListCmd : LocalCmd("list", "show every colleague link, in bo
         if (emitJson(LocalContactsRes.serializer(), res)) return@runBlocking
         val live = res.items.filterNot { it.removed }
         if (live.isEmpty()) {
-            echo("no colleague links yet — mint one with: cc-pocket-daemon collaborator invite --label <name>")
+            echo("no colleague links yet — mint one with: pairlet collaborator invite --label <name>")
             return@runBlocking
         }
         echo("")
@@ -182,7 +182,7 @@ private class CollabListCmd : LocalCmd("list", "show every colleague link, in bo
         val removed = res.items.count { it.removed }
         echo("")
         if (removed > 0) echo("  ($removed removed link(s) kept for history)")
-        echo("  remove one:  cc-pocket-daemon collaborator remove <id|label>")
+        echo("  remove one:  pairlet collaborator remove <id|label>")
     }
 }
 
@@ -228,7 +228,7 @@ private class ReviewSendCmd : LocalCmd("send", "ask a colleague to review an MR,
     private val expires by option("--expires", help = "hard cut-off (ISO-8601); default 7 days")
 
     override fun run() = runBlocking {
-        if (to.isBlank()) throw CliktError("--to <id|label> is required — see: cc-pocket-daemon collaborator list")
+        if (to.isBlank()) throw CliktError("--to <id|label> is required — see: pairlet collaborator list")
         if (request.isBlank()) throw CliktError("--request <text> is required — say what you want them to do")
         if (artifact.isEmpty()) throw CliktError("at least one --artifact is required, e.g. --artifact 'mr:https://…/42'")
         // parse locally too, so a typo fails before anything is sent anywhere
@@ -251,7 +251,7 @@ private class ReviewSendCmd : LocalCmd("send", "ask a colleague to review an MR,
         echo("    shared:    ${r.artifacts.joinToString("; ") { ArtifactSyntax.render(it) }}")
         echo("    status:    ${r.status.name.lowercase()} (it becomes delivered once their daemon has it on disk)")
         echo("")
-        echo("  check on it:  cc-pocket-daemon review show ${r.id}")
+        echo("  check on it:  pairlet review show ${r.id}")
     }
 }
 
@@ -265,7 +265,7 @@ private class ReviewListCmd : LocalCmd("list", "the review requests YOU sent") {
         val res = client.get("/reviews", LocalReviewsRes.serializer(), status?.let { mapOf("status" to it) } ?: emptyMap())
         if (emitJson(LocalReviewsRes.serializer(), res)) return@runBlocking
         if (res.items.isEmpty()) {
-            echo("no review requests sent yet — send one with: cc-pocket-daemon review send --to <name> …")
+            echo("no review requests sent yet — send one with: pairlet review send --to <name> …")
             return@runBlocking
         }
         echo("")
@@ -275,7 +275,7 @@ private class ReviewListCmd : LocalCmd("list", "the review requests YOU sent") {
             r.result?.let { echo("    verdict: ${it.verdict.name.lowercase()} — ${inline(it.summary)}") }
         }
         echo("")
-        echo("  read one:  cc-pocket-daemon review show <id>")
+        echo("  read one:  pairlet review show <id>")
     }
 }
 
@@ -302,7 +302,7 @@ private class ReviewInboxCmd : LocalCmd("inbox", "the review requests colleagues
             if (row.pending.isNotEmpty()) echo("    queued (not yet confirmed by them): ${row.pending.joinToString(", ")}")
         }
         echo("")
-        echo("  start on one:  cc-pocket-daemon review prepare <id> --json")
+        echo("  start on one:  pairlet review prepare <id> --json")
     }
 
     private companion object {
@@ -485,8 +485,8 @@ internal fun reviewCommand(): CliktCommand = ReviewCmd().subcommands(
 internal fun daemonStartHintText(): String {
     val os = System.getProperty("os.name").lowercase()
     return when {
-        os.contains("win") -> "start it:  schtasks /Run /TN ${dev.ccpocket.daemon.service.ServiceInstaller.WINDOWS_TASK}    (or: cc-pocket-daemon run)"
-        os.contains("mac") -> "start it:  launchctl kickstart -k gui/\$(id -u)/dev.ccpocket.daemon    (or: cc-pocket-daemon run)"
-        else -> "start it:  systemctl --user start cc-pocket-daemon    (or: cc-pocket-daemon run)"
+        os.contains("win") -> "start it:  schtasks /Run /TN ${dev.ccpocket.daemon.service.ServiceInstaller.WINDOWS_TASK}    (or: pairlet run)"
+        os.contains("mac") -> "start it:  launchctl kickstart -k gui/\$(id -u)/dev.ccpocket.daemon    (or: pairlet run)"
+        else -> "start it:  systemctl --user start cc-pocket-daemon    (or: pairlet run)"
     }
 }

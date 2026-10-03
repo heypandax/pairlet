@@ -55,10 +55,10 @@ try {
     foreach ($attempt in 1..2) {
         & powershell -NoProfile -File $brandScript -Path $valid
         if ($LASTEXITCODE -ne 0) { throw "Branding valid MSI failed on attempt $attempt" }
-        if ((Read-Scalar $valid "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'ProductName'") -ne 'CC Pairlet') {
+        if ((Read-Scalar $valid "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'ProductName'") -ne 'Pairlet') {
             throw 'Product name was not committed'
         }
-        if ((Read-Scalar $valid 'SELECT `Name` FROM `Shortcut`') -ne 'CC Pairlet') { throw 'Shortcut was not branded' }
+        if ((Read-Scalar $valid 'SELECT `Name` FROM `Shortcut`') -ne 'Pairlet') { throw 'Shortcut was not branded' }
         if ((Read-Scalar $valid 'SELECT `Target` FROM `Shortcut`') -ne '[#launcher]') { throw 'Shortcut target changed' }
     }
     $invalid = Join-Path $testRoot 'wrong identity.msi'

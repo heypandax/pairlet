@@ -1,23 +1,25 @@
 # Pairlet 名称与过渡期约定
 
-2026-09-10 用户确认：当前先叫 **CC Pairlet** 做过渡。最终品牌名不等于立即简化每个用户入口。
+2026-10-03 用户确认：过渡名称结束，商店名称、设备显示名和各端界面统一为 **Pairlet**，对外引导的命令统一为 `pairlet`。此前（2026-09-10 起，至 2.2.0）使用 **CC Pairlet** 做过渡；下文“安装后搜索”一节与验收记录中的 CC Pairlet 是当时的实测对象，保留原样。
+
+本次是源码与元数据改动，尚未发版：App Store 名称要随下一个版本提审才生效，“Pairlet” 在商店是否可用也要到那时才能确认。
 
 | 位置 | 当前名称或文案 |
 | --- | --- |
 | 最终品牌、域名、源码仓库 | Pairlet、pairlet.org、heypandax/pairlet |
-| App Store 中英文名称 | **CC Pairlet** |
-| 安装后的设备显示名、系统 App 入口 | **CC Pairlet** |
+| App Store 中英文名称 | **Pairlet** |
+| 安装后的设备显示名、系统 App 入口 | **Pairlet** |
 | 中文商店副标题 | AI 编程伴侣 |
 | 英文商店副标题 | Coding agents, within reach |
 | 中文主张 | 随时接续你的 AI 编程任务 |
 | 英文完整表达 | Your coding agents, within reach. |
-| 描述及改名说明 | CC Pairlet（原名 CC Pocket）；英文 formerly CC Pocket |
-| 图标过渡标签 | 保留原主体，主图标带 Pocket 标签 |
-| CLI | pairlet；旧 cc-pocket-daemon 继续可用 |
+| 描述及改名说明 | Pairlet（原名 CC Pocket）；英文 formerly CC Pocket |
+| 图标 | 2026-10-03 起用回加 Pocket 标签之前的无文字图标；启动图文字改为 Pairlet。新 logo 另行设计中 |
+| CLI | 文案与提示一律写 pairlet；旧 cc-pocket-daemon 继续可用。包名、服务 ID、日志与数据目录、链接 scheme 保持原值 |
 
-副标题按商店 30 字符限制独立配置，不能用旧商店的「随身编程遥控 / AI Code Remote」覆盖原来的 AI 编程伴侣定位。以后移除商店或设备名称中的 CC，须由用户另行确定；移除图标 Pocket 标签是另一个决定。
+副标题按商店 30 字符限制独立配置，不能用旧商店的「随身编程遥控 / AI Code Remote」覆盖原来的 AI 编程伴侣定位。商店和设备名称中的 CC、图标上的 Pocket 标签均已按 2026-10-03 的决定移除。
 
-`scripts/check-brand-compatibility.py` 要求商店名称与 iOS 设备显示名保持一致，防止只修正文案时丢失过渡名称。
+`scripts/check-brand-compatibility.py` 要求商店名称与 iOS 设备显示名保持一致，防止只修正文案时两处名称不一致。
 
 ## 安装后搜索的当前证据
 

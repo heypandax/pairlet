@@ -40,7 +40,7 @@ function Property-Value([string]$name) {
 $expectedUpgrade = '{230D5F5E-4C7A-3DE9-98EE-6E492CCCB7D0}'
 $actualUpgrade = Property-Value 'UpgradeCode'
 if ($actualUpgrade -ne $expectedUpgrade) { throw "MSI UpgradeCode drifted from v1.9.8: $actualUpgrade" }
-if ((Property-Value 'ProductName') -notin @('CC Pocket', 'CC Pairlet')) { throw 'Unexpected product name' }
+if ((Property-Value 'ProductName') -notin @('CC Pocket', 'CC Pairlet', 'Pairlet')) { throw 'Unexpected product name' }
 $properties = @('UpgradeCode','ProductCode','ProductVersion','Manufacturer','ALLUSERS')
 $beforeProperties = @{}
 foreach ($name in $properties) { $beforeProperties[$name] = Property-Value $name }
@@ -49,7 +49,7 @@ foreach ($name in $properties) { $beforeProperties[$name] = Property-Value $name
 $tables = @('Directory','Component','File','Registry','Upgrade','Media','MsiFileHash')
 $beforeTables = @{}
 foreach ($table in $tables) { $beforeTables[$table] = ConvertTo-Json -InputObject (Read-Rows "SELECT * FROM ``$table``") -Depth 5 -Compress }
-Execute-Sql "UPDATE ``Property`` SET ``Value`` = 'CC Pairlet' WHERE ``Property`` = 'ProductName'"
+Execute-Sql "UPDATE ``Property`` SET ``Value`` = 'Pairlet' WHERE ``Property`` = 'ProductName'"
 $shortcutTables = Read-Rows "SELECT ``Name`` FROM ``_Tables`` WHERE ``Name`` = 'Shortcut'"
 if ($shortcutTables.Count -ne 1) { throw 'Candidate MSI must contain the requested system shortcuts' }
 if ($shortcutTables.Count -gt 0) {
@@ -58,8 +58,8 @@ if ($shortcutTables.Count -gt 0) {
     foreach ($row in $shortcuts) {
         # The launcher and destination stay CC Pocket; only its system-search/Start-menu label changes.
         $longName = ($row.Values[1] -split '\|')[-1]
-        if ($longName -in @('CC Pocket', 'CC Pocket.lnk', 'CC Pairlet', 'CC Pairlet.lnk')) {
-            $displayName = if ($longName.EndsWith('.lnk')) { 'CC Pairlet.lnk' } else { 'CC Pairlet' }
+        if ($longName -in @('CC Pocket', 'CC Pocket.lnk', 'CC Pairlet', 'CC Pairlet.lnk', 'Pairlet', 'Pairlet.lnk')) {
+            $displayName = if ($longName.EndsWith('.lnk')) { 'Pairlet.lnk' } else { 'Pairlet' }
             $id = $row.Values[0].Replace("'", "''")
             Execute-Sql "UPDATE ``Shortcut`` SET ``Name`` = '$displayName' WHERE ``Shortcut`` = '$id'"
             $branded++
@@ -81,4 +81,4 @@ foreach ($table in $tables) {
     if ($after -ne $beforeTables[$table]) { throw "MSI table changed: $table" }
 }
 $database.Commit()
-Write-Host "CC Pairlet display metadata applied; upgrade identity and package layout preserved: $msiPath"
+Write-Host "Pairlet display metadata applied; upgrade identity and package layout preserved: $msiPath"

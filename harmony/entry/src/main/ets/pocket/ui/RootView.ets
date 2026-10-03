@@ -15,7 +15,7 @@ export struct RootView {
     Column() {
       if (this.repo.brandNoticePending) {
         Row() {
-          Text('CC Pocket 现已更名为 Pairlet，设备上显示为 CC Pairlet。')
+          Text('CC Pocket 现已更名为 Pairlet。')
             .fontSize(13).fontColor(Tok.tx2).layoutWeight(1)
           Button('知道了').onClick(() => this.repo.dismissBrandNotice())
         }.padding(12).width('100%').backgroundColor(Tok.surface)

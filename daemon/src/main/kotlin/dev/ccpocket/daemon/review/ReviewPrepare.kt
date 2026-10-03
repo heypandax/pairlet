@@ -124,7 +124,7 @@ object ReviewPrepare {
         append(
             "When you're done, write the result as JSON (verdict/summary/findings/verification/openQuestions/" +
                 "recommendedNextSteps) to a temp file and return it with:  " +
-                "cc-pocket-daemon review respond ${shellQuote(r.id)} --result <file>",
+                "pairlet review respond ${shellQuote(r.id)} --result <file>",
         )
     }
 

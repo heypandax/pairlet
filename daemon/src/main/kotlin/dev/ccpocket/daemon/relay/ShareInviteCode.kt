@@ -7,7 +7,7 @@ import java.util.Base64
 /**
  * The owner-side folder-share invite CODEC (issue #115), daemon copy for the `share` CLI (issue #91's
  * `pair --headless` sibling). It produces the EXACT string the app's `ShareInvite.encode()` produces, so
- * a `cc-pocket-daemon share` mint and an in-app "Create invite" are byte-for-byte identical — a guest's
+ * a `pairlet share` mint and an in-app "Create invite" are byte-for-byte identical — a guest's
  * `decodeShareInvite` redeems either one.
  *
  * Wire form: `ccpocket://share#<base64url-no-pad(json)>` — the same prefix + the same [PocketJson] over the

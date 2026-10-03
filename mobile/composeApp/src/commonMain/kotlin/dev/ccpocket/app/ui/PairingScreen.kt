@@ -77,7 +77,7 @@ import qrscanner.CameraLens
 import qrscanner.QrScanner
 
 /** The desktop command that mints a pairing code — quoted verbatim, never paraphrased. */
-internal const val PAIR_COMMAND = "cc-pocket-daemon pair"
+internal const val PAIR_COMMAND = "pairlet pair"
 
 /**
  * "Pair a computer" — the first surface of the entry flow (Entry Flow UI 2.0 · Master frame 01).

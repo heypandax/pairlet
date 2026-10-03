@@ -29,7 +29,7 @@
 `--workdir` 可重复——**每个项目一条**，这就是这个机器人能碰的全部范围：
 
 ```bash
-cc-pocket-daemon pair --headless \
+pairlet pair --headless \
   --name feishu-bot \
   --workdir /Users/you/proj/alpha \
   --workdir /Users/you/proj/beta \
@@ -46,8 +46,8 @@ cc-pocket-daemon pair --headless \
 管理凭证：
 
 ```bash
-cc-pocket-daemon bridges                     # 列出所有 bridge 凭证
-cc-pocket-daemon bridges --revoke feishu-bot # 吊销（立刻断链 + 删钥）
+pairlet bridges                     # 列出所有 bridge 凭证
+pairlet bridges --revoke feishu-bot # 吊销（立刻断链 + 删钥）
 ```
 
 ### 2. 装依赖
