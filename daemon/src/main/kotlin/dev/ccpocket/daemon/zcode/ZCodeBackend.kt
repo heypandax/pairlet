@@ -57,6 +57,8 @@ class ZCodeBackend(
     @Volatile private var resumeId: String? = null
     @Volatile private var sessionId: String? = null
     @Volatile private var openId = ""
+    @Volatile private var openSelection: String? = null
+    @Volatile private var openInlineProvider = true
     @Volatile private var subscribeId = ""
     @Volatile private var mode = PermissionMode.DEFAULT
     @Volatile private var model: String? = null
@@ -130,14 +132,31 @@ class ZCodeBackend(
             queued.clear()
         }
         openId = nextId()
-        val method = if (resumeId == null) "session/create" else "session/resume"
         // The runtime resolves an unqualified model against ~/.zcode/cli/config.json, which ZCode 3.9+ no
         // longer writes — every open would fail with ModelConfigMissing. Carry the provider inline instead,
         // exactly as the official desktop shell does. On resume the stored model wins over the default so we
         // register the provider the session actually runs on, not whichever one happens to be first.
-        val selected = model?.trim()?.takeIf { it.isNotEmpty() }
+        //
+        // ZCode 3.14 turned that around (issue #386): its runtime reads the provider store itself
+        // (`~/.zcode/v2/provider_config.json` plus the bundled built-in config) and its strict open schema
+        // no longer has `runtimeModel` at all — sending it fails the open with `Unrecognized key:
+        // "runtimeModel"`. A machine upgraded from an older ZCode still has the old `config.json` this
+        // daemon builds the payload from, which is exactly how the reporter's sessions kept failing. For
+        // such a runtime nothing is carried inline, and the daemon's own default (read from that stale
+        // file) is not forced on it either: only a model the user actually picked is passed.
+        val selfResolving = runtimeResolvesProviders()
+        val chosen = model?.trim()?.takeIf { it.isNotEmpty() }
+        val selected = chosen
             ?: resumeId?.let(storedModel)
-            ?: modelService.defaultModel()
+            ?: modelService.defaultModel().takeUnless { selfResolving }
+        writeOpen(selected, inlineProvider = !selfResolving)
+    }
+
+    /** The open request. [inlineProvider] false = the runtime resolves providers itself (ZCode 3.14+). */
+    private suspend fun writeOpen(selected: String?, inlineProvider: Boolean) {
+        openSelection = selected
+        openInlineProvider = inlineProvider
+        val method = if (resumeId == null) "session/create" else "session/resume"
         val params = buildJsonObject {
             resumeId?.let { put("sessionId", it) }
             putJsonObject("workspace") { put("workspacePath", workdir); put("workspaceKey", workdir) }
@@ -146,10 +165,17 @@ class ZCodeBackend(
                 modelRef(selected)?.let { put("model", it) }
             }
             // Last: this is the only field carrying a provider credential (see ZCodeProviderCatalog).
-            modelService.runtimeModel(selected)?.let { put("runtimeModel", it) }
+            if (inlineProvider) modelService.runtimeModel(selected)?.let { put("runtimeModel", it) }
         }
         send(openId, method, params)
     }
+
+    /** True when the launched bundle ships its own provider config — the 3.14+ layout whose runtime reads
+     *  the provider store itself and rejects `runtimeModel` (see [attach]). */
+    private fun runtimeResolvesProviders(): Boolean = runCatching {
+        val exe = resolvedExe ?: executable().also { resolvedExe = it }
+        exe.fileName.toString().equals("zcode.cjs", ignoreCase = true) && ZCodeLauncher.bundledProviderConfig(exe) != null
+    }.getOrDefault(false)
 
     override suspend fun parse(line: String): List<AgentEvent> {
         val raw = line.trim()
@@ -240,6 +266,15 @@ class ZCodeBackend(
         // the opening prompt forever. The level/model simply stays as stored, which is logged above.
         if (id != null && id != openId && settleStartupSetting(id)) {
             log.warn("zcode startup setting $id failed: $message")
+        }
+        // Safety net for the same drift reached through a launcher [runtimeResolvesProviders] cannot see
+        // (a native wrapper, a user-supplied binary): the runtime names the rejected key, so reopen once
+        // without it instead of failing every turn of the session.
+        if (id == openId && openInlineProvider && "runtimeModel" in message && "nrecognized key" in message) {
+            log.warn("zcode rejected runtimeModel on open; reopening without it")
+            openId = nextId()
+            writeOpen(openSelection, inlineProvider = false)
+            return emptyList()
         }
         val prompt = id?.let { promptRequests.remove(it) }
         if (id == openId || prompt != null) {

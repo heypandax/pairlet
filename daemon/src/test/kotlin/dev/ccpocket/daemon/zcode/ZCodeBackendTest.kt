@@ -624,4 +624,67 @@ class ZCodeBackendTest {
         // session/resume has no `model` member in the runtime's strict schema — the stored session wins.
         assertFalse(params.containsKey("model"))
     }
+
+    // ---- ZCode 3.14: the runtime reads the provider store itself and rejects runtimeModel (issue #386) ----
+
+    private fun staleConfig(): Path = kotlin.io.path.createTempFile("zcode-stale", ".json").also {
+        it.toFile().writeText(
+            """{"provider":{"acme":{"kind":"anthropic","options":{"apiKey":"sk-redacted"},"models":{"glm-5.3":{}}}}}""",
+        )
+    }
+
+    /** `<root>/glm/zcode.cjs` with the 3.14 layout's `<root>/config/provider/zcode-builtin.json` beside it. */
+    private fun bundle314(): Path {
+        val root = java.nio.file.Files.createTempDirectory("zcode-314")
+        java.nio.file.Files.createDirectories(root.resolve("glm"))
+        java.nio.file.Files.createDirectories(root.resolve("config").resolve("provider"))
+        java.nio.file.Files.writeString(root.resolve("config").resolve("provider").resolve("zcode-builtin.json"), "{}")
+        return root.resolve("glm").resolve("zcode.cjs").also { java.nio.file.Files.writeString(it, "") }
+    }
+
+    @Test
+    fun `a 3_14 bundle opens without runtimeModel even when an older config json is still on disk`() = runBlocking {
+        val writes = mutableListOf<String>()
+        val cjs = bundle314()
+        val backend = ZCodeBackend(null, modelService = ZCodeModelService(staleConfig()), executable = { cjs }, storedModel = { null })
+        backend.attach(AgentIo({ writes += it }, {}), AgentSpec(Path.of("/repo")))
+        val params = (json.parseToJsonElement(writes.withMethod("session/create")) as JsonObject)["params"] as JsonObject
+        assertFalse(params.containsKey("runtimeModel"), "3.14's strict schema rejects the key")
+        assertFalse(params.containsKey("model"), "the stale store's default is not forced on a runtime with its own")
+    }
+
+    @Test
+    fun `a 3_14 bundle still passes the model the user picked`() = runBlocking {
+        val writes = mutableListOf<String>()
+        val cjs = bundle314()
+        val backend = ZCodeBackend(null, modelService = ZCodeModelService(staleConfig()), executable = { cjs }, storedModel = { null })
+        backend.attach(AgentIo({ writes += it }, {}), AgentSpec(Path.of("/repo"), model = "acme/glm-5.3"))
+        val params = (json.parseToJsonElement(writes.withMethod("session/create")) as JsonObject)["params"] as JsonObject
+        assertFalse(params.containsKey("runtimeModel"))
+        assertEquals("acme", (params["model"] as JsonObject)["providerId"].toString().trim('"'))
+    }
+
+    @Test
+    fun `an open rejected for runtimeModel is retried once without it and the session still opens`() = runBlocking {
+        val writes = mutableListOf<String>()
+        val backend = ZCodeBackend(
+            null, modelService = ZCodeModelService(staleConfig()), executable = { Path.of("/fake/zcode") }, storedModel = { null },
+        )
+        backend.attach(AgentIo({ writes += it }, {}), AgentSpec(Path.of("/repo")))
+        val first = json.parseToJsonElement(writes.withMethod("session/create")) as JsonObject
+        assertTrue((first["params"] as JsonObject).containsKey("runtimeModel"))
+        // verbatim from ZCode 3.14.3 (Windows box, 2026-10-03)
+        val events = backend.parse(
+            """{"id":${first["id"]},"error":{"code":-32602,"message":"Invalid params — (root): Unrecognized key: \"runtimeModel\""}}""",
+        )
+        assertTrue(events.isEmpty(), "the rejection is handled, not surfaced as a failed turn")
+        val creates = writes.filter { "\"session/create\"" in it }
+        assertEquals(2, creates.size)
+        val retry = json.parseToJsonElement(creates.last()) as JsonObject
+        assertFalse((retry["params"] as JsonObject).containsKey("runtimeModel"))
+        // a second rejection is NOT retried again — it surfaces
+        val again = backend.parse("""{"id":${retry["id"]},"error":{"code":-32602,"message":"Unrecognized key: \"runtimeModel\""}}""")
+        assertTrue(again.any { it is AgentEvent.TurnResult })
+        assertEquals(2, writes.count { "\"session/create\"" in it })
+    }
 }
