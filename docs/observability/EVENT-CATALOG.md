@@ -24,6 +24,8 @@
 
 `source/transport/resume/decision/phase/reason/attempt/link/retried/version/entry_point/help_task/target/value` 沿用原业务含义。后续事件优先使用固定枚举；现有 reason 仍可能是异常类名，补结果事件时归一为固定原因码，不扩展为异常 message。不新增项目名、会话名、路径、内容、账号或跨设备身份维度。
 
+`source`（仅 iOS，仅 `app_launch`／`onboarding_shown`／`demo_entered`／`demo_exited`，#342）：`store` 为 App Store 安装，`sandbox` 为 TestFlight 与 App Review（两者同用沙盒收据，无法再细分），`unknown` 为取不到收据。审核安装每次提审都会走一遍演示，分析海外漏斗顶部时应排除 `sandbox`；它不改变 `internal_traffic`。其他事件的 `source` 仍是各自的业务含义。
+
 正式分析限定明确 production，并排除已知内部流量和 Demo；内部身份 unknown 的样本单列覆盖，不声称已精确剔除所有内测安装。旧埋点、自动事件和新自定义事件不能不加区分地合并漏斗。
 
 ## 3. 现有事件的真实语义
@@ -33,8 +35,9 @@
 | 事件 | 触发与含义 | 不能证明 |
 |---|---|---|
 | app_launch | App 进入主界面生命周期埋点 | 新安装、已连接或有效使用 |
-| onboarding_shown / onboarding_cta | 引导呈现 / 具体引导控件操作 | 已读懂说明或完成电脑安装 |
+| onboarding_shown / onboarding_cta | 引导呈现 / 具体引导控件操作；`onboarding_shown.value` = `first`／`return`／`return_many`，本安装第几次看到引导（#342） | 已读懂说明或完成电脑安装；`return` 不证明装过电脑端 |
 | demo_entered | 进入演示分支 | 已配对或真实使用 |
+| demo_exited | 一次演示结束时一条，`value` = `none`／`opened`／`prompted`（只进入、打开过会话、发过提示）（#342） | 用户为何离开；演示后的去向看其后的 `pair_started` |
 | pair_started / paired / pair_failed | 配对尝试 / 当前流程成功 / 当前流程失败 | 后续连接或会话能够使用；多次尝试不是多个人 |
 | connected / disconnected | 当前逻辑的连接就绪 / 主动断开入口 | 所有断开均已覆盖；历史首屏可见 |
 | conn_phase / conn_failed | 连接阶段变化 / 一次连接尝试失败 | 用户操作最终失败；直连回退成功不计两次失败 |

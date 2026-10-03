@@ -2933,6 +2933,7 @@ class PocketRepository(
         lastWorkingSessions = emptySet(); lastWorkingDirectories = emptyMap(); unseenSessions.value = emptySet()
         directories.clear(); sessions.clear(); transcript.clearMessages(); pendingImages.clear(); clearFileUploads(); clearBackgroundJobs()
         resetHistoryPaging() // #147: the transcript left with messages — so must its cursor
+        if (demoMode.value) Telemetry.track(TelEvent.DemoExited, mapOf(TelKey.Value to demoDepth)) // issue #342
         demoMode.value = false // leaving the demo returns to real pairing
         // #362: no pin frame from this link applies to whatever comes next, and a link retired here (fleet satellite,
         // collaborator inbox) stops listening to its computer's shared pins; the next start or switch rebinds
@@ -3268,13 +3269,14 @@ class PocketRepository(
     private var demoSeq = 0L
     private var demoAsked = false        // the one-time tool + permission demo has fired this session
     private var demoPendingReply = false // a turn is paused on the demo permission prompt
+    private var demoDepth = "none" // none | opened | prompted — reported once by demo_exited
 
     /** Enter the demo: seed the project list + slash commands, then render like a connected session. */
     fun enterDemo() {
         // Fired on the TRANSITION only: the demo's own routes re-enter it, and a repeat would count one
         // walkthrough as several (issue #342). Everything the demo does afterwards is already split off real
         // activation by [demoTag] — Connected/SessionOpened/PromptSent all run through the shared call sites.
-        if (!demoMode.value) Telemetry.track(TelEvent.DemoEntered)
+        if (!demoMode.value) { Telemetry.track(TelEvent.DemoEntered); demoDepth = "none" }
         demoMode.value = true
         bindProjectPins() // #362: the demo's pins live in memory only
         // Demo has no handshake, so explicitly emulate a current daemon rather than inheriting the
@@ -3299,6 +3301,8 @@ class PocketRepository(
 
     /** Synthesize the daemon's reply to an outbound [frame] from local sample data. */
     private suspend fun demoRespond(frame: Frame) {
+        // how far this walkthrough got, for demo_exited (issue #342); it only ever deepens
+        if (frame is SendPrompt) demoDepth = "prompted" else if (frame is OpenSession && demoDepth == "none") demoDepth = "opened"
         when (frame) {
             is ListDirectories -> handle(Directories(DemoData.dirs()))
             // @-file completion (issue #75): a small on-device tree so the demo composer's @ menu works

@@ -164,7 +164,11 @@ fun OnboardingScreen(
     if (onBack != null) dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     // install-guide exposure (issue #278): how many of the users who never pair even open these steps
     LaunchedEffect(Unit) {
-        dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.OnboardingShown)
+        dev.ccpocket.app.telemetry.Telemetry.track(
+            dev.ccpocket.app.telemetry.TelEvent.OnboardingShown,
+            // first | return | return_many (issue #342): did they come back after going to the computer?
+            mapOf(dev.ccpocket.app.telemetry.TelKey.Value to dev.ccpocket.app.telemetry.OnboardingVisits.next()),
+        )
     }
     var os by remember { mutableStateOf("macOS") }
     // Which install route is on screen. Deliberately kept ACROSS an OS switch: a reader who rejected the

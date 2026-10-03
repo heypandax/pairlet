@@ -125,7 +125,10 @@ private fun PairingForm(repo: PocketRepository) {
     // onboarding_shown belongs. Only a genuine first run counts — re-entering the form to add a second
     // computer is not onboarding. Fires once per entry; pair_started follows from pairWithCode.
     if (repo.pairedList.isEmpty()) LaunchedEffect(Unit) {
-        dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.OnboardingShown)
+        dev.ccpocket.app.telemetry.Telemetry.track(
+            dev.ccpocket.app.telemetry.TelEvent.OnboardingShown,
+            mapOf(dev.ccpocket.app.telemetry.TelKey.Value to dev.ccpocket.app.telemetry.OnboardingVisits.next()), // #342
+        )
     }
     Text(stringResource(Res.string.connect_computer_header).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
     Spacer(Modifier.height(16.dp))
