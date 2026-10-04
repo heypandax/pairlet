@@ -312,6 +312,7 @@ class RelayClient(
         val reconnect = ReconnectBackoff()
         while (true) {
             linkAttachedAt = 0L
+            linkCloseReason = null
             val clean = try {
                 connectOnce()
                 true
@@ -320,7 +321,17 @@ class RelayClient(
                 false
             }
             val attachedFor = linkAttachedAt.takeIf { it != 0L }?.let { System.currentTimeMillis() - it }
-            val backoff = reconnect.next(ReconnectBackoff.LinkEnd(clean, attachedFor))
+            val end = ReconnectBackoff.LinkEnd(clean, attachedFor, linkCloseReason)
+            if (end.superseded) {
+                log.warn("relay SUPERSEDED this daemon: another daemon attached with the same account " +
+                    "(account=${identity.accountId}). Two daemons are fighting over one account — stop the extra " +
+                    "one; this daemon waits ${ReconnectBackoff.SUPERSEDED_MS / 1000}s before reconnecting.")
+                dev.ccpocket.observability.Diagnostics.report(
+                    dev.ccpocket.observability.ErrorPath.RELAY, dev.ccpocket.observability.Stage.CONNECT,
+                    dev.ccpocket.observability.ErrorCode.SUPERSEDED, isError = true,
+                )
+            }
+            val backoff = reconnect.next(end)
             val jittered = backoff / 2 + Random.nextLong(backoff / 2 + 1) // equal jitter: 50–100% of backoff, decorrelates herd reconnects
             log.info("relay reconnect in ${jittered}ms (backoff ${backoff}ms, link ${attachedFor?.let { "attached ${it / 1000}s" } ?: "never attached"})")
             delay(jittered)
@@ -329,6 +340,9 @@ class RelayClient(
 
     /** When the current link reached Attached (0 = not yet) — how [run] tells a stable link from a flap. */
     @Volatile private var linkAttachedAt = 0L
+
+    /** The relay's close-frame reason for the current link, when it ended with one (e.g. "superseded"). */
+    @Volatile private var linkCloseReason: String? = null
 
     /**
      * Reclaim conversations idle longer than [IDLE_REAP_MS] that no client OCCUPIES. Reaping stops the
@@ -477,6 +491,9 @@ class RelayClient(
                             is WsFrame.Text -> onControl(runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull())
                             else -> {}
                         }
+                        // incoming ended without a throw: the relay closed the link — keep its reason (a
+                        // "superseded" close means another daemon took this account; see ReconnectBackoff)
+                        linkCloseReason = withTimeoutOrNull(1_000) { closeReason.await() }?.message
                     } finally {
                         dataOut = null
                         outbox.close(); dataWriter.cancel(); ctrlWriter.cancel(); heartbeat.cancel()
