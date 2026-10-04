@@ -801,6 +801,42 @@ class GitServiceTest {
         }
     }
 
+    @Test
+    fun a_timed_out_checkout_is_stopped_politely_so_index_lock_is_cleaned_and_the_filter_tree_dies() {
+        assumeTrue(gitAvailable() && !isWindows)
+        val dir = repo()
+        val pidFile = tmp.resolve("filter-child.pid")
+        val lockSeen = tmp.resolve("lock-seen")
+        // a slow smudge filter (git-lfs fetching a large object is the real one): checkout holds
+        // .git/index.lock for the whole run, and the filter's own child is a grandchild of git
+        dir.resolve(".gitattributes").writeText("*.bin filter=slow\n")
+        sh(dir, "add", ".gitattributes"); sh(dir, "commit", "-q", "-m", "attributes")
+        sh(dir, "checkout", "-q", "-b", "other")
+        dir.resolve("x.bin").writeText("payload\n")
+        sh(dir, "add", "x.bin"); sh(dir, "commit", "-q", "-m", "bin")
+        sh(dir, "checkout", "-q", "main")
+        val filter = tmp.resolve("slow-smudge.sh")
+        filter.writeText("#!/bin/sh\nls -a '$dir/.git' > '$lockSeen'\nsleep 60 &\necho \$! > '$pidFile'\nwait\n")
+        assertTrue(filter.toFile().setExecutable(true))
+        sh(dir, "config", "--local", "filter.slow.smudge", filter.toString())
+
+        val svc = GitService(nowMs = { clock }, localTimeoutMs = 1_500)
+        try {
+            val r = within(20_000) { act(svc, dir, GIT_OP_CHECKOUT, branch = "other") }
+            assertNotNull(r, "the timed-out checkout never replied")
+            assertIs<GitActionResult>(r)
+            assertFalse(r.ok)
+            assertEquals("git took too long and was stopped", r.error)
+            val child = assertNotNull(pidFrom(pidFile))
+            assertTrue("index.lock" in lockSeen.readText(), "precondition: git holds the lock while the filter runs")
+            // SIGKILL gives git no chance to remove its lock, and every later git command then fails on it
+            assertFalse(dir.resolve(".git/index.lock").exists(), "index.lock left behind by the timeout kill")
+            assertTrue(gone(child), "the filter's child outlived the timeout")
+        } finally {
+            pidFrom(pidFile, waitMs = 0)?.let(::kill)
+        }
+    }
+
     // ------------------------------------------------------------- helpers
 
     private val isWindows = System.getProperty("os.name").lowercase().contains("win")
@@ -830,11 +866,11 @@ class GitServiceTest {
 
     private fun pidFrom(file: Path, waitMs: Long = 5_000): Long? {
         val deadline = System.currentTimeMillis() + waitMs
-        while (System.currentTimeMillis() < deadline) {
+        while (true) {
             runCatching { file.readText().trim().toLong() }.getOrNull()?.let { return it }
+            if (System.currentTimeMillis() >= deadline) return null
             Thread.sleep(20)
         }
-        return null
     }
 
     private fun kill(pid: Long) {

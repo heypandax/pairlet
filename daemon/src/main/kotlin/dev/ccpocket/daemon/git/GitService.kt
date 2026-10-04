@@ -4,6 +4,7 @@ import dev.ccpocket.observability.*
 
 import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.util.ChildOutput
+import dev.ccpocket.daemon.util.ProcessTree
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AddWorktree
@@ -104,6 +105,9 @@ class GitService(
      *  "unknown". Injectable purely so a test on a loaded machine measures the LOGIC and not the box:
      *  the production value is a UX budget, and a wall clock in an assertion is a flake waiting to fire. */
     private val worktreeStatusBudgetMs: Long = WORKTREE_STATUS_BUDGET_MS,
+    /** The bound on a local git process (every read, commit, worktree add/remove). Injectable so a test can
+     *  reach the timeout path without waiting the production 30 s. */
+    private val localTimeoutMs: Long = LOCAL_TIMEOUT_MS,
 ) {
     private val log = logger("Git")
     private val isWindows = System.getProperty("os.name").lowercase().contains("win")
@@ -280,7 +284,7 @@ class GitService(
                     return err(f.convoId, f.op, "resolve the ${st.conflicted.size} conflicts before committing")
                 }
                 // -m's VALUE: free text can never be read as an option here. No --amend, no --no-verify.
-                done(f, exe, repo, git(exe, repo.root, listOf("commit", "-m", msg), timeoutMs = LOCAL_TIMEOUT_MS))
+                done(f, exe, repo, git(exe, repo.root, listOf("commit", "-m", msg), timeoutMs = localTimeoutMs))
             }
 
             GIT_OP_FETCH -> done(f, exe, repo, git(exe, repo.root, listOf("fetch", "--no-tags"), timeoutMs = NET_TIMEOUT_MS))
@@ -388,7 +392,7 @@ class GitService(
                 add(target.toString())
                 add(if (f.createBranch) defaultBranch(exe, repo, known) else branch)
             }
-            val r = git(exe, repo.root, argv, timeoutMs = LOCAL_TIMEOUT_MS)
+            val r = git(exe, repo.root, argv, timeoutMs = localTimeoutMs)
             return GitActionResult(
                 f.convoId, op, ok = r.code == 0, exitCode = r.code,
                 stdout = r.out.take(MAX_OUT),
@@ -457,7 +461,7 @@ class GitService(
                 if (losable.isNotEmpty()) add("--force")
                 add(target)
             }
-            val r = git(exe, repo.root, argv, timeoutMs = LOCAL_TIMEOUT_MS)
+            val r = git(exe, repo.root, argv, timeoutMs = localTimeoutMs)
             return GitActionResult(
                 f.convoId, op, ok = r.code == 0, exitCode = r.code,
                 stdout = r.out.take(MAX_OUT),
@@ -689,7 +693,7 @@ class GitService(
      * wait forever for EOF — the readers live outside this scope ([ChildOutput]), so after [READ_DRAIN_MS]
      * we answer with what arrived. Same three-part shape as ShellService.execute, minus the shell.
      */
-    private suspend fun git(exe: Path, dir: Path, args: List<String>, timeoutMs: Long = LOCAL_TIMEOUT_MS, readOnly: Boolean = false): Exec =
+    private suspend fun git(exe: Path, dir: Path, args: List<String>, timeoutMs: Long = localTimeoutMs, readOnly: Boolean = false): Exec =
         withContext(Dispatchers.IO) {
             try {
                 val pb = ProcessBuilder(listOf(exe.toString()) + args).directory(dir.toFile()).redirectErrorStream(false)
@@ -712,7 +716,7 @@ class GitService(
                 val out = ChildOutput(proc.inputStream, DIFF_CAP)
                 val err = ChildOutput(proc.errorStream, DIFF_CAP)
                 val finished = proc.waitFor(timeoutMs.coerceIn(1_000, MAX_TIMEOUT_MS), TimeUnit.MILLISECONDS)
-                if (!finished) proc.destroyForcibly()
+                if (!finished) ProcessTree.terminate(proc) // SIGTERM first: git removes its index.lock
                 val (stdout, stderr) = ChildOutput.both(out, err, READ_DRAIN_MS)
                 if (!finished) Exec(-1, stdout, stderr, timedOut = true, failure = "git took too long and was stopped")
                 else Exec(proc.exitValue(), stdout, stderr)

@@ -112,6 +112,31 @@ class ShellServiceTest {
         }
     }
 
+    @Test
+    fun a_timeout_takes_down_the_whole_process_tree_not_just_the_shell() {
+        assumeTrue(!isWindows)
+        val pidFile = tmp.resolve("child.pid")
+        val shell = ShellService(CoroutineScope(Dispatchers.Unconfined))
+        try {
+            val r = within(20_000) { runBypass(shell, "sleep 60 & echo \$! > '$pidFile'; wait", timeoutMs = 1_000) }
+            assertNotNull(r, "a timed-out command never replied")
+            assertTrue(r.timedOut)
+            val child = assertNotNull(pidFrom(pidFile))
+            assertTrue(gone(child), "the shell's child survived the timeout")
+        } finally {
+            pidFrom(pidFile, waitMs = 0)?.let { pid -> ProcessHandle.of(pid).ifPresent { it.destroyForcibly() } }
+        }
+    }
+
+    private fun gone(pid: Long, waitMs: Long = 5_000): Boolean {
+        val deadline = System.currentTimeMillis() + waitMs
+        while (System.currentTimeMillis() < deadline) {
+            if (!ProcessHandle.of(pid).map { it.isAlive }.orElse(false)) return true
+            Thread.sleep(20)
+        }
+        return false
+    }
+
     private fun runBypass(shell: ShellService, command: String, timeoutMs: Long = 30_000): ShellResult = runBlocking {
         val out = CopyOnWriteArrayList<Frame>()
         shell.run(RunShellCommand("c1", command, tmp.toString(), timeoutMs), PermissionMode.BYPASS_PERMISSIONS) { out += it }
@@ -132,10 +157,10 @@ class ShellServiceTest {
 
     private fun pidFrom(file: Path, waitMs: Long = 5_000): Long? {
         val deadline = System.currentTimeMillis() + waitMs
-        while (System.currentTimeMillis() < deadline) {
+        while (true) {
             runCatching { file.readText().trim().toLong() }.getOrNull()?.let { return it }
+            if (System.currentTimeMillis() >= deadline) return null
             Thread.sleep(20)
         }
-        return null
     }
 }

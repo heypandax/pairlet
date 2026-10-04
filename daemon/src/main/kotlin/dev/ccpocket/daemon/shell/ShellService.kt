@@ -7,6 +7,7 @@ import dev.ccpocket.daemon.approval.ApprovalGrantStore
 import dev.ccpocket.daemon.approval.ApprovalOutcome
 import dev.ccpocket.daemon.approval.ApprovalSource
 import dev.ccpocket.daemon.util.ChildOutput
+import dev.ccpocket.daemon.util.ProcessTree
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AuthorizedActionRecorded
 import dev.ccpocket.protocol.Decision
@@ -194,7 +195,8 @@ class ShellService(
             val out = ChildOutput(proc.inputStream, MAX_OUT)
             val err = ChildOutput(proc.errorStream, MAX_OUT)
             val finished = proc.waitFor(cmd.timeoutMs.coerceIn(1_000, MAX_TIMEOUT_MS), TimeUnit.MILLISECONDS)
-            if (!finished) proc.destroyForcibly()
+            // the whole tree, politely first: `make` / `npm test` children otherwise outlive the shell
+            if (!finished) ProcessTree.terminate(proc)
             // bound the read: a grandchild that inherited the pipe can keep it open after the child is gone, so
             // never block forever waiting for EOF — emit what we have.
             val (stdout, stderr) = ChildOutput.both(out, err, READ_DRAIN_MS)
