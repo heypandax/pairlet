@@ -1,4 +1,7 @@
-What's new in 2.2.0
+What's new in 2.3.0
 
-- New experimental feature, Voice memo to tasks: turn it on in Settings > General, then talk through a few things. The recording is sent end-to-end encrypted to your own computer, transcribed there locally, and organised into to-dos by the Claude or Codex tool on that computer; without an organiser the transcript is kept for you to split by hand. Organising never runs anything, and each to-do is sent to the session you choose only after you review and confirm it. Before the first recording, the app explains where the data goes and asks for your consent.
-- The back button in the top-left corner is now the same control on every page, at the same position, and screen readers announce where it leads.
+- The name is now Pairlet everywhere, and the icon no longer carries the Pocket label. It is the same app: pairing and data are kept, and there is nothing to reinstall or pair again.
+- Tapping a project now shows "Opening…" and offers a retry if the computer does not answer; projects with many sessions no longer fail to open.
+- When Claude asks a question, tap the card's title to collapse it to one line and read what came before; your selections are kept. The "Answer required" notice at the top now takes a single line.
+- The Codex model list is no longer limited to three built-in models, and it says why when only the built-in ones can be shown.
+- After you also update Pairlet on your computer: Kimi background tasks no longer stay "running" after they end, ZCode 3.14 sessions can send messages again, and DeepSeek sessions started on the phone show up on the computer too.

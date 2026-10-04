@@ -10,7 +10,7 @@ cask "cc-pocket" do
   # bit-reproducible, so even the arm64 sha changes on a rebuild).
   arch arm: "arm64", intel: "x86_64"
 
-  version "2.2.0"
+  version "2.3.0"
   sha256 arm:   "169fb0bfe60252f0d56d9396d0ba45e36be0da5af7736dca36e4b95d006a2964",
          intel: "f04512334f8e219eea6d433c8a7b2429ffdedc06ea74747d9b23fba526f9a6a6"
 
