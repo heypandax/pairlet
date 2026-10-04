@@ -2946,6 +2946,17 @@ class PocketRepository(
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
         skillCatalog.value = null; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
+        // per-daemon truth as well: the schedule list (cancel would send this machine's ids to the next one,
+        // and a next daemon too old to answer would leave "loaded" pinned on these rows), the usage snapshot,
+        // the archive rows (restore would target this machine's paths) and the filesystem roots (#176)
+        scheduleDeadline?.cancel(); scheduleDeadline = null
+        schedules.clear(); schedulesLoaded.value = false; schedulesUnavailable.value = false; scheduleError.value = null
+        usage.value = null; usageAgent.value = null; usageLoading.value = false; usageRequestedAgent = null
+        archivedSessions.clear(); archivedRefreshing.value = false
+        browseRoots.value = emptyList()
+        // the auto-continue / repair offers name a session on the machine we are leaving (#137)
+        limitOffer.value = null; limitConfirmed.value = null
+        repairOffer.value = null; repairProgress.value = null
         convoId.value = null
         sessionsDir.value = null
         browseIntentDir = null // #349: a browse intent belongs to the link/machine that accepted the tap
