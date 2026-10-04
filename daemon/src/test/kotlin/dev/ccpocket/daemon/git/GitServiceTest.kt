@@ -225,6 +225,22 @@ class GitServiceTest {
         assertEquals(2, d.adds)
     }
 
+    @Test
+    fun the_null_device_fallback_never_reads_a_file_outside_the_untracked_list() {
+        assumeTrue(gitAvailable())
+        val dir = repo()
+        val outside = tmp.resolve("outside-secret.txt").also { it.writeText("not part of any repository\n") }
+        dir.resolve(".gitignore").writeText("ignored.env\n")
+        dir.resolve("ignored.env").writeText("TOKEN=1\n")
+        val svc = service()
+        for (p in listOf(outside.toString(), "../outside-secret.txt", "ignored.env")) {
+            val d = runBlocking { svc.diff(ReadGitDiff("c1", dir.toString(), p, staged = false), dir) }
+            assertFalse(d.ok, "$p was read through --no-index: ${d.diff}")
+            val body = d.diff.orEmpty()
+            assertFalse(body.contains("not part of any repository") || body.contains("TOKEN"), body)
+        }
+    }
+
     // -------------------------------------------------------------- verbs
 
     @Test
@@ -437,6 +453,47 @@ class GitServiceTest {
     }
 
     @Test
+    fun a_path_with_glob_characters_reverts_only_that_file() {
+        assumeTrue(gitAvailable())
+        val dir = repo()
+        val svc = service()
+        // Next.js route segments: `[id]` is a glob character class to git unless pathspecs are literal
+        for (p in listOf("app/[id]/page.tsx", "app/i/page.tsx", "app/d/page.tsx")) {
+            dir.resolve(p).also { it.parent.createDirectories() }.writeText("base\n")
+        }
+        sh(dir, "add", "-A"); sh(dir, "commit", "-q", "-m", "routes")
+        for (p in listOf("app/[id]/page.tsx", "app/i/page.tsx", "app/d/page.tsx")) dir.resolve(p).writeText("edited\n")
+
+        val preview = act(svc, dir, GIT_OP_REVERT, paths = listOf("app/[id]/page.tsx")) as GitActionPreview
+        val r = act(svc, dir, GIT_OP_REVERT, paths = listOf("app/[id]/page.tsx"), token = preview.confirmToken) as GitActionResult
+        assertTrue(r.ok, r.error + r.stderr)
+        assertEquals("base\n", dir.resolve("app/[id]/page.tsx").readText())
+        assertEquals("edited\n", dir.resolve("app/i/page.tsx").readText(), "a file the user never named was reverted")
+        assertEquals("edited\n", dir.resolve("app/d/page.tsx").readText(), "a file the user never named was reverted")
+    }
+
+    @Test
+    fun revert_refuses_a_path_that_is_not_a_changed_file() {
+        assumeTrue(gitAvailable())
+        val dir = repo()
+        val svc = service()
+        dir.resolve("sub").createDirectories()
+        dir.resolve("sub/a.txt").writeText("a\n")
+        sh(dir, "add", "-A"); sh(dir, "commit", "-q", "-m", "sub")
+        dir.resolve("README.md").writeText("edited\n")
+        dir.resolve("sub/a.txt").writeText("edited\n")
+
+        // "." would preview as one harmless-looking row and then discard every change in the repository
+        for (bad in listOf(".", "sub", ":/", "*.md")) {
+            val r = act(svc, dir, GIT_OP_REVERT, paths = listOf(bad))
+            assertIs<GitActionResult>(r, bad)
+            assertFalse(r.ok, bad)
+        }
+        assertEquals("edited\n", dir.resolve("README.md").readText())
+        assertEquals("edited\n", dir.resolve("sub/a.txt").readText())
+    }
+
+    @Test
     fun a_confirm_token_is_single_use() {
         assumeTrue(gitAvailable())
         val dir = repo()
@@ -532,6 +589,27 @@ class GitServiceTest {
         val preview = act(svc, dir, GIT_OP_CHECKOUT, branch = "feat/x") as GitActionPreview
         // a sheet that listed only the working side would promise something --force does not honour
         assertEquals(setOf("README.md", "staged-only.txt"), preview.files.map { it.path }.toSet())
+    }
+
+    @Test
+    fun a_dirty_checkout_confirm_refuses_when_files_the_preview_never_showed_would_be_lost() {
+        assumeTrue(gitAvailable())
+        val dir = repo()
+        val svc = service()
+        dir.resolve("other.txt").writeText("base\n")
+        sh(dir, "add", "other.txt"); sh(dir, "commit", "-q", "-m", "other")
+        sh(dir, "branch", "feat/x")
+        dir.resolve("README.md").writeText("dirty\n")
+        val preview = act(svc, dir, GIT_OP_CHECKOUT, branch = "feat/x") as GitActionPreview
+        assertEquals(listOf("README.md"), preview.files.map { it.path })
+
+        // the agent edits another file inside the 60-second window; the user confirms what they saw
+        dir.resolve("other.txt").writeText("work the user never saw in the sheet\n")
+        val r = act(svc, dir, GIT_OP_CHECKOUT, branch = "feat/x", token = preview.confirmToken) as GitActionResult
+        assertFalse(r.ok)
+        assertTrue(r.error.orEmpty().contains("changed since"), r.error.orEmpty())
+        assertEquals("work the user never saw in the sheet\n", dir.resolve("other.txt").readText())
+        assertEquals("main", sh(dir, "rev-parse", "--abbrev-ref", "HEAD").trim())
     }
 
     @Test
@@ -685,6 +763,27 @@ class GitServiceTest {
     }
 
     @Test
+    fun a_worktree_that_was_clean_at_preview_but_dirty_at_confirm_is_not_force_removed() {
+        assumeTrue(gitAvailable())
+        val dir = repo()
+        val svc = service()
+        runBlocking { svc.addWorktree(AddWorktree("c1", dir.toString(), "feat/x", createBranch = true), dir) }
+        val wt = tmp.resolve("repo-worktrees").resolve("feat-x")
+
+        val preview = runBlocking { svc.removeWorktree(RemoveWorktree("c1", dir.toString(), wt.toString()), dir) }
+        assertIs<GitActionPreview>(preview)
+        assertEquals("worktree-clean", preview.summary)
+
+        // an editor writes into the checkout before the user taps confirm on a "clean" sheet
+        wt.resolve("late.txt").writeText("written after the preview\n")
+        val r = runBlocking { svc.removeWorktree(RemoveWorktree("c1", dir.toString(), wt.toString(), preview.confirmToken), dir) }
+        assertIs<GitActionResult>(r)
+        assertFalse(r.ok)
+        assertTrue(r.error.orEmpty().contains("changed since"), r.error.orEmpty())
+        assertEquals("written after the preview\n", wt.resolve("late.txt").readText())
+    }
+
+    @Test
     fun a_worktree_with_a_live_session_is_refused_even_with_a_valid_confirm_token() {
         assumeTrue(gitAvailable())
         val dir = repo()
@@ -774,7 +873,178 @@ class GitServiceTest {
         assertTrue(refused.all { it.error.orEmpty().contains("already running") || it.ok }, refused.map { it.error }.toString())
     }
 
+    // ------------------------------------------------- subprocess lifetime
+
+    @Test
+    fun a_hook_that_leaves_a_background_process_holding_the_pipe_does_not_wedge_the_reply() {
+        assumeTrue(gitAvailable() && !isWindows)
+        val dir = repo()
+        val pidFile = tmp.resolve("bg.pid")
+        // the shape of `ControlPersist` ssh or a hook that starts a watcher: git exits, but a process it
+        // started keeps git's stderr open long after
+        hook(dir, "pre-commit", "sleep 60 &\necho \$! > '$pidFile'\nexit 0")
+        dir.resolve("a.txt").writeText("a\n")
+        sh(dir, "add", "a.txt")
+        val svc = service()
+        try {
+            val r = within(15_000) { act(svc, dir, GIT_OP_COMMIT, message = "with a lingering hook child") }
+            assertNotNull(r, "the commit never replied: a pipe held by the hook's background child wedged git()")
+            assertIs<GitActionResult>(r)
+            assertTrue(r.ok, r.error + r.stderr)
+            // and the conversation's mutating slot was released, so the next write is not "already running"
+            val next = within(15_000) { act(svc, dir, GIT_OP_STAGE, paths = listOf("README.md")) } as GitActionResult?
+            assertNotNull(next)
+            assertFalse(next.error.orEmpty().contains("already running"), next.error.orEmpty())
+        } finally {
+            pidFrom(pidFile)?.let(::kill)
+        }
+    }
+
+    @Test
+    fun a_timed_out_checkout_is_stopped_politely_so_index_lock_is_cleaned_and_the_filter_tree_dies() {
+        assumeTrue(gitAvailable() && !isWindows)
+        val dir = repo()
+        val pidFile = tmp.resolve("filter-child.pid")
+        val lockSeen = tmp.resolve("lock-seen")
+        // a slow smudge filter (git-lfs fetching a large object is the real one): checkout holds
+        // .git/index.lock for the whole run, and the filter's own child is a grandchild of git
+        dir.resolve(".gitattributes").writeText("*.bin filter=slow\n")
+        sh(dir, "add", ".gitattributes"); sh(dir, "commit", "-q", "-m", "attributes")
+        sh(dir, "checkout", "-q", "-b", "other")
+        dir.resolve("x.bin").writeText("payload\n")
+        sh(dir, "add", "x.bin"); sh(dir, "commit", "-q", "-m", "bin")
+        sh(dir, "checkout", "-q", "main")
+        val filter = tmp.resolve("slow-smudge.sh")
+        filter.writeText("#!/bin/sh\nls -a '$dir/.git' > '$lockSeen'\nsleep 60 &\necho \$! > '$pidFile'\nwait\n")
+        assertTrue(filter.toFile().setExecutable(true))
+        sh(dir, "config", "--local", "filter.slow.smudge", filter.toString())
+
+        val svc = GitService(nowMs = { clock }, localTimeoutMs = 1_500)
+        try {
+            val r = within(20_000) { act(svc, dir, GIT_OP_CHECKOUT, branch = "other") }
+            assertNotNull(r, "the timed-out checkout never replied")
+            assertIs<GitActionResult>(r)
+            assertFalse(r.ok)
+            assertEquals("git took too long and was stopped", r.error)
+            val child = assertNotNull(pidFrom(pidFile))
+            assertTrue("index.lock" in lockSeen.readText(), "precondition: git holds the lock while the filter runs")
+            // SIGKILL gives git no chance to remove its lock, and every later git command then fails on it
+            assertFalse(dir.resolve(".git/index.lock").exists(), "index.lock left behind by the timeout kill")
+            assertTrue(gone(child), "the filter's child outlived the timeout")
+        } finally {
+            pidFrom(pidFile, waitMs = 0)?.let(::kill)
+        }
+    }
+
+    @Test
+    fun reads_that_time_out_still_answer_with_a_failure_frame() {
+        assumeTrue(gitAvailable() && !isWindows)
+        val dir = repo()
+        dir.resolve("README.md").writeText("changed\n")
+        val pidFile = tmp.resolve("fsmonitor-child.pid")
+        // an fsmonitor hook that wedges: every status/diff refresh waits on it, and its child holds stderr
+        val monitor = tmp.resolve("slow-fsmonitor.sh")
+        monitor.writeText("#!/bin/sh\nsleep 60 &\necho \$! > '$pidFile'\nwait\n")
+        assertTrue(monitor.toFile().setExecutable(true))
+        sh(dir, "config", "--local", "core.fsmonitor", monitor.toString())
+        val svc = GitService(nowMs = { clock }, localTimeoutMs = 1_500, worktreeStatusBudgetMs = 60_000)
+        try {
+            val st = within(20_000) { status(svc, dir) }
+            assertNotNull(st, "status never answered")
+            assertFalse(st.ok)
+            assertEquals(dir.toString(), st.workdir)
+            assertNotNull(pidFrom(pidFile), "precondition: the fsmonitor hook ran")
+            // a tracked file whose diff timed out must not fall through to --no-index and come back
+            // as a whole-file "new file" diff
+            val d = within(20_000) { runBlocking { svc.diff(ReadGitDiff("c1", dir.toString(), "README.md", staged = false), dir) } }
+            assertNotNull(d, "diff never answered")
+            assertFalse(d.ok, d.diff.orEmpty())
+            val wl = within(20_000) { runBlocking { svc.listWorktrees(ListWorktrees("c1", dir.toString(), withStatus = true), dir) } }
+            assertNotNull(wl, "worktree list never answered")
+        } finally {
+            pidFrom(pidFile, waitMs = 0)?.let(::kill)
+        }
+    }
+
+    @Test
+    fun the_worktree_list_answers_within_its_status_budget_even_when_status_hangs() {
+        assumeTrue(gitAvailable() && !isWindows)
+        val dir = repo()
+        runBlocking { service().addWorktree(AddWorktree("c1", dir.toString(), "feat/x", createBranch = true), dir) }
+        val pidFile = tmp.resolve("fsmonitor-children.pid")
+        val monitor = tmp.resolve("slow-fsmonitor.sh")
+        monitor.writeText("#!/bin/sh\nsleep 60 &\necho \$! >> '$pidFile'\nwait\n")
+        assertTrue(monitor.toFile().setExecutable(true))
+        sh(dir, "config", "--local", "core.fsmonitor", monitor.toString())
+        // production local timeout (30 s): the budget, not the per-process bound, must be what answers
+        val svc = GitService(nowMs = { clock }, worktreeStatusBudgetMs = 500)
+        try {
+            val started = System.nanoTime()
+            val list = within(10_000) { runBlocking { svc.listWorktrees(ListWorktrees("c1", dir.toString(), withStatus = true), dir) } }
+            assertNotNull(list, "the 500 ms budget did not bound the call: cancelled scans still waited out git")
+            assertTrue(list.ok, list.error)
+            assertEquals(2, list.worktrees.size)
+            assertTrue(list.worktrees.all { it.dirty == null }, "unfinished scans degrade to unknown")
+            assertTrue(System.nanoTime() - started < TimeUnit.SECONDS.toNanos(10))
+            // the abandoned scans were stopped, not left running out their 30 s
+            pidsFrom(pidFile).forEach { assertTrue(gone(it), "fsmonitor child $it outlived the cancelled scan") }
+        } finally {
+            pidsFrom(pidFile).forEach(::kill)
+        }
+    }
+
     // ------------------------------------------------------------- helpers
+
+    private fun pidsFrom(file: Path): List<Long> =
+        runCatching { file.readText().lines().mapNotNull { it.trim().toLongOrNull() } }.getOrDefault(emptyList())
+
+    private val isWindows = System.getProperty("os.name").lowercase().contains("win")
+
+    /** An executable hook in the repo's own hooks dir — hooksPath pinned locally so a machine-wide
+     *  `core.hooksPath` cannot redirect it (GitService itself runs with the developer's real config). */
+    private fun hook(dir: Path, name: String, body: String) {
+        sh(dir, "config", "--local", "core.hooksPath", ".git/hooks")
+        val f = dir.resolve(".git/hooks/$name")
+        f.parent.createDirectories()
+        f.writeText("#!/bin/sh\n$body\n")
+        assertTrue(f.toFile().setExecutable(true))
+    }
+
+    /** Run [block] on its own thread and give up after [ms] — null means it was still blocked. A wedged call
+     *  stays parked on that daemon thread until the test's finally kills what holds it. */
+    private fun <T> within(ms: Long, block: () -> T): T? {
+        val pool = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "within").apply { isDaemon = true } }
+        return try {
+            pool.submit(java.util.concurrent.Callable { block() }).get(ms, TimeUnit.MILLISECONDS)
+        } catch (_: java.util.concurrent.TimeoutException) {
+            null
+        } finally {
+            pool.shutdown()
+        }
+    }
+
+    private fun pidFrom(file: Path, waitMs: Long = 5_000): Long? {
+        val deadline = System.currentTimeMillis() + waitMs
+        while (true) {
+            runCatching { file.readText().trim().toLong() }.getOrNull()?.let { return it }
+            if (System.currentTimeMillis() >= deadline) return null
+            Thread.sleep(20)
+        }
+    }
+
+    private fun kill(pid: Long) {
+        ProcessHandle.of(pid).ifPresent { it.destroyForcibly() }
+    }
+
+    /** True once [pid] is gone, polling up to [waitMs]. */
+    private fun gone(pid: Long, waitMs: Long = 5_000): Boolean {
+        val deadline = System.currentTimeMillis() + waitMs
+        while (System.currentTimeMillis() < deadline) {
+            if (!ProcessHandle.of(pid).map { it.isAlive }.orElse(false)) return true
+            Thread.sleep(20)
+        }
+        return false
+    }
 
     /** A repo left mid-merge with exactly one unmerged path, `f.txt`. */
     private fun conflictedRepo(): Path {

@@ -39,9 +39,9 @@ internal object GitIgnoreProbe {
      * The subset of [names] (direct children of [dir], plain names with no separator) that git excludes.
      * Null means "no answer" — not "nothing is ignored" — and the caller must then show everything.
      */
-    suspend fun ignored(dir: Path, names: List<String>): Set<String>? {
+    suspend fun ignored(dir: Path, names: List<String>, gitExe: () -> Path? = { GitBin.resolve() }): Set<String>? {
         if (names.isEmpty() || names.size > MAX_NAMES) return null
-        val exe = GitBin.resolve() ?: return null
+        val exe = gitExe() ?: return null
         return withContext(Dispatchers.IO) {
             try {
                 val pb = ProcessBuilder(listOf(exe.toString(), "check-ignore", "--stdin", "-z"))
@@ -59,14 +59,19 @@ internal object GitIgnoreProbe {
                 // then both sides block on each other forever.
                 val out = async { proc.inputStream.readBytes() }
                 val err = async { proc.errorStream.readBytes() }
-                // A child that already died (128 on a non-repo) makes this write fail; that is a normal
+                // The write gets a thread of its own so the [TIMEOUT_MS] clock starts at spawn: a git that
+                // stops reading (wedged index, network filesystem) would otherwise block a large batch's
+                // write with no timer running at all. The kill below makes the blocked write fail (EPIPE).
+                // A child that already died (128 on a non-repo) makes this write fail too; that is a normal
                 // path, and the exit code below is what actually decides the answer.
-                runCatching {
-                    proc.outputStream.use { s ->
-                        s.write(SELF.encodeToByteArray()); s.write(NUL.code)
-                        names.forEach { n -> s.write(n.encodeToByteArray()); s.write(NUL.code) }
+                Thread({
+                    runCatching {
+                        proc.outputStream.use { s ->
+                            s.write(SELF.encodeToByteArray()); s.write(NUL.code)
+                            names.forEach { n -> s.write(n.encodeToByteArray()); s.write(NUL.code) }
+                        }
                     }
-                }
+                }, "check-ignore-stdin").apply { isDaemon = true }.start()
                 val finished = proc.waitFor(TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 if (!finished) proc.destroyForcibly()
                 // Safe to await unconditionally: the process is either exited or destroyed, so both pipes
