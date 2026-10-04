@@ -15,6 +15,8 @@
 - [Chat Rhythm v1](chat-rhythm-v1/README.md)：移动端会话详情排版整理，保留一键复制（原型已通过，Opus 已实现，完成自动化与渲染验收，已开发同步到桌面端和 iPhone）。
 - [Core List Chat v1](core-list-chat-v1/README.md)：核心列表与会话体验设计提案、功能优先级及验收规则（未实施）。
 - [Entry Flow UI 2.0](entry-flow-ui-2.0/README.md) 与 [Implementation Brief](entry-flow-ui-2.0/IMPLEMENTATION_BRIEF.md)：入口流程。
+- [First Run · Send to Computer v1](first-run-send-to-computer-v1/README.md)：#342 首启页以「把设置链接发到电脑」为第一个动作，演示结束后给出下一步（用户评审不通过：辅助入口接管了主路径，不按此稿实现）。
+- [Read Aloud v1](read-aloud-v1/README.md)：朗读从文件查看器里的一个按钮变成全 App 的小播放器，可离开界面继续读、可调倍率，入口覆盖文档、回复、子 Agent 报告和语音备忘（用户评审不通过：干扰聊天主路径，不按此稿实现）。
 - [Supporting Surfaces UI 2.0](supporting-surfaces-ui-2.0/README.md)：辅助页面。
 - [Chat Quick Actions UI 2.0](chat-quick-actions-ui-2.0/README.md)：聊天快捷操作。
 - [Settings + Bridges UI 2.1](settings-bridges-ui-2.1/README.md)：设置与桥接修订。
@@ -39,6 +41,7 @@
 | `chat-quote-v1` | [Chat Quote v1 — Agent 回复中的引用块](chat-quote-v1/README.md) |
 | `tool-process-live-v1` | [Tool Process Live v1 — 执行过程折叠的实时行](tool-process-live-v1/README.md) |
 | `recent-row-actions-v1` | [Recent Row Actions v1 — 桌面侧栏「最近」项目行操作簇](recent-row-actions-v1/README.md) |
+| `read-aloud-v1` | [Read Aloud v1 — 朗读从一个按钮变成全 App 的小播放器](read-aloud-v1/README.md)（评审不通过，不实现） |
 | `chat-quick-actions-ui-2.0` | [Chat Quick Actions UI 2.0](chat-quick-actions-ui-2.0/README.md) |
 | `context-statusline` | [上下文占用指示器入驻 composer 设计交付](context-statusline/README.md) |
 | `defaults-voice-results-ui-2.1` | [Defaults + Voice + Results UI 2.1 — Claude Design handoff](defaults-voice-results-ui-2.1/README.md) |
@@ -48,6 +51,7 @@
 | `fast-start-260` | [新任务创建链路（issue #260）——Fast Start](fast-start-260/README.md) |
 | `files-browser-dual-view` | [文件浏览双视角（变更 / 全部）设计 handoff](files-browser-dual-view/README.md) |
 | `first-run-connect-pair` | [First Run · Connect + Pair handoff（#278 批次 2 A＋B）](first-run-connect-pair/README.md) |
+| `first-run-send-to-computer-v1` | [First Run · Send to Computer v1 — 首启「把设置链接发到电脑」与演示的下一步](first-run-send-to-computer-v1/README.md)（评审不通过，不实现） |
 | `fleet` | [Fleet 多机并行（Mobile · Desktop）设计落地记录](fleet.md) |
 | `folder-share` | [文件夹级共享 — owner 邀请 / 管理 / guest 加入 / 终态（设计 handoff）](folder-share/README.md) |
 | `gauge-rhythm` | [占用环视觉节奏修正设计交付](gauge-rhythm/README.md) |

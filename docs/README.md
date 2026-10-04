@@ -16,6 +16,7 @@
 | 了解使用方式与运行链路 | [使用说明](USAGE.md)、[运行说明](RUN.md)、[贡献指南](../CONTRIBUTING.md) |
 | 构建、发版、iOS 提审 | [发布流程](RELEASE.md)、[拒审案例与检查](APP-STORE-REJECTIONS.md)、[构建链](BUILD-TOOLCHAIN-UPGRADE.md)、[iOS 设备](ios-device.md) |
 | 修改产品或界面 | [设计索引](design/README.md)、[UI 设计说明](design/claude-design-handoff/README.md) |
+| 查询调研后决定不做的需求 | [不做的需求案例集](DECLINED-REQUIREMENTS.md) |
 | 排查观测、配置分析与发布诊断 | [观测开发入口](observability/README.md) |
 | 用户反馈未解决、补日志并交付诊断测试包 | [反馈排障与测试版本交付](observability/FEEDBACK-DIAGNOSTICS.md) |
 | 审核推送注册确认与存量用户自动恢复 | [推送恢复方案（待审核）](design/PUSH-REGISTRATION-RECOVERY.md) |
