@@ -61,6 +61,7 @@ class KimiBackend(
     private val modelService: KimiModelService = KimiModelService(),
     private val taskPollMs: Long = TASK_POLL_MS,
     private val taskFile: (sessionId: String, taskId: String) -> Path? = KimiPaths::taskFile,
+    private val handshakeTimeoutMs: Long = HANDSHAKE_TIMEOUT_MS,
 ) : AgentBackend {
     private val log = logger("KimiBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -75,6 +76,19 @@ class KimiBackend(
     @Volatile private var model: String? = null
 
     @Volatile private var sessionId: String? = null
+
+    /**
+     * Why this session will never open, once a startup stage failed (audit 2026-10-04 H1 — the #388 fix
+     * [dev.ccpocket.daemon.dsh.DshBackend] already carries). Set by [failStartup], cleared by [attach]. It
+     * silences the handshake watchdog after a real diagnosis, and settles prompts that arrive AFTER the
+     * failure — they would otherwise queue behind a session id that can never land, with no terminal state
+     * and a re-run on every relaunch. Nothing retries a stage or opens a replacement session: a resume that
+     * failed must stay the session the user asked for.
+     */
+    @Volatile private var openFailure: String? = null
+
+    /** The handshake watchdog of the CURRENT process; replaced on every [attach]. */
+    @Volatile private var handshakeWatch: Job? = null
 
     // `agentCapabilities.promptCapabilities.image` off THIS process's `initialize` answer (issue #377) — only
     // an explicit `true` counts, and every attach forgets the previous process's answer.
@@ -149,11 +163,14 @@ class KimiBackend(
         this.model = spec.model
         // reset per-process protocol state (runs on every (re)launch)
         sessionId = null
+        openFailure = null
+        sessionOpenId = -1
         suppressReplayUpdates = false
         imagePrompts = false
         bootstrap.withLock { promptQueue.clear() }
         promptIds.clear(); pendingApprovals.clear(); toolCalls.clear()
         stopTaskWatchers() // the previous process's tasks are no longer this conversation's jobs
+        handshakeWatch?.cancel()
         // kick off the ACP handshake — session open happens when the initialize response lands
         initializeId = rpcRequest("initialize", buildJsonObject {
             put("protocolVersion", 1)
@@ -161,6 +178,22 @@ class KimiBackend(
                 putJsonObject("fs") { put("readTextFile", false); put("writeTextFile", false) }
             }
         })
+        handshakeWatch = taskScope.launch { watchHandshake(io) }
+    }
+
+    /**
+     * An `initialize` that never answers is the one startup failure no frame can report (a legacy Python
+     * `kimi` sharing the name, a CLI that does not speak ACP v1). Bounded, like DSH's: once a session open
+     * was sent, its own error rides the wire.
+     */
+    private suspend fun watchHandshake(owner: AgentIo) {
+        delay(handshakeTimeoutMs)
+        if (io !== owner || sessionOpenId >= 0 || sessionId != null || openFailure != null) return
+        injectStartupFailure(
+            STAGE_HANDSHAKE,
+            "no answer to `initialize` within ${handshakeTimeoutMs / 1000}s — check that `kimi` is the Kimi Code " +
+                "CLI (`kimi acp`), not the legacy Python kimi-cli",
+        )
     }
 
     override suspend fun parse(line: String): List<AgentEvent> {
@@ -170,6 +203,12 @@ class KimiBackend(
             ?: return listOf(AgentEvent.Unparseable(t))
         // our own refusal (see sendPrompt) — the one frame on this pump kimi did not write
         if (root.str("type") == SYNTHETIC_REFUSAL) return settleRefusal(root)
+        if (root.str("type") == SYNTHETIC_ERROR) {
+            return listOf(
+                AgentEvent.AssistantText("⚠️ ${root.str("message").orEmpty()}"),
+                AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
+            )
+        }
         if (root.str("type") == SYNTHETIC_TASK_SETTLED) {
             val taskId = root.str("taskId") ?: return emptyList()
             return listOf(AgentEvent.BackgroundTaskUpdated(taskId, root.str("status")))
@@ -208,8 +247,14 @@ class KimiBackend(
     private suspend fun handleErrorResponse(idEl: JsonElement?, error: JsonObject?): List<AgentEvent> {
         val id = (idEl as? JsonPrimitive)?.longOrNull
         val msg = error?.str("message") ?: "kimi error"
-        // an auth wall (no model / not logged in) surfaces here on session open or the first prompt
-        if (id == sessionOpenId || (id != null && promptIds.containsKey(id))) {
+        // A failed startup stage leaves a session that will never open: every prompt waiting on it settles
+        // (an auth wall — no model / not logged in — lands here on session open, too).
+        if (id != null && id == initializeId) return failStartup(STAGE_HANDSHAKE, msg)
+        if (id != null && id == sessionOpenId) {
+            suppressReplayUpdates = false
+            return failStartup(if (resumeId != null) STAGE_RESUME else STAGE_NEW, msg)
+        }
+        if (id != null && promptIds.containsKey(id)) {
             val consumed = id?.let { promptIds.remove(it) }
             val next = flushQueuedPrompt() // a failed prompt must not stall the FIFO behind it
             return listOfNotNull(
@@ -224,6 +269,44 @@ class KimiBackend(
         }
         log.warn("kimi error response id=$id: $msg")
         return emptyList()
+    }
+
+    /** A startup stage failed, so this session will never open: name the stage and give every prompt waiting
+     *  on it a terminal state — an unsettled one stays in Conversation's ledger and re-runs on relaunch. */
+    private suspend fun failStartup(stage: String, why: String): List<AgentEvent> {
+        val message = "$stage: $why"
+        openFailure = message
+        log.warn("kimi startup failed — $message")
+        val stranded = drainWaitingPrompts()
+        return if (stranded.isEmpty()) {
+            listOf(
+                AgentEvent.AssistantText("⚠️ $message"),
+                AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
+            )
+        } else {
+            stranded.flatMap { errorTurn(it.text, message) }
+        }
+    }
+
+    /** [failStartup] for the watchdog, which is not on the parse pump: the same settlement, delivered through
+     *  [AgentIo.inject] (only the pump may return events). */
+    private suspend fun injectStartupFailure(stage: String, why: String) {
+        val message = "$stage: $why"
+        openFailure = message
+        log.warn("kimi startup failed — $message")
+        val stranded = drainWaitingPrompts()
+        if (stranded.isEmpty()) {
+            io?.inject?.invoke(buildJsonObject { put("type", SYNTHETIC_ERROR); put("message", message) }.toString())
+            return
+        }
+        for (prompt in stranded) {
+            val id = bootstrap.withLock { reservePrompt(prompt.text) }
+            io?.inject?.invoke(syntheticRefusal(id, message))
+        }
+    }
+
+    private suspend fun drainWaitingPrompts(): List<Prompt> = bootstrap.withLock {
+        promptQueue.toList().also { promptQueue.clear() }
     }
 
     private suspend fun openSession() {
@@ -245,8 +328,10 @@ class KimiBackend(
 
     private suspend fun onSessionOpened(result: JsonObject?): List<AgentEvent> {
         suppressReplayUpdates = false
-        // session/new returns {sessionId}; session/load returns {} (id is the one we sent)
-        val sid = result?.str("sessionId") ?: resumeId ?: return emptyList()
+        // session/new returns {sessionId}; session/load returns {} (id is the one we sent). A session/new with
+        // no id is a session nobody can address — the same dead end as an error answer, settled the same way.
+        val sid = result?.str("sessionId") ?: resumeId
+            ?: return failStartup(STAGE_NEW, "kimi did not return a session id")
         val refused = ArrayList<Prompt>()
         val first = bootstrap.withLock {
             sessionId = sid
@@ -377,6 +462,13 @@ class KimiBackend(
 
     override suspend fun sendPrompt(text: String, images: List<ImageData>) {
         val prompt = Prompt(text, images)
+        // the session already failed to open: queueing would park this behind a session id that can never
+        // land — settle it with the stage error instead, exactly like a refused prompt
+        openFailure?.let { why ->
+            val id = bootstrap.withLock { reservePrompt(text) }
+            io?.inject?.invoke(syntheticRefusal(id, why))
+            return
+        }
         val reserved = bootstrap.withLock {
             when {
                 // no session yet — the session open releases the FIFO head
@@ -516,7 +608,10 @@ class KimiBackend(
 
     // kimi self-manages its session store. A dead process cannot take a completion frame any more (inject
     // drops it), so stop watching — Conversation's stale-job reaper owns the jobs of a dead agent.
-    override suspend fun onProcessEnded(sessionId: String?) { stopTaskWatchers() }
+    override suspend fun onProcessEnded(sessionId: String?) {
+        stopTaskWatchers()
+        handshakeWatch?.cancel()
+    }
 
     // ---- background task completion (issue #391) ----
 
@@ -602,7 +697,18 @@ class KimiBackend(
         /** Namespaced so it can never collide with a real kimi frame. */
         private const val SYNTHETIC_REFUSAL = "cc-pocket/kimi-prompt-refused"
         private const val SYNTHETIC_TASK_SETTLED = "cc-pocket/kimi-task-settled"
+        private const val SYNTHETIC_ERROR = "cc-pocket/kimi-error"
         const val TASK_POLL_MS = 2_000L
+
+        /** The startup stages a failure can land in — each asks the user for something different. */
+        const val STAGE_HANDSHAKE = "Kimi Code never completed its handshake"
+        const val STAGE_NEW = "could not start a Kimi Code session"
+        const val STAGE_RESUME = "could not resume this Kimi Code session — " +
+            "it was not reopened, and nothing was sent to a different one"
+
+        /** Handshake watchdog, as generous as DSH's: a cold start can take seconds on a slow machine, and a
+         *  false "never completed its handshake" is worse than waiting. */
+        const val HANDSHAKE_TIMEOUT_MS = 30_000L
 
         // kimi's own task-id shape (its VALID_TASK_ID, read out of the 2.1.1 bundle). The id becomes a file
         // name under the session dir, so anything else — a path, a `..` — is refused rather than resolved.
