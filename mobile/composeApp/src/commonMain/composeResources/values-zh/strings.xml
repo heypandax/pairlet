@@ -1173,6 +1173,7 @@
     <string name="observe_readonly">只读——此会话正在电脑的终端里运行</string>
     <string name="message_agent_hint">给 %1$s 发消息…</string>
     <string name="composer_uploading">正在上传 %1$d/%2$d——完成后发送</string>
+    <string name="composer_compressing">正在处理图片——完成后发送</string>
     <string name="key_send">发送</string>
     <string name="key_newline">换行</string>
     <string name="key_stop">停止</string>

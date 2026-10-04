@@ -6739,6 +6739,10 @@ class PocketRepository(
     /** Any staged file still moving? The send button waits (design: spinner) until uploads settle. */
     fun uploadsBusy() = pendingFiles.any { it.state == FileUpState.Uploading || it.state == FileUpState.Queued }
 
+    /** A staged photo is still being downscaled — [sendPrompt] holds the send (keeping text and photo) until it
+     *  is Ready, so a composer must show Send as waiting, exactly as it does for [uploadsBusy]. */
+    fun imagesCompressing() = pendingImages.any { it.state == ImgState.Compressing }
+
     fun hasLandedFiles() = pendingFiles.any { it.state == FileUpState.Landed && it.path != null }
 
     /** Stage picked files: over-cap picks fail immediately (nothing to stream); the rest queue and
@@ -6917,7 +6921,7 @@ class PocketRepository(
         if (includeAttachments && uploadsBusy()) return false // sends with attachments wait for uploads
         // …and for photos still compressing: only Ready photos ride the prompt and the staging list is
         // cleared below, so sending now would deliver the text and silently drop the picture
-        if (includeAttachments && pendingImages.any { it.state == ImgState.Compressing }) return false
+        if (includeAttachments && imagesCompressing()) return false
         val ready = if (includeAttachments) pendingImages.filter { it.state == ImgState.Ready }.map { it.bytes } else emptyList()
         val landed = if (includeAttachments) pendingFiles.filter { it.state == FileUpState.Landed && it.path != null } else emptyList()
         if (text.isBlank() && ready.isEmpty() && landed.isEmpty()) return false

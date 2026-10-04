@@ -1176,6 +1176,7 @@
     <string name="observe_readonly">Read-only — this session is running in a terminal on the computer</string>
     <string name="message_agent_hint">Message %1$s…</string>
     <string name="composer_uploading">uploading %1$d of %2$d — send waits</string>
+    <string name="composer_compressing">preparing photo — send waits</string>
     <string name="key_send">send</string>
     <string name="key_newline">newline</string>
     <string name="key_stop">stop</string>

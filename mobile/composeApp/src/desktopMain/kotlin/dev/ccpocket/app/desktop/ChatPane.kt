@@ -171,6 +171,7 @@ import dev.ccpocket.app.resources.cmd_source_builtin
 import dev.ccpocket.app.resources.cmd_source_project
 import dev.ccpocket.app.resources.cmd_source_skill
 import dev.ccpocket.app.resources.cmd_source_user
+import dev.ccpocket.app.resources.composer_compressing
 import dev.ccpocket.app.resources.composer_uploading
 import dev.ccpocket.app.resources.continue_here
 import dev.ccpocket.app.resources.ctx_nearly_full
@@ -1579,6 +1580,9 @@ private fun MessageRow(
 
 enum class ToolStatus { RUN, OK, FAIL, UNKNOWN }
 internal const val TOOL_ROW_TAG = "plain-tool-row"
+/** The composer's send circle, and the non-clickable circle that stands in for it while the send must wait. */
+internal const val SEND_TAG = "composer-send"
+internal const val SEND_WAITS_TAG = "composer-send-waits"
 
 @Composable
 fun ToolRow(
@@ -1789,8 +1793,14 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
             Column(Modifier.widthIn(max = Dk.maxStreamWidth).fillMaxWidth()) {
                 val scope = rememberCoroutineScope()
                 val uploadsBusy = model.uploadsBusy()
+                // a photo still downscaling holds the send too (the repository refuses it, keeping text and photo):
+                // read off the model's own staged images, so a split column — which stages none — never waits on it
+                val compressing = model.pendingImages.any { it.state == ImgState.Compressing }
+                val sendWaits = uploadsBusy || compressing
                 val submit = {
-                    if (!model.uploadsBusy() && (model.composer.isNotBlank() || model.hasReadyImages() || model.hasLandedFiles())) {
+                    if (!model.uploadsBusy() && model.pendingImages.none { it.state == ImgState.Compressing } &&
+                        (model.composer.isNotBlank() || model.hasReadyImages() || model.hasLandedFiles())
+                    ) {
                         model.send(model.composer)
                     }
                 }
@@ -1995,11 +2005,11 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                             contentAlignment = Alignment.Center,
                         ) { Box(Modifier.size(11.dp).clip(RoundedCornerShape(2.dp)).background(Tok.danger)) }
                     }
-                    if (uploadsBusy) {
+                    if (sendWaits) {
                         // send WAITS while uploads run (design: desktop-attach.jsx) — the landed
-                        // @-references don't exist until the daemon's receipt lands
+                        // @-references don't exist until the daemon's receipt lands — and while a photo compresses
                         Box(
-                            Modifier.size(34.dp).clip(RoundedCornerShape(999.dp)).background(Tok.base)
+                            Modifier.testTag(SEND_WAITS_TAG).size(34.dp).clip(RoundedCornerShape(999.dp)).background(Tok.base)
                                 .border(1.dp, Tok.hair, RoundedCornerShape(999.dp)),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -2008,7 +2018,7 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                         }
                     } else {
                         Box(
-                            Modifier.size(34.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent).clickable { submit() },
+                            Modifier.testTag(SEND_TAG).size(34.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent).clickable { submit() },
                             contentAlignment = Alignment.Center,
                         ) { Icon(Icons.Rounded.ArrowUpward, null, tint = Tok.base, modifier = Modifier.size(16.dp)) }
                     }
@@ -2020,6 +2030,14 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                         Text(
                             stringResource(Res.string.composer_uploading, active, model.pendingFiles.size),
                             color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
+                        )
+                        Spacer(Modifier.weight(1f))
+                    } else if (compressing) {
+                        // the same written wait as an upload's, beside the same dot (tightCenter: text next to geometry)
+                        Box(Modifier.size(5.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent))
+                        Text(
+                            stringResource(Res.string.composer_compressing),
+                            color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp),
                         )
                         Spacer(Modifier.weight(1f))
                     }
