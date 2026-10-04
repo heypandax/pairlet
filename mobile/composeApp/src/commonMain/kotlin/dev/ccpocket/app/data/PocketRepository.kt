@@ -3812,6 +3812,15 @@ class PocketRepository(
                 pendingNewOpenWd = null // the in-flight open (if any) is answered by this announce
                 openInFlight = null // …and so is its #235 claim — the next click on this row is a real request again
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
+                // Audit M7: the same session re-announced under a NEW convoId (daemon restart → cold resume,
+                // handoff migration, rewind branch) is a new agent process. The old convo's cards are dead —
+                // no AskWithdrawn will ever come for them — and Allow would pair the new convoId with an askId
+                // the daemon never issued; its "always allow" rules died with it too. A live ask of the new
+                // process re-arrives under the new convoId. Same convoId (plain reattach) keeps everything.
+                if (convoId.value != null && convoId.value != f.convoId) {
+                    clearAskQueue()
+                    allowRules.clear()
+                }
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
                 f.sessionId?.let {
                     sessionKey.value = it
@@ -7818,7 +7827,8 @@ class PocketRepository(
     ) {
         if (!isCurrentAsk(ask)) return
         val a = pendingAsk.value ?: return
-        val c = convoId.value ?: return
+        convoId.value ?: return
+        val c = a.convoId // the verdict names the ask's own conversation, never a re-keyed one (audit M7)
         openSessionId()?.let(PushDismissal::dismiss) // issue #389: answered in the open chat — its tray alerts are stale
         advanceAsk()
         pendingApprovals.remove(ApprovalKey(a.convoId, a.askId))
@@ -7967,7 +7977,8 @@ class PocketRepository(
     fun answerQuestions(answers: Map<String, String>?, response: String? = null, ask: PermissionAsk? = null) {
         if (!isCurrentAsk(ask)) return // a stale answer must not land on the next queued ask (see [resolve])
         val a = pendingAsk.value ?: return
-        val c = convoId.value ?: return
+        convoId.value ?: return
+        val c = a.convoId // see [resolve]
         openSessionId()?.let(PushDismissal::dismiss) // issue #389: answered in the open chat — its tray alerts are stale
         advanceAsk()
         messages.add(ChatItem.QuestionsAnswered(answeredItems(a, answers, response)))
