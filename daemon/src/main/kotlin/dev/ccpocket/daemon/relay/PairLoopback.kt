@@ -164,7 +164,11 @@ class PairLoopback(
         }
         embeddedServer(CIO, host = "127.0.0.1", port = port) {
             routing {
-                post("/pair") {
+                // audit 2026-10-04 H2: every legacy route hangs off this guarded child — a request with an
+                // Origin (a browser) or a non-loopback Host (DNS rebinding) is refused before any handler.
+                // No token / Content-Type demand: the shipped CLI sends neither (see LegacyLoopbackGuard).
+                val legacy = LegacyLoopbackGuard.routes(this)
+                legacy.post("/pair") {
                     // mint serialization (issue #91): while a headless pairing is pending, an interactive
                     // mint could LIFO-cross the PSK binding — refuse for the ticket's short TTL instead
                     if (relay.bridges.intentPending()) {
@@ -211,7 +215,7 @@ class PairLoopback(
                 // workdir-must-exist rule, and one mint-serialization dance. A drift between two copies of
                 // that would mis-classify a credential's power, which is the one thing #91 must never get
                 // wrong. (Same reuse the `share` CLI below already does.)
-                post("/pair/headless") {
+                legacy.post("/pair/headless") {
                     val req = runCatching { PocketJson.decodeFromString<LoopbackHeadlessReq>(call.receiveText()) }.getOrNull()
                     if (req == null || req.name.isBlank() || req.workdirs.isEmpty()) {
                         call.respondText("""{"error":"bad_request","message":"name and at least one --workdir are required"}""", ContentType.Application.Json, HttpStatusCode.BadRequest)
@@ -256,14 +260,14 @@ class PairLoopback(
                     )
                 }
 
-                get("/bridges") {
+                legacy.get("/bridges") {
                     val rows = relay.bridges.list().map { (id, spec) ->
                         LoopbackBridge(id, spec.name, spec.workdirs, spec.maxSessions, spec.opensPerMin, spec.promptsPerMin)
                     }
                     call.respondText(PocketJson.encodeToString(rows), ContentType.Application.Json)
                 }
 
-                post("/bridge/revoke") {
+                legacy.post("/bridge/revoke") {
                     val req = runCatching { PocketJson.decodeFromString<LoopbackRevokeReq>(call.receiveText()) }.getOrNull()
                     if (req == null || req.idOrName.isBlank()) {
                         call.respondText("""{"error":"bad_request"}""", ContentType.Application.Json, HttpStatusCode.BadRequest)
@@ -288,7 +292,7 @@ class PairLoopback(
                 // code. Loopback reachability == local-user authority, the same trust `pair`/`pair/headless`
                 // already ride: the machine's owner is the one entitled to grant a folder from that machine.
 
-                post("/share") {
+                legacy.post("/share") {
                     val sc = relay.shareControl
                     if (sc == null) {
                         // no relay-side control plane yet: daemon still wiring up, or a LAN-only `run` that
@@ -343,7 +347,7 @@ class PairLoopback(
                     )
                 }
 
-                get("/shares") {
+                legacy.get("/shares") {
                     val sc = relay.shareControl
                     if (sc == null) {
                         call.respondText("""{"error":"unavailable"}""", ContentType.Application.Json, HttpStatusCode.ServiceUnavailable)
@@ -352,7 +356,7 @@ class PairLoopback(
                     call.respondText(PocketJson.encodeToString(sc.list()), ContentType.Application.Json)
                 }
 
-                post("/share/revoke") {
+                legacy.post("/share/revoke") {
                     val sc = relay.shareControl
                     if (sc == null) {
                         call.respondText("""{"error":"unavailable"}""", ContentType.Application.Json, HttpStatusCode.ServiceUnavailable)
@@ -366,7 +370,7 @@ class PairLoopback(
                     call.respondText(PocketJson.encodeToString(sc.revoke(req.deviceId)), ContentType.Application.Json)
                 }
 
-                get("/status") {
+                legacy.get("/status") {
                     call.respondText(
                         PocketJson.encodeToString(LoopbackStatus(relay.accountId, relayWsBase, relay.attached, relay.lastPongAgeMs())),
                         ContentType.Application.Json,
