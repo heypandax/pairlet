@@ -117,6 +117,9 @@ class SidePaneModelDelegationGuardTest {
      *  class doc's litmus — and every one of them means the same thing in a column as anywhere else. */
     private val WINDOW_DELEGATED = setOf(
         "exposeFeature", "sideContentLayoutToken", "onSideContentLaidOut",
+        // feature_used from window overlays (Git, Worktrees, Skills, Bridges) — an app-level usage count,
+        // never an action on any conversation
+        "useFeature",
         // window chrome (desktop chrome v2): whether the sidebar is collapsed, and the session back/forward
         // history behind ⌘[ / ⌘]. Both describe the WINDOW — one trail per window, not per column — and both
         // are read by the chrome cluster the leftmost column's sub-header adopts while the sidebar is hidden.

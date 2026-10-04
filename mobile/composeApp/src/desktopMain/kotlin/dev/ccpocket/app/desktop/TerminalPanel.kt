@@ -133,6 +133,9 @@ class TerminalPanelController(
 
     fun openEmbedded(cwd: String?, branch: String?) {
         if (cwd.isNullOrBlank()) return
+        // a local shell is always the user's own machine; a re-focus of the already-open dock is not a new use
+        if (mode != TermPanelMode.OPEN || this.cwd != cwd) dev.ccpocket.app.telemetry.ProductFeatures.used(
+            dev.ccpocket.app.telemetry.ProductFeature.EMBEDDED_TERMINAL, mapOf(dev.ccpocket.app.telemetry.TelKey.UsageMode to "own"))
         if (this.cwd != cwd) { // the dock moves to this session's folder — one shell, never two
             engine?.dispose()
             engine = null

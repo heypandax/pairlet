@@ -122,6 +122,7 @@ fun GitPill(model: DesktopModel) {
 
 @Composable
 fun GitOverlay(model: DesktopModel, onDismiss: () -> Unit) {
+    LaunchedEffect(Unit) { model.useFeature(dev.ccpocket.app.telemetry.ProductFeature.GIT_PANEL) }
     val status = model.gitStatus
     var message by remember(model.selectedSessionId) { mutableStateOf("") }
     var branchesOpen by remember { mutableStateOf(false) }
@@ -630,6 +631,7 @@ private fun GitConfirmDialog(model: DesktopModel, preview: GitActionPreview) {
 
 @Composable
 fun WorktreesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
+    LaunchedEffect(Unit) { model.useFeature(dev.ccpocket.app.telemetry.ProductFeature.WORKTREE) }
     val list = model.worktrees
     // newest linked checkout first, main pinned on top (#294 真机反馈) — same order as mobile
     val trees = remember(list) { dev.ccpocket.app.data.worktreeDisplayOrder(list?.worktrees.orEmpty()) }

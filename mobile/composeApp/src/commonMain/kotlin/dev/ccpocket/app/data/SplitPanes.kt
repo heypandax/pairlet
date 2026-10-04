@@ -285,6 +285,7 @@ class SidePanes(
         // before it. -1 keeps the historic append-at-the-right-end (the context-menu path).
         val slot = if (at < 0) panes.size + 1 else at.coerceIn(0, panes.size + 1)
         ProductFeatures.used(ProductFeature.SESSION_VIEW, productDimensions())
+        ProductFeatures.used(ProductFeature.SPLIT_PANE, productDimensions())
         panes.add(paneIndexForSlot(slot, focusedSlot.value), pane)
         if (slot <= focusedSlot.value) focusedSlot.value += 1
         recount()

@@ -106,6 +106,7 @@ fun WorktreesScreen(repo: PocketRepository, onOpenSessionHere: (String) -> Unit,
     }
 
     LaunchedEffect(repo.convoId.value) { repo.fetchWorktrees() }
+    LaunchedEffect(Unit) { repo.useFeature(dev.ccpocket.app.telemetry.ProductFeature.WORKTREE) }
 
     Box(Modifier.fillMaxSize().background(Tok.base)) {
         Column(Modifier.fillMaxSize()) {
