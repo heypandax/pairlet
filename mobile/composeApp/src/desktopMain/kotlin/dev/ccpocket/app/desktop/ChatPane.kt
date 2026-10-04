@@ -535,8 +535,9 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                     Box(Modifier.heightIn(max = chatViewportHeight)) {
                                         QuestionCard(
                                             ask,
-                                            onAnswer = { answers, response -> model.answerQuestions(answers, response) },
-                                            onSkip = { model.skipQuestions("User skipped the questions") },
+                                            // bound to the ask this card shows (audit M4): a stale click is a no-op
+                                            onAnswer = { answers, response -> if (model.isStillAsking(ask)) model.answerQuestions(answers, response) },
+                                            onSkip = { if (model.isStillAsking(ask)) model.skipQuestions("User skipped the questions") },
                                             onOwnsInput = { questionOwnsInput = it },
                                         )
                                     }
@@ -578,15 +579,17 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 // issue #100: on the daemon's TIMED_OUT signal the card flips to its terminal
                                 // "auto-denied" state (greyed + Dismiss) rather than staying actionable — the
                                 // repo keeps the pendingAsk and stamps timedOutAskId, so ask is still non-null here.
+                                // every verb is bound to the ask THIS card shows (audit M4): in a burst the next
+                                // card lands in the same place, and a double click must not decide it unread
                                 InlinePermCard(
                                     ask, model.chatAgent, model.chatWorkdir, model.chatBranch,
-                                    onAllow = { rem -> model.resolve(allow = true, remember = rem) },
-                                    onDeny = { model.resolve(allow = false, remember = false) },
+                                    onAllow = { rem -> if (model.isStillAsking(ask)) model.resolve(allow = true, remember = rem) },
+                                    onDeny = { if (model.isStillAsking(ask)) model.resolve(allow = false, remember = false) },
                                     timedOut = model.askTimedOut,
-                                    onDismiss = { model.dismissAsk() },
+                                    onDismiss = { if (model.isStillAsking(ask)) model.dismissAsk() },
                                     risk = model.askRisk,
-                                    onAllowTask = { model.resolveTaskGrant() },
-                                    onRetrySafer = { model.retrySafer(it) },
+                                    onAllowTask = { if (model.isStillAsking(ask)) model.resolveTaskGrant() },
+                                    onRetrySafer = { if (model.isStillAsking(ask)) model.retrySafer(it) },
                                 )
                             } else if (model.turnStalled) {
                                 // delivered but the agent started no turn within the deadline (issue #104) —

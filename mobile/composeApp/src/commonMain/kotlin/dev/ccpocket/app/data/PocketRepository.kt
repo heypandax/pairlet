@@ -3813,6 +3813,15 @@ class PocketRepository(
                 pendingNewOpenWd = null // the in-flight open (if any) is answered by this announce
                 openInFlight = null // …and so is its #235 claim — the next click on this row is a real request again
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
+                // Audit M7: the same session re-announced under a NEW convoId (daemon restart → cold resume,
+                // handoff migration, rewind branch) is a new agent process. The old convo's cards are dead —
+                // no AskWithdrawn will ever come for them — and Allow would pair the new convoId with an askId
+                // the daemon never issued; its "always allow" rules died with it too. A live ask of the new
+                // process re-arrives under the new convoId. Same convoId (plain reattach) keeps everything.
+                if (convoId.value != null && convoId.value != f.convoId) {
+                    clearAskQueue()
+                    allowRules.clear()
+                }
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
                 f.sessionId?.let {
                     sessionKey.value = it
@@ -7807,15 +7816,29 @@ class PocketRepository(
         askRisk.clear()
     }
 
+    /** Is [ask] still the card at the head of the focused queue? Matched on (convoId, askId), so a re-emitted
+     *  frame refreshing the card in place still counts as the same request. */
+    private fun isCurrentAsk(ask: PermissionAsk?): Boolean =
+        ask == null || pendingAsk.value?.let { it.convoId == ask.convoId && it.askId == ask.askId } == true
+
+    /**
+     * Decide the focused card. [ask] is the request the clicked card was COMPOSED with (audit 2026-10-04 H1):
+     * when it is no longer the pending head — the click was a second tap on a card that already advanced —
+     * nothing happens, so a double tap can never approve the next queued command the user has not read.
+     * Null keeps the legacy "whatever is pending" behavior for callers that hold no ask.
+     */
     fun resolve(
         decision: Decision, remember: Boolean = false, message: String? = null,
         // approval design M2 (only sent for asks whose grantOptions offered them):
         grantScope: String? = null,          // "task" | "session" — 允许本任务 / Session 记忆
         retrySafer: Boolean = false,         // 换种安全方式 (rides a DENY)
         constraints: List<String>? = null,
+        ask: PermissionAsk? = null,
     ) {
+        if (!isCurrentAsk(ask)) return
         val a = pendingAsk.value ?: return
-        val c = convoId.value ?: return
+        convoId.value ?: return
+        val c = a.convoId // the verdict names the ask's own conversation, never a re-keyed one (audit M7)
         openSessionId()?.let(PushDismissal::dismiss) // issue #389: answered in the open chat — its tray alerts are stale
         advanceAsk()
         pendingApprovals.remove(ApprovalKey(a.convoId, a.askId))
@@ -7961,9 +7984,11 @@ class PocketRepository(
 
     /** Answer an AskUserQuestion prompt: the picks (question text → label/comma-joined labels/"Other…" text)
      *  and/or a freeform [response] ride the ALLOW verdict; the daemon merges them into claude's updatedInput. */
-    fun answerQuestions(answers: Map<String, String>?, response: String? = null) {
+    fun answerQuestions(answers: Map<String, String>?, response: String? = null, ask: PermissionAsk? = null) {
+        if (!isCurrentAsk(ask)) return // a stale answer must not land on the next queued ask (see [resolve])
         val a = pendingAsk.value ?: return
-        val c = convoId.value ?: return
+        convoId.value ?: return
+        val c = a.convoId // see [resolve]
         openSessionId()?.let(PushDismissal::dismiss) // issue #389: answered in the open chat — its tray alerts are stale
         advanceAsk()
         messages.add(ChatItem.QuestionsAnswered(answeredItems(a, answers, response)))
@@ -8007,7 +8032,7 @@ class PocketRepository(
             ?: ask.questions.orEmpty().mapNotNull { q -> answers?.get(q.question)?.takeIf { it.isNotBlank() }?.let { q.question to it } }
 
     /** Timeout: the daemon already auto-denied; clear the prompt without re-sending, show the next queued ask. */
-    fun dismissAsk() { if (pendingAsk.value != null) advanceAsk() }
+    fun dismissAsk(ask: PermissionAsk? = null) { if (pendingAsk.value != null && isCurrentAsk(ask)) advanceAsk() }
 
     /** Switch the execution/permission mode — applied on the next turn (issue #84), never interrupting a
      *  running turn (the daemon relaunches Claude before the next send; Codex carries it in-turn). */
