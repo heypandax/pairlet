@@ -40,6 +40,7 @@ import dev.ccpocket.app.resources.pair_copied
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.session.Hairline
 import dev.ccpocket.app.ui.session.StateMark
 import dev.ccpocket.app.ui.session.StateMarkGlyph
@@ -192,7 +193,7 @@ fun EntryStateBlock(
         Column {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
                 StateMarkGlyph(mark, tint)
-                Text(title, color = Tok.tx, style = TypeRole.rowTitle, modifier = Modifier.weight(1f))
+                Text(title, color = Tok.tx, style = TypeRole.rowTitle.merge(tightCenter(TypeRole.rowTitle.fontSize)), modifier = Modifier.weight(1f))
             }
             Text(body, color = Tok.tx2, style = TypeRole.preview, modifier = Modifier.padding(top = Metric.gapS))
             if (!hint.isNullOrBlank()) Text(
@@ -235,7 +236,7 @@ fun CopyableCommand(
     ) {
         Text(command, color = Tok.tx, style = TypeRole.bodyMono, modifier = Modifier.weight(1f))
         if (copied) Text(
-            stringResource(Res.string.pair_copied), color = Tok.ok, style = TypeRole.caption,
+            stringResource(Res.string.pair_copied), color = Tok.ok, style = TypeRole.caption.merge(tightCenter(TypeRole.caption.fontSize)),
             modifier = Modifier.padding(end = Metric.gapS),
         )
         Box(
@@ -297,7 +298,7 @@ fun EntryNote(text: String, modifier: Modifier = Modifier, color: Color = Tok.mu
 /** The section heading inside a bounded surface — smaller than a screen title, louder than a label. */
 @Composable
 fun EntrySheetTitle(title: String, modifier: Modifier = Modifier) {
-    Text(title, color = Tok.tx, style = TypeRole.title, modifier = modifier)
+    Text(title, color = Tok.tx, style = TypeRole.title.merge(tightCenter(TypeRole.title.fontSize)), modifier = modifier)
 }
 
 /**

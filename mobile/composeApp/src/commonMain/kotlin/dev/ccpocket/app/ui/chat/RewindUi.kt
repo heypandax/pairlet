@@ -54,6 +54,7 @@ import dev.ccpocket.app.resources.rewind_tool_calls
 import dev.ccpocket.app.resources.rewind_turns
 import dev.ccpocket.app.resources.rewind_will_drop
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.protocol.RewindMode
 import dev.ccpocket.protocol.RewindRefusal
 import kotlinx.coroutines.delay
@@ -93,7 +94,7 @@ internal fun RewindMenuItems(enabled: Boolean, onPick: (String) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Box7Dot()
-            Text(stringResource(Res.string.rewind_menu_blocked), color = Tok.muted, fontSize = 12.5.sp)
+            Text(stringResource(Res.string.rewind_menu_blocked), color = Tok.muted, fontSize = 12.5.sp, style = tightCenter(12.5.sp))
         }
     }
 }

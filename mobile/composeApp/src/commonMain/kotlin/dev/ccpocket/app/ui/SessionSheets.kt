@@ -237,7 +237,7 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit, onHandoff: (
                     Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(stringResource(Res.string.label_agent), color = Tok.tx2, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+                    Text(stringResource(Res.string.label_agent), color = Tok.tx2, fontSize = 13.5.sp, style = tightCenter(13.5.sp), modifier = Modifier.weight(1f))
                     AgentTag(repo.sessionAgent.value ?: AgentKind.CLAUDE, small = false)
                 }
                 Hairline()
@@ -759,7 +759,7 @@ internal fun PocketRepository.newSessionModelChoices(agent: AgentKind): List<Mod
 @Composable
 internal fun CtxPill(ctx: String, big: Boolean) {
     Text(
-        ctx, color = if (big) Tok.base else Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+        ctx, color = if (big) Tok.base else Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(10.5.sp),
         modifier = Modifier.clip(RoundedCornerShape(999.dp))
             .then(if (big) Modifier.background(Tok.accent) else Modifier.border(1.dp, Tok.hair, RoundedCornerShape(999.dp)))
             .padding(horizontal = 8.dp, vertical = 2.dp),
@@ -893,17 +893,17 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
                     ) {
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(c.name, color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                Text(c.name, color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(15.sp))
                                 if (c.unavailable) {
                                     Spacer(Modifier.width(8.dp))
                                     Text(
-                                        stringResource(Res.string.model_not_installed), color = Tok.muted, fontSize = 10.5.sp,
+                                        stringResource(Res.string.model_not_installed), color = Tok.muted, fontSize = 10.5.sp, style = tightCenter(10.5.sp),
                                         modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp)).padding(horizontal = 8.dp, vertical = 1.dp),
                                     )
                                 }
                             }
                             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(c.id, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, maxLines = 1)
+                                Text(c.id, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, style = tightCenter(11.5.sp), maxLines = 1)
                                 if (c.ctx.isNotEmpty()) { Spacer(Modifier.width(8.dp)); CtxPill(c.ctx, c.big) }
                             }
                         }
@@ -989,7 +989,7 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
                     if (switchingTo != null) Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(13.dp), color = Tok.accent, strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
-                        Text(stringResource(Res.string.model_switching), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
+                        Text(stringResource(Res.string.model_switching), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
                     } else Column {
                         // mid-turn (issue #157): the running turn keeps its model — say the pick lands NEXT turn
                         if (repo.streaming.value) Text(stringResource(Res.string.model_next_turn_note), color = Tok.tx2, fontSize = 12.5.sp, modifier = Modifier.padding(bottom = 6.dp))
@@ -1045,14 +1045,14 @@ private fun GatewayPresetSection(
                 GatewayVendorMonogram(p, 32.dp)
                 Column(Modifier.padding(start = 12.dp).weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(p.vendor, color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+                        Text(p.vendor, color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(14.5.sp))
                         // host names this vendor → terracotta "suggested" tick (accent stays reserved
                         // for this + the selected check; the monograms never wear it)
                         if (p.matchesGatewayHost(gatewayUrl)) {
                             Spacer(Modifier.width(8.dp))
-                            Text("✓", color = Tok.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("✓", color = Tok.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, style = tightCenter(11.sp))
                             Spacer(Modifier.width(3.dp))
-                            Text(stringResource(Res.string.model_gateway_suggested), color = Tok.accent, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(Res.string.model_gateway_suggested), color = Tok.accent, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(10.5.sp))
                         }
                     }
                     Text(p.id, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
@@ -1085,7 +1085,7 @@ private fun GatewayHostPill(host: String) {
     ) {
         Box(Modifier.size(5.dp).clip(CircleShape).background(Tok.ok))
         Spacer(Modifier.width(5.dp))
-        Text(stringResource(Res.string.model_gateway_via, host), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, maxLines = 1)
+        Text(stringResource(Res.string.model_gateway_via, host), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, style = tightCenter(10.5.sp), maxLines = 1)
     }
 }
 
@@ -1099,7 +1099,7 @@ internal fun GatewayVendorMonogram(preset: GatewayModelPreset, size: Dp) {
         Modifier.size(size).clip(shape).background(tint.copy(alpha = 0.13f)).border(1.dp, tint.copy(alpha = 0.33f), shape),
         contentAlignment = Alignment.Center,
     ) {
-        Text(preset.monogram, color = tint, fontFamily = FontFamily.Monospace, fontSize = (size.value * 0.4f).sp, fontWeight = FontWeight.Bold, letterSpacing = 0.2.sp)
+        Text(preset.monogram, color = tint, fontFamily = FontFamily.Monospace, fontSize = (size.value * 0.4f).sp, fontWeight = FontWeight.Bold, letterSpacing = 0.2.sp, style = tightCenter((size.value * 0.4f).sp))
     }
 }
 
@@ -1116,8 +1116,8 @@ fun BackgroundJobsStrip(jobs: List<BackgroundJob>, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         CircularProgressIndicator(Modifier.size(12.dp), color = Tok.accent, strokeWidth = 1.5.dp)
-        Text(stringResource(Res.string.bg_running, running), color = Tok.tx2, fontSize = 12.sp, modifier = Modifier.weight(1f))
-        Text("⌃", color = Tok.muted, fontSize = 13.sp)
+        Text(stringResource(Res.string.bg_running, running), color = Tok.tx2, fontSize = 12.sp, style = tightCenter(12.sp), modifier = Modifier.weight(1f))
+        Text("⌃", color = Tok.muted, fontSize = 13.sp, style = tightCenter(13.sp))
     }
 }
 
@@ -1170,9 +1170,9 @@ private fun JobRow(job: BackgroundJob, onStop: (BackgroundJob) -> Unit) {
         // turns warn-coloured to flag a possibly-stuck task. A settled job keeps its status word.
         if (running) {
             val (elapsed, warn) = rememberJobElapsed(job.startedAt)
-            Text(elapsed, color = if (warn) Tok.warn else Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text(elapsed, color = if (warn) Tok.warn else Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.Medium, style = tightCenter(11.sp))
         } else {
-            Text(jobStatusLabel(job.status), color = jobStatusColor(job.status), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text(jobStatusLabel(job.status), color = jobStatusColor(job.status), fontSize = 11.sp, fontWeight = FontWeight.Medium, style = tightCenter(11.sp))
         }
     }
     if (confirmStop) {

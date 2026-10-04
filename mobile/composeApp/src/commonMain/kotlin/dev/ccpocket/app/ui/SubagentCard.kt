@@ -55,6 +55,7 @@ import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.subagent_report
 import dev.ccpocket.app.resources.subagent_tools
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
@@ -126,7 +127,7 @@ internal fun SubagentCard(m: ChatItem.Tool, dense: Boolean = false) {
                     PulseDot(Tok.accent, 7.dp)
                     Text(
                         subagentElapsed(m.taskId!!),
-                        color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
+                        color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, style = tightCenter(10.5.sp),
                     )
                 }
                 if (expandable) Icon(
@@ -160,11 +161,11 @@ private fun SubagentSubline(m: ChatItem.Tool, running: Boolean, dense: Boolean) 
             EcgGlyph(Tok.muted, 11.dp) // activity, not a spinner — the run has no known endpoint
             Text(
                 stringResource(Res.string.subagent_tools, m.childCount),
-                color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = fontSize,
+                color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = fontSize, style = tightCenter(fontSize),
             )
             m.lastChild?.let {
                 Text(
-                    "· $it", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = fontSize,
+                    "· $it", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = fontSize, style = tightCenter(fontSize),
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -196,7 +197,7 @@ private fun SubagentReportBody(m: ChatItem.Tool, dense: Boolean) {
             EcgGlyph(Tok.muted, 11.dp)
             Text(
                 stringResource(Res.string.subagent_report).uppercase(),
-                color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 9.5.sp, letterSpacing = 1.2.sp,
+                color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 9.5.sp, letterSpacing = 1.2.sp, style = tightCenter(9.5.sp),
             )
         }
         Box(

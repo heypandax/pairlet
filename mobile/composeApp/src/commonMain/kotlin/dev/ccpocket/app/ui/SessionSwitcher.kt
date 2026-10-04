@@ -156,11 +156,11 @@ fun SessionSwitcherSheet(
             Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(stringResource(Res.string.sessions_title), color = Tok.tx, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(Res.string.sessions_title), color = Tok.tx, fontSize = 19.sp, fontWeight = FontWeight.Bold, style = tightCenter(19.sp))
             Spacer(Modifier.width(8.dp))
             Text(
                 stringResource(Res.string.switcher_total, set.otherCount + if (set.current != null) 1 else 0),
-                color = Tok.muted, fontSize = 12.sp,
+                color = Tok.muted, fontSize = 12.sp, style = tightCenter(12.sp),
             )
         }
         // scrolls rather than clips: a busy fleet can fill more than the cap, and a row you cannot reach
@@ -188,7 +188,7 @@ fun SessionSwitcherSheet(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                stringResource(Res.string.switcher_all_projects), color = Tok.tx2, fontSize = 13.sp,
+                stringResource(Res.string.switcher_all_projects), color = Tok.tx2, fontSize = 13.sp, style = tightCenter(13.sp),
                 modifier = Modifier.weight(1f),
             )
             Icon(Icons.Rounded.ChevronRight, null, tint = Tok.muted, modifier = Modifier.size(17.dp))
@@ -248,7 +248,7 @@ private fun SwitcherRow(s: SessionSwitcherItem, onClick: (() -> Unit)?) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(stringResource(Res.string.switcher_current), color = Tok.muted, fontSize = 12.sp)
+                Text(stringResource(Res.string.switcher_current), color = Tok.muted, fontSize = 12.sp, style = tightCenter(12.sp))
                 Icon(Icons.Rounded.Check, null, tint = Tok.accent, modifier = Modifier.size(17.dp))
             }
             // #229: color alone was too easy to miss (and inaccessible), so name the exact distinction the
@@ -262,7 +262,7 @@ private fun SwitcherRow(s: SessionSwitcherItem, onClick: (() -> Unit)?) {
                 Text(
                     stringResource(if (s.executing) Res.string.st_running else Res.string.switcher_open_idle),
                     color = if (s.executing) Tok.accent else Tok.muted,
-                    fontSize = 12.sp,
+                    fontSize = 12.sp, style = tightCenter(12.sp),
                 )
             }
         }

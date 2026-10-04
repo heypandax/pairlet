@@ -325,7 +325,7 @@ private fun SendButton(enabled: Boolean, onClick: () -> Unit) {
                 .padding(horizontal = Metric.gapL),
             contentAlignment = Alignment.Center,
         ) {
-            Text(label, color = if (enabled) Tok.base else Tok.muted, style = TypeRole.action, maxLines = 1)
+            Text(label, color = if (enabled) Tok.base else Tok.muted, style = TypeRole.action.merge(tightCenter(TypeRole.action.fontSize)), maxLines = 1)
         }
     }
 }
@@ -346,7 +346,7 @@ private fun PanelFrame(title: String, onClose: () -> Unit, content: @Composable 
             Modifier.fillMaxWidth().heightIn(min = Metric.touch).padding(start = Metric.gapL, end = Metric.gapXs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, color = Tok.tx, style = TypeRole.rowTitle, modifier = Modifier.weight(1f), maxLines = 1)
+            Text(title, color = Tok.tx, style = TypeRole.rowTitle.merge(tightCenter(TypeRole.rowTitle.fontSize)), modifier = Modifier.weight(1f), maxLines = 1)
             Box(
                 Modifier.size(Metric.touch).clip(RoundedCornerShape(Metric.radiusS))
                     .clickable(role = Role.Button, onClick = onClose),
@@ -419,7 +419,7 @@ private fun ProjectPanel(
         ) {
             Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(Metric.gap))
-            Text(stringResource(Res.string.new_task_browse_other), color = Tok.tx, style = TypeRole.body, modifier = Modifier.weight(1f))
+            Text(stringResource(Res.string.new_task_browse_other), color = Tok.tx, style = TypeRole.body.merge(tightCenter(TypeRole.body.fontSize)), modifier = Modifier.weight(1f))
             Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(18.dp))
         }
     }
@@ -487,11 +487,11 @@ private fun AgentPanel(
                         agentName(a), color = if (a == selected && usable) Tok.tx else Tok.tx2,
                         style = TypeRole.body.copy(
                             fontWeight = if (a == selected && usable) FontWeight.SemiBold else FontWeight.Medium,
-                        ),
+                        ).merge(tightCenter(TypeRole.body.fontSize)),
                         modifier = Modifier.weight(1f), maxLines = 1,
                     )
                     if (!usable) {
-                        Text(stringResource(Res.string.new_task_agent_unavailable), color = Tok.muted, style = TypeRole.caption)
+                        Text(stringResource(Res.string.new_task_agent_unavailable), color = Tok.muted, style = TypeRole.caption.merge(tightCenter(TypeRole.caption.fontSize)))
                     } else if (a == selected) {
                         CheckMark()
                     }
