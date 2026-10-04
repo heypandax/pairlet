@@ -3919,6 +3919,9 @@ class PocketRepository(
                 openTimedOut.value = false
                 // remember this session's launch flags so a close+reopen cycle can restore (and relaunch under) them
                 f.sessionId?.let {
+                    // remove first: re-putting an existing key keeps its insertion slot, and persistence keeps the
+                    // LAST 100 entries — a session used daily but first seen long ago was the first evicted
+                    sessionParams.remove(it)
                     sessionParams[it] = SessionParams(
                         mode.value,
                         model.value,
