@@ -155,7 +155,7 @@ class SidePaneModelDelegationGuardTest {
         "groupCollapsed",
         // the sidebar's per-project fold memory: project header collapse + session "Show more" depth
         "projectCollapsed", "sessionsShown",
-        "archivedSessions", "canArchiveSessions", "archiveSession", "unarchiveSession",
+        "archivedSessions", "canArchiveSessions", "archiveSession", "unarchiveSession", "archiveRefused", "dismissArchiveError",
         "refreshArchived", "browseArchived",
         "canRenameSessions", "renameSession", "renameError", "dismissRenameError",
         // the rewind CONFIRMATION lives in window chrome (the sheet), unlike the banners above

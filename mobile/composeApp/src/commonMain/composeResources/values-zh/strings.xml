@@ -913,6 +913,8 @@
     <string name="archive_toast_archived">已归档</string>
     <string name="archive_toast_restored">已放回 %1$s</string>
     <string name="archive_toast_still_running">仍在运行</string>
+    <string name="archive_toast_archive_failed">未能归档此会话</string>
+    <string name="archive_toast_restore_failed">未能放回此会话</string>
     <string name="session_section">会话</string>
     <string name="group_move_to_section">移动到分组</string>
     <string name="sidebar_archived">已归档会话</string>

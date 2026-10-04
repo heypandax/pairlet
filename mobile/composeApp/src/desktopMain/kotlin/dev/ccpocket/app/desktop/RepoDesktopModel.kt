@@ -1833,6 +1833,14 @@ class RepoDesktopModel(
         )
     }
 
+    // the phone's archive toast state, read as a row's inline refusal (this shell renders no toast — see ArchivedRow)
+    override fun archiveRefused(sessionId: String): Boolean? =
+        repo.archiveToast.value?.takeIf { it.failed && it.sessionId == sessionId }?.archived
+
+    override fun dismissArchiveError() {
+        if (repo.archiveToast.value?.failed == true) repo.dismissArchiveToast()
+    }
+
     override fun refreshArchived() { repo.listArchivedSessions() }
 
     override fun browseArchived() { refreshArchived(); palette = PaletteScope.ARCHIVED }

@@ -1244,9 +1244,14 @@ class PocketRepository(
         val archived: Boolean,
         val running: Boolean,
         val at: Long,
+        // the daemon refused this archive/restore (`archive_failed`): the same toast states the failure instead
+        // of the optimistic confirmation, and its action retries the same verb
+        val failed: Boolean = false,
     )
 
     val archiveToast = mutableStateOf<ArchiveToast?>(null)
+    /** The last archive/restore asked for — what an `archive_failed` (which names no session) answers to. */
+    private var archiveTarget: ArchiveToast? = null
 
     fun dismissArchiveToast() { archiveToast.value = null }
     /** The daemon's refusal of the LAST [renameSession] attempt (issue #158), keyed to the session it
@@ -4176,6 +4181,9 @@ class PocketRepository(
                 // Same rule as rename_failed: this answers a sidebar/list action, never an OpenSession and
                 // never the chat on screen. Splicing it into the transcript put it in an unrelated chat, and
                 // falling through to the branch below took it as the refusal of an open in flight.
+                // archive_failed answers the last archive/restore: the toast that confirmed it optimistically
+                // now states the failure (phone), and the desktop sidebar row reads the same state inline.
+                if (f.code == "archive_failed") archiveTarget?.let { archiveToast.value = it.copy(failed = true, at = epochMillis()) }
             } else if (f.convoId != null && (openInFlight != null || f.convoId != convoId.value)) {
                 // Conversation-scoped errors fan out from background sessions just like SessionLive and
                 // stream frames. They must not splice a system row into this transcript or terminate a
@@ -6314,7 +6322,7 @@ class PocketRepository(
     ) {
         scope.launch { runCatching { send(SetSessionArchived(wd, sessionId, archived, fromArchiveView)) } }
         if (fromArchiveView) listArchivedSessions() // frames are ordered: the mutation lands before the list
-        archiveToast.value = ArchiveToast(wd, sessionId, title, archived, running, epochMillis())
+        archiveToast.value = ArchiveToast(wd, sessionId, title, archived, running, epochMillis()).also { archiveTarget = it }
     }
 
     /** Pull-to-refresh spinner for the sessions list (mirrors [refreshing] for the project list). */

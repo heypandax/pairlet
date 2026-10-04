@@ -655,6 +655,12 @@ interface DesktopModel {
     val canArchiveSessions: Boolean get() = false
     fun archiveSession(s: DkSession) {}
     fun unarchiveSession(s: DkSession) {}
+    /** The daemon refused the last archive/restore and it targeted [sessionId]: the verb that was refused
+     *  (true = archive, false = restore), which the row that asked shows inline — the rename refusal's mechanism
+     *  ([renameError]); a list action's failure belongs on its row, never in whatever chat is open. Null = none. */
+    fun archiveRefused(sessionId: String): Boolean? = null
+    /** Clear the inline archive refusal (clicking it). */
+    fun dismissArchiveError() {}
     fun refreshArchived() {}
     /** Open the ⌘K palette in its ARCHIVED scope (the sidebar's "Archived sessions" row). */
     fun browseArchived() {}

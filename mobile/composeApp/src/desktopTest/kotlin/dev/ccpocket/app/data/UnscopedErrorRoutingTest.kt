@@ -42,6 +42,28 @@ class UnscopedErrorRoutingTest {
         }
     }
 
+    /**
+     * …but it must still reach the user. The archive confirmation toast went up the moment the user archived
+     * (optimistically, "Archived · Restore"); a refusal flips that same toast to the failure, for the session
+     * that was asked about, so the phone no longer reports a success that did not happen.
+     */
+    @Test
+    fun anArchiveRefusalTurnsTheArchiveToastIntoTheFailure() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val r = repo(scope, mutableListOf())
+        try {
+            r.setSessionArchived("/w", "sid-9", archived = true, title = "Fix relay", running = false)
+            assertFalse(r.archiveToast.value!!.failed, "precondition: the optimistic confirmation")
+
+            r.receiveForTest(archiveRefusal)
+
+            val t = r.archiveToast.value
+            assertTrue(t != null && t.failed && t.sessionId == "sid-9" && t.archived && t.title == "Fix relay", "got $t")
+        } finally {
+            scope.cancel()
+        }
+    }
+
     @Test
     fun anArchiveRefusalDoesNotEndAnOpenInFlight() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
