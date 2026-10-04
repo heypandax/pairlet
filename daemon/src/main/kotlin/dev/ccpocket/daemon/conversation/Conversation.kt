@@ -48,6 +48,7 @@ import dev.ccpocket.protocol.ToolPhase
 import dev.ccpocket.protocol.TurnDone
 import dev.ccpocket.protocol.WorkflowAgentDetail
 import dev.ccpocket.protocol.WorkflowUpdate
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -1911,8 +1912,45 @@ class Conversation(
             }
         }
         scope.launch(CoroutineName("pump-$convoId")) {
-            pump(p, b, launchGeneration)
+            try {
+                pump(p, b, launchGeneration)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                pumpCrashed(p, e)
+            }
         }
+    }
+
+    /** One line or event the pump could not handle — logged and reported, then skipped (see [pump]). */
+    private fun pumpEventFailed(what: String, e: Exception) {
+        log.error("$convoId pump: failed to handle $what — skipped", e)
+        Diagnostics.report(ErrorPath.AGENT_PROTOCOL, Stage.APPLY, ErrorCode.UNEXPECTED, e,
+            SafeMetrics(backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }))
+    }
+
+    /**
+     * The pump escaped its per-event isolation (its exit/death handling threw). Without this the coroutine
+     * failed into the SupervisorJob with no trace on the wire and the session wedged. Give it a terminal
+     * state the way an unexpected death does: stop the process this pump served, drop the handle so the
+     * next prompt respawns, clear the turn and tell the client. A newer launch that already owns the
+     * conversation, or a deliberate stop, is left alone.
+     */
+    private suspend fun pumpCrashed(p: AgentProcess, e: Exception) {
+        log.error("$convoId pump crashed — stopping its process and settling the session", e)
+        Diagnostics.report(ErrorPath.TURN, Stage.EXIT, ErrorCode.UNEXPECTED, e,
+            SafeMetrics(backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }), isError = true)
+        val owned = proc === p
+        if (!owned && (proc != null || intentionalStop)) return
+        if (owned) proc = null
+        runCatching { p.shutdown() }
+        revokeAllBridgeGrants()
+        clearTurnWork()
+        runCatching { bridge?.cancelAll() }
+        bridge = null
+        runCatching { for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId) }
+        runCatching { backend.onProcessEnded(sessionId) }
+        sink.emit(PocketError("process_exited", "agent session stopped after an internal daemon error — send again to restart it", convoId))
     }
 
     /**
@@ -1965,7 +2003,18 @@ class Conversation(
         var leftoverTasksSettling = false
         for (line in p.stdout) {
             lastActivityMs = System.currentTimeMillis()
-            for (ev in backend.parse(line)) {
+            // PER-EVENT ISOLATION (audit 2026-10-04): one exception while parsing or handling one line used to
+            // fail this coroutine silently — no death branch, stdout no longer read, the turn "executing"
+            // forever. A failed line/event is reported and skipped; the stream goes on.
+            val events = try {
+                backend.parse(line)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                pumpEventFailed("parse", e)
+                emptyList()
+            }
+            for (ev in events) try {
                 when (ev) {
                     is AgentEvent.SessionInit -> {
                         if (ev.sessionId != null && ev.sessionId != sessionId) sessionNotice = ev.notice
@@ -2362,6 +2411,16 @@ class Conversation(
                     is AgentEvent.Unparseable -> Diagnostics.report(ErrorPath.AGENT_PROTOCOL, Stage.PARSE,
                         ErrorCode.DECODE_FAILED, metrics = SafeMetrics(byteCount = ev.raw.encodeToByteArray().size.toLong(),
                             backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                pumpEventFailed(ev::class.simpleName ?: "event", e)
+                // A turn end that failed half-way must still END the turn: a client waiting on TurnDone would
+                // otherwise spin forever. Only when it failed before the hand-off — never a second TurnDone.
+                if (ev is AgentEvent.TurnResult && isExecuting()) {
+                    settleTurnWork(expectContinuation = false)
+                    runCatching { sink.emit(TurnDone(convoId, ev.finalText, null, error = "daemon failed to process the turn result")) }
                 }
             }
         }
