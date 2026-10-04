@@ -309,19 +309,26 @@ class RelayClient(
         bridgeRunners.startAutostarted()
         launch { reaperLoop() } // reclaim sessions abandoned while the phone is offline
         launch { guestExpiryLoop() } // cut + purge folder shares the instant they expire (issue #115 §6)
-        var backoff = 1_000L
+        val reconnect = ReconnectBackoff()
         while (true) {
-            try {
+            linkAttachedAt = 0L
+            val clean = try {
                 connectOnce()
-                backoff = 1_000L
+                true
             } catch (t: Throwable) {
-                log.warn("relay connection lost (${t.message}); retry in ${backoff}ms")
+                log.warn("relay connection lost (${t.message})")
+                false
             }
+            val attachedFor = linkAttachedAt.takeIf { it != 0L }?.let { System.currentTimeMillis() - it }
+            val backoff = reconnect.next(ReconnectBackoff.LinkEnd(clean, attachedFor))
             val jittered = backoff / 2 + Random.nextLong(backoff / 2 + 1) // equal jitter: 50–100% of backoff, decorrelates herd reconnects
+            log.info("relay reconnect in ${jittered}ms (backoff ${backoff}ms, link ${attachedFor?.let { "attached ${it / 1000}s" } ?: "never attached"})")
             delay(jittered)
-            backoff = (backoff * 2).coerceAtMost(30_000L)
         }
     }
+
+    /** When the current link reached Attached (0 = not yet) — how [run] tells a stable link from a flap. */
+    @Volatile private var linkAttachedAt = 0L
 
     /**
      * Reclaim conversations idle longer than [IDLE_REAP_MS] that no client OCCUPIES. Reaping stops the
@@ -400,6 +407,7 @@ class RelayClient(
                 // authenticate() — not just the message loop. A throw from the setup below (attach replay,
                 // channel/coroutine wiring) would otherwise leave a dead link's protoV standing for the whole
                 // reconnect backoff, and offers created in that window would queue a targeted push.
+                linkAttachedAt = System.currentTimeMillis()
                 try {
                     log.info("attached to relay as daemon (account=${identity.accountId})")
                     // The relay re-announces every non-revoked device right after attach and then sends an
