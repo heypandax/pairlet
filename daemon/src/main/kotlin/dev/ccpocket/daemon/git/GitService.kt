@@ -373,6 +373,11 @@ class GitService(
     /** Throw away the working-tree changes of specific files. Always two-step; the index is left alone. */
     private suspend fun revert(f: GitAction, exe: Path, repo: Repo, st: GitPorcelain.Status): Frame {
         val paths = f.paths.ifEmpty { return err(f.convoId, f.op, "no files given") }
+        // Only FILES git itself just listed as changed. A directory, "." or ":/" previews as one innocent
+        // row and then restores everything beneath it — work the sheet never named. (Globs are already
+        // inert: every process runs with GIT_LITERAL_PATHSPECS.) Checked on both steps, against fresh status.
+        val listed = (st.staged + st.unstaged + st.conflicted + st.untracked).mapTo(HashSet()) { it.path }
+        paths.firstOrNull { it !in listed }?.let { return err(f.convoId, f.op, "not a changed file: ${it.take(200)}") }
         val token = f.confirmToken
         if (token.isNullOrEmpty()) {
             val touched = (st.unstaged + st.conflicted).filter { it.path in paths.toSet() }
@@ -741,6 +746,9 @@ class GitService(
                     put("LANG", "C")
                     // reads must not fight the agent for index.lock
                     if (readOnly) put("GIT_OPTIONAL_LOCKS", "0")
+                    // every path we hand git is a FILE NAME, never a pattern: without this, reverting
+                    // `app/[id]/page.tsx` also matches `app/i/…` and `app/d/…` through the [id] glob
+                    put("GIT_LITERAL_PATHSPECS", "1")
                 }
                 val proc = pb.start()
                 proc.outputStream.close() // no stdin for any verb we run

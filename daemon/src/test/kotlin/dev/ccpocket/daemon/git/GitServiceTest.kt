@@ -437,6 +437,47 @@ class GitServiceTest {
     }
 
     @Test
+    fun a_path_with_glob_characters_reverts_only_that_file() {
+        assumeTrue(gitAvailable())
+        val dir = repo()
+        val svc = service()
+        // Next.js route segments: `[id]` is a glob character class to git unless pathspecs are literal
+        for (p in listOf("app/[id]/page.tsx", "app/i/page.tsx", "app/d/page.tsx")) {
+            dir.resolve(p).also { it.parent.createDirectories() }.writeText("base\n")
+        }
+        sh(dir, "add", "-A"); sh(dir, "commit", "-q", "-m", "routes")
+        for (p in listOf("app/[id]/page.tsx", "app/i/page.tsx", "app/d/page.tsx")) dir.resolve(p).writeText("edited\n")
+
+        val preview = act(svc, dir, GIT_OP_REVERT, paths = listOf("app/[id]/page.tsx")) as GitActionPreview
+        val r = act(svc, dir, GIT_OP_REVERT, paths = listOf("app/[id]/page.tsx"), token = preview.confirmToken) as GitActionResult
+        assertTrue(r.ok, r.error + r.stderr)
+        assertEquals("base\n", dir.resolve("app/[id]/page.tsx").readText())
+        assertEquals("edited\n", dir.resolve("app/i/page.tsx").readText(), "a file the user never named was reverted")
+        assertEquals("edited\n", dir.resolve("app/d/page.tsx").readText(), "a file the user never named was reverted")
+    }
+
+    @Test
+    fun revert_refuses_a_path_that_is_not_a_changed_file() {
+        assumeTrue(gitAvailable())
+        val dir = repo()
+        val svc = service()
+        dir.resolve("sub").createDirectories()
+        dir.resolve("sub/a.txt").writeText("a\n")
+        sh(dir, "add", "-A"); sh(dir, "commit", "-q", "-m", "sub")
+        dir.resolve("README.md").writeText("edited\n")
+        dir.resolve("sub/a.txt").writeText("edited\n")
+
+        // "." would preview as one harmless-looking row and then discard every change in the repository
+        for (bad in listOf(".", "sub", ":/", "*.md")) {
+            val r = act(svc, dir, GIT_OP_REVERT, paths = listOf(bad))
+            assertIs<GitActionResult>(r, bad)
+            assertFalse(r.ok, bad)
+        }
+        assertEquals("edited\n", dir.resolve("README.md").readText())
+        assertEquals("edited\n", dir.resolve("sub/a.txt").readText())
+    }
+
+    @Test
     fun a_confirm_token_is_single_use() {
         assumeTrue(gitAvailable())
         val dir = repo()
