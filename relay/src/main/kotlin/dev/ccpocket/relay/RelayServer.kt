@@ -82,6 +82,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
@@ -113,6 +114,7 @@ class RelayServer(
     internal val analytics = AnalyticsIngress(analyticsConfig, limiter, ga4Forwarder, clock)
     // off-loop fan-out: a slow APNs/FCM round-trip must not block the daemon socket's control loop
     private val pushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val pushSlots = Semaphore(MAX_PUSH_IN_FLIGHT)
     private val daemonAuth = DaemonAuthenticator(store, clock)
     private val deviceAuth = DeviceAuthenticator(store, clock)
     private val pairing = PairingService(store, clock)
@@ -285,7 +287,8 @@ class RelayServer(
         }
     }
 
-    private suspend fun handleDaemonControl(account: String, text: String) {
+    // internal: the push tests drive the daemon control plane directly, as RelayServerControlTest does the device's
+    internal suspend fun handleDaemonControl(account: String, text: String) {
         when (val body = runCatching { PocketJson.decodeFromString<Envelope>(text).body }.getOrNull()) {
             is PairBegin -> {
                 if (!limiter.check("pairbegin:acct:$account", 10, 3_600_000)) {
@@ -335,8 +338,16 @@ class RelayServer(
         val target = body.deviceId
         if (target == null) {
             if (!NotifyGate.shouldSend(body, broker.interactiveDeviceCount(account), targetDeviceSockets = 0)) return
+            // Audit H2: the account fan-out had no ceiling at all (urgent=true always passes the gate above),
+            // and every push reads the store under its single lock — the one every login also waits on — then
+            // spends the relay's own APNs/FCM credentials. Far above what coalesced turn-ends and bridge
+            // approvals produce; like the targeted cap, it degrades to "no alert", never to a lockout.
+            if (!limiter.check("push:acct:$account", MAX_ACCOUNT_PUSH_PER_MINUTE, 60_000)) {
+                logConn("push_rate_limited", ip = "-", account = account)
+                return
+            }
             val route = NotifyGate.routeOf(body)
-            pushScope.launch { pushService.notify(account, body.title, body.body, route) }
+            launchPush(account) { pushService.notify(account, body.title, body.body, route) }
             return
         }
         if (!NotifyGate.shouldSend(body, interactiveDevices = 0, targetDeviceSockets = broker.deviceSocketCount(account, target))) return
@@ -354,7 +365,17 @@ class RelayServer(
         val alert =
             if (store.getDevice(target)?.collaborator == true) NotifyGate.contactAlert(body) ?: return
             else NotifyGate.ownAlert(body)
-        pushScope.launch { pushService.notifyDevice(account, target, alert.title, alert.body, alert.route) }
+        launchPush(account) { pushService.notifyDevice(account, target, alert.title, alert.body, alert.route) }
+    }
+
+    /** Hand one push to [pushScope] — unless [MAX_PUSH_IN_FLIGHT] are already running (a stalled provider, or
+     *  many accounts at once): then it is dropped and logged rather than queued without bound (audit H2). */
+    private fun launchPush(account: String, send: suspend () -> Unit) {
+        if (!pushSlots.tryAcquire()) {
+            logConn("push_busy", ip = "-", account = account)
+            return
+        }
+        pushScope.launch { try { send() } finally { pushSlots.release() } }
     }
 
     /** device control TEXT plane: only push-token (de)registration; everything else rides the data plane.
@@ -609,7 +630,7 @@ class RelayServer(
     ) {
         val code = when {
             reason == "superseded" -> ErrorCode.SUPERSEDED
-            reason == "rate_limited" || reason == "push_rate_limited" -> ErrorCode.RATE_LIMITED
+            reason == "rate_limited" || reason == "push_rate_limited" || reason == "push_busy" -> ErrorCode.RATE_LIMITED
             reason == "too_many_connections" -> ErrorCode.SIZE_LIMIT
             reason == "detached" -> ErrorCode.CONNECTION_CLOSED
             reason == "handshake_timeout" -> ErrorCode.TIMEOUT
@@ -633,6 +654,11 @@ class RelayServer(
         // §3.4: ceiling on how often ONE device may be woken by a targeted push. A real workflow rings a
         // contact a handful of times a day; this only bites a daemon looping the frame.
         const val MAX_TARGETED_PUSH_PER_HOUR = 20
+        // audit H2: per-account fan-out ceiling. The daemon already coalesces turn-end pushes per session, so
+        // even many parallel sessions stay well below this; it only bites a daemon looping the frame.
+        const val MAX_ACCOUNT_PUSH_PER_MINUTE = 30
+        // relay-wide ceiling on push jobs (store read + APNs/FCM round-trip) running at once
+        const val MAX_PUSH_IN_FLIGHT = 256
         // an APNs token is 64 hex chars and an FCM one a few hundred; 4096 is far above any real vendor
         // token and exists so a malformed/hostile registration is refused ("bad_request") instead of
         // being written into the devices row
