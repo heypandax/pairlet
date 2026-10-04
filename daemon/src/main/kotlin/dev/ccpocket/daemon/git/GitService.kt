@@ -135,7 +135,22 @@ class GitService(
     // ------------------------------------------------------------------ reads
 
     /** `git status --porcelain=v2 --branch -z` for the whole repository [workdir] sits in. */
-    suspend fun status(f: FetchGitStatus, workdir: Path): GitStatus = statusAt(f.convoId, f.workdir, workdir, f.withBranches)
+    suspend fun status(f: FetchGitStatus, workdir: Path): GitStatus = neverThrows(
+        { GitStatus(f.convoId, f.workdir, ok = false, error = it) },
+    ) { statusAt(f.convoId, f.workdir, workdir, f.withBranches) }
+
+    /**
+     * The three reads are launched bare by the router, so an exception here means the phone never gets a
+     * reply and spins until its own timeout. Same contract as [act]: a failure is a frame the user can read.
+     */
+    private inline fun <T> neverThrows(fail: (String) -> T, block: () -> T): T = try {
+        block()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        log.warn("git read failed", e)
+        fail(e.message ?: "git failed")
+    }
 
     /**
      * [echo] is the workdir string the CLIENT sent, replayed verbatim; [anchor] is the canonical directory
@@ -165,7 +180,11 @@ class GitService(
     }
 
     /** One file's unified diff, index side ([ReadGitDiff.staged]) or working side. */
-    suspend fun diff(f: ReadGitDiff, workdir: Path): GitDiff {
+    suspend fun diff(f: ReadGitDiff, workdir: Path): GitDiff = neverThrows(
+        { GitDiff(f.convoId, f.workdir, f.path, f.staged, ok = false, error = it) },
+    ) { diffInner(f, workdir) }
+
+    private suspend fun diffInner(f: ReadGitDiff, workdir: Path): GitDiff {
         val fail = { why: String -> GitDiff(f.convoId, f.workdir, f.path, f.staged, ok = false, error = why) }
         val repo = repoOf(workdir) ?: return fail("not a git repository")
         val exe = gitBin() ?: return fail(GIT_NOT_FOUND)
@@ -186,7 +205,11 @@ class GitService(
     }
 
     /** `git worktree list --porcelain`, enriched with per-checkout dirty state and live-session info. */
-    suspend fun listWorktrees(f: ListWorktrees, workdir: Path): WorktreeList {
+    suspend fun listWorktrees(f: ListWorktrees, workdir: Path): WorktreeList = neverThrows(
+        { WorktreeList(f.convoId, f.workdir, ok = false, error = it) },
+    ) { listWorktreesInner(f, workdir) }
+
+    private suspend fun listWorktreesInner(f: ListWorktrees, workdir: Path): WorktreeList {
         val repo = repoOf(workdir)
             ?: return WorktreeList(f.convoId, f.workdir, ok = true, notARepo = true)
         val exe = gitBin()

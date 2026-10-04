@@ -837,6 +837,31 @@ class GitServiceTest {
         }
     }
 
+    @Test
+    fun reads_that_time_out_still_answer_with_a_failure_frame() {
+        assumeTrue(gitAvailable() && !isWindows)
+        val dir = repo()
+        dir.resolve("README.md").writeText("changed\n")
+        val pidFile = tmp.resolve("fsmonitor-child.pid")
+        // an fsmonitor hook that wedges: every status/diff refresh waits on it, and its child holds stderr
+        val monitor = tmp.resolve("slow-fsmonitor.sh")
+        monitor.writeText("#!/bin/sh\nsleep 60 &\necho \$! > '$pidFile'\nwait\n")
+        assertTrue(monitor.toFile().setExecutable(true))
+        sh(dir, "config", "--local", "core.fsmonitor", monitor.toString())
+        val svc = GitService(nowMs = { clock }, localTimeoutMs = 1_500, worktreeStatusBudgetMs = 60_000)
+        try {
+            val st = within(20_000) { status(svc, dir) }
+            assertNotNull(st, "status never answered")
+            assertFalse(st.ok)
+            assertEquals(dir.toString(), st.workdir)
+            assertNotNull(pidFrom(pidFile), "precondition: the fsmonitor hook ran")
+            val wl = within(20_000) { runBlocking { svc.listWorktrees(ListWorktrees("c1", dir.toString(), withStatus = true), dir) } }
+            assertNotNull(wl, "worktree list never answered")
+        } finally {
+            pidFrom(pidFile, waitMs = 0)?.let(::kill)
+        }
+    }
+
     // ------------------------------------------------------------- helpers
 
     private val isWindows = System.getProperty("os.name").lowercase().contains("win")
