@@ -394,6 +394,102 @@ class KimiBackendTest {
         assertEquals(blocks("again", JPEG), contentOf(prompts(w).last()))
     }
 
+    // ---- startup failure (audit 2026-10-04 H1, the #388 fix DSH already has): every waiting prompt settles ----
+
+    /** `initialize` answering an error used to fall through to a log line: the opening prompt stayed queued,
+     *  the phone showed "running" forever and nothing said why. */
+    @Test
+    fun `an initialize error names the handshake stage and settles the waiting prompt`() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = KimiBackend(null)
+        b.attach(AgentIo(writeLine = { w += it }, emit = {}), AgentSpec(Path.of("/repo"), mode = PermissionMode.DEFAULT))
+        b.sendPrompt("first message", emptyList())
+        val events = b.parse("""{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"unsupported protocol version"}}""")
+        assertEquals("first message", events.filterIsInstance<AgentEvent.UserReplay>().single().text)
+        val text = events.filterIsInstance<AgentEvent.AssistantText>().single().text
+        assertTrue("never completed its handshake" in text && "unsupported protocol version" in text, text)
+        assertTrue(events.filterIsInstance<AgentEvent.TurnResult>().single().isError)
+        assertTrue(w.none { "\"session/new\"" in it || "\"session/load\"" in it }, "a dead handshake opens nothing")
+    }
+
+    /** A failed resume reported once, then every later message queued silently behind a session id that
+     *  could never arrive. */
+    @Test
+    fun `a failed resume settles the waiting prompt and every later one`() = runBlocking {
+        val w = mutableListOf<String>()
+        val injected = mutableListOf<String>()
+        val b = KimiBackend(null)
+        b.attach(
+            AgentIo(writeLine = { w += it }, emit = {}, inject = { injected += it }),
+            AgentSpec(Path.of("/repo"), resumeId = "k-session-1", mode = PermissionMode.DEFAULT),
+        )
+        b.sendPrompt("carry on", emptyList())
+        b.parse("""{"jsonrpc":"2.0","id":1,"result":$NO_CAPABILITIES}""")
+        val events = b.parse("""{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"session not found"}}""")
+        assertEquals("carry on", events.filterIsInstance<AgentEvent.UserReplay>().single().text)
+        assertTrue("could not resume" in events.filterIsInstance<AgentEvent.AssistantText>().single().text)
+        assertTrue(w.none { "\"session/new\"" in it }, "a failed resume must not mint a replacement session")
+
+        b.sendPrompt("anyone there?", emptyList())
+        val later = b.parse(injected.single())
+        assertEquals("anyone there?", assertIs<AgentEvent.UserReplay>(later[0]).text)
+        assertTrue("session not found" in assertIs<AgentEvent.AssistantText>(later[1]).text)
+        assertTrue(assertIs<AgentEvent.TurnResult>(later[2]).isError)
+        assertTrue(prompts(w).isEmpty(), "nothing is sent to a session that never opened")
+    }
+
+    /** No answer to `initialize` at all: bounded by the watchdog, which settles what was waiting. */
+    @Test
+    fun `a handshake that never answers settles the waiting prompt after the watchdog`() = runBlocking {
+        val w = mutableListOf<String>()
+        val injected = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val b = KimiBackend(null, handshakeTimeoutMs = 100)
+        b.attach(
+            AgentIo(writeLine = { w += it }, emit = {}, inject = { injected += it }),
+            AgentSpec(Path.of("/repo"), mode = PermissionMode.DEFAULT),
+        )
+        b.sendPrompt("hello?", emptyList())
+        val deadline = System.currentTimeMillis() + 5_000
+        while (injected.isEmpty() && System.currentTimeMillis() < deadline) kotlinx.coroutines.delay(20)
+        val events = b.parse(injected.single())
+        assertEquals("hello?", assertIs<AgentEvent.UserReplay>(events[0]).text)
+        assertTrue("never completed its handshake" in assertIs<AgentEvent.AssistantText>(events[1]).text)
+        assertTrue(assertIs<AgentEvent.TurnResult>(events[2]).isError)
+    }
+
+    /** A handshake that answers in time is never accused afterwards. */
+    @Test
+    fun `the watchdog stays quiet once the handshake answered`() = runBlocking {
+        val w = mutableListOf<String>()
+        val injected = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val b = KimiBackend(null, handshakeTimeoutMs = 100)
+        b.attach(
+            AgentIo(writeLine = { w += it }, emit = {}, inject = { injected += it }),
+            AgentSpec(Path.of("/repo"), mode = PermissionMode.DEFAULT),
+        )
+        b.parse("""{"jsonrpc":"2.0","id":1,"result":$NO_CAPABILITIES}""")
+        b.parse("""{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s1"}}""")
+        kotlinx.coroutines.delay(400)
+        assertTrue(injected.isEmpty(), "no failure after a completed handshake: $injected")
+    }
+
+    /** A relaunch is a fresh process: the dead one's failure must not refuse the new one's prompts. */
+    @Test
+    fun `a relaunch clears the previous process's startup failure`() = runBlocking {
+        val w = mutableListOf<String>()
+        val injected = mutableListOf<String>()
+        val b = KimiBackend(null)
+        b.attach(
+            AgentIo(writeLine = { w += it }, emit = {}, inject = { injected += it }),
+            AgentSpec(Path.of("/repo"), mode = PermissionMode.DEFAULT),
+        )
+        b.parse("""{"jsonrpc":"2.0","id":1,"result":$NO_CAPABILITIES}""")
+        b.parse("""{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"Internal error"}}""")
+        reattach(b, w, injected, initialize = NO_CAPABILITIES)
+        b.sendPrompt("try again", emptyList())
+        assertEquals(blocks("try again"), contentOf(prompts(w).single()), "the new process takes prompts normally")
+    }
+
     private companion object {
         /** The handshake every other test here answers with: no `agentCapabilities` at all. */
         const val NO_CAPABILITIES = """{"protocolVersion":1}"""
