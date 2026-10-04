@@ -193,10 +193,13 @@ class GitService(
         val exe = gitBin() ?: return fail(GIT_NOT_FOUND)
         // `--` terminates option parsing: a file named "--cached" is a file.
         val base = listOf("diff", "--no-color") + (if (f.staged) listOf("--cached") else emptyList()) + listOf("--", f.path)
-        var out = git(exe, repo.root, base, readOnly = true).out
-        if (out.isBlank() && !f.staged) {
+        val first = git(exe, repo.root, base, readOnly = true)
+        var out = first.out
+        if (out.isBlank() && !f.staged && first.code == 0 && isUntracked(exe, repo, f.path)) {
             // untracked: git has no recorded side for it, so diff it against the null device. --no-index
-            // exits 1 when the files differ, which is the normal success path here.
+            // exits 1 when the files differ, which is the normal success path here. --no-index reads ANY
+            // path it is given, so it is reached only for a file git itself lists as untracked — never a
+            // path outside the repository, an ignored file, or a tracked one whose first diff failed.
             val nul = if (isWindows) "NUL" else "/dev/null"
             out = git(exe, repo.root, listOf("diff", "--no-color", "--no-index", "--", nul, f.path), readOnly = true).out
         }
@@ -587,6 +590,12 @@ class GitService(
             staged = GitPorcelain.withCounts(st.staged, index),
             unstaged = GitPorcelain.withCounts(st.unstaged, work),
         )
+    }
+
+    /** Exactly [path] is an untracked, non-ignored file — the same set the panel's untracked group shows. */
+    private suspend fun isUntracked(exe: Path, repo: Repo, path: String): Boolean {
+        val r = git(exe, repo.root, listOf("ls-files", "-z", "--others", "--exclude-standard", "--", path), readOnly = true)
+        return r.code == 0 && r.out.split('\u0000').any { it == path }
     }
 
     private suspend fun withCounts(exe: Path, repo: Repo, entries: List<GitFileEntry>, staged: Boolean): List<GitFileEntry> {

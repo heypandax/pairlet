@@ -225,6 +225,22 @@ class GitServiceTest {
         assertEquals(2, d.adds)
     }
 
+    @Test
+    fun the_null_device_fallback_never_reads_a_file_outside_the_untracked_list() {
+        assumeTrue(gitAvailable())
+        val dir = repo()
+        val outside = tmp.resolve("outside-secret.txt").also { it.writeText("not part of any repository\n") }
+        dir.resolve(".gitignore").writeText("ignored.env\n")
+        dir.resolve("ignored.env").writeText("TOKEN=1\n")
+        val svc = service()
+        for (p in listOf(outside.toString(), "../outside-secret.txt", "ignored.env")) {
+            val d = runBlocking { svc.diff(ReadGitDiff("c1", dir.toString(), p, staged = false), dir) }
+            assertFalse(d.ok, "$p was read through --no-index: ${d.diff}")
+            val body = d.diff.orEmpty()
+            assertFalse(body.contains("not part of any repository") || body.contains("TOKEN"), body)
+        }
+    }
+
     // -------------------------------------------------------------- verbs
 
     @Test
@@ -938,6 +954,11 @@ class GitServiceTest {
             assertFalse(st.ok)
             assertEquals(dir.toString(), st.workdir)
             assertNotNull(pidFrom(pidFile), "precondition: the fsmonitor hook ran")
+            // a tracked file whose diff timed out must not fall through to --no-index and come back
+            // as a whole-file "new file" diff
+            val d = within(20_000) { runBlocking { svc.diff(ReadGitDiff("c1", dir.toString(), "README.md", staged = false), dir) } }
+            assertNotNull(d, "diff never answered")
+            assertFalse(d.ok, d.diff.orEmpty())
             val wl = within(20_000) { runBlocking { svc.listWorktrees(ListWorktrees("c1", dir.toString(), withStatus = true), dir) } }
             assertNotNull(wl, "worktree list never answered")
         } finally {
