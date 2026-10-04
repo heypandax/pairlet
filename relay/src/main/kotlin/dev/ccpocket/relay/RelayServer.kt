@@ -32,6 +32,7 @@ import dev.ccpocket.protocol.RegisterPush
 import dev.ccpocket.protocol.RevokeDevice
 import dev.ccpocket.protocol.Role
 import dev.ccpocket.protocol.Route
+import dev.ccpocket.protocol.WIRE_MAX_FRAME_BYTES
 import dev.ccpocket.protocol.e2e.Wire
 import dev.ccpocket.relay.analytics.AnalyticsConfig
 import dev.ccpocket.relay.analytics.AnalyticsIngress
@@ -481,6 +482,11 @@ class RelayServer(
             return closeWith("too_many_connections")
         }
 
+        // Every frame from this socket reaches the daemon with the routing header in front, and the daemon's
+        // own cap is the wire cap — so this leg stops exactly where the WRAPPED frame would cross it (audit M1).
+        // Over it, Ktor closes THIS socket with TOO_BIG; before, the frame was forwarded and killed the
+        // daemon's whole relay link, dropping every device of the account.
+        maxFrameSize = WIRE_MAX_FRAME_BYTES - Wire.wrapDevice(hello.deviceId, ByteArray(0)).size
         val conn = conn(account, Role.DEVICE, hello.deviceId, headless = headless)
         // From the attach on, everything is inside the try (audit M4): a ghost device socket left by a throw
         // before the read loop would keep the daemon from ever hearing PeerPresence(false) and hold a slot.
