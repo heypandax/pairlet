@@ -36,6 +36,7 @@ import dev.ccpocket.app.net.RelayControlDial
 import dev.ccpocket.app.net.RelayE2EConnection
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filterIsInstance
@@ -2602,12 +2603,12 @@ class PocketRepository(
         if (inboundJob == null) {
             inboundJob = scope.launch {
                 // only the transport that's actually connected emits — merging idle flows is free
-                merge(relay.inbound, direct.inbound, directE2E.inbound).collect { handle(it) }
+                collectInbound(merge(relay.inbound, direct.inbound, directE2E.inbound), ::handle)
             }
         }
         if (controlJob == null) {
             controlJob = scope.launch {
-                merge(relay.control, direct.control, directE2E.control).collect { handleControl(it) }
+                collectInbound(merge(relay.control, direct.control, directE2E.control), ::handleControl)
             }
         }
         if (deafJob == null) {
@@ -3433,6 +3434,28 @@ class PocketRepository(
     // delivery→turn watchdog handoff (PromptAck vs. a following turn frame) without a live daemon.
     internal fun receiveForTest(f: Frame) = handle(f)
 
+    /**
+     * The persistent collectors over the transports' inbound/control flows. Each frame is applied in
+     * isolation: one handler failure (a merge that throws, a UI hook, a frozen-area branch) is reported
+     * and the NEXT frame is still applied. Unisolated, the first exception ended the collector while
+     * [inboundJob] stayed non-null — launchTransport never rebuilt it, so a link that looked Ready
+     * silently ignored every later frame until the user disconnected.
+     */
+    private suspend fun collectInbound(source: Flow<Frame>, apply: (Frame) -> Unit) {
+        source.collect { f ->
+            try {
+                apply(f)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                Diagnostics.report(ErrorPath.PROTOCOL, DiagnosticStage.APPLY, ErrorCode.UNEXPECTED, t)
+            }
+        }
+    }
+
+    // The persistent inbound collector as launchTransport runs it, over a scripted flow.
+    internal suspend fun collectInboundForTest(source: Flow<Frame>) = collectInbound(source, ::handle)
+
     // Test the single outbound capability boundary with arbitrary protocol frames. Keeping this beside
     // receiveForTest makes additions to agentCarried() independently pin-able without UI setup.
     internal suspend fun sendForTest(f: Frame) = send(f)
@@ -4193,8 +4216,11 @@ class PocketRepository(
                 // the receipt reconciliation and the session-keyed cursor / paging anchors.
                 val lastSeq = try { transcript.mergeHistory(f, ::reconcilePromptReceiptFromHistory) }
                 catch (error: Exception) {
+                    // mergeHistory already reported the failure. Skip the cursor bookkeeping below so the
+                    // next reattach asks again from the last APPLIED seq; rethrowing only took the inbound
+                    // collector down with it.
                     openObservation?.takeIf { it.convoId == f.convoId }?.fail(ProductResult.FAILURE, ErrorCode.APPLY_FAILED, DiagnosticStage.APPLY)
-                    throw error
+                    return
                 }
                 openObservation?.takeIf { it.convoId == f.convoId }?.historyApplied(f.diagnostic)
                 if (f.delta) {
