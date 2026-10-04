@@ -358,8 +358,7 @@ class RelayClient(
      * pending-ask / handoff shields; everything else is released on the same 90s clock as before.
      */
     private suspend fun reaperLoop() {
-        while (true) {
-            delay(REAP_SCAN_MS)
+        residentLoop(REAP_SCAN_MS, onFailure = { log.error("idle reaper pass failed — next pass in ${REAP_SCAN_MS}ms", it) }) {
             val n = core.registry.reapIdle(IDLE_REAP_MS, relayPeerOnline = peerOnline)
             if (n > 0) log.info("reaped $n unoccupied idle session(s) — transcripts unhidden for desktop resume")
         }
@@ -370,8 +369,7 @@ class RelayClient(
      *  locally NOW (its handshake dies) and best-effort tells the relay to force-close its socket, so the
      *  guest is severed and its credential can't be reused. */
     private suspend fun guestExpiryLoop() {
-        while (true) {
-            delay(GUEST_EXPIRY_SCAN_MS)
+        residentLoop(GUEST_EXPIRY_SCAN_MS, onFailure = { log.error("guest expiry sweep failed — next sweep in ${GUEST_EXPIRY_SCAN_MS}ms", it) }) {
             for (id in sessions.bridges.expiredGuestIds()) {
                 log.info("folder share ${id.take(8)}… expired — revoking")
                 runCatching { revokeBridge(id, reason = dev.ccpocket.protocol.ShareEnded.REASON_EXPIRED) }
