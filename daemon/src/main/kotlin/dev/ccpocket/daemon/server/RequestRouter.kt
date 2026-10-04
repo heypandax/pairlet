@@ -83,6 +83,8 @@ import dev.ccpocket.protocol.FetchHistoryPage
 import dev.ccpocket.protocol.FetchSkillCatalog
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.FileChunk
+import dev.ccpocket.protocol.FileContent
+import dev.ccpocket.protocol.FileDiff
 import dev.ccpocket.protocol.FileUploadCancel
 import dev.ccpocket.protocol.Frame
 // Git panel (#280) + worktrees (#281) — every one of these is OWNER-ONLY at dispatch, see the block
@@ -388,11 +390,31 @@ class RequestRouter(
     private fun gitDenial(origin: String?, guestScope: GuestScope?, collabScope: CollaboratorScope?, workdir: String): String =
         if (!gitOwnerOnly(origin, guestScope, collabScope)) GIT_OWNER_ONLY else "not a readable directory: $workdir"
 
+    /**
+     * Run a launched reply [block]; when it throws, answer [fallback] first so the client is not left waiting
+     * for its own timeout, then rethrow so the scope's handler still reports it. Cancellation is not a
+     * failure and passes straight through. A fallback that cannot be sent either is dropped silently — the
+     * original failure is the one worth reporting.
+     */
+    private suspend inline fun replyOnFailure(sink: OutboundSink, fallback: () -> Frame, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            runCatching { sink.emit(fallback()) }
+            throw e
+        }
+    }
+
     companion object {
         /** The device identity for callers with no transport-authenticated id: the plaintext `--local`
          *  dev socket and trusted in-process callers. One machine-local pseudo-device, so the handoff
          *  gate still arbitrates it (it is never a lease holder unless it accepted a handoff itself). */
         const val LOCAL_DEVICE_ID = "local"
+
+        /** The error a file-surface reply carries when its service failed unexpectedly (audit 2026-10-04 C). */
+        const val FILE_SURFACE_FAILED = "the computer could not read this session's files — try again"
 
         /** Soft cap on the cross-project archive view (issue #202) — the archive is "put it away", not an
          *  unbounded ledger, and one frame must stay bounded however long a machine has accumulated. */
@@ -732,8 +754,12 @@ class RequestRouter(
             }
 
             // both re-scan the transcript from disk (issue #36) → same off-pump rule as FetchUsage
+            // Every file-surface branch answers even when its service throws (audit 2026-10-04 C): a launched
+            // branch's exception only reaches the scope's handler, which sends nothing — see [replyOnFailure].
             is ListSessionFiles -> scope.launch {
-                sink.emit(SessionFiles(frame.workdir, frame.sessionId, SessionFilesService.changedFiles(frame.agent, frame.workdir, frame.sessionId)))
+                replyOnFailure(sink, { SessionFiles(frame.workdir, frame.sessionId, error = FILE_SURFACE_FAILED) }) {
+                    sink.emit(SessionFiles(frame.workdir, frame.sessionId, SessionFilesService.changedFiles(frame.agent, frame.workdir, frame.sessionId)))
+                }
             }
             // serves any path canonically inside the workdir (issue #133) and, for a client that opted in,
             // streams over-cap binaries as FileContentChunk frames (issue #134)
@@ -741,11 +767,16 @@ class RequestRouter(
                 val observation = FileReadDiagnostics(frame.diagnostic?.validated()?.takeIf {
                     caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null
                 }, sink::emit)
-                try { SessionFilesService.streamFile(frame.agent, frame.workdir, frame.sessionId, frame.path, frame.allowChunks, observation::send) }
-                catch (error: Exception) { observation.failed(error); throw error }
+                // the ok=false FileContent also settles a half-sent chunk stream (it supersedes the partial)
+                replyOnFailure(sink, { FileContent(frame.workdir, frame.sessionId, frame.path, ok = false, error = FILE_SURFACE_FAILED) }) {
+                    try { SessionFilesService.streamFile(frame.agent, frame.workdir, frame.sessionId, frame.path, frame.allowChunks, observation::send) }
+                    catch (error: Exception) { observation.failed(error); throw error }
+                }
             }
             is ReadFileDiff -> scope.launch {
-                sink.emit(SessionFilesService.fileDiff(frame.agent, frame.workdir, frame.sessionId, frame.path))
+                replyOnFailure(sink, { FileDiff(frame.workdir, frame.sessionId, frame.path, ok = false, error = FILE_SURFACE_FAILED) }) {
+                    sink.emit(SessionFilesService.fileDiff(frame.agent, frame.workdir, frame.sessionId, frame.path))
+                }
             }
             // approval-gated export of a file the session did NOT change (issue #67 v2 / #79). MUST launch,
             // not await — like RunShellCommand below, it suspends on the human approval gate, and the mode
@@ -754,8 +785,10 @@ class RequestRouter(
                 val observation = FileReadDiagnostics(frame.diagnostic?.validated()?.takeIf {
                     caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null
                 }, sink::emit)
-                try { exports.run(frame, registry.modeOf(frame.convoId), observation::send) }
-                catch (error: Exception) { observation.failed(error); throw error }
+                replyOnFailure(sink, { FileContent(frame.workdir, frame.sessionId, frame.path, ok = false, error = FILE_SURFACE_FAILED) }) {
+                    try { exports.run(frame, registry.modeOf(frame.convoId), observation::send) }
+                    catch (error: Exception) { observation.failed(error); throw error }
+                }
             }
             // ---- Git panel (issue #280) + worktree management (issue #281) ----
             // OWNER-ONLY, and deliberately guarded HERE as well as by the caps allow-lists. GuestCaps /

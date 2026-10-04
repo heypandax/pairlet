@@ -5,7 +5,10 @@ import dev.ccpocket.observability.*
 import dev.ccpocket.protocol.FileChunk
 import dev.ccpocket.protocol.MAX_UPLOAD_BYTES
 import java.io.OutputStream
+import java.nio.channels.Channels
+import java.nio.channels.FileChannel
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
@@ -20,7 +23,7 @@ import java.util.Base64
  * structural difference: audio buffers every chunk in memory and decodes once, but a file can be
  * 200 MB — so chunks are decoded INDIVIDUALLY (each chunk's base64 is self-contained) and the
  * contiguous prefix is streamed straight into a `.part` file, with only a small bounded
- * reorder buffer in memory. `last` + all-written → fsync + atomic rename to the final name.
+ * reorder buffer in memory. `last` + all-written → fsync of the file data + atomic rename to the final name.
  *
  * This is the daemon's only PHONE-DRIVEN write surface, so it is fenced harder than the read
  * paths: the caller passes the session cwd (NEVER the phone), captureId must match a strict
@@ -57,8 +60,10 @@ class UploadReassembler(
         val workdir: Path,
         val dir: Path,        // <cwd>/.ccpocket/inbox/<captureId>
         val part: Path,       // <dir>/<name>.part
+        val channel: FileChannel, // [out]'s channel — kept for the fsync before landing
         val out: OutputStream,
         val createdMs: Long,
+        val createdDir: Boolean, // false when [dir] already existed (a reused captureId) — cleanup must keep it
     ) {
         var lastMs: Long = createdMs
         var nextIdx = 0                              // next contiguous idx to stream to disk
@@ -132,6 +137,7 @@ class UploadReassembler(
         markFinished(p.captureId)
         return runCatching {
             p.out.flush()
+            p.channel.force(true) // durable BEFORE the rename publishes it under its final, @-referenced name
             p.out.close()
             val final = p.dir.resolve(p.name)
             try {
@@ -191,6 +197,7 @@ class UploadReassembler(
             val realInbox = inboxRoot.toRealPath()
             if (!realInbox.startsWith(realWorkdir)) return Opened.Refuse("workspace inbox escaped the workspace")
             val dir = realInbox.resolve(c.captureId)
+            val createdDir = !Files.exists(dir, LinkOption.NOFOLLOW_LINKS)
             Files.createDirectories(dir)
             val real = dir.toRealPath()
             if (!real.startsWith(realInbox)) {
@@ -203,8 +210,9 @@ class UploadReassembler(
             // itself, not its target — then CREATE_NEW so the write can never follow a symlink out of
             // the (already contained) capture dir.
             Files.deleteIfExists(part)
-            val out = Files.newOutputStream(part, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
-            Opened.Ok(Pending(c.convoId, c.captureId, name, realWorkdir, real, part, out, nowMs())) as Opened
+            val channel = FileChannel.open(part, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
+            val out = Channels.newOutputStream(channel)
+            Opened.Ok(Pending(c.convoId, c.captureId, name, realWorkdir, real, part, channel, out, nowMs(), createdDir)) as Opened
         }.getOrElse { Diagnostics.report(ErrorPath.FILE_UPLOAD, Stage.WRITE, ErrorCode.WRITE_FAILED, it); Opened.Refuse("could not open the workspace inbox for writing") }
     }
 
@@ -223,16 +231,16 @@ class UploadReassembler(
         return Result.Refused(p.captureId, error)
     }
 
-    /** Close the stream and remove the capture's directory (partial + anything else we created). */
+    /**
+     * Close the stream and remove what THIS upload created: its `.part`, and the capture directory only when
+     * this upload created it and it is now empty. A captureId can come back after a daemon restart or once
+     * the [finished] ring has rolled over (audit 2026-10-04 E) — e.g. a re-sent tail chunk opens an upload
+     * that can never complete — and its sweep must not take the file that already landed under that id.
+     */
     private fun cleanup(p: Pending) {
         runCatching { p.out.close() }
-        runCatching {
-            if (Files.exists(p.dir)) {
-                Files.walk(p.dir).use { walk ->
-                    walk.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) }
-                }
-            }
-        }
+        runCatching { Files.deleteIfExists(p.part) }
+        if (p.createdDir) runCatching { Files.deleteIfExists(p.dir) } // DirectoryNotEmptyException → kept
     }
 
     /** Drop uploads that stopped receiving chunks (phone died mid-stream) — state AND partial file. */
@@ -255,7 +263,10 @@ class UploadReassembler(
     private fun ensureSelfIgnored(workdir: Path) {
         runCatching {
             val gi = workdir.resolve(".ccpocket").resolve(".gitignore")
-            if (!Files.exists(gi)) Files.write(gi, listOf("*"))
+            // NOFOLLOW + CREATE_NEW: a dangling symlink planted here must not be written through to its target
+            if (!Files.exists(gi, LinkOption.NOFOLLOW_LINKS)) {
+                Files.write(gi, listOf("*"), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
+            }
         }
     }
 
@@ -280,7 +291,9 @@ class UploadReassembler(
          * Reduce a phone-supplied display name to a safe basename that is also a clean `@`-token:
          * strip any directory part, replace separators/control chars/whitespace with `_`, refuse
          * empty/dot names, sidestep Windows reserved device names, and cap length keeping the
-         * extension end. Returns null when nothing usable remains.
+         * extension end — in characters AND in UTF-8 bytes (ext4 and most Unix filesystems cap a name at
+         * 255 bytes, and `.part` is appended while it streams; 120 CJK characters are 360 bytes), never
+         * splitting a surrogate pair. Returns null when nothing usable remains.
          */
         fun sanitizeName(raw: String): String? {
             val base = raw.substringAfterLast('/').substringAfterLast('\\').trim()
@@ -290,10 +303,31 @@ class UploadReassembler(
             }.trim('.').ifEmpty { return null } // ".." / "..." collapse to empty → refused
             val stem = cleaned.substringBefore('.')
             val safe = if (stem.uppercase() in WINDOWS_RESERVED) "_$cleaned" else cleaned
-            return if (safe.length <= MAX_NAME_LEN) safe else safe.takeLast(MAX_NAME_LEN)
+            return takeLastWithin(safe, MAX_NAME_LEN, MAX_NAME_BYTES)
+        }
+
+        /** The longest suffix of [s] within [maxChars] characters and [maxBytes] UTF-8 bytes, whole code points only. */
+        private fun takeLastWithin(s: String, maxChars: Int, maxBytes: Int): String {
+            var bytes = 0
+            var i = s.length
+            while (i > 0) {
+                val cp = s.codePointBefore(i)
+                val n = when {
+                    cp < 0x80 -> 1
+                    cp < 0x800 -> 2
+                    cp < 0x10000 -> 3
+                    else -> 4
+                }
+                val width = Character.charCount(cp)
+                if (s.length - i + width > maxChars || bytes + n > maxBytes) break
+                bytes += n
+                i -= width
+            }
+            return s.substring(i)
         }
 
         private const val MAX_NAME_LEN = 120
+        private const val MAX_NAME_BYTES = 200 // + ".part" stays well under the common 255-byte name limit
         private val WINDOWS_RESERVED = setOf(
             "CON", "PRN", "AUX", "NUL",
             "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",

@@ -76,14 +76,17 @@ object SessionFilesService {
     fun changedFiles(agent: AgentKind, workdir: String, sessionId: String): List<ChangedFile> =
         changedFilesWithSources(agent, workdir, sessionId, backendSources)
 
-    internal fun changedFilesWithSources(agent: AgentKind, workdir: String, sessionId: String, sources: BackendSessionFiles): List<ChangedFile> {
+    internal fun changedFilesWithSources(
+        agent: AgentKind, workdir: String, sessionId: String, sources: BackendSessionFiles,
+        roots: TranscriptRoots = TranscriptRoots(),
+    ): List<ChangedFile> {
         if (BackendSessionFiles.supports(agent)) {
             val evidence = sources.load(agent, workdir, sessionId).getOrNull() ?: return emptyList()
             return scanEvidence(evidence, workdir, null).map { (path, acc) ->
                 ChangedFile(path, op = acc.op, edits = acc.edits, adds = acc.adds, dels = acc.dels)
             }.asReversed()
         }
-        val file = transcriptFor(agent, workdir, sessionId) ?: return emptyList()
+        val file = transcriptFor(agent, workdir, sessionId, roots) ?: return emptyList()
         return changedFilesIn(agent, file, workdir)
     }
 
@@ -99,7 +102,10 @@ object SessionFilesService {
     fun readFile(agent: AgentKind, workdir: String, sessionId: String, path: String): FileContent =
         readFileWithSources(agent, workdir, sessionId, path, backendSources)
 
-    internal fun readFileWithSources(agent: AgentKind, workdir: String, sessionId: String, path: String, sources: BackendSessionFiles): FileContent {
+    internal fun readFileWithSources(
+        agent: AgentKind, workdir: String, sessionId: String, path: String, sources: BackendSessionFiles,
+        roots: TranscriptRoots = TranscriptRoots(),
+    ): FileContent {
         if (BackendSessionFiles.supports(agent)) {
             val evidence = sources.load(agent, workdir, sessionId, requireChanges = containedForExport(workdir, path) !is ExportGate.Allowed).getOrElse {
                 return FileContent(workdir, sessionId, path, ok = false, error = "session file evidence unavailable: ${it.message}")
@@ -109,7 +115,7 @@ object SessionFilesService {
                 is ReadGate.Refuse -> FileContent(workdir, sessionId, path, ok = false, error = gate.error)
             }
         }
-        val transcript = transcriptFor(agent, workdir, sessionId)
+        val transcript = transcriptFor(agent, workdir, sessionId, roots)
             ?: return FileContent(workdir, sessionId, path, ok = false, error = "session transcript not found")
         return readFileIn(agent, transcript, workdir, sessionId, path)
     }
@@ -140,6 +146,7 @@ object SessionFilesService {
     internal suspend fun streamFileWithSources(
         agent: AgentKind, workdir: String, sessionId: String, path: String, allowChunks: Boolean,
         sources: BackendSessionFiles, emit: suspend (Frame) -> Unit,
+        roots: TranscriptRoots = TranscriptRoots(),
     ) {
         if (BackendSessionFiles.supports(agent)) {
             val evidence = sources.load(agent, workdir, sessionId, requireChanges = containedForExport(workdir, path) !is ExportGate.Allowed).getOrElse {
@@ -153,7 +160,7 @@ object SessionFilesService {
             }
             return
         }
-        val transcript = transcriptFor(agent, workdir, sessionId)
+        val transcript = transcriptFor(agent, workdir, sessionId, roots)
         if (transcript == null) {
             emit(FileContent(workdir, sessionId, path, ok = false, error = "session transcript not found"))
             return
@@ -335,14 +342,17 @@ object SessionFilesService {
     fun isChanged(agent: AgentKind, workdir: String, sessionId: String, path: String): Boolean =
         isChangedWithSources(agent, workdir, sessionId, path, backendSources)
 
-    internal fun isChangedWithSources(agent: AgentKind, workdir: String, sessionId: String, path: String, sources: BackendSessionFiles): Boolean {
+    internal fun isChangedWithSources(
+        agent: AgentKind, workdir: String, sessionId: String, path: String, sources: BackendSessionFiles,
+        roots: TranscriptRoots = TranscriptRoots(),
+    ): Boolean {
         if (BackendSessionFiles.supports(agent)) {
             val evidence = sources.load(agent, workdir, sessionId).getOrNull() ?: return false
             val abs = resolveEvidencePath(path, workdir) ?: return false
             return evidence.changes.any { resolveEvidencePath(it.path, workdir) == abs } &&
                 evidenceReadGate(evidence, workdir, path) is ReadGate.Serve
         }
-        val transcript = transcriptFor(agent, workdir, sessionId) ?: return false
+        val transcript = transcriptFor(agent, workdir, sessionId, roots) ?: return false
         val abs = resolve(path, workdir) ?: return false
         return abs in scan(agent, transcript, workdir, diffFor = null).keys
     }
@@ -397,7 +407,10 @@ object SessionFilesService {
     fun fileDiff(agent: AgentKind, workdir: String, sessionId: String, path: String): FileDiff =
         fileDiffWithSources(agent, workdir, sessionId, path, backendSources)
 
-    internal fun fileDiffWithSources(agent: AgentKind, workdir: String, sessionId: String, path: String, sources: BackendSessionFiles): FileDiff {
+    internal fun fileDiffWithSources(
+        agent: AgentKind, workdir: String, sessionId: String, path: String, sources: BackendSessionFiles,
+        roots: TranscriptRoots = TranscriptRoots(),
+    ): FileDiff {
         if (BackendSessionFiles.supports(agent)) {
             val evidence = sources.load(agent, workdir, sessionId).getOrElse {
                 return FileDiff(workdir, sessionId, path, ok = false, error = "session file evidence unavailable: ${it.message}")
@@ -410,7 +423,7 @@ object SessionFilesService {
             return FileDiff(workdir, sessionId, path, diff = acc.diff.toString(),
                 adds = acc.adds ?: 0, dels = acc.dels ?: 0, truncated = acc.diffTruncated)
         }
-        val transcript = transcriptFor(agent, workdir, sessionId)
+        val transcript = transcriptFor(agent, workdir, sessionId, roots)
             ?: return FileDiff(workdir, sessionId, path, ok = false, error = "session transcript not found")
         return fileDiffIn(agent, transcript, workdir, sessionId, path)
     }
@@ -439,22 +452,65 @@ object SessionFilesService {
         var adds: Int? = null
         var dels: Int? = null
         val diff = StringBuilder()
+        var diffBytes = 0L // [diff] as the wire carries it: JSON-escaped UTF-8, not characters
         var diffTruncated = false
 
         fun stat(a: Int, d: Int) { adds = (adds ?: 0) + a; dels = (dels ?: 0) + d }
 
-        /** Appends one tool call's hunk group whole, or drops it whole — never mid-hunk garbage. */
+        /** Appends one tool call's hunk group whole, or drops it whole — never mid-hunk garbage. The cap is
+         *  measured in ENCODED bytes (audit 2026-10-04 D): an ESC-heavy diff is 6 bytes per character on
+         *  the wire, so a character cap let a "256 KB" diff reach 1.5 MB and drop a 1 MiB client's link. */
         fun appendHunks(text: String) {
+            val size = jsonStringBytes(text)
             when {
-                diff.length + text.length <= DIFF_CAP_BYTES -> diff.append(text)
+                diffBytes + size <= DIFF_CAP_BYTES -> { diff.append(text); diffBytes += size }
                 diff.isEmpty() -> { // a single oversized group: keep whole lines up to the cap
-                    val cut = text.take(DIFF_CAP_BYTES)
-                    diff.append(cut.substring(0, cut.lastIndexOf('\n') + 1))
+                    val cut = clipLinesToJsonBytes(text, DIFF_CAP_BYTES.toLong())
+                    diff.append(cut)
+                    diffBytes += jsonStringBytes(cut)
                     diffTruncated = true
                 }
                 else -> diffTruncated = true
             }
         }
+    }
+
+    /** Bytes [s] occupies inside a JSON string literal as kotlinx.serialization writes it (quotes excluded):
+     *  `"`/`\` and the short-escaped controls take 2, other C0 controls 6 (`\u00XX`), the rest their UTF-8
+     *  length (a lone surrogate counts as the 3-byte replacement character it is encoded as). */
+    internal fun jsonStringBytes(s: CharSequence): Long {
+        var n = 0L
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            n += when {
+                c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t' || c == '\b' || c == '\u000C' -> 2
+                c < ' ' -> 6
+                c.code < 0x80 -> 1
+                c.code < 0x800 -> 2
+                c.isHighSurrogate() && i + 1 < s.length && s[i + 1].isLowSurrogate() -> { i++; 4 }
+                else -> 3
+            }
+            i++
+        }
+        return n
+    }
+
+    /** The longest whole-line prefix of [text] (ending in `\n`) whose [jsonStringBytes] is at most [cap];
+     *  empty when even the first line is over. */
+    internal fun clipLinesToJsonBytes(text: String, cap: Long): String {
+        var bytes = 0L
+        var lineStart = 0
+        var keep = 0
+        while (lineStart < text.length) {
+            val nl = text.indexOf('\n', lineStart)
+            if (nl < 0) break
+            bytes += jsonStringBytes(text.subSequence(lineStart, nl + 1))
+            if (bytes > cap) break
+            keep = nl + 1
+            lineStart = nl + 1
+        }
+        return text.substring(0, keep)
     }
 
     /** Insertion order = oldest-touched first, re-anchored on re-touch (callers reverse for the wire).
@@ -562,18 +618,51 @@ object SessionFilesService {
 
     // --- transcript location (same per-backend sources the session list uses) ---
 
-    private fun transcriptFor(agent: AgentKind, workdir: String, sessionId: String): Path? {
+    /** Where [transcriptFor] looks — injectable so tests never touch `$HOME` / `$CODEX_HOME`. */
+    internal class TranscriptRoots(
+        val claudeProjects: () -> Path = ProjectPaths::projectsRoot,
+        val codexSessions: () -> Path = CodexPaths::sessionsRoot,
+    )
+
+    private fun transcriptFor(agent: AgentKind, workdir: String, sessionId: String, roots: TranscriptRoots): Path? {
         // sessionId is interpolated into a filename; forbid separators/dot-dot so it can't traverse
         if (sessionId.contains('/') || sessionId.contains('\\') || sessionId.contains("..")) return null
-        val file = when (agent) {
-            AgentKind.CLAUDE -> ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl")
-            AgentKind.CODEX -> CodexPaths.findSession(sessionId)
-            AgentKind.OPENCODE -> null // OpenCode sessions are in SQLite, not individual files
-            AgentKind.KIMI -> null // KIMI file-preview is P1 no-op (transcript format unverified pre-auth)
-            AgentKind.ZCODE, AgentKind.DSH -> null // resolved as verified evidence, never synthetic paths
-        }
-        return file?.takeIf { it.exists() }
+        // Never throws: a NUL in the id (InvalidPathException) or a project dir deleted mid-scan must read as
+        // "not found" — the router's launched branch would otherwise answer nothing at all.
+        val file = runCatching {
+            when (agent) {
+                AgentKind.CLAUDE -> ProjectPaths.dirForUnder(roots.claudeProjects(), workdir).resolve("$sessionId.jsonl")
+                AgentKind.CODEX -> CodexPaths.findSession(sessionId, roots.codexSessions())
+                AgentKind.OPENCODE -> null // OpenCode sessions are in SQLite, not individual files
+                AgentKind.KIMI -> null // KIMI file-preview is P1 no-op (transcript format unverified pre-auth)
+                AgentKind.ZCODE, AgentKind.DSH -> null // resolved as verified evidence, never synthetic paths
+            }?.takeIf { it.exists() }
+        }.getOrNull() ?: return null
+        // Bind the pair: the in-tree read lane is rooted at the CLIENT's workdir, so that workdir must be the
+        // project the transcript itself recorded. Codex finds rollouts by id alone, and Claude's dirKey is lossy
+        // (`/a.b`, `/a-b`, `/a_b` share one folder) — without this, any real session id would widen the lane to
+        // a made-up root such as "/". Same canonical-key rule the session listing matches rows by.
+        val recorded = recordedCwd(agent, file) ?: return null
+        return file.takeIf { ProjectPaths.canonicalKey(recorded) == ProjectPaths.canonicalKey(workdir) }
     }
+
+    /** The working directory the transcript recorded at session start: Claude's first `cwd` field, Codex's
+     *  first-line `session_meta.cwd`. Null when absent or unreadable — the binding then fails closed. */
+    private fun recordedCwd(agent: AgentKind, file: Path): String? = runCatching {
+        file.bufferedReader().useLines { lines ->
+            when (agent) {
+                AgentKind.CODEX -> lines.firstOrNull()?.let { first ->
+                    (runCatching { json.parseToJsonElement(first.trim()) }.getOrNull() as? JsonObject)
+                        ?.takeIf { it.str("type") == "session_meta" }
+                        ?.let { it["payload"] as? JsonObject }?.str("cwd")
+                }
+                else -> lines.firstNotNullOfOrNull { raw ->
+                    if ("\"cwd\"" !in raw) return@firstNotNullOfOrNull null
+                    (runCatching { json.parseToJsonElement(raw.trim()) }.getOrNull() as? JsonObject)?.str("cwd")
+                }
+            }
+        }
+    }.getOrNull()?.takeIf { it.isNotBlank() }
 
     // --- Claude: tool_use blocks on assistant lines; structuredPatch on user-line toolUseResults ---
 
