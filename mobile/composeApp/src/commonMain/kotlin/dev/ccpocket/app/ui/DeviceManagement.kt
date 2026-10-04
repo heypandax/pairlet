@@ -43,6 +43,7 @@ import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -75,7 +76,7 @@ fun DeviceList(repo: PocketRepository, onSwitch: (PairedDaemon) -> Unit, onAdd: 
         ) {
             Icon(Icons.Outlined.Add, null, tint = Tok.accent, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(10.dp))
-            Text(stringResource(Res.string.add_device), color = Tok.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(Res.string.add_device), color = Tok.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(14.sp))
         }
     }
     // Dialogs render in their own overlay window — safe to host here even though DeviceList itself sits
@@ -101,11 +102,11 @@ private fun DeviceRow(d: PairedDaemon, active: Boolean, onTap: () -> Unit, onRen
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     d.displayName(), color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(14.sp), modifier = Modifier.weight(1f, fill = false),
                 )
                 if (active) {
                     Spacer(Modifier.width(8.dp))
-                    Text(stringResource(Res.string.device_active), color = Tok.ok, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(Res.string.device_active), color = Tok.ok, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(10.5.sp))
                 }
             }
             Text(

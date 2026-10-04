@@ -63,6 +63,7 @@ import dev.ccpocket.app.resources.ho_bash_recorded
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.MarkdownText
 import dev.ccpocket.app.ui.RiskBadge
 import dev.ccpocket.app.ui.sheetMeasure
@@ -199,11 +200,11 @@ private fun ApprovalHeader(ui: ApprovalUi, seconds: Int, terminal: Boolean) {
             Box(Modifier.size(8.dp).rotate(if (ui.ask.danger) 0f else 45f).background(accent))
             Text(
                 stringResource(Res.string.ap_required), color = accent,
-                style = TypeRole.action, modifier = Modifier.weight(1f),
+                style = TypeRole.action.merge(tightCenter(TypeRole.action.fontSize)), modifier = Modifier.weight(1f),
             )
             // never a fabricated "1 of 1": the counter exists only while a burst really is queued
             ui.queue?.let { (pos, total) ->
-                Text(stringResource(Res.string.ap_queue, pos, total), color = Tok.tx2, style = TypeRole.captionMono)
+                Text(stringResource(Res.string.ap_queue, pos, total), color = Tok.tx2, style = TypeRole.captionMono.merge(tightCenter(TypeRole.captionMono.fontSize)))
             }
         }
         if (terminal) return@Column
@@ -242,9 +243,9 @@ private fun ApprovalHeader(ui: ApprovalUi, seconds: Int, terminal: Boolean) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
                     ) {
-                        Text("${seconds}s", color = tint, style = TypeRole.action.copy(fontFamily = FontFamily.Monospace))
+                        Text("${seconds}s", color = tint, style = TypeRole.action.copy(fontFamily = FontFamily.Monospace).merge(tightCenter(TypeRole.action.fontSize)))
                         Text(
-                            stringResource(Res.string.ap_fail_closed), color = Tok.tx2, style = TypeRole.caption,
+                            stringResource(Res.string.ap_fail_closed), color = Tok.tx2, style = TypeRole.caption.merge(tightCenter(TypeRole.caption.fontSize)),
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -296,12 +297,12 @@ private fun KindToolLine(tool: String, promoted: Boolean, modifier: Modifier = M
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
         Text(
             stringResource(Res.string.ap_kind), color = if (promoted) Tok.tx else Tok.tx2,
-            style = if (promoted) TypeRole.title else TypeRole.body,
+            style = if (promoted) TypeRole.title.merge(tightCenter(TypeRole.title.fontSize)) else TypeRole.body.merge(tightCenter(TypeRole.body.fontSize)),
         )
         Box(Modifier.size(3.dp).clip(CircleShape).background(Tok.muted))
         Text(
             tool, color = Tok.tx,
-            style = if (promoted) TypeRole.title.copy(fontFamily = FontFamily.Monospace) else TypeRole.bodyMono,
+            style = if (promoted) TypeRole.title.copy(fontFamily = FontFamily.Monospace).merge(tightCenter(TypeRole.title.fontSize)) else TypeRole.bodyMono.merge(tightCenter(TypeRole.bodyMono.fontSize)),
         )
     }
 }

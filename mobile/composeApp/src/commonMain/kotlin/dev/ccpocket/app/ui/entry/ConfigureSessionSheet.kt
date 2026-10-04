@@ -493,7 +493,7 @@ private fun ModelRow(name: String, id: String?, ctx: String, big: Boolean, selec
                 if (!id.isNullOrBlank()) Row(
                     Modifier.padding(top = Metric.gapXs), verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(id, color = Tok.tx2, style = TypeRole.metaMono, modifier = Modifier.weight(1f, fill = false))
+                    Text(id, color = Tok.tx2, style = TypeRole.metaMono.merge(tightCenter(TypeRole.metaMono.fontSize)), modifier = Modifier.weight(1f, fill = false))
                     if (ctx.isNotEmpty()) { Box(Modifier.padding(start = Metric.gapS)) { CtxPill(ctx, big) } }
                 }
             }
@@ -516,7 +516,7 @@ private fun ModeSelectionRow(label: String, body: String, danger: Boolean, selec
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
                     // danger ink appears on Full access and in its confirmation, nowhere else
                     if (danger) Box(Modifier.size(8.dp).background(Tok.danger))
-                    Text(label, color = Tok.tx, style = TypeRole.action)
+                    Text(label, color = Tok.tx, style = TypeRole.action.merge(tightCenter(TypeRole.action.fontSize)))
                 }
                 Text(body, color = Tok.tx2, style = TypeRole.preview, modifier = Modifier.padding(top = Metric.gapXs))
             }
@@ -540,7 +540,7 @@ private fun OpenCodeAutomatic() {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
             Box(Modifier.size(8.dp).rotate(45f).background(Tok.warn))
-            Text(stringResource(Res.string.cfg_opencode_title), color = Tok.tx, style = TypeRole.rowTitle)
+            Text(stringResource(Res.string.cfg_opencode_title), color = Tok.tx, style = TypeRole.rowTitle.merge(tightCenter(TypeRole.rowTitle.fontSize)))
         }
         Text(
             stringResource(Res.string.cfg_opencode_body), color = Tok.tx2, style = TypeRole.preview,

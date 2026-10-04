@@ -57,6 +57,7 @@ import dev.ccpocket.app.resources.time_just_now
 import dev.ccpocket.app.resources.time_minutes_ago
 import dev.ccpocket.app.resources.time_yesterday
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.fmtMmSs
 import dev.ccpocket.app.ui.session.StateMark
 import dev.ccpocket.app.ui.session.StateMarkGlyph
@@ -196,7 +197,7 @@ fun AttentionBadge(n: Int, modifier: Modifier = Modifier) {
             .padding(horizontal = 5.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text("$n", color = Tok.base, fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text("$n", color = Tok.base, fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.Bold, style = tightCenter(11.sp))
     }
 }
 
@@ -235,6 +236,7 @@ fun MiniCountdownRing(seconds: Int, total: Int, size: Dp = 34.dp) {
         Text(
             fmtMmSs(seconds),
             color = col, fontFamily = FontFamily.Monospace, fontSize = 8.5.sp,
+            style = tightCenter(8.5.sp),
         )
     }
 }

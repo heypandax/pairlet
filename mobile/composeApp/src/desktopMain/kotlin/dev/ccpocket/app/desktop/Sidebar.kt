@@ -891,7 +891,7 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                         )
                         Text(
                             stringResource(Res.string.rewind_group_rewound, row.count),
-                            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp), fontWeight = FontWeight.SemiBold,
                         )
                     }
                     is RecentRow.Rewound -> SessionRow(model, row.session, selected = row.session.sessionId == selectedId, indented = true) {
@@ -1643,7 +1643,7 @@ private fun NewGroupRow(model: DesktopModel) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Icon(Icons.Rounded.Add, null, tint = Tok.tx2, modifier = Modifier.size(12.dp))
-        Text(stringResource(Res.string.group_new), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text(stringResource(Res.string.group_new), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp), fontWeight = FontWeight.Medium)
     }
 }
 
@@ -1691,7 +1691,7 @@ private fun AllProjectsRow(onClick: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(14.dp))
-            Text(stringResource(Res.string.switcher_all_projects) + "…", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(Res.string.switcher_all_projects) + "…", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp), modifier = Modifier.weight(1f))
         }
     }
 }
@@ -1707,8 +1707,8 @@ private fun ArchivedRow(count: Int, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(Icons.Outlined.Inventory2, null, tint = Tok.tx2, modifier = Modifier.size(14.dp))
-        Text(stringResource(Res.string.sidebar_archived), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
-        if (count > 0) Text("$count", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+        Text(stringResource(Res.string.sidebar_archived), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp), modifier = Modifier.weight(1f))
+        if (count > 0) Text("$count", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp))
     }
 }
 
@@ -1720,7 +1720,7 @@ private fun NewSessionRow(onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(13.dp))
-        Text(stringResource(Res.string.new_session_title), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        Text(stringResource(Res.string.new_session_title), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp), fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
         Key("⌘N")
     }
 }
@@ -1735,7 +1735,7 @@ private fun OpenFolderRow(onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(Icons.Rounded.FolderOpen, null, tint = Tok.tx2, modifier = Modifier.size(13.dp))
-        Text(stringResource(Res.string.open_folder), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+        Text(stringResource(Res.string.open_folder), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp), modifier = Modifier.weight(1f))
         Key("⌘O")
     }
 }
@@ -1995,7 +1995,7 @@ private fun FooterActions(model: DesktopModel, updateAvailable: Boolean, onHelp:
             ) {
                 Icon(Icons.AutoMirrored.Outlined.HelpOutline, null, tint = Tok.tx2, modifier = Modifier.size(15.dp))
                 Text(
-                    stringResource(Res.string.support_title), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
+                    stringResource(Res.string.support_title), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp),
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -2012,7 +2012,7 @@ private fun FooterActions(model: DesktopModel, updateAvailable: Boolean, onHelp:
                 if (updateAvailable) Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(Tok.accent))
                 Text(
                     "v$APP_VERSION", color = if (updateAvailable) Tok.accent else Tok.muted,
-                    fontFamily = Dk.mono, fontSize = 10.sp,
+                    fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp),
                 )
             }
         }
@@ -2041,7 +2041,7 @@ fun MachineSwitcher(model: DesktopModel) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(13.dp))
-                Text(stringResource(Res.string.add_device), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                Text(stringResource(Res.string.add_device), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp), fontWeight = FontWeight.Medium)
             }
         }
     }
@@ -2067,7 +2067,7 @@ private fun SwitcherRow(m: DkMachine, keyHint: String, onClick: () -> Unit) {
         ) {
             Icon(osIcon(m.computer.os), null, tint = Tok.tx2, modifier = Modifier.size(13.dp))
             Text(
-                m.computer.name, color = if (m.active) Tok.tx else Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,
+                m.computer.name, color = if (m.active) Tok.tx else Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp, style = tightCenter(12.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
             )
             if (m.computer.online) PulseDot(Tok.ok, 5.dp) else Dot(Tok.muted, 5.dp)

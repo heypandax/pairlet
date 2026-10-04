@@ -101,7 +101,7 @@ private fun WaitDial(ask: PermissionAsk, diameter: Dp, stroke: Dp, color: Color)
         Modifier.size(diameter).clip(CircleShape).border(1.dp, Tok.hair, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        Text("∞", color = Tok.muted, fontFamily = Dk.ui, fontSize = (diameter.value * 0.44f).sp, fontWeight = FontWeight.SemiBold)
+        Text("∞", color = Tok.muted, fontFamily = Dk.ui, fontSize = (diameter.value * 0.44f).sp, fontWeight = FontWeight.SemiBold, style = tightCenter((diameter.value * 0.44f).sp))
     }
 }
 
@@ -337,7 +337,7 @@ fun InlinePermCard(
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                         Text(
                             stringResource(if (isDiff) Res.string.agent_wants_edit else Res.string.agent_needs_permission, agentName(agent)),
-                            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
+                            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp),
                         )
                         AgentBadge(agent)
                         risk?.let { dev.ccpocket.app.ui.RiskBadge(it) } // M3 advisory (shape-distinct four states)

@@ -239,7 +239,7 @@ fun ChangesPanel(model: DesktopModel, onDismiss: () -> Unit, modifier: Modifier 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(stringResource(Res.string.files_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(Res.string.files_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(15.sp))
             if (view == FilesView.CHANGES && files.isNotEmpty()) FilesSummaryText(files, fontSize = 12.sp)
             Box(Modifier.weight(1f))
             Icon(
@@ -650,7 +650,7 @@ private fun DesktopFileRow(f: ChangedFile, selected: Boolean, onClick: () -> Uni
                 if (dir.isNotEmpty()) TailPathText(dir, fontSize = 10.5.sp, color = Tok.muted)
             }
             if (isImagePath(f.path)) {
-                Text("img", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp)
+                Text("img", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp))
             } else {
                 DiffStatText(f.adds, f.dels, fontSize = 11.sp)
             }

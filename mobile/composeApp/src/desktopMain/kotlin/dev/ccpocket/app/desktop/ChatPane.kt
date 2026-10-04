@@ -955,14 +955,14 @@ private fun EmptyChat(model: DesktopModel) {
                 // says out loud what the quick path decides FOR you, so nothing here is a silent default
                 Text(
                     stringResource(Res.string.chat_start_defaults_note),
-                    color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                    color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
             }
             }
             Row(Modifier.fillMaxWidth().padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Key("⏎"); Text(stringResource(Res.string.key_send), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
-                Key("⇧⏎"); Text(stringResource(Res.string.key_newline), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+                Key("⏎"); Text(stringResource(Res.string.key_send), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp))
+                Key("⇧⏎"); Text(stringResource(Res.string.key_newline), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp))
             }
             // ONE inline status line — never a dialog: whatever went wrong, the text is still in the field
             // above it and the fix is to press ⏎ again.
@@ -1068,7 +1068,7 @@ private fun StarterProjectPopover(
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp),
                     )
                 }
-                if (checked) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 14.sp)
+                if (checked) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 14.sp, style = tightCenter(14.sp))
             }
         }
         Row(
@@ -1078,9 +1078,9 @@ private fun StarterProjectPopover(
         ) {
             Text(
                 stringResource(Res.string.new_task_browse_other), color = Tok.tx, fontFamily = Dk.ui,
-                fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f),
+                fontSize = 14.sp, fontWeight = FontWeight.Medium, style = tightCenter(14.sp), modifier = Modifier.weight(1f),
             )
-            Text("›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 17.sp)
+            Text("›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 17.sp, style = tightCenter(17.sp))
         }
     }
 }
@@ -1104,9 +1104,10 @@ private fun StarterAgentPopover(available: List<AgentKind>, selected: AgentKind,
                 Text(
                     agentName(a), color = if (a == selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui,
                     fontSize = 13.5.sp, fontWeight = if (a == selected) FontWeight.SemiBold else FontWeight.Medium,
+                    style = tightCenter(13.5.sp),
                     modifier = Modifier.weight(1f),
                 )
-                if (a == selected) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp)
+                if (a == selected) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp))
             }
         }
     }
@@ -1491,10 +1492,10 @@ private fun MessageRow(
         } }
         is ChatItem.Assistant -> CopyableBlock(item.text) { MarkdownText(item.text, Tok.tx) }
         is ChatItem.Thinking -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text("💭", fontSize = 12.sp)
+            Text("💭", fontSize = 12.sp, style = tightCenter(12.sp))
             Text(
                 item.seconds?.let { stringResource(Res.string.thought_for, it) } ?: stringResource(Res.string.thinking_streaming),
-                color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp),
             )
         }
         // sub-agent (Task/Agent) runs get the shared dense card (issue #77 / chat-cards handoff):
@@ -1572,7 +1573,7 @@ private fun MessageRow(
         // a live turn's end: quiet ✓ divider so "finished" stays visible after the caret stops blinking
         is ChatItem.TurnEnded -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))
-            Text("✓ " + stringResource(Res.string.turn_done_marker) + (item.seconds?.let { "  ·  ${turnDurLabel(it)}" } ?: ""), color = Tok.ok, fontFamily = Dk.mono, fontSize = 11.sp)
+            Text("✓ " + stringResource(Res.string.turn_done_marker) + (item.seconds?.let { "  ·  ${turnDurLabel(it)}" } ?: ""), color = Tok.ok, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp))
             Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))
         }
     }
@@ -1655,10 +1656,12 @@ fun ToolRow(
             Text(
                 name, color = Tok.tx, fontFamily = Dk.ui,
                 fontSize = if (inBlock) 13.sp else 12.5.sp, fontWeight = if (inBlock) FontWeight.Bold else FontWeight.SemiBold,
+                style = tightCenter(if (inBlock) 13.sp else 12.5.sp),
                 maxLines = if (inBlock) 1 else Int.MAX_VALUE,
             )
             Text(
                 cmd.lineSequence().first(), color = Tok.tx2, fontFamily = Dk.mono, fontSize = if (inBlock) 12.5.sp else 12.sp,
+                style = tightCenter(if (inBlock) 12.5.sp else 12.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
             if (images.isNotEmpty()) {
@@ -2029,7 +2032,7 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                         Box(Modifier.size(5.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent))
                         Text(
                             stringResource(Res.string.composer_uploading, active, model.pendingFiles.size),
-                            color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
+                            color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp),
                         )
                         Spacer(Modifier.weight(1f))
                     } else if (compressing) {
@@ -2041,16 +2044,16 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                         )
                         Spacer(Modifier.weight(1f))
                     }
-                    Key("⏎"); Text(stringResource(Res.string.key_send), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
-                    Key("⇧⏎"); Text(stringResource(Res.string.key_newline), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
-                    if (model.streaming) { Key("esc"); Text(stringResource(Res.string.key_stop), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp) }
+                    Key("⏎"); Text(stringResource(Res.string.key_send), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp))
+                    Key("⇧⏎"); Text(stringResource(Res.string.key_newline), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp))
+                    if (model.streaming) { Key("esc"); Text(stringResource(Res.string.key_stop), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp)) }
                     // CDP: relaunch Dia with the debug port — a small pill at the far right of the hint row,
                     // directly under the send button (outside the input box). Confirm popover anchors above it.
                     if (diaSupported) {
                         Spacer(Modifier.weight(1f))
                         diaStatus?.let { msg ->
                             LaunchedEffect(msg) { delay(3500); diaStatus = null } // auto-dismiss the last result
-                            Text(msg, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(msg, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Box {
                             Row(
@@ -2137,10 +2140,10 @@ private fun SlashMenu(commands: List<SlashCommand>, selected: Int, onPick: (Slas
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("/${cmd.name}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
-                cmd.argumentHint?.let { Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1) }
+                Text("/${cmd.name}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(12.5.sp))
+                cmd.argumentHint?.let { Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp), maxLines = 1) }
                 Text(
-                    cmd.description, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
+                    cmd.description, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp),
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
                 Text(
@@ -2152,7 +2155,7 @@ private fun SlashMenu(commands: List<SlashCommand>, selected: Int, onPick: (Slas
                             CommandSource.SKILL -> Res.string.cmd_source_skill
                         },
                     ),
-                    color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp,
+                    color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp),
                 )
             }
         }
@@ -2200,11 +2203,11 @@ private fun FileMenu(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     // folders lead with a caret + trailing separator, so "drill in" reads before the tap
-                    Text(if (entry.isDir) "▸" else " ", color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
+                    Text(if (entry.isDir) "▸" else " ", color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp, style = tightCenter(12.sp))
                     Text(
                         entry.name + if (entry.isDir) sep.toString() else "",
                         color = if (entry.isDir) Tok.tx else Tok.tx2,
-                        fontFamily = Dk.mono, fontSize = 12.5.sp,
+                        fontFamily = Dk.mono, fontSize = 12.5.sp, style = tightCenter(12.5.sp),
                         fontWeight = if (entry.isDir) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )
@@ -2305,10 +2308,10 @@ private fun DesktopSentFileChip(f: SentFile) {
             Modifier.size(28.dp).clip(RoundedCornerShape(7.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(7.dp)),
             contentAlignment = Alignment.Center,
         ) { Icon(glyphFor(fileGlyphKind(f.name)), null, tint = Tok.tx2, modifier = Modifier.size(16.dp)) }
-        Text(f.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(fmtSize(f.size), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1)
+        Text(f.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 13.sp, style = tightCenter(13.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(fmtSize(f.size), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp), maxLines = 1)
         Text(
-            "@${f.path}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.5.sp,
+            "@${f.path}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
         )
     }
@@ -2328,10 +2331,10 @@ private fun DesktopSentVideoThumb(f: SentFile, onOpen: () -> Unit) {
             Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(f.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(fmtSize(f.size), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1)
+            Text(f.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 13.sp, style = tightCenter(13.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(fmtSize(f.size), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp), maxLines = 1)
             Text(
-                "@${f.path}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.5.sp,
+                "@${f.path}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
             )
         }
@@ -2379,7 +2382,7 @@ private fun PendingImagesRow(model: DesktopModel) {
                     .border(1.dp, if (img.state == ImgState.Rejected) Tok.danger else Tok.hair, RoundedCornerShape(8.dp)),
             ) {
                 if (img.state == ImgState.Compressing) {
-                    Text("…", color = Tok.muted, fontSize = 16.sp, modifier = Modifier.align(Alignment.Center))
+                    Text("…", color = Tok.muted, fontSize = 16.sp, style = tightCenter(16.sp), modifier = Modifier.align(Alignment.Center))
                 } else {
                     // decode AFTER compression only (Ready/Rejected bytes are bounded; originals may be huge)
                     val thumb = remember(img.id, img.state) {

@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
@@ -55,7 +56,7 @@ fun LoadEarlierRow(fading: Boolean, fontFamily: FontFamily? = null) {
         )
         Text(
             stringResource(Res.string.history_loading_earlier),
-            color = Tok.muted, fontSize = 12.5.sp, fontFamily = fontFamily, maxLines = 1,
+            color = Tok.muted, fontSize = 12.5.sp, style = tightCenter(12.5.sp), fontFamily = fontFamily, maxLines = 1,
         )
     }
 }
@@ -91,7 +92,7 @@ fun EarlierMessagesSeam(gen: Int, monoFamily: FontFamily = FontFamily.Monospace)
             Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))
             Text(
                 stringResource(Res.string.history_earlier_seam),
-                color = Tok.muted, fontFamily = monoFamily, fontSize = 10.5.sp,
+                color = Tok.muted, fontFamily = monoFamily, fontSize = 10.5.sp, style = tightCenter(10.5.sp),
                 letterSpacing = 0.6.sp, maxLines = 1,
             )
             Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))

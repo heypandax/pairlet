@@ -63,7 +63,7 @@ import dev.ccpocket.app.resources.rs_tests_only
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
-import dev.ccpocket.app.ui.TightCenter
+import dev.ccpocket.app.theme.tightCenter
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -131,7 +131,7 @@ internal fun ApprovalTimeoutTerminal(onDismiss: () -> Unit) {
                 .clickable(role = Role.Button, onClick = onDismiss)
                 .heightIn(min = Metric.touch).padding(horizontal = Metric.gap),
             contentAlignment = Alignment.Center,
-        ) { Text(stringResource(Res.string.dismiss), color = Tok.accent, style = TypeRole.action.merge(TightCenter)) }
+        ) { Text(stringResource(Res.string.dismiss), color = Tok.accent, style = TypeRole.action.merge(tightCenter(TypeRole.action.fontSize))) }
     }
 }
 
@@ -171,7 +171,7 @@ private fun DecisionTile(
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            stringResource(label), color = ink, style = TypeRole.action.merge(TightCenter),
+            stringResource(label), color = ink, style = TypeRole.action.merge(tightCenter(TypeRole.action.fontSize)),
             maxLines = 2, overflow = TextOverflow.Ellipsis,
         )
         // the scope sublabel is the daemon's `rule` verbatim — absent rule, absent sublabel
@@ -256,7 +256,7 @@ internal fun RetrySaferBody(
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
             ) {
                 Icon(Icons.Rounded.Check, null, tint = if (on) Tok.accent else Tok.muted, modifier = Modifier.size(14.dp))
-                Text(c, color = if (on) Tok.tx else Tok.tx2, style = TypeRole.body)
+                Text(c, color = if (on) Tok.tx else Tok.tx2, style = TypeRole.body.merge(tightCenter(TypeRole.body.fontSize)))
             }
         }
         BasicTextField(

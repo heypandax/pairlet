@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.protocol.AgentKind
 
 /**
@@ -165,7 +166,7 @@ fun AgentTag(agent: AgentKind, small: Boolean = true) {
         AgentGlyph(agent, c, if (small) 12 else 14)
         // trim the text's asymmetric ascent/descent so the glyph optically centers against the letters;
         // single-line + ellipsis so a squeezed chip degrades gracefully instead of wrapping the name
-        Text(agentName(agent), color = c, fontSize = if (small) 10.5.sp else 12.sp, fontWeight = FontWeight.SemiBold, style = TightCenter, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(agentName(agent), color = c, fontSize = if (small) 10.5.sp else 12.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(if (small) 10.5.sp else 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -179,7 +180,7 @@ fun AgentTagCompact(agent: AgentKind) {
     val c = agentColor(agent)
     Text(
         agentAbbrev(agent), color = c, fontSize = 9.5.sp, fontWeight = FontWeight.Bold,
-        style = TightCenter, maxLines = 1,
+        style = tightCenter(9.5.sp), maxLines = 1,
         modifier = Modifier
             .background(c.agentTintFill(), RoundedCornerShape(5.dp))
             .border(1.dp, c.agentTintBorder(), RoundedCornerShape(5.dp))

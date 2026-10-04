@@ -345,10 +345,10 @@ private fun StepHead(n: Int, title: String) {
         ) {
             Text(
                 n.toString(), color = Tok.accent,
-                style = TypeRole.captionMono.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                style = TypeRole.captionMono.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold).merge(tightCenter(12.sp)),
             )
         }
-        Text(title, color = Tok.tx, style = TypeRole.rowTitle, modifier = Modifier.weight(1f))
+        Text(title, color = Tok.tx, style = TypeRole.rowTitle.merge(tightCenter(TypeRole.rowTitle.fontSize)), modifier = Modifier.weight(1f))
     }
 }
 

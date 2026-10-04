@@ -436,6 +436,7 @@ fun RecordingBar(
                     stringResource(Res.string.transcribing),
                     color = Tok.tx2,
                     fontSize = 13.sp,
+                    style = tightCenter(13.sp),
                     modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
                 )
             } else {
@@ -443,7 +444,7 @@ fun RecordingBar(
                 Waveform(levels, frozen = false, modifier = Modifier.weight(1f))
             }
             Text(
-                fmtElapsed(elapsedMs), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp,
+                fmtElapsed(elapsedMs), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp, style = tightCenter(12.5.sp),
             )
         }
         val doneLabel = stringResource(Res.string.done)

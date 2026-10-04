@@ -33,6 +33,7 @@ import dev.ccpocket.app.data.parseUnifiedDiff
 import dev.ccpocket.app.data.staleDaemon
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.DiffEmptyState
 import dev.ccpocket.app.ui.DiffView
 import dev.ccpocket.app.ui.TruncatedBanner
@@ -120,7 +121,7 @@ fun GitStatusChip(letter: String, chip: GitChip, dense: Boolean = false) {
             .clip(RoundedCornerShape(5.dp)).background(bg),
         contentAlignment = Alignment.Center,
     ) {
-        Text(letter.take(1), color = fg, fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text(letter.take(1), color = fg, fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(11.sp))
     }
 }
 
@@ -211,7 +212,7 @@ fun GitErrorStrip(title: String, detail: String?, amber: Boolean, onDismiss: () 
                 .border(1.3.dp, ink, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Text("!", color = ink, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
+            Text("!", color = ink, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(10.5.sp))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, color = ink, fontSize = 13.sp, lineHeight = 17.5.sp, fontWeight = FontWeight.SemiBold)
@@ -228,6 +229,6 @@ fun GitErrorStrip(title: String, detail: String?, amber: Boolean, onDismiss: () 
         Box(
             Modifier.size(24.dp).clip(RoundedCornerShape(999.dp)).clickable(onClick = onDismiss),
             contentAlignment = Alignment.Center,
-        ) { Text("×", color = Tok.muted, fontSize = 14.sp) }
+        ) { Text("×", color = Tok.muted, fontSize = 14.sp, style = tightCenter(14.sp)) }
     }
 }

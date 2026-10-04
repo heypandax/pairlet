@@ -84,7 +84,7 @@ fun ChangedFilesSheet(repo: PocketRepository, onOpen: (String) -> Unit, onDismis
     PocketSheet(dismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp, top = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(Res.string.files_title), color = Tok.tx, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(Res.string.files_title), color = Tok.tx, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(22.sp))
                 Box(Modifier.weight(1f))
                 if (view == FilesView.CHANGES && repo.changedFiles.isNotEmpty()) {
                     FilesSummaryText(repo.changedFiles, fontSize = 12.sp)
@@ -450,6 +450,6 @@ private fun ExportWaitingRow() {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         CircularProgressIndicator(Modifier.size(14.dp), color = Tok.tx2, strokeWidth = 2.dp)
-        Text(stringResource(Res.string.file_export_waiting), color = Tok.muted, fontSize = 12.sp)
+        Text(stringResource(Res.string.file_export_waiting), color = Tok.muted, fontSize = 12.sp, style = tightCenter(12.sp))
     }
 }

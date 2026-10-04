@@ -435,7 +435,7 @@ private fun HelpStep(number: Int, text: String) {
             Modifier.size(24.dp).clip(RoundedCornerShape(8.dp)).background(Tok.raised),
             contentAlignment = Alignment.Center,
         ) {
-            Text(number.toString(), color = Tok.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(number.toString(), color = Tok.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, style = tightCenter(11.sp))
         }
         Text(
             text,
@@ -484,6 +484,7 @@ private fun HelpAction(label: String, icon: ImageVector, primary: Boolean, onCli
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            style = tightCenter(12.5.sp),
             modifier = Modifier.padding(start = 7.dp),
         )
     }

@@ -118,9 +118,9 @@ fun TrayPopover(
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 CcGlyphMark(Tok.tx, 16.dp)
-                Text("Pairlet", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                Text("Pairlet", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, style = tightCenter(13.5.sp), fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
-                Text(trayStatsLine(computers, sessions), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                Text(trayStatsLine(computers, sessions), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
                 Icon(
                     Icons.Outlined.Settings, stringResource(Res.string.settings_title), tint = Tok.tx2,
                     // Settings lives in the main window, so the gear surfaces it too (from the menu-bar
@@ -178,7 +178,7 @@ fun TrayPopover(
                         .clickable(onClick = openMain).padding(horizontal = 8.dp, vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(stringResource(Res.string.tray_open_app), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(Res.string.tray_open_app), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp), fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.weight(1f))
                     if (keyHint) Key("⌘⏎")
                 }
@@ -280,7 +280,7 @@ private fun MachineChip(name: String, os: DkOs) {
 private fun TrayEmpty(icon: androidx.compose.ui.graphics.vector.ImageVector?, tint: androidx.compose.ui.graphics.Color, text: String) {
     Row(Modifier.padding(vertical = 10.dp, horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (icon != null) Icon(icon, null, tint = tint, modifier = Modifier.size(15.dp)) else Dot(tint, 6.dp)
-        Text(text, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp)
+        Text(text, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp))
     }
 }
 
@@ -297,7 +297,7 @@ private fun TrayApprovalRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> U
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Text(
-                a.tool, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                a.tool, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp), fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
             MachineChip(a.machine, a.os)
@@ -347,11 +347,11 @@ private fun TrayRunning(title: String, computer: String, os: DkOs, elapsed: Stri
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         PulseDot(Tok.ok, 6.dp)
-        Text(title, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(title, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, style = tightCenter(12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         MachineChip(computer, os)
         if (elapsed != null) {
             Text(
-                elapsed, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1,
+                elapsed, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp), maxLines = 1,
                 textAlign = TextAlign.End, modifier = Modifier.widthIn(min = 30.dp),
             )
         }

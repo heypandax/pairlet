@@ -318,7 +318,7 @@ private fun TerminalPanelView(
             TermGlyphButton(menuOpen, size = 24.dp) { onOpenMenu(TermMenuAnchor.PANEL) }
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 Text(
-                    middleTruncatedPath(tilde(tp.cwd ?: "")), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp,
+                    middleTruncatedPath(tilde(tp.cwd ?: "")), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                 )
                 tp.branch?.let { TermBranchChip(it) }
@@ -378,14 +378,14 @@ private fun TerminalCollapsedStrip(
             TermGlyphButton(menuOpen, size = 20.dp) { onOpenMenu(TermMenuAnchor.STRIP) }
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 Text(
-                    middleTruncatedPath(tilde(tp.cwd ?: "")), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp,
+                    middleTruncatedPath(tilde(tp.cwd ?: "")), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                 )
                 tp.branch?.let { TermBranchChip(it) }
             }
             if (tp.engine?.running == true) {
                 PulseDot(Tok.ok, 6.dp)
-                Text(stringResource(Res.string.term_one_running), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                Text(stringResource(Res.string.term_one_running), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
             }
             Icon(Icons.Rounded.KeyboardArrowUp, stringResource(Res.string.term_restore), tint = Tok.muted, modifier = Modifier.size(15.dp))
         }
@@ -544,7 +544,7 @@ private fun TermMenuRow(
         ) { icon(if (primary) Tok.accent else Tok.tx2) }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(title, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(title, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(13.sp))
                 if (primary) Icon(Icons.Rounded.Check, null, tint = Tok.accent, modifier = Modifier.size(14.dp))
             }
             Text(sub, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)

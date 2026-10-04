@@ -227,7 +227,7 @@ fun ScheduleSendSheet(
             // clock glyph + title (design: 19px glyph, 18sp/700)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 Icon(ClockGlyph, null, tint = Tok.tx, modifier = Modifier.size(19.dp))
-                Text(stringResource(Res.string.schedule_send_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(Res.string.schedule_send_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold, style = tightCenter(18.sp))
             }
             // the staged message as a quote (left hairline rule), so what's being scheduled is unambiguous
             Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 16.dp).height(IntrinsicSize.Min)) {
@@ -264,12 +264,12 @@ fun ScheduleSendSheet(
                 ) {
                     Text(
                         stringResource(Res.string.schedule_custom_time),
-                        color = if (customOpen) Tok.tx else Tok.tx2, fontSize = 15.5.sp, modifier = Modifier.weight(1f),
+                        color = if (customOpen) Tok.tx else Tok.tx2, fontSize = 15.5.sp, style = tightCenter(15.5.sp), modifier = Modifier.weight(1f),
                     )
                     if (customOpen) {
                         Text(
                             wheel.dayLabel(startOfToday), color = Tok.accent, fontSize = 13.sp,
-                            fontFamily = FontFamily.Monospace, modifier = Modifier.padding(end = 6.dp),
+                            fontFamily = FontFamily.Monospace, style = tightCenter(13.sp), modifier = Modifier.padding(end = 6.dp),
                         )
                     }
                     Icon(
@@ -314,6 +314,7 @@ private fun ScheduleRepeatRow(daily: Boolean, resolvedHm: String, onToggle: (Boo
                         Text(
                             stringResource(Res.string.schedule_repeat_caption, resolvedHm),
                             color = Tok.accent, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                            style = tightCenter(12.sp),
                         )
                     }
                 }
@@ -453,7 +454,7 @@ private fun ScheduleSheetFooter(
         Text(
             if (daily) stringResource(Res.string.schedule_confirm_daily, resolvedHm)
             else stringResource(Res.string.schedule_confirm, if (customOpen) "$dayLabel, $resolvedHm" else resolvedHm),
-            color = Tok.base, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+            color = Tok.base, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(16.sp),
         )
     }
     Box(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
@@ -526,7 +527,7 @@ fun AgentRepairBanner(repo: PocketRepository) {
                     .clickable { repo.startAgentRepair() }.padding(horizontal = 13.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(stringResource(Res.string.repair_button), color = Tok.base, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(Res.string.repair_button), color = Tok.base, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(13.5.sp))
             }
         }
     }
@@ -547,7 +548,7 @@ private fun RowScope.LimitOfferContent(repo: PocketRepository, offer: PocketRepo
             .clickable { repo.scheduleAutoContinue() }.padding(horizontal = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(stringResource(Res.string.limit_autocontinue), color = Tok.base, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(Res.string.limit_autocontinue), color = Tok.base, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(13.5.sp))
     }
 }
 
@@ -557,10 +558,10 @@ private fun RowScope.LimitConfirmedContent(repo: PocketRepository, confirmed: Po
     Icon(CheckGlyph, null, tint = Tok.ok, modifier = Modifier.size(17.dp))
     Text(
         stringResource(Res.string.limit_confirmed, hhmm(confirmed.resetAtMs + PocketRepository.LIMIT_RESUME_MARGIN_MS)),
-        color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+        color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(13.5.sp), modifier = Modifier.weight(1f),
     )
     Text(
-        stringResource(Res.string.limit_undo), color = Tok.accent, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold,
+        stringResource(Res.string.limit_undo), color = Tok.accent, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(13.5.sp),
         modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { repo.undoAutoContinue() }.padding(horizontal = 8.dp, vertical = 8.dp),
     )
 }
@@ -683,6 +684,7 @@ private fun ScheduleRow(s: ScheduleInfo, now: Long, onCancel: () -> Unit) {
                     Text(
                         stringResource(Res.string.schedule_last_failed, reason),
                         color = Tok.danger, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                        style = tightCenter(11.sp),
                     )
                 }
             }
@@ -764,6 +766,7 @@ private fun DailyBadge(r: ScheduleRepeat) {
         Text(
             repeatLabel(r).uppercase(), color = Tok.accent, fontSize = 10.sp,
             fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace, letterSpacing = 0.3.sp,
+            style = tightCenter(10.sp),
         )
     }
 }

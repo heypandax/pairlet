@@ -44,6 +44,7 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.TerminalEntry
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -151,7 +152,7 @@ private fun TerminalRow(e: TerminalEntry) {
             else -> "exit ${r.exitCode}"
         }
         Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(status, color = if (bad) Tok.danger else Tok.ok, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            Text(status, color = if (bad) Tok.danger else Tok.ok, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = tightCenter(11.sp), modifier = Modifier.weight(1f))
             if (body.isNotEmpty()) CopyChip(body)
         }
     }

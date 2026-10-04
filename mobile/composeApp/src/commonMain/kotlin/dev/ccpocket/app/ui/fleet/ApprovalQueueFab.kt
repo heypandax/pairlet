@@ -45,6 +45,7 @@ import dev.ccpocket.app.resources.approval_fab_a11y
 import dev.ccpocket.app.resources.approval_fab_label
 import dev.ccpocket.app.resources.approval_fab_refreshing
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -105,7 +106,7 @@ fun ApprovalQueueFab(
                 }
             }
             Spacer(Modifier.width(8.dp))
-            Text(label, color = Tok.tx, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(label, color = Tok.tx, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(13.sp))
             Spacer(Modifier.width(8.dp))
             Box(
                 Modifier.widthIn(min = 24.dp).height(24.dp).clip(RoundedCornerShape(8.dp))
@@ -119,6 +120,7 @@ fun ApprovalQueueFab(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
+                    style = tightCenter(11.sp),
                 )
             }
         }
