@@ -61,10 +61,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
@@ -93,10 +91,6 @@ private val Indigo get() = Tok.info
 
 internal const val POCKET_SHEET_DRAG_HANDLE_TAG = "pocket-sheet-drag-handle"
 
-/** Trims a single line's leading and centers the glyph in it — fixes text riding high when vertically centered. */
-internal val TightCenter = TextStyle(
-    lineHeightStyle = LineHeightStyle(alignment = LineHeightStyle.Alignment.Center, trim = LineHeightStyle.Trim.Both),
-)
 val MODES = listOf(
     ModeInfo(PermissionMode.DEFAULT, Res.string.mode_default_short, Res.string.mode_default_label, "default", Tok.tx2, Res.string.mode_default_detail),
     ModeInfo(PermissionMode.ACCEPT_EDITS, Res.string.mode_accept_short, Res.string.mode_accept_label, "acceptEdits", Tok.ok, Res.string.mode_accept_detail),
@@ -385,7 +379,7 @@ fun SessionDefaultsChip(agent: AgentKind, mode: PermissionMode, modifier: Modifi
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         AgentGlyph(agent, agentColor(agent), 13)
-        Text(label, color = color, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, style = TightCenter)
+        Text(label, color = color, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, style = tightCenter(11.5.sp))
         Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted, modifier = Modifier.size(15.dp))
     }
 }

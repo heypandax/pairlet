@@ -596,9 +596,9 @@ internal fun ModelChip(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                // TightCenter: mono ascent/descent are asymmetric, so a raw Text rides high inside the
-                // pill even under CenterVertically — same trim the agent tags and mode chips use
-                label, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = TightCenter,
+                // tightCenter: mono ascent/descent are asymmetric, so a raw Text rides high inside the
+                // pill even under CenterVertically — same line box the agent tags and mode chips use
+                label, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = tightCenter(11.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = labelMax),
             )
             Spacer(Modifier.width(5.dp))

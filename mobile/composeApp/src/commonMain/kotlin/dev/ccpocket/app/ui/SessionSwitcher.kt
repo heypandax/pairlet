@@ -49,6 +49,7 @@ import dev.ccpocket.app.data.SessionWorkingSet
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -100,10 +101,10 @@ fun SessionStackChip(count: Int, attention: Boolean, flat: Boolean = false, onCl
                 SessionStackGlyph(Tok.tx2, Modifier.size(13.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    // TightCenter for the same reason the model chip needs it: mono ascent/descent are
+                    // tightCenter for the same reason the model chip needs it: mono ascent/descent are
                     // asymmetric, so a raw Text rides high inside the pill even under CenterVertically
                     if (count > 9) "9+" else count.toString(),
-                    color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = TightCenter,
+                    color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = tightCenter(11.sp),
                     maxLines = 1,
                 )
             }

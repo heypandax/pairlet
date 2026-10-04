@@ -85,6 +85,7 @@ import dev.ccpocket.app.resources.new_task_send_failed
 import dev.ccpocket.app.resources.new_task_timeout
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.theme.TypeRole
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
@@ -273,7 +274,7 @@ private fun TaskChip(
             Text(
                 label, color = ink,
                 fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
-                fontSize = if (mono) 11.sp else 12.sp, fontWeight = FontWeight.Medium, style = TightCenter,
+                fontSize = if (mono) 11.sp else 12.sp, fontWeight = FontWeight.Medium, style = tightCenter(if (mono) 11.sp else 12.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = labelMax),
             )

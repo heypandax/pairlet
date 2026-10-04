@@ -322,7 +322,7 @@ private fun toggle(current: Set<String>, label: String, multi: Boolean): Set<Str
 @Composable
 internal fun QBadge(size: androidx.compose.ui.unit.Dp) {
     Box(Modifier.size(size).clip(CircleShape).background(A12), contentAlignment = Alignment.Center) {
-        Text("?", color = Tok.accent, fontSize = (size.value * 0.56f).sp, fontWeight = FontWeight.Bold, style = TightCenter)
+        Text("?", color = Tok.accent, fontSize = (size.value * 0.56f).sp, fontWeight = FontWeight.Bold, style = tightCenter((size.value * 0.56f).sp))
     }
 }
 
