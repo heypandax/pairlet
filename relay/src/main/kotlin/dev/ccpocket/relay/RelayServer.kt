@@ -206,7 +206,11 @@ class RelayServer(
 
     private suspend fun DefaultWebSocketServerSession.handleDaemon() {
         val ip = call.clientIp()
-        if (!limiter.check("ws:ip:$ip", 10, 60_000)) { logConn("rate_limited", ip); return closeWith("rate_limited") }
+        // Per ROUTE, and refunded once the socket authenticates (audit M5): the bucket bounds unauthenticated
+        // churn. Shared and charged for every socket, two daemons on one machine superseding each other used
+        // it up in seconds and the phone on the same Wi-Fi was then refused too.
+        val wsKey = "ws:daemon:ip:$ip"
+        if (!limiter.check(wsKey, 10, 60_000)) { logConn("rate_limited", ip); return closeWith("rate_limited") }
 
         val hello = (receiveHandshake<DaemonHello>() ?: return handshakeTimedOut(ip)).value
             ?: run { logConn("expected_hello", ip); return closeWith("expected_hello") }
@@ -223,7 +227,7 @@ class RelayServer(
                 logConn("auth_failed:${r.code}", ip, account = hello.accountId)
                 return closeWith("auth_failed")
             }
-            is DaemonAuthenticator.Result.Ok -> r.accountId
+            is DaemonAuthenticator.Result.Ok -> r.accountId.also { limiter.refund(wsKey) }
         }
 
         val conn = conn(account, Role.DAEMON, null, daemonProtoV = hello.protoV)
@@ -450,7 +454,8 @@ class RelayServer(
 
     private suspend fun DefaultWebSocketServerSession.handleDevice() {
         val ip = call.clientIp()
-        if (!limiter.check("ws:ip:$ip", 10, 60_000)) { logConn("rate_limited", ip); return closeWith("rate_limited") }
+        val wsKey = "ws:device:ip:$ip" // per route, refunded on success — see handleDaemon
+        if (!limiter.check(wsKey, 10, 60_000)) { logConn("rate_limited", ip); return closeWith("rate_limited") }
 
         val hello = (receiveHandshake<DeviceHello>() ?: return handshakeTimedOut(ip)).value
             ?: run { logConn("expected_hello", ip); return closeWith("expected_hello") }
@@ -461,7 +466,7 @@ class RelayServer(
                 logConn("auth_failed:${r.code}", ip, deviceId = hello.deviceId)
                 return closeWith("auth_failed")
             }
-            is DeviceAuthenticator.Result.Ok -> r.accountId
+            is DeviceAuthenticator.Result.Ok -> r.accountId.also { limiter.refund(wsKey) }
         }
         // a bridge socket is presence-invisible (issue #91): it never flips PeerPresence and never
         // counts toward the "is anyone attached" gates — else an always-on bot mutes every push and
