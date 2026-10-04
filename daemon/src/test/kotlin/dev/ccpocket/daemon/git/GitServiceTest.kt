@@ -966,7 +966,37 @@ class GitServiceTest {
         }
     }
 
+    @Test
+    fun the_worktree_list_answers_within_its_status_budget_even_when_status_hangs() {
+        assumeTrue(gitAvailable() && !isWindows)
+        val dir = repo()
+        runBlocking { service().addWorktree(AddWorktree("c1", dir.toString(), "feat/x", createBranch = true), dir) }
+        val pidFile = tmp.resolve("fsmonitor-children.pid")
+        val monitor = tmp.resolve("slow-fsmonitor.sh")
+        monitor.writeText("#!/bin/sh\nsleep 60 &\necho \$! >> '$pidFile'\nwait\n")
+        assertTrue(monitor.toFile().setExecutable(true))
+        sh(dir, "config", "--local", "core.fsmonitor", monitor.toString())
+        // production local timeout (30 s): the budget, not the per-process bound, must be what answers
+        val svc = GitService(nowMs = { clock }, worktreeStatusBudgetMs = 500)
+        try {
+            val started = System.nanoTime()
+            val list = within(10_000) { runBlocking { svc.listWorktrees(ListWorktrees("c1", dir.toString(), withStatus = true), dir) } }
+            assertNotNull(list, "the 500 ms budget did not bound the call: cancelled scans still waited out git")
+            assertTrue(list.ok, list.error)
+            assertEquals(2, list.worktrees.size)
+            assertTrue(list.worktrees.all { it.dirty == null }, "unfinished scans degrade to unknown")
+            assertTrue(System.nanoTime() - started < TimeUnit.SECONDS.toNanos(10))
+            // the abandoned scans were stopped, not left running out their 30 s
+            pidsFrom(pidFile).forEach { assertTrue(gone(it), "fsmonitor child $it outlived the cancelled scan") }
+        } finally {
+            pidsFrom(pidFile).forEach(::kill)
+        }
+    }
+
     // ------------------------------------------------------------- helpers
+
+    private fun pidsFrom(file: Path): List<Long> =
+        runCatching { file.readText().lines().mapNotNull { it.trim().toLongOrNull() } }.getOrDefault(emptyList())
 
     private val isWindows = System.getProperty("os.name").lowercase().contains("win")
 

@@ -38,9 +38,11 @@ import dev.ccpocket.protocol.RemoveWorktree
 import dev.ccpocket.protocol.WorktreeEntry
 import dev.ccpocket.protocol.WorktreeList
 import dev.ccpocket.protocol.gitStderrHighlight
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Files
@@ -764,11 +766,23 @@ class GitService(
                 // readers NOT tied to this scope: see ChildOutput for why an `async` here could wedge forever
                 val out = ChildOutput(proc.inputStream, DIFF_CAP)
                 val err = ChildOutput(proc.errorStream, DIFF_CAP)
-                val finished = proc.waitFor(timeoutMs.coerceIn(1_000, MAX_TIMEOUT_MS), TimeUnit.MILLISECONDS)
+                val bound = timeoutMs.coerceIn(1_000, MAX_TIMEOUT_MS)
+                // A READ is interruptible: a cancelled caller stops waiting at once and takes the process down
+                // with it — the worktree scan's budget cancels its laggards and must not then sit out their
+                // 30 s. A write keeps the old semantics and runs to its own end: a push the user tapped is not
+                // aborted halfway because the request that started it went away.
+                val finished = if (!readOnly) proc.waitFor(bound, TimeUnit.MILLISECONDS) else try {
+                    runInterruptible { proc.waitFor(bound, TimeUnit.MILLISECONDS) }
+                } catch (c: CancellationException) {
+                    ProcessTree.terminateInBackground(proc)
+                    throw c
+                }
                 if (!finished) ProcessTree.terminate(proc) // SIGTERM first: git removes its index.lock
                 val (stdout, stderr) = ChildOutput.both(out, err, READ_DRAIN_MS)
                 if (!finished) Exec(-1, stdout, stderr, timedOut = true, failure = "git took too long and was stopped")
                 else Exec(proc.exitValue(), stdout, stderr)
+            } catch (c: CancellationException) {
+                throw c
             } catch (e: Exception) {
                 Diagnostics.report(ErrorPath.GIT, Stage.SPAWN, ErrorCode.SPAWN_FAILED, e)
                 log.warn("git ${args.firstOrNull()} failed to start", e)

@@ -30,4 +30,9 @@ internal object ProcessTree {
         }
         tree.filter { it.isAlive }.forEach { runCatching { it.destroyForcibly() } }
     }
+
+    /** [terminate] off the caller's thread — for a cancelled caller that must return now, not after the grace. */
+    fun terminateInBackground(proc: Process, graceMs: Long = GRACE_MS) {
+        Thread({ terminate(proc, graceMs) }, "process-tree-stop").apply { isDaemon = true }.start()
+    }
 }
