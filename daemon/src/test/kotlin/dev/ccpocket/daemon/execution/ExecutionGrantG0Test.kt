@@ -368,6 +368,29 @@ class ExecutionGrantG0Test {
     }
 
     @Test
+    fun an_unloaded_execution_plane_loads_on_the_first_execution_frame(): Unit = runBlocking {
+        val e = establish()
+        // a confirmed link is evidence of use on its own: the attach-time check would have loaded the planes
+        val usage = ExecutionUsage(
+            grantStore = File(targetDir, "nope-grants.json"), runRoot = File(targetDir, "nope-runs"),
+            clientLinks = File(targetDir, "nope-links.json"), clientLinkSecrets = File(targetDir, "nope-secrets.json"),
+            clientRuns = File(targetDir, "nope-client-runs.json"),
+        )
+        assertEquals("execution_credential", usage.reason(harness.bridges))
+        // …but even if they were not loaded (defensive path), the frame loads them instead of being refused
+        harness.unwirePlane()
+        var installs = 0
+        harness.core.offerExecution(installer = { installs++; harness.wirePlane() }, evidence = { null })
+        assertEquals(0, installs, "no evidence offered → nothing loaded at attach")
+        val (link, secret) = linkOf(e.grantId)
+        val info = assertIs<ExecutionGrantInfo>(exchange(link, secret, listOf(ExecutionGrantQuery(e.grantId))).getOrThrow().single())
+        assertEquals(e.grantId, info.grantId)
+        assertEquals(1, installs)
+        exchange(link, secret, listOf(ExecutionGrantQuery(e.grantId))).getOrThrow()
+        assertEquals(1, installs, "loaded once per process")
+    }
+
+    @Test
     fun execution_link_cannot_issue_review_session_handoff_or_owner_requests(): Unit = runBlocking {
         val e = establish()
         val (link, secret) = linkOf(e.grantId)

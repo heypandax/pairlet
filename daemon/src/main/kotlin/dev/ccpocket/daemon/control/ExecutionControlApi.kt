@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.control
 
+import dev.ccpocket.daemon.DaemonCore
 import dev.ccpocket.daemon.execution.ExecutionFingerprint
 import dev.ccpocket.daemon.execution.ExecutionGrant
 import dev.ccpocket.daemon.execution.ExecutionGrantDraft
@@ -195,6 +196,19 @@ class ExecutionControlDeps(
     val grants: () -> ExecutionGrantStore?,
     /** Source-side client. Null on a build/instance with no execution links configured. */
     val client: () -> ExecutionClient?,
+)
+
+/**
+ * The production deps over a [DaemonCore]: every provider first makes sure the execution planes are
+ * loaded ([DaemonCore.ensureExecution]) — on a machine that had never used remote execution they are not
+ * loaded at attach, and the first authorised `pairlet agent …` call is what loads them. The providers are
+ * only reached AFTER the route's token gate, so an unauthenticated request cannot trigger the load. With
+ * no relay leg (nothing to load them with) the providers return null exactly as before.
+ */
+fun executionControlDepsOf(core: DaemonCore): ExecutionControlDeps = ExecutionControlDeps(
+    target = { core.ensureExecution(); core.executionTarget },
+    grants = { core.ensureExecution(); core.executionGrants },
+    client = { core.ensureExecution(); core.executionClient },
 )
 
 /**
