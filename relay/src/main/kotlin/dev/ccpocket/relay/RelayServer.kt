@@ -76,10 +76,12 @@ import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import dev.ccpocket.protocol.Frame as PocketFrame
@@ -220,30 +222,33 @@ class RelayServer(
         }
 
         val conn = conn(account, Role.DAEMON, null, daemonProtoV = hello.protoV)
-        broker.attachDaemon(conn)?.let { old ->
-            Diagnostics.connection(old.diagnosticId, conn.diagnosticId, ErrorCode.SUPERSEDED)
-            logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
-            runCatching { old.close("superseded") }
-        }
-        // relayProtoV is OUR capability level, the mirror of DaemonHello.protoV (§3.4): the daemon gates its
-        // targeted offer push on it, because an older relay would silently ignore NotifyPush.deviceId and
-        // fan the alert out to the OWNER's phones instead of the addressed contact.
-        sendControl(Attached(Role.DAEMON, account, relayProtoV = PROTO_V_ATTACH_REPLAY_COMPLETE, connectionId = DiagnosticId(conn.diagnosticId)))
-        // re-announce known devices so a daemon that missed a DevicePaired (e.g. offline at redeem)
-        // re-learns them. HEADLESS rows only go to daemons that understand bridges (issue #91): an
-        // older daemon would file the announced key into its FULL-POWER devices.json — a bridge
-        // credential silently escalating to a complete device on daemon downgrade.
-        store.devicesForAccount(account).forEach { d ->
-            if (d.headless && hello.protoV < PROTO_V_HEADLESS) return@forEach
-            broker.controlToDaemon(conn, controlText(DevicePaired(d.deviceId, Codec.b64uEnc(d.devicePubkey))))
-        }
-        // This marker is the replay barrier. The daemon must not infer completion from a timer: a
-        // reconnecting relay may be serving a durable snapshot while the socket is under backpressure.
-        // Sending it through the same control writer after every DevicePaired preserves ordering.
-        broker.controlToDaemon(conn, controlText(DeviceReplayComplete))
-        Diagnostics.connection(conn.diagnosticId)
-        broker.controlToDevices(account, controlText(PeerPresence(true, DiagnosticId(conn.diagnosticId))))
+        // Everything from the attach on sits inside the try (audit M4): a throw between registering the socket
+        // and the read loop (the Attached send meeting a socket the peer already left, the replay's store read
+        // failing) used to skip the finally and leave a ghost daemon that kept every device "online".
         try {
+            broker.attachDaemon(conn)?.let { old ->
+                Diagnostics.connection(old.diagnosticId, conn.diagnosticId, ErrorCode.SUPERSEDED)
+                logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
+                runCatching { old.close("superseded") }
+            }
+            // relayProtoV is OUR capability level, the mirror of DaemonHello.protoV (§3.4): the daemon gates its
+            // targeted offer push on it, because an older relay would silently ignore NotifyPush.deviceId and
+            // fan the alert out to the OWNER's phones instead of the addressed contact.
+            sendControl(Attached(Role.DAEMON, account, relayProtoV = PROTO_V_ATTACH_REPLAY_COMPLETE, connectionId = DiagnosticId(conn.diagnosticId)))
+            // re-announce known devices so a daemon that missed a DevicePaired (e.g. offline at redeem)
+            // re-learns them. HEADLESS rows only go to daemons that understand bridges (issue #91): an
+            // older daemon would file the announced key into its FULL-POWER devices.json — a bridge
+            // credential silently escalating to a complete device on daemon downgrade.
+            store.devicesForAccount(account).forEach { d ->
+                if (d.headless && hello.protoV < PROTO_V_HEADLESS) return@forEach
+                broker.controlToDaemon(conn, controlText(DevicePaired(d.deviceId, Codec.b64uEnc(d.devicePubkey))))
+            }
+            // This marker is the replay barrier. The daemon must not infer completion from a timer: a
+            // reconnecting relay may be serving a durable snapshot while the socket is under backpressure.
+            // Sending it through the same control writer after every DevicePaired preserves ordering.
+            broker.controlToDaemon(conn, controlText(DeviceReplayComplete))
+            Diagnostics.connection(conn.diagnosticId)
+            broker.controlToDevices(account, controlText(PeerPresence(true, DiagnosticId(conn.diagnosticId))))
             for (frame in incoming) when (frame) {
                 // daemon addresses a specific device: [deviceId][payload] -> route payload to it
                 is Frame.Binary -> Wire.unwrapDevice(frame.data)?.let { (deviceId, payload) -> broker.toDevice(account, deviceId, payload) }
@@ -255,14 +260,17 @@ class RelayServer(
             reportReceiveFailure(error)
             throw error
         } finally {
-            Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
-            // "daemon offline" only when THIS socket was still the account's daemon — a superseded socket's
-            // late exit (the daemon reconnected before we noticed the old link die, e.g. after sleep/wake)
-            // arrives AFTER the successor's PeerPresence(true); broadcasting false then would flip every
-            // device to "computer offline" with no later true to recover on (mirrors the device-side guard)
-            if (broker.detachDaemon(conn)) {
-                logConn("detached", conn.ip, account = account)
-                broker.controlToDevices(account, controlText(PeerPresence(false)))
+            // NonCancellable: a cancelled handler must still unregister — the broker lock can suspend
+            withContext(NonCancellable) {
+                Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
+                // "daemon offline" only when THIS socket was still the account's daemon — a superseded socket's
+                // late exit (the daemon reconnected before we noticed the old link die, e.g. after sleep/wake)
+                // arrives AFTER the successor's PeerPresence(true); broadcasting false then would flip every
+                // device to "computer offline" with no later true to recover on (mirrors the device-side guard)
+                if (broker.detachDaemon(conn)) {
+                    logConn("detached", conn.ip, account = account)
+                    broker.controlToDevices(account, controlText(PeerPresence(false)))
+                }
             }
         }
     }
@@ -463,19 +471,21 @@ class RelayServer(
         }
 
         val conn = conn(account, Role.DEVICE, hello.deviceId, headless = headless)
-        // newest socket per device wins (mirrors attachDaemon): a lingering older socket of the same device
-        // (reconnect overlap, machine-switch race) would otherwise fight this one over the daemon's single
-        // per-device E2E session and deafen it
-        broker.attachDevice(conn)?.let { old ->
-            Diagnostics.connection(old.diagnosticId, conn.diagnosticId, ErrorCode.SUPERSEDED)
-            logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
-            runCatching { old.close("superseded") }
-        }
-        val peerId = broker.daemonConn(account)?.diagnosticId
-        Diagnostics.connection(conn.diagnosticId, peerId)
-        sendControl(Attached(Role.DEVICE, account, relayProtoV = PROTO_V_PUSH_ACK, connectionId = DiagnosticId(conn.diagnosticId), peerConnectionId = peerId?.let(::DiagnosticId)))
-        if (!headless) broker.controlToDaemon(account, controlText(PeerPresence(true, DiagnosticId(conn.diagnosticId))))
+        // From the attach on, everything is inside the try (audit M4): a ghost device socket left by a throw
+        // before the read loop would keep the daemon from ever hearing PeerPresence(false) and hold a slot.
         try {
+            // newest socket per device wins (mirrors attachDaemon): a lingering older socket of the same device
+            // (reconnect overlap, machine-switch race) would otherwise fight this one over the daemon's single
+            // per-device E2E session and deafen it
+            broker.attachDevice(conn)?.let { old ->
+                Diagnostics.connection(old.diagnosticId, conn.diagnosticId, ErrorCode.SUPERSEDED)
+                logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
+                runCatching { old.close("superseded") }
+            }
+            val peerId = broker.daemonConn(account)?.diagnosticId
+            Diagnostics.connection(conn.diagnosticId, peerId)
+            sendControl(Attached(Role.DEVICE, account, relayProtoV = PROTO_V_PUSH_ACK, connectionId = DiagnosticId(conn.diagnosticId), peerConnectionId = peerId?.let(::DiagnosticId)))
+            if (!headless) broker.controlToDaemon(account, controlText(PeerPresence(true, DiagnosticId(conn.diagnosticId))))
             for (frame in incoming) when (frame) {
                 is Frame.Binary -> broker.toDaemonFrom(account, hello.deviceId, frame.data)
                 is Frame.Text -> handleDeviceControl(conn, frame.readText())
@@ -486,14 +496,16 @@ class RelayServer(
             reportReceiveFailure(error)
             throw error
         } finally {
-            Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
-            broker.detachDevice(conn)
-            logConn("detached", conn.ip, account = account, deviceId = hello.deviceId, headless = headless)
-            // "peer offline" only when the LAST INTERACTIVE socket left — a superseded/overlapping socket's
-            // exit while another is live must not arm the daemon's idle reaper against a watched
-            // conversation, and a bridge coming or going never moves presence at all
-            if (!headless && broker.interactiveDeviceCount(account) == 0) {
-                broker.controlToDaemon(account, controlText(PeerPresence(false)))
+            withContext(NonCancellable) { // a cancelled handler must still unregister (see handleDaemon)
+                Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
+                broker.detachDevice(conn)
+                logConn("detached", conn.ip, account = account, deviceId = hello.deviceId, headless = headless)
+                // "peer offline" only when the LAST INTERACTIVE socket left — a superseded/overlapping socket's
+                // exit while another is live must not arm the daemon's idle reaper against a watched
+                // conversation, and a bridge coming or going never moves presence at all
+                if (!headless && broker.interactiveDeviceCount(account) == 0) {
+                    broker.controlToDaemon(account, controlText(PeerPresence(false)))
+                }
             }
         }
     }
