@@ -9,6 +9,7 @@
 | 交给 Claude Code 独立实施后续 Issue | [2026-09-14 任务目录与方案](iterations/2026-09-14-claude-code/README.md) |
 | 实施本轮八项 Issue 修复（不含 #352／#381／#342） | [2026-09-19 批次规划与逐项方案](iterations/2026-09-19-claude-code/README.md) |
 | 2.1.2 全平台发布与验收 | [2026-09-22 发布记录](iterations/2026-09-22-release/RELEASE-2.1.2.md) |
+| 2.3.0 全平台发布与验收 | [2026-10-05 发布记录](iterations/2026-10-05-release/RELEASE-2.3.0.md) |
 | 2.2.0 全平台发布与验收 | [2026-09-30 发布记录](iterations/2026-09-30-release/RELEASE-2.2.0.md) |
 | 2.1.5 全平台发布与验收 | [2026-09-28 发布记录](iterations/2026-09-28-release/RELEASE-2.1.5.md) |
 | 2.1.4 全平台发布与验收 | [2026-09-27 发布记录](iterations/2026-09-27-release/RELEASE-2.1.4.md) |

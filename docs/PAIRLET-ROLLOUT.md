@@ -55,7 +55,7 @@ main 已合入观测模块及发行配置跟进（PR #369、#370）；`2f2dba8b`
 | 项 | 现状 | 下一步 |
 | --- | --- | --- |
 | `pairlet://` 链接 | App 各入口已同时接受两种 scheme，iOS / Android 已注册；daemon 仍输出 `ccpocket://` | 接受新 scheme 的 App 版本铺开后，daemon 改为输出 `pairlet://`；旧链接永久可解析 |
-| 官网仓库链接 | 已改为 `heypandax/pairlet`，2026-10-04 已部署（见[网站部署记录](PAIRLET-WEBSITE-DEPLOYMENT.md)） | macOS 下载链接等新包发布后再切 |
+| 官网仓库链接 | 已改为 `heypandax/pairlet`，2026-10-04 已部署（见[网站部署记录](PAIRLET-WEBSITE-DEPLOYMENT.md)） | macOS 下载链接已随 2.3.0 切到 `pairlet-desktop-*`（2026-10-04） |
 | relay 域名 | `relay.pairlet.org` 已指向同一个 relay，客户端默认值未切 | 中国大陆网络与新旧地址组合验证通过后再切默认；已配对设备保存的地址不改写 |
 | Homebrew 包名 | 草稿在 `packaging/pairlet-candidates/` | 发版时填入真实版本与哈希，用 tap 的 rename map 把 `cc-pocket` 改为 `pairlet`，并实测旧安装升级与卸载 |
 
