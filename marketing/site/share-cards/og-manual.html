@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pairlet share card — manual/og-manual.png (1200×630)</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* tokens are the dark set of site/styles.css; section names and one-liners are the manual index's own */
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #0E0F11; color: #ECEDEE;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .left { position: absolute; left: 72px; top: 0; width: 470px; height: 630px; display: flex; flex-direction: column; justify-content: center; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 44px; }
+  .mark { width: 36px; height: 36px; border-radius: 9px; background: url('../../../site/favicon.svg') center / contain no-repeat; }
+  .word { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 600; font-size: 24px; letter-spacing: -0.02em; }
+  .title { border-left: 5px solid #D97757; padding-left: 22px; }
+  h1 { margin: 0; font-weight: 700; font-size: 52px; line-height: 1.1; letter-spacing: -0.025em; }
+  .sub { margin: 14px 0 0; font-size: 26px; color: #9BA1A6; }
+  .panel { position: absolute; left: 600px; top: 62px; width: 528px; }
+  .search { display: flex; align-items: center; gap: 14px; height: 58px; padding: 0 20px; border: 1px solid #2A2E33; border-radius: 12px;
+    background: #16181B; color: #6B7177; font-size: 19px; }
+  .search i { width: 17px; height: 17px; border: 2px solid #9BA1A6; border-radius: 50%; position: relative; flex: none; }
+  .search i::after { content: ''; position: absolute; left: 15px; top: 16px; width: 8px; height: 2px; background: #9BA1A6; transform: rotate(45deg); }
+  .rows { margin-top: 18px; border: 1px solid #2A2E33; border-radius: 12px; background: #16181B; }
+  .row { display: flex; align-items: center; gap: 18px; padding: 17px 20px; border-top: 1px solid #2A2E33; }
+  .row:first-child { border-top: 0; }
+  .bar { width: 3px; align-self: stretch; background: #D97757; border-radius: 2px; flex: none; }
+  .row b { display: block; font-weight: 600; font-size: 20px; }
+  .row span { display: block; margin-top: 4px; font-size: 15.5px; line-height: 1.35; color: #9BA1A6; }
+  .chev { margin-left: auto; color: #6B7177; font-size: 24px; flex: none; }
+  .ai { margin-top: 18px; display: flex; align-items: center; gap: 18px; padding: 16px 20px; border: 1px dashed #3A3F45; border-radius: 12px; }
+  .ai b { display: block; font-weight: 600; font-size: 19px; }
+  .ai span { display: block; margin-top: 4px; font-size: 15.5px; line-height: 1.35; color: #9BA1A6; }
+</style>
+</head>
+<body>
+  <div class="left">
+    <div class="brand"><span class="mark"></span><span class="word">Pairlet</span></div>
+    <div class="title">
+      <h1>Pairlet User Manual</h1>
+      <p class="sub">Answers for people and AI</p>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="search"><i></i>Search the manual…</div>
+    <div class="rows">
+      <div class="row"><div class="bar"></div><div><b>Start here</b><span>Install the daemon, pair a device, and open your first project.</span></div><div class="chev">›</div></div>
+      <div class="row"><div class="bar"></div><div><b>Approvals &amp; safety</b><span>Choose how much autonomy a session has and approve from anywhere.</span></div><div class="chev">›</div></div>
+      <div class="row"><div class="bar"></div><div><b>Troubleshooting</b><span>Recover an offline computer or update an out-of-date daemon.</span></div><div class="chev">›</div></div>
+    </div>
+    <div class="ai"><div><b>Give an AI the exact source</b><span>Copy a guide URL instead of describing the screen from memory.</span></div></div>
+  </div>
+</body>
+</html>

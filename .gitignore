@@ -48,6 +48,8 @@ docs/design/APP-DESIGN-AUTOPILOT.md
 !/marketing/site/generate-assets.sh
 !/marketing/site/smoke.py
 !/marketing/site/write-manifest.py
+!/marketing/site/render-share-cards.sh
+!/marketing/site/share-cards/
 
 # local agent / IDE state
 .claude/

@@ -20,6 +20,16 @@ bash marketing/site/generate-assets.sh --reuse    # 帧已在，只重编码 / �
 
 `scripts/check-public-content.py` 会校验 manifest 存在、条目齐全、文件非空且哈希对得上。
 
+## 分享图（og:image）
+
+`site/og-image.png`（功能、隐私与各指南页）和 `site/manual/og-manual.png`（用户手册）由 `share-cards/` 下的两份 HTML 渲染，都是 1200×630：
+
+```bash
+bash marketing/site/render-share-cards.sh
+```
+
+用本机 Chrome 无头截图，字体与官网相同（Google Fonts，需要联网）；画面里的手机截图取自上表的 `control-loop-en-poster.jpg`，手册卡片的栏目名和说明取自手册首页。首页用的 `overview.png` 仍由上面的素材管线生成，不在这个脚本里。
+
 ## 闭环剧本（`renderSiteLoop`）
 
 一镜到底走完四件公开任务，用的全是产品里真实的 composable：

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pairlet share card — og-image.png (1200×630)</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* tokens are the dark set of site/styles.css; the card is rendered by render-share-cards.sh */
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #0E0F11; color: #ECEDEE;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .left { position: absolute; left: 72px; top: 62px; width: 610px; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .mark { width: 44px; height: 44px; border-radius: 11px; background: url('../../../site/favicon.svg') center / contain no-repeat; }
+  .word { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 600; font-size: 30px; letter-spacing: -0.02em; }
+  h1 { margin: 66px 0 0; font-weight: 700; font-size: 58px; line-height: 1.08; letter-spacing: -0.025em; }
+  h1 em { font-style: normal; color: #D97757; }
+  .sub { margin: 26px 0 0; font-size: 24px; line-height: 1.42; color: #9BA1A6; }
+  .chips { position: absolute; left: 72px; bottom: 58px; display: flex; gap: 12px; }
+  .chip { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px; color: #9BA1A6; background: #16181B;
+    border: 1px solid #2A2E33; border-radius: 8px; padding: 9px 13px; }
+  .chip b { color: #D97757; font-weight: 500; }
+  .phone { position: absolute; right: 92px; top: 50px; width: 304px; height: 658px; border-radius: 34px; overflow: hidden;
+    border: 1px solid #2A2E33; box-shadow: 0 30px 80px rgba(0, 0, 0, .55); }
+  .phone img { display: block; width: 100%; }
+  .fade { position: absolute; left: 0; right: 0; bottom: 0; height: 90px; background: linear-gradient(rgba(14, 15, 17, 0), #0E0F11); }
+</style>
+</head>
+<body>
+  <div class="left">
+    <div class="brand"><span class="mark"></span><span class="word">Pairlet</span></div>
+    <h1>A companion for the <em>coding agents</em> on your computer.</h1>
+    <p class="sub">Watch them work, approve what they are blocked on, and continue the same session from your phone.</p>
+  </div>
+  <div class="chips">
+    <span class="chip"><b>end-to-end</b> encrypted</span>
+    <span class="chip">zero-knowledge relay</span>
+    <span class="chip">open source</span>
+  </div>
+  <div class="phone"><img src="../../../site/assets/product/control-loop-en-poster.jpg" alt=""></div>
+  <div class="fade"></div>
+</body>
+</html>
