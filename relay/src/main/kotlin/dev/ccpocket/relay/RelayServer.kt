@@ -237,7 +237,7 @@ class RelayServer(
             is DaemonAuthenticator.Result.Ok -> r.accountId.also { limiter.refund(wsKey) }
         }
 
-        val conn = conn(account, Role.DAEMON, null, daemonProtoV = hello.protoV)
+        val (conn, out) = conn(account, Role.DAEMON, null, daemonProtoV = hello.protoV)
         // Everything from the attach on sits inside the try (audit M4): a throw between registering the socket
         // and the read loop (the Attached send meeting a socket the peer already left, the replay's store read
         // failing) used to skip the finally and leave a ghost daemon that kept every device "online".
@@ -278,6 +278,7 @@ class RelayServer(
         } finally {
             // NonCancellable: a cancelled handler must still unregister — the broker lock can suspend
             withContext(NonCancellable) {
+                out.close()
                 Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
                 // "daemon offline" only when THIS socket was still the account's daemon — a superseded socket's
                 // late exit (the daemon reconnected before we noticed the old link die, e.g. after sleep/wake)
@@ -512,7 +513,7 @@ class RelayServer(
         // Over it, Ktor closes THIS socket with TOO_BIG; before, the frame was forwarded and killed the
         // daemon's whole relay link, dropping every device of the account.
         maxFrameSize = WIRE_MAX_FRAME_BYTES - Wire.wrapDevice(hello.deviceId, ByteArray(0)).size
-        val conn = conn(account, Role.DEVICE, hello.deviceId, headless = headless)
+        val (conn, out) = conn(account, Role.DEVICE, hello.deviceId, headless = headless)
         // From the attach on, everything is inside the try (audit M4): a ghost device socket left by a throw
         // before the read loop would keep the daemon from ever hearing PeerPresence(false) and hold a slot.
         try {
@@ -539,6 +540,7 @@ class RelayServer(
             throw error
         } finally {
             withContext(NonCancellable) { // a cancelled handler must still unregister (see handleDaemon)
+                out.close()
                 Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
                 broker.detachDevice(conn)
                 logConn("detached", conn.ip, account = account, deviceId = hello.deviceId, headless = headless)
@@ -554,21 +556,37 @@ class RelayServer(
 
     // ---- control-frame codec (TEXT plane) + helpers ----
 
+    /** The authenticated socket's [Conn], writing through a byte-bounded [OutboundQueue] (audit H1). The
+     *  caller must [OutboundQueue.close] it when the handler ends. */
     private fun DefaultWebSocketServerSession.conn(
         account: String,
         role: Role,
         deviceId: String?,
         headless: Boolean = false,
         daemonProtoV: Int = 1,
-    ) = Conn(
-        account, role, deviceId,
-        sendText = { outgoing.send(Frame.Text(it)) },
-        sendBinary = { outgoing.send(Frame.Binary(true, it)) },
-        close = { reason -> closeSoon(CloseReason(CloseReason.Codes.NORMAL, reason)) },
-        headless = headless,
-        daemonProtoV = daemonProtoV,
-        ip = call.clientIp(),
-    )
+    ): Pair<Conn, OutboundQueue> {
+        val ip = call.clientIp()
+        val out = OutboundQueue(
+            MAX_OUTBOUND_BYTES,
+            write = { outgoing.send(it); flush() },
+            onOverflow = { queued ->
+                logConn("slow_consumer", ip, account = account, deviceId = deviceId, headless = if (role == Role.DEVICE) headless else null)
+                println("[conn] slow_consumer queued_bytes=$queued limit=$MAX_OUTBOUND_BYTES")
+                closeSoon(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER, "slow_consumer"))
+            },
+        )
+        launch { out.pump() }
+        val conn = Conn(
+            account, role, deviceId,
+            sendText = { out.offer(Frame.Text(it)) },
+            sendBinary = { out.offer(Frame.Binary(true, it)) },
+            close = { reason -> closeSoon(CloseReason(CloseReason.Codes.NORMAL, reason)) },
+            headless = headless,
+            daemonProtoV = daemonProtoV,
+            ip = ip,
+        )
+        return conn to out
+    }
 
     /**
      * Close a socket from OUTSIDE its own handler (supersede, revoke) without waiting for it (audit M3).
@@ -657,7 +675,7 @@ class RelayServer(
         val code = when {
             reason == "superseded" -> ErrorCode.SUPERSEDED
             reason == "rate_limited" || reason == "push_rate_limited" || reason == "push_busy" -> ErrorCode.RATE_LIMITED
-            reason == "too_many_connections" -> ErrorCode.SIZE_LIMIT
+            reason == "too_many_connections" || reason == "slow_consumer" -> ErrorCode.SIZE_LIMIT
             reason == "detached" -> ErrorCode.CONNECTION_CLOSED
             reason == "handshake_timeout" -> ErrorCode.TIMEOUT
             reason == "revoked" || reason.startsWith("auth_failed:") -> ErrorCode.REJECTED
@@ -687,6 +705,10 @@ class RelayServer(
         const val MAX_PUSH_IN_FLIGHT = 256
         // how long a supersede/revoke close may take to go out cleanly before the socket is cut (audit M3)
         const val CLOSE_GRACE_MS = 3_000L
+        // audit H1: bytes one socket may owe before it is cut as a slow consumer. Four full-size (4 MiB) frames:
+        // a healthy link drains as the daemon produces, so this only fills when the peer has stopped reading
+        // or is minutes behind. Per socket, not global — ExitOnOutOfMemoryError in the unit is the backstop.
+        const val MAX_OUTBOUND_BYTES = 16L * 1024 * 1024
         // an APNs token is 64 hex chars and an FCM one a few hundred; 4096 is far above any real vendor
         // token and exists so a malformed/hostile registration is refused ("bad_request") instead of
         // being written into the devices row
