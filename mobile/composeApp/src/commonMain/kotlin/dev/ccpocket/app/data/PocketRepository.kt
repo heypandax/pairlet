@@ -4154,6 +4154,10 @@ class PocketRepository(
                 // asked) — the common case (renaming a terminal-held session) has no chat open, and an
                 // open chat is an UNRELATED session whose transcript must not absorb the error line.
                 renameError.value = renameTarget?.let { RenameRefusal(it, f.message) }
+            } else if (f.convoId == null && f.code in LIST_ACTION_ERROR_CODES) {
+                // Same rule as rename_failed: this answers a sidebar/list action, never an OpenSession and
+                // never the chat on screen. Splicing it into the transcript put it in an unrelated chat, and
+                // falling through to the branch below took it as the refusal of an open in flight.
             } else if (f.convoId != null && (openInFlight != null || f.convoId != convoId.value)) {
                 // Conversation-scoped errors fan out from background sessions just like SessionLive and
                 // stream frames. They must not splice a system row into this transcript or terminate a
@@ -8368,6 +8372,14 @@ class PocketRepository(
     }
 
     internal companion object {
+        /**
+         * Convo-less PocketError codes that answer a session-list action (archive/restore, #202) — never an
+         * OpenSession and never the open chat. Deliberately narrow: `internal`/`unsupported` and the
+         * share/bridge/collaborator codes can be the refusal of an OpenSession too, and the wire does not say
+         * which request an unscoped error answers, so those keep the existing routing.
+         */
+        private val LIST_ACTION_ERROR_CODES = setOf("archive_failed")
+
         /** The folder browser's workdir anchor (issue #152): the literal "~" the daemon expands to ITS
          *  home. Also the [PathEntries] routing key that separates browser replies from @-completion
          *  ones — a real session's workdir is never the bare "~" (SessionLive carries the resolved path). */
