@@ -40,6 +40,7 @@ import androidx.compose.ui.window.rememberWindowState
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.desktop.AddComputerModal
 import dev.ccpocket.app.desktop.AppMenuAction
+import dev.ccpocket.app.desktop.ApprovalNotifyTarget
 import dev.ccpocket.app.desktop.InstallMacAppMenuHandlers
 import dev.ccpocket.app.desktop.MacAppMenuBar
 import dev.ccpocket.app.desktop.Overlay
@@ -82,6 +83,11 @@ private const val K_WIN_BOUNDS = "desktop_window_bounds" // "x,y,w,h[,zoomed]" �
  *  it exists to keep the sidebar's live dots from freezing, not to animate them — a "running" state that
  *  settles within a few seconds reads as live, and the pull is a whole-machine directory scan on the host. */
 private const val DIRECTORY_POLL_MS = 15_000L
+
+/** Audit H1: the account-wide approval list's pull cadence — the phone's foreground cadence (App.kt). The daemon
+ *  pushes an ask frame only to clients attached to its conversation, so this pull is how the bell, tray and badge
+ *  learn of every other one. */
+private const val APPROVAL_POLL_MS = 3_000L
 
 /** Issue #189: close-to-tray is safe only when Windows can actually keep a reachable tray icon alive.
  *  Disabling the menu-bar setting or running without SystemTray support preserves the old exit behavior,
@@ -227,6 +233,15 @@ private fun ApplicationScope.PocketShell() {
         // installed — DesktopApp under seed/UI tests keeps the factory null, so no test ever spawns a PTY.
         model.terminalPanel?.let { tp ->
             tp.engineFactory = { cwd -> JediTermEngine.spawn(cwd, onCmdJ = { tp.collapse() }) }
+        }
+    }
+    // Approvals across the fleet (audit H1). At application scope and NOT gated on the window, unlike the directory
+    // poll: a window closed to the Windows tray (#189) or minimized is exactly when the tray/Dock count must stay
+    // true. Each link skips the pull unless it is live and Ready; a daemon predating the list drops the frame.
+    LaunchedEffect(Unit) {
+        while (true) {
+            fleet.repos().forEach { it.refreshPendingApprovals() }
+            delay(APPROVAL_POLL_MS)
         }
     }
     val connected by repo.sessionActive
@@ -508,32 +523,45 @@ private fun ApplicationScope.PocketShell() {
                     DesktopNotify.notify(title, preview ?: turnCompleteFallback, sessionId)
                 }
             }
-            // §18.2 P2-4: an approval arriving while the window is backgrounded raises a system banner +
-            // badge; clicking activates the app (the card is already on screen — snapshot-true by
-            // construction). The banner carries NO command/file/diff content.
-            repo.onApprovalArrived = {
-                if (!windowFocused) {
-                    unseenDone++
-                    DesktopNotify.badge(unseenDone)
-                    DesktopNotify.notify(approvalTitle, approvalBody, null)
-                }
-            }
             // banner clicked (issue #99): the OS already activated the app (bundle identity); surface the
             // window and jump back to the finished session when we still know it. The callback arrives on
             // the AppKit main thread — hop to the EDT before touching the window or Compose state.
-            DesktopNotify.onActivate = { sessionId ->
+            DesktopNotify.onActivate = { target ->
                 java.awt.EventQueue.invokeLater {
                     activateMainWindow()
-                    if (sessionId != null && repo.sessionActive.value && repo.sessionKey.value != sessionId) {
-                        model.liveSession(sessionId)?.let(model::selectSession)
+                    val approval = ApprovalNotifyTarget.decode(target)
+                    if (approval != null) {
+                        // audit H1: the request as the attention list knows it NOW (decided meanwhile → just the window)
+                        val (accountId, convoId) = approval
+                        model.attention.firstOrNull { it.accountId == accountId && it.convoId == convoId }
+                            ?.let(model::openAttention)
+                    } else if (target != null && repo.sessionActive.value && repo.sessionKey.value != target) {
+                        model.liveSession(target)?.let(model::selectSession)
                     }
                 }
             }
             onDispose {
                 repo.onTurnFinished = null
-                repo.onApprovalArrived = null
                 DesktopNotify.onActivate = null
             }
+        }
+        // §18.2 P2-4 + audit H1: an approval arriving on ANY live link (other computers' satellites too, and
+        // conversations nobody has open — those arrive through the account-wide list) raises a system banner +
+        // badge while the window is backgrounded. The card is NOT necessarily on screen: the click opens the
+        // asking session (see onActivate above). The banner carries NO command/file/diff content.
+        val approvalLinks = fleet.repos()
+        DisposableEffect(approvalLinks) {
+            approvalLinks.forEach { link ->
+                link.onApprovalArrived = { key ->
+                    if (!windowFocused) {
+                        unseenDone++
+                        DesktopNotify.badge(unseenDone)
+                        val target = link.paired.value?.accountId?.let { ApprovalNotifyTarget.encode(it, key.convoId) }
+                        DesktopNotify.notify(approvalTitle, approvalBody, target)
+                    }
+                }
+            }
+            onDispose { approvalLinks.forEach { it.onApprovalArrived = null } }
         }
         // native fullscreen wiring (issue #94): stash the AWT window so the toggle above can drive it, mark
         // it fullscreen-capable, and subscribe to OS-driven fullscreen transitions so `fullscreen` mirrors

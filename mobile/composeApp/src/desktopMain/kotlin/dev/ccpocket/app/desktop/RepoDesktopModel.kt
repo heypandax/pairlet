@@ -26,8 +26,12 @@ import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.ui.ComposerState
 import dev.ccpocket.app.ui.codexCatalogNote
+import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.ui.fleet.MachineOs
+import dev.ccpocket.app.ui.fleet.attentionAsk
+import dev.ccpocket.app.ui.fleet.fleetAttention
 import dev.ccpocket.app.ui.fleet.osFromName
+import dev.ccpocket.app.ui.fleet.resolveAttention
 import dev.ccpocket.app.ui.folderName
 import dev.ccpocket.app.ui.modelLabelForAgent
 import dev.ccpocket.app.ui.normalizedDirKey
@@ -344,7 +348,9 @@ class RepoDesktopModel(
     override val connGen: Int get() = repo.connGen.value
 
     // bindings don't carry an OS on the wire — read it off the user's naming, like the mobile fleet does
-    private fun PairedDaemon.dkOs(): DkOs = when (osFromName(displayName())) {
+    private fun PairedDaemon.dkOs(): DkOs = osFromName(displayName()).toDk()
+
+    private fun MachineOs.toDk(): DkOs = when (this) {
         MachineOs.WIN -> DkOs.WIN
         MachineOs.LINUX -> DkOs.LINUX
         MachineOs.MAC -> DkOs.MAC
@@ -384,6 +390,7 @@ class RepoDesktopModel(
         get() {
             val activeId = repo.paired.value?.accountId
             val fleet = FleetRuntime.forPrimary(repo)
+            val waiting = attention.groupingBy { it.accountId }.eachCount()
             return repo.pairedList.map { d ->
                 val active = d.accountId == activeId
                 val link = if (active) repo else fleet?.satellites?.get(d.accountId)
@@ -396,7 +403,8 @@ class RepoDesktopModel(
                     // computed here now. Unknown either side (old daemon with no hostname) stays false.
                     thisMachine = d.hostName?.takeIf { it.isNotBlank() }
                         ?.equals(localHostName(), ignoreCase = true) == true,
-                    pending = if (link?.pendingAsk?.value != null) 1 else 0,
+                    // the rows the bell lists (audit H1): every waiting ask on the machine, not only the open chat's card
+                    pending = if (link != null) waiting[d.accountId] ?: 0 else 0,
                     // per-account directories (live when loaded, else the coordinator's last snapshot):
                     // RUNNING rows + non-active group content keep showing through a machine switch,
                     // instead of blanking while links tear down and re-handshake
@@ -425,14 +433,34 @@ class RepoDesktopModel(
 
     override val attention: List<DkAttention>
         get() {
-            // aggregated across every live link; satellites carry asks once the daemon broadcasts them
+            // Audit 2026-10-04 H1: the daemon-authoritative, account-wide list the phone reads ([fleetAttention]) —
+            // every waiting approval on every live link, whichever conversation (or none) is open. The open chat's
+            // first card used to be the only source, so a session switched away from, a session nobody had open
+            // and another computer all went unseen here.
+            val now = epochMillis()
+            val inbox = repo.fleetAttention().map { e ->
+                // a deadline only when the daemon gave one (never the phone's 30s convention), and none for an ask
+                // the daemon keeps renewing
+                val renewing = repo.attentionAsk(e)?.noAutoDeny == true
+                DkAttention(
+                    id = e.askId, accountId = e.accountId, machine = e.machineName, os = e.os.toDk(),
+                    tool = e.tool, preview = e.preview,
+                    seconds = e.expiresAt?.takeIf { !renewing }?.let { ((it - now + 999) / 1000).toInt().coerceAtLeast(0) },
+                    live = true, convoId = e.convoId, workdir = e.workdir, sessionId = e.sessionId,
+                )
+            }
+            // The open chat's card where the list doesn't hold it: an AskUserQuestion (the list carries approvals
+            // only, but the bell has always listed questions — the tray routes them to the session), or a list a
+            // daemon never answered (one predating it drops ListPendingApprovals; its live asks still feed the list).
+            // So nothing the bell showed before goes missing.
             val links = FleetRuntime.forPrimary(repo)?.repos() ?: listOf(repo)
-            return links.mapNotNull { r ->
+            val focused = links.mapNotNull { r ->
                 // a timed-out ask (issue #100) is terminal — dismiss-only on its inline card — so it's no
                 // longer "waiting": drop it from the bell/palette/badge instead of offering a Deny/Allow that
-                // would only hit the daemon's ask_expired. Matched by id (askIds are unique per request).
+                // would only hit the daemon's ask_expired.
                 val ask = r.pendingAsk.value?.takeIf { !r.askTimedOut(it) } ?: return@mapNotNull null
                 val d = r.paired.value ?: return@mapNotNull null
+                if (inbox.any { it.accountId == d.accountId && it.convoId == ask.convoId && it.id == ask.askId }) return@mapNotNull null
                 DkAttention(
                     id = ask.askId, accountId = d.accountId, machine = d.displayName(), os = d.dkOs(),
                     tool = ask.tool, preview = ask.diff ?: ask.inputPreview,
@@ -441,16 +469,46 @@ class RepoDesktopModel(
                     convoId = ask.convoId,
                 )
             }
+            return inbox + focused
         }
 
     override fun resolveAttention(a: DkAttention, allow: Boolean) {
+        // A row of the account-wide list goes through the phone's own funnel: that machine's link, the exact
+        // (convoId, askId) row. The row leaves the list before the verdict is sent, so a second click on the same
+        // row finds nothing and sends nothing; when it is also the open chat's card, that card advances with it.
+        val entry = repo.fleetAttention().firstOrNull { it.accountId == a.accountId && it.convoId == a.convoId && it.askId == a.id }
+        if (entry != null) {
+            repo.resolveAttention(entry, allow)
+            return
+        }
+        // the open chat's card the list doesn't hold (see [attention]): composite match (audit M3) — the row's
+        // askId alone can name ANOTHER session's ask, since Codex/ZCode number asks per session
         val r = FleetRuntime.forPrimary(repo)?.repoFor(a.accountId) ?: repo
-        // composite match (audit M3): the row's askId alone can name ANOTHER session's ask — Codex/ZCode
-        // number asks per session, so after a switch the focused card may carry the same id
         val ask = r.pendingAsk.value
         if (a.live && ask != null && ask.askId == a.id && ask.convoId == a.convoId) {
             r.resolve(if (allow) Decision.ALLOW else Decision.DENY, remember = false)
         }
+    }
+
+    override fun openAttention(a: DkAttention) {
+        val sid = a.sessionId
+        val wd = a.workdir?.takeIf { it.isNotBlank() }
+        if (sid == null || wd == null) { super.openAttention(a); return } // no session named — the machine is all we know
+        navGen++ // user navigation — stop an in-flight RECENT refill from repointing the list (#102)
+        if (a.accountId == repo.paired.value?.accountId) {
+            // a row this machine already lists opens like a sidebar click (its agent included); otherwise through
+            // the push-tap seam, the way a tapped approval push opens it on the phone
+            liveSession(sid)?.let { selectSession(it); return }
+            requestReveal(wd, sid, a.accountId)
+            repo.requestOpenSession(wd, sid)
+            return
+        }
+        // another computer: switch over, then open once its link is Ready (the cross-machine pin's path)
+        val target = repo.pairedList.firstOrNull { it.accountId == a.accountId } ?: return
+        optimisticSelectedId = null
+        requestReveal(wd, sid, a.accountId)
+        switchMachine(target)
+        repo.requestOpenSession(wd, sid)
     }
 
     override val watch: DkWatch? get() = null // needs a second live stream — multi-connection repo work
@@ -586,8 +644,12 @@ class RepoDesktopModel(
     // derived so the many per-row readers (pin rows, RECENT rows, runningVisible) share one mapping
     // per snapshot instead of re-mapping the whole repo list on every read
     private val sessionsDerived = derivedStateOf {
-        val askWd = repo.pendingAsk.value?.let { repo.workdir.value }
         val openId = repo.sessionKey.value.takeIf { repo.convoId.value != null }
+        // audit H1 / L3: which rows wait on an approval, by SESSION ID off this machine's account-wide list (the
+        // title match lit every same-titled row); the open chat's card still counts for the open row when the
+        // list doesn't name it (a question, a daemon that never answers the list)
+        val waitingBySession = repo.fleetAttention().filter { it.current }.mapNotNull { it.sessionId }.groupingBy { it }.eachCount()
+        val focusedWaiting = repo.pendingAsk.value != null
         val missing = repo.managedMissing.value // #360: managed members whose native record is gone
         val listed = repo.sessions.map {
             DkSession(
@@ -597,7 +659,7 @@ class RepoDesktopModel(
                 // Superseded below wherever the daemon can answer; this stays the fallback for the ones
                 // that can't (see [daemonLiveSessions]).
                 running = if (it.sessionId == openId) repo.streaming.value || it.busy else it.live || it.busy,
-                pending = if (askWd != null && it.cwd == askWd && it.title == repo.chatTitle.value) 1 else 0,
+                pending = waitingBySession[it.sessionId] ?: if (focusedWaiting && it.sessionId == openId) 1 else 0,
                 model = it.model,
                 group = it.group, // custom session-group membership (issue #119)
                 forkedFrom = it.forkedFrom, rewindOf = it.rewindOf, // #282 lineage

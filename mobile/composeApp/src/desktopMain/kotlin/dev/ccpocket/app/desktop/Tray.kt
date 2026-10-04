@@ -141,7 +141,7 @@ fun TrayPopover(
                             a,
                             onDeny = { model.resolveAttention(a, allow = false) },
                             onAllow = { model.resolveAttention(a, allow = true) },
-                            onOpen = { openMain(); jumpToMachine(model, a.accountId) },
+                            onOpen = { openMain(); model.openAttention(a) },
                         )
                     }
                     // overflow → the bell popover, which lists the whole fleet attention queue
@@ -225,10 +225,9 @@ internal fun trayStatsLine(computers: Int, sessions: Int): String =
     stringResource(if (computers == 1) Res.string.tray_computers_one else Res.string.tray_computers_many, computers) +
         " · " + stringResource(if (sessions == 1) Res.string.tray_sessions_one else Res.string.tray_sessions_many, sessions)
 
-/** Switch the active binding to the machine that owns an approval (its single live ask then surfaces inline).
- *  [DkAttention] carries no session id, so this is the honest "jump" — exactly what the bell popover does.
- *  `internal` (was private) so the Windows flyout ([WinTrayFlyout], issue #292) reuses the SAME jump — the
- *  two carriers must not drift into two definitions of "open the machine that's asking". */
+/** Switch the active binding to the machine that owns an approval — [DesktopModel.openAttention]'s fallback when
+ *  the row names no session (the bell, tray, Windows flyout and a clicked banner all open rows through that one
+ *  verb, so the carriers can't drift into different definitions of "open what's asking"). */
 internal fun jumpToMachine(model: DesktopModel, accountId: String) {
     model.machines.firstOrNull { it.computer.accountId == accountId }?.let { if (!it.active) model.selectComputer(it.computer) }
 }

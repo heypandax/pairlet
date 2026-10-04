@@ -193,7 +193,8 @@ private fun buildItems(model: DesktopModel, scope: CoroutineScope, l10n: Palette
         add(
             PItem(
                 PKind.ACTION, fmt(l10n.approveOn, a.machine), "${a.tool} · ${a.preview}", Icons.Outlined.Shield,
-                hint = a.seconds?.let(::fmtMmSs), accent = true, id = "ask:${a.id}",
+                // composite (audit H1): the fleet-wide list can hold two sessions' "3" — a lazy-list key must stay unique
+                hint = a.seconds?.let(::fmtMmSs), accent = true, id = "ask:${a.accountId}:${a.convoId}:${a.id}",
             ) { model.showAttention = true },
         )
     }
