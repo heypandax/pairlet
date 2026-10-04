@@ -144,8 +144,10 @@ class RelayClient(
     }
 
     /**
-     * Build and install the #367 execution planes (issue #367 G1). Called from the relay attach path, so a
-     * LAN-only `serve` leaves every one of them null and the transport fails closed.
+     * Build and install the #367 execution planes (issue #367 G1). Registered from the relay attach path
+     * as the core's execution installer ([DaemonCore.offerExecution]) and run at most once per process —
+     * at attach when the machine has used execution, otherwise on first use. A LAN-only `serve` never
+     * registers it, so every plane stays null and the transport fails closed.
      *
      * Three wiring details that are load-bearing rather than incidental:
      *
@@ -277,9 +279,13 @@ class RelayClient(
         // minting a request addressed to a contact nobody has verified.
         core.reviews.collaborators = collaboratorService
         // #367: the execution planes, on exactly the same relay-only footing as the three planes above —
-        // approving a grant mints a connect ticket, and the source half dials the relay. installExecution
-        // is idempotent, so a reconnect re-points the store/target without stacking a second RunService.
-        installExecutionPlanes()
+        // approving a grant mints a connect ticket, and the source half dials the relay. They load HERE
+        // only on a machine with evidence of use (grants, an execution credential, a run journal, source
+        // links/runs — see ExecutionUsage); anywhere else they load on first use (local control API, or an
+        // execution frame on the transport), through the same installer, once per process.
+        core.offerExecution(::installExecutionPlanes) {
+            dev.ccpocket.daemon.execution.ExecutionUsage.defaults(core.executionRunRoot).reason(sessions.bridges)
+        }
         // §3.4: the content-free, device-TARGETED offer nudge for an offline contact. The whole payload is
         // built by PushPolicy from two opaque ids — nothing about the work rides the alert.
         //

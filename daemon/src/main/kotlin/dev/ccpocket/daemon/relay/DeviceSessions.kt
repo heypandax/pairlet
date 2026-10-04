@@ -528,6 +528,9 @@ class DeviceSessions(
                     // the credential must not survive the frame that created it: drop key, spec and session
                     // and let the owner re-approve. Nothing is routed either way.
                     if (spec.kind == CredentialKind.EXECUTION) {
+                        // the bind hook lives on the execution planes; load them if this process has not
+                        // yet (no-op when loaded, false with no relay leg → hook null → refused as before)
+                        core.ensureExecution()
                         val pubB64 = bridges.pubOf(deviceId)?.let { B64enc.encodeToString(it) } ?: ""
                         val bound = runCatching { executionControl?.onRedeemed(deviceId, pubB64, spec.grantId) }
                             .getOrElse { if (it is CancellationException) throw it else null } == true
@@ -678,6 +681,12 @@ class DeviceSessions(
                 // only thing they are ever handed to. It gets no sink attach of any kind (no handoff, no
                 // review, no pins, no managed-session slot), so no fan-out can select it as a target.
                 val request = env.body as? dev.ccpocket.protocol.ToDaemon
+                // A confirmed execution credential is itself evidence of use (ExecutionUsage), so the
+                // planes are already loaded by the time the relay delivers this frame. Defensive anyway:
+                // if they are not, load them now rather than refuse a link the owner approved. With nothing
+                // to load them with (LAN-only `serve`, a test core) this is a no-op and the refusal below
+                // is exactly what it was.
+                core.ensureExecution()
                 val guard = core.router.executionGuard
                 val plane = core.router.executionPlane
                 // the static key that ACTUALLY decrypted this frame. The plane must be handed it rather

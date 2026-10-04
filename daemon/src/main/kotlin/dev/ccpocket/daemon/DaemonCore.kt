@@ -76,8 +76,9 @@ class DaemonCore(
         dev.ccpocket.daemon.pins.FileProjectPinStore(dev.ccpocket.daemon.pins.FileProjectPinStore.defaultFile()),
     /** Managed session list store directory (issue #360). Read lazily; tests hand in a temp directory. */
     managedSessionRoot: java.io.File = dev.ccpocket.daemon.disk.ManagedSessionStore.defaultRoot(),
-    /** #367 run-journal root. Read lazily (see [executionRuns]); tests hand in a temp directory. */
-    private val executionRunRoot: java.io.File = dev.ccpocket.daemon.execution.RunJournal.defaultRoot(),
+    /** #367 run-journal root. Read lazily (see [executionRuns]); tests hand in a temp directory. Also one
+     *  piece of the "execution in use" evidence ([dev.ccpocket.daemon.execution.ExecutionUsage]). */
+    internal val executionRunRoot: java.io.File = dev.ccpocket.daemon.execution.RunJournal.defaultRoot(),
     /** Voice memo scratch directory, emptied at start (see [dev.ccpocket.daemon.memo.MemoWorkDir]). Null — the
      *  default, so unit tests and embedded cores never touch ~/.cc-pocket — keeps per-job directories in the
      *  system temp directory. Production passes the daemon's own. */
@@ -400,6 +401,52 @@ class DaemonCore(
         }
     }
 
+    // ------------------------------------------------------------------ #367 load on evidence / first use
+
+    /** How to build + [installExecution] the planes — registered by the relay wiring ([offerExecution]),
+     *  which owns the identity, the relay link and the credential registry the planes need. Null on a
+     *  LAN-only `serve` and before the relay leg reaches that point. */
+    @Volatile
+    private var executionInstaller: (() -> Unit)? = null
+
+    @Volatile
+    private var executionLoaded = false
+    private val executionLoadLock = Any()
+
+    /**
+     * Relay wiring: register how to load the execution planes, then load them NOW only when [evidence]
+     * finds this machine has used remote execution (see [dev.ccpocket.daemon.execution.ExecutionUsage]).
+     * A machine with no evidence keeps every plane null and starts no maintenance ticker until first use
+     * ([ensureExecution]).
+     */
+    fun offerExecution(installer: () -> Unit, evidence: () -> String?) {
+        executionInstaller = installer
+        val why = evidence()
+        if (why != null) {
+            log.info("remote execution in use ($why) — loading the execution planes")
+            ensureExecution()
+        } else {
+            log.info("remote execution not used on this machine — execution planes load on first use")
+        }
+    }
+
+    /**
+     * Load the execution planes if they are not loaded yet. Idempotent and once per process: concurrent
+     * callers serialise on one lock and the installer runs at most once successfully; once loaded, nothing
+     * unloads them. Returns false only when there is nothing to load them WITH (no relay leg registered an
+     * installer) — the callers then answer exactly as they did before this existed (planes null).
+     */
+    fun ensureExecution(): Boolean {
+        if (executionLoaded) return true
+        synchronized(executionLoadLock) {
+            if (executionLoaded) return true
+            val install = executionInstaller ?: return false
+            install()
+            executionLoaded = true
+            return true
+        }
+    }
+
     /**
      * How the execution gate resolves a credential's grant pointer and its proven static key. Installed by
      * the relay wiring (which owns [dev.ccpocket.daemon.relay.DeviceSessions] and therefore the
@@ -420,6 +467,8 @@ class DaemonCore(
     }
 
     private companion object {
+        val log = dev.ccpocket.daemon.util.logger("DaemonCore")
+
         /** Cadence of the periodic spawned-session sweep (issue #216 ②). Convergence for crash/orphan
          *  leftovers only — the common paths (process end, idle reap) unhide in real time, so this just
          *  bounds how long a stranded transcript can stay hidden without a daemon restart. */
