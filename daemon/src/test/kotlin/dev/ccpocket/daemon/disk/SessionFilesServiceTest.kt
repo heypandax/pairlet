@@ -308,6 +308,23 @@ class SessionFilesServiceTest {
         assertTrue(diff.diff!!.endsWith("\n")) // cut on a whole-line boundary, not mid-line
     }
 
+    @Test
+    fun file_diff_cap_counts_encoded_bytes_not_characters() {
+        // audit 2026-10-04 D: ANSI output is mostly ESC, which JSON writes as a 6-byte \u001b — 240k characters
+        // were under the old character cap yet encoded to ~1.4 MB, over a 1 MiB iOS client's frame limit
+        val escaped = "\\u001b".repeat(1_200) // the transcript's own JSON spelling of 1200 ESC characters
+        val manyLines = (1..200).joinToString(",") { "\"+$escaped\"" }
+        val hunk = """{"oldStart":1,"oldLines":0,"newStart":1,"newLines":200,"lines":[$manyLines]}"""
+        val t = tmp.resolve("s.jsonl").also { Files.write(it, editWithPatch("/w/ansi.log", hunk)) }
+        val diff = SessionFilesService.fileDiffIn(AgentKind.CLAUDE, t, "/w", "s", "/w/ansi.log")
+        assertTrue(diff.ok, diff.error)
+        val encoded = kotlinx.serialization.json.JsonPrimitive(diff.diff!!).toString().encodeToByteArray().size // quoted + escaped
+        assertTrue(encoded <= SessionFilesService.DIFF_CAP_BYTES + 2, "encoded $encoded B")
+        assertTrue(diff.truncated)
+        assertTrue(diff.diff!!.endsWith("\n"))
+        assertTrue(diff.diff!!.lines().size > 1, "a whole-line prefix survives")
+    }
+
     // ── chunked reads (issue #134) ────────────────────────────────────────────
 
     /** Collect every frame [SessionFilesService.streamFileIn] emits for [path]. */

@@ -452,22 +452,65 @@ object SessionFilesService {
         var adds: Int? = null
         var dels: Int? = null
         val diff = StringBuilder()
+        var diffBytes = 0L // [diff] as the wire carries it: JSON-escaped UTF-8, not characters
         var diffTruncated = false
 
         fun stat(a: Int, d: Int) { adds = (adds ?: 0) + a; dels = (dels ?: 0) + d }
 
-        /** Appends one tool call's hunk group whole, or drops it whole — never mid-hunk garbage. */
+        /** Appends one tool call's hunk group whole, or drops it whole — never mid-hunk garbage. The cap is
+         *  measured in ENCODED bytes (audit 2026-10-04 D): an ESC-heavy diff is 6 bytes per character on
+         *  the wire, so a character cap let a "256 KB" diff reach 1.5 MB and drop a 1 MiB client's link. */
         fun appendHunks(text: String) {
+            val size = jsonStringBytes(text)
             when {
-                diff.length + text.length <= DIFF_CAP_BYTES -> diff.append(text)
+                diffBytes + size <= DIFF_CAP_BYTES -> { diff.append(text); diffBytes += size }
                 diff.isEmpty() -> { // a single oversized group: keep whole lines up to the cap
-                    val cut = text.take(DIFF_CAP_BYTES)
-                    diff.append(cut.substring(0, cut.lastIndexOf('\n') + 1))
+                    val cut = clipLinesToJsonBytes(text, DIFF_CAP_BYTES.toLong())
+                    diff.append(cut)
+                    diffBytes += jsonStringBytes(cut)
                     diffTruncated = true
                 }
                 else -> diffTruncated = true
             }
         }
+    }
+
+    /** Bytes [s] occupies inside a JSON string literal as kotlinx.serialization writes it (quotes excluded):
+     *  `"`/`\` and the short-escaped controls take 2, other C0 controls 6 (`\u00XX`), the rest their UTF-8
+     *  length (a lone surrogate counts as the 3-byte replacement character it is encoded as). */
+    internal fun jsonStringBytes(s: CharSequence): Long {
+        var n = 0L
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            n += when {
+                c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t' || c == '\b' || c == '\u000C' -> 2
+                c < ' ' -> 6
+                c.code < 0x80 -> 1
+                c.code < 0x800 -> 2
+                c.isHighSurrogate() && i + 1 < s.length && s[i + 1].isLowSurrogate() -> { i++; 4 }
+                else -> 3
+            }
+            i++
+        }
+        return n
+    }
+
+    /** The longest whole-line prefix of [text] (ending in `\n`) whose [jsonStringBytes] is at most [cap];
+     *  empty when even the first line is over. */
+    internal fun clipLinesToJsonBytes(text: String, cap: Long): String {
+        var bytes = 0L
+        var lineStart = 0
+        var keep = 0
+        while (lineStart < text.length) {
+            val nl = text.indexOf('\n', lineStart)
+            if (nl < 0) break
+            bytes += jsonStringBytes(text.subSequence(lineStart, nl + 1))
+            if (bytes > cap) break
+            keep = nl + 1
+            lineStart = nl + 1
+        }
+        return text.substring(0, keep)
     }
 
     /** Insertion order = oldest-touched first, re-anchored on re-touch (callers reverse for the wire).

@@ -1,10 +1,12 @@
 package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.disk.ReplayBudget
+import dev.ccpocket.daemon.disk.SessionFilesService
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.ConvoHistoryPage
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.FileContent
+import dev.ccpocket.protocol.FileDiff
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.PocketJson
@@ -25,7 +27,8 @@ import dev.ccpocket.protocol.ToolEvent
  * Shrinking is per frame type, cheapest loss first: a history window sheds row extras (images, sub-agent
  * reports) before rows, and drops rows oldest-first with its cursor metadata re-anchored so the phone pages
  * the rest in on demand; a tool event loses its images; a file body over the cap becomes the same "too
- * large" refusal the daemon already gives for files over its own cap; a project's session list loses its
+ * large" refusal the daemon already gives for files over its own cap; a diff keeps the whole lines that fit
+ * and is marked truncated; a project's session list loses its
  * prompt previews, then its oldest rows. Anything else is sent as it is and
  * reported through [encodeWithin]'s callback, so a new oversized frame type shows up in the daemon log
  * instead of as a silent reconnect loop.
@@ -97,6 +100,13 @@ object FrameFitter {
                 // JSON escaping can double a character, so halve the room rather than measure again
                 body.copy(text = ReplayBudget.takeUtf8(text, room / 2), truncated = true)
             }
+        }
+        // a diff already carries `truncated`: keep the whole-line prefix that fits (audit 2026-10-04 D). The
+        // daemon's own cap (SessionFilesService.DIFF_CAP_BYTES, encoded bytes) keeps this off the 1 MiB path;
+        // it fires for a client that declared a smaller frame cap.
+        is FileDiff -> body.diff?.let { diff ->
+            val room = (jsonBudget(maxFrameBytes) - encode(env.copy(body = body.copy(diff = "", truncated = true))).size).coerceAtLeast(0L)
+            body.copy(diff = SessionFilesService.clipLinesToJsonBytes(diff, room), truncated = true)
         }
         is Sessions -> fitSessions(env, maxFrameBytes, body)
         else -> null
