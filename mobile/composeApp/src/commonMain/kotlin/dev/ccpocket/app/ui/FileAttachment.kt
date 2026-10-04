@@ -57,6 +57,7 @@ import dev.ccpocket.app.data.PendingFile
 import dev.ccpocket.app.data.SentFile
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import org.jetbrains.compose.resources.stringResource
 
 // ============================================================================================
@@ -371,7 +372,7 @@ fun PendingFileChip(f: PendingFile, onCancel: () -> Unit, onRetry: () -> Unit) {
                             FileUpState.Failed -> stringResource(Res.string.file_retry)
                         },
                         color = if (failed) Tok.danger else Tok.muted,
-                        fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp, fontFamily = FontFamily.Monospace, style = tightCenter(10.sp),
                         maxLines = 1, softWrap = false,
                     )
                 }
@@ -409,13 +410,13 @@ fun PendingFilesStrip(files: List<PendingFile>, onCancel: (Long) -> Unit, onRetr
                 SpinnerRing(14.dp)
                 Text(
                     stringResource(Res.string.file_strip_uploading, active, files.size),
-                    color = Tok.tx2, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                    color = Tok.tx2, fontSize = 11.sp, fontFamily = FontFamily.Monospace, style = tightCenter(11.sp),
                 )
             } else if (landed > 0) {
                 Icon(CheckMiniGlyph, null, tint = Tok.ok, modifier = Modifier.size(11.dp))
                 Text(
                     stringResource(Res.string.file_strip_ready, landed),
-                    color = Tok.tx2, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                    color = Tok.tx2, fontSize = 11.sp, fontFamily = FontFamily.Monospace, style = tightCenter(11.sp),
                 )
             } else {
                 Text(stringResource(Res.string.file_upload_failed), color = Tok.danger, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
@@ -516,7 +517,7 @@ fun SentFileChip(file: SentFile) {
                     Icon(CheckMiniGlyph, null, tint = Tok.ok, modifier = Modifier.size(11.dp))
                     Text(
                         "${fmtSize(file.size)} · ${stringResource(Res.string.file_in_workspace)}",
-                        color = Tok.muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                        color = Tok.muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace, style = tightCenter(11.sp),
                     )
                 }
             }
@@ -562,7 +563,7 @@ fun VideoPoster(
                 Modifier.align(Alignment.BottomEnd).padding(8.dp).clip(RoundedCornerShape(6.dp))
                     .background(Color(0xFF0C0A09).copy(alpha = 0.66f)).padding(horizontal = 7.dp, vertical = 3.dp),
             ) {
-                Text(mmss(durationSecs), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, fontFamily = FontFamily.Monospace)
+                Text(mmss(durationSecs), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, fontFamily = FontFamily.Monospace, style = tightCenter(11.sp))
             }
         }
     }
@@ -587,11 +588,13 @@ fun SentVideoCard(file: SentFile, onOpen: () -> Unit) {
             Text(
                 file.name, color = Tok.tx, fontSize = 12.5.sp, fontFamily = FontFamily.Monospace,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                style = tightCenter(12.5.sp),
             )
             Icon(CheckMiniGlyph, null, tint = Tok.ok, modifier = Modifier.size(11.dp))
             Text(
                 "${fmtSize(file.size)} · ${stringResource(Res.string.file_in_workspace)}",
                 color = Tok.muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 1,
+                style = tightCenter(11.sp),
             )
         }
         Box(Modifier.padding(top = 4.dp)) { PathRefText(file.path) }

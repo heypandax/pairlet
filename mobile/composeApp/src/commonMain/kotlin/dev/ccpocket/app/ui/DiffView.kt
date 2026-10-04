@@ -221,6 +221,7 @@ fun DiffFileToggle(
                 label,
                 color = if (on) Tok.tx else Tok.tx2,
                 fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                style = tightCenter(12.5.sp),
                 modifier = Modifier.clip(RoundedCornerShape(6.dp))
                     .background(if (on) Tok.surface else Tok.raised)
                     .clickable(enabled = enabled && !on) { onPick(isDiff) }
@@ -232,6 +233,7 @@ fun DiffFileToggle(
         seg(stringResource(Res.string.file_tab), isDiff = false, enabled = fileEnabled)
         if (caption != null) Text(
             caption, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 9.5.sp,
+            style = tightCenter(9.5.sp),
             modifier = Modifier.padding(start = 4.dp, end = 8.dp),
         )
     }
@@ -394,13 +396,13 @@ private fun HunkHeader(hunk: DiffHunk, dense: Boolean, isCollapsed: Boolean, fir
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Text("▾", color = Tok.muted, fontSize = 10.sp, modifier = Modifier.rotate(if (isCollapsed) -90f else 0f))
+            Text("▾", color = Tok.muted, fontSize = 10.sp, style = tightCenter(10.sp), modifier = Modifier.rotate(if (isCollapsed) -90f else 0f))
             val header = if (hunk.numbered) "@@ −${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@" else "@@ ⋯ @@"
-            Text(header, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
+            Text(header, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, style = tightCenter(11.sp))
             Box(Modifier.weight(1f))
             if (isCollapsed) Text(
                 stringResource(Res.string.diff_collapsed_lines, hunk.lines.size),
-                color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = tightCenter(11.sp),
             )
         }
         HairlineRow()
@@ -562,7 +564,7 @@ fun DiffEmptyState(glyph: String, title: String, caption: String?) {
             Modifier.size(46.dp).clip(RoundedCornerShape(13.dp)).background(Tok.surface),
             contentAlignment = Alignment.Center,
         ) {
-            Text(glyph, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
+            Text(glyph, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 16.sp, style = tightCenter(16.sp))
         }
         Text(
             title, color = Tok.tx2, fontSize = 14.sp, lineHeight = 21.sp, textAlign = TextAlign.Center,
@@ -754,6 +756,7 @@ private fun DocTypeBadge(ext: String, dense: Boolean, muted: Boolean = false) {
             ext.take(4).uppercase().ifEmpty { "BIN" },
             color = fg, fontFamily = FontFamily.Monospace,
             fontSize = if (dense) 11.sp else 12.5.sp, fontWeight = FontWeight.Bold,
+            style = tightCenter(if (dense) 11.sp else 12.5.sp),
         )
         // folded corner: base-coloured cut over a faint family-tint square (handoff ::before/::after)
         Canvas(Modifier.size(11.dp).align(Alignment.TopEnd)) {
@@ -844,7 +847,7 @@ private fun DocumentTooLargeCard(path: String, error: String, dense: Boolean) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Rounded.Computer, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
-            Text(stringResource(Res.string.file_open_on_computer), color = Tok.tx2, fontSize = 12.sp)
+            Text(stringResource(Res.string.file_open_on_computer), color = Tok.tx2, fontSize = 12.sp, style = tightCenter(12.sp))
         }
     }
 }
@@ -965,6 +968,6 @@ private fun ExportActionChip(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Icon(icon, null, tint = fg, modifier = Modifier.size(if (dense) 13.dp else 14.dp))
-        Text(label, color = fg, fontSize = if (dense) 12.sp else 12.5.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = fg, fontSize = if (dense) 12.sp else 12.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(if (dense) 12.sp else 12.5.sp))
     }
 }

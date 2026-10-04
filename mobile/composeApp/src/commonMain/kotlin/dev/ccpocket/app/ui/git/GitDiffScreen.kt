@@ -153,6 +153,7 @@ private fun SideBar(staged: Boolean, adds: Int, dels: Int, hunks: Int, onPick: (
                         label,
                         color = if (on) Tok.tx else Tok.tx2,
                         fontSize = 12.5.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                        style = tightCenter(12.5.sp),
                         modifier = Modifier.height(28.dp).clip(RoundedCornerShape(7.dp))
                             .background(if (on) Tok.tx.copy(alpha = 0.10f) else Color.Transparent)
                             .clickable(enabled = !on) { onPick(isStaged) }
@@ -164,11 +165,11 @@ private fun SideBar(staged: Boolean, adds: Int, dels: Int, hunks: Int, onPick: (
             }
             Box(Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("+$adds", color = Tok.ok, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
-                Text("−$dels", color = Tok.danger, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
+                Text("+$adds", color = Tok.ok, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
+                Text("−$dels", color = Tok.danger, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
                 Text(
                     "· " + if (hunks == 1) stringResource(Res.string.git_hunk_one) else stringResource(Res.string.git_hunks, hunks),
-                    color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp,
+                    color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
                 )
             }
         }

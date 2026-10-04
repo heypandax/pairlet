@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.PocketSheet
 import dev.ccpocket.app.ui.relativeTime
 import dev.ccpocket.protocol.GIT_OP_BRANCH
@@ -95,8 +96,8 @@ fun BranchSheet(repo: PocketRepository, onDismiss: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text("＋", color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
-                Text(stringResource(Res.string.git_new_branch), color = Tok.accent, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
+                Text("＋", color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 14.sp, style = tightCenter(14.sp))
+                Text(stringResource(Res.string.git_new_branch), color = Tok.accent, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, style = tightCenter(14.5.sp))
             }
         } else {
             Column(
@@ -164,7 +165,7 @@ private fun BranchRow(b: GitBranchInfo, isCurrent: Boolean, onClick: () -> Unit)
             horizontalArrangement = Arrangement.spacedBy(11.dp),
         ) {
             Box(Modifier.size(width = 16.dp, height = 16.dp), contentAlignment = Alignment.Center) {
-                if (isCurrent) Text("✓", color = Tok.ok, fontSize = 13.sp)
+                if (isCurrent) Text("✓", color = Tok.ok, fontSize = 13.sp, style = tightCenter(13.sp))
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
@@ -206,7 +207,7 @@ fun GitConfirmSheet(repo: PocketRepository, preview: GitActionPreview) {
                     .border(1.3.dp, if (blocked) Tok.hair else Tok.danger.copy(alpha = 0.42f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(if (blocked) "i" else "!", color = ink, fontFamily = FontFamily.Monospace, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text(if (blocked) "i" else "!", color = ink, fontFamily = FontFamily.Monospace, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(17.sp))
             }
             Text(
                 when {
@@ -230,7 +231,7 @@ fun GitConfirmSheet(repo: PocketRepository, preview: GitActionPreview) {
                     Box(
                         Modifier.padding(top = 1.dp).size(16.dp).clip(CircleShape).border(1.3.dp, Tok.tx2, CircleShape),
                         contentAlignment = Alignment.Center,
-                    ) { Text("i", color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                    ) { Text("i", color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(11.sp)) }
                     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text(stringResource(Res.string.wt_remove_blocked), color = Tok.tx, fontSize = 13.5.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold)
                         preview.blockedReason?.let { Text(it, color = Tok.tx2, fontSize = 12.sp, lineHeight = 17.5.sp) }
@@ -294,8 +295,8 @@ private fun LostFilesCard(files: List<GitFileEntry>, worktree: Boolean) {
             Box(
                 Modifier.size(15.dp).clip(CircleShape).border(1.3.dp, Tok.danger, CircleShape),
                 contentAlignment = Alignment.Center,
-            ) { Text("!", color = Tok.danger, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold) }
-            Text(stringResource(Res.string.wt_remove_lost, files.size), color = Tok.danger, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            ) { Text("!", color = Tok.danger, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(10.5.sp)) }
+            Text(stringResource(Res.string.wt_remove_lost, files.size), color = Tok.danger, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(13.sp))
         }
         files.forEachIndexed { i, f ->
             if (i > 0 || worktree) Box(
