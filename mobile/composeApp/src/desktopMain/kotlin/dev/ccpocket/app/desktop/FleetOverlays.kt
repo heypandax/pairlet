@@ -78,12 +78,12 @@ fun AttentionPopover(model: DesktopModel) {
             Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(stringResource(Res.string.tray_needs_you), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(Res.string.tray_needs_you), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, style = tightCenter(13.5.sp), fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             val online = model.machines.count { it.computer.online }
             Text(
                 stringResource(Res.string.attention_stats, model.machines.size, online, model.attention.size),
-                color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
+                color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp),
             )
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -153,7 +153,7 @@ private fun AttentionRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> Unit
             Modifier.fillMaxWidth().padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (hovered) Text(stringResource(Res.string.attention_open_session), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 10.5.sp)
+            if (hovered) Text(stringResource(Res.string.attention_open_session), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
             Spacer(Modifier.weight(1f))
             Text(
                 stringResource(Res.string.deny), color = Tok.danger, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,

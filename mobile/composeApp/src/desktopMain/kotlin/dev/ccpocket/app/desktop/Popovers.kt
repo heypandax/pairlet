@@ -327,7 +327,7 @@ fun NewSessionPopover(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
-                        Text(stringResource(Res.string.opencode_mode_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(Res.string.opencode_mode_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp), fontWeight = FontWeight.SemiBold)
                     }
                     Text(
                         stringResource(Res.string.opencode_mode_note),
@@ -344,10 +344,10 @@ fun NewSessionPopover(
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Dot(m.dot, 7.dp)
-                    Text(stringResource(m.label), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp)
+                    Text(stringResource(m.label), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp))
                     if (m.danger) Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
                     Spacer(Modifier.weight(1f))
-                    Text(m.token, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
+                    Text(m.token, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp))
                 }
             }
             if (!modeValid) {
@@ -362,7 +362,7 @@ fun NewSessionPopover(
                 NewSessionPresetRow(agentPresets, chosenPreset) { chosenPreset = it }
             }
             Text(
-                stringResource(Res.string.new_path_start), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                stringResource(Res.string.new_path_start), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.5.sp, style = tightCenter(13.5.sp), fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp).alpha(if (looksAbsolute && modeValid) 1f else 0.45f)
                     .clip(RoundedCornerShape(10.dp)).background(Tok.accent)
                     .clickable(enabled = looksAbsolute && modeValid) {
@@ -407,9 +407,9 @@ private fun NewSessionModelRow(choices: List<ModelChoice>, chosen: String?, fall
             .clickable { open = !open }.padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(summary, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
-        if (chosen == null) Text(defaultLabel, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
-        Text(if (open) "⌃" else "›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp)
+        Text(summary, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp), maxLines = 1, modifier = Modifier.weight(1f))
+        if (chosen == null) Text(defaultLabel, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp))
+        Text(if (open) "⌃" else "›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp))
     }
     if (open) {
         Column(Modifier.padding(bottom = 8.dp)) {
@@ -647,8 +647,8 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
             // generations while a hand-written native id rots (#168). Header keeps the
             // "· host" + live dot (0714 design); the vendor rows drop one group below.
             Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(stringResource(Res.string.model_section_anthropic).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
-                Text("· ${gatewayHostLabel(gatewayUrl) ?: "?"}", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                Text(stringResource(Res.string.model_section_anthropic).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp), fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+                Text("· ${gatewayHostLabel(gatewayUrl) ?: "?"}", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
                 Spacer(Modifier.weight(1f))
                 Dot(Tok.ok, 5.dp)
             }
@@ -754,9 +754,9 @@ private fun QaRow(label: String, value: String? = null, danger: Boolean = false,
             .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(label, color = if (danger) Tok.danger else Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
-        value?.let { Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp) }
-        if (chevron) Text("›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp)
+        Text(label, color = if (danger) Tok.danger else Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp), modifier = Modifier.weight(1f))
+        value?.let { Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp)) }
+        if (chevron) Text("›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp))
     }
 }
 
@@ -766,8 +766,8 @@ private fun QaBack(title: String, onBack: () -> Unit) {
         Modifier.fillMaxWidth().padding(bottom = 9.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onBack),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("‹", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 15.sp)
-        Text(title.uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+        Text("‹", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 15.sp, style = tightCenter(15.sp))
+        Text(title.uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp), fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
     }
 }
 
@@ -781,11 +781,11 @@ private fun QaOption(label: String, selected: Boolean, dot: Color? = null, dange
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         dot?.let { Dot(it, 7.dp) }
-        Text(label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp)
+        Text(label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp))
         if (danger) Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
         Spacer(Modifier.weight(1f))
-        token?.let { Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp) }
-        if (selected && token == null) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp)
+        token?.let { Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp)) }
+        if (selected && token == null) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp))
     }
 }
 

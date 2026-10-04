@@ -146,11 +146,11 @@ fun SkillsOverlay(model: DesktopModel, onDismiss: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(stringResource(Res.string.skills_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(Res.string.skills_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, style = tightCenter(15.sp), fontWeight = FontWeight.SemiBold)
             catalog?.takeIf { rows.isNotEmpty() }?.let {
                 Text(
                     stringResource(Res.string.skills_count, it.skills.size, it.plugins.size),
-                    color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp,
+                    color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
                 )
             }
             Box(Modifier.weight(1f))
@@ -220,7 +220,7 @@ fun SkillsOverlay(model: DesktopModel, onDismiss: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FootHintText("↑↓", stringResource(Res.string.key_switch_entry))
-            Text("·", color = Tok.hair, fontFamily = Dk.ui, fontSize = 12.sp)
+            Text("·", color = Tok.hair, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp))
             FootHintText("esc", stringResource(Res.string.key_close))
         }
     }
@@ -345,7 +345,7 @@ private fun DetailScaffold(
         ) {
             // headline
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(title, color = Tok.tx, fontFamily = Dk.mono, fontSize = 25.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp)
+                Text(title, color = Tok.tx, fontFamily = Dk.mono, fontSize = 25.sp, style = tightCenter(25.sp), fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp)
                 Text(
                     kind.uppercase(), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 10.5.sp,
                     fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, style = tightCenter(10.5.sp),
@@ -407,7 +407,7 @@ private fun DetailScaffold(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text(bodyTitle, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, letterSpacing = 0.6.sp)
+                    Text(bodyTitle, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp), letterSpacing = 0.6.sp)
                     Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))
                 }
                 body.split(Regex("\n{2,}")).map { it.trim() }.filter { it.isNotEmpty() }.forEach { para ->
