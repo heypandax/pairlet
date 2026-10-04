@@ -215,7 +215,7 @@ private fun SubagentReportBody(m: ChatItem.Tool, dense: Boolean) {
         ) {
             Text(
                 if (m.childCount > 0) stringResource(Res.string.subagent_tools, m.childCount) else m.tool,
-                color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
+                color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, style = tightCenter(10.5.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
             CopyChip(m.output!!)
