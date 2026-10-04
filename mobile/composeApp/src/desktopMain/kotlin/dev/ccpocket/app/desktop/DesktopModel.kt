@@ -229,6 +229,11 @@ data class DkAttention(
     // the conversation the ask belongs to: askId is only unique per agent connection (Codex/ZCode mint small
     // integers per session), so a verdict must match both (audit 2026-10-04 M3). Null = seed/preview rows.
     val convoId: String? = null,
+    // where the asking session lives, when the daemon's account-wide list named it (audit H1) — what lets a
+    // row or a clicked banner open THAT session instead of only switching to its machine. Null = unknown
+    // (an ask that arrived live before any list reply, a bridge conversation with no transcript yet).
+    val workdir: String? = null,
+    val sessionId: String? = null,
 )
 
 /** What the ⌘K palette shows: everything, just project rows ("All projects…"), or the cross-project
@@ -481,6 +486,9 @@ interface DesktopModel {
     val attention: List<DkAttention>
     val watch: DkWatch?
     fun resolveAttention(a: DkAttention, allow: Boolean)
+    /** Take the user to the request behind an attention row (bell, tray, Windows flyout, a clicked banner).
+     *  Default: switch to the machine that asks — all a row without a session id can honestly promise. */
+    fun openAttention(a: DkAttention) { jumpToMachine(this, a.accountId) }
     /** ⌘1–⌘4 — jump to the n-th machine group (switching the active binding when it isn't already). */
     fun jumpMachine(i: Int) {
         machines.getOrNull(i)?.takeIf { !it.active }?.let { selectComputer(it.computer) }
@@ -647,6 +655,12 @@ interface DesktopModel {
     val canArchiveSessions: Boolean get() = false
     fun archiveSession(s: DkSession) {}
     fun unarchiveSession(s: DkSession) {}
+    /** The daemon refused the last archive/restore and it targeted [sessionId]: the verb that was refused
+     *  (true = archive, false = restore), which the row that asked shows inline — the rename refusal's mechanism
+     *  ([renameError]); a list action's failure belongs on its row, never in whatever chat is open. Null = none. */
+    fun archiveRefused(sessionId: String): Boolean? = null
+    /** Clear the inline archive refusal (clicking it). */
+    fun dismissArchiveError() {}
     fun refreshArchived() {}
     /** Open the ⌘K palette in its ARCHIVED scope (the sidebar's "Archived sessions" row). */
     fun browseArchived() {}

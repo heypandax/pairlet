@@ -3540,6 +3540,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 val hasReady = repo.hasReadyImages()
                 val hasLanded = repo.hasLandedFiles()      // files already in the workspace inbox (issue #90)
                 val uploadsBusy = repo.uploadsBusy()       // uploads still moving → send waits
+                val compressing = repo.imagesCompressing() // a photo still downscaling → send waits too
                 val voiceState = repo.voice.value
                 // the timer stays visible (frozen) through S3, after Recording stopped carrying it
                 var recElapsed by remember { mutableStateOf(0L) }
@@ -3677,6 +3678,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                         repo.pendingFiles.size,
                                     ),
                                 )
+                                compressing -> ComposerNote(stringResource(Res.string.composer_compressing))
                                 repo.streaming.value -> ComposerNote(stringResource(Res.string.message_queued_hint))
                             }
                             val stagedContent = input.isNotBlank() || hasReady || hasLanded
@@ -3718,10 +3720,13 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 // @-references exist. Staged content earns Send even mid-turn, because Claude's
                                 // stream-json input queues a mid-turn user message and weaves it into the
                                 // running turn at the next tool boundary (verified on 2.1.201).
-                                val showSend = stagedContent && !uploadsBusy
+                                // a compressing photo holds the send the same way (sendPrompt refuses it): the
+                                // status slot stands in Send's place instead of a Send that does nothing
+                                val sendWaits = uploadsBusy || (compressing && stagedContent)
+                                val showSend = stagedContent && !sendWaits
                                 val showStop = repo.streaming.value
                                 ComposerAccessoryLane(
-                                    actionCount = (if (showStop) 1 else 0) + (if (uploadsBusy || showSend) 1 else 0),
+                                    actionCount = (if (showStop) 1 else 0) + (if (sendWaits || showSend) 1 else 0),
                                     leading = {
                                         val attachInteraction = remember { MutableInteractionSource() }
                                         val attachPressed by attachInteraction.collectIsPressedAsState()
@@ -3781,6 +3786,8 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                                 ),
                                                 modifier = actionModifier,
                                             )
+                                        } else if (sendWaits) {
+                                            UploadStatusSlot(stringResource(Res.string.composer_compressing), modifier = actionModifier)
                                         } else if (showSend) {
                                             val sendLabel = stringResource(Res.string.send)
                                             ComposerLaneActionButton(

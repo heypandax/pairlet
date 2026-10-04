@@ -1244,9 +1244,14 @@ class PocketRepository(
         val archived: Boolean,
         val running: Boolean,
         val at: Long,
+        // the daemon refused this archive/restore (`archive_failed`): the same toast states the failure instead
+        // of the optimistic confirmation, and its action retries the same verb
+        val failed: Boolean = false,
     )
 
     val archiveToast = mutableStateOf<ArchiveToast?>(null)
+    /** The last archive/restore asked for — what an `archive_failed` (which names no session) answers to. */
+    private var archiveTarget: ArchiveToast? = null
 
     fun dismissArchiveToast() { archiveToast.value = null }
     /** The daemon's refusal of the LAST [renameSession] attempt (issue #158), keyed to the session it
@@ -1735,9 +1740,11 @@ class PocketRepository(
     var onTurnFinished: ((title: String, preview: String?, sessionId: String?) -> Unit)? = null
 
     /** §18.2 P2-4 (desktop): a NEW security approval arrived — the shell notifies (system banner + badge)
-     *  when the window is unfocused. Fired for approval asks only (questions are conversation UI); the
-     *  callback receives NO command/path content, matching the push minimization contract. */
-    var onApprovalArrived: (() -> Unit)? = null
+     *  when the window is unfocused. Fired for approval asks only (questions are conversation UI), once per
+     *  request this link had not listed yet — a live frame or a row new in an account-wide list reply. The
+     *  callback receives only the request's ids (so a clicked banner can find it again), NO command/path
+     *  content, matching the push minimization contract. */
+    var onApprovalArrived: ((ApprovalKey) -> Unit)? = null
 
     /** Real turn evidence (chunk / tool / turn-end / error) or a terminal frame (process exit, session gone):
      *  the agent is actually producing — or the whole turn is being torn down. Cancels BOTH the delivery
@@ -3984,18 +3991,24 @@ class PocketRepository(
             // hand-paired call here and one more in the split panes, i.e. a convention waiting to be forgotten)
             is ToolEvent -> if (f.convoId == convoId.value) { promptEvidence(); onToolEvent(f) }
             is PendingApprovals -> {
+                val known = pendingApprovals.keys.toSet()
                 pendingApprovals.clear()
                 f.items.filterNot { it.ask.isQuestion }.forEach { pendingApprovals[ApprovalKey(it.ask.convoId, it.ask.askId)] = it }
+                // audit H1: an ask in a conversation this link isn't attached to reaches us ONLY through this list,
+                // so a row we had not seen is an arrival too — one signal per reply, not one banner per row
+                pendingApprovals.keys.firstOrNull { it !in known }?.let { onApprovalArrived?.invoke(it) }
             }
             is PermissionAsk -> {
                 // Every approval contributes to the machine-wide inbox, even when its conversation is not
                 // the screen currently open. AskUserQuestion remains in its conversation-specific answer UI.
                 if (!f.isQuestion) {
-                    onApprovalArrived?.invoke() // P2-4: desktop banner/badge hook (content-free)
-                    pendingApprovals[ApprovalKey(f.convoId, f.askId)] = PendingApproval(
+                    val key = ApprovalKey(f.convoId, f.askId)
+                    val fresh = key !in pendingApprovals // a re-emitted frame (reattach resurface) is not a new arrival
+                    pendingApprovals[key] = PendingApproval(
                         ask = f,
                         expiresAt = f.timeoutSec?.let { epochMillis() + it * 1000L },
                     )
+                    if (fresh) onApprovalArrived?.invoke(key) // P2-4: desktop banner/badge hook (ids only, no content)
                 }
                 if (f.convoId == convoId.value) {
                     // a card sitting in its terminal timed-out display (issue #100) must not dam the queue:
@@ -4168,6 +4181,9 @@ class PocketRepository(
                 // Same rule as rename_failed: this answers a sidebar/list action, never an OpenSession and
                 // never the chat on screen. Splicing it into the transcript put it in an unrelated chat, and
                 // falling through to the branch below took it as the refusal of an open in flight.
+                // archive_failed answers the last archive/restore: the toast that confirmed it optimistically
+                // now states the failure (phone), and the desktop sidebar row reads the same state inline.
+                if (f.code == "archive_failed") archiveTarget?.let { archiveToast.value = it.copy(failed = true, at = epochMillis()) }
             } else if (f.convoId != null && (openInFlight != null || f.convoId != convoId.value)) {
                 // Conversation-scoped errors fan out from background sessions just like SessionLive and
                 // stream frames. They must not splice a system row into this transcript or terminate a
@@ -6306,7 +6322,7 @@ class PocketRepository(
     ) {
         scope.launch { runCatching { send(SetSessionArchived(wd, sessionId, archived, fromArchiveView)) } }
         if (fromArchiveView) listArchivedSessions() // frames are ordered: the mutation lands before the list
-        archiveToast.value = ArchiveToast(wd, sessionId, title, archived, running, epochMillis())
+        archiveToast.value = ArchiveToast(wd, sessionId, title, archived, running, epochMillis()).also { archiveTarget = it }
     }
 
     /** Pull-to-refresh spinner for the sessions list (mirrors [refreshing] for the project list). */
@@ -6731,6 +6747,10 @@ class PocketRepository(
     /** Any staged file still moving? The send button waits (design: spinner) until uploads settle. */
     fun uploadsBusy() = pendingFiles.any { it.state == FileUpState.Uploading || it.state == FileUpState.Queued }
 
+    /** A staged photo is still being downscaled — [sendPrompt] holds the send (keeping text and photo) until it
+     *  is Ready, so a composer must show Send as waiting, exactly as it does for [uploadsBusy]. */
+    fun imagesCompressing() = pendingImages.any { it.state == ImgState.Compressing }
+
     fun hasLandedFiles() = pendingFiles.any { it.state == FileUpState.Landed && it.path != null }
 
     /** Stage picked files: over-cap picks fail immediately (nothing to stream); the rest queue and
@@ -6909,7 +6929,7 @@ class PocketRepository(
         if (includeAttachments && uploadsBusy()) return false // sends with attachments wait for uploads
         // …and for photos still compressing: only Ready photos ride the prompt and the staging list is
         // cleared below, so sending now would deliver the text and silently drop the picture
-        if (includeAttachments && pendingImages.any { it.state == ImgState.Compressing }) return false
+        if (includeAttachments && imagesCompressing()) return false
         val ready = if (includeAttachments) pendingImages.filter { it.state == ImgState.Ready }.map { it.bytes } else emptyList()
         val landed = if (includeAttachments) pendingFiles.filter { it.state == FileUpState.Landed && it.path != null } else emptyList()
         if (text.isBlank() && ready.isEmpty() && landed.isEmpty()) return false

@@ -155,7 +155,7 @@ class SidePaneModelDelegationGuardTest {
         "groupCollapsed",
         // the sidebar's per-project fold memory: project header collapse + session "Show more" depth
         "projectCollapsed", "sessionsShown",
-        "archivedSessions", "canArchiveSessions", "archiveSession", "unarchiveSession",
+        "archivedSessions", "canArchiveSessions", "archiveSession", "unarchiveSession", "archiveRefused", "dismissArchiveError",
         "refreshArchived", "browseArchived",
         "canRenameSessions", "renameSession", "renameError", "dismissRenameError",
         // the rewind CONFIRMATION lives in window chrome (the sheet), unlike the banners above
@@ -167,7 +167,7 @@ class SidePaneModelDelegationGuardTest {
         // remote directory browser (issues #218/#214)
         "browseListing", "browseRoots", "browseDirectories", "requestBrowse",
         // fleet
-        "machines", "attention", "watch", "resolveAttention", "jumpMachine",
+        "machines", "attention", "watch", "resolveAttention", "openAttention", "jumpMachine",
         "running", "runningVisible", "runningSessionsIn", "runningRows", "openRunning", "browseRunning",
         // split-pane plumbing itself: these take the pane as an argument, so they are already explicit
         // (splitFocusedSlot is window layout — WHERE the focused chat renders — not conversation state)

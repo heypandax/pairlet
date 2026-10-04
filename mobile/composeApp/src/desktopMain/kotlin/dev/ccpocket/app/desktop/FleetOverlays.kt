@@ -102,9 +102,7 @@ fun AttentionPopover(model: DesktopModel) {
                         onAllow = { model.resolveAttention(a, allow = true) },
                         onOpen = {
                             model.showAttention = false
-                            model.machines.firstOrNull { it.computer.accountId == a.accountId }?.let {
-                                if (!it.active) model.selectComputer(it.computer)
-                            }
+                            model.openAttention(a) // the asking session when the list named it, else its machine
                         },
                     )
                 }

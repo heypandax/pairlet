@@ -49,8 +49,26 @@ class AttentionResolveScopeTest {
 
         model.resolveAttention(row, allow = true)
 
-        assertTrue(sent.isEmpty(), "B's request was never shown on that row: got $sent")
+        // audit H1: the row now comes off the account-wide list, so after the switch it still answers A's own "3"
+        // (A is still waiting) — and never B's
+        assertEquals(listOf(PermissionVerdict("convo-a", "3", Decision.ALLOW)), sent, "B's request was never shown on that row")
         assertEquals("convo-b", repo.pendingAsk.value?.convoId, "B's card is still waiting for its own decision")
+    }
+
+    @Test
+    fun theOpenChatsCardOutsideTheListStillMatchesOnBothIds() {
+        // a card the account-wide list doesn't hold (here: the list was replaced by a reply without it) is the
+        // legacy focused path — which must keep the composite match
+        repo.convoId.value = "convo-a"
+        repo.pendingAsk.value = ask("convo-a", "git status")
+        val row = model.attention.single()
+        repo.convoId.value = "convo-b"
+        repo.pendingAsk.value = ask("convo-b", "rm -rf ~/work")
+
+        model.resolveAttention(row, allow = true)
+
+        assertTrue(sent.isEmpty(), "B's request was never shown on that row: got $sent")
+        assertEquals("convo-b", repo.pendingAsk.value?.convoId)
     }
 
     @Test

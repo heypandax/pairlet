@@ -194,9 +194,14 @@ internal fun ArchiveToastBar(repo: PocketRepository, modifier: Modifier = Modifi
     ) {
         Column(Modifier.weight(1f)) {
             Text(
-                if (toast.archived) stringResource(Res.string.archive_toast_archived)
-                else stringResource(Res.string.archive_toast_restored, tilde(toast.workdir)),
-                color = Tok.tx, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                when {
+                    // the daemon refused it (archive_failed): the same toast says so instead of the optimistic receipt
+                    toast.failed && toast.archived -> stringResource(Res.string.archive_toast_archive_failed)
+                    toast.failed -> stringResource(Res.string.archive_toast_restore_failed)
+                    toast.archived -> stringResource(Res.string.archive_toast_archived)
+                    else -> stringResource(Res.string.archive_toast_restored, tilde(toast.workdir))
+                },
+                color = if (toast.failed) Tok.danger else Tok.tx, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Text(
@@ -206,14 +211,15 @@ internal fun ArchiveToastBar(repo: PocketRepository, modifier: Modifier = Modifi
             )
         }
         Spacer(Modifier.width(10.dp))
-        // the reverse verb, not "Undo"
+        // the reverse verb, not "Undo" — or, after a refusal, the SAME verb again (nothing happened to reverse)
+        val next = if (toast.failed) toast.archived else !toast.archived
         Text(
-            if (toast.archived) stringResource(Res.string.archive_unarchive) else stringResource(Res.string.archive_session),
+            if (next) stringResource(Res.string.archive_session) else stringResource(Res.string.archive_unarchive),
             color = Tok.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable {
                 repo.setSessionArchived(
-                    toast.workdir, toast.sessionId, archived = !toast.archived,
-                    fromArchiveView = !toast.archived, title = toast.title, running = toast.running,
+                    toast.workdir, toast.sessionId, archived = next,
+                    fromArchiveView = !toast.archived, title = toast.title, running = toast.running, // where the toasted action came from
                 )
             }.padding(horizontal = 8.dp, vertical = 4.dp),
         )

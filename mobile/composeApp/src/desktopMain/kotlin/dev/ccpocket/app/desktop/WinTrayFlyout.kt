@@ -161,7 +161,7 @@ fun WinTrayFlyout(
                             a,
                             onDeny = { model.resolveAttention(a, allow = false) },
                             onAllow = { model.resolveAttention(a, allow = true) },
-                            onOpen = { openMain(); jumpToMachine(model, a.accountId) },
+                            onOpen = { openMain(); model.openAttention(a) },
                         )
                     }
                     // 溢出去的审批落到「审批中心」= 铃铛的全机群待办队列（model.showAttention）。
