@@ -535,6 +535,27 @@ class GitServiceTest {
     }
 
     @Test
+    fun a_dirty_checkout_confirm_refuses_when_files_the_preview_never_showed_would_be_lost() {
+        assumeTrue(gitAvailable())
+        val dir = repo()
+        val svc = service()
+        dir.resolve("other.txt").writeText("base\n")
+        sh(dir, "add", "other.txt"); sh(dir, "commit", "-q", "-m", "other")
+        sh(dir, "branch", "feat/x")
+        dir.resolve("README.md").writeText("dirty\n")
+        val preview = act(svc, dir, GIT_OP_CHECKOUT, branch = "feat/x") as GitActionPreview
+        assertEquals(listOf("README.md"), preview.files.map { it.path })
+
+        // the agent edits another file inside the 60-second window; the user confirms what they saw
+        dir.resolve("other.txt").writeText("work the user never saw in the sheet\n")
+        val r = act(svc, dir, GIT_OP_CHECKOUT, branch = "feat/x", token = preview.confirmToken) as GitActionResult
+        assertFalse(r.ok)
+        assertTrue(r.error.orEmpty().contains("changed since"), r.error.orEmpty())
+        assertEquals("work the user never saw in the sheet\n", dir.resolve("other.txt").readText())
+        assertEquals("main", sh(dir, "rev-parse", "--abbrev-ref", "HEAD").trim())
+    }
+
+    @Test
     fun a_branch_and_a_file_of_the_same_name_is_never_ambiguous() {
         assumeTrue(gitAvailable())
         val dir = repo()
@@ -682,6 +703,27 @@ class GitServiceTest {
         assertFalse(wt.exists())
         // the BRANCH survives — the directory is what was deleted
         assertTrue("feat/x" in sh(dir, "branch", "--format=%(refname:short)"))
+    }
+
+    @Test
+    fun a_worktree_that_was_clean_at_preview_but_dirty_at_confirm_is_not_force_removed() {
+        assumeTrue(gitAvailable())
+        val dir = repo()
+        val svc = service()
+        runBlocking { svc.addWorktree(AddWorktree("c1", dir.toString(), "feat/x", createBranch = true), dir) }
+        val wt = tmp.resolve("repo-worktrees").resolve("feat-x")
+
+        val preview = runBlocking { svc.removeWorktree(RemoveWorktree("c1", dir.toString(), wt.toString()), dir) }
+        assertIs<GitActionPreview>(preview)
+        assertEquals("worktree-clean", preview.summary)
+
+        // an editor writes into the checkout before the user taps confirm on a "clean" sheet
+        wt.resolve("late.txt").writeText("written after the preview\n")
+        val r = runBlocking { svc.removeWorktree(RemoveWorktree("c1", dir.toString(), wt.toString(), preview.confirmToken), dir) }
+        assertIs<GitActionResult>(r)
+        assertFalse(r.ok)
+        assertTrue(r.error.orEmpty().contains("changed since"), r.error.orEmpty())
+        assertEquals("written after the preview\n", wt.resolve("late.txt").readText())
     }
 
     @Test

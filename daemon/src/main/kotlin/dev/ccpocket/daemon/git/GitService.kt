@@ -130,7 +130,10 @@ class GitService(
         /** true = the preview already knows the confirm must fail (#281: a session runs in this worktree).
          *  A token is still minted so the client flow is uniform; redeeming it refuses. */
         val blocked: Boolean = false,
-    )
+    ) {
+        /** Every path the confirmed action would lose NOW was listed on the preview the user agreed to. */
+        fun covers(losable: List<String>): Boolean = paths.toSet().containsAll(losable)
+    }
 
     // ------------------------------------------------------------------ reads
 
@@ -359,8 +362,11 @@ class GitService(
         if (token.isNullOrEmpty()) {
             return preview(f.convoId, f.op, repo, withCounts(exe, repo, losable, staged = false), "dirty-checkout", branch = target)
         }
-        consume(token, f.op, f.convoId, repo, target)
+        val confirm = consume(token, f.op, f.convoId, repo, target)
             ?: return err(f.convoId, f.op, "that confirmation expired — check the changes again")
+        // --force discards whatever is dirty NOW. If that is more than the sheet listed (the agent kept
+        // editing during the confirm window), the user never agreed to lose it.
+        if (!confirm.covers(losable.map { it.path })) return err(f.convoId, f.op, CHANGED_SINCE_PREVIEW)
         return done(f, exe, repo, git(exe, repo.root, listOf("checkout", "--force", target, "--")))
     }
 
@@ -463,7 +469,7 @@ class GitService(
             if (token.isNullOrEmpty()) {
                 return GitActionPreview(
                     convoId = f.convoId, op = op,
-                    confirmToken = mint(op, f.convoId, repo, emptyList(), null, target, blocked = live != null),
+                    confirmToken = mint(op, f.convoId, repo, losable.map { it.path }, null, target, blocked = live != null),
                     expiresAtMs = nowMs() + GIT_CONFIRM_TTL_MS,
                     files = losable.take(GIT_STATUS_MAX_ENTRIES),
                     summary = if (losable.isEmpty()) "worktree-clean" else "worktree-dirty",
@@ -479,6 +485,9 @@ class GitService(
             if (confirm.blocked || liveIndex()[key] != null) {
                 return err(f.convoId, op, "a session is running in this worktree — stop it first")
             }
+            // --force is decided from the state at THIS moment, so it may only discard what the sheet
+            // showed: a checkout that was clean at preview and got written to since is refused, not forced.
+            if (!confirm.covers(losable.map { it.path })) return err(f.convoId, op, CHANGED_SINCE_PREVIEW)
             val argv = buildList {
                 add("worktree"); add("remove")
                 if (losable.isNotEmpty()) add("--force")
@@ -752,6 +761,7 @@ class GitService(
 
     internal companion object {
         const val GIT_NOT_FOUND = "git is not installed on the computer"
+        const val CHANGED_SINCE_PREVIEW = "files changed since the preview — check the changes again"
         const val MAX_OUT = 4_000 // stdout/stderr echoed back on an action frame
         const val DIFF_CAP = 200_000 // a single diff body; also the hard read cap on any git output
         const val LOCAL_TIMEOUT_MS = 30_000L
