@@ -6,7 +6,7 @@
 
 ## 2.0 改名准备
 
-- 中英文商店名称均为 `Pairlet`（`name.txt`；2026-10-03 起，此前过渡名称为 `CC Pairlet`）。副标题独立写入 `subtitle.txt`：中文 `AI 编程伴侣`，英文 `Coding agents, within reach`。名称和副标题各不超过 30 字符。
+- 商店名称（`name.txt`）：中文 `Pairlet`，英文 `Pairlet: Coding Agents`。2026-10-04 同步到 App Store Connect 时，英文区的 `Pairlet` 被报告已由其他账号使用，中文区可用，所以英文名带描述后缀；此前的过渡名称为 `CC Pairlet`。副标题独立写入 `subtitle.txt`：中文 `AI 编程伴侣`，英文 `Coding agents, within reach`。名称和副标题各不超过 30 字符。
 - 当前口径见[名称与过渡期约定](../../docs/PAIRLET-NAMING.md)。原命名评估表述为「Pairlet｜AI 编程伴侣」「你的编程任务，随时接续」以及 `Pairlet — Your coding agents, within reach.`；实施方案的中文主张为「随时接续你的 AI 编程任务」。`Your coding agents, within reach.` 共 33 字符，商店副标题去掉 `Your` 和句号后为 27 字符，其余宣传场景可保留完整原句。不要再从旧商店标题回填「随身编程遥控 / AI Code Remote」。
 - 介绍保留原有功能与能力边界，在首段说明原名 CC Pocket，并补齐 iPhone / iPad；关键词保留 `CC Pocket` 供老用户搜索。
 - `marketing_url.txt` 指向中文官网 `https://pairlet.org/` 或英文官网 `https://pairlet.org/en/`；`support_url.txt`、`privacy_url.txt` 分别指向 `https://pairlet.org/support/`、`https://pairlet.org/privacy.html`。上传前要检查公开访问；本地校验只验证 URL 格式。

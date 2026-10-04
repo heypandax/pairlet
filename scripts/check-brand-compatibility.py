@@ -30,7 +30,11 @@ def main():
     assert ios["CFBundleDisplayName"] == "Pairlet"
     for locale in ("en-US", "zh-Hans"):
         store_name = (ROOT / f"fastlane/metadata/{locale}/name.txt").read_text().strip()
-        assert store_name == ios["CFBundleDisplayName"], f"Store and device transition names differ: {locale}"
+        # en-US cannot be the bare name: App Store Connect reports "Pairlet" as used on another account
+        # (2026-10-04). A store name may therefore carry a ": <descriptor>" suffix, never a different lead.
+        device_name = ios["CFBundleDisplayName"]
+        assert store_name == device_name or store_name.startswith(device_name + ": "), \
+            f"Store name must be the device name, optionally followed by ': <descriptor>': {locale}"
     assert ios["CFBundleURLTypes"][0]["CFBundleURLSchemes"] == ["ccpocket", "pairlet"], "Keep the legacy scheme first; pairlet is additive"
     project = (ROOT / "iosApp/iosApp.xcodeproj/project.pbxproj").read_text()
     app_ids = set()

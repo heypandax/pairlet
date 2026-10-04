@@ -2,12 +2,12 @@
 
 2026-10-03 用户确认：过渡名称结束，商店名称、设备显示名和各端界面统一为 **Pairlet**，对外引导的命令统一为 `pairlet`。此前（2026-09-10 起，至 2.2.0）使用 **CC Pairlet** 做过渡；下文“安装后搜索”一节与验收记录中的 CC Pairlet 是当时的实测对象，保留原样。
 
-本次是源码与元数据改动，尚未发版：App Store 名称要随下一个版本提审才生效，“Pairlet” 在商店是否可用也要到那时才能确认。
+本次是源码与元数据改动，尚未发版：App Store 名称要随下一个版本提审才生效。2026-10-04 用 2.3.0 草稿同步商店文案时实测：中文区 `Pairlet` 可用，英文区 `Pairlet` 被 App Store Connect 报告为已由其他账号使用（各区商店都搜不到同名的已上架应用）。用户决定英文商店名加描述后缀，中文商店名和设备显示名仍为 Pairlet。
 
 | 位置 | 当前名称或文案 |
 | --- | --- |
 | 最终品牌、域名、源码仓库 | Pairlet、pairlet.org、heypandax/pairlet |
-| App Store 中英文名称 | **Pairlet** |
+| App Store 名称 | 中文 **Pairlet**；英文 **Pairlet: Coding Agents** |
 | 安装后的设备显示名、系统 App 入口 | **Pairlet** |
 | 中文商店副标题 | AI 编程伴侣 |
 | 英文商店副标题 | Coding agents, within reach |
@@ -19,7 +19,7 @@
 
 副标题按商店 30 字符限制独立配置，不能用旧商店的「随身编程遥控 / AI Code Remote」覆盖原来的 AI 编程伴侣定位。商店和设备名称中的 CC、图标上的 Pocket 标签均已按 2026-10-03 的决定移除。
 
-`scripts/check-brand-compatibility.py` 要求商店名称与 iOS 设备显示名保持一致，防止只修正文案时两处名称不一致。
+`scripts/check-brand-compatibility.py` 要求商店名称以 iOS 设备显示名开头：要么完全相同，要么后面跟「: 描述」，防止只修正文案时两处名称走样。
 
 ## 安装后搜索的当前证据
 
