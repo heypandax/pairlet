@@ -5,7 +5,16 @@ import kotlin.time.TimeSource
 
 enum class ProductResult { SUCCESS, FAILURE, TIMEOUT, CANCELLED, UNKNOWN, WAITING }
 enum class Coverage { COMPLETE, PARTIAL, UNKNOWN }
-enum class ProductFeature { SESSION_VIEW, PROMPT_TASK, APPROVAL, FILE_VIEW, BACKGROUND_TASK }
+/** `feature` values of feature_exposed / feature_used (sent as `name.lowercase()`). The first five are the core
+ *  features with exposure denominators and value/outcome events. The rest (second batch, 2026-10-04) are
+ *  keep-or-remove candidates: usage only — feature_used at the one point that shows the feature was really
+ *  used, no exposure denominator, never a parameter beyond the shared enum dimensions. */
+enum class ProductFeature {
+    SESSION_VIEW, PROMPT_TASK, APPROVAL, FILE_VIEW, BACKGROUND_TASK,
+    REVIEW_REQUEST, SESSION_HANDOFF, COLLABORATOR_INVITE, FOLDER_SHARE, WORKFLOW_RUN, VOICE_MEMO,
+    GIT_PANEL, WORKTREE, SESSION_REWIND, SESSION_FORK, SKILL_BROWSE, SPLIT_PANE, EMBEDDED_TERMINAL,
+    HTML_PREVIEW, BRIDGE_ADMIN,
+}
 
 /** Business denominators are independent of Sentry sampling/admission. One instance per user operation.
  * Main-thread confined, like the repository that owns it. Never carries business identifiers/text. */

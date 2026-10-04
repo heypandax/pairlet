@@ -107,6 +107,7 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun BridgesPane(model: DesktopModel) {
     LaunchedEffect(Unit) { model.fetchBridges() }
+    LaunchedEffect(Unit) { model.useFeature(dev.ccpocket.app.telemetry.ProductFeature.BRIDGE_ADMIN) }
     var creating by remember { mutableStateOf(false) }
 
     Column {

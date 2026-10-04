@@ -115,6 +115,7 @@ fun GitPanelScreen(
 
     // one pull on entry; everything after rides GitActionResult.statusAfter — no polling anywhere
     LaunchedEffect(repo.convoId.value) { repo.fetchGitStatus(withBranches = true) }
+    LaunchedEffect(Unit) { repo.useFeature(dev.ccpocket.app.telemetry.ProductFeature.GIT_PANEL) }
 
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         GitNavRow(title = repo.chatTitle.value ?: stringResource(Res.string.chat_title), onBack = onBack)

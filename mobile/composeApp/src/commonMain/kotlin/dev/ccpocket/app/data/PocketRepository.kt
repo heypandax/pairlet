@@ -1468,7 +1468,7 @@ class PocketRepository(
         item.workflowRunId?.let { workflowRuns[it] }
             ?: item.taskId?.let { tid -> workflowRuns.values.firstOrNull { it.toolUseId == tid } }
 
-    fun openWorkflow(runId: String) { viewedWorkflowRunId.value = runId }
+    fun openWorkflow(runId: String) { useFeature(ProductFeature.WORKFLOW_RUN); viewedWorkflowRunId.value = runId }
     fun closeWorkflow() { viewedWorkflowRunId.value = null }
 
     /** Ask the daemon for one agent's full prompt/return (detail sheet). Cached per (run, index);
@@ -1502,6 +1502,7 @@ class PocketRepository(
     private val promptOutcomes = PromptOutcomeTracker(scope, { appIsForeground.value }, { promptTurnTimeoutMs })
     private val backgroundOutcomes = BackgroundOutcomeTracker()
     fun exposeFeature(feature: ProductFeature) = ProductFeatures.expose(feature, productDimensions())
+    fun useFeature(feature: ProductFeature) = ProductFeatures.used(feature, productDimensions())
     private var daemonDiagnostics = false
     private var openObservation: SessionOpenObservation? = null
     private var historyDiagnosticDeadline: Job? = null
@@ -5266,6 +5267,7 @@ class PocketRepository(
 
     /** Owner: mint a scoped, expiring invite for [path]. Reply lands in [lastShareCreated]. */
     fun createShare(path: String, tier: AccessTier, expiresInSec: Long, label: String? = null) {
+        useFeature(ProductFeature.FOLDER_SHARE) // the guest's join is already counted as pair_*/source=share
         lastShareCreated.value = null; sharesRefreshing.value = true
         scope.launch { runCatching { send(CreateShare(path, tier, expiresInSec, label)) } }
     }
@@ -5398,6 +5400,7 @@ class PocketRepository(
     fun createHandoff(recipientLabel: String, expiresHours: Int, request: String, recipientDeviceId: String? = null) {
         val wd = workdir.value ?: return
         val sid = sessionKey.value ?: currentSessionId ?: return
+        useFeature(ProductFeature.SESSION_HANDOFF)
         handoffCreating.value = true; handoffError.value = null
         val brief = HandoffBrief(request = request)
         scope.launch {
@@ -5452,6 +5455,7 @@ class PocketRepository(
 
     /** Mint a one-time connect ticket (short TTL). Reply lands in [collaboratorTicket]; old daemons drop it. */
     fun createCollaboratorTicket(label: String? = null) {
+        useFeature(ProductFeature.COLLABORATOR_INVITE) // the redeeming side is already counted as pair_*/source=collaborator
         collaboratorTicket.value = null; collaboratorTicketCreating.value = true; collaboratorError.value = null
         scope.launch {
             runCatching { send(CreateCollaboratorTicket(label)) }
@@ -5488,6 +5492,7 @@ class PocketRepository(
      */
     fun acceptHandoff(id: String) {
         if (handoffAccepting.value == id) return // a double-tap is not a second accept
+        useFeature(ProductFeature.SESSION_HANDOFF)
         handoffAccepting.value = id
         handoffAcceptError.value = null
         acceptedHere += id
@@ -5656,6 +5661,7 @@ class PocketRepository(
         dueAt: Long? = null,
         expiresAt: Long? = null,
     ) {
+        useFeature(ProductFeature.REVIEW_REQUEST)
         reviewSending.value = true; reviewError.value = null; reviewLastCreated.value = null
         scope.launch {
             runCatching { send(CreateReviewRequest(recipientDeviceId, title, brief, artifacts, dueAt, expiresAt)) }
@@ -5691,6 +5697,7 @@ class PocketRepository(
         result: ReviewResult? = null,
     ) {
         if (reviewActing.value == requestId) return // a double-tap is not a second action
+        useFeature(ProductFeature.REVIEW_REQUEST)
         reviewActing.value = requestId; reviewError.value = null; reviewLastActed.value = null
         scope.launch {
             runCatching { send(ActOnReviewInbox(requestId, action, reason, result)) }
@@ -6311,6 +6318,7 @@ class PocketRepository(
         val convo = convoId.value ?: return
         rewindSheet.value = sheet.copy(submitting = true)
         val t = sheet.target
+        useFeature(if (t.mode == RewindMode.FORK) ProductFeature.SESSION_FORK else ProductFeature.SESSION_REWIND)
         rewindAwaiting = t
         scope.launch { send(RewindSession(convo, t.seq, t.uuid, t.mode, dryRun = false)) }
     }
@@ -6518,7 +6526,8 @@ class PocketRepository(
         // rather than only fetching on picker-open (SessionSheets.kt ModelPicker LaunchedEffect).
         fetchModels(openAgent)
         clearBackgroundJobs()
-        Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0) + demoTag())
+        Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0,
+            TelKey.Backend to openAgent.name.lowercase()) + demoTag()) // resume=0 + backend = which agent a NEW session picked
         // lastEventSeq = 0 (never null, via lastEventSeqFor after the reset above): full replay, but it
         // declares this client delta-capable so an observe view tails with deltas (issue #147)
         if (gen != openGen) return
@@ -7377,6 +7386,7 @@ class PocketRepository(
 
     fun openMemos() {
         if (!memoFeatureOn.value || pinnedTo != null) return // a fleet satellite shares the library; it never opens it
+        useFeature(ProductFeature.VOICE_MEMO)
         memoOpen.value = true
         memo.accept(dev.ccpocket.app.memo.MemoAction.Opened)
     }

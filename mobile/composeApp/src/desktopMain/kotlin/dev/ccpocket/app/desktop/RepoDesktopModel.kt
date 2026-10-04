@@ -1459,6 +1459,7 @@ class RepoDesktopModel(
         get() = repo.toolProcessScope
     // older-history lazy load (issue #147) — straight delegation to the shared repository
     override fun exposeFeature(feature: dev.ccpocket.app.telemetry.ProductFeature) = repo.exposeFeature(feature)
+    override fun useFeature(feature: dev.ccpocket.app.telemetry.ProductFeature) = repo.useFeature(feature)
     override fun sideContentLayoutToken(pane: SidePane): String? = repo.sideContentLayoutToken(pane)
     override fun onSideContentLaidOut(pane: SidePane, token: String, hasVisibleContent: Boolean, lastVisibleContent: Int) = repo.onSideContentLaidOut(pane, token, hasVisibleContent, lastVisibleContent)
     override val historyLayoutToken: String? get() = repo.contentLayoutToken

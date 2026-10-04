@@ -62,6 +62,10 @@ internal actual fun HtmlPreview(document: String, modifier: Modifier, onError: (
     DisposableEffect(Unit) {
         onDispose { holder[0]?.dispose(); holder[0] = null }
     }
+    // the JavaFX preview actually rendered (not the source view). No path/content — the feature name only.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        dev.ccpocket.app.telemetry.ProductFeatures.used(dev.ccpocket.app.telemetry.ProductFeature.HTML_PREVIEW, emptyMap())
+    }
     SwingPanel(
         modifier = modifier,
         background = Color.White,

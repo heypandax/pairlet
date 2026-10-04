@@ -123,6 +123,7 @@ fun SkillsOverlay(model: DesktopModel, onDismiss: () -> Unit) {
     }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
+    LaunchedEffect(Unit) { model.useFeature(dev.ccpocket.app.telemetry.ProductFeature.SKILL_BROWSE) }
 
     Column(
         Modifier.widthIn(max = 960.dp).fillMaxWidth(0.88f).heightIn(max = 620.dp).fillMaxHeight(0.86f)
