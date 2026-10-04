@@ -2825,6 +2825,28 @@ class PocketRepository(
         launchTransport(reconnect = true, force = true)
     }
 
+    internal suspend fun restoreAfterReconnectForTest() = restoreAfterReconnect()
+
+    /**
+     * The automatic re-open of the session on screen (reconnect restore, SessionGone recovery). When the
+     * daemon no longer holds the conversation this becomes a COLD resume that launches with exactly what
+     * the request names — a bare request relaunched on CLI defaults and the next SessionLive then wrote
+     * those defaults back over the user's choice. The live values below are the session's daemon-confirmed
+     * launch flags (SessionLive reconciles them; [sessionParams] persists the same set). Thinking is
+     * restored by [send] for every OpenSession.
+     */
+    private fun resumeOpenSession(wd: String, sid: String) = OpenSession(
+        wd,
+        sid,
+        model = model.value,
+        mode = mode.value,
+        effort = effort.value,
+        agent = sessionAgent.value ?: AgentKind.CLAUDE,
+        lastEventSeq = lastEventSeqFor(sid),
+        permissionMode = permissionMode.value,
+        serviceTier = serviceTier.value,
+    )
+
     /** After the link is back: re-sync whatever page the user is parked on; reattach a live chat. */
     private suspend fun restoreAfterReconnect() {
         val sid = currentSessionId
@@ -2845,7 +2867,7 @@ class PocketRepository(
                 // tailing — two SessionLive/ConvoHistory streams ping-ponging the phone between convoIds.
                 if (observing.value) send(CloseSession(convo))
                 // lastEventSeq (issue #147): we still hold this session's transcript — ask for the delta
-                send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE, lastEventSeq = lastEventSeqFor(sid)))
+                send(resumeOpenSession(wd, sid))
             }
             dir != null -> send(ListSessions(dir))
             else -> {} // directory list already refreshed by launchTransport
@@ -4178,7 +4200,7 @@ class PocketRepository(
                     if (promptRetry != null && !promptResendArmed && sid != null && wd != null) {
                         promptResendArmed = true
                         // lastEventSeq (issue #147): the transcript is still on screen — delta reattach
-                        scope.launch { send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE, lastEventSeq = lastEventSeqFor(sid))) }
+                        scope.launch { send(resumeOpenSession(wd, sid)) }
                     } else {
                         promptEvidence(exactPrompt = true); promptResendArmed = false
                         finishThinking(); streaming.value = false
