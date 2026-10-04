@@ -80,6 +80,8 @@ import dev.ccpocket.app.ui.session.SessionRowUi
 import dev.ccpocket.app.ui.session.SurfaceState
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ActiveSession
+import dev.ccpocket.protocol.AskOption
+import dev.ccpocket.protocol.AskQuestion
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ConvoHistory
@@ -645,6 +647,28 @@ class MobileUi20ChromeTest {
         assertFalse(present(str(Res.string.st_act_review)), "no second Review path")
         assertFalse(present(str(Res.string.deny)), "no second Deny")
         assertFalse(present(str(Res.string.allow_once)), "no second Allow")
+    }
+
+    /** #402: under a docked QuestionCard the block is one row — label and running qualifier side by side,
+     *  no quoted title — so the transcript being asked about keeps the rows the old three-row block took. */
+    @Test
+    fun aQuestionsStateBlockIsOneRowWithTheRunningQualifierBesideTheLabel() = runDesktopComposeUiTest(W, H) {
+        val ask = PermissionAsk(
+            convoId = convo, askId = "q-1", tool = "AskUserQuestion", title = "Answer questions", inputPreview = "",
+            questions = listOf(AskQuestion(question = "Which palette?", options = listOf(AskOption("Warm", null)))),
+        )
+        setContent {
+            PocketTheme { ChatStateBlock(chatStateUi(ask, sessionDegraded = false, streaming = true)!!) }
+        }
+        advanceFrameAndWait()
+        assertFalse(present("Answer questions"), "the ask title is not quoted: the card below shows the question")
+        val label = onAllNodes(hasText(str(Res.string.st_answer))).onFirst().getBoundsInRoot()
+        val running = onAllNodes(hasText(str(Res.string.st_also_running))).onFirst().getBoundsInRoot()
+        assertTrue(
+            running.top < label.bottom && running.bottom > label.top,
+            "the qualifier shares the label's row (label $label, qualifier $running)",
+        )
+        assertTrue(running.left > label.left, "and trails the label")
     }
 
     @Test

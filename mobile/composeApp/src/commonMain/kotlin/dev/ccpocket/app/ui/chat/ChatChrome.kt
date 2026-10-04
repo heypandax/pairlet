@@ -319,6 +319,9 @@ private fun ContextChevronDown(modifier: Modifier = Modifier) {
 @Composable
 fun ChatStateBlock(ui: ChatStateUi, modifier: Modifier = Modifier) {
     val tint = stateColor(ui.tone)
+    // #402: with no detail line to sit under (a question — its card carries the text), the qualifier rides
+    // the label row, so the whole block is ONE row and the transcript keeps the rows it used to cost
+    val inlineRunning = ui.alsoRunning && ui.detail == null
     Column(
         modifier.fillMaxWidth().background(Tok.surface)
             .padding(horizontal = Metric.gutter, vertical = Metric.gap),
@@ -329,8 +332,9 @@ fun ChatStateBlock(ui: ChatStateUi, modifier: Modifier = Modifier) {
             // block's own tinted rule already carry the colour half of the signal
             Text(
                 stateLabel(ui.state), color = Tok.tx, fontSize = 15.sp, lineHeight = 20.sp,
-                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                fontWeight = FontWeight.SemiBold, style = tightCenter(15.sp), modifier = Modifier.weight(1f),
             )
+            if (inlineRunning) AlsoRunning()
         }
         // the request's own title, verbatim — the sheet below still carries tool, payload and evidence
         ui.detail?.let { detail ->
@@ -340,18 +344,26 @@ fun ChatStateBlock(ui: ChatStateUi, modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxWidth().padding(start = 17.dp, top = 9.dp),
             )
         }
-        // the demoted qualifier — present only because a turn really is still producing tokens
-        if (ui.alsoRunning) {
-            Row(
-                Modifier.padding(start = 17.dp, top = 11.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
-            ) {
-                PulseDot(Tok.ok, size = 7.dp)
-                Text(stringResource(Res.string.st_also_running), color = Tok.tx2, style = TypeRole.caption)
-            }
-        }
+        if (ui.alsoRunning && !inlineRunning) AlsoRunning(Modifier.padding(start = 17.dp, top = 11.dp))
         Hairline(Modifier.padding(top = Metric.gap), color = tint.copy(alpha = 0.32f))
+    }
+}
+
+/** The demoted qualifier — present only because a turn really is still producing tokens. */
+@Composable
+private fun AlsoRunning(modifier: Modifier = Modifier) {
+    Row(
+        modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
+    ) {
+        PulseDot(Tok.ok, size = 7.dp)
+        // TypeRole.caption's size and line box, centred in it: the text shares its row with the dot and,
+        // inline, with the 15sp label
+        Text(
+            stringResource(Res.string.st_also_running), color = Tok.tx2,
+            fontSize = 11.5.sp, lineHeight = 16.sp, style = tightCenter(11.5.sp),
+        )
     }
 }
 

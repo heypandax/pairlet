@@ -18,7 +18,8 @@ import dev.ccpocket.protocol.isQuestion
  */
 data class ChatStateUi(
     val state: SurfaceState,
-    /** The real ask title behind an intervention. Never a client-authored summary; null when there is none. */
+    /** The real ask title behind an approval. Never a client-authored summary; null when there is none, and
+     *  always null for a question — the docked QuestionCard already shows what is being asked (#402). */
     val detail: String?,
     /**
      * A genuinely streaming turn UNDER an open approval/question — the design's demoted qualifying line
@@ -51,8 +52,10 @@ fun chatStateUi(
 ): ChatStateUi? = when {
     pendingAsk != null && !pendingAsk.isQuestion ->
         ChatStateUi(SurfaceState.APPROVAL, pendingAsk.title.takeIf { it.isNotBlank() }, alsoRunning = streaming)
-    pendingAsk != null ->
-        ChatStateUi(SurfaceState.ANSWER, pendingAsk.title.takeIf { it.isNotBlank() }, alsoRunning = streaming)
+    // #402: a question quotes no title. Its QuestionCard is docked above the composer with the question
+    // itself, and the ask title ("Answer questions") only said the label twice — at the cost of rows the
+    // transcript being asked about needs on a phone.
+    pendingAsk != null -> ChatStateUi(SurfaceState.ANSWER, detail = null, alsoRunning = streaming)
     sessionDegraded -> ChatStateUi(SurfaceState.FAILURE, detail = null, alsoRunning = false)
     else -> null
 }

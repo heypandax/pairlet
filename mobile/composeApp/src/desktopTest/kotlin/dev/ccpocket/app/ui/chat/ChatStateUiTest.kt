@@ -93,6 +93,13 @@ class ChatStateUiTest {
         )
     }
 
+    @Test
+    fun a_question_quotes_no_title_because_its_card_already_shows_the_question() {
+        val ui = assertNotNullUi(chatStateUi(question("Answer questions"), sessionDegraded = false, streaming = true))
+        assertNull(ui.detail, "#402: the docked QuestionCard carries the question; the ask title only repeats the label")
+        assertTrue(ui.alsoRunning, "dropping the title must not drop the running qualifier")
+    }
+
     private fun assertNotNullUi(ui: ChatStateUi?): ChatStateUi {
         assertTrue(ui != null, "expected a pinned state")
         return ui
