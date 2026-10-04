@@ -7,7 +7,8 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * One authenticated socket. [sendBinary] carries the opaque E2E data plane; [sendText] carries
- * relay control frames; [close] force-disconnects (e.g. on revoke or supersede).
+ * relay control frames; [close] force-disconnects (e.g. on revoke or supersede) and must return without
+ * waiting for the socket to drain — its callers are another socket's handler or the daemon's read loop.
  */
 class Conn(
     val account: String,

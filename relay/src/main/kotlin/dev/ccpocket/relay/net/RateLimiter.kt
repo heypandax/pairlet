@@ -35,6 +35,12 @@ class RateLimiter(private val clock: () -> Long = System::currentTimeMillis) {
         return allowed
     }
 
+    /** Give back one call [check] allowed, for a call that turned out legitimate — e.g. a socket counted
+     *  before its handshake that then authenticated. Never lifts a lockout and never goes below zero. */
+    fun refund(key: String) {
+        buckets.computeIfPresent(key) { _, b -> b.also { if (it.count > 0) it.count-- } }
+    }
+
     /** Drop idle buckets so the map can't grow without bound. Call periodically. */
     fun sweep(idleMs: Long = 3_600_000) {
         val cutoff = clock() - idleMs
