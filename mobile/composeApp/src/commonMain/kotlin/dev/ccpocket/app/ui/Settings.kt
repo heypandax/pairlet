@@ -469,6 +469,10 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
         },
         monospace = { it != null },
     ) { repo.setDefaultModelFor(defaultAgent, it) }
+    // a fallback list reads exactly like a real catalog — say so before a default is picked from it
+    codexCatalogNote(defaultAgent, repo.agentModels[defaultAgent])?.let {
+        CodexCatalogNoteLine(it, Modifier.padding(top = 10.dp, start = 2.dp))
+    }
     Text(
         stringResource(Res.string.settings_default_model_sub, agentName(defaultAgent)),
         color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp,

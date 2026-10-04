@@ -904,6 +904,9 @@ interface DesktopModel {
     fun permissionModeAvailable(id: String): Boolean = false
     /** Agent model lists from the daemon — fetched by [fetchModels]. */
     fun modelsForAgent(agent: AgentKind): List<String> = emptyList()
+    /** Why [modelsForAgent] is only a built-in fallback ([dev.ccpocket.app.ui.codexCatalogNote]), or null.
+     *  Null by default: a seed/preview model has no daemon whose cache could be missing. */
+    fun modelsNoteForAgent(agent: AgentKind): String? = null
 
     /** The daemon's advertised AGENT presets for [agent] (issue #333) — same [fetchModels] answer as the
      *  model list. Empty = not advertised, and the new-session popover then shows no preset row at all:

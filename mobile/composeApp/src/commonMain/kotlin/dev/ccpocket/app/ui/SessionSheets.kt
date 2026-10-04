@@ -133,6 +133,20 @@ internal fun modelCatalogNotice(agent: AgentKind, result: ModelsList?, hasSelect
     return ModelCatalogNotice.EMPTY.takeUnless { hasSelectableModels }
 }
 
+/** Why a Codex model list is only the built-in fallback, or null. Codex keeps its static fallback, so an
+ *  error never empties the list — without this line the built-in trio is indistinguishable from the
+ *  user's real catalog. ZCode/dsh surface their catalog errors through [modelCatalogNotice], OpenCode
+ *  through its own line in [ModelPicker]. */
+internal fun codexCatalogNote(agent: AgentKind, result: ModelsList?): String? =
+    if (agent == AgentKind.CODEX) result?.error else null
+
+/** [codexCatalogNote] as every phone model surface prints it: one muted line on its own, never inside a Row.
+ *  [modifier] carries the surface's own spacing. */
+@Composable
+internal fun CodexCatalogNoteLine(note: String, modifier: Modifier = Modifier) {
+    Text(note, color = Tok.muted, fontSize = 12.sp, lineHeight = 16.sp, modifier = modifier)
+}
+
 /**
  * Display copy for an agent-preset id (issue #333).
  *
@@ -823,9 +837,7 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
             }
             // Codex keeps its static fallback, so an error never empties the list — without this line the
             // built-in trio is indistinguishable from the user's real catalog ("is the list trimmed?").
-            if (agent == AgentKind.CODEX) agentModels?.error?.let {
-                Text(it, color = Tok.muted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 10.dp))
-            }
+            codexCatalogNote(agent, agentModels)?.let { CodexCatalogNoteLine(it, Modifier.padding(top = 10.dp)) }
             // ZCode has no static fallback: distinguish an in-flight fetch from a completed empty answer,
             // and preserve a refresh error even when last-good provider/model rows remain visible.
             modelCatalogNotice(agent, agentModels, choices.isNotEmpty())?.let { notice ->

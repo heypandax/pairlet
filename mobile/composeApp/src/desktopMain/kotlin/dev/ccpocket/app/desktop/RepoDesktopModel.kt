@@ -25,6 +25,7 @@ import dev.ccpocket.app.resources.update_reach_failed
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.ui.ComposerState
+import dev.ccpocket.app.ui.codexCatalogNote
 import dev.ccpocket.app.ui.fleet.MachineOs
 import dev.ccpocket.app.ui.fleet.osFromName
 import dev.ccpocket.app.ui.folderName
@@ -1489,6 +1490,7 @@ class RepoDesktopModel(
     override fun permissionModeAvailable(id: String): Boolean = repo.supportsPermissionMode(id)
     override fun compactConversation() { repo.sendPrompt("/compact") }
     override fun modelsForAgent(agent: AgentKind): List<String> = repo.agentModels[agent]?.models ?: emptyList()
+    override fun modelsNoteForAgent(agent: AgentKind): String? = codexCatalogNote(agent, repo.agentModels[agent])
 
     override fun agentPresetsForAgent(agent: AgentKind) = repo.agentPresetsFor(agent)
     override fun fetchModels(agent: AgentKind) = repo.fetchModels(agent)

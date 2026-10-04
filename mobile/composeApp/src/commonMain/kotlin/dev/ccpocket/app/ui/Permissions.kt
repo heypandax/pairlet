@@ -298,6 +298,8 @@ fun StartSessionModeSheet(
     availableAgents: List<AgentKind> = AgentKind.entries,
     modelsFor: (AgentKind) -> List<ModelChoice> = { emptyList() },
     defaultModelFor: (AgentKind) -> String? = { null },
+    /** Why [modelsFor]'s rows are only a built-in fallback ([codexCatalogNote]); null = nothing to explain. */
+    modelsNoteFor: (AgentKind) -> String? = { null },
     modePresetsFor: (AgentKind) -> List<AgentModePreset> = { emptyList() },
     /** issue #333 — the daemon's advertised agent presets per agent; empty = no preset row (see the sheet). */
     agentPresetsFor: (AgentKind) -> List<dev.ccpocket.protocol.AgentPresetInfo> = { emptyList() },
@@ -317,6 +319,7 @@ fun StartSessionModeSheet(
     availableAgents = availableAgents,
     modelsFor = modelsFor,
     defaultModelFor = defaultModelFor,
+    modelsNoteFor = modelsNoteFor,
     modePresetsFor = modePresetsFor,
     agentPresetsFor = agentPresetsFor,
     fullAccessConfirmed = fullAccessConfirmed,

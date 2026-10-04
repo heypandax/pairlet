@@ -374,6 +374,10 @@ private fun GeneralPane(model: DesktopModel) {
             options.forEach { (label, id) ->
                 PrefRow(label, id, selected = defaultModel == id) { model.setDefaultModelFor(defaultAgent, id) }
             }
+            // a built-in fallback reads exactly like a real catalog — say so before a default is picked from it
+            model.modelsNoteForAgent(defaultAgent)?.let {
+                Text(it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, lineHeight = 16.sp)
+            }
             if (defaultAgent == AgentKind.OPENCODE && options.isEmpty()) {
                 Text(
                     stringResource(Res.string.settings_opencode_local_default),

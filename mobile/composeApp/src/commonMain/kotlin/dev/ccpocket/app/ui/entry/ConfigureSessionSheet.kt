@@ -97,6 +97,7 @@ import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
 import dev.ccpocket.app.theme.tightCenter
+import dev.ccpocket.app.ui.CodexCatalogNoteLine
 import dev.ccpocket.app.ui.CtxPill
 import dev.ccpocket.app.ui.ModelChoice
 import dev.ccpocket.app.ui.PocketSheet
@@ -149,6 +150,10 @@ fun ConfigureSessionSheet(
     availableAgents: List<AgentKind> = AgentKind.entries,
     modelsFor: (AgentKind) -> List<ModelChoice> = { emptyList() },
     defaultModelFor: (AgentKind) -> String? = { null },
+    /** Why [modelsFor]'s rows are only a built-in fallback, per agent (Codex today — see
+     *  [dev.ccpocket.app.ui.codexCatalogNote]); null = nothing to explain. A lambda like [modelsFor]: the agent
+     *  chips switch backends in place. */
+    modelsNoteFor: (AgentKind) -> String? = { null },
     modePresetsFor: (AgentKind) -> List<AgentModePreset> = { emptyList() },
     /**
      * The connected daemon's advertised AGENT presets, per agent (issue #333; dsh only today). A lambda for
@@ -253,6 +258,8 @@ fun ConfigureSessionSheet(
                     Modifier.padding(top = 22.dp, bottom = Metric.gapS),
                 )
                 ModelSection(models, chosenModel, defaultModelFor(chosenAgent)) { chosenModel = it }
+                // a fallback list reads exactly like a real catalog — say so before the user picks from it
+                modelsNoteFor(chosenAgent)?.let { CodexCatalogNoteLine(it, Modifier.padding(top = Metric.gap)) }
 
                 when (modeChoiceSet(chosenAgent)) {
                     ModeChoiceSet.OPENCODE_AUTOMATIC -> {

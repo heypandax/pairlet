@@ -298,6 +298,7 @@ fun DesktopApp(
                         dev.ccpocket.app.ui.modelChoicesFor(a, model.modelsForAgent(a))
                     },
                     defaultModelFor = { a -> model.defaultModelFor(a) },
+                    modelsNoteFor = { a -> model.modelsNoteForAgent(a) },
                     // #333: the same daemon answer the model rows come from — empty means no preset row
                     agentPresetsFor = { a -> model.agentPresetsForAgent(a) },
                     onAgentPicked = { a -> model.fetchModels(a) },

@@ -213,6 +213,8 @@ fun NewSessionPopover(
     autoAvailable: Boolean = false,
     modelsFor: (AgentKind) -> List<ModelChoice> = { emptyList() },
     defaultModelFor: (AgentKind) -> String? = { null },
+    /** Why [modelsFor]'s rows are only a built-in fallback (Codex today); null = nothing to explain. */
+    modelsNoteFor: (AgentKind) -> String? = { null },
     /** issue #333 — the daemon's advertised agent presets for the agent picked INSIDE the popover.
      *  Empty = no preset row: a daemon that never advertised them never reads the choice back either. */
     agentPresetsFor: (AgentKind) -> List<AgentPresetInfo> = { emptyList() },
@@ -310,7 +312,8 @@ fun NewSessionPopover(
                     }
                 }
             }
-            NewSessionModelRow(modelsFor(agent), chosenModel, defaultModelFor(agent)) { chosenModel = it }
+            // mobile parity: a fallback list reads exactly like a real catalog, so the row says which one this is
+            NewSessionModelRow(modelsFor(agent), chosenModel, defaultModelFor(agent), note = modelsNoteFor(agent)) { chosenModel = it }
             PopoverLabel(stringResource(Res.string.label_mode))
             if (agent == AgentKind.OPENCODE) {
                 // no selectable ladder: opencode has no approval protocol (daemon runs it --auto),
@@ -385,9 +388,11 @@ fun NewSessionPopover(
  * The new-session MODEL row (issue #199): one line saying what will actually run, click to reveal
  * "Default" + the agent's rows. [chosen] null = follow [fallback] (the per-agent Settings default, or the
  * CLI's own when that is null too), so the row stays honest even when the user never opens it.
+ * [note] is one muted line under the row (and under the open list): why these rows are only a fallback. It
+ * sits inside the row's own section gap, so it reads as part of the model row, not of what follows.
  */
 @Composable
-private fun NewSessionModelRow(choices: List<ModelChoice>, chosen: String?, fallback: String?, onChoose: (String?) -> Unit) {
+private fun NewSessionModelRow(choices: List<ModelChoice>, chosen: String?, fallback: String?, note: String? = null, onChoose: (String?) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val defaultLabel = stringResource(Res.string.value_model_default)
     val summary = when {
@@ -397,7 +402,7 @@ private fun NewSessionModelRow(choices: List<ModelChoice>, chosen: String?, fall
     }
     PopoverLabel(stringResource(Res.string.label_model))
     Row(
-        Modifier.fillMaxWidth().padding(bottom = if (open) 6.dp else 14.dp).clip(RoundedCornerShape(8.dp))
+        Modifier.fillMaxWidth().padding(bottom = if (open || note != null) 6.dp else 14.dp).clip(RoundedCornerShape(8.dp))
             .border(1.dp, Tok.hair, RoundedCornerShape(8.dp))
             .clickable { open = !open }.padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -413,6 +418,12 @@ private fun NewSessionModelRow(choices: List<ModelChoice>, chosen: String?, fall
                 QaOption(c.name, chosen.equals(c.pick, ignoreCase = true), token = c.ctx.takeIf { it.isNotEmpty() }) { onChoose(c.pick); open = false }
             }
         }
+    }
+    note?.let {
+        Text(
+            it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp,
+            modifier = Modifier.padding(bottom = 14.dp),
+        )
     }
 }
 
@@ -648,6 +659,13 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
         }
         options.forEach { (label, pick) ->
             QaOption(label, isActive(pick)) { model.switchModel(pick); onDismiss() }
+        }
+        // a built-in fallback reads exactly like a real catalog — say which one these rows are
+        model.modelsNoteForAgent(model.chatAgent)?.let {
+            Text(
+                it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp,
+                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+            )
         }
         if (gatewayUrl != null) {
             PopoverLabel(stringResource(Res.string.model_gateway_section))
