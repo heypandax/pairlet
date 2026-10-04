@@ -19,6 +19,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +35,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlin.coroutines.ContinuationInterceptor
 import kotlin.concurrent.Volatile // commonMain: JVM resolves kotlin.jvm.Volatile implicitly, Kotlin/Native (iOS) does not
 import kotlin.random.Random
 
@@ -942,18 +946,35 @@ class PushRegistrar(
 
         /** The one shared instance every link attaches to. */
         @Volatile private var instance: PushRegistrar? = null
+        /** Its own process-lived scope (see [shared]); cancelled only by the test reset. */
+        @Volatile private var instanceScope: CoroutineScope? = null
 
         /** Process-wide foreground flag, written by whichever repository receives the app lifecycle
          *  callback and read by the shared coordinator. Deliberately NOT per-repository: the coordinator
          *  is a singleton, and "is the app on screen" is a property of the app, not of one link. */
         val appForeground = MutableStateFlow(true)
 
-        /** The process-wide coordinator, created on first use with [scope] as its host. */
-        fun shared(scope: CoroutineScope): PushRegistrar =
-            instance ?: PushRegistrar(scope, foreground = appForeground).also { instance = it }
+        /**
+         * The process-wide coordinator, created on first use. It runs on [scope]'s DISPATCHER (the UI thread
+         * in production, so its state stays single-threaded with the repositories that call it) but never on
+         * [scope]'s Job: the first caller is a composition root (`rememberCoroutineScope()`), and on Android
+         * an Activity recreation cancels that scope while this singleton lives on — its trigger loop and token
+         * collector died with it, so later pairings never registered and token rotations went unreported.
+         */
+        fun shared(scope: CoroutineScope): PushRegistrar = shared(scope, DefaultPushPlatform, SecureStorePushStateStore)
 
-        /** Test seam: drop the singleton so a test never inherits another test's coordinator. */
-        internal fun resetSharedForTest() { instance = null }
+        internal fun shared(scope: CoroutineScope, platform: PushPlatform, store: PushStateStore): PushRegistrar =
+            instance ?: run {
+                val own = CoroutineScope(SupervisorJob() + (scope.coroutineContext[ContinuationInterceptor] ?: Dispatchers.Main))
+                PushRegistrar(own, platform, store, foreground = appForeground).also { instance = it; instanceScope = own }
+            }
+
+        /** Test seam: drop (and stop) the singleton so a test never inherits another test's coordinator. */
+        internal fun resetSharedForTest() {
+            instanceScope?.cancel()
+            instanceScope = null
+            instance = null
+        }
     }
 }
 
