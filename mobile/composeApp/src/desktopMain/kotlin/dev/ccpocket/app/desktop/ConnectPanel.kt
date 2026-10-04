@@ -162,7 +162,7 @@ private fun DevicePicker(repo: PocketRepository) {
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp),
         ) {
             Icon(Icons.Rounded.LaptopMac, null, tint = Tok.tx2, modifier = Modifier.size(17.dp))
-            Text(d.displayName(), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Text(d.displayName(), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, style = tightCenter(14.sp), modifier = Modifier.weight(1f))
             Icon(Icons.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(16.dp))
         }
     }
@@ -172,7 +172,7 @@ private fun DevicePicker(repo: PocketRepository) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(15.dp))
-        Text(stringResource(Res.string.add_device), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+        Text(stringResource(Res.string.add_device), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Medium, style = tightCenter(13.5.sp))
     }
 }
 
@@ -198,7 +198,7 @@ private fun CodeField(code: String, big: Boolean = false, onCodeChange: (String)
                         .border(1.5.dp, if (cur) Tok.accent else Tok.hair, RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (filled) Text(code[i].toString(), color = Tok.tx, fontFamily = Dk.mono, fontSize = if (big) 24.sp else 21.sp, fontWeight = FontWeight.SemiBold)
+                    if (filled) Text(code[i].toString(), color = Tok.tx, fontFamily = Dk.mono, fontSize = if (big) 24.sp else 21.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(if (big) 24.sp else 21.sp))
                     else if (cur) Box(Modifier.size(2.dp, if (big) 26.dp else 22.dp).background(Tok.accent))
                 }
             }
@@ -293,6 +293,7 @@ fun AddComputerModal(repo: PocketRepository, onClose: () -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     stringResource(Res.string.cancel), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                    style = tightCenter(14.sp),
                     modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).clickable { onClose() }.padding(vertical = 11.dp),
                 )
                 PrimaryButton(stringResource(if (busy) Res.string.status_pairing else Res.string.connect), enabled = code.length == 6 && !busy, modifier = Modifier.weight(1f)) { submit() }

@@ -195,7 +195,7 @@ private fun DesktopFilePreviewPane(state: DesktopFilePreviewState, file: File, m
                     Modifier.fillMaxWidth().background(Tok.surface).padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(stringResource(Res.string.file_preview), color = Tok.tx2, fontSize = 12.sp)
+                    Text(stringResource(Res.string.file_preview), color = Tok.tx2, fontSize = 12.sp, style = tightCenter(12.sp))
                     Box(Modifier.weight(1f))
                     content?.takeIf { it.ok }?.text?.let { CopyChip(it) }
                 }

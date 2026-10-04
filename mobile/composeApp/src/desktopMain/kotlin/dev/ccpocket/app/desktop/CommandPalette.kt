@@ -354,7 +354,7 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
             Text(
                 highlight(item.label, query),
                 color = if (item.accent) Tok.accent else Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, style = tightCenter(13.5.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 // cap the (unweighted) label so a long title can't swallow the whole row and hide the weighted detail (#179)
                 modifier = Modifier.widthIn(max = 280.dp),
             )
