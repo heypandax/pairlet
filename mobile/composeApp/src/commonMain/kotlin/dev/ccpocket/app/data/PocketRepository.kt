@@ -6882,6 +6882,9 @@ class PocketRepository(
         val c = convoId.value ?: return false
         openSessionId()?.let(PushDismissal::dismiss) // issue #389: typing here = looking here; clear its tray alerts
         if (includeAttachments && uploadsBusy()) return false // sends with attachments wait for uploads
+        // …and for photos still compressing: only Ready photos ride the prompt and the staging list is
+        // cleared below, so sending now would deliver the text and silently drop the picture
+        if (includeAttachments && pendingImages.any { it.state == ImgState.Compressing }) return false
         val ready = if (includeAttachments) pendingImages.filter { it.state == ImgState.Ready }.map { it.bytes } else emptyList()
         val landed = if (includeAttachments) pendingFiles.filter { it.state == FileUpState.Landed && it.path != null } else emptyList()
         if (text.isBlank() && ready.isEmpty() && landed.isEmpty()) return false
