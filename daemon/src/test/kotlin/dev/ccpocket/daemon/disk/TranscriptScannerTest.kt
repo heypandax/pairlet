@@ -1,11 +1,15 @@
 package dev.ccpocket.daemon.disk
 
 import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.attribute.FileTime
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class TranscriptScannerTest {
 
@@ -186,5 +190,95 @@ class TranscriptScannerTest {
         healthy.writeText("""{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"hi"}]}}""")
         assertEquals(0, TranscriptScanner.syntheticTailStreak(healthy))
         assertEquals(0, TranscriptScanner.syntheticTailStreak(dir.resolve("absent.jsonl")))
+    }
+
+    // ── the listing memo: a project listing must not re-read transcripts that did not change ──────────
+
+    /** One transcript line that summarizes to [title]. Equal-length titles make equal-size files. */
+    private fun titled(title: String) = """{"type":"custom-title","customTitle":"$title"}"""
+
+    /** Replace [f]'s content while keeping the mtime the memo keys on — what "this file did not change" looks
+     *  like to the scanner, so whatever a scan returns afterwards shows whether it read the file again. */
+    private fun rewriteKeepingMtime(f: Path, text: String) {
+        val mtime = Files.getLastModifiedTime(f)
+        f.writeText(text)
+        Files.setLastModifiedTime(f, mtime)
+    }
+
+    @Test
+    fun a_listing_reuses_an_unchanged_transcript_and_rereads_a_touched_one() {
+        TranscriptScanner.clearListCacheForTest()
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-memo.jsonl")
+        f.writeText(titled("first"))
+        assertEquals("first", TranscriptScanner.scan(dir).single().title)
+
+        rewriteKeepingMtime(f, titled("other")) // same size, same mtime
+        assertEquals("first", TranscriptScanner.scan(dir).single().title, "an unchanged stamp is served from the memo")
+
+        Files.setLastModifiedTime(f, FileTime.fromMillis(Files.getLastModifiedTime(f).toMillis() + 5_000))
+        val reread = TranscriptScanner.scan(dir).single()
+        assertEquals("other", reread.title, "a moved mtime is read again")
+        assertEquals(Files.getLastModifiedTime(f).toMillis(), reread.lastModified)
+    }
+
+    @Test
+    fun a_grown_transcript_is_reread_even_when_its_mtime_did_not_move() {
+        // a writer that keeps the file open may not move the mtime on every append — the size still gives it away
+        TranscriptScanner.clearListCacheForTest()
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-grow.jsonl")
+        f.writeText(titled("short"))
+        assertEquals("short", TranscriptScanner.scan(dir).single().title)
+
+        rewriteKeepingMtime(f, titled("short") + "\n" + titled("renamed later"))
+        assertEquals("renamed later", TranscriptScanner.scan(dir).single().title)
+    }
+
+    @Test
+    fun a_remembered_row_still_ages_out_of_live() {
+        TranscriptScanner.clearListCacheForTest()
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-live.jsonl")
+        f.writeText(titled("running"))
+        val mtime = Files.getLastModifiedTime(f).toMillis()
+        try {
+            TranscriptScanner.clock = { mtime + 1_000 }
+            assertTrue(TranscriptScanner.scan(dir).single().live, "touched a second ago: a session running right now")
+            TranscriptScanner.clock = { mtime + TranscriptScanner.LIVE_WINDOW_MS + 1_000 }
+            assertFalse(TranscriptScanner.scan(dir).single().live, "`live` is recomputed on a memo hit, never remembered")
+        } finally {
+            TranscriptScanner.clock = System::currentTimeMillis
+        }
+    }
+
+    @Test
+    fun a_transcript_with_nothing_to_list_is_remembered_too() {
+        TranscriptScanner.clearListCacheForTest()
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-empty.jsonl")
+        val listed = titled("now it has a title")
+        f.writeText("""{"type":"mode","mode":"normal"}""".padEnd(listed.length)) // no prompt, no title → no row
+        assertEquals(emptyList(), TranscriptScanner.scan(dir))
+
+        rewriteKeepingMtime(f, listed)
+        assertEquals(emptyList(), TranscriptScanner.scan(dir), "the 'no row' answer came from the memo")
+
+        Files.setLastModifiedTime(f, FileTime.fromMillis(Files.getLastModifiedTime(f).toMillis() + 5_000))
+        assertEquals("now it has a title", TranscriptScanner.scan(dir).single().title)
+    }
+
+    @Test
+    fun an_oversized_first_prompt_is_not_remembered() {
+        // one pasted log runs to hundreds of KB; remembering those would turn the row memo into a transcript cache
+        TranscriptScanner.clearListCacheForTest()
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-big.jsonl")
+        fun prompt(c: Char) = """{"type":"user","message":{"role":"user","content":"${c.toString().repeat(5_000)}"},"cwd":"/repo"}"""
+        f.writeText(prompt('a'))
+        assertTrue(TranscriptScanner.scan(dir).single().firstPrompt.startsWith("aaa"))
+
+        rewriteKeepingMtime(f, prompt('b'))
+        assertTrue(TranscriptScanner.scan(dir).single().firstPrompt.startsWith("bbb"), "read again: it was never remembered")
     }
 }

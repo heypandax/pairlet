@@ -164,13 +164,19 @@ import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.SwitchServiceTier
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 /** Maps an inbound [Frame] to the registry/services. Returns fast; turns run on conversation scopes. */
 /** Diagnostic tap for the subscription-quota reply path (phone-not-showing investigation, 2026-08-24). */
 private val quotaLog = dev.ccpocket.daemon.util.logger("QuotaRoute")
+
+/** Failures of a session-list reply produced on a listing lane — off the caller's loop, so nothing else would log them. */
+private val listingLog = dev.ccpocket.daemon.util.logger("ListingLane")
 
 class RequestRouter(
     private val registry: SessionRegistry,
@@ -402,6 +408,10 @@ class RequestRouter(
          *  over the client's frame cap, which drops the link instead of opening the list. */
         const val SESSION_PROMPT_CLIP = 400
 
+        /** Session-list replies one lane may have waiting. A client asks for a handful at most (a sidebar
+         *  refreshing its projects); past this the caller waits its turn instead of queueing without bound. */
+        const val LISTING_LANE_BACKLOG = 32
+
         /** §18.2 P2-3: frames only an approvalV2-declaring client should receive — ingress sinks drop
          *  them for undeclared peers instead of relying on the client's unknown-type tolerance. */
         fun approvalV2Only(frame: Frame): Boolean =
@@ -547,7 +557,11 @@ class RequestRouter(
     // [bridgeContextPreamble] (issue #242) is a BUILT-IN bridge's session-stable context (which chat, which
     // project, what the session cannot see), appended to the agent's SYSTEM prompt for the conversation this
     // OpenSession creates. Carries no authority and is set only by trusted in-process code; null everywhere else.
-    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), bridgeContextPreamble: String? = null, ownerBypass: Boolean = false, deviceId: String? = null, collabScope: CollaboratorScope? = null, pinConnection: dev.ccpocket.daemon.pins.ProjectPinConnection? = null, onOpened: suspend (String) -> Unit = {}) {
+    // [listingLane]: non-null asks for this frame's session-list reply to be produced OFF the caller's loop,
+    // one at a time and in request order with every other reply of the same lane (see [emitSessions]). The
+    // relay ingress passes the deviceId — its single reader serves every device, so a listing produced
+    // inline holds all of them. Null (LAN socket, in-process callers, tests) keeps the reply inline.
+    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), bridgeContextPreamble: String? = null, ownerBypass: Boolean = false, deviceId: String? = null, collabScope: CollaboratorScope? = null, pinConnection: dev.ccpocket.daemon.pins.ProjectPinConnection? = null, listingLane: String? = null, onOpened: suspend (String) -> Unit = {}) {
         val dev = deviceId ?: LOCAL_DEVICE_ID
         when (frame) {
             // capability declaration (wire-compat gate for AgentKind additions) — no reply; the very
@@ -579,7 +593,7 @@ class RequestRouter(
                 sink.emit(PendingApprovals(registry.pendingApprovals(shell.pendingApprovals() + exports.pendingApprovals())))
             }
 
-            is ListSessions -> emitSessions(frame.workdir, sink, guestScope, caps)
+            is ListSessions -> emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
 
             // session groups (issue #119): mutate the daemon-side group store, then re-push this workdir's
             // session list so the grouping change reflects immediately (same response path as ListSessions).
@@ -587,19 +601,19 @@ class RequestRouter(
             // mutation but still answer with the (re-filtered) list so the client isn't left hanging.
             is GroupCreate -> {
                 if (guestScope == null) SessionGroups.create(groupWorkdir(frame.workdir), frame.name)
-                emitSessions(frame.workdir, sink, guestScope, caps)
+                emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
             }
             is GroupRename -> {
                 if (guestScope == null) SessionGroups.rename(groupWorkdir(frame.workdir), frame.groupId, frame.name)
-                emitSessions(frame.workdir, sink, guestScope, caps)
+                emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
             }
             is GroupDelete -> {
                 if (guestScope == null) SessionGroups.delete(groupWorkdir(frame.workdir), frame.groupId)
-                emitSessions(frame.workdir, sink, guestScope, caps)
+                emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
             }
             is GroupAssign -> {
                 if (guestScope == null) SessionGroups.assign(groupWorkdir(frame.workdir), frame.sessionId, frame.groupId)
-                emitSessions(frame.workdir, sink, guestScope, caps)
+                emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
             }
 
             // session archive (issue #202): same daemon-side-truth + re-push contract as the groups above.
@@ -623,7 +637,7 @@ class RequestRouter(
                 // the emit is gated too, not just the mutation: emitArchivedSessions is a whole-machine
                 // enumeration with no scope filter, so a non-owner must never reach it through this door
                 if (owner && frame.fromArchiveView) scope.launch { emitArchivedSessions(sink, caps) }
-                else emitSessions(frame.workdir, sink, guestScope, caps)
+                else emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
             }
             // a multi-project scan → off the inbound pump like FetchUsage. Owner only: this is a
             // cross-project discovery surface, strictly more than the per-dir listing a guest may have.
@@ -654,9 +668,9 @@ class RequestRouter(
             // guest never reaches here (GuestCaps default-denies the frame type at the choke point) —
             // the null-check is belt-and-suspenders like the group mutations', answering with the list.
             is RenameSession -> scope.launch {
-                if (guestScope != null) { emitSessions(frame.workdir, sink, guestScope, caps); return@launch }
+                if (guestScope != null) { emitSessions(frame.workdir, sink, guestScope, caps, listingLane); return@launch }
                 val err = registry.renameSession(groupWorkdir(frame.workdir), frame.sessionId, frame.title)
-                if (err == null) emitSessions(frame.workdir, sink, guestScope, caps)
+                if (err == null) emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
                 else sink.emit(PocketError("rename_failed", err))
             }
 
@@ -1692,8 +1706,62 @@ class RequestRouter(
      * listing scans a non-existent dir and answers EMPTY — desktop ⌘N regression), merges every backend's
      * sessions, marks the busy ones, and stamps the project's groups. A GUEST (issue #115) sees ONLY the
      * sessions IT started (visibility "by initiator") and no group headers.
+     *
+     * With a [lane] the reply is produced on that lane instead of the caller's loop ([listingLaneFor]) and
+     * this returns as soon as it is queued.
      */
-    private suspend fun emitSessions(workdir: String, sink: OutboundSink, guestScope: GuestScope?, caps: ClientCapsHolder? = null) {
+    private suspend fun emitSessions(workdir: String, sink: OutboundSink, guestScope: GuestScope?, caps: ClientCapsHolder? = null, lane: String? = null) {
+        if (lane == null) return emitSessionsNow(workdir, sink, guestScope, caps)
+        // send, not trySend: when the lane is full the caller waits its turn rather than jumping the queue
+        listingLaneFor(lane).send {
+            try {
+                emitSessionsNow(workdir, sink, guestScope, caps)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                // inline, the transport's own catch answers a failed request; out here nothing else would
+                listingLog.warn("session list failed on its lane: ${e.message}")
+                runCatching { sink.emit(PocketError("internal", e.message ?: "request failed")) }
+            }
+        }
+    }
+
+    private val listingLanes = java.util.concurrent.ConcurrentHashMap<String, Channel<suspend () -> Unit>>()
+
+    /**
+     * The lane a caller named with `listingLane`: its session-list replies are produced one at a time, in the
+     * order they were asked for, on a coroutine of their own.
+     *
+     * Why a lane and not a plain `scope.launch` per reply: a project listing reads transcripts from disk, and
+     * the relay leg has ONE reader for every paired device — produced inline, a slow scan holds every frame
+     * from every device behind it. Launching each reply freely would fix that and break something else: the
+     * re-push after a `GroupAssign` could overtake the `ListSessions` sent before it, and the client would end
+     * up showing the older snapshot. On a lane every reply takes its snapshot when it RUNS, so each is at
+     * least as fresh as the one before it, and they leave in that order.
+     *
+     * Only the scan and the emit move here. The mutation that precedes a re-push (a group edit, an archive
+     * toggle) stays on the caller's loop, where it always was. A lane is never closed: one parked coroutine
+     * per device that ever listed, bounded by the paired-device count. Its loop outlives anything a reply
+     * throws — a dead consumer would fill the lane and then hold the caller's loop for good, which is the
+     * very stall the lane exists to remove.
+     */
+    private fun listingLaneFor(key: String): Channel<suspend () -> Unit> = listingLanes.computeIfAbsent(key) {
+        Channel<suspend () -> Unit>(LISTING_LANE_BACKLOG).also { replies ->
+            scope.launch(Dispatchers.IO) {
+                for (reply in replies) {
+                    try {
+                        reply()
+                    } catch (t: Throwable) {
+                        // our own cancellation ends the loop; a reply's own (a send timeout is a
+                        // CancellationException too) does not
+                        ensureActive()
+                        listingLog.warn("session-list lane survived ${t::class.simpleName}: ${t.message}")
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun emitSessionsNow(workdir: String, sink: OutboundSink, guestScope: GuestScope?, caps: ClientCapsHolder?) {
         val busy = registry.busySessionIds()
         val wd = groupWorkdir(workdir)
         var items = registry.listSessions(wd).map { if (it.sessionId in busy) it.copy(busy = true) else it }

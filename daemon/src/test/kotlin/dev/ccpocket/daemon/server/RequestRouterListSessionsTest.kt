@@ -6,6 +6,7 @@ import dev.ccpocket.daemon.agent.AgentBackendFactory
 import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.daemon.claude.AuthService
+import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
@@ -20,14 +21,22 @@ import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.ListSessions
 import dev.ccpocket.protocol.PermissionMode
+import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.Sessions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -42,9 +51,10 @@ import kotlin.test.assertEquals
 class RequestRouterListSessionsTest {
 
     /** Records the workdir each listSessions call receives; every live-process member is unreachable here. */
-    private class ListingBackend(val listed: MutableList<String>) : AgentBackend {
+    private class ListingBackend(val listed: MutableList<String>, val onList: (String) -> Unit = {}) : AgentBackend {
         override val kind = AgentKind.CLAUDE
         override fun listSessions(workdir: String): List<SessionSummary> {
+            onList(workdir) // a test's stand-in for a slow transcript scan
             listed += workdir
             return emptyList()
         }
@@ -65,8 +75,8 @@ class RequestRouterListSessionsTest {
         override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
     }
 
-    private fun router(scope: CoroutineScope, listed: MutableList<String>): RequestRouter {
-        val registry = SessionRegistry(scope, backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { ListingBackend(listed) }))
+    private fun router(scope: CoroutineScope, listed: MutableList<String>, onList: (String) -> Unit = {}): RequestRouter {
+        val registry = SessionRegistry(scope, backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { ListingBackend(listed, onList) }))
         val tmp = Files.createTempDirectory("ccp-router").toFile()
         return RequestRouter(
             registry = registry,
@@ -105,5 +115,84 @@ class RequestRouterListSessionsTest {
 
         assertEquals(listOf("/no/such/dir-ccp"), listed, "an unresolvable path keeps the old raw-string behavior")
         assertEquals("/no/such/dir-ccp", (emitted.single() as Sessions).workdir)
+    }
+
+    // ── listing lanes: the relay ingress asks for session-list replies off its single reader ──────────
+
+    private fun workdirs(frames: List<Frame>) = frames.map { (it as Sessions).workdir }
+
+    private suspend fun awaitSize(frames: List<Frame>, n: Int) = withTimeout(10_000) { while (frames.size < n) delay(10) }
+
+    @Test
+    fun a_lane_produces_replies_off_the_callers_loop_and_in_request_order() = runBlocking {
+        val scan = CountDownLatch(1) // holds the "/slow" scan the way a cold transcript read would
+        val listed = Collections.synchronizedList(mutableListOf<String>())
+        val emitted = Collections.synchronizedList(mutableListOf<Frame>())
+        val scope = CoroutineScope(Dispatchers.Default)
+        val router = router(scope, listed) { if (it == "/slow") scan.await(10, TimeUnit.SECONDS) }
+        val sink = OutboundSink { emitted += it }
+        try {
+            router.handle(ListSessions("/slow"), sink, listingLane = "dev-1") // returns with the scan still held
+            router.handle(ListSessions("/fast"), sink, listingLane = "dev-1")
+            assertEquals(emptyList(), emitted.toList(), "neither reply is produced on the caller's loop")
+
+            // …which is therefore free: a frame handled inline answers while the lane is still busy
+            router.handle(ListSessions("/inline"), sink)
+            assertEquals(listOf("/inline"), workdirs(emitted.toList()))
+
+            scan.countDown()
+            awaitSize(emitted, 3)
+            assertEquals(
+                listOf("/inline", "/slow", "/fast"), workdirs(emitted.toList()),
+                "a later listing never overtakes the one asked for before it",
+            )
+        } finally {
+            scan.countDown(); scope.cancel()
+        }
+    }
+
+    @Test
+    fun one_lanes_slow_listing_does_not_hold_another_lanes() = runBlocking {
+        val scan = CountDownLatch(1)
+        val listed = Collections.synchronizedList(mutableListOf<String>())
+        val first = Collections.synchronizedList(mutableListOf<Frame>())
+        val second = Collections.synchronizedList(mutableListOf<Frame>())
+        val scope = CoroutineScope(Dispatchers.Default)
+        val router = router(scope, listed) { if (it == "/slow") scan.await(10, TimeUnit.SECONDS) }
+        try {
+            router.handle(ListSessions("/slow"), { first += it }, listingLane = "dev-1")
+            router.handle(ListSessions("/fast"), { second += it }, listingLane = "dev-2")
+            awaitSize(second, 1)
+            assertEquals(emptyList(), first.toList(), "the other device answered while this one was still scanning")
+
+            scan.countDown()
+            awaitSize(first, 1)
+            assertEquals(listOf("/slow"), workdirs(first.toList()))
+        } finally {
+            scan.countDown(); scope.cancel()
+        }
+    }
+
+    @Test
+    fun a_reply_that_fails_on_its_lane_answers_with_an_error_and_the_lane_keeps_working() = runBlocking {
+        val listed = Collections.synchronizedList(mutableListOf<String>())
+        val emitted = Collections.synchronizedList(mutableListOf<Frame>())
+        val failOnce = AtomicBoolean(true)
+        val scope = CoroutineScope(Dispatchers.Default)
+        val router = router(scope, listed)
+        val sink = OutboundSink { frame ->
+            if (frame is Sessions && failOnce.compareAndSet(true, false)) error("send failed")
+            emitted += frame
+        }
+        try {
+            router.handle(ListSessions("/a"), sink, listingLane = "dev-1")
+            router.handle(ListSessions("/b"), sink, listingLane = "dev-1")
+            awaitSize(emitted, 2)
+            // inline, the transport's catch would have answered the failure; on a lane the router has to
+            assertEquals("internal", (emitted[0] as PocketError).code)
+            assertEquals("/b", (emitted[1] as Sessions).workdir, "the lane outlives a failed reply")
+        } finally {
+            scope.cancel()
+        }
     }
 }

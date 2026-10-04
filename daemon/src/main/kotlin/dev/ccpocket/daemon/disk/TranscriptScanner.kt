@@ -13,8 +13,10 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import dev.ccpocket.daemon.util.logger
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.attribute.FileTime
 import kotlin.io.path.bufferedReader
 import kotlin.io.path.exists
@@ -23,8 +25,12 @@ import kotlin.io.path.isDirectory
 
 /** Reads the `.jsonl` transcript headers under a project dir into [SessionSummary] — no claude launch. */
 object TranscriptScanner {
+    private val log = logger("TranscriptScanner")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     const val LIVE_WINDOW_MS = 20_000L // transcript touched within this window = a session running right now
+
+    /** What "now" is for the [LIVE_WINDOW_MS] test. A seam so a test can age a remembered row without sleeping. */
+    internal var clock: () -> Long = System::currentTimeMillis
 
     fun scan(dir: Path): List<SessionSummary> = scanDetailed(dir).items
 
@@ -34,6 +40,7 @@ object TranscriptScanner {
 
     fun scanDetailed(dir: Path): Detailed {
         if (!dir.isDirectory()) return Detailed(emptyList(), 0)
+        val startedNs = System.nanoTime()
         val files = try { Files.newDirectoryStream(dir, "*.jsonl").use { it.toList() } }
         catch (error: Exception) {
             Diagnostics.report(ErrorPath.SESSION_LIST, DiagnosticStage.SCAN, ErrorCode.READ_FAILED, error)
@@ -43,7 +50,11 @@ object TranscriptScanner {
         // hold hundreds of transcripts and the edges are daemon-global
         val lineage = runCatching { RewindLineage.byChild() }.getOrDefault(emptyMap())
         var failed = 0L
-        val result = files.mapNotNull { file -> runCatching { summarize(file) }.onFailure { error ->
+        var read = 0       // transcripts actually parsed this scan — the rest came from the memo
+        var readBytes = 0L
+        val result = files.mapNotNull { file -> runCatching {
+            summarizeListed(file) { bytes -> read++; readBytes += bytes }
+        }.onFailure { error ->
             failed++
             Diagnostics.report(ErrorPath.SESSION_LIST, DiagnosticStage.SCAN, ErrorCode.READ_FAILED, error)
         }.getOrNull() }
@@ -52,8 +63,46 @@ object TranscriptScanner {
         if (failed > 0) Diagnostics.report(ErrorPath.SESSION_LIST, DiagnosticStage.SCAN, ErrorCode.PARTIAL_RESULT,
             metrics = SafeMetrics(totalCount = files.size.toLong(), failedCount = failed, returnedCount = result.size.toLong(),
                 resultQuality = dev.ccpocket.observability.ResultQuality.PARTIAL))
+        // The evidence for whether listings need more than the memo (an on-disk index, paging): counts and
+        // sizes only — the directory name encodes the project path and stays out of the log.
+        val tookMs = (System.nanoTime() - startedNs) / 1_000_000
+        if (tookMs >= SLOW_SCAN_MS) {
+            log.info("slow session scan: ${tookMs}ms for ${files.size} transcripts, $read read from disk ($readBytes bytes)")
+        }
         return Detailed(result, failed.toInt())
     }
+
+    /**
+     * [summarize] for the LISTING path, memoized by (path, mtime, size).
+     *
+     * Opening a project used to re-read every transcript in its directory on every request — megabytes
+     * each, hundreds of files — although between two listings almost none of them change. Transcripts are
+     * append-only, so a moved mtime is the only way a summary goes stale (the reasoning [resumeSeed] already
+     * relies on); the size is checked as well because a writer that keeps the file open may not move the
+     * mtime on every append. The stamp is taken BEFORE the read: a file appended mid-read is remembered
+     * under its old stamp and misses on the next listing.
+     *
+     * `live` is the one field that ages while the file stays put, so it is recomputed on every hit. A
+     * summary with an oversized first prompt is not remembered ([LIST_MEMO_PROMPT_MAX]). [onRead] reports
+     * each real read with the file's size, for the slow-scan line.
+     */
+    private fun summarizeListed(file: Path, onRead: (bytes: Long) -> Unit): SessionSummary? {
+        val attrs = runCatching { Files.readAttributes(file, BasicFileAttributes::class.java) }.getOrNull()
+        val stamp = attrs?.lastModifiedTime()
+        val size = attrs?.size() ?: -1L
+        listCache.get(file, stamp)?.takeIf { it.size == size }?.let { hit ->
+            val row = hit.summary ?: return null
+            return row.copy(live = clock() - row.lastModified < LIVE_WINDOW_MS)
+        }
+        onRead(size.coerceAtLeast(0L))
+        val fresh = summarize(file)
+        if (fresh == null || fresh.firstPrompt.length <= LIST_MEMO_PROMPT_MAX) listCache.put(file, stamp, Listed(fresh, size))
+        return fresh
+    }
+
+    /** A remembered listing row: the summary — null when the transcript carries no prompt and no title, which
+     *  is remembered too, or every listing would re-read each such file — and the size it was read at. */
+    private class Listed(val summary: SessionSummary?, val size: Long)
 
     /** Land one ledger edge on the CHILD row. The original keeps a clean summary: clients derive "this
      *  one was superseded" by looking for a peer that names it, so nothing has to be written twice. */
@@ -139,7 +188,7 @@ object TranscriptScanner {
             lastModified = mtime,
             gitBranch = gitBranch ?: fbGitBranch,
             version = version ?: fbVersion,
-            live = System.currentTimeMillis() - mtime < LIVE_WINDOW_MS,
+            live = clock() - mtime < LIVE_WINDOW_MS,
             model = model,
         )
     }
@@ -261,6 +310,21 @@ object TranscriptScanner {
     internal fun clearSeedCacheForTest() = seedCache.clear()
 
     private const val SEED_MEMO_MAX = 800
+
+    private val listCache = MtimeMemo<Listed>(LIST_MEMO_MAX)
+
+    /** Cross-test isolation, as for [clearSeedCacheForTest]. */
+    internal fun clearListCacheForTest() = listCache.clear()
+
+    /** Sized for one large project plus the others a client keeps listing; a row is a few hundred bytes. */
+    private const val LIST_MEMO_MAX = 4_000
+
+    /** A summary whose first prompt is longer than this is not remembered: a pasted log or a skill injection
+     *  runs to hundreds of KB, and a handful of those would turn a row memo into a transcript cache. */
+    private const val LIST_MEMO_PROMPT_MAX = 4_096
+
+    /** A project scan at least this long is logged, with how much of it was real reading. */
+    private const val SLOW_SCAN_MS = 500L
 
     /**
      * Context tokens the LAST completed assistant turn left in the window — its `message.usage` summed

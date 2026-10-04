@@ -811,7 +811,9 @@ class DeviceSessions(
         try {
             // deviceId is the Noise-authenticated transport identity — the handoff gate's ONLY input for
             // "who is driving" (SESSION-HANDOFF.md §5.3: never a frame field)
-            core.router.handle(frame, sink, origin, guestScope, caps = caps(), deviceId = deviceId, collabScope = collabScope, pinConnection = pin) { convoId ->
+            // listingLane: this reader serves EVERY device, so a session-list reply (a transcript scan) is produced on
+            // the device's own lane instead of here — in order with that device's other listings, behind nobody else's
+            core.router.handle(frame, sink, origin, guestScope, caps = caps(), deviceId = deviceId, collabScope = collabScope, pinConnection = pin, listingLane = deviceId) { convoId ->
                 mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }
                 bridges.guardOf(deviceId)?.noteOpened(convoId)     // bridge (#91)
                 bridges.guestGuardOf(deviceId)?.noteOpened(convoId) // guest (#115)
