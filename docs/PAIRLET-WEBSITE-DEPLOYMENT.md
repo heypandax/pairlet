@@ -17,7 +17,7 @@
 
 站点目录：
 
-- 当前链接：`/var/www/pairlet-site/current` → `releases/website-20260912-bdfab268`（2026-09-12 同步到 main `bdfab268`；上一版 `releases/website-20260910-r2` 保留用于回退）。
+- 当前链接：`/var/www/pairlet-site/current` → `releases/website-20261004-49fbbda9`（2026-10-04 同步到 main `49fbbda9`；上一版 `releases/website-wiki-20260915-c6ddcb71` 保留用于回退，更早的 `website-20260912-bdfab268`、`website-20260910-r2` 也还在）。
 - 最初部署：`/var/www/pairlet-site/releases/e92ba5cf-20260910`，保留用于内容回退。
 - 旧站点：`/var/www/cc-pocket-site`，未覆盖。
 - 站点文件共 66 个；最终包 SHA-256 为 `4735b8a2953a75718973a66f290954b4fa362b8e825f40deb07186d46b95523a`。
@@ -44,6 +44,23 @@
 详细证据保存在当前 worktree 被忽略的 `docs/plans/pairlet-implementation/deploy-20260910/`，包括 DNS/SSL 页面回读、HTTP/TLS 回执、浏览器截图、站点清单及测试日志。凭据未写入记录或提交。
 
 ## 备份与回退
+
+### 2026-10-04 22:50 CST：官网内容同步到 main（49fbbda9）
+
+根据 Owner 当次授权部署。部署前线上是 `website-wiki-20260915-c6ddcb71`，与 main 相比缺这些内容：名称由 CC Pairlet 改为 Pairlet、仓库链接改到 `heypandax/pairlet`、Linux 桌面端 `.deb`／`.rpm` 下载入口、隐私页的「语音备忘转任务」段落（2.2.0 的审核备注链接到这一页）、两张换成 Pairlet 的分享图。抽查的 13 个线上页面里没有发现线上有而 main 没有的内容。
+
+做法与 2026-09-12 相同：`git archive HEAD:site` 打包 66 个文件，单次 SSH 会话上传到 `/var/www/pairlet-site/releases/website-20261004-49fbbda9`，远端按 `LC_ALL=C` 排序生成 SHA-256 清单，与本地清单哈希 `1b14e364abe5d53264b9875c20c4f1c31766b688a15ecc3c4083541b56792c22` 一致后才原子切换 `current`。没有动 Caddyfile、relay、下载镜像与稳定版本清单。
+
+公网回读：`/`、`/en/`、`/manual/zh/`、`/manual/en/`、`/support/`、`/privacy.html`、`/features.html`、`/guides/faq.html`、`/dl/latest.json` 均 200，`www` 308 保留完整 URI；`index.html`、`en/index.html`、`privacy.html`、`llms.txt`、`styles.css`、`app.js`、`sitemap.xml`、`manual/en/index.html` 和两张分享图与仓库逐字节一致。页面引用的 25 个 `heypandax/pairlet` 地址（安装脚本、下载、仓库）部署前逐个请求均为 200。macOS 桌面端下载链接仍指向 `cc-pocket-desktop-*`，要等首个含 `pairlet-desktop-*` 资产的版本发布后再切。
+
+一处坑：不要用 macOS 的 `tar` 打包工作区。即使加了 `--no-xattrs`，它仍会为每个文件和目录带上 `._*` 元数据文件，远端解出 164 个文件，清单校验不通过，首次上传因此被拒绝切换（线上未受影响）。直接用 `git archive` 的输出上传即可，同时也避免把未提交的文件带上去。
+
+回退到上一版：
+
+```bash
+ln -sfn releases/website-wiki-20260915-c6ddcb71 /var/www/pairlet-site/current.new
+mv -Tf /var/www/pairlet-site/current.new /var/www/pairlet-site/current
+```
 
 ### 2026-09-12 00:08 CST：官网内容同步到 main（bdfab268）
 
