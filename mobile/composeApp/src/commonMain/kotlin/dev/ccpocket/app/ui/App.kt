@@ -560,17 +560,19 @@ fun App(scope: CoroutineScope) {
                     } == true,
                     timedOutSignal = repo.askTimedOut(ask), // issue #100 (composite-matched, P1-3)
                 )
+                // every verdict names the ask THIS sheet was composed with: in a burst the next card appears
+                // in the same place, and a second tap must not approve a command nobody read (audit H1)
                 dev.ccpocket.app.ui.approval.SecureApprovalSheet(
                     approvalUi,
-                    onDeny = { repo.resolve(Decision.DENY) },
-                    onAllowOnce = { repo.resolve(Decision.ALLOW) },
-                    onAllowTask = { repo.resolve(Decision.ALLOW, grantScope = "task") },
+                    onDeny = { repo.resolve(Decision.DENY, ask = ask) },
+                    onAllowOnce = { repo.resolve(Decision.ALLOW, ask = ask) },
+                    onAllowTask = { repo.resolve(Decision.ALLOW, grantScope = "task", ask = ask) },
                     // legacy "Always allow" and the V2 session scope are the same effect: remember for old
                     // daemons, the M2 session grant for new ones
-                    onAllowSession = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session") },
-                    onAlwaysAllow = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session") },
-                    onRetrySafer = { constraints -> repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints) },
-                    onDismiss = { repo.dismissAsk() },
+                    onAllowSession = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session", ask = ask) },
+                    onAlwaysAllow = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session", ask = ask) },
+                    onRetrySafer = { constraints -> repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints, ask = ask) },
+                    onDismiss = { repo.dismissAsk(ask) },
                 )
             }
         }
@@ -3493,8 +3495,8 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 val skipMessage = stringResource(Res.string.question_skip_message)
                 QuestionCard(
                     ask,
-                    onAnswer = { answers, response -> repo.answerQuestions(answers, response) },
-                    onSkip = { repo.resolve(Decision.DENY, message = skipMessage) },
+                    onAnswer = { answers, response -> repo.answerQuestions(answers, response, ask = ask) },
+                    onSkip = { repo.resolve(Decision.DENY, message = skipMessage, ask = ask) },
                     onOwnsInput = { cardOwnsInput = it },
                 )
             }
