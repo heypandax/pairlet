@@ -10,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Base64
+import java.util.UUID
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -432,5 +433,59 @@ class SessionFilesServiceTest {
         val gone = SessionFilesService.serveExport(proj.toString(), "s", "ghost.md")
         assertFalse(gone.ok)
         assertTrue("no longer exists" in gone.error!!, gone.error)
+    }
+
+    // ── (workdir, sessionId) binding — audit 2026-10-04 A ─────────────────────────────────────────
+    // The in-tree lane serves anything under the CLIENT-supplied workdir, so that workdir must be the
+    // session's own recorded project — a real session id must not turn "/" into the project tree.
+
+    private fun rootsAt(claude: Path = tmp.resolve("claude-projects"), codex: Path = tmp.resolve("codex-sessions")) =
+        SessionFilesService.TranscriptRoots(claudeProjects = { claude }, codexSessions = { codex })
+
+    private fun codexRollout(sessions: Path, id: String, cwd: String, vararg lines: String): Path {
+        val dir = Files.createDirectories(sessions.resolve("2026/10/04"))
+        return dir.resolve("rollout-2026-10-04T00-00-00-$id.jsonl").also {
+            Files.write(it, listOf("""{"type":"session_meta","payload":{"id":"$id","cwd":"$cwd"}}""") + lines)
+        }
+    }
+
+    @Test
+    fun codex_read_refuses_a_workdir_the_session_was_not_recorded_in() {
+        val proj = Files.createDirectories(tmp.resolve("proj"))
+        Files.writeString(proj.resolve("in.txt"), "inside")
+        val secret = Files.writeString(tmp.resolve("secret.txt"), "nope")
+        val id = "019a0000-" + UUID.randomUUID()
+        codexRollout(tmp.resolve("codex-sessions"), id, proj.toString())
+        fun read(workdir: String, path: String) =
+            SessionFilesService.readFileWithSources(AgentKind.CODEX, workdir, id, path, BackendSessionFiles(), rootsAt())
+
+        val own = read(proj.toString(), "in.txt")
+        assertTrue(own.ok, own.error)
+        assertEquals("inside", own.text)
+        for (root in listOf("/", tmp.toString())) {
+            val widened = read(root, secret.toString())
+            assertFalse(widened.ok, "workdir=$root served ${widened.text}")
+            assertNull(widened.text)
+        }
+    }
+
+    @Test
+    fun claude_read_refuses_a_lossy_dirkey_sibling_of_the_recorded_project() {
+        val dotted = Files.createDirectories(tmp.resolve("a.b"))
+        val dashed = Files.createDirectories(tmp.resolve("a-b"))
+        Files.writeString(dashed.resolve("mine.txt"), "mine")
+        Files.writeString(dotted.resolve("other.txt"), "another project")
+        assertEquals(ProjectPaths.dirKey(dotted.toString()), ProjectPaths.dirKey(dashed.toString()))
+        val projects = tmp.resolve("claude-projects")
+        val dir = Files.createDirectories(projects.resolve(ProjectPaths.dirKey(dashed.toString())))
+        Files.write(dir.resolve("sid.jsonl"), listOf("""{"type":"user","cwd":"$dashed","message":{"content":"hi"}}"""))
+        fun read(workdir: Path, path: String) =
+            SessionFilesService.readFileWithSources(AgentKind.CLAUDE, workdir.toString(), "sid", path, BackendSessionFiles(), rootsAt(claude = projects))
+
+        val own = read(dashed, "mine.txt")
+        assertTrue(own.ok, own.error)
+        val sibling = read(dotted, "other.txt")
+        assertFalse(sibling.ok, "served ${sibling.text}")
+        assertNull(sibling.text)
     }
 }
