@@ -47,6 +47,8 @@ import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun VideoPlayerOverlay(file: SentFile, onClose: () -> Unit) {
+    // Android back closes the player only, not the chat underneath (same rule as ImageViewer)
+    dev.ccpocket.app.SystemBackHandler(enabled = true) { onClose() }
     val openLocal = rememberLocalVideoOpener()
     val canPlayHere = file.localUri != null
     Box(Modifier.fillMaxSize().background(Color(0xFF060708))) {

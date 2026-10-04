@@ -36,6 +36,7 @@ import dev.ccpocket.app.net.RelayControlDial
 import dev.ccpocket.app.net.RelayE2EConnection
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filterIsInstance
@@ -2603,12 +2604,12 @@ class PocketRepository(
         if (inboundJob == null) {
             inboundJob = scope.launch {
                 // only the transport that's actually connected emits — merging idle flows is free
-                merge(relay.inbound, direct.inbound, directE2E.inbound).collect { handle(it) }
+                collectInbound(merge(relay.inbound, direct.inbound, directE2E.inbound), ::handle)
             }
         }
         if (controlJob == null) {
             controlJob = scope.launch {
-                merge(relay.control, direct.control, directE2E.control).collect { handleControl(it) }
+                collectInbound(merge(relay.control, direct.control, directE2E.control), ::handleControl)
             }
         }
         if (deafJob == null) {
@@ -2825,6 +2826,28 @@ class PocketRepository(
         launchTransport(reconnect = true, force = true)
     }
 
+    internal suspend fun restoreAfterReconnectForTest() = restoreAfterReconnect()
+
+    /**
+     * The automatic re-open of the session on screen (reconnect restore, SessionGone recovery). When the
+     * daemon no longer holds the conversation this becomes a COLD resume that launches with exactly what
+     * the request names — a bare request relaunched on CLI defaults and the next SessionLive then wrote
+     * those defaults back over the user's choice. The live values below are the session's daemon-confirmed
+     * launch flags (SessionLive reconciles them; [sessionParams] persists the same set). Thinking is
+     * restored by [send] for every OpenSession.
+     */
+    private fun resumeOpenSession(wd: String, sid: String) = OpenSession(
+        wd,
+        sid,
+        model = model.value,
+        mode = mode.value,
+        effort = effort.value,
+        agent = sessionAgent.value ?: AgentKind.CLAUDE,
+        lastEventSeq = lastEventSeqFor(sid),
+        permissionMode = permissionMode.value,
+        serviceTier = serviceTier.value,
+    )
+
     /** After the link is back: re-sync whatever page the user is parked on; reattach a live chat. */
     private suspend fun restoreAfterReconnect() {
         val sid = currentSessionId
@@ -2845,7 +2868,7 @@ class PocketRepository(
                 // tailing — two SessionLive/ConvoHistory streams ping-ponging the phone between convoIds.
                 if (observing.value) send(CloseSession(convo))
                 // lastEventSeq (issue #147): we still hold this session's transcript — ask for the delta
-                send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE, lastEventSeq = lastEventSeqFor(sid)))
+                send(resumeOpenSession(wd, sid))
             }
             dir != null -> send(ListSessions(dir))
             else -> {} // directory list already refreshed by launchTransport
@@ -2924,6 +2947,17 @@ class PocketRepository(
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
         skillCatalog.value = null; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
+        // per-daemon truth as well: the schedule list (cancel would send this machine's ids to the next one,
+        // and a next daemon too old to answer would leave "loaded" pinned on these rows), the usage snapshot,
+        // the archive rows (restore would target this machine's paths) and the filesystem roots (#176)
+        scheduleDeadline?.cancel(); scheduleDeadline = null
+        schedules.clear(); schedulesLoaded.value = false; schedulesUnavailable.value = false; scheduleError.value = null
+        usage.value = null; usageAgent.value = null; usageLoading.value = false; usageRequestedAgent = null
+        archivedSessions.clear(); archivedRefreshing.value = false
+        browseRoots.value = emptyList()
+        // the auto-continue / repair offers name a session on the machine we are leaving (#137)
+        limitOffer.value = null; limitConfirmed.value = null
+        repairOffer.value = null; repairProgress.value = null
         convoId.value = null
         sessionsDir.value = null
         browseIntentDir = null // #349: a browse intent belongs to the link/machine that accepted the tap
@@ -3434,6 +3468,28 @@ class PocketRepository(
     // delivery→turn watchdog handoff (PromptAck vs. a following turn frame) without a live daemon.
     internal fun receiveForTest(f: Frame) = handle(f)
 
+    /**
+     * The persistent collectors over the transports' inbound/control flows. Each frame is applied in
+     * isolation: one handler failure (a merge that throws, a UI hook, a frozen-area branch) is reported
+     * and the NEXT frame is still applied. Unisolated, the first exception ended the collector while
+     * [inboundJob] stayed non-null — launchTransport never rebuilt it, so a link that looked Ready
+     * silently ignored every later frame until the user disconnected.
+     */
+    private suspend fun collectInbound(source: Flow<Frame>, apply: (Frame) -> Unit) {
+        source.collect { f ->
+            try {
+                apply(f)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                Diagnostics.report(ErrorPath.PROTOCOL, DiagnosticStage.APPLY, ErrorCode.UNEXPECTED, t)
+            }
+        }
+    }
+
+    // The persistent inbound collector as launchTransport runs it, over a scripted flow.
+    internal suspend fun collectInboundForTest(source: Flow<Frame>) = collectInbound(source, ::handle)
+
     // Test the single outbound capability boundary with arbitrary protocol frames. Keeping this beside
     // receiveForTest makes additions to agentCarried() independently pin-able without UI setup.
     internal suspend fun sendForTest(f: Frame) = send(f)
@@ -3873,6 +3929,9 @@ class PocketRepository(
                 openTimedOut.value = false
                 // remember this session's launch flags so a close+reopen cycle can restore (and relaunch under) them
                 f.sessionId?.let {
+                    // remove first: re-putting an existing key keeps its insertion slot, and persistence keeps the
+                    // LAST 100 entries — a session used daily but first seen long ago was the first evicted
+                    sessionParams.remove(it)
                     sessionParams[it] = SessionParams(
                         mode.value,
                         model.value,
@@ -4105,6 +4164,10 @@ class PocketRepository(
                 // asked) — the common case (renaming a terminal-held session) has no chat open, and an
                 // open chat is an UNRELATED session whose transcript must not absorb the error line.
                 renameError.value = renameTarget?.let { RenameRefusal(it, f.message) }
+            } else if (f.convoId == null && f.code in LIST_ACTION_ERROR_CODES) {
+                // Same rule as rename_failed: this answers a sidebar/list action, never an OpenSession and
+                // never the chat on screen. Splicing it into the transcript put it in an unrelated chat, and
+                // falling through to the branch below took it as the refusal of an open in flight.
             } else if (f.convoId != null && (openInFlight != null || f.convoId != convoId.value)) {
                 // Conversation-scoped errors fan out from background sessions just like SessionLive and
                 // stream frames. They must not splice a system row into this transcript or terminate a
@@ -4165,7 +4228,7 @@ class PocketRepository(
                     if (promptRetry != null && !promptResendArmed && sid != null && wd != null) {
                         promptResendArmed = true
                         // lastEventSeq (issue #147): the transcript is still on screen — delta reattach
-                        scope.launch { send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE, lastEventSeq = lastEventSeqFor(sid))) }
+                        scope.launch { send(resumeOpenSession(wd, sid)) }
                     } else {
                         promptEvidence(exactPrompt = true); promptResendArmed = false
                         finishThinking(); streaming.value = false
@@ -4203,8 +4266,11 @@ class PocketRepository(
                 // the receipt reconciliation and the session-keyed cursor / paging anchors.
                 val lastSeq = try { transcript.mergeHistory(f, ::reconcilePromptReceiptFromHistory) }
                 catch (error: Exception) {
+                    // mergeHistory already reported the failure. Skip the cursor bookkeeping below so the
+                    // next reattach asks again from the last APPLIED seq; rethrowing only took the inbound
+                    // collector down with it.
                     openObservation?.takeIf { it.convoId == f.convoId }?.fail(ProductResult.FAILURE, ErrorCode.APPLY_FAILED, DiagnosticStage.APPLY)
-                    throw error
+                    return
                 }
                 openObservation?.takeIf { it.convoId == f.convoId }?.historyApplied(f.diagnostic)
                 if (f.delta) {
@@ -6841,6 +6907,9 @@ class PocketRepository(
         val c = convoId.value ?: return false
         openSessionId()?.let(PushDismissal::dismiss) // issue #389: typing here = looking here; clear its tray alerts
         if (includeAttachments && uploadsBusy()) return false // sends with attachments wait for uploads
+        // …and for photos still compressing: only Ready photos ride the prompt and the staging list is
+        // cleared below, so sending now would deliver the text and silently drop the picture
+        if (includeAttachments && pendingImages.any { it.state == ImgState.Compressing }) return false
         val ready = if (includeAttachments) pendingImages.filter { it.state == ImgState.Ready }.map { it.bytes } else emptyList()
         val landed = if (includeAttachments) pendingFiles.filter { it.state == FileUpState.Landed && it.path != null } else emptyList()
         if (text.isBlank() && ready.isEmpty() && landed.isEmpty()) return false
@@ -8338,6 +8407,14 @@ class PocketRepository(
     }
 
     internal companion object {
+        /**
+         * Convo-less PocketError codes that answer a session-list action (archive/restore, #202) — never an
+         * OpenSession and never the open chat. Deliberately narrow: `internal`/`unsupported` and the
+         * share/bridge/collaborator codes can be the refusal of an OpenSession too, and the wire does not say
+         * which request an unscoped error answers, so those keep the existing routing.
+         */
+        private val LIST_ACTION_ERROR_CODES = setOf("archive_failed")
+
         /** The folder browser's workdir anchor (issue #152): the literal "~" the daemon expands to ITS
          *  home. Also the [PathEntries] routing key that separates browser replies from @-completion
          *  ones — a real session's workdir is never the bare "~" (SessionLive carries the resolved path). */
