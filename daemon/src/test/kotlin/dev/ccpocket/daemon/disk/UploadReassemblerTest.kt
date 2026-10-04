@@ -272,6 +272,48 @@ class UploadReassemblerTest {
         assertEquals("*", Files.readAllLines(gi).single())
     }
 
+    // ---- audit 2026-10-04 E ------------------------------------------------------------------
+
+    @Test
+    fun a_reused_capture_id_never_deletes_a_file_that_already_landed() {
+        assertIs<UploadReassembler.Result.Complete>(buf().add(chunk(idx = 0, last = true, payload = "landed".toByteArray()), tmp))
+        // the daemon restarted (empty finished ring — 64+ later uploads do the same) and a tail chunk of that
+        // old capture is re-sent: it opens an upload that can never complete...
+        val restarted = buf()
+        assertIs<UploadReassembler.Result.Incomplete>(restarted.add(chunk(idx = 1, last = true, payload = "tail".toByteArray()), tmp))
+        // ...and the idle sweep must take only its own partial, not the file the user already @-referenced
+        now += UploadReassembler.IDLE_EXPIRY_MS + 1
+        restarted.add(chunk(capture = "cap-next", idx = 0, last = true, name = "next.txt"), tmp)
+        assertContentEquals("landed".toByteArray(), Files.readAllBytes(landed("report.pdf")))
+        assertFalse(Files.exists(landed("report.pdf.part")))
+        assertEquals(0, restarted.inFlight("c1"))
+    }
+
+    @Test
+    fun a_long_cjk_name_is_capped_in_bytes_and_still_lands() {
+        val name = "季度经营分析报告".repeat(20) + ".pdf" // 164 characters, 484 UTF-8 bytes
+        val safe = UploadReassembler.sanitizeName(name)!!
+        assertTrue("$safe.part".toByteArray(Charsets.UTF_8).size <= 255, "${safe.toByteArray(Charsets.UTF_8).size} B")
+        assertTrue(safe.endsWith(".pdf"))
+        val c = assertIs<UploadReassembler.Result.Complete>(buf().add(chunk(idx = 0, last = true, name = name, payload = "x".toByteArray()), tmp))
+        assertEquals(safe, c.name)
+        // a surrogate pair is never split by the cap
+        val emoji = UploadReassembler.sanitizeName("😀".repeat(150) + ".txt")!!
+        assertEquals(emoji, String(emoji.toByteArray(Charsets.UTF_8), Charsets.UTF_8)) // a lone surrogate would not round-trip
+        assertTrue(emoji.endsWith(".txt"))
+    }
+
+    @Test
+    fun a_dangling_gitignore_symlink_is_not_written_through() {
+        val outside = Files.createDirectories(tmp.parent.resolve("gi-escape-${System.nanoTime()}"))
+        val target = outside.resolve("planted")
+        Files.createDirectories(tmp.resolve(".ccpocket"))
+        Files.createSymbolicLink(tmp.resolve(".ccpocket").resolve(".gitignore"), target)
+        assertIs<UploadReassembler.Result.Complete>(buf().add(chunk(idx = 0, last = true), tmp))
+        assertFalse(Files.exists(target), "the self-gitignore followed a planted link out of the workspace")
+        runCatching { Files.walk(outside).sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) } }
+    }
+
     @Test
     fun actual_bytes_beyond_the_cap_abort_even_when_totalBytes_lied() {
         // a client that under-declares (totalBytes=0) is still stopped by the write-side cap
