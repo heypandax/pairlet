@@ -11,10 +11,11 @@ import dev.ccpocket.protocol.MAX_CHUNKED_READ_BYTES
 import dev.ccpocket.protocol.READ_CHUNK_RAW_BYTES
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.longOrNull
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
@@ -29,14 +30,15 @@ import kotlin.io.path.isRegularFile
  * ReadFileDiff.
  *
  * The changed-file set is re-derived from the session's own transcript on every call (never cached,
- * never phone-supplied): for Claude, `tool_use` inputs of the file-writing tools; for Codex, the
- * `*** Update/Add/Delete File:` envelopes inside apply_patch tool-call arguments.
+ * never phone-supplied), and holds only edits the transcript shows SUCCEEDED (audit 2026-10-04 B): for
+ * Claude, file-writing `tool_use` calls whose paired `tool_result` is not an error; for Codex, completed
+ * FileChange records, or apply_patch invocations whose output reports success.
  *
  * [readFile]'s serve rule (issue #133): any path canonically INSIDE the workdir is served — the same
  * `..`/symlink containment red line as the export gate ([containedForExport]), scoped to a (workdir,
  * sessionId) pair that must name a REAL transcript (so the read surface is the project trees of actual
  * sessions, never an arbitrary root a client makes up). Paths OUTSIDE the tree are served only when
- * the changed-set scan proves this session touched them (absolute-path edits) — an arbitrary-path
+ * the changed-set scan proves this session changed them (absolute-path edits) — an arbitrary-path
  * read stays impossible.
  *
  * Line-level data ([ChangedFile.adds]/[dels] and [fileDiff]) rides the same scan: Claude transcripts
@@ -269,8 +271,8 @@ object SessionFilesService {
             is ExportGate.Allowed -> return ReadGate.Serve(gate.file)
             ExportGate.Outside, ExportGate.Missing -> {} // fall through to the changed-set check below
         }
-        // outside the tree (or gone from it): only what THIS session's transcript proves it changed —
-        // the boundary that keeps this from becoming an arbitrary-path read
+        // outside the tree (or gone from it): only what THIS session's transcript proves it SUCCESSFULLY
+        // changed — the boundary that keeps this from becoming an arbitrary-path read
         val allowed = scan(agent, transcript, workdir, diffFor = null).keys
         if (abs in allowed) return ReadGate.Serve(Path.of(abs)) // serveAt reports a deleted one gracefully
         return ReadGate.Refuse(
@@ -670,7 +672,15 @@ object SessionFilesService {
         "Write" to "write", "Edit" to "edit", "MultiEdit" to "edit", "NotebookEdit" to "notebook",
     )
 
+    /**
+     * A file counts as changed only when its Write/Edit call SUCCEEDED (audit 2026-10-04 B): the `tool_use`
+     * is just the attempt — a rejected approval, a failed edit or an interrupted call never touched the file,
+     * and an outside-project path in this set becomes readable through [readGate]. Success is the paired
+     * `tool_result` without `is_error` (released CLIs omit the flag on success; rejected/failed calls set it
+     * true; anything else is not success), the same rule the DSH lane applies to its own results.
+     */
     private fun claudeScan(file: Path, touch: (String, String) -> Unit, record: (String, Int, Int, () -> String) -> Unit) {
+        val pending = HashMap<String, Pair<String, String>>() // tool_use id → (path, op), awaiting its result
         forEachJsonLine(file) { obj ->
             when (obj.str("type")) {
                 "assistant" -> {
@@ -678,13 +688,28 @@ object SessionFilesService {
                     for (el in content) {
                         val block = el as? JsonObject ?: continue
                         if (block.str("type") != "tool_use") continue
+                        val id = block.str("id") ?: continue
+                        pending.remove(id) // a reused id never inherits an earlier call's authority
                         val op = claudeOps[block.str("name")] ?: continue
                         val input = block["input"] as? JsonObject ?: continue
                         val p = input.str("file_path") ?: input.str("notebook_path") ?: continue
-                        touch(p, op)
+                        pending[id] = p to op
                     }
                 }
                 "user" -> {
+                    var applied = false
+                    val content = (obj["message"] as? JsonObject)?.get("content") as? JsonArray
+                    for (el in content.orEmpty()) {
+                        val block = el as? JsonObject ?: continue
+                        if (block.str("type") != "tool_result") continue
+                        val (p, op) = pending.remove(block.str("tool_use_id") ?: continue) ?: continue
+                        val flag = block["is_error"]
+                        if (flag != null && (flag as? JsonPrimitive)?.booleanOrNull != false) continue
+                        touch(p, op)
+                        applied = true
+                    }
+                    // the hunks below ride the same line as a SUCCESSFUL edit result, never on their own
+                    if (!applied) return@forEachJsonLine
                     // Edit/Write results carry filePath + structuredPatch (hunks the CLI computed at
                     // edit time). Write-create ships an empty patch + the full content instead.
                     val tur = obj["toolUseResult"] as? JsonObject ?: return@forEachJsonLine
@@ -723,56 +748,162 @@ object SessionFilesService {
         }
     }
 
-    // --- Codex: apply_patch envelopes inside tool-call arguments ---
-    // The patch body reaches the rollout as a nested JSON string, so newlines may appear either raw
-    // or as literal `\n` — [codexPatchText] recovers the raw text (JSON-decoding the arguments
-    // document when needed); the path regex stops at raw newlines, quotes and backslashes so it
-    // still works on the escaped form as a fallback.
+    // --- Codex: what the rollout proves was APPLIED (audit 2026-10-04 B) ---
+    // Two sources, both requiring positive evidence of success:
+    //  1. `event_msg/item_completed` FileChange records with status "completed" — written by Codex itself
+    //     after applying, with the real paths and diffs. Code-mode (`exec` scripts calling
+    //     `tools.apply_patch`, codex ≥ 0.15x) only has these: the script text is not a patch envelope.
+    //  2. Older rollouts: an actual apply_patch INVOCATION (the freeform/function tool, or a shell command
+    //     that is apply_patch itself) whose paired output reports success. Patch-shaped text anywhere else —
+    //     an echo, a script, a failed apply — is not evidence. A call that also has a FileChange record with
+    //     its call id is counted once, from the record.
 
     private val codexPatch = Regex("""\*\*\* (Update|Add|Delete) File: ([^\n"\\]+)""")
 
+    private sealed interface CodexApplied
+    private class CodexEnvelope(val callId: String, val patch: String) : CodexApplied
+    private class CodexItem(val id: String?, val changes: JsonObject) : CodexApplied
+
     private fun codexScan(file: Path, touch: (String, String) -> Unit, record: (String, Int, Int, () -> String) -> Unit) {
+        val calls = HashMap<String, String>()       // call_id → patch text of an apply_patch invocation
+        val verdicts = HashMap<String, Boolean>()   // call_id → patch_apply_end success (older rollouts)
+        val vetoed = HashSet<String>()
+        val applied = ArrayList<CodexApplied>()
         forEachJsonLine(file) { obj ->
-            if (obj.str("type") != "response_item") return@forEachJsonLine
             val p = obj["payload"] as? JsonObject ?: return@forEachJsonLine
-            val body = when (p.str("type")) {
-                "function_call" -> p.str("arguments")
-                "custom_tool_call" -> p.str("input")
-                else -> null
-            } ?: return@forEachJsonLine
-            val patch = codexPatchText(body)
-            if (patch != null) {
-                for ((verb, path, section) in codexSections(patch)) {
+            when (obj.str("type")) {
+                "event_msg" -> when (p.str("type")) {
+                    "item_completed" -> {
+                        val item = p["item"] as? JsonObject ?: return@forEachJsonLine
+                        if (item.str("type") != "FileChange" && item.str("type") != "fileChange") return@forEachJsonLine
+                        if (item.str("status") != "completed") return@forEachJsonLine
+                        val changes = item["changes"] as? JsonObject ?: return@forEachJsonLine
+                        applied += CodexItem(item.str("id"), changes)
+                    }
+                    "patch_apply_end" -> {
+                        val id = p.str("call_id") ?: return@forEachJsonLine
+                        val ok = (p["success"] as? JsonPrimitive)?.booleanOrNull == true
+                        verdicts[id] = ok
+                        if (!ok) vetoed += id
+                    }
+                }
+                "response_item" -> when (p.str("type")) {
+                    "function_call", "custom_tool_call" -> {
+                        val id = p.str("call_id") ?: return@forEachJsonLine
+                        calls.remove(id) // a reused id never inherits an earlier call's patch
+                        codexApplyPatchInvocation(p)?.let { calls[id] = it }
+                    }
+                    "function_call_output", "custom_tool_call_output" -> {
+                        val id = p.str("call_id") ?: return@forEachJsonLine
+                        val patch = calls.remove(id) ?: return@forEachJsonLine
+                        if (verdicts[id] ?: codexPatchSucceeded(p)) applied += CodexEnvelope(id, patch)
+                    }
+                }
+            }
+        }
+        val itemIds = applied.mapNotNullTo(HashSet()) { (it as? CodexItem)?.id }
+        for (a in applied) when (a) {
+            is CodexItem -> codexItemChanges(a.changes, touch, record)
+            is CodexEnvelope -> if (a.callId !in itemIds && a.callId !in vetoed) {
+                for ((verb, path, section) in codexSections(a.patch)) {
                     val op = when (verb) { "Add" -> "write"; "Delete" -> "delete"; else -> "edit" }
                     touch(path, op)
                     val adds = section.count { it.startsWith("+") }
                     val dels = section.count { it.startsWith("-") }
                     if (adds > 0 || dels > 0) record(path, adds, dels) { codexHunkText(section) }
                 }
-            } else {
-                // unparseable arguments — keep the pre-diff behavior: paths only, no stats
-                for (m in codexPatch.findAll(body)) {
-                    val op = when (m.groupValues[1]) { "Add" -> "write"; "Delete" -> "delete"; else -> "edit" }
-                    touch(m.groupValues[2].trim(), op)
+            }
+        }
+    }
+
+    /** One completed FileChange record's `changes` map (`path → {type: add|update|delete, …}`). */
+    private fun codexItemChanges(changes: JsonObject, touch: (String, String) -> Unit, record: (String, Int, Int, () -> String) -> Unit) {
+        for ((path, el) in changes) {
+            val change = el as? JsonObject ?: continue
+            when (change.str("type")) {
+                "add" -> {
+                    touch(path, "write")
+                    val body = change.str("content") ?: continue
+                    val lines = body.lineSequence().toList().let { if (body.endsWith('\n')) it.dropLast(1) else it }
+                    record(path, lines.size, 0) {
+                        buildString {
+                            append("@@ -0,0 +1,${lines.size} @@\n")
+                            lines.forEach { append('+').append(it).append('\n') }
+                        }
+                    }
+                }
+                "delete" -> touch(path, "delete")
+                "update" -> {
+                    touch(path, "edit")
+                    change.str("unified_diff")?.let { diff ->
+                        // hunk lines only: any `---`/`+++` file header before the first `@@` is not content
+                        val hunks = diff.lines().dropWhile { !it.startsWith("@@") }.let { if (diff.endsWith('\n')) it.dropLast(1) else it }
+                        val adds = hunks.count { it.startsWith("+") }
+                        val dels = hunks.count { it.startsWith("-") }
+                        if (hunks.isNotEmpty()) record(path, adds, dels) { hunks.joinToString("") { "$it\n" } }
+                    }
+                    change.str("move_path")?.let { touch(it, "write") }
                 }
             }
         }
     }
 
     /**
-     * The raw patch text out of a tool-call body: as-is, or fished from the arguments JSON document.
-     * Real newlines are the tell — a raw patch must contain them, while a JSON-string-escaped body
-     * can't (JSON forbids raw newlines in strings). Checking for literal `\n` instead would misread
-     * patches whose CODE contains the two-character sequence.
+     * The patch text of a call that IS an apply_patch invocation, else null: the freeform `apply_patch` tool,
+     * the function-style one (`{"input": …}`), or a shell command whose program is apply_patch — argv
+     * `["apply_patch", patch]`, `["bash", "-lc", "apply_patch <<'EOF' …"]`, or a `cmd`/`command` string
+     * starting with it. Never a body that merely contains patch-shaped text.
      */
-    private fun codexPatchText(body: String): String? {
-        if ("*** Begin Patch" in body && '\n' in body) return body
-        fun JsonElement.findPatch(): String? = when (this) {
-            is JsonPrimitive -> contentOrNull?.takeIf { "*** Begin Patch" in it }
-            is JsonObject -> values.firstNotNullOfOrNull { it.findPatch() }
-            is JsonArray -> firstNotNullOfOrNull { it.findPatch() }
+    private fun codexApplyPatchInvocation(p: JsonObject): String? {
+        val name = p.str("name")
+        fun patchOf(text: String?) = text?.takeIf { "*** Begin Patch" in it }
+        fun scriptPatch(script: String?): String? {
+            val s = script?.trimStart() ?: return null
+            return if (s.startsWith("apply_patch") || s.startsWith("applypatch")) patchOf(s) else null
         }
-        return runCatching { json.parseToJsonElement(body) }.getOrNull()?.findPatch()
+        return when (p.str("type")) {
+            "custom_tool_call" -> if (name == "apply_patch") patchOf(p.str("input")) else null
+            "function_call" -> {
+                val args = runCatching { json.parseToJsonElement(p.str("arguments") ?: return null) }.getOrNull() as? JsonObject
+                    ?: return null
+                if (name == "apply_patch") return patchOf(args.str("input"))
+                when (val command = args["command"] ?: args["cmd"]) {
+                    is JsonArray -> {
+                        val argv = command.map { (it as? JsonPrimitive)?.contentOrNull ?: return null }
+                        when {
+                            argv.size == 2 && argv[0] in setOf("apply_patch", "applypatch") -> patchOf(argv[1])
+                            argv.size == 3 && argv[0].substringAfterLast('/') in setOf("bash", "zsh", "sh") &&
+                                argv[1] in setOf("-lc", "-c") -> scriptPatch(argv[2])
+                            else -> null
+                        }
+                    }
+                    is JsonPrimitive -> scriptPatch(command.contentOrNull)
+                    else -> null
+                }
+            }
+            else -> null
+        }
+    }
+
+    private val codexExitCode = Regex("""^Exit code: (-?\d+)\n""")
+    private val codexShellExit = Regex("""^(?:Chunk ID: [^\n]*\n)?Wall time: [^\n]*\nProcess exited with code (-?\d+)\n""")
+
+    /** Positive success evidence on an apply_patch call's output: an explicit error flag fails it, an exit code
+     *  decides it, otherwise only apply_patch's own "Success." report counts. Unknown is not success. */
+    private fun codexPatchSucceeded(payload: JsonObject): Boolean {
+        val output = payload["output"]
+        val text = dev.ccpocket.daemon.codex.codexToolOutputText(output)
+        val obj = output as? JsonObject ?: text?.let { runCatching { json.parseToJsonElement(it) }.getOrNull() as? JsonObject }
+        fun JsonObject.flag(key: String) = (this[key] as? JsonPrimitive)?.booleanOrNull
+        val flags = listOfNotNull(payload.flag("is_error"), payload.flag("isError"), obj?.flag("is_error"), obj?.flag("isError"))
+        if (true in flags) return false
+        val exit = ((obj?.get("metadata") as? JsonObject)?.get("exit_code") as? JsonPrimitive)?.longOrNull
+            ?: (obj?.get("exit_code") as? JsonPrimitive)?.longOrNull
+        if (exit != null) return exit == 0L
+        val inner = obj?.str("output") ?: text ?: return false
+        codexExitCode.find(inner)?.let { return it.groupValues[1] == "0" }
+        codexShellExit.find(inner)?.let { return it.groupValues[1] == "0" }
+        return inner.startsWith("Success. Updated the following files:")
     }
 
     /** Splits a patch into (verb, path, body-lines) per `*** <Verb> File:` header, markers dropped. */

@@ -5,6 +5,11 @@ import dev.ccpocket.protocol.FileContent
 import dev.ccpocket.protocol.FileContentChunk
 import dev.ccpocket.protocol.Frame
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -22,14 +27,27 @@ class SessionFilesServiceTest {
     @TempDir
     lateinit var tmp: Path
 
+    /** One Claude tool call as the CLI records it: the assistant's `tool_use` line, then the user line
+     *  carrying its `tool_result` (released CLIs omit `is_error` on success; a rejected or failed call has
+     *  `is_error:true` and a string `toolUseResult`). */
+    private fun claudeCall(id: String, name: String, path: String, rejected: Boolean = false): List<String> {
+        val inputKey = if (name == "NotebookEdit") "notebook_path" else "file_path"
+        val result = if (rejected) {
+            """{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"$id","is_error":true,"content":"The user doesn't want to proceed with this tool use."}]},"toolUseResult":"User rejected tool use"}"""
+        } else {
+            """{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"$id","content":"ok"}]}}"""
+        }
+        return listOf(
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"$id","name":"$name","input":{"$inputKey":"$path","content":"x"}},{"type":"text","text":"done"}]}}""",
+            result,
+        )
+    }
+
     private fun claudeTranscript(vararg toolUses: Pair<String, String>): Path {
-        // (toolName, file_path) pairs, one assistant line each, plus noise lines the scan must skip
+        // (toolName, file_path) pairs, one successful call each, plus noise lines the scan must skip
         val lines = buildList {
             add("""{"type":"user","cwd":"/w","message":{"content":"do it"}}""")
-            toolUses.forEach { (name, p) ->
-                val inputKey = if (name == "NotebookEdit") "notebook_path" else "file_path"
-                add("""{"type":"assistant","message":{"content":[{"type":"tool_use","name":"$name","input":{"$inputKey":"$p","content":"x"}},{"type":"text","text":"done"}]}}""")
-            }
+            toolUses.forEachIndexed { i, (name, p) -> addAll(claudeCall("toolu_$i", name, p)) }
             add("""{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/w/ignored.txt"}}]}}""")
             add("not json at all")
         }
@@ -60,8 +78,10 @@ class SessionFilesServiceTest {
         val fnArgs = """{\"command\":[\"apply_patch\",\"*** Begin Patch\\n*** Update File: src/App.kt\\n@@\\n*** End Patch\"]}"""
         val lines = listOf(
             """{"type":"session_meta","payload":{"cwd":"/w"}}""",
-            """{"type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"$fnArgs"}}""",
-            """{"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** Add File: docs/new.md\n+hi\n*** Delete File: old.txt\n*** End Patch"}}""",
+            """{"type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"$fnArgs","call_id":"call_1"}}""",
+            FN_PATCH_OK.replace("CALL", "call_1"),
+            """{"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** Add File: docs/new.md\n+hi\n*** Delete File: old.txt\n*** End Patch","call_id":"call_2"}}""",
+            CUSTOM_PATCH_OK.replace("CALL", "call_2"),
         )
         val t = tmp.resolve("rollout.jsonl").also { Files.write(it, lines) }
         val files = SessionFilesService.changedFilesIn(AgentKind.CODEX, t, "/w")
@@ -215,11 +235,16 @@ class SessionFilesServiceTest {
 
     // ── line-level diffs (changed-files v2) ──────────────────────────────────
 
-    /** An Edit tool_use line plus its toolUseResult line, the way the CLI records them. */
-    private fun editWithPatch(path: String, hunkJson: String): List<String> = listOf(
-        """{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"$path"}}]}}""",
-        """{"type":"user","toolUseResult":{"filePath":"$path","oldString":"a","newString":"b","structuredPatch":[$hunkJson]}}""",
-    )
+    private var callSeq = 0
+
+    /** An Edit tool_use line plus its successful tool_result + toolUseResult line, the way the CLI records them. */
+    private fun editWithPatch(path: String, hunkJson: String): List<String> {
+        val id = "toolu_e${callSeq++}"
+        return listOf(
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"$id","name":"Edit","input":{"file_path":"$path"}}]}}""",
+            """{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"$id","content":"ok"}]},"toolUseResult":{"filePath":"$path","oldString":"a","newString":"b","structuredPatch":[$hunkJson]}}""",
+        )
+    }
 
     @Test
     fun claude_structured_patch_yields_stats_and_a_unified_diff() {
@@ -245,8 +270,8 @@ class SessionFilesServiceTest {
     @Test
     fun claude_write_create_synthesizes_an_all_added_hunk() {
         val lines = listOf(
-            """{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/w/new.md"}}]}}""",
-            """{"type":"user","toolUseResult":{"type":"create","filePath":"/w/new.md","content":"one\ntwo","structuredPatch":[]}}""",
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_w","name":"Write","input":{"file_path":"/w/new.md"}}]}}""",
+            """{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_w","content":"ok"}]},"toolUseResult":{"type":"create","filePath":"/w/new.md","content":"one\ntwo","structuredPatch":[]}}""",
         )
         val t = tmp.resolve("s.jsonl").also { Files.write(it, lines) }
         val row = SessionFilesService.changedFilesIn(AgentKind.CLAUDE, t, "/w").single()
@@ -258,7 +283,7 @@ class SessionFilesServiceTest {
 
     @Test
     fun claude_without_patch_data_keeps_null_stats_and_refuses_the_diff() {
-        val t = claudeTranscript("Edit" to "/w/b.kt") // tool_use only — no toolUseResult lines
+        val t = claudeTranscript("Edit" to "/w/b.kt") // successful result, but no toolUseResult patch data
         val row = SessionFilesService.changedFilesIn(AgentKind.CLAUDE, t, "/w").single()
         assertNull(row.adds)
         assertNull(row.dels)
@@ -276,8 +301,10 @@ class SessionFilesServiceTest {
         // function_call: the patch rides inside the arguments JSON document, escaped
         val fnArgs = """{\"command\":[\"apply_patch\",\"*** Begin Patch\\n*** Update File: src/B.kt\\n@@\\n-x\\n+y\\n*** End Patch\"]}"""
         val lines = listOf(
-            """{"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"${raw.replace("\n", "\\n")}"}}""",
-            """{"type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"$fnArgs"}}""",
+            """{"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"${raw.replace("\n", "\\n")}","call_id":"call_a"}}""",
+            CUSTOM_PATCH_OK.replace("CALL", "call_a"),
+            """{"type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"$fnArgs","call_id":"call_b"}}""",
+            FN_PATCH_OK.replace("CALL", "call_b"),
         )
         val t = tmp.resolve("rollout.jsonl").also { Files.write(it, lines) }
 
@@ -523,5 +550,137 @@ class SessionFilesServiceTest {
             buildList { SessionFilesService.streamFileWithSources(AgentKind.CLAUDE, proj.toString(), nul, "a.md", true, sources, { add(it) }, roots) }
         }
         assertFalse((streamed.single() as FileContent).ok)
+    }
+
+    // ── the changed set is what the session SUCCESSFULLY changed — audit 2026-10-04 B ───────────────
+    // An outside-project path in the changed set becomes readable, so an attempt (a rejected Edit, a failed
+    // patch, patch-shaped text in some other command) must not count.
+
+    private fun codexLine(type: String, vararg payload: Pair<String, JsonElement>): String =
+        buildJsonObject {
+            put("type", JsonPrimitive(type))
+            put("payload", JsonObject(payload.toMap()))
+        }.toString()
+
+    private fun s(v: String) = JsonPrimitive(v)
+
+    private fun fileChange(id: String, status: String, changes: JsonObject) = codexLine(
+        "event_msg", "type" to s("item_completed"),
+        "item" to buildJsonObject {
+            put("type", s("FileChange")); put("id", s(id)); put("status", s(status)); put("changes", changes)
+        },
+    )
+
+    @Test
+    fun claude_a_rejected_or_unanswered_edit_is_not_a_change_and_opens_no_outside_read() {
+        val proj = Files.createDirectories(tmp.resolve("proj"))
+        val secret = Files.writeString(tmp.resolve("ssh-config"), "Host *")
+        val kept = Files.writeString(tmp.resolve("notes.txt"), "edited elsewhere")
+        val lines = listOf("""{"type":"user","cwd":"$proj","message":{"content":"go"}}""") +
+            claudeCall("toolu_r", "Edit", secret.toString(), rejected = true) +
+            claudeCall("toolu_i", "Write", tmp.resolve("interrupted.txt").toString()).take(1) + // no result at all
+            claudeCall("toolu_ok", "Edit", kept.toString())
+        val t = tmp.resolve("s.jsonl").also { Files.write(it, lines) }
+
+        assertEquals(listOf(kept.toString()), SessionFilesService.changedFilesIn(AgentKind.CLAUDE, t, proj.toString()).map { it.path })
+        val refused = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, proj.toString(), "s", secret.toString())
+        assertFalse(refused.ok, "served ${refused.text}")
+        assertNull(refused.text)
+        // the owner's ordinary case is untouched: a successful outside edit stays readable
+        assertEquals("edited elsewhere", SessionFilesService.readFileIn(AgentKind.CLAUDE, t, proj.toString(), "s", kept.toString()).text)
+    }
+
+    @Test
+    fun codex_failed_patches_and_patch_shaped_text_are_not_changes() {
+        val proj = Files.createDirectories(tmp.resolve("proj"))
+        val secret = Files.writeString(tmp.resolve("secret.txt"), "nope")
+        fun patch(path: String) = "*** Begin Patch\n*** Update File: $path\n@@\n-a\n+b\n*** End Patch"
+        val lines = listOf(
+            """{"type":"session_meta","payload":{"cwd":"$proj"}}""",
+            // a real apply_patch whose verification failed
+            codexLine("response_item", "type" to s("custom_tool_call"), "name" to s("apply_patch"), "input" to s(patch(secret.toString())), "call_id" to s("c_fail")),
+            codexLine("response_item", "type" to s("custom_tool_call_output"), "call_id" to s("c_fail"),
+                "output" to s("Exit code: 1\nWall time: 0 seconds\nOutput:\napply_patch verification failed: Failed to find expected lines")),
+            // a successful command that merely printed patch-shaped text
+            codexLine("response_item", "type" to s("function_call"), "name" to s("exec_command"),
+                "arguments" to s(buildJsonObject { put("cmd", s("echo '${patch(secret.toString())}'")) }.toString()), "call_id" to s("c_echo")),
+            codexLine("response_item", "type" to s("function_call_output"), "call_id" to s("c_echo"),
+                "output" to s("Chunk ID: 1\nWall time: 0.0 seconds\nProcess exited with code 0\nOutput:\nok\n")),
+            // a code-mode script mentioning a patch (non-JSON body: the old fallback regex matched it) that failed
+            codexLine("response_item", "type" to s("custom_tool_call"), "name" to s("exec"),
+                "input" to s("text(await tools.apply_patch(\"${patch(secret.toString()).replace("\n", "\\n")}\"))"), "call_id" to s("c_exec")),
+            codexLine("response_item", "type" to s("custom_tool_call_output"), "call_id" to s("c_exec"), "output" to s("Script failed\nError: apply_patch failed")),
+            // a FileChange record that did not complete
+            fileChange("exec-2", "failed", buildJsonObject {
+                put(secret.toString(), buildJsonObject { put("type", s("update")); put("unified_diff", s("@@ -1 +1 @@\n-a\n+b\n")) })
+            }),
+        )
+        val t = tmp.resolve("rollout.jsonl").also { Files.write(it, lines) }
+
+        assertEquals(emptyList(), SessionFilesService.changedFilesIn(AgentKind.CODEX, t, proj.toString()).map { it.path })
+        val refused = SessionFilesService.readFileIn(AgentKind.CODEX, t, proj.toString(), "s", secret.toString())
+        assertFalse(refused.ok, "served ${refused.text}")
+    }
+
+    @Test
+    fun codex_code_mode_changes_come_from_completed_file_change_records() {
+        val proj = Files.createDirectories(tmp.resolve("proj"))
+        val target = proj.resolve("report.py").toString()
+        val outside = Files.writeString(tmp.resolve("outside.md"), "# out\n")
+        val direct = proj.resolve("x.kt").toString()
+        val lines = listOf(
+            """{"type":"session_meta","payload":{"cwd":"$proj"}}""",
+            codexLine("response_item", "type" to s("custom_tool_call"), "name" to s("exec"),
+                "input" to s("text(await tools.apply_patch(\"*** Begin Patch\\n*** Update File: $target\\n@@\\n-b\\n+c\\n*** End Patch\"))"), "call_id" to s("c_exec")),
+            fileChange("exec-1", "completed", buildJsonObject {
+                put(target, buildJsonObject { put("type", s("update")); put("unified_diff", s("@@ -1,2 +1,3 @@\n a\n-b\n+c\n+d\n")); put("move_path", JsonNull) })
+                put(outside.toString(), buildJsonObject { put("type", s("add")); put("content", s("# out\n")) })
+            }),
+            codexLine("response_item", "type" to s("custom_tool_call_output"), "call_id" to s("c_exec"), "output" to s("Script completed\nWall time 0.0 seconds\nOutput:\n")),
+            // a direct apply_patch that ALSO produced a FileChange record with its call id: counted once
+            codexLine("response_item", "type" to s("custom_tool_call"), "name" to s("apply_patch"),
+                "input" to s("*** Begin Patch\n*** Update File: x.kt\n@@\n-1\n+2\n*** End Patch"), "call_id" to s("call_x")),
+            fileChange("call_x", "completed", buildJsonObject {
+                put(direct, buildJsonObject { put("type", s("update")); put("unified_diff", s("@@ -1 +1 @@\n-1\n+2\n")) })
+            }),
+            CUSTOM_PATCH_OK.replace("CALL", "call_x"),
+        )
+        val t = tmp.resolve("rollout.jsonl").also { Files.write(it, lines) }
+
+        val rows = SessionFilesService.changedFilesIn(AgentKind.CODEX, t, proj.toString()).associateBy { it.path }
+        assertEquals(setOf(target, outside.toString(), direct), rows.keys)
+        assertEquals(Triple("edit", 2, 1), rows.getValue(target).let { Triple(it.op, it.adds, it.dels) })
+        assertEquals(Triple("write", 1, 0), rows.getValue(outside.toString()).let { Triple(it.op, it.adds, it.dels) })
+        assertEquals(1, rows.getValue(direct).edits)
+        assertEquals("@@ -1,2 +1,3 @@\n a\n-b\n+c\n+d\n", SessionFilesService.fileDiffIn(AgentKind.CODEX, t, proj.toString(), "s", target).diff)
+        assertEquals("@@ -0,0 +1,1 @@\n+# out\n", SessionFilesService.fileDiffIn(AgentKind.CODEX, t, proj.toString(), "s", outside.toString()).diff)
+        assertEquals("# out\n", SessionFilesService.readFileIn(AgentKind.CODEX, t, proj.toString(), "s", outside.toString()).text)
+    }
+
+    @Test
+    fun a_successfully_edited_outside_file_behind_a_symlink_is_still_readable() {
+        // Only the changed-set rule tightened; the outside read still follows symlinks like before (a
+        // dotfiles-managed ~/.zshrc is a link, and so may be a parent directory of the edited path).
+        val proj = Files.createDirectories(tmp.resolve("proj"))
+        val dotfiles = Files.createDirectories(tmp.resolve("dotfiles"))
+        Files.writeString(dotfiles.resolve("zshrc"), "export A=1")
+        val linkedFile = Files.createSymbolicLink(tmp.resolve(".zshrc"), dotfiles.resolve("zshrc"))
+        Files.writeString(dotfiles.resolve("gitconfig"), "[user]")
+        val linkedDir = Files.createSymbolicLink(tmp.resolve("config"), dotfiles)
+        val viaDir = linkedDir.resolve("gitconfig")
+        val t = claudeTranscript("Edit" to linkedFile.toString(), "Write" to viaDir.toString())
+
+        assertEquals("export A=1", SessionFilesService.readFileIn(AgentKind.CLAUDE, t, proj.toString(), "s", linkedFile.toString()).text)
+        assertEquals("[user]", SessionFilesService.readFileIn(AgentKind.CLAUDE, t, proj.toString(), "s", viaDir.toString()).text)
+    }
+
+    private companion object {
+        /** A successful shell-style apply_patch output (JSON envelope with an exit code). */
+        const val FN_PATCH_OK =
+            """{"type":"response_item","payload":{"type":"function_call_output","call_id":"CALL","output":"{\"output\":\"Success. Updated the following files:\\nM src/App.kt\\n\",\"metadata\":{\"exit_code\":0,\"duration_seconds\":0.0}}"}}"""
+
+        /** A successful freeform apply_patch output. */
+        const val CUSTOM_PATCH_OK =
+            """{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"CALL","output":"Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nA docs/new.md\n"}}"""
     }
 }
