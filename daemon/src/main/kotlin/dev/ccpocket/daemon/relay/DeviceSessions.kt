@@ -1071,7 +1071,11 @@ class DeviceSessions(
 
     // ---- persistence of paired device public keys (shared with the direct-LAN gate) ----
 
-    private fun persist() = PairedDevices.save(devicePubs, store)
+    /** Snapshot AND write under [mutex]: [devicePubs] is mutated under it from other coroutines, so a
+     *  lock-free iteration could throw (and the swallowed failure skip the write) or an older snapshot land
+     *  on disk after a newer one — a revoked device written back into the LAN allow-list. Never call this
+     *  while holding [mutex] (not reentrant). */
+    private suspend fun persist() = mutex.withLock { PairedDevices.save(HashMap(devicePubs), store) }
 
     private fun loadPersisted(): Map<String, ByteArray> = PairedDevices.load(store)
 
