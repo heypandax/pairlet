@@ -82,6 +82,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import dev.ccpocket.protocol.Frame as PocketFrame
@@ -100,6 +101,8 @@ class RelayServer(
     private val clock: () -> Long = System::currentTimeMillis,
     analyticsConfig: AnalyticsConfig = AnalyticsConfig.disabled(),
     ga4Forwarder: Ga4Forwarder = HttpGa4Forwarder(),
+    // pre-auth deadline per handshake frame; matches the daemon's and the phone's own 15 s handshake timeout
+    private val handshakeTimeoutMs: Long = 15_000,
 ) {
     // internal: control-plane tests attach their socket first, exactly as handleDevice does
     internal val broker = Broker()
@@ -205,10 +208,12 @@ class RelayServer(
         val ip = call.clientIp()
         if (!limiter.check("ws:ip:$ip", 10, 60_000)) { logConn("rate_limited", ip); return closeWith("rate_limited") }
 
-        val hello = receiveControl<DaemonHello>() ?: run { logConn("expected_hello", ip); return closeWith("expected_hello") }
+        val hello = (receiveHandshake<DaemonHello>() ?: return handshakeTimedOut(ip)).value
+            ?: run { logConn("expected_hello", ip); return closeWith("expected_hello") }
         val challenge = daemonAuth.issueChallenge()
         sendControl(challenge)
-        val auth = receiveControl<DaemonAuth>() ?: run { logConn("expected_auth", ip, account = hello.accountId); return closeWith("expected_auth") }
+        val auth = (receiveHandshake<DaemonAuth>() ?: return handshakeTimedOut(ip, hello.accountId)).value
+            ?: run { logConn("expected_auth", ip, account = hello.accountId); return closeWith("expected_auth") }
 
         val account = when (val r = daemonAuth.verify(hello, auth, challenge.nonce)) {
             is DaemonAuthenticator.Result.Err -> {
@@ -447,7 +452,8 @@ class RelayServer(
         val ip = call.clientIp()
         if (!limiter.check("ws:ip:$ip", 10, 60_000)) { logConn("rate_limited", ip); return closeWith("rate_limited") }
 
-        val hello = receiveControl<DeviceHello>() ?: run { logConn("expected_hello", ip); return closeWith("expected_hello") }
+        val hello = (receiveHandshake<DeviceHello>() ?: return handshakeTimedOut(ip)).value
+            ?: run { logConn("expected_hello", ip); return closeWith("expected_hello") }
         val account = when (val r = deviceAuth.verify(hello)) {
             is DeviceAuthenticator.Result.Err -> {
                 limiter.check("auth:ip:$ip", 5, 60_000, lockoutOnBreach = true)
@@ -551,9 +557,21 @@ class RelayServer(
     private suspend fun DefaultWebSocketServerSession.sendControl(frame: PocketFrame) =
         outgoing.send(Frame.Text(controlText(frame)))
 
-    private suspend inline fun <reified T> DefaultWebSocketServerSession.receiveControl(): T? {
-        val frame = runCatching { incoming.receive() }.getOrNull() as? Frame.Text ?: return null
-        return runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull() as? T
+    /** One frame of the pre-auth handshake, under [handshakeTimeoutMs] (audit M2). Null = the deadline passed:
+     *  every WebSocket library answers our pings by itself, so without a deadline a socket that never sends
+     *  its hello stays open for good. [Received.value] null = the wrong frame, or the socket ended. */
+    private suspend inline fun <reified T> DefaultWebSocketServerSession.receiveHandshake(): Received<T>? =
+        withTimeoutOrNull(handshakeTimeoutMs) {
+            // receiveCatching, not runCatching { receive() }: the timeout's cancellation must not be swallowed
+            val frame = incoming.receiveCatching().getOrNull() as? Frame.Text
+            Received(frame?.let { runCatching { PocketJson.decodeFromString<Envelope>(it.readText()).body }.getOrNull() as? T })
+        }
+
+    private class Received<T>(val value: T?)
+
+    private suspend fun DefaultWebSocketServerSession.handshakeTimedOut(ip: String, account: String? = null) {
+        logConn("handshake_timeout", ip, account = account)
+        closeWith("handshake_timeout")
     }
 
     private suspend fun DefaultWebSocketServerSession.closeWith(reason: String) =
@@ -583,6 +601,7 @@ class RelayServer(
             reason == "rate_limited" || reason == "push_rate_limited" -> ErrorCode.RATE_LIMITED
             reason == "too_many_connections" -> ErrorCode.SIZE_LIMIT
             reason == "detached" -> ErrorCode.CONNECTION_CLOSED
+            reason == "handshake_timeout" -> ErrorCode.TIMEOUT
             reason == "revoked" || reason.startsWith("auth_failed:") -> ErrorCode.REJECTED
             else -> ErrorCode.UNSUPPORTED
         }
