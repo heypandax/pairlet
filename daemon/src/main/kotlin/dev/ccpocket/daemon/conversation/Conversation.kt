@@ -1683,7 +1683,21 @@ class Conversation(
         } else {
             rawSpec
         }
-        val cleanSpec = if (cleanRoom) securedSpec.copy(cleanRoom = true) else securedSpec
+        // #367 HIGH-1, at the ONE choke point: a remote run's CLI is never launched in a mode that applies
+        // edits without a ControlRequest. Enforced here rather than per call site, because the call sites
+        // (lazy first prompt, one-shot drains, lock heal, /clear, directory switch, …) build their own
+        // AgentSpec and the lazy first-prompt spawn — the one a run actually takes — used to pass the raw
+        // ceiling straight through. Idempotent for callers that already pass [launchMode]; a local
+        // conversation is untouched.
+        val modeSpec = if (remoteExecution) {
+            securedSpec.copy(
+                mode = dev.ccpocket.daemon.execution.ExecutionSandbox.launchMode(securedSpec.mode, remoteExecution = true),
+                permissionMode = null,
+            )
+        } else {
+            securedSpec
+        }
+        val cleanSpec = if (cleanRoom) modeSpec.copy(cleanRoom = true) else modeSpec
         // REWIND/FORK truncation (issue #282), applied at the ONE choke point every launch path funnels
         // through so no caller can forget it — and gated on `sessionId == null`, which is what makes it
         // fire exactly once. Only the FIRST launch is the branching one; after the CLI reports the forked
