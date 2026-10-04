@@ -3,6 +3,7 @@ package dev.ccpocket.daemon.git
 import dev.ccpocket.observability.*
 
 import dev.ccpocket.daemon.disk.ProjectPaths
+import dev.ccpocket.daemon.util.ChildOutput
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AddWorktree
@@ -685,7 +686,8 @@ class GitService(
      * Start one git process with an explicit argv — the ONLY place in this file that spawns anything.
      * Output is capped while still being drained (a chatty command must neither blow the relay frame nor
      * block on a full pipe), the wait is bounded, and a grandchild holding the pipe open cannot make us
-     * wait forever for EOF. Same three-part shape as ShellService.execute, minus the shell.
+     * wait forever for EOF — the readers live outside this scope ([ChildOutput]), so after [READ_DRAIN_MS]
+     * we answer with what arrived. Same three-part shape as ShellService.execute, minus the shell.
      */
     private suspend fun git(exe: Path, dir: Path, args: List<String>, timeoutMs: Long = LOCAL_TIMEOUT_MS, readOnly: Boolean = false): Exec =
         withContext(Dispatchers.IO) {
@@ -706,12 +708,12 @@ class GitService(
                 }
                 val proc = pb.start()
                 proc.outputStream.close() // no stdin for any verb we run
-                val out = async { drainCapped(proc.inputStream.bufferedReader()) }
-                val err = async { drainCapped(proc.errorStream.bufferedReader()) }
+                // readers NOT tied to this scope: see ChildOutput for why an `async` here could wedge forever
+                val out = ChildOutput(proc.inputStream, DIFF_CAP)
+                val err = ChildOutput(proc.errorStream, DIFF_CAP)
                 val finished = proc.waitFor(timeoutMs.coerceIn(1_000, MAX_TIMEOUT_MS), TimeUnit.MILLISECONDS)
                 if (!finished) proc.destroyForcibly()
-                val stdout = withTimeoutOrNull(READ_DRAIN_MS) { out.await() } ?: ""
-                val stderr = withTimeoutOrNull(READ_DRAIN_MS) { err.await() } ?: ""
+                val (stdout, stderr) = ChildOutput.both(out, err, READ_DRAIN_MS)
                 if (!finished) Exec(-1, stdout, stderr, timedOut = true, failure = "git took too long and was stopped")
                 else Exec(proc.exitValue(), stdout, stderr)
             } catch (e: Exception) {
@@ -720,19 +722,6 @@ class GitService(
                 Exec(-1, "", "", failure = e.message ?: "could not run git")
             }
         }
-
-    private fun drainCapped(reader: java.io.Reader): String = reader.use { r ->
-        val sb = StringBuilder()
-        val buf = CharArray(4096)
-        var total = 0
-        while (true) {
-            val n = r.read(buf)
-            if (n < 0) break
-            if (total < DIFF_CAP) sb.append(buf, 0, minOf(n, DIFF_CAP - total))
-            total += n
-        }
-        sb.toString()
-    }
 
     internal companion object {
         const val GIT_NOT_FOUND = "git is not installed on the computer"

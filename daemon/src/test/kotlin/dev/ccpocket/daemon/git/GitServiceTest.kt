@@ -774,7 +774,82 @@ class GitServiceTest {
         assertTrue(refused.all { it.error.orEmpty().contains("already running") || it.ok }, refused.map { it.error }.toString())
     }
 
+    // ------------------------------------------------- subprocess lifetime
+
+    @Test
+    fun a_hook_that_leaves_a_background_process_holding_the_pipe_does_not_wedge_the_reply() {
+        assumeTrue(gitAvailable() && !isWindows)
+        val dir = repo()
+        val pidFile = tmp.resolve("bg.pid")
+        // the shape of `ControlPersist` ssh or a hook that starts a watcher: git exits, but a process it
+        // started keeps git's stderr open long after
+        hook(dir, "pre-commit", "sleep 60 &\necho \$! > '$pidFile'\nexit 0")
+        dir.resolve("a.txt").writeText("a\n")
+        sh(dir, "add", "a.txt")
+        val svc = service()
+        try {
+            val r = within(15_000) { act(svc, dir, GIT_OP_COMMIT, message = "with a lingering hook child") }
+            assertNotNull(r, "the commit never replied: a pipe held by the hook's background child wedged git()")
+            assertIs<GitActionResult>(r)
+            assertTrue(r.ok, r.error + r.stderr)
+            // and the conversation's mutating slot was released, so the next write is not "already running"
+            val next = within(15_000) { act(svc, dir, GIT_OP_STAGE, paths = listOf("README.md")) } as GitActionResult?
+            assertNotNull(next)
+            assertFalse(next.error.orEmpty().contains("already running"), next.error.orEmpty())
+        } finally {
+            pidFrom(pidFile)?.let(::kill)
+        }
+    }
+
     // ------------------------------------------------------------- helpers
+
+    private val isWindows = System.getProperty("os.name").lowercase().contains("win")
+
+    /** An executable hook in the repo's own hooks dir — hooksPath pinned locally so a machine-wide
+     *  `core.hooksPath` cannot redirect it (GitService itself runs with the developer's real config). */
+    private fun hook(dir: Path, name: String, body: String) {
+        sh(dir, "config", "--local", "core.hooksPath", ".git/hooks")
+        val f = dir.resolve(".git/hooks/$name")
+        f.parent.createDirectories()
+        f.writeText("#!/bin/sh\n$body\n")
+        assertTrue(f.toFile().setExecutable(true))
+    }
+
+    /** Run [block] on its own thread and give up after [ms] — null means it was still blocked. A wedged call
+     *  stays parked on that daemon thread until the test's finally kills what holds it. */
+    private fun <T> within(ms: Long, block: () -> T): T? {
+        val pool = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "within").apply { isDaemon = true } }
+        return try {
+            pool.submit(java.util.concurrent.Callable { block() }).get(ms, TimeUnit.MILLISECONDS)
+        } catch (_: java.util.concurrent.TimeoutException) {
+            null
+        } finally {
+            pool.shutdown()
+        }
+    }
+
+    private fun pidFrom(file: Path, waitMs: Long = 5_000): Long? {
+        val deadline = System.currentTimeMillis() + waitMs
+        while (System.currentTimeMillis() < deadline) {
+            runCatching { file.readText().trim().toLong() }.getOrNull()?.let { return it }
+            Thread.sleep(20)
+        }
+        return null
+    }
+
+    private fun kill(pid: Long) {
+        ProcessHandle.of(pid).ifPresent { it.destroyForcibly() }
+    }
+
+    /** True once [pid] is gone, polling up to [waitMs]. */
+    private fun gone(pid: Long, waitMs: Long = 5_000): Boolean {
+        val deadline = System.currentTimeMillis() + waitMs
+        while (System.currentTimeMillis() < deadline) {
+            if (!ProcessHandle.of(pid).map { it.isAlive }.orElse(false)) return true
+            Thread.sleep(20)
+        }
+        return false
+    }
 
     /** A repo left mid-merge with exactly one unmerged path, `f.txt`. */
     private fun conflictedRepo(): Path {
