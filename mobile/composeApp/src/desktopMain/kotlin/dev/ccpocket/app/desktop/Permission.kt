@@ -156,15 +156,16 @@ private fun DenyButton(big: Boolean = false, onClick: () -> Unit) {
     )
 }
 
+// No ⌘⏎ keycap on Allow / Allow for task (audit 2026-10-04 M1): nothing binds that key to an approval — the
+// composer keeps focus while a card is up and sends its draft on ⌘⏎. A keycap appears only where it is wired.
 @Composable
-private fun AllowButton(big: Boolean = false, key: Boolean = true, onClick: () -> Unit) {
+private fun AllowButton(big: Boolean = false, onClick: () -> Unit) {
     Row(
         Modifier.clip(RoundedCornerShape(if (big) 10.dp else 9.dp)).background(Tok.accent).clickable(onClick = onClick)
             .padding(horizontal = if (big) 18.dp else 16.dp, vertical = if (big) 10.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Text(stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.Bold, style = tightCenter(if (big) 13.5.sp else 13.sp))
-        if (key) Key("⌘⏎")
     }
 }
 
@@ -179,7 +180,7 @@ private fun OnceButton(onClick: () -> Unit) {
     )
 }
 
-/** M2 "允许本任务" — the recommended action (design `.btn.rec`): accent fill + ⌘⏎. */
+/** M2 "允许本任务" — the recommended action (design `.btn.rec`): accent fill. */
 @Composable
 private fun TaskAllowButton(onClick: () -> Unit) {
     Row(
@@ -188,7 +189,6 @@ private fun TaskAllowButton(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Text(stringResource(Res.string.allow_for_task), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold, style = tightCenter(13.sp))
-        Key("⌘⏎")
     }
 }
 
@@ -414,7 +414,7 @@ fun InlinePermCard(
                         Spacer(Modifier.weight(1f))
                         WaitDial(ask, 26.dp, 2.2.dp, color)
                         DenyButton(onClick = onDeny)
-                        AllowButton(key = !isDiff, onClick = { onAllow(rememberRule) })
+                        AllowButton(onClick = { onAllow(rememberRule) })
                     }
                 }
             }
