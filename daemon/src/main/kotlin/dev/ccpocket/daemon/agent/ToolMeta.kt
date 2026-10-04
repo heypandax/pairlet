@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.agent
 
+import dev.ccpocket.daemon.approval.ApprovalGrantStore
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -15,10 +16,16 @@ data class ToolMeta(
     // A human-decision gate that must NEVER be remembered or auto-allowed (e.g. ExitPlanMode): every occurrence
     // re-prompts even if "Always allow" was tapped before or the mode would otherwise skip the ask.
     val neverRemember: Boolean = false,
+    // False when [rule] does not describe everything the call would run: a Bash line carrying shell
+    // metacharacters (`&&`, `;`, `|`, `$(…)`, backticks, newlines, redirects…) still yields the two-token
+    // rule of its FIRST command, so a remembered session rule must never auto-allow it (audit 2026-10-04
+    // M3: `npm test && curl … | sh` rode a remembered `npm test`). The call falls through to a card.
+    val sessionRuleMatchable: Boolean = true,
 )
 
 /** Derives [ToolMeta] from a tool name + its input. The allow-rule is granular: Bash → first two tokens
- *  ("git status"), edits → the tool family ("Edit"). A future request that produces the same rule auto-allows.
+ *  ("git status"), edits → the tool family ("Edit"). A future request that produces the same rule auto-allows —
+ *  unless it is a chained/redirected shell line ([ToolMeta.sessionRuleMatchable]).
  *  Codex backends reuse this by synthesizing Claude-shaped tool names ("Bash"/"Edit") + inputs. */
 object ToolMetadata {
     private val DANGER = Regex(
@@ -39,6 +46,7 @@ object ToolMetadata {
                     rule = twoTokens.ifEmpty { "Bash" },
                     danger = danger,
                     dangerNote = if (danger) "run destructive commands" else null,
+                    sessionRuleMatchable = !ApprovalGrantStore.SHELL_METACHARS.containsMatchIn(cmd),
                 )
             }
             "Write", "Edit", "MultiEdit", "NotebookEdit" -> ToolMeta(

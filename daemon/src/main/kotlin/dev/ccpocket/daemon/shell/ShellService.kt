@@ -84,7 +84,8 @@ class ShellService(
                     coordinator.recordAuto(ApprovalSource.SHELL, cmd.convoId, "Bash", meta.rule, "bypass-permissions")
                     true
                 }
-                allowRules[cmd.convoId]?.contains(meta.rule) == true -> {
+                // same gate as the agent's Bash: a chained/redirected line never rides a session rule (audit M3)
+                meta.sessionRuleMatchable && allowRules[cmd.convoId]?.contains(meta.rule) == true -> {
                     coordinator.recordAuto(ApprovalSource.SHELL, cmd.convoId, "Bash", meta.rule, "remembered-rule")
                     emit(autorunChip(cmd.convoId, taskId, meta.rule, "session-rule", grantId = null))
                     true
