@@ -584,13 +584,17 @@ object SessionFilesService {
     private fun transcriptFor(agent: AgentKind, workdir: String, sessionId: String, roots: TranscriptRoots): Path? {
         // sessionId is interpolated into a filename; forbid separators/dot-dot so it can't traverse
         if (sessionId.contains('/') || sessionId.contains('\\') || sessionId.contains("..")) return null
-        val file = when (agent) {
-            AgentKind.CLAUDE -> ProjectPaths.dirForUnder(roots.claudeProjects(), workdir).resolve("$sessionId.jsonl")
-            AgentKind.CODEX -> CodexPaths.findSession(sessionId, roots.codexSessions())
-            AgentKind.OPENCODE -> null // OpenCode sessions are in SQLite, not individual files
-            AgentKind.KIMI -> null // KIMI file-preview is P1 no-op (transcript format unverified pre-auth)
-            AgentKind.ZCODE, AgentKind.DSH -> null // resolved as verified evidence, never synthetic paths
-        }?.takeIf { it.exists() } ?: return null
+        // Never throws: a NUL in the id (InvalidPathException) or a project dir deleted mid-scan must read as
+        // "not found" — the router's launched branch would otherwise answer nothing at all.
+        val file = runCatching {
+            when (agent) {
+                AgentKind.CLAUDE -> ProjectPaths.dirForUnder(roots.claudeProjects(), workdir).resolve("$sessionId.jsonl")
+                AgentKind.CODEX -> CodexPaths.findSession(sessionId, roots.codexSessions())
+                AgentKind.OPENCODE -> null // OpenCode sessions are in SQLite, not individual files
+                AgentKind.KIMI -> null // KIMI file-preview is P1 no-op (transcript format unverified pre-auth)
+                AgentKind.ZCODE, AgentKind.DSH -> null // resolved as verified evidence, never synthetic paths
+            }?.takeIf { it.exists() }
+        }.getOrNull() ?: return null
         // Bind the pair: the in-tree read lane is rooted at the CLIENT's workdir, so that workdir must be the
         // project the transcript itself recorded. Codex finds rollouts by id alone, and Claude's dirKey is lossy
         // (`/a.b`, `/a-b`, `/a_b` share one folder) — without this, any real session id would widen the lane to

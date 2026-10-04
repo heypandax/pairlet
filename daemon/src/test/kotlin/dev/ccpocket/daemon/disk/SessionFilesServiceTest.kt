@@ -488,4 +488,23 @@ class SessionFilesServiceTest {
         assertFalse(sibling.ok, "served ${sibling.text}")
         assertNull(sibling.text)
     }
+
+    // ── malformed ids answer instead of throwing — audit 2026-10-04 C ──────────────────────────────
+    // A throw inside the router's launched branch sends nothing, so the phone waits for its timeout.
+
+    @Test
+    fun a_malformed_session_id_answers_with_a_refusal_instead_of_throwing() {
+        val proj = Files.createDirectories(tmp.resolve("proj"))
+        val nul = "a\u0000b"
+        val roots = rootsAt()
+        val sources = BackendSessionFiles()
+        assertEquals(emptyList(), SessionFilesService.changedFilesWithSources(AgentKind.CLAUDE, proj.toString(), nul, sources, roots))
+        assertFalse(SessionFilesService.readFileWithSources(AgentKind.CLAUDE, proj.toString(), nul, "a.md", sources, roots).ok)
+        assertFalse(SessionFilesService.fileDiffWithSources(AgentKind.CLAUDE, proj.toString(), nul, "a.md", sources, roots).ok)
+        assertFalse(SessionFilesService.isChangedWithSources(AgentKind.CLAUDE, proj.toString(), nul, "a.md", sources, roots))
+        val streamed = runBlocking {
+            buildList { SessionFilesService.streamFileWithSources(AgentKind.CLAUDE, proj.toString(), nul, "a.md", true, sources, { add(it) }, roots) }
+        }
+        assertFalse((streamed.single() as FileContent).ok)
+    }
 }
