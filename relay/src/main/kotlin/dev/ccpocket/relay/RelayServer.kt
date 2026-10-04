@@ -75,7 +75,9 @@ import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
@@ -115,6 +117,8 @@ class RelayServer(
     // off-loop fan-out: a slow APNs/FCM round-trip must not block the daemon socket's control loop
     private val pushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pushSlots = Semaphore(MAX_PUSH_IN_FLIGHT)
+    // closes of sockets other than the caller's own (supersede, revoke) run here, never inline — see closeSoon
+    private val socketScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val daemonAuth = DaemonAuthenticator(store, clock)
     private val deviceAuth = DeviceAuthenticator(store, clock)
     private val pairing = PairingService(store, clock)
@@ -560,11 +564,33 @@ class RelayServer(
         account, role, deviceId,
         sendText = { outgoing.send(Frame.Text(it)) },
         sendBinary = { outgoing.send(Frame.Binary(true, it)) },
-        close = { reason -> runCatching { close(CloseReason(CloseReason.Codes.NORMAL, reason)) } },
+        close = { reason -> closeSoon(CloseReason(CloseReason.Codes.NORMAL, reason)) },
         headless = headless,
         daemonProtoV = daemonProtoV,
         ip = call.clientIp(),
     )
+
+    /**
+     * Close a socket from OUTSIDE its own handler (supersede, revoke) without waiting for it (audit M3).
+     *
+     * `close()` is Close + flush, and the flush completes only once every frame queued ahead of it is in the
+     * socket. On a half-open link with a backlog that is the ping timeout or longer — and the callers are the
+     * replacing socket's handler (its Attached waited, past the phone's 15 s handshake timeout) and the daemon's
+     * read loop (a revoke stalled the whole account's data plane). So the close runs on its own, gets
+     * [CLOSE_GRACE_MS] for the close handshake, and the session is cancelled outright after that.
+     */
+    private fun DefaultWebSocketServerSession.closeSoon(reason: CloseReason) {
+        val session = this
+        socketScope.launch {
+            withTimeoutOrNull(CLOSE_GRACE_MS) {
+                try { session.close(reason) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+                // close() returns once our Close frame is written; a peer that has stopped reading never answers
+                // it, and the session would then live on until the ping timeout — so wait for the handshake too
+                session.closeReason.await()
+            }
+            session.cancel() // a no-op for a session that already ended
+        }
+    }
 
     private fun controlText(frame: PocketFrame): String =
         PocketJson.encodeToString(Envelope(id = "r", ts = clock(), to = Route.RELAY, body = frame))
@@ -659,6 +685,8 @@ class RelayServer(
         const val MAX_ACCOUNT_PUSH_PER_MINUTE = 30
         // relay-wide ceiling on push jobs (store read + APNs/FCM round-trip) running at once
         const val MAX_PUSH_IN_FLIGHT = 256
+        // how long a supersede/revoke close may take to go out cleanly before the socket is cut (audit M3)
+        const val CLOSE_GRACE_MS = 3_000L
         // an APNs token is 64 hex chars and an FCM one a few hundred; 4096 is far above any real vendor
         // token and exists so a malformed/hostile registration is refused ("bad_request") instead of
         // being written into the devices row
