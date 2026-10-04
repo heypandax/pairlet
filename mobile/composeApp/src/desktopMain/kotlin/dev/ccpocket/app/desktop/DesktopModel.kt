@@ -226,6 +226,9 @@ data class DkAttention(
     // map — a bare ALLOW reads "did not answer" to the CLI — so summary surfaces (the tray) route these to
     // the session instead of offering a Deny/Allow that would silently drop the user's choice
     val question: Boolean = false,
+    // the conversation the ask belongs to: askId is only unique per agent connection (Codex/ZCode mint small
+    // integers per session), so a verdict must match both (audit 2026-10-04 M3). Null = seed/preview rows.
+    val convoId: String? = null,
 )
 
 /** What the ⌘K palette shows: everything, just project rows ("All projects…"), or the cross-project

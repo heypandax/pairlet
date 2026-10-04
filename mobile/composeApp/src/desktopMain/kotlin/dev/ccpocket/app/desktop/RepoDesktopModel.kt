@@ -438,13 +438,17 @@ class RepoDesktopModel(
                     tool = ask.tool, preview = ask.diff ?: ask.inputPreview,
                     seconds = null, live = true, // no invented deadline — the inline card carries the real one
                     question = ask.isQuestion, // tray hides Deny/Allow for these (bare ALLOW = "did not answer")
+                    convoId = ask.convoId,
                 )
             }
         }
 
     override fun resolveAttention(a: DkAttention, allow: Boolean) {
         val r = FleetRuntime.forPrimary(repo)?.repoFor(a.accountId) ?: repo
-        if (a.live && r.pendingAsk.value?.askId == a.id) {
+        // composite match (audit M3): the row's askId alone can name ANOTHER session's ask — Codex/ZCode
+        // number asks per session, so after a switch the focused card may carry the same id
+        val ask = r.pendingAsk.value
+        if (a.live && ask != null && ask.askId == a.id && ask.convoId == a.convoId) {
             r.resolve(if (allow) Decision.ALLOW else Decision.DENY, remember = false)
         }
     }
