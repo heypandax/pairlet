@@ -200,7 +200,7 @@ fun ModeSheet(
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         CircularProgressIndicator(Modifier.size(15.dp), color = Tok.accent, strokeWidth = 2.dp)
-                        Text(stringResource(Res.string.mode_switching), color = Tok.tx2, fontSize = 12.5.sp)
+                        Text(stringResource(Res.string.mode_switching), color = Tok.tx2, fontSize = 12.5.sp, style = tightCenter(12.5.sp))
                     }
                 }
                 if (agent == AgentKind.CODEX) {
@@ -350,7 +350,7 @@ fun OpenCodeAutoApproveNotice(modifier: Modifier = Modifier) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Icon(Icons.Rounded.WarningAmber, null, tint = Tok.warn, modifier = Modifier.size(15.dp))
-            Text(stringResource(Res.string.opencode_mode_title), color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(Res.string.opencode_mode_title), color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(13.5.sp))
         }
         Text(
             stringResource(Res.string.opencode_mode_note),
@@ -567,7 +567,7 @@ private fun ModeRow(m: ModeInfo, selected: Boolean, enabled: Boolean, onClick: (
             // dot + label share one CenterVertically row, so the dot tracks the first line exactly
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.size(11.dp).clip(CircleShape).background(m.color))
-                Text(stringResource(m.label), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(stringResource(m.label), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(14.5.sp), modifier = Modifier.weight(1f))
                 if (m.warn) Icon(Icons.Rounded.WarningAmber, null, tint = m.color, modifier = Modifier.size(13.dp))
                 if (selected) Icon(Icons.Rounded.Check, null, tint = m.color, modifier = Modifier.size(16.dp))
             }
@@ -585,8 +585,8 @@ private fun RulesReview(rules: List<String>, onClear: (String) -> Unit, onClearA
     Column(Modifier.padding(top = 18.dp)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Row(Modifier.padding(top = 14.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(Res.string.rules_remembered_header), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, modifier = Modifier.weight(1f))
-            Text(stringResource(Res.string.clear_all), color = Tok.danger, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { onClearAll() }.padding(4.dp))
+            Text(stringResource(Res.string.rules_remembered_header), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, style = tightCenter(11.sp), modifier = Modifier.weight(1f))
+            Text(stringResource(Res.string.clear_all), color = Tok.danger, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(12.sp), modifier = Modifier.clickable { onClearAll() }.padding(4.dp))
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             rules.forEach { r ->
@@ -595,7 +595,7 @@ private fun RulesReview(rules: List<String>, onClear: (String) -> Unit, onClearA
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(13.dp))
-                    Text(r, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                    Text(r, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1, style = tightCenter(12.sp), modifier = Modifier.weight(1f))
                     Box(
                         Modifier.size(24.dp).clip(CircleShape).background(Tok.raised).border(1.dp, Tok.hair, CircleShape).clickable { onClear(r) },
                         contentAlignment = Alignment.Center,
@@ -630,7 +630,7 @@ fun RiskBadge(risk: String) {
         else -> Style("? " + stringResource(Res.string.risk_unknown), Tok.tx2, Color.Transparent, Tok.muted)
     }
     Text(
-        s.label, color = s.fg, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+        s.label, color = s.fg, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, style = tightCenter(10.sp),
         modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(s.bg)
             .then(s.outline?.let { Modifier.border(1.dp, it, RoundedCornerShape(6.dp)) } ?: Modifier)
             .padding(horizontal = 6.dp, vertical = 2.dp),
@@ -651,9 +651,9 @@ fun AllowChip(rule: String) {
         Row {
             // suffix is empty in languages where the scope reads naturally up front (e.g. zh)
             val suffix = stringResource(Res.string.allow_chip_suffix)
-            Text(stringResource(Res.string.allow_chip_prefix) + " ", color = Tok.tx2, fontSize = 12.5.sp)
-            Text(rule, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
-            if (suffix.isNotBlank()) Text(" $suffix", color = Tok.tx2, fontSize = 12.5.sp)
+            Text(stringResource(Res.string.allow_chip_prefix) + " ", color = Tok.tx2, fontSize = 12.5.sp, style = tightCenter(12.5.sp))
+            Text(rule, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
+            if (suffix.isNotBlank()) Text(" $suffix", color = Tok.tx2, fontSize = 12.5.sp, style = tightCenter(12.5.sp))
         }
     }
 }
@@ -669,20 +669,20 @@ fun AutoRunChip(item: dev.ccpocket.app.data.ChatItem.AutoRun, onTighten: () -> U
             .padding(start = 11.dp, end = 9.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Text("⚡", fontSize = 11.sp)
-        Text(stringResource(Res.string.autorun_label), color = Tok.tx2, fontSize = 11.5.sp)
-        Text(item.summary, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+        Text("⚡", fontSize = 11.sp, style = tightCenter(11.sp))
+        Text(stringResource(Res.string.autorun_label), color = Tok.tx2, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
+        Text(item.summary, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, style = tightCenter(11.sp), modifier = Modifier.weight(1f, fill = false))
         Text(
             stringResource(if (item.basis == "task-grant") Res.string.autorun_basis_task else Res.string.autorun_basis_session),
-            color = Tok.accent, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+            color = Tok.accent, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(10.sp),
             modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.12f)).padding(horizontal = 7.dp, vertical = 2.dp),
         )
         Spacer(Modifier.weight(1f))
         if (item.tightening) {
-            Text("…", color = Tok.muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+            Text("…", color = Tok.muted, fontSize = 11.sp, style = tightCenter(11.sp), modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
         } else if (!item.tightened) {
             Text(
-                stringResource(Res.string.autorun_tighten), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                stringResource(Res.string.autorun_tighten), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(11.sp),
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onTighten).padding(horizontal = 6.dp, vertical = 3.dp),
             )
         } else {

@@ -38,6 +38,7 @@ import dev.ccpocket.app.resources.st_act_review
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.FirstHopHeader
 import dev.ccpocket.app.ui.FirstHopSectionLabel
 import dev.ccpocket.app.ui.FirstHopWideAction
@@ -177,7 +178,7 @@ private fun MachineRow(m: FleetMachine, onClick: () -> Unit) {
                 }
             }
             if (m.pending > 0) AttentionBadge(m.pending)
-            Text("›", color = Tok.muted, style = TypeRole.title)
+            Text("›", color = Tok.muted, style = TypeRole.title.merge(tightCenter(TypeRole.title.fontSize)))
         }
     }
 }

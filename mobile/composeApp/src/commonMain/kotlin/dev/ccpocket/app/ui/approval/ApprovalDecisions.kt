@@ -256,7 +256,7 @@ internal fun RetrySaferBody(
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
             ) {
                 Icon(Icons.Rounded.Check, null, tint = if (on) Tok.accent else Tok.muted, modifier = Modifier.size(14.dp))
-                Text(c, color = if (on) Tok.tx else Tok.tx2, style = TypeRole.body)
+                Text(c, color = if (on) Tok.tx else Tok.tx2, style = TypeRole.body.merge(tightCenter(TypeRole.body.fontSize)))
             }
         }
         BasicTextField(
