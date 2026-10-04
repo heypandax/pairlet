@@ -4,6 +4,10 @@ import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.PocketJson
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.AtomicMoveNotSupportedException
@@ -22,12 +26,15 @@ object PairedDevices {
     private val b64dec: Base64.Decoder = Base64.getUrlDecoder()
     private val log = logger("PairedDevices")
 
-    /** Bumped on every [save]. Live direct-LAN connections watch it and re-verify their device is still
-     *  allow-listed on the next frame — so a revocation cuts an ESTABLISHED socket too, instead of
-     *  grandfathering it until it happens to disconnect. */
-    @Volatile
-    var epoch: Long = 0L
-        private set
+    /** Bumped on every [save]. Live direct-LAN connections watch it ([epochChanges]) and re-verify their
+     *  device is still allow-listed — so a revocation cuts an ESTABLISHED socket at once, instead of
+     *  grandfathering it until it happens to send a frame or disconnect. */
+    val epoch: Long get() = epochState.value
+
+    private val epochState = MutableStateFlow(0L)
+
+    /** [epoch] as a flow, for connections that must react to a revoke without waiting for traffic. */
+    val epochChanges: StateFlow<Long> = epochState.asStateFlow()
 
     fun file(): File {
         val dir = System.getenv("CC_POCKET_IDENTITY")?.let { File(it).parentFile }
@@ -65,6 +72,6 @@ object PairedDevices {
                 tmp.delete() // no-op once moved
             }
         }.onFailure { log.warn("devices.json write failed (${it.message}) — the previous allow-list stays on disk") }
-        epoch++
+        epochState.update { it + 1 }
     }
 }

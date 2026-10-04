@@ -321,6 +321,15 @@ class WsConnection(
                 }
             }
         }
+        // A revoke cuts a gated socket the moment it is written (audit 2026-10-04): the epoch check in the read
+        // loop below only ran when THIS device sent a frame, so a silent revoked device kept receiving every
+        // session stream, approval card and handoff/review row meanwhile. Throwing fails this scope — reader
+        // and writer with it — exactly like the writer's own "device revoked" refusal.
+        val revokeWatch = if (crypto != null && gatedDeviceId != null) launch {
+            PairedDevices.epochChanges.collect { epoch ->
+                if (epoch != allowlistEpoch && !deviceStillAllowListed()) error("device revoked — closing live direct link")
+            }
+        } else null
         try {
             for (frame in session.incoming) {
                 // revocation cuts LIVE sockets too: PairedDevices.save() bumps the epoch, so the next frame
@@ -414,6 +423,7 @@ class WsConnection(
             caps.pinSubscriptionId = null
             outbox.close()
             writer.cancel()
+            revokeWatch?.cancel()
             withContext(NonCancellable) {
                 // grace-close, not immediate: a flaky LAN socket / backgrounded phone can reconnect and reattach
                 // the still-warm session instead of paying a kill + transcript rewrite + cold resume every blip.
