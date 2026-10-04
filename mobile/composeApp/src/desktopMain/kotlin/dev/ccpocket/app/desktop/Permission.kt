@@ -130,6 +130,17 @@ private fun RememberCheck(label: String, checked: Boolean, onToggle: () -> Unit)
     }
 }
 
+/**
+ * Is [shown] — the ask a card was COMPOSED with — still the one the model is waiting on? (audit 2026-10-04 M4)
+ *
+ * The model's verdict verbs decide "whatever is pending now". In a burst the next card renders in the same
+ * place with the same buttons, and a second click delivered before the card recomposes still reaches the
+ * first card's callbacks — so every card verb checks this first and a stale click does nothing at all.
+ * Matched on (convoId, askId): a re-emitted frame refreshing the card in place is still the same request.
+ */
+internal fun DesktopModel.isStillAsking(shown: PermissionAsk): Boolean =
+    ask?.let { it.convoId == shown.convoId && it.askId == shown.askId } == true
+
 /** Whether "remember" is offered at all: needs a rule to remember, and one-off decisions (plan
  *  approval, questions) never offer it — [oneOff] carries the daemon's ToolMeta policy. */
 private fun canRemember(ask: PermissionAsk): Boolean = ask.rule != null && !ask.oneOff

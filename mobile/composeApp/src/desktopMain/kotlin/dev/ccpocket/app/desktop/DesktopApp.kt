@@ -397,9 +397,10 @@ fun DesktopApp(
                 FocusedModal(
                     computer = model.activeComputer?.name ?: stringResource(Res.string.your_computer),
                     ask = ask, agent = model.chatAgent, workdir = model.chatWorkdir, branch = model.chatBranch,
-                    onAllow = { rem -> model.resolve(allow = true, remember = rem) },
-                    onDeny = { model.resolve(allow = false, remember = false) },
-                    onDismiss = { model.dismissAsk() },
+                    // bound to the ask this modal shows (audit M4): a stale click decides nothing
+                    onAllow = { rem -> if (model.isStillAsking(ask)) model.resolve(allow = true, remember = rem) },
+                    onDeny = { if (model.isStillAsking(ask)) model.resolve(allow = false, remember = false) },
+                    onDismiss = { if (model.isStillAsking(ask)) model.dismissAsk() },
                 )
             }
         }
