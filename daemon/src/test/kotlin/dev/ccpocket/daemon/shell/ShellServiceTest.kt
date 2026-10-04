@@ -55,6 +55,54 @@ class ShellServiceTest {
     }
 
     @Test
+    fun session_rule_never_auto_runs_a_chained_command() = runBlocking {
+        // audit 2026-10-04 M3: the quick terminal shares the two-token session rule, so a remembered
+        // `echo hi` must not auto-run `echo hi && …` — chained lines re-ask; plain same-prefix lines still ride
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = CopyOnWriteArrayList<Frame>()
+        val coordinator = dev.ccpocket.daemon.approval.ApprovalCoordinator(scope)
+        val shell = ShellService(scope, coordinator = coordinator, verdictTimeoutMs = 5_000)
+        val workdir = System.getProperty("java.io.tmpdir")
+
+        // returns the ask if one was shown (then denied so nothing runs), or null if the command auto-ran
+        suspend fun runOnce(command: String): PermissionAsk? {
+            emitted.clear()
+            val job = scope.async { shell.run(RunShellCommand("c1", command, workdir), PermissionMode.DEFAULT) { emitted += it } }
+            kotlinx.coroutines.withTimeout(5_000) {
+                while (emitted.none { it is PermissionAsk || it is ShellResult }) delay(10)
+            }
+            val ask = emitted.filterIsInstance<PermissionAsk>().firstOrNull()
+            if (ask != null) {
+                coordinator.onVerdict(dev.ccpocket.protocol.PermissionVerdict("c1", ask.askId, dev.ccpocket.protocol.Decision.DENY))
+            }
+            job.await()
+            return ask
+        }
+
+        // seed the rule: approve `echo hi` with session memory
+        val seedJob = scope.async { shell.run(RunShellCommand("c1", "echo hi", workdir), PermissionMode.DEFAULT) { emitted += it } }
+        kotlinx.coroutines.withTimeout(5_000) { while (emitted.none { it is PermissionAsk }) delay(10) }
+        val seed = emitted.filterIsInstance<PermissionAsk>().single()
+        assertEquals("echo hi", seed.rule)
+        coordinator.onVerdict(dev.ccpocket.protocol.PermissionVerdict("c1", seed.askId, dev.ccpocket.protocol.Decision.ALLOW, remember = true))
+        seedJob.await()
+
+        // harmless payloads only: should the gate regress, the test still runs nothing destructive
+        val chained = listOf(
+            "echo hi && echo chained", "echo hi ; echo chained", "echo hi | cat", "echo hi \$(echo chained)",
+            "echo hi `echo chained`", "echo hi\necho chained", "echo hi > /dev/null", "echo hi ;echo chained",
+            "echo hi&&echo chained", "echo hi;echo chained", "echo hi|cat",
+        )
+        val autoRun = chained.filter { runOnce(it) == null }
+        assertTrue(autoRun.isEmpty(), "quick-terminal session rule auto-ran chained commands: ${autoRun.map { it.replace("\n", "\\n") }}")
+
+        // a plain same-prefix command still rides the remembered rule — no card
+        assertEquals(null, runOnce("echo hi there"), "plain same-prefix command must auto-run")
+        assertEquals(0, emitted.filterIsInstance<ShellResult>().single().exitCode)
+        scope.cancel()
+    }
+
+    @Test
     fun approval_timeout_withdraws_the_card_and_reports_denied() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val emitted = CopyOnWriteArrayList<Frame>() // gate completes on a background delay thread
