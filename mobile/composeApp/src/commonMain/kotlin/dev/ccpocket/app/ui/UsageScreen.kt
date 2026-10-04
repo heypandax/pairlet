@@ -155,7 +155,7 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit, embedded: Boolean = 
                         Box(
                             Modifier.clip(RoundedCornerShape(999.dp)).then(if (on) Modifier.background(Tok.accent) else Modifier)
                                 .clickable { days = d }.padding(horizontal = 10.dp, vertical = 4.dp),
-                        ) { Text(label, color = if (on) Tok.base else Tok.tx2, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold) }
+                        ) { Text(label, color = if (on) Tok.base else Tok.tx2, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(11.5.sp)) }
                     }
                 }
             }
@@ -321,8 +321,8 @@ private fun HeroCard(tokens: Long, scope: String, period: String, deltaPct: Int?
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(Res.string.usage_tokens), color = Tok.tx2, fontSize = 12.sp, modifier = Modifier.weight(1f))
-            Text("· $scope", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
+            Text(stringResource(Res.string.usage_tokens), color = Tok.tx2, fontSize = 12.sp, style = tightCenter(12.sp), modifier = Modifier.weight(1f))
+            Text("· $scope", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
         }
         Text(formatTokens(tokens), color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 36.sp, fontWeight = FontWeight.SemiBold)
         Text(period, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
@@ -332,9 +332,9 @@ private fun HeroCard(tokens: Long, scope: String, period: String, deltaPct: Int?
                 val down = deltaPct < 0
                 val baseline = if (span <= 1) stringResource(Res.string.usage_vs_yesterday) else stringResource(Res.string.usage_vs_prev_days, span)
                 Row(Modifier.padding(top = 1.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (down) "▼" else "▲", color = Tok.muted, fontSize = 9.sp)
+                    Text(if (down) "▼" else "▲", color = Tok.muted, fontSize = 9.sp, style = tightCenter(9.sp))
                     Spacer(Modifier.width(4.dp))
-                    Text("${if (down) -deltaPct else deltaPct}% $baseline", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
+                    Text("${if (down) -deltaPct else deltaPct}% $baseline", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
                 }
             }
         }
@@ -518,14 +518,14 @@ private fun Heatmap(days: List<UsageDay>, selected: Int? = null, onSelect: (Int?
         }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) { TrendCaption(selected?.let(days::getOrNull), days.maxByOrNull { it.tokens }, labelOf = ::peakLabel) }
-            Text(stringResource(Res.string.usage_less), color = Tok.muted, fontSize = 10.sp)
+            Text(stringResource(Res.string.usage_less), color = Tok.muted, fontSize = 10.sp, style = tightCenter(10.sp))
             Spacer(Modifier.width(5.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 Box(Modifier.size(9.dp).clip(RoundedCornerShape(2.dp)).background(Tok.raised))
                 for (a in alphas) Box(Modifier.size(9.dp).clip(RoundedCornerShape(2.dp)).background(Tok.accent.copy(alpha = a)))
             }
             Spacer(Modifier.width(5.dp))
-            Text(stringResource(Res.string.usage_more), color = Tok.muted, fontSize = 10.sp)
+            Text(stringResource(Res.string.usage_more), color = Tok.muted, fontSize = 10.sp, style = tightCenter(10.sp))
         }
     }
 }
@@ -606,7 +606,7 @@ private fun AgentChip(label: String, color: Color, selected: Boolean, onClick: (
     ) {
         Text(
             label, color = if (selected) color else Tok.tx2,
-            fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, style = tightCenter(11.5.sp),
         )
     }
 }

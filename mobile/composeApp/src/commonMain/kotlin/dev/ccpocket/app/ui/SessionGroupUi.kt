@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.protocol.SessionGroup
 import dev.ccpocket.protocol.SessionSummary
 import org.jetbrains.compose.resources.stringResource
@@ -94,9 +95,9 @@ internal fun GroupHeader(name: String, count: Int, collapsed: Boolean, onToggle:
             null, tint = Tok.tx2, modifier = Modifier.size(18.dp),
         )
         Spacer(Modifier.width(4.dp))
-        Text(name, color = Tok.tx2, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        Text(name, color = Tok.tx2, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(12.sp), modifier = Modifier.weight(1f, fill = false))
         Spacer(Modifier.width(6.dp))
-        Text(count.toString(), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+        Text(count.toString(), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = tightCenter(11.sp))
         Spacer(Modifier.weight(1f))
         if (onManage != null) {
             Icon(
@@ -118,7 +119,7 @@ internal fun NewGroupRow(onClick: () -> Unit) {
     ) {
         Icon(Icons.Rounded.Add, null, tint = Tok.tx2, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(4.dp))
-        Text(stringResource(Res.string.group_new), color = Tok.tx2, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(stringResource(Res.string.group_new), color = Tok.tx2, fontSize = 12.sp, fontWeight = FontWeight.Medium, style = tightCenter(12.sp))
     }
 }
 
@@ -223,7 +224,7 @@ internal fun MoveSessionSheet(
                         .padding(horizontal = 14.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text(g.name, color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(g.name, color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(14.5.sp), modifier = Modifier.weight(1f))
                     if (current) Icon(Icons.Rounded.Check, null, tint = Tok.accent, modifier = Modifier.size(18.dp))
                 }
             }

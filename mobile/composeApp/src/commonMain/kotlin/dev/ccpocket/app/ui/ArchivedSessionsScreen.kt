@@ -140,7 +140,7 @@ private fun ArchivedRow(repo: PocketRepository, s: SessionSummary) {
                     Spacer(Modifier.width(8.dp))
                     PulseDot(Tok.ok)
                     Spacer(Modifier.width(4.dp))
-                    Text(stringResource(Res.string.running), color = Tok.ok, fontSize = 11.sp)
+                    Text(stringResource(Res.string.running), color = Tok.ok, fontSize = 11.sp, style = tightCenter(11.sp))
                 }
             }
             s.distinctPreview()?.let {

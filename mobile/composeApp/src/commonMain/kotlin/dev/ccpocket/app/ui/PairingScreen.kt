@@ -58,6 +58,7 @@ import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.entry.CopyableCommand
 import dev.ccpocket.app.ui.entry.EntryLabel
 import dev.ccpocket.app.ui.entry.EntryNote
@@ -182,7 +183,7 @@ fun PairingScreen(repo: PocketRepository, firstRun: Boolean = false) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
                     Box(Modifier.size(8.dp).rotate(45f).background(Tok.warn)) // attention, not danger
-                    Text(stringResource(Res.string.co_pairing_linked), color = Tok.tx, style = TypeRole.action)
+                    Text(stringResource(Res.string.co_pairing_linked), color = Tok.tx, style = TypeRole.action.merge(tightCenter(TypeRole.action.fontSize)))
                 }
                 Text(
                     stringResource(Res.string.co_pairing_linked_sub, collabLinks.joinToString("、") { it.displayName() }),
@@ -331,7 +332,7 @@ private fun CameraUnavailable(detail: String?) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
             Box(Modifier.size(8.dp).rotate(45f).background(Tok.warn)) // attention, not danger
-            Text(stringResource(Res.string.scan_unavailable_title), color = Tok.tx, style = TypeRole.rowTitle)
+            Text(stringResource(Res.string.scan_unavailable_title), color = Tok.tx, style = TypeRole.rowTitle.merge(tightCenter(TypeRole.rowTitle.fontSize)))
         }
         Text(
             stringResource(Res.string.scan_unavailable_body), color = Tok.tx2, style = TypeRole.preview,
@@ -419,7 +420,7 @@ private fun CodeInput(code: String, locked: Boolean = false, onCode: (String) ->
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
-                        ch != null -> Text(ch.toString(), color = if (locked) Tok.tx2 else Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 24.sp, fontWeight = FontWeight.Medium)
+                        ch != null -> Text(ch.toString(), color = if (locked) Tok.tx2 else Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 24.sp, fontWeight = FontWeight.Medium, style = tightCenter(24.sp))
                         active -> Box(Modifier.width(2.dp).height(26.dp).background(Tok.accent))
                         else -> Box(Modifier.width(8.dp).height(2.dp).background(Tok.hair))
                     }
@@ -480,7 +481,7 @@ private fun PairStatusRegion(
                 horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
             ) {
                 PulsingRing()
-                Text(stringResource(Res.string.pair_verifying), color = Tok.tx, style = TypeRole.action)
+                Text(stringResource(Res.string.pair_verifying), color = Tok.tx, style = TypeRole.action.merge(tightCenter(TypeRole.action.fontSize)))
             }
             // the reason for the lock is WRITTEN, not implied by a field that stopped responding
             EntryNote(stringResource(Res.string.pair_verifying_note), Modifier.padding(top = Metric.gapXs))

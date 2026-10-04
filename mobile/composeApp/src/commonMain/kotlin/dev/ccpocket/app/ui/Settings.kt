@@ -289,7 +289,7 @@ private fun PendingCountMark(count: Int) {
         if (count == 1) Res.string.rv_summary_waiting_one else Res.string.rv_summary_waiting_many, count,
     )
     Text(
-        "$count", color = Tok.base, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+        "$count", color = Tok.base, fontSize = 11.sp, fontWeight = FontWeight.Bold, style = tightCenter(11.sp),
         modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(Tok.accent)
             .semantics { contentDescription = label }
             .padding(horizontal = 6.dp, vertical = 2.dp),
@@ -437,12 +437,12 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
                     }.padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("●", color = m.color, fontSize = 9.sp, modifier = Modifier.padding(end = 10.dp))
+                Text("●", color = m.color, fontSize = 9.sp, style = tightCenter(9.sp), modifier = Modifier.padding(end = 10.dp))
                 Text(
                     stringResource(m.label), color = if (sel) Tok.accent else Tok.tx, fontSize = 14.sp,
-                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.weight(1f),
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, style = tightCenter(14.sp), modifier = Modifier.weight(1f),
                 )
-                if (sel) Text("✓", color = Tok.accent, fontSize = 13.5.sp)
+                if (sel) Text("✓", color = Tok.accent, fontSize = 13.5.sp, style = tightCenter(13.5.sp))
             }
         }
     }
@@ -587,7 +587,7 @@ private fun AgentFilterChoice(label: String, dot: Color?, sel: Boolean, onClick:
         }
         Text(
             label, color = if (sel) Tok.base else Tok.tx2, fontSize = 13.sp,
-            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
+            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, style = tightCenter(13.sp),
         )
     }
 }
@@ -961,13 +961,13 @@ private fun VersionRow(label: String, version: String, behindNote: String?) {
         Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = Tok.tx2, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+        Text(label, color = Tok.tx2, fontSize = 13.5.sp, style = tightCenter(13.5.sp), modifier = Modifier.weight(1f))
         if (behindNote != null) {
             Box(Modifier.size(7.dp).clip(RoundedCornerShape(4.dp)).background(Tok.accent))
             Spacer(Modifier.width(6.dp))
-            Text(behindNote, color = Tok.accent, fontSize = 12.sp, modifier = Modifier.padding(end = 8.dp))
+            Text(behindNote, color = Tok.accent, fontSize = 12.sp, style = tightCenter(12.sp), modifier = Modifier.padding(end = 8.dp))
         }
-        Text(version, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp, maxLines = 1)
+        Text(version, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp, maxLines = 1, style = tightCenter(12.5.sp))
     }
 }
 
@@ -1023,10 +1023,10 @@ private fun SecurityGroup(lock: AppLockController) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Spacer(Modifier.width(34.dp)) // align under the title (glyph 22 + gap 12)
-                Text(stringResource(Res.string.app_lock_autolock), color = Tok.tx, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                Text(autoLockText(lock.autoLock.value), color = Tok.tx2, fontSize = 13.sp)
+                Text(stringResource(Res.string.app_lock_autolock), color = Tok.tx, fontSize = 14.sp, style = tightCenter(14.sp), modifier = Modifier.weight(1f))
+                Text(autoLockText(lock.autoLock.value), color = Tok.tx2, fontSize = 13.sp, style = tightCenter(13.sp))
                 Spacer(Modifier.width(6.dp))
-                Text("›", color = Tok.muted, fontSize = 16.sp)
+                Text("›", color = Tok.muted, fontSize = 16.sp, style = tightCenter(16.sp))
             }
         }
     }
@@ -1034,7 +1034,7 @@ private fun SecurityGroup(lock: AppLockController) {
         Row(Modifier.fillMaxWidth().padding(top = 8.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             FaceIdGlyph(color = Tok.muted, size = 14.dp)
             Spacer(Modifier.width(7.dp))
-            Text(stringResource(Res.string.app_lock_verifying, kindName), color = Tok.muted, fontSize = 11.5.sp)
+            Text(stringResource(Res.string.app_lock_verifying, kindName), color = Tok.muted, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
         }
     }
     if (showAutoLock) AutoLockSheet(lock) { showAutoLock = false }
@@ -1056,8 +1056,8 @@ private fun AutoLockSheet(lock: AppLockController, onDismiss: () -> Unit) {
                     Modifier.fillMaxWidth().clickable { lock.setAutoLock(d); onDismiss() }.padding(horizontal = 18.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(autoLockText(d), color = if (sel) Tok.tx else Tok.tx2, fontSize = 15.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.weight(1f))
-                    if (sel) Text("✓", color = Tok.accent, fontSize = 14.sp)
+                    Text(autoLockText(d), color = if (sel) Tok.tx else Tok.tx2, fontSize = 15.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, style = tightCenter(15.sp), modifier = Modifier.weight(1f))
+                    if (sel) Text("✓", color = Tok.accent, fontSize = 14.sp, style = tightCenter(14.sp))
                 }
             }
             Text(stringResource(Res.string.app_lock_autolock_hint), color = Tok.muted, fontSize = 11.5.sp, lineHeight = 16.sp, modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 6.dp))
@@ -1107,7 +1107,7 @@ private fun ContextWindowCustomRow(repo: PocketRepository, onEdit: () -> Unit = 
             .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(stringResource(Res.string.context_window_custom), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text(stringResource(Res.string.context_window_custom), color = Tok.tx2, fontSize = 13.sp, style = tightCenter(13.sp), modifier = Modifier.weight(1f))
         // Tok-native input matching the desktop settings field (SettingsModal Box+BasicTextField): a single
         // Tok.hair-bordered well on Tok.base with an accent cursor — no M3 OutlinedTextField (its 56dp min
         // height dwarfed the ~40dp segments above and its focus stroke drew in Material primary, not Tok.accent).
@@ -1232,7 +1232,7 @@ private fun PerModelRow(id: String, tokens: Long, live: Boolean, onDelete: () ->
         }
         Text(
             groupDigits(tokens), color = Tok.tx2, fontFamily = FontFamily.Monospace,
-            fontSize = 13.sp, modifier = Modifier.padding(horizontal = 10.dp),
+            fontSize = 13.sp, style = tightCenter(13.sp), modifier = Modifier.padding(horizontal = 10.dp),
         )
         // Label sits on the CLICKABLE node, not the icon inside it: the tap target and the thing a11y (and
         // the tests) name must be the same node, or you can find the label but not press it.
@@ -1403,7 +1403,7 @@ fun AboutRow(label: String, value: String) {
         Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = Tok.tx2, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
-        Text(value, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp, maxLines = 1)
+        Text(label, color = Tok.tx2, fontSize = 13.5.sp, style = tightCenter(13.5.sp), modifier = Modifier.weight(1f))
+        Text(value, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp, maxLines = 1, style = tightCenter(12.5.sp))
     }
 }
