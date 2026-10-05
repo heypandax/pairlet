@@ -33,10 +33,6 @@
       "note": "2026-10-05 retired features (ReviewRequest, Session Handoff, Collaborator Links, Folder Share): the review-contact, collab, handoff and share hosts are recognised by host alone and parse to IncomingLink.Retired, which callers answer with a 'feature retired' notice and no pairing attempt or pair_failed; the payload is never decoded. A bare blob is no longer an invite at the paste entry and falls through to the pre-scheme pair forms. The ccpocket:// scheme, the pair (full link and 6-digit code) and session hosts, and legacy bare pair query strings and codes parse exactly as before. IncomingLinkTest and RetiredFeaturesTest cover every retired host, corrupt payloads, case variants and the unchanged pair/session routes."
     },
     {
-      "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/ShareInvites.kt",
-      "sha256": "efab47fb125424a7b619f68094f336d9699008139c8dc8e1e24613d18d98d1c4"
-    },
-    {
       "path": "mobile/composeApp/src/desktopMain/kotlin/dev/ccpocket/app/desktop/DesktopUpdater.kt",
       "sha256": "01d20cd3091b0a88bdc95d0352eaf7e0fd3d8eb59554e9c6a9d00e7907f31d64"
     },

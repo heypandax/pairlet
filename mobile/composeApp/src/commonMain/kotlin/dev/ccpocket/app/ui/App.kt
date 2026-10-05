@@ -84,7 +84,6 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Reorder
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -228,11 +227,6 @@ import dev.ccpocket.app.ui.session.stateColor
 import dev.ccpocket.app.ui.session.sessionRows
 import dev.ccpocket.app.ui.session.splitSessions
 import dev.ccpocket.app.resources.*
-import dev.ccpocket.app.ui.share.GuestEnding
-import dev.ccpocket.app.ui.share.ShareFolderScreen
-import dev.ccpocket.app.ui.share.SharedPill
-import dev.ccpocket.app.ui.share.expiryLeft
-import dev.ccpocket.app.ui.share.expiryLeftText
 import dev.ccpocket.app.theme.LocalFontScale
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.PocketTheme
@@ -253,7 +247,6 @@ import dev.ccpocket.protocol.isQuestion
 import dev.ccpocket.protocol.isSubagentTool
 import dev.ccpocket.protocol.isWorkflowTool
 import dev.ccpocket.protocol.PermissionMode
-import dev.ccpocket.protocol.ShareEnded
 import dev.ccpocket.protocol.SlashCommand
 import kotlinx.coroutines.CoroutineScope
 import org.jetbrains.compose.resources.stringResource
@@ -603,28 +596,7 @@ private fun ConnectionGate(
 ) {
     val recovery = connRecovery(repo.phase.value)
     when (repo.phase.value) {
-        ConnPhase.PairingInvalid -> {
-            val ended = repo.shareEnded.value
-            when {
-                // guest share revoked MID-SESSION (design 4c): keep the transcript readable under the slim
-                // danger banner instead of yanking the user to a full-screen card; the ended card waits at browse
-                ended != null && ended.reason == ShareEnded.REASON_REVOKED && repo.convoId.value != null ->
-                    Column(Modifier.fillMaxSize()) {
-                        dev.ccpocket.app.ui.share.ShareRevokedBanner()
-                        Box(Modifier.weight(1f)) { content() }
-                    }
-                // guest share ended (design 4b): the precise, calm terminal card — revoked vs expired
-                ended != null -> NavBarPadded {
-                    dev.ccpocket.app.ui.share.GuestEndedCard(
-                        ownerLabel = ended.ownerLabel,
-                        ending = if (ended.reason == ShareEnded.REASON_EXPIRED) GuestEnding.EXPIRED else GuestEnding.REVOKED,
-                        onRemove = { repo.unpairActive() },
-                        onAskNew = { repo.unpairActive() }, // drops the dead binding → lands on Connect to paste a fresh invite
-                    )
-                }
-                else -> RecoverySurface(repo, recovery)
-            }
-        }
+        ConnPhase.PairingInvalid -> RecoverySurface(repo, recovery)
         ConnPhase.RelayUnreachable -> RecoverySurface(repo, recovery)
         ConnPhase.ComputerOffline ->
             // mid-chat: keep the history readable under a slim banner instead of a takeover
@@ -1363,9 +1335,6 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     // sheets), NOT here — composed this early it painted UNDER the FAB stack/scrim (same z-order bug as
     // the strip itself).
     var showQuota by remember { mutableStateOf(false) }
-    // long-press a project → "Share this folder…" opens the owner invite flow full-screen (issue #115)
-    var shareTarget by remember { mutableStateOf<DirectoryEntry?>(null) }
-    shareTarget?.let { NavBarPadded { ShareFolderScreen(repo, it, onBack = { shareTarget = null }) }; return }
     // Pull-to-refresh remains available here; the app-level foreground poll keeps the same directory
     // truth fresh while Projects, Sessions, Chat, Settings, or an overlay is mounted (#239).
 
@@ -1416,10 +1385,9 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
     // "+" → type an arbitrary path to start a session in a folder with no prior history (issue #7)
     var showNewPath by remember { mutableStateOf(false) }
     var newPathTarget by remember { mutableStateOf<String?>(null) }
-    // "open a project folder" browser (issue #152): the "+" entries land here for an OWNER; a guest
-    // keeps the manual path sheet (its browse anchor "~" is outside the share and daemon-denied anyway)
+    // "open a project folder" browser (issue #152): the "+" entries land here
     var showDirPicker by remember { mutableStateOf(false) }
-    val openFolderEntry = { if (isGuestDirView(dirsSnapshot)) showNewPath = true else showDirPicker = true }
+    val openFolderEntry = { showDirPicker = true }
     // the FAB's sheet (issue #260) — the screen's one new-task entry
     var showNewTask by remember { mutableStateOf(false) }
     // The docked allowance strip's measured height. The bottom overlays (FAB scrim, FAB stack, archive
@@ -1646,8 +1614,8 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
         if (showNewTask) NewTaskSheet(
             repo = repo,
             dirs = visibleDirs,
-            // the picker's pinned bottom row is the SAME doorway the removed standalone row used, guest
-            // fork included — one implementation, reached from where the choice is actually being made
+            // the picker's pinned bottom row is the SAME doorway the removed standalone row used — one
+            // implementation, reached from where the choice is actually being made
             onBrowseOther = { showNewTask = false; openFolderEntry() },
             onDismiss = { showNewTask = false },
         )
@@ -1657,7 +1625,7 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
         // The FAILURE direction is the one that needs wiring: nothing opened, so this screen is still here
         // and the sheet has to come back carrying the draft and one inline line saying what happened.
         LaunchedEffect(repo.newTaskError.value) { if (repo.newTaskError.value != null) showNewTask = true }
-        actionTarget?.let { t -> ProjectActionsSheet(repo, t, onShare = { shareTarget = t }) { actionTarget = null } }
+        actionTarget?.let { t -> ProjectActionsSheet(repo, t) { actionTarget = null } }
         if (showNewPath) NewPathSheet(
             // drilled into a folder → seed it as the parent so the user types only the new project's name (issue #7)
             parent = base.takeIf { it.length > 1 }, // seed the current location (root prefix or a drilled folder) so "type the rest of the path" is obvious (#32/#7)
@@ -1879,7 +1847,7 @@ private fun PocketRepository.openProject(e: DirectoryEntry) {
 
 /** A project row: jumps into the live session (when [direct] and running) or opens its session list.
  *  [onNewSession] is the trailing ＋ (issue #199) — start a session in THIS project without first
- *  walking into its session list. Null hides it (a guest's shared row keeps its own layout). */
+ *  walking into its session list. Null hides it. */
 @Composable
 private fun ProjectCell(
     repo: PocketRepository,
@@ -1892,8 +1860,6 @@ private fun ProjectCell(
     val sid = e.activeSessionId
     val pinned = repo.isPinned(e.path)
     when {
-        // a guest's shared folder (issue #115) — neutral "Shared" pill + origin + "6d left"
-        e.sharedBy != null -> SharedProjectCell(repo, e, onLongPress, onNewSession)
         direct && e.open && sid != null ->
             // the 历史 badge lists this project's sessions (issue #49) — the row itself keeps auto-resuming
             LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }, onNewSession = onNewSession) { repo.openProject(e) }
@@ -1911,35 +1877,7 @@ private fun NewSessionGlyph(onClick: () -> Unit) {
     )
 }
 
-/** A guest's shared-folder row (issue #115): folder (mono) + the neutral hairline "Shared" pill,
- *  the "shared by <owner>" origin, and the remaining validity ("6d left"). Tap opens its sessions. */
-@Composable
-private fun SharedProjectCell(repo: PocketRepository, e: DirectoryEntry, onLongPress: (() -> Unit)?, onNewSession: (() -> Unit)? = null) {
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
-            .combinedClickable(onClick = { repo.openProject(e) }, onLongClick = onLongPress)
-            .padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = if (onNewSession != null) 6.dp else 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(e.name.ifBlank { e.path }, color = Tok.tx, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                SharedPill()
-            }
-            e.sharedBy?.let {
-                Text(stringResource(Res.string.shared_by_caption, it), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
-            }
-        }
-        e.shareExpiresAt?.let { exp ->
-            Spacer(Modifier.width(8.dp))
-            Text(expiryLeftText(expiryLeft(exp, dev.ccpocket.app.epochMillis())), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, maxLines = 1)
-        }
-        // a guest can start work in the folder they were given — same ＋ as any other project row
-        onNewSession?.let { Spacer(Modifier.width(2.dp)); NewSessionGlyph(it) }
-    }
-}
-
-/** Long-press a project → pin it to the top, or unpin it, or share it. Small sheet, mirrors the app's other actions. */
+/** Long-press a project → pin it to the top, or unpin it. Small sheet, mirrors the app's other actions. */
 internal fun projectActionAgents(e: DirectoryEntry): List<AgentKind> {
     val active = e.activeSessions.map { it.agent }.distinct()
     return (if (active.isNotEmpty()) active else e.sessionAgents)
@@ -1948,7 +1886,7 @@ internal fun projectActionAgents(e: DirectoryEntry): List<AgentKind> {
 }
 
 @Composable
-private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onShare: () -> Unit, onDismiss: () -> Unit) {
+private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onDismiss: () -> Unit) {
     val pinned = repo.isPinned(e.path)
     val agents = remember(e.activeSessions, e.sessionAgents) { projectActionAgents(e) }
     PocketSheet(onDismiss) {
@@ -1977,17 +1915,6 @@ private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onSha
                     color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium,
                     style = tightCenter(14.5.sp),
                 )
-            }
-            // Share this folder… — owners only; a guest's shared row (sharedBy set) can't re-share the owner's machine.
-            if (e.sharedBy == null) {
-                Row(
-                    Modifier.padding(top = 9.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                        .clickable { onShare(); onDismiss() }.padding(horizontal = 14.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Icon(Icons.Rounded.Share, null, tint = Tok.accent, modifier = Modifier.size(18.dp))
-                    Text(stringResource(Res.string.share_this_folder), color = Tok.accent, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, style = tightCenter(14.5.sp))
-                }
             }
         }
     }
@@ -2452,7 +2379,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 // so a freshly created group stays visible and manageable (issue #119).
                 // The "+ New group" affordance rides the section header's trailing edge — shown whenever the
                 // daemon is group-aware (groupsSupported), including zero groups yet so the FIRST group stays
-                // creatable, but hidden on an older daemon / guest connection that omits groups entirely
+                // creatable, but hidden on an older daemon that omits groups entirely
                 // (sessionSections then returns one flat section). Inline rather than a full-width row of its
                 // own: a bootstrap affordance must stay discoverable without owning a whole list line.
                 if (split.recent.isNotEmpty() || repo.groupsSupported.value) {

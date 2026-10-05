@@ -57,7 +57,7 @@ internal data class SessionSection(val group: SessionGroup?, val sessions: List<
 /**
  * Fold [sessions] into ordered group sections plus a trailing "ungrouped" bucket (issue #119).
  *
- * - [groups] empty (older daemon / guest / no groups yet) → a single ungrouped section holding everything;
+ * - [groups] empty (older daemon / no groups yet) → a single ungrouped section holding everything;
  *   the caller renders it flat, with no header.
  * - Otherwise every defined group yields a section in `order` (kept even when empty, so a freshly created
  *   group stays visible and manageable), followed by the ungrouped bucket — emitted only when it has rows.

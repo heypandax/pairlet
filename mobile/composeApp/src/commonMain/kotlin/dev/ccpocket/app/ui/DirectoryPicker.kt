@@ -75,8 +75,6 @@ import org.jetbrains.compose.resources.stringResource
 // resolve accepts '/' on a Windows host too), and opening rides the ordinary OpenSession(resumeId =
 // null) → validateOrCreateWorkdir path the manual "+ path" sheet (#7) already uses. No new protocol,
 // no new daemon read surface — an owner could already list any readable directory through #75.
-// Guests never see this UI (owner-only entry, see isGuestDirView) and the daemon independently denies
-// their "~" anchor (GuestGuard clamps ListPathEntries to the shared root).
 
 /** The subpath segments are '/'-joined CLIENT-side keys; the daemon resolves them under its home. */
 private const val SEP = '/'
@@ -172,13 +170,6 @@ internal fun fsRootOf(path: String): String? {
     return if (path.startsWith("/")) "/" else null
 }
 
-/** True when this connection is a folder-share GUEST view (issue #115): every project row the daemon
- *  sent is a stamped shared root. Guests don't get the home browser — their ListDirectories reply
- *  always contains the shared root(s) and nothing else, so "non-empty and all stamped" is precise.
- *  Cosmetic only: the daemon independently denies a guest's "~" listing and out-of-scope opens. */
-internal fun isGuestDirView(dirs: List<DirectoryEntry>): Boolean =
-    dirs.isNotEmpty() && dirs.all { it.sharedBy != null }
-
 /**
  * The picker sheet (UI-DESIGN §5.3 / §10.2④): Recents pinned at the root, a breadcrumb + subfolder
  * browse below, and a bottom "use this directory" bar that starts the session under the persisted
@@ -211,11 +202,9 @@ internal fun DirectoryPickerSheet(
     val failed = browseFailed(listing, anchor, subPath)
     val recents = remember(dirs, homeAbs) { browseRecents(dirs, homeAbs) }
     val crumbs = browseCrumbsOf(anchor, subPath)
-    // the fs-root switcher's choices (#176) — owner-only: a guest never receives roots (daemon-gated),
-    // and this belt-and-suspenders keeps the switcher off for a guest view client-side too. Empty against
-    // an old daemon → the breadcrumb stays a plain crumb (manual path still covers off-home), so a new
-    // app on an old daemon degrades cleanly.
-    val roots = if (isGuestDirView(dirs)) emptyList() else repo.browseRoots.value
+    // the fs-root switcher's choices (#176). Empty against an old daemon → the breadcrumb stays a plain
+    // crumb (manual path still covers off-home), so a new app on an old daemon degrades cleanly.
+    val roots = repo.browseRoots.value
 
     // one start per sheet: a repeated tap (or a dismiss racing the effect) has nothing left to fire
     var started by remember { mutableStateOf(false) }
@@ -307,8 +296,8 @@ internal fun DirectoryPickerSheet(
                         style = TypeRole.caption, modifier = Modifier.padding(top = Metric.gap, bottom = Metric.gapS),
                     )
                 }
-                // escape hatch to the manual sheet: off-home paths (other drives, /opt), older daemons and
-                // guest constraints all still land somewhere
+                // escape hatch to the manual sheet: off-home paths (other drives, /opt) and older daemons
+                // all still land somewhere
                 item { EntryRouteRow(stringResource(Res.string.dir_picker_type_path), onClick = onTypePath) }
             }
 
@@ -382,7 +371,7 @@ private fun SkeletonRow() {
 /** The picker's breadcrumb with the #176 root switcher folded into its root segment: when the daemon
  *  reported filesystem [roots], the leading crumb gains a ▾ and taps open an inline panel of Home + every
  *  root; picking one calls [onSwitchRoot] (which the sheet turns into an anchor switch). With no roots
- *  (old daemon / guest) it renders as the plain breadcrumb — byte-identical to the pre-#176 behaviour, so
+ *  (old daemon) it renders as the plain breadcrumb — byte-identical to the pre-#176 behaviour, so
  *  the manual-path escape hatch stays the only off-home route there. */
 @Composable
 private fun PickerBreadcrumb(
