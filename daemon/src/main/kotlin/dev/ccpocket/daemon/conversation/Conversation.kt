@@ -438,8 +438,66 @@ class Conversation(
 
     @Volatile
     private var proc: AgentProcess? = null
+    @Volatile
     private var bridge: PermissionBridge? = null
     private val seq = AtomicLong(0)
+
+    /**
+     * The conversation-level LIFECYCLE LOCK (lifecycle design S4). Every process transition runs inside it:
+     * the spawn / relaunch / queue-or-write decision of [sendPrompt] together with its ledger record and stdin
+     * write, stop, the death transition, the one-shot queue drain, the lock heal, the OpenCode watchdog's kill,
+     * [pumpCrashed], /clear, the directory switch, a control-op cold start, a take-over open, and the settings
+     * switches (their field commit + next-turn arming — design D12). The defects it closes all share one shape:
+     * "observe the process state → act on it" spanned a suspension, and another transition ran in between
+     * (D1/D1'/D2/D3/D12).
+     *
+     * Not reentrant: only the public entry points (and the pump's transitions) take it, through [lifecycleLocked];
+     * everything they call assumes it is held. Suspensions while held are all bounded: process start/attach, a
+     * stdin write, a process shutdown (≤ EOF 3 s + TERM 2 s + KILL 2 s) and, from S5, the old pump's drain.
+     *
+     * Deliberately NOT taken by ■ ([cancelTurn] / [requestInterrupt]), [stopBackgroundJob], [renameSession],
+     * the registry's state predicates ([isBusy], [isExecuting], [hasPendingAsk], …) or a permission verdict —
+     * none of them may queue behind a stop.
+     *
+     * Lock order: `modeMutationMutex → lifecycle → bridgeGrantLock → {turnWorkLock → promptLedger, …}` and
+     * `AgentProcess.shutdownLock` last. Nothing holding [bridgeGrantLock] (or anything after it) ever takes this.
+     */
+    private val lifecycle = Mutex()
+
+    /** A launch is between its entry and its return (inside [lifecycle]). Every launch starts from "no process"
+     *  (each caller stopped or lost the previous one first), so a [close] that finds the lock held by a launch
+     *  has nothing else to stop: the launch sees [closed] and rolls its own process back. */
+    @Volatile
+    private var launching = false
+
+    /** The stop that ends a closed conversation ran (by [close] itself, or by the lifecycle holder [close] could
+     *  not wait for — see [lifecycleLocked]). */
+    private val closeStopDone = AtomicBoolean(false)
+
+    /**
+     * Run [block] holding [lifecycle]. A holder that lets go of a CLOSED conversation finishes the close's stop
+     * itself when [close] could not wait for it (a launch in flight): whoever still holds the lock last after
+     * `closed` was set sees it on the way out, so the process can never outlive the close unattended.
+     */
+    private suspend fun <T> lifecycleLocked(block: suspend () -> T): T {
+        lifecycle.lock()
+        try {
+            return block()
+        } finally {
+            lifecycle.unlock()
+            if (closed.get()) withContext(NonCancellable) { stopAfterClose() }
+        }
+    }
+
+    /** See [lifecycleLocked]. A no-op when another holder has the lock — it runs this same check on its way out. */
+    private suspend fun stopAfterClose() {
+        if (!lifecycle.tryLock()) return
+        try {
+            if (closeStopDone.compareAndSet(false, true) || proc != null) stopProcess()
+        } finally {
+            lifecycle.unlock()
+        }
+    }
 
     // background work (bg shells / sub-agents / monitors) tracked from the tool stream; drives the in-chat
     // jobs indicator and keeps the session "busy" (un-reapable) while anything is still running.
@@ -1059,15 +1117,17 @@ class Conversation(
             // so a take-over of a disk session resumes it instead of silently forking a fresh one. The
             // eager launch below is still a no-op for OpenCode (argv needs a prompt; the guard in
             // launchProcess defers to the first sendPrompt, which anchors on sessionId ?: openedResumeId).
-            launchProcess(
-                launchSpec(
-                    resumeId = resumeId, forkSession = fork,
-                    // ONLY here: this is the one launch the user asked for by tapping "Continue here".
-                    // Codex names the branch it forks for this take-over after it (issue #347); a later
-                    // relaunch resumes the branch in place and must not rename anything again.
-                    takeOver = true,
-                ),
-            )
+            lifecycleLocked {
+                launchProcess(
+                    launchSpec(
+                        resumeId = resumeId, forkSession = fork,
+                        // ONLY here: this is the one launch the user asked for by tapping "Continue here".
+                        // Codex names the branch it forks for this take-over after it (issue #347); a later
+                        // relaunch resumes the branch in place and must not rename anything again.
+                        takeOver = true,
+                    ),
+                )
+            }
         }
         // a headless agent (claude `--input-format stream-json`; codex pre-thread) emits NOTHING — not even the
         // init that would drive SessionLive — until the first user turn / handshake lands (and on a lazy open there
@@ -1417,14 +1477,6 @@ class Conversation(
      *  keep-alive predicate for SessionRegistry.close/scheduleClose/reapIdle. */
     fun isBusy(): Boolean = hasAuthoritativeTurnWork() || hasPendingAsk()
 
-    /** Pre-first-turn (issue #61 lazy start): with no agent process yet, a mode/model/effort switch only
-     *  records the field and re-announces — relaunching would spawn the very process the lazy open avoided,
-     *  re-occupying the session before any message. Returns true when it handled this case (caller returns). */
-    private suspend fun recordedPreFirstTurn(): Boolean {
-        if (proc != null) return false
-        sink.emit(live(sessionId ?: openedResumeId))
-        return true
-    }
 
     /**
      * Settle background jobs stuck RUNNING with no update for [staleMs] (a completion event that never came),
@@ -1486,26 +1538,27 @@ class Conversation(
         }
         modeMutationMutex.withLock {
             val normalizedNative = normalizePermissionMode(nativeMode)
-            val changed = synchronized(modeStateLock) {
-                if (newMode == mode && normalizedNative == permissionMode) {
-                    false
-                } else {
-                    mode = newMode
-                    permissionMode = normalizedNative
-                    modeGeneration++
-                    armFullControlExpiryLocked()
-                    true
+            // S4 / D12: the commit and its next-turn arming are one lifecycle step, so a launch can never bake
+            // the old mode after this switch decided there was no process to arm.
+            val announce = lifecycleLocked {
+                val changed = synchronized(modeStateLock) {
+                    if (newMode == mode && normalizedNative == permissionMode) {
+                        false
+                    } else {
+                        mode = newMode
+                        permissionMode = normalizedNative
+                        modeGeneration++
+                        armFullControlExpiryLocked()
+                        true
+                    }
                 }
+                if (!changed) return@lifecycleLocked sessionId // no-op, but still announce: an out-of-sync badge corrects itself
+                // approval design M2: a mode switch changes the ground the user granted under — every standing
+                // task grant of this conversation dies with it (design §5.1 "mode change" expiry)
+                grants.endSession(convoId)
+                armPendingSettingsLocked(mode = newMode, model = null, effort = null, permissionModeChanged = true)
             }
-            if (!changed) {
-                // no-op, but still announce: an out-of-sync phone badge corrects itself from this
-                sink.emit(live(sessionId))
-                return@withLock
-            }
-            // approval design M2: a mode switch changes the ground the user granted under — every standing
-            // task grant of this conversation dies with it (design §5.1 "mode change" expiry)
-            grants.endSession(convoId)
-            recordPendingSettings(mode = newMode, model = null, effort = null, permissionModeChanged = true)
+            sink.emit(live(announce))
         }
     }
 
@@ -1543,21 +1596,24 @@ class Conversation(
             if (mode != PermissionMode.BYPASS_PERMISSIONS) return@launch // already left it
             beforeFullControlExpiryCommit?.invoke()
             modeMutationMutex.withLock {
-                val expired = synchronized(modeStateLock) {
-                    if (modeGeneration != armedGeneration || mode != PermissionMode.BYPASS_PERMISSIONS) {
-                        false
-                    } else {
-                        mode = PermissionMode.DEFAULT
-                        permissionMode = null
-                        modeGeneration++
-                        fullControlExpiry = null
-                        true
+                val announce = lifecycleLocked {
+                    val expired = synchronized(modeStateLock) {
+                        if (modeGeneration != armedGeneration || mode != PermissionMode.BYPASS_PERMISSIONS) {
+                            false
+                        } else {
+                            mode = PermissionMode.DEFAULT
+                            permissionMode = null
+                            modeGeneration++
+                            fullControlExpiry = null
+                            true
+                        }
                     }
-                }
-                if (!expired) return@withLock
-                log.info("$convoId Full Control expired after ${ttl / 60_000}min — back to default mode")
-                grants.endSession(convoId) // the ground changed again — nothing standing survives
-                recordPendingSettings(mode = PermissionMode.DEFAULT, model = null, effort = null, permissionModeChanged = true)
+                    if (!expired) return@lifecycleLocked null
+                    log.info("$convoId Full Control expired after ${ttl / 60_000}min — back to default mode")
+                    grants.endSession(convoId) // the ground changed again — nothing standing survives
+                    Announce(armPendingSettingsLocked(mode = PermissionMode.DEFAULT, model = null, effort = null, permissionModeChanged = true))
+                } ?: return@withLock
+                sink.emit(live(announce.sid))
                 // #220: make the fallback PERCEPTIBLE — a system line in the transcript, not just a badge flip,
                 // so the owner is never surprised that "the mode changed itself" (design intent of the notice)
                 sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FULL_CONTROL_EXPIRED_NOTICE)))
@@ -1577,28 +1633,36 @@ class Conversation(
     /** Switch the model — next-turn semantics (issue #84): the running turn is untouched; the change takes
      *  effect on the next turn (Claude relaunches then, Codex applies it in that turn's params). */
     suspend fun switchModel(newModel: String?) {
-        model = newModel
-        modelPickPending = true
-        backfilledModel = null // an explicit choice replaces the transcript guess, even a choice of "default"
-        val normalizedEffort = backend.normalizeEffort(newModel, effort)
-        val effortChanged = normalizedEffort != effort
-        effort = normalizedEffort
-        val normalizedTier = normalizeServiceTier(serviceTier)
-        val tierChanged = normalizedTier != serviceTier
-        serviceTier = normalizedTier
-        recordPendingSettings(
-            mode = null,
-            model = newModel,
-            effort = null,
-            effortChanged = effortChanged,
-            serviceTierChanged = tierChanged,
-        )
+        // S4 / D12: commit + arm in one lifecycle step — a lazy launch either bakes the new model or is already
+        // published when the arming looks, never neither (the switch used to be lost inside the launch window)
+        val announce = lifecycleLocked {
+            model = newModel
+            modelPickPending = true
+            backfilledModel = null // an explicit choice replaces the transcript guess, even a choice of "default"
+            val normalizedEffort = backend.normalizeEffort(newModel, effort)
+            val effortChanged = normalizedEffort != effort
+            effort = normalizedEffort
+            val normalizedTier = normalizeServiceTier(serviceTier)
+            val tierChanged = normalizedTier != serviceTier
+            serviceTier = normalizedTier
+            armPendingSettingsLocked(
+                mode = null,
+                model = newModel,
+                effort = null,
+                effortChanged = effortChanged,
+                serviceTierChanged = tierChanged,
+            )
+        }
+        sink.emit(live(announce))
     }
 
     /** Switch reasoning effort — next-turn semantics (issue #84), same deferral as switchModel. */
     suspend fun switchEffort(newEffort: String?) {
-        effort = backend.normalizeEffort(model, newEffort)
-        recordPendingSettings(mode = null, model = null, effort = null, effortChanged = true)
+        val announce = lifecycleLocked {
+            effort = backend.normalizeEffort(model, newEffort)
+            armPendingSettingsLocked(mode = null, model = null, effort = null, effortChanged = true)
+        }
+        sink.emit(live(announce))
     }
 
     /** Switch extended thinking — next-turn semantics (issue #345), same deferral as the other launch knobs.
@@ -1610,34 +1674,40 @@ class Conversation(
             sink.emit(live(sessionId))
             return
         }
-        if (newThinking == thinking) { // no-op, but re-announce so an out-of-sync client corrects itself
-            sink.emit(live(sessionId))
-            return
+        val announce = lifecycleLocked {
+            // no-op, but re-announce so an out-of-sync client corrects itself
+            if (newThinking == thinking) return@lifecycleLocked sessionId
+            thinking = newThinking
+            armPendingSettingsLocked(mode = null, model = null, effort = null, thinkingChanged = true)
         }
-        thinking = newThinking
-        recordPendingSettings(mode = null, model = null, effort = null, thinkingChanged = true)
+        sink.emit(live(announce))
     }
 
     /** Switch Codex's service tier independently from reasoning effort (`priority` is the Fast tier). */
     suspend fun switchServiceTier(newServiceTier: String?) {
-        val normalized = normalizeServiceTier(newServiceTier)
-        if (normalized == serviceTier) {
-            sink.emit(live(sessionId))
-            return
+        val announce = lifecycleLocked {
+            val normalized = normalizeServiceTier(newServiceTier)
+            if (normalized == serviceTier) return@lifecycleLocked sessionId
+            serviceTier = normalized
+            armPendingSettingsLocked(
+                mode = null,
+                model = null,
+                effort = null,
+                serviceTierChanged = true,
+            )
         }
-        serviceTier = normalized
-        recordPendingSettings(
-            mode = null,
-            model = null,
-            effort = null,
-            serviceTierChanged = true,
-        )
+        sink.emit(live(announce))
     }
+
+    /** A nullable announce id wrapped so "nothing to announce" (null wrapper) stays distinct from "announce
+     *  with no session id yet". */
+    private class Announce(val sid: String?)
 
     /**
      * Record a mid-session mode/model/effort switch under NEXT-TURN semantics (issue #84) — a running turn is
-     * NEVER interrupted. The caller has already updated the desired `mode`/`model`/`effort` field; this decides
-     * how the change reaches the agent:
+     * NEVER interrupted. Caller holds [lifecycle] and has already updated the desired `mode`/`model`/`effort`
+     * field in the SAME critical section (design D12); returns the id the caller's optimistic SessionLive
+     * re-announce carries (emitted after the lock is released). This decides how the change reaches the agent:
      *  - Pre-first-turn (no process yet, issue #61): record only — the deferred first-prompt launch bakes the
      *    fields into its AgentSpec, so nothing to relaunch.
      *  - Codex ([applySettings] returns false): the value is stashed for the next turn/start; no relaunch.
@@ -1646,7 +1716,7 @@ class Conversation(
      *    relaunches under the new flags FIRST, then sends that turn to the fresh process (relaunch-then-send).
      * Either way the badge is optimistically re-announced; the resolved value confirms on the next init.
      */
-    private suspend fun recordPendingSettings(
+    private fun armPendingSettingsLocked(
         mode: PermissionMode?,
         model: String?,
         effort: String?,
@@ -1654,8 +1724,11 @@ class Conversation(
         permissionModeChanged: Boolean = false,
         serviceTierChanged: Boolean = false,
         thinkingChanged: Boolean = false,
-    ) {
-        if (recordedPreFirstTurn()) return
+    ): String? {
+        // Pre-first-turn (issue #61 lazy start): with no agent process yet, a switch only records the field and
+        // re-announces — relaunching would spawn the very process the lazy open avoided, re-occupying the
+        // session before any message. The deferred launch bakes the field (its spec is built under this lock).
+        if (proc == null) return sessionId ?: openedResumeId
         val relaunchForSettings = backend.applySettings(mode = mode, model = model, effort = effort)
         val relaunchForEffort = effortChanged && backend.applyEffort(this.effort)
         val relaunchForPermissionMode = permissionModeChanged && backend.applyPermissionMode(permissionMode)
@@ -1664,7 +1737,7 @@ class Conversation(
         if (relaunchForSettings || relaunchForEffort || relaunchForPermissionMode || relaunchForServiceTier || relaunchForThinking) {
             pendingRelaunch = true
         }
-        sink.emit(live(sessionId))
+        return sessionId
     }
 
     /** Only the installed Claude CLI's verified backend-native mode is accepted, and never for a scoped
@@ -1754,11 +1827,23 @@ class Conversation(
         forkSession = forkSession, takeOver = takeOver, initialPrompt = initialPrompt,
     )
 
+    /** Caller holds [lifecycle] (S4). Every launch starts from "no process": each caller stopped or lost the
+     *  previous one first. */
     private suspend fun launchProcess(rawSpec: AgentSpec, armExecuting: Boolean = false, initialSend: InitialSend? = null) {
+        check(lifecycle.isLocked) { "launchProcess outside the lifecycle lock" }
         // A closed conversation never spawns again (D5): a sender that still held this conversation when the
         // reaper / closeIfIdle closed it lands here. Failing the launch routes every caller through its existing
         // "agent failed to start" path (lazy start / relaunch: PocketError, no ack, promptId forgotten).
         if (closed.get()) throw IllegalStateException("conversation $convoId is closed")
+        launching = true
+        try {
+            launchProcessLocked(rawSpec, armExecuting, initialSend)
+        } finally {
+            launching = false
+        }
+    }
+
+    private suspend fun launchProcessLocked(rawSpec: AgentSpec, armExecuting: Boolean, initialSend: InitialSend?) {
         // OpenCode requires a message argument — can't launch without one (opencode run exits with error).
         // Defer to sendPrompt() which always provides initialPrompt.
         if (backend.kind == AgentKind.OPENCODE && rawSpec.initialPrompt == null) {
@@ -2029,25 +2114,36 @@ class Conversation(
                 // touched — without this check every >45s turn would be killed mid-stream and misreported
                 // as a startup timeout. Same-process check: a relaunch already replaced it → no-op.
                 if (proc === p && p.isAlive() && !p.sawStdout) {
-                    log.warn("$convoId OpenCode watchdog: no stdout in ${windowMs}ms, killing process ${p.pid}")
-                    intentionalStop = true
-                    revokeAllBridgeGrants()
-                    p.shutdown(eofGraceMs = 1_000, termGraceMs = 1_000, forceGraceMs = 1_000)
-                    p.awaitExit()
-                    lifecycleProbe?.invoke(LifecyclePoint.WATCHDOG_AFTER_EXIT)
-                    // Same-process check AGAIN after the kill: shutdown + awaitExit suspend for seconds, and a
-                    // /clear or directory switch plus the next prompt may have replaced this process meanwhile.
-                    // Nulling `proc` / clearing the turn now would orphan that replacement (lifecycle design D3').
-                    if (proc !== p) {
-                        log.info("$convoId OpenCode watchdog: process ${p.pid} was replaced while it was being killed — leaving the new one alone")
-                        return@launch
+                    // S4: the kill is a lifecycle transition — re-checked and performed under the lock, so a
+                    // prompt cannot spawn the replacement while this process is still being torn down.
+                    val killed = lifecycleLocked {
+                        if (proc !== p || !p.isAlive() || p.sawStdout) return@lifecycleLocked false
+                        log.warn("$convoId OpenCode watchdog: no stdout in ${windowMs}ms, killing process ${p.pid}")
+                        intentionalStop = true
+                        revokeAllBridgeGrants()
+                        p.shutdown(eofGraceMs = 1_000, termGraceMs = 1_000, forceGraceMs = 1_000)
+                        p.awaitExit()
+                        true
                     }
-                    // Null proc + clear state so the next sendPrompt triggers a fresh relaunch
-                    // (without this, subsequent prompts would write into the dead stdin and be lost)
-                    proc = null
-                    clearTurnWork()
-                    bridge?.cancelAll()
-                    bridge = null
+                    if (!killed) return@launch
+                    lifecycleProbe?.invoke(LifecyclePoint.WATCHDOG_AFTER_EXIT)
+                    // Same-process check AGAIN, in a fresh lifecycle step: a /clear or directory switch plus the
+                    // next prompt may have replaced this process since the kill. Nulling `proc` / clearing the turn
+                    // now would orphan that replacement (lifecycle design D3').
+                    val settled = lifecycleLocked {
+                        if (proc !== p) {
+                            log.info("$convoId OpenCode watchdog: process ${p.pid} was replaced while it was being killed — leaving the new one alone")
+                            return@lifecycleLocked false
+                        }
+                        // Null proc + clear state so the next sendPrompt triggers a fresh relaunch
+                        // (without this, subsequent prompts would write into the dead stdin and be lost)
+                        proc = null
+                        clearTurnWork()
+                        bridge?.cancelAll()
+                        bridge = null
+                        true
+                    }
+                    if (!settled) return@launch
                     // Surface the stderr tail's diagnosis (often the real cause) + a clear message
                     val why = p.stderrDiagnostic()?.let { " — $it" } ?: ""
                     sink.emit(PocketError(
@@ -2093,29 +2189,37 @@ class Conversation(
         log.error("$convoId pump crashed — stopping its process and settling the session", e)
         Diagnostics.report(ErrorPath.TURN, Stage.EXIT, ErrorCode.UNEXPECTED, e,
             SafeMetrics(backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }), isError = true)
-        val owned = proc === p
-        if (!owned && (proc != null || intentionalStop)) return
-        if (owned) proc = null
-        runCatching { p.shutdown() }
-        lifecycleProbe?.invoke(LifecyclePoint.PUMP_CRASHED_AFTER_SHUTDOWN)
-        // The shutdown above suspends for up to the whole EOF → TERM → KILL ladder, and `proc` is already null:
-        // a prompt landing meanwhile lazily started a NEW process. Clearing the turn, revoking grants or
-        // dropping `bridge` now would hit that process — its running turn reads idle, its pending asks vanish
-        // from hasPendingAsk / the approval inbox, and the reaper may take it mid-question (lifecycle design
-        // D3''). Settle only what belonged to this process — its own bridge's open cards — and stop there; the
-        // newer launch owns the conversation, so "send again to restart it" would be stale advice too.
-        if (proc != null) {
-            log.info("$convoId pump crash: a newer process took over during the shutdown — settling only process ${p.pid}")
-            runCatching { b.cancelAll() }
-            return
+        // S4: drop the handle and stop the process in one lifecycle step — no prompt can spawn a replacement
+        // while this one is still exiting.
+        val stopped = lifecycleLocked {
+            val owned = proc === p
+            if (!owned && (proc != null || intentionalStop)) return@lifecycleLocked false
+            if (owned) proc = null
+            runCatching { p.shutdown() }
+            true
         }
-        revokeAllBridgeGrants()
-        clearTurnWork()
-        runCatching { bridge?.cancelAll() }
-        bridge = null
-        runCatching { for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId) }
-        runCatching { backend.onProcessEnded(sessionId) }
-        sink.emit(PocketError("process_exited", "agent session stopped after an internal daemon error — send again to restart it", convoId))
+        if (!stopped) return
+        lifecycleProbe?.invoke(LifecyclePoint.PUMP_CRASHED_AFTER_SHUTDOWN)
+        // `proc` is null from here until the settle below takes the lock again: a prompt landing in between
+        // lazily started a NEW process. Clearing the turn, revoking grants or dropping `bridge` now would hit
+        // that process — its running turn reads idle, its pending asks vanish from hasPendingAsk / the approval
+        // inbox, and the reaper may take it mid-question (lifecycle design D3''). Settle only what belonged to
+        // this process — its own bridge's open cards — and stop there; the newer launch owns the conversation,
+        // so "send again to restart it" would be stale advice too.
+        lifecycleLocked {
+            if (proc != null) {
+                log.info("$convoId pump crash: a newer process took over during the shutdown — settling only process ${p.pid}")
+                runCatching { b.cancelAll() }
+                return@lifecycleLocked
+            }
+            revokeAllBridgeGrants()
+            clearTurnWork()
+            runCatching { bridge?.cancelAll() }
+            bridge = null
+            runCatching { for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId) }
+            runCatching { backend.onProcessEnded(sessionId) }
+            sink.emit(PocketError("process_exited", "agent session stopped after an internal daemon error — send again to restart it", convoId))
+        }
     }
 
     /**
@@ -2593,76 +2697,117 @@ class Conversation(
             }
         }
         log.info("$convoId pump ended (intentionalStop=$intentionalStop)")
-        if (!intentionalStop) {
-            // superseded: a newer launch already owns this conversation (a relaunch raced this pump's
-            // tail) — the old process's death is history, not an error, and must not touch shared state
-            if (proc !== p) return
-            // stdout EOF precedes the last transcript flush, so wait for the real process exit before
-            // classifying it (intentional stops settle in stopProcess)
-            p.awaitExit()
-            lifecycleProbe?.invoke(LifecyclePoint.DEATH_AFTER_AWAIT_EXIT)
-            // …and again after it: awaitExit suspends (up to 5+2 s), and a /clear, directory switch or settings
-            // relaunch landing meanwhile has already stopped this process and published a new one. Everything
-            // below (clear the turn, revoke grants, drop the handle, heal, re-launch a one-shot drain) would act
-            // on THAT process — orphaning it and minting a second writer (lifecycle design D3). The stop that
-            // replaced us settled this process; its death is history. Stopgap until the lifecycle lock (S4).
+        if (intentionalStop) return
+        // superseded: a newer launch already owns this conversation (a relaunch raced this pump's tail) — the
+        // old process's death is history, not an error, and must not touch shared state
+        if (proc !== p) return
+        // stdout EOF precedes the last transcript flush, so wait for the real process exit before classifying
+        // it (intentional stops settle in stopProcess). Outside the lifecycle lock: it concerns only the dead p.
+        p.awaitExit()
+        lifecycleProbe?.invoke(LifecyclePoint.DEATH_AFTER_AWAIT_EXIT)
+        if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && turnCompleted && p.isCleanTurnExit()) {
+            oneShotExited(p, generation)
+            return
+        }
+        lifecycleLocked {
+            // …and again under the lock: awaitExit suspends (up to 5+2 s), and a /clear, directory switch or
+            // settings relaunch landing meanwhile has already stopped this process and published a new one.
+            // Everything below (clear the turn, revoke grants, drop the handle, heal) would act on THAT process —
+            // orphaning it and minting a second writer (lifecycle design D3). The stop that replaced us settled
+            // this process; its death is history.
             if (proc !== p) {
                 log.info("$convoId pump: process ${p.pid} was replaced while its exit was awaited — leaving the new one alone")
-                return
+                return@lifecycleLocked
             }
-            if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && turnCompleted && p.isCleanTurnExit()) {
-                // The completed turn's ACTIVE authority always dies here. A later prompt that raced this
-                // clean edge keeps its still-staged token: pending authority grants nothing until that exact
-                // prompt's replay activates it in the fresh process. An unexpected crash below preserves none.
-                revokeActiveBridgeGrant(generation)
-                log.info("$convoId one-shot process completed normally (sid=${sessionId?.take(8) ?: "-"})")
-                // settle any card the clean exit left open (a tool_use that never reported completed)
-                for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId)
-                bridge?.cancelAll()
-                bridge = null
-                proc = null // dead handle dropped FIRST — a failed drain-launch below must not leave prompts writing into it
-                lifecycleProbe?.invoke(LifecyclePoint.ONE_SHOT_AFTER_NULL)
-                if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) {
-                    // Argv one-shot: drain ONE queued prompt per process. Pop it, then re-record it as the
-                    // next launch's initialSend so SessionInit is its consumption receipt.
-                    val next = popQueuedPrompt()
-                    if (next != null) {
-                        carryPendingPromptTransfer()
-                        log.info("$convoId one-shot queue: relaunching with queued prompt ${next.key.take(8)}…")
-                        runCatching {
-                            launchProcess(
-                                // never forks, even pre-first-turn on a fork-opened session (design §4.2: kept
-                                // as today pending a ruling)
-                                launchSpec(forkSession = false, initialPrompt = next.text),
-                                armExecuting = true,
-                                initialSend = InitialSend(next.key, next.text, next.images, next.bridgeGrantToken),
-                            )
-                        }.onFailure { e ->
-                            clearTurnWork() // the spawn never started a turn
-                            // The popped entry is gone from the ledger — forget its id too, so the client's
-                            // resend runs it fresh instead of being hollow-re-acked as "already delivered".
-                            synchronized(seenPromptIds) { seenPromptIds.remove(next.key) }
-                            sink.emit(PocketError("agent_unavailable", "agent failed to start for a queued message (${e.message})", convoId))
-                        }
-                    } else clearTurnWork()
-                } else if (hasUnconsumedPrompts()) {
-                    // Stdin one-shot (Codex): keep the whole ledger in place. launchProcess's ordinary
-                    // re-injection stamps the fresh generation and replays EVERY entry in original order.
-                    // This closes the turn/completed → process-exit race without dropping a just-acked input.
+            unexpectedDeathLocked(p, generation)
+        }
+    }
+
+    /**
+     * A one-shot process finished its turn and exited cleanly. Two lifecycle steps (S4):
+     *  1. drop the dead handle (still ours?) and settle what died with it;
+     *  2. drain the queue into the next process — unless a prompt that landed between the two steps already
+     *     launched one. That launch re-injected the stdin ledger / carries its own argv prompt, so starting a
+     *     second process here would run those prompts twice (design D1 / D1').
+     */
+    private suspend fun oneShotExited(p: AgentProcess, generation: Long) {
+        val dropped = lifecycleLocked {
+            if (proc !== p) {
+                log.info("$convoId pump: process ${p.pid} was replaced while its exit was awaited — leaving the new one alone")
+                return@lifecycleLocked false
+            }
+            // The completed turn's ACTIVE authority always dies here. A later prompt that raced this
+            // clean edge keeps its still-staged token: pending authority grants nothing until that exact
+            // prompt's replay activates it in the fresh process. An unexpected crash below preserves none.
+            revokeActiveBridgeGrant(generation)
+            log.info("$convoId one-shot process completed normally (sid=${sessionId?.take(8) ?: "-"})")
+            // settle any card the clean exit left open (a tool_use that never reported completed)
+            for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId)
+            bridge?.cancelAll()
+            bridge = null
+            proc = null // dead handle dropped FIRST — a failed drain-launch below must not leave prompts writing into it
+            // The old process's turn/jobs/grace are over. A queued prompt keeps its work shield across the gap
+            // to step 2 (or to the launch that pre-empts it); with nothing queued the conversation settles.
+            if (hasUnconsumedPrompts()) carryPendingPromptTransfer() else clearTurnWork()
+            true
+        }
+        if (!dropped) return
+        lifecycleProbe?.invoke(LifecyclePoint.ONE_SHOT_AFTER_NULL)
+        lifecycleLocked {
+            if (proc != null) {
+                log.info("$convoId one-shot queue: a prompt already started the next process — nothing to drain")
+                return@lifecycleLocked
+            }
+            if (closed.get()) {
+                clearTurnWork()
+                return@lifecycleLocked
+            }
+            if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) {
+                // Argv one-shot: drain ONE queued prompt per process. Pop it, then re-record it as the
+                // next launch's initialSend so SessionInit is its consumption receipt.
+                val next = popQueuedPrompt()
+                if (next != null) {
                     carryPendingPromptTransfer()
-                    log.info("$convoId stdin one-shot queue: relaunching with unconsumed prompt(s)")
+                    log.info("$convoId one-shot queue: relaunching with queued prompt ${next.key.take(8)}…")
                     runCatching {
                         launchProcess(
-                            launchSpec(forkSession = false), // same fork rule as the argv drain above
+                            // never forks, even pre-first-turn on a fork-opened session (design §4.2: kept
+                            // as today pending a ruling)
+                            launchSpec(forkSession = false, initialPrompt = next.text),
                             armExecuting = true,
+                            initialSend = InitialSend(next.key, next.text, next.images, next.bridgeGrantToken),
                         )
                     }.onFailure { e ->
-                        clearTurnWork()
-                        sink.emit(PocketError("agent_unavailable", "agent failed to restart for queued messages (${e.message})", convoId))
+                        clearTurnWork() // the spawn never started a turn
+                        // The popped entry is gone from the ledger — forget its id too, so the client's
+                        // resend runs it fresh instead of being hollow-re-acked as "already delivered".
+                        synchronized(seenPromptIds) { seenPromptIds.remove(next.key) }
+                        sink.emit(PocketError("agent_unavailable", "agent failed to start for a queued message (${e.message})", convoId))
                     }
                 } else clearTurnWork()
-                return
-            }
+            } else if (hasUnconsumedPrompts()) {
+                // Stdin one-shot (Codex): keep the whole ledger in place. launchProcess's ordinary
+                // re-injection stamps the fresh generation and replays EVERY entry in original order.
+                // This closes the turn/completed → process-exit race without dropping a just-acked input.
+                carryPendingPromptTransfer()
+                log.info("$convoId stdin one-shot queue: relaunching with unconsumed prompt(s)")
+                runCatching {
+                    launchProcess(
+                        launchSpec(forkSession = false), // same fork rule as the argv drain above
+                        armExecuting = true,
+                    )
+                }.onFailure { e ->
+                    clearTurnWork()
+                    sink.emit(PocketError("agent_unavailable", "agent failed to restart for queued messages (${e.message})", convoId))
+                }
+            } else clearTurnWork()
+        }
+    }
+
+    /** The pump's process died unexpectedly (not a clean one-shot exit, not a deliberate stop). Caller holds
+     *  [lifecycle] and verified [p] is still the conversation's process. */
+    private suspend fun unexpectedDeathLocked(p: AgentProcess, generation: Long) {
+        run {
             // Unexpected process loss is a hard authority boundary: neither active nor staged grants may
             // survive into a later lazy respawn.
             revokeAllBridgeGrants()
@@ -2950,6 +3095,42 @@ class Conversation(
         // is exactly what a redelivery re-sends, and the transport layer (sendPrompt/steer) stays free of
         // prompt string-matching (issue #301).
         val outgoing = backend.expandSlashPrompt(text)
+        // S4: the spawn / relaunch / queue decision, the ledger record and the stdin write are ONE lifecycle
+        // step. Two first prompts no longer both see "no process" and spawn two (D2); a prompt can no longer
+        // land between a one-shot exit and its queue drain (D1); a settings switch can no longer slip between
+        // the spec snapshot and the launch (D12). A prompt arriving while a stop is in flight waits for it —
+        // never longer than the stop's bounded shutdown ladder — because spawning before the old process has
+        // exited is what made Claude refuse the resume and fork.
+        val delivered = lifecycleLocked { deliverLocked(outgoing, images, promptId, bridgeGrantToken) } ?: return
+        promptId?.let {
+            sink.emit(PromptAck(convoId, it)) // the turn is in the agent's hands — receipt (issue #66)
+            // (issue #104) an ack is NOT a started turn. If the client later reports turnStalled for this prompt,
+            // this line pins whether the ack landed during a spawn/relaunch window (write possibly lost) or steady state.
+            log.info("$convoId acked prompt ${it.take(8)}… → agent (firstSpawn=${delivered.firstSpawn} relaunch=${delivered.relaunching})")
+        }
+    }
+
+    /** What [deliverLocked] did with a prompt that reached the agent (for the ack log line, issue #104). */
+    private class Delivered(val firstSpawn: Boolean, val relaunching: Boolean)
+
+    /** The locked half of [sendPromptInternal]. Null = the prompt did NOT reach an agent (a PocketError was
+     *  emitted and its id forgotten so a resend runs it): no ack. Caller holds [lifecycle]. */
+    private suspend fun deliverLocked(
+        outgoing: String,
+        images: List<ImageData>,
+        promptId: String?,
+        bridgeGrantToken: String?,
+    ): Delivered? {
+        // A closed conversation never runs a prompt (S3(b) / D5): same "agent failed to start" path as before,
+        // also for the instant between a close and the stop it hands to the last lifecycle holder.
+        if (closed.get()) {
+            val error = IllegalStateException("conversation $convoId is closed")
+            promptDiagnostics.failed(promptId, error)
+            clearTurnWork()
+            promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
+            sink.emit(PocketError("agent_unavailable", "agent failed to start (${error.message})", convoId))
+            return null
+        }
         // approval design M2 §5.4 / §18.1 P1-4: EVERY top-level user prompt begins a new task — the
         // previous task's grants die right here, whether or not the CLI folds the message into a running
         // turn. A new instruction never inherits an old authorization; task identity is decoupled from
@@ -3015,7 +3196,7 @@ class Conversation(
                 clearTurnWork() // the relaunch never started a turn
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
                 sink.emit(PocketError("agent_unavailable", "agent failed to relaunch for the new settings (${relaunched.exceptionOrNull()?.message})", convoId))
-                return
+                return null
             }
         } else if (proc == null) {
             // LAZY START (issue #61): a plain open no longer spawns the agent — the FIRST prompt does. Resume the id
@@ -3045,7 +3226,7 @@ class Conversation(
                 // no ack: the prompt did NOT reach an agent — forget the id so the client's retry can run
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
                 sink.emit(PocketError("agent_unavailable", "agent failed to start (${launched.exceptionOrNull()?.message})", convoId))
-                return
+                return null
             }
         } else if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) {
             // ONE-SHOT mid-turn queue: the live process baked its prompt into argv and reads no stdin,
@@ -3066,12 +3247,7 @@ class Conversation(
         lastActivityMs = System.currentTimeMillis()
         lockForkRetried = false // each user prompt re-arms one heal
         backend.sendPrompt(outgoing, images)
-        promptId?.let {
-            sink.emit(PromptAck(convoId, it)) // the turn is in the agent's hands — receipt (issue #66)
-            // (issue #104) an ack is NOT a started turn. If the client later reports turnStalled for this prompt,
-            // this line pins whether the ack landed during a spawn/relaunch window (write possibly lost) or steady state.
-            log.info("$convoId acked prompt ${it.take(8)}… → agent (firstSpawn=$firstSpawn relaunch=$relaunching)")
-        }
+        return Delivered(firstSpawn, relaunching)
     }
 
     /**
@@ -3111,20 +3287,23 @@ class Conversation(
      * below must never drift apart). Returns false when the op cannot proceed (already replied).
      */
     private suspend fun ensureProcessForControlOp(opLabel: String): Boolean {
-        if (isExecuting()) {
-            reply("Wait for the current turn to finish before $opLabel.")
-            return false
+        val refusal = lifecycleLocked {
+            if (isExecuting()) return@lifecycleLocked "Wait for the current turn to finish before $opLabel."
+            if (proc == null) {
+                val launched = runCatching {
+                    // no thinking / agentPreset on this launch: today's behaviour, kept pending a ruling (design
+                    // §4.2 #7; only Codex has native control ops, and it reads neither)
+                    launchProcess(launchSpec(thinking = null, agentPreset = null))
+                }
+                if (launched.isFailure) {
+                    return@lifecycleLocked "Could not start the agent for $opLabel: ${launched.exceptionOrNull()?.message ?: "unknown error"}"
+                }
+            }
+            null
         }
-        if (proc == null) {
-            val launched = runCatching {
-                // no thinking / agentPreset on this launch: today's behaviour, kept pending a ruling (design
-                // §4.2 #7; only Codex has native control ops, and it reads neither)
-                launchProcess(launchSpec(thinking = null, agentPreset = null))
-            }
-            if (launched.isFailure) {
-                reply("Could not start the agent for $opLabel: ${launched.exceptionOrNull()?.message ?: "unknown error"}")
-                return false
-            }
+        if (refusal != null) {
+            reply(refusal)
+            return false
         }
         return true
     }
@@ -3219,7 +3398,7 @@ class Conversation(
      * the same cwd (no resume), keeping the chosen model/effort/mode. The phone's transcript is wiped via an
      * empty history; the next turn lands on a brand-new sessionId.
      */
-    private suspend fun handleClearCommand() {
+    private suspend fun handleClearCommand() = lifecycleLocked {
         stopProcess() // also clears + re-emits background jobs (the killed tree took its bg shells with it)
         clearPromptLedger() // a wiped session must not re-inject the old one's undelivered prompts (issue #122)
         sessionId = null
@@ -3313,6 +3492,11 @@ class Conversation(
 
     /** Default semantics: kill the current process tree and start a fresh session in the new cwd. */
     suspend fun switchDirectory(newWorkdir: Path) {
+        lifecycleLocked { switchDirectoryLocked(newWorkdir) }
+        emitCommands() // project commands differ per workdir
+    }
+
+    private suspend fun switchDirectoryLocked(newWorkdir: Path) {
         stopProcess()
         clearPromptLedger() // fresh session in a new cwd — the old session's undelivered prompts die with it (issue #122)
         workdir = newWorkdir
@@ -3332,7 +3516,6 @@ class Conversation(
         // model = null: today's behaviour, kept pending a ruling (design §4.2 #9 / audit L2: the header keeps
         // showing the user's pick while the process runs the default)
         launchProcess(launchSpec(resumeId = null, forkSession = false, model = null))
-        emitCommands() // project commands differ per workdir
     }
 
     /** Activate only the lease carried by the exact prompt entry the backend proved consumed. */
@@ -3376,7 +3559,9 @@ class Conversation(
         if (pendingBridgeGrant.get()?.token != preservePendingToken) pendingBridgeGrant.set(null)
     }
 
+    /** Caller holds [lifecycle] (S4): the next launch can only start once this stop has returned. */
     private suspend fun stopProcess(preservePendingBridgeGrantToken: String? = null) {
+        check(lifecycle.isLocked) { "stopProcess outside the lifecycle lock" }
         intentionalStop = true
         clearTurnWork() // any in-flight turn and continuation grace die with the process
         heldTurnPush.set(null) // a deliberate stop/relaunch — the owner is acting on this session right now
@@ -3536,10 +3721,25 @@ class Conversation(
 
     suspend fun close() {
         closed.set(true) // before anything suspends: no launch may start from here on (see [closed])
+        // Abort a stdin write that may be wedged on a full pipe while holding the lifecycle lock (a CLI that
+        // stopped reading) — the stop below needs that lock. Non-suspending; the CLI gets its EOF.
+        proc?.closeInput()
         bridgeRequestGate.cancelAll()
         grants.endSession(convoId) // approval design M2: no task grant survives its session
         riskEngine?.forget(convoId) // M3: the sequence ledger dies with the conversation
-        stopProcess()
+        // S4: the stop is a lifecycle transition. Waiting for the lock waits out at most one bounded transition
+        // (a stop's shutdown ladder, a write). A LAUNCH holding it is the exception: there is no other process
+        // to stop then (every launch starts from none), and the launch itself fails on [closed] and rolls its
+        // process back — so close does not wait for it, and the launch's holder runs the stop on its way out.
+        if (lifecycle.tryLock() || (!launching && run { lifecycle.lock(); true })) {
+            try {
+                if (closeStopDone.compareAndSet(false, true) || proc != null) stopProcess()
+            } finally {
+                lifecycle.unlock()
+            }
+        } else {
+            log.info("$convoId close during a launch — the launch rolls itself back and its holder finishes the stop")
+        }
         promptDiagnostics.close()
         scope.cancel()
     }

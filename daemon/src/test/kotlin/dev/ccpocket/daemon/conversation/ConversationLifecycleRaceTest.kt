@@ -47,7 +47,6 @@ class ConversationLifecycleRaceTest {
      * that window is also in the ledger, so the pump starts Y and re-injects B: B runs twice.
      */
     @Test
-    @Disabled("待 S4：生命周期锁把一次性续发的「置空 + 续发启动」做成一步（D1）")
     fun stdin_one_shot_boundary_does_not_run_a_racing_prompt_twice() = runBlocking {
         if (LifecycleHarness.isWindows()) return@runBlocking
         val oneTurn = "IFS= read -r line; printf 'init:s1\\nuser:%s\\nresult\\n' \"\$line\"; " +
@@ -84,7 +83,6 @@ class ConversationLifecycleRaceTest {
     /** T1' / D1' — the argv (OpenCode-shaped) variant: the drain pops the racing prompt's ledger entry and
      *  launches it a second time. */
     @Test
-    @Disabled("待 S4：生命周期锁把一次性续发的「置空 + 出队 + 启动」做成一步（D1'）")
     fun argv_one_shot_boundary_does_not_launch_a_racing_prompt_twice() = runBlocking {
         if (LifecycleHarness.isWindows()) return@runBlocking
         val backend = LifecycleBackend(
@@ -116,7 +114,6 @@ class ConversationLifecycleRaceTest {
     /** T2 / D2 — two clients send the first message of a lazily opened session at once: both observe
      *  `proc == null` and each spawns its own process on the same session. */
     @Test
-    @Disabled("待 S4：sendPrompt 的启动判定进生命周期锁（D2）")
     fun two_first_prompts_share_one_process() = runBlocking {
         if (LifecycleHarness.isWindows()) return@runBlocking
         val backend = LifecycleBackend { _, _ -> LifecycleBackend.ECHO_TURNS }
@@ -227,7 +224,6 @@ class ConversationLifecycleRaceTest {
      *  old model, and `recordPendingSettings` still sees no process, so it only announces and never arms the
      *  next-turn relaunch. */
     @Test
-    @Disabled("待 S4：recordPendingSettings 与启动判定、spec 构造同在生命周期锁内（D12）")
     fun a_model_switch_during_the_lazy_launch_is_not_lost() = withGrace("0") {
         runBlocking {
             if (LifecycleHarness.isWindows()) return@runBlocking
