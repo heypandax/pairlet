@@ -26,7 +26,7 @@ import kotlin.test.fail
  * the duration.
  *
  * Minting is exactly that shape — `createTicket` suspends until the relay answers with a [PairTicket] —
- * which is why the share/bridge mints run off the loop, selected by [isOwnerControlFrame].
+ * which is why the bridge mints run off the loop, selected by [isOwnerControlFrame].
  *
  * This models the loop rather than standing up a relay: the property under test is the DISPATCH DECISION,
  * and a socket would add nothing but flakiness.

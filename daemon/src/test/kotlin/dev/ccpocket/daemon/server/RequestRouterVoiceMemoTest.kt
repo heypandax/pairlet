@@ -2,8 +2,6 @@ package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.DaemonPrefs
 import dev.ccpocket.daemon.bridge.BridgeCaps
-import dev.ccpocket.daemon.bridge.GuestCaps
-import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.DirectoryService
@@ -22,7 +20,6 @@ import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
-import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.Frame
@@ -151,14 +148,11 @@ class RequestRouterVoiceMemoTest {
     fun a_restricted_credential_is_dropped_in_silence() = runBlocking {
         val router = router()
         val upload = MemoUpload.random()
-        val guest = GuestScope(listOf(tmp.path), emptySet(), "guest", null, AccessTier.entries.first())
 
         val viaBridge = declared(router)
         router.handle(upload.start(), viaBridge, origin = "feishu-bot", caps = viaBridge.caps, deviceId = "dev-a")
-        val viaGuest = declared(router)
-        router.handle(upload.start(), viaGuest, guestScope = guest, caps = viaGuest.caps, deviceId = "dev-a")
 
-        for (conn in listOf(viaBridge, viaGuest)) assertTrue(conn.frames.isEmpty(), "no job, no refusal frame")
+        for (conn in listOf(viaBridge)) assertTrue(conn.frames.isEmpty(), "no job, no refusal frame")
         assertEquals(0, transcriber.calls.get())
     }
 
@@ -283,11 +277,9 @@ class RequestRouterVoiceMemoTest {
         )
         val state = VoiceMemoState(memoId, attemptId, 1, VoiceMemoStage.READY)
         for (request in requests) {
-            assertFalse(GuestCaps.ingressAllowed(request), "guest ${request::class.simpleName}")
             assertFalse(BridgeCaps.ingressAllowed(request), "bridge ${request::class.simpleName}")
             assertFalse(ExecutionCaps.ingressAllowed(request), "execution ${request::class.simpleName}")
         }
-        assertFalse(GuestCaps.egressAllowed(state))
         assertFalse(BridgeCaps.egressAllowed(state))
         assertFalse(ExecutionCaps.egressAllowed(state))
     }

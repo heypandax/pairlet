@@ -12,8 +12,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Audit 2026-10-04 (session-relay M7): RelayClient.run launches the idle reaper and the guest-expiry sweep
- * in the SAME coroutineScope as the reconnect loop. One throwing iteration failed its child, which cancelled
+ * Audit 2026-10-04 (session-relay M7): RelayClient.run launched the idle reaper and (until folder sharing was
+ * retired) the guest-expiry sweep in the SAME coroutineScope as the reconnect loop. One throwing iteration failed its child, which cancelled
  * the scope — the reconnect loop with it — and run() threw out of Main.
  */
 class ResidentLoopTest {

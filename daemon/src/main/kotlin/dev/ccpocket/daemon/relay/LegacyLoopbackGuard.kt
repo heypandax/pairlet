@@ -12,7 +12,7 @@ import io.ktor.server.routing.RoutingResolveContext
 
 /**
  * Anti-browser gate for the LEGACY loopback routes (`/pair`, `/pair/headless`, `/bridges`, `/bridge/revoke`,
- * `/share`, `/shares`, `/share/revoke`, `/status`) — audit 2026-10-04 H2, the compatible half.
+ * `/status`) — audit 2026-10-04 H2, the compatible half.
  *
  * Those routes carry no token (shipped `pairlet` CLIs call them bare), so "reaching loopback" is their
  * whole authority. A web page must not borrow that authority:
@@ -23,7 +23,7 @@ import io.ktor.server.routing.RoutingResolveContext
  *    `Host: attacker.example:<port>`, which this refuses.
  *
  * What it deliberately does NOT do: require a token or a Content-Type. The shipped CLI sends neither
- * (`setBody(String)` with no content type), so either would break `pair` / `bridges` / `share` / `status`.
+ * (`setBody(String)` with no content type), so either would break `pair` / `bridges` / `status`.
  * Keeping other local users / processes out needs the token scheme — a separate change.
  */
 internal object LegacyLoopbackGuard {

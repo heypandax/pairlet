@@ -2,9 +2,14 @@ package dev.ccpocket.daemon.relay
 
 import dev.ccpocket.daemon.bridge.BridgeRegistry
 import dev.ccpocket.daemon.bridge.BridgeSpec
+import dev.ccpocket.daemon.execution.ExecutionGrantDraft
+import dev.ccpocket.daemon.execution.ExecutionGrantStore
+import dev.ccpocket.daemon.execution.ExecutionTarget
+import dev.ccpocket.daemon.identity.Identity
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CreateBridge
-import dev.ccpocket.protocol.CreateShare
 import dev.ccpocket.protocol.PairTicket
+import dev.ccpocket.protocol.PermissionMode
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -14,11 +19,12 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
- * The issue #207 mint race, closed: every ticket-backed restricted mint (folder share, bridge
- * credential, execution grant) must hold the ONE mint slot ACROSS its suspending relay round-trip.
+ * The issue #207 mint race, closed: every ticket-backed restricted mint (bridge credential, execution
+ * grant) must hold the ONE mint slot ACROSS its suspending relay round-trip.
  *
  * The broken shape these tests were first proven RED against: `intentPending()` checked before the
  * suspending `mintTicket()`, the intent recorded only after — so two overlapping mints both passed the
@@ -47,7 +53,7 @@ class MintReservationRaceTest {
     }
 
     private fun registry(tag: String) = BridgeRegistry(
-        File(dir, "bridges-$tag.json"), File(dir, "guests-$tag.json"), File(dir, "gs-$tag.json"),
+        File(dir, "bridges-$tag.json"), guestStore = File(dir, "guests-$tag.json"),
     )
 
     private fun bridgeService(reg: BridgeRegistry, mint: suspend () -> PairTicket?) = BridgeService(
@@ -58,31 +64,6 @@ class MintReservationRaceTest {
         revokeCredential = {},
         liveSessions = { emptyList() },
     )
-
-    @Test
-    fun an_overlapping_share_mint_is_refused_while_the_first_round_trip_is_in_flight() = runBlocking {
-        val relay = GatedRelay()
-        val service = ShareService(
-            accountId = "acct", daemonPubB64 = "pub", relayWsBase = "wss://relay",
-            ownerLabel = { null }, registry = registry("share"),
-            mintTicket = { _ -> relay.mint() },
-            interactivePairingPending = { false },
-            revokeCredential = {},
-            liveSessions = { emptyList() },
-        )
-
-        val first = async { service.create(CreateShare(sharedRoot.path)) }
-        while (relay.mintCalls == 0) yield()
-
-        val second = service.create(CreateShare(sharedRoot.path))
-        assertFalse(second.ok, "the overlapped mint must be refused, not raced")
-        assertTrue(second.error!!.contains("another pairing"), "got: ${second.error}")
-
-        relay.answer.complete(Unit)
-        val f = first.await()
-        assertTrue(f.ok, f.error)
-        assertEquals(1, relay.mintCalls, "the refused mint must never have burned a second relay ticket")
-    }
 
     @Test
     fun an_overlapping_bridge_mint_is_refused_while_the_first_round_trip_is_in_flight() = runBlocking {
@@ -109,29 +90,40 @@ class MintReservationRaceTest {
         assertEquals(1, relay.mintCalls, "the refused mint must never have burned a second relay ticket")
     }
 
-    /** Overlaps ACROSS mint classes must serialize on the same slot — a share mint during a bridge's
-     *  round-trip is exactly the two-button shape v1.6.1 added. */
+    /** Overlaps ACROSS mint classes must serialize on the same slot (#207) — a bridge mint during an
+     *  execution grant's round-trip is refused too. (This case used to drive the retired folder-share mint
+     *  against a bridge; the execution grant is the other ticket-backed mint class that remains.) */
     @Test
-    fun a_share_mint_during_a_bridge_round_trip_is_refused_too() = runBlocking {
+    fun a_bridge_mint_during_an_execution_grant_round_trip_is_refused_too() = runBlocking {
         val reg = registry("cross")
         val relay = GatedRelay()
         val bridge = bridgeService(reg) { relay.mint() }
-        val share = ShareService(
-            accountId = "acct", daemonPubB64 = "pub", relayWsBase = "wss://relay",
-            ownerLabel = { null }, registry = reg,
-            mintTicket = { _ -> relay.mint() },
-            interactivePairingPending = { false },
-            revokeCredential = {},
-            liveSessions = { emptyList() },
+        val identity = Identity.loadOrCreate(File(dir, "identity.json"))
+        val target = ExecutionTarget(
+            identity = identity,
+            relayUrl = "wss://relay",
+            store = ExecutionGrantStore.load(File(dir, "execution-grants.json"), identity.e2ePubB64),
+            bridges = reg,
+            mintTicket = { relay.mint() },
+            armPsk = {},
+            revokeRelayDevice = {},
+            isKnownDevice = { false },
+        )
+        val draft = ExecutionGrantDraft(
+            sourceLabel = "Studio Mac",
+            workspaces = mapOf("repo" to sharedRoot.path),
+            allowedAgents = listOf(AgentKind.CLAUDE),
+            approvalCeiling = PermissionMode.DEFAULT,
+            ttlMs = 3600_000,
         )
 
-        val first = async { bridge.create(CreateBridge("bot-a", listOf(sharedRoot.path))) }
+        val first = async { target.approve(draft) }
         while (relay.mintCalls == 0) yield()
 
-        assertFalse(share.create(CreateShare(sharedRoot.path)).ok)
+        assertFalse(bridge.create(CreateBridge("bot-a", listOf(sharedRoot.path))).ok)
 
         relay.answer.complete(Unit)
-        assertTrue(first.await().ok)
+        assertIs<ExecutionTarget.Approval.Ok>(first.await())
         assertEquals(1, relay.mintCalls)
     }
 

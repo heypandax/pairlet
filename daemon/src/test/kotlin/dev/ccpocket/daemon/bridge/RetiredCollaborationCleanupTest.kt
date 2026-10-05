@@ -153,7 +153,7 @@ class RetiredCollaborationCleanupTest {
     }
 
     private val retiredFiles = setOf(
-        "collaborator-keys.json", RetiredCollaboratorStore.FILE_NAME, RetiredPeerLinks.PUBLIC_FILE, RetiredPeerLinks.SECRET_FILE,
+        "collaborator-keys.json", RetiredCredentialStore.FILE_NAME, RetiredPeerLinks.PUBLIC_FILE, RetiredPeerLinks.SECRET_FILE,
     )
 
     /** sha256 of every file under both daemon directories, except the four the cleanup is meant to touch. */
@@ -164,7 +164,7 @@ class RetiredCollaborationCleanupTest {
             }
         }.toMap()
 
-    private fun tombstones(): String = File(targetDir, RetiredCollaboratorStore.FILE_NAME).readText()
+    private fun tombstones(): String = File(targetDir, RetiredCredentialStore.FILE_NAME).readText()
 
     @Test
     fun the_upgrade_clears_collaborator_credentials_and_review_links_and_nothing_else(): Unit = runBlocking {
@@ -181,7 +181,7 @@ class RetiredCollaborationCleanupTest {
         assertNull(sourceLinks().secretOf(grantId)!!.ticket, "precondition: the execution link's first contact is done")
 
         restricted("dev-bridge", BridgeSpec("feishu-bot", listOf(ws.path)))
-        restricted("dev-guest", BridgeSpec.guest("guest", ws.path, AccessTier.REVIEW, expiresAt = System.currentTimeMillis() + 3_600_000))
+        restricted("dev-guest", BridgeSpec("guest", listOf(ws.path), kind = CredentialKind.GUEST, expiresAt = System.currentTimeMillis() + 3_600_000, tier = AccessTier.REVIEW))
         val ownerKeys = E2ECrypto.generateKeyPair()
         harness.sessions.onMintedTicket("phone-ticket", headless = true) // headless: no #91 exclusion stamp
         harness.sessions.onDevicePaired("owner-phone", b64.encodeToString(ownerKeys.publicRaw))
@@ -213,7 +213,7 @@ class RetiredCollaborationCleanupTest {
 
         // the collaborator keys are gone, their ids tombstoned (ids only — no key material)
         assertEquals("{}", File(targetDir, "collaborator-keys.json").readText())
-        assertEquals(collabPubs.keys, harness.bridges.retiredCollaboratorIds())
+        assertEquals(collabPubs.keys, harness.bridges.retiredCredentialIds())
         for ((id, pub) in collabPubs) {
             assertFalse(harness.bridges.isRestricted(id), "$id is no credential any more")
             assertNull(harness.bridges.pubOf(id))
@@ -295,12 +295,12 @@ class RetiredCollaborationCleanupTest {
         harness.sessions.onDevicePaired("owner-phone", b64.encodeToString(ownerKeys.publicRaw))
         harness.sessions.onDevicePaired(collabReview, collabPubs.getValue(collabReview))
         harness.sessions.reconcileReplay(authoritativeEmpty = true)
-        assertEquals(setOf(collabReview), harness.bridges.retiredCollaboratorIds())
+        assertEquals(setOf(collabReview), harness.bridges.retiredCredentialIds())
         assertEquals(listOf(collabReview), harness.sessions.pendingRetiredRevocations().map { it.deviceId })
 
         // the relay confirms the revoke it was asked for: the last tombstone goes, and nothing else moves
         harness.sessions.onRelayDeviceRevoked(collabReview)
-        assertEquals(emptySet(), harness.bridges.retiredCollaboratorIds())
+        assertEquals(emptySet(), harness.bridges.retiredCredentialIds())
         assertTrue(devicesBefore.contentEquals(File(targetDir, "devices.json").readBytes()), "devices.json untouched")
         assertEquals(setOf("owner-phone"), PairedDevices.load(File(targetDir, "devices.json")).keys)
         assertFalse(tombstones().contains(collabReview))
@@ -327,7 +327,7 @@ class RetiredCollaborationCleanupTest {
         assertEquals(setOf("owner-phone"), PairedDevices.load(File(targetDir, "devices.json")).keys)
         harness.sessions.onRelayDeviceRevoked("owner-phone")
         assertEquals(emptySet(), PairedDevices.load(File(targetDir, "devices.json")).keys, "an owner device is revoked as before")
-        assertEquals(collabPubs.keys, harness.bridges.retiredCollaboratorIds(), "…and no tombstone moved")
+        assertEquals(collabPubs.keys, harness.bridges.retiredCredentialIds(), "…and no tombstone moved")
     }
 
     @Test
@@ -340,9 +340,9 @@ class RetiredCollaborationCleanupTest {
         } finally {
             targetDir.setWritable(true, false)
         }
-        assertFalse(File(targetDir, RetiredCollaboratorStore.FILE_NAME).exists())
+        assertFalse(File(targetDir, RetiredCredentialStore.FILE_NAME).exists())
         assertEquals(keysBefore, File(targetDir, "collaborator-keys.json").readText(), "fail closed: the keys stay for the next start")
-        assertEquals(collabPubs.keys, registry.retiredCollaboratorIds(), "…and this run still treats them as retired")
+        assertEquals(collabPubs.keys, registry.retiredCredentialIds(), "…and this run still treats them as retired")
         assertTrue(collabPubs.keys.none { registry.isRestricted(it) }, "…and never as credentials")
     }
 }

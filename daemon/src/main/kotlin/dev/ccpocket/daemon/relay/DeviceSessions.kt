@@ -11,21 +11,16 @@ import dev.ccpocket.daemon.bridge.BridgeCaps
 import dev.ccpocket.daemon.bridge.BridgeRegistry
 import dev.ccpocket.daemon.bridge.BridgeVerdict
 import dev.ccpocket.daemon.bridge.CredentialKind
-import dev.ccpocket.daemon.bridge.GuestCaps
-import dev.ccpocket.daemon.bridge.GuestScope
-import dev.ccpocket.daemon.bridge.PathScope
 import dev.ccpocket.daemon.server.RequestRouter
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.memo.withVoiceMemo
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.identity.PairedDevices
 import dev.ccpocket.daemon.util.logger
-import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.ConfigureBridgeRunner
 import dev.ccpocket.protocol.ControlBridgeRunner
 import dev.ccpocket.protocol.CreateBridge
-import dev.ccpocket.protocol.CreateShare
 import dev.ccpocket.protocol.DetachBridgeRunner
 import dev.ccpocket.protocol.ListBridges
 import dev.ccpocket.protocol.RevokeBridge
@@ -33,11 +28,9 @@ import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.DAEMON_SUPPORTED_AGENT_WIRES
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.Frame
-import dev.ccpocket.protocol.ListShares
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PocketJson
-import dev.ccpocket.protocol.RevokeShare
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.ShareEnded
@@ -70,18 +63,15 @@ class DeviceSessions(
     private val lanUrl: () -> String? = { null }, // advertised in DaemonInfo after each handshake (null = direct listener off)
     private val hostname: () -> String? = { null }, // OS computer name advertised in DaemonInfo (client's default binding name)
     private val gatewayBaseUrl: () -> String? = { null }, // third-party ANTHROPIC_BASE_URL in DaemonInfo (issue #139; null = official endpoint)
-    /** The restricted-credential authority (issue #91 bridges + #115 guests): classification, constraints,
+    /** The restricted-credential authority (issue #91 bridges, #367 execution links, the retired kinds): classification, constraints,
      *  capability gates. */
     val bridges: BridgeRegistry = BridgeRegistry(),
     private val send: suspend (deviceId: String, payload: ByteArray) -> Unit,
 ) {
     private val log = logger("DeviceSessions")
 
-    /** The OWNER control planes (share #115 / bridge #91 follow-up) live on [DaemonCore] — the LAN
-     *  transport serves them too, so they can't be relay-local state. These are convenience views. */
-    var shareControl: dev.ccpocket.daemon.relay.ShareControl?
-        get() = core.shareControl
-        set(v) { core.shareControl = v }
+    /** The OWNER bridge control plane (bridge #91 follow-up) lives on [DaemonCore] — the LAN transport
+     *  serves it too, so it can't be relay-local state. This is a convenience view. */
     var bridgeControl: dev.ccpocket.daemon.relay.BridgeControl?
         get() = core.bridgeControl
         set(v) { core.bridgeControl = v }
@@ -143,10 +133,11 @@ class DeviceSessions(
      *  fail-closed `recognized` check in [transport] and the owner mints a fresh invite. */
     suspend fun onDevicePaired(deviceId: String, devicePubB64: String) {
         val pub = runCatching { B64dec.decode(devicePubB64) }.getOrNull() ?: return
-        // confirmed bridge/guest: replay must not leak the key into devices.json. A retired collaborator's id
-        // (tombstoned until the relay confirms its revoke) is held off the same way: its key is gone, so
-        // without this it would look like a brand-new device and could be armed with someone's pairing ticket.
-        if (bridges.isRestricted(deviceId) || bridges.isRetiredCollaborator(deviceId)) {
+        // confirmed bridge/guest: replay must not leak the key into devices.json. A retired credential's id (a
+        // Collaborator Link or a folder-share guest, tombstoned until the relay confirms its revoke) is held off
+        // the same way: its key is gone, so without this it would look like a brand-new device and could be armed
+        // with someone's pairing ticket.
+        if (bridges.isRestricted(deviceId) || bridges.isRetiredCredential(deviceId)) {
             mutex.withLock { seenThisAttach.add(deviceId) }
             return
         }
@@ -208,8 +199,8 @@ class DeviceSessions(
             // relay has no headless column and replays them as ordinary devices — either way a live
             // bridge is in the set and survives.
             val sb = bridges.ids().filter { it !in seenThisAttach }.onEach { sessions.remove(it); pskFor.remove(it) }
-            // a retired collaborator the replay no longer carries is already revoked at the relay
-            val gr = bridges.retiredCollaboratorIds().filter { it !in seenThisAttach }
+            // a retired credential the replay no longer carries is already revoked at the relay
+            val gr = bridges.retiredCredentialIds().filter { it !in seenThisAttach }
             Triple(s, sb, gr)
         }
         goneRetired.forEach { bridges.confirmRetired(it) }
@@ -226,27 +217,19 @@ class DeviceSessions(
 
     /** The relay says this device was just revoked: cut key + live E2E session immediately. The persist
      *  bumps [PairedDevices.epoch], which also severs any LIVE direct-LAN socket on its next frame. For any
-     *  RESTRICTED credential (a GUEST #115 or a BRIDGE #91) this ALSO ends its running sessions now — the
-     *  owner's "revoke" promise is "their sessions end", not merely "their link drops".
-     *
-     *  Returns true when a guest-facing [ShareEnded] notice was actually sealed toward the guest (the
-     *  #115 follow-up: the precise "revoked"/"expired" ending for its terminal card). The notice rides
-     *  BEFORE the prune below — the last frame the dying E2E session can still seal — and is pure
-     *  best-effort: everything security-relevant (key death, session cut, convo force-close) is
-     *  unchanged and unconditional right after. */
-    suspend fun onDeviceRevoked(deviceId: String, reason: String = ShareEnded.REASON_REVOKED): Boolean {
+     *  RESTRICTED credential (a BRIDGE #91, an EXECUTION link #367) this ALSO ends its running sessions now
+     *  — the owner's "revoke" promise is "their sessions end", not merely "their link drops". A retired
+     *  folder-share guest still loaded is cut the same way, minus the close-by-label (below);
+     *  its normal path out is [retireLegacyGuests]. */
+    suspend fun onDeviceRevoked(deviceId: String) {
         val wasGuest = bridges.isGuest(deviceId)
-        // guest OR bridge — a revoke must end the sessions of EITHER, not just a guest's (issue #91: a
-        // bridge's live Claude turn otherwise keeps editing files until the idle reaper claims it)
+        // every restricted kind — a revoke must end its sessions (issue #91: a bridge's live Claude turn
+        // otherwise keeps editing files until the idle reaper claims it)
         val wasRestricted = bridges.isRestricted(deviceId)
-        var noticed = false
-        if (wasGuest) {
-            // sealAndSend silently no-ops without a live session — only report a notice that could seal
-            noticed = mutex.withLock { sessions.containsKey(deviceId) }
-            // ownerLabel = the computer name the guest already learned from its invite (leaks nothing new)
-            runCatching { sealAndSend(deviceId, ShareEnded(reason, hostname())) }
-        }
-        val revokedOrigin = if (wasRestricted) bridges.specOf(deviceId)?.name else null // read BEFORE bridges.remove
+        // read BEFORE bridges.remove. Never for a guest (folder sharing is retired): its label is free text in the
+        // same namespace as a bridge's origin, so closing by it could end a same-named bridge's sessions. A guest's
+        // own conversations are the ones this connection opened ([owned]), closed below by id.
+        val revokedOrigin = if (wasRestricted && !wasGuest) bridges.specOf(deviceId)?.name else null
         val revokedConvos = mutex.withLock {
             devicePubs.remove(deviceId); sessions.remove(deviceId)?.let { retirePins(it) }; pskFor.remove(deviceId)
             seenThisAttach.remove(deviceId)
@@ -260,23 +243,22 @@ class DeviceSessions(
         runCatching { core.router.revokeVoiceMemoDevice(deviceId) }
         persist()
         // force-close the revoked credential's convos NOW (kills their process trees) — the owner's revoke
-        // promise is "their sessions end", not "their link drops". Covers guests (#115) AND bridges (#91):
-        // a bridge's running Claude turn must not outlive the revoke. The per-connection `owned` list covers
-        // this connection; closeByOrigin ALSO reaps convos opened on an EARLIER connection (which `owned`
-        // cleared on disconnect) so nothing keeps running past the revoke (issue #115 crypto review L1).
+        // promise is "their sessions end", not "their link drops": a bridge's running Claude turn must not
+        // outlive the revoke (#91). The per-connection `owned` list covers this connection; closeByOrigin ALSO
+        // reaps convos opened on an EARLIER connection (which `owned` cleared on disconnect) so nothing keeps
+        // running past the revoke (issue #115 crypto review L1).
         if (wasRestricted) {
             revokedConvos.forEach { runCatching { core.registry.close(it, force = true) } }
             revokedOrigin?.let { runCatching { core.registry.closeByOrigin(it) } }
         }
         log.info("device revoked: ${deviceId.take(8)}… — pruned from allow-list${if (wasRestricted) " (${if (wasGuest) "guest " else ""}sessions ended)" else ""}")
-        return noticed
     }
 
     /**
-     * The relay's `DeviceRevoked` control. For a retired collaborator's tombstoned id this is the
-     * confirmation that its credential is dead at the relay: the tombstone goes, and — since this daemon holds
-     * nothing else for that id — that is all (no allow-list rewrite, so no live LAN socket is cut for it).
-     * Every other id takes [onDeviceRevoked], exactly as before.
+     * The relay's `DeviceRevoked` control. For a retired credential's tombstoned id (a Collaborator Link or a
+     * folder-share guest) this is the confirmation that its credential is dead at the relay: the tombstone goes,
+     * and — since this daemon holds nothing else for that id — that is all (no allow-list rewrite, so no live LAN
+     * socket is cut for it). Every other id takes [onDeviceRevoked], exactly as before.
      */
     suspend fun onRelayDeviceRevoked(deviceId: String) {
         val retired = bridges.confirmRetired(deviceId)
@@ -284,11 +266,48 @@ class DeviceSessions(
         onDeviceRevoked(deviceId)
     }
 
-    /** One relay revoke per retired collaborator still tombstoned — what the relay client sends once the
+    /** One relay revoke per retired credential still tombstoned — what the relay client sends once the
      *  relay's device set is known (after the replay barrier, or right after attach on a relay without one).
      *  Repeats on every attach until each is confirmed; a revoke the relay has already applied is a no-op. */
     fun pendingRetiredRevocations(): List<dev.ccpocket.protocol.RevokeDevice> =
-        bridges.retiredCollaboratorIds().map { dev.ccpocket.protocol.RevokeDevice(it) }
+        bridges.retiredCredentialIds().map { dev.ccpocket.protocol.RevokeDevice(it) }
+
+    /**
+     * Folder sharing (#115) was retired (2026-10): retire every GUEST credential this daemon still holds. Called
+     * by the relay client once the relay's device set is known, right before it asks for
+     * [pendingRetiredRevocations] — which then include these ids. In this order:
+     *
+     *  1. tombstone the ids ([BridgeRegistry.tombstoneGuests]); if that write fails nothing happens at all and the
+     *     next attach tries again;
+     *  2. tell a guest that is online right now that its access ended — the one [ShareEnded] this daemon still
+     *     sends, sealed with the E2E session it already holds and passed by the GUEST line of the egress gate;
+     *  3. clear the keys ([BridgeRegistry.forgetRetiredGuests] — only guests.json is rewritten), drop the live
+     *     session and close the conversations THIS credential opened, by deviceId ([owned]) — never by label: a
+     *     guest's label is free text in the same namespace as a bridge's origin.
+     *
+     * Every other credential, the full-power allow-list and the files behind them are left alone. Returns true
+     * when a notice was sealed, so the caller can give it a head start before the relay cuts the socket.
+     */
+    suspend fun retireLegacyGuests(): Boolean {
+        val retired = bridges.tombstoneGuests(bridges.guestIds())
+        if (retired.isEmpty()) return false
+        var noticed = false
+        for (id in retired) {
+            if (mutex.withLock { sessions.containsKey(id) }) {
+                runCatching { sealAndSend(id, ShareEnded(ShareEnded.REASON_REVOKED, hostname())) }.onSuccess { noticed = true }
+            }
+        }
+        bridges.forgetRetiredGuests(retired)
+        for (id in retired) {
+            val convos = mutex.withLock {
+                sessions.remove(id)?.let { retirePins(it) }; pskFor.remove(id)
+                owned.remove(id).orEmpty()
+            }
+            convos.forEach { runCatching { core.registry.close(it, force = true) } }
+        }
+        log.info("retired ${retired.size} folder-share guest credential(s)${if (noticed) " — access-ended notice sent" else ""}")
+        return noticed
+    }
 
     /**
      * #367: does this daemon already know [deviceId] under an identity OTHER than a just-confirmed
@@ -297,7 +316,7 @@ class DeviceSessions(
      *  - the FULL-POWER allow-list ([devicePubs] / devices.json);
      *  - a confirmed restricted credential of any other kind ([BridgeRegistry.ids] minus the execution row);
      *  - a key still held PROVISIONAL (announced, not yet classified);
-     *  - a retired collaborator's tombstoned id (the relay may still honour it until its revoke is confirmed).
+     *  - a retired credential's tombstoned id (the relay may still honour it until its revoke is confirmed).
      *
      * The credential being bound right now is excluded by construction, not by a special case:
      * [BridgeRegistry.finalize] has already moved it out of `provisionalPub` into `bridgePubs` with an
@@ -305,7 +324,7 @@ class DeviceSessions(
      */
     suspend fun isKnownDevice(deviceId: String): Boolean =
         mutex.withLock { devicePubs.containsKey(deviceId) } ||
-            bridges.isBridge(deviceId) || bridges.isGuest(deviceId) || bridges.isRetiredCollaborator(deviceId) ||
+            bridges.isBridge(deviceId) || bridges.isGuest(deviceId) || bridges.isRetiredCredential(deviceId) ||
             (bridges.pubOf(deviceId) != null && !bridges.isRestricted(deviceId))
 
     /** True while this device's FIRST post-pairing contact hasn't completed over the relay. The LAN gate
@@ -330,7 +349,7 @@ class DeviceSessions(
      *  PeerPresence(true) edge just re-syncs the page; clearing here was what turned every daemon-side
      *  relay blip into a phone-side full teardown + supersede storm). Sessions still die on revoke, on
      *  the attach-replay reconcile, and when a newer handshake displaces them. [owned] is per-connection
-     *  bookkeeping for the guest-revoke path and still resets; owned conversations keep running in the
+     *  bookkeeping for the restricted-credential revoke path and still resets; owned conversations keep running in the
      *  background — the idle reaper reclaims them once truly abandoned. */
     suspend fun onDisconnect() = mutex.withLock {
         owned.clear()
@@ -525,7 +544,7 @@ class DeviceSessions(
         val confirmedPsk = mutex.withLock { link.pskShadow = null; pskFor.remove(deviceId) }
         // FIRST successful decrypt after pairing: the PSK (the exact pairing ticket) is now PROVEN to be
         // held by this device. If it matches a pending intent, finalize the restricted classification here
-        // (bridge #91 OR guest #115) — the one moment the binding is cryptographically exact.
+        // (bridge #91 OR execution link #367) — the one moment the binding is cryptographically exact.
         if (confirmedPsk != null && confirmedPsk.isNotEmpty()) {
             if (viaTwin) {
                 log.info("first-contact PSK abandoned for ${deviceId.take(8)}… — device handshook without its ticket (#161)")
@@ -592,12 +611,12 @@ class DeviceSessions(
         )
 
         // ---- restricted INGRESS gates: both checks live HERE, on the only path where deviceId is
-        // authenticated (proven by the Noise static key that just decrypted the frame). Bridge (#91) and
-        // guest (#115) each get their own capability whitelist + guard; a full-power owner device is
-        // additionally allowed to drive the folder-share control plane. ----
+        // authenticated (proven by the Noise static key that just decrypted the frame). A bridge (#91) gets its
+        // capability whitelist + guard, an execution link (#367) its own plane; the retired kinds (collaborator,
+        // folder-share guest) are refused outright; a full-power owner device additionally drives the owner
+        // control planes. ----
         var toRoute: Frame = env.body
         var origin: String? = null
-        var guestScope: GuestScope? = null
         when {
             bridges.isBridge(deviceId) -> {
                 val guard = bridges.startGuard(deviceId)
@@ -617,34 +636,6 @@ class DeviceSessions(
                     is BridgeVerdict.Allow -> {
                         toRoute = v.frame // canonicalized workdir, clamped mode, stripped takeOver/force
                         origin = guard.spec.name
-                    }
-                }
-            }
-            bridges.isGuest(deviceId) -> {
-                val guard = bridges.startGuestGuard(deviceId)
-                if (guard == null || !GuestCaps.ingressAllowed(env.body)) {
-                    log.warn("guest ${deviceId.take(8)}… sent forbidden ${env.body::class.simpleName} — refused")
-                    runCatching { sink.emit(PocketError("share_forbidden", "not permitted for a folder-share guest: ${env.body::class.simpleName}", convoIdOf(env.body))) }
-                    return
-                }
-                val liveOwned = if (env.body is OpenSession) core.registry.liveCountOf(guard.ownedConvoIds()) else 0
-                when (val v = guard.vet(env.body, System.currentTimeMillis(), liveOwned)) {
-                    is BridgeVerdict.Deny -> {
-                        log.warn("guest ${deviceId.take(8)}… ${env.body::class.simpleName} denied: ${v.code.guestWire}")
-                        runCatching { sink.emit(PocketError(v.code.guestWire, v.code.guestMessage, convoIdOf(env.body))) }
-                        return
-                    }
-                    is BridgeVerdict.Allow -> {
-                        toRoute = v.frame // canonicalized workdir, tier-clamped mode, stripped takeOver/force
-                        origin = guard.spec.name
-                        val spec = bridges.specOf(deviceId)
-                        guestScope = GuestScope(
-                            roots = spec?.workdirs?.mapNotNull { PathScope.canonical(it) } ?: emptyList(),
-                            ownedSessions = bridges.guestSessionIds(deviceId),
-                            label = spec?.name ?: "guest",
-                            expiresAt = spec?.expiresAt,
-                            tier = spec?.tier ?: AccessTier.REVIEW,
-                        )
                     }
                 }
             }
@@ -700,6 +691,13 @@ class DeviceSessions(
                 log.warn("retired collaborator credential ${deviceId.take(8)}… sent ${env.body::class.simpleName} — refused")
                 return
             }
+            bridges.kindOf(deviceId) == CredentialKind.GUEST -> {
+                // A folder-share guest (#115, retired 2026-10). Its key is still loaded until [retireLegacyGuests]
+                // clears it once the relay link is up, so the kind is recognised — and refused outright, every frame.
+                // Nothing is answered: [sealAndSend] lets only the access-ended notice through to this kind.
+                log.warn("retired folder-share guest ${deviceId.take(8)}… sent ${env.body::class.simpleName} — refused")
+                return
+            }
             bridges.isRestricted(deviceId) -> {
                 // A CONFIRMED restricted credential whose kind none of the branches above claims — i.e. a
                 // [CredentialKind] this build has no capability policy for, loaded from a file a NEWER
@@ -711,11 +709,10 @@ class DeviceSessions(
                 return
             }
             else -> {
-                // FULL-POWER owner device: the share/bridge control planes (mint / list / revoke) need
-                // handles the router lacks, so they're intercepted here — via the SAME dispatcher the LAN
-                // transport uses. A restricted credential never reaches this branch (its own whitelist
-                // denies these frames), so re-sharing the machine or minting another bridge is
-                // structurally impossible.
+                // FULL-POWER owner device: the bridge control plane (mint / list / revoke) needs handles the
+                // router lacks, so it's intercepted here — via the SAME dispatcher the LAN transport uses. A
+                // restricted credential never reaches this branch (its own whitelist denies these frames), so
+                // minting another bridge is structurally impossible.
                 // project-pin pushes (issue #362): ONE subscriber per device key, idempotent across frames, and
                 // resolved entirely at emission by [deliverProjectPins]. Attaching delivers nothing by itself —
                 // the device's CURRENT connection must also have declared the capability and fetched.
@@ -748,17 +745,17 @@ class DeviceSessions(
                             else sink.emit(frame)
                         },
                     )
-                    route(env.body, pinSink, origin, guestScope, deviceId, { inboundCaps }, RelayPinConnection(deviceId, link, inboundCaps))
+                    route(env.body, pinSink, origin, deviceId, { inboundCaps }, RelayPinConnection(deviceId, link, inboundCaps))
                     return
                 }
                 if (isOwnerControlFrame(env.body)) {
                     // OFF the reader loop: a mint suspends ~10s waiting for the relay's PairTicket reply,
                     // which arrives through the SAME single ws reader that called us — dispatching inline
                     // deadlocks the mint into its own timeout (and starves every device for the duration).
-                    // The direct-ws leg masked this for shares/bridges; the relay leg hits it every time.
+                    // The direct-ws leg masked this for bridges; the relay leg hits it every time.
                     val body = env.body
                     core.scope.launch {
-                        val handled = dispatchOwnerControl(body, shareControl, bridgeControl) { sink.emit(it) }
+                        val handled = dispatchOwnerControl(body, bridgeControl) { sink.emit(it) }
                         // null control plane (daemon still wiring up / LAN-only serve) — surface it rather
                         // than vanish, mirroring what the router's fall-through used to produce
                         if (!handled) runCatching { sink.emit(PocketError("unsupported", "the daemon isn't ready for ${body::class.simpleName}", null)) }
@@ -767,7 +764,7 @@ class DeviceSessions(
                 }
             }
         }
-        route(toRoute, sink, origin, guestScope, deviceId, capsNow)
+        route(toRoute, sink, origin, deviceId, capsNow)
     }
 
     /** The router hand-off, extracted so a frame can take it either inline or off the reader loop.
@@ -777,7 +774,6 @@ class DeviceSessions(
         frame: Frame,
         sink: OutboundSink,
         origin: String?,
-        guestScope: GuestScope?,
         deviceId: String,
         caps: () -> RequestRouter.ClientCapsHolder,
         /** #362: the pin context of the connection that sent a project-pin request; null for every other frame. */
@@ -787,10 +783,9 @@ class DeviceSessions(
             // deviceId is the Noise-authenticated transport identity — never a frame field
             // listingLane: this reader serves EVERY device, so a session-list reply (a transcript scan) is produced on
             // the device's own lane instead of here — in order with that device's other listings, behind nobody else's
-            core.router.handle(frame, sink, origin, guestScope, caps = caps(), deviceId = deviceId, pinConnection = pin, listingLane = deviceId) { convoId ->
+            core.router.handle(frame, sink, origin, caps = caps(), deviceId = deviceId, pinConnection = pin, listingLane = deviceId) { convoId ->
                 mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }
                 bridges.guardOf(deviceId)?.noteOpened(convoId)     // bridge (#91)
-                bridges.guestGuardOf(deviceId)?.noteOpened(convoId) // guest (#115)
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -936,23 +931,23 @@ class DeviceSessions(
     }
 
     private suspend fun sealAndSend(deviceId: String, frame: Frame) {
-        // ---- restricted EGRESS gate (issue #91 bridges + #115 guests): this is the ONLY place frames are
-        // sealed toward a relay device, so filtering here covers every source — conversation fan-out,
-        // handshake DaemonInfo, resurfaced asks, router errors. A bridge can never receive a PermissionAsk;
-        // a guest CAN (it answers its own), but neither ever receives the management/identity frames.
+        // ---- restricted EGRESS gate (issue #91 bridges, #367 execution links, the retired kinds): this is the
+        // ONLY place frames are sealed toward a relay device, so filtering here covers every source — conversation
+        // fan-out, handshake DaemonInfo, resurfaced asks, router errors. A bridge can never receive a PermissionAsk
+        // nor any management/identity frame.
         // Keyed on isBridgeCandidate so the provisional window (pre-first-transport handshake) is covered.
         if (bridges.isBridgeCandidate(deviceId)) {
             // learn the sessionIds minted for this credential's convos (SessionLive backfills them) so a
-            // later open(resumeId=…)/read is recognized as OWN; the guest guard also persists to the ledger
+            // later open(resumeId=…)/read is recognized as OWN
             if (frame is SessionLive) frame.sessionId?.let { sid ->
                 bridges.guardOf(deviceId)?.noteSession(frame.convoId, sid)
-                bridges.guestGuardOf(deviceId)?.noteSession(frame.convoId, sid)
             }
             // egress whitelist by kind. A provisional (kind not yet confirmed) candidate only ever has the
-            // handshake DaemonInfo in flight, which BOTH whitelists drop — so fall back to the stricter
+            // handshake DaemonInfo in flight, which every whitelist drops — so fall back to the stricter
             // BRIDGE whitelist until the first transport frame confirms the kind (fail closed).
             val allowed = when (bridges.kindOf(deviceId)) {
-                CredentialKind.GUEST -> GuestCaps.egressAllowed(frame)
+                // a retired folder-share guest (2026-10) gets the access-ended notice and nothing else
+                CredentialKind.GUEST -> frame is ShareEnded
                 // #367: the run plane's own reply path already filters, but this is the ONE place a frame is
                 // sealed toward a relay device, so an execution credential is filtered here too — that is
                 // what keeps a resurfaced ask, a router error or any future fan-out from reaching it.

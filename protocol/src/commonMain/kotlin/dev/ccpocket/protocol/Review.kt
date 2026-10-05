@@ -10,6 +10,8 @@ import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 
 // ===========================================================================
+//  RETIRED (2026-10): review requests were removed — 已下线，仅为兼容保留. Every type below is kept
+//  only so older apps and daemons still decode; this daemon answers the requests as retired.
 //  ReviewRequest (docs/design/REVIEW-REQUEST.md): TASK-context handoff. A sender
 //  shares a narrow artifact reference (MR / document / commit range) plus a brief;
 //  the recipient reviews it with THEIR OWN daemon, repo, agent and credentials and
@@ -28,7 +30,7 @@ import kotlinx.serialization.encoding.Encoder
 //     caller arms a reply deadline and says "the other daemon needs an update".
 // ===========================================================================
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * A ReviewRequest's lifecycle state (§8). The SENDER daemon's persisted row is the only authority; the
  * recipient's mirror and every UI are followers.
  *
@@ -78,14 +80,14 @@ private object ReviewStatusSerializer : KSerializer<ReviewStatus> {
     }
 }
 
-/** The four states after which a request is history. [ReviewStatus.RESPONDED] is deliberately NOT
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. The four states after which a request is history. [ReviewStatus.RESPONDED] is deliberately NOT
  *  terminal (the sender still closes it) and neither is [ReviewStatus.UNKNOWN] — a state this build
  *  cannot read must stay locked rather than be silently treated as finished. */
 val ReviewStatus.isTerminal: Boolean
     get() = this == ReviewStatus.CLOSED || this == ReviewStatus.DECLINED ||
         this == ReviewStatus.CANCELLED || this == ReviewStatus.EXPIRED
 
-/** What kind of thing is being reviewed (§7.2). M1 ships the three link-shaped kinds; FILE_SNAPSHOT
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. What kind of thing is being reviewed (§7.2). M1 ships the three link-shaped kinds; FILE_SNAPSHOT
  *  (attachment bytes) is an M3 milestone and deliberately has no wire value yet. */
 @Serializable(with = ArtifactKindSerializer::class)
 enum class ArtifactKind(internal val wire: String) {
@@ -112,7 +114,7 @@ private object ArtifactKindSerializer : KSerializer<ArtifactKind> {
     }
 }
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * One thing to review (§7.2). Which fields are REQUIRED depends on [kind] — the sender daemon validates
  * before persisting and refuses rather than truncating:
  *  - [ArtifactKind.MERGE_REQUEST] / [ArtifactKind.DOCUMENT_URL]: [url];
@@ -134,7 +136,7 @@ data class ArtifactRef(
     val title: String? = null,
 )
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * The structured brief (§7.3): navigation for the recipient, NOT a permission grant and NOT an
  * instruction channel into their daemon. Only [request] must be non-blank; everything else is optional
  * colour, and every list is bounded by the sending daemon before it is persisted.
@@ -152,7 +154,7 @@ data class ReviewBrief(
     val definitionOfDone: List<String> = emptyList(),
 )
 
-/** The overall call the reviewer makes (§7.4). Tolerant like every other enum here. */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. The overall call the reviewer makes (§7.4). Tolerant like every other enum here. */
 @Serializable(with = ReviewVerdictSerializer::class)
 enum class ReviewVerdict(internal val wire: String) {
     APPROVE("approve"),
@@ -173,7 +175,7 @@ private object ReviewVerdictSerializer : KSerializer<ReviewVerdict> {
     }
 }
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * One finding inside a [ReviewResult]. [severity] is a plain string (the [HandoffFinding] pattern): a
  * future level degrades to display text instead of failing the whole decode. Suggested values are
  * [HandoffFinding.SEVERITY_CRITICAL] … [HandoffFinding.SEVERITY_INFO].
@@ -189,7 +191,7 @@ data class ReviewFinding(
     val line: Int? = null,
 )
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * The structured outcome the recipient returns (§7.4). [respondedByDeviceId]/[respondedAt] are STAMPED
  * BY THE SENDER'S DAEMON from the authenticated transport — a client-declared identity is never
  * trusted — which is why they default rather than being required.
@@ -208,7 +210,7 @@ data class ReviewResult(
     val respondedAt: Long = 0,
 )
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * One ReviewRequest (§7.1). The SENDER daemon owns the authoritative row; the recipient daemon keeps a
  * mirror keyed by (peer account, id) and never invents a transition the sender did not confirm.
  *
@@ -256,7 +258,7 @@ data class ReviewRequest(
 //  field (§10: "wire 身份来自 E2E transport").
 // ===========================================================================
 
-/** owner -> daemon: create + send a ReviewRequest to one bound contact. Reply: [ReviewRequestCreated]. */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: create + send a ReviewRequest to one bound contact. Reply: [ReviewRequestCreated]. */
 @Serializable
 @SerialName("pocket/review.create")
 data class CreateReviewRequest(
@@ -269,7 +271,7 @@ data class CreateReviewRequest(
     val expiresAt: Long? = null,
 ) : ToDaemon
 
-/** daemon -> owner: the reply to [CreateReviewRequest]. [code] carries the refusal machine-readably
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. daemon -> owner: the reply to [CreateReviewRequest]. [code] carries the refusal machine-readably
  *  (`review_no_recipient`, `review_bad_artifact`, `review_too_large`, …). */
 @Serializable
 @SerialName("pocket/review.created")
@@ -280,7 +282,7 @@ data class ReviewRequestCreated(
     val code: String? = null,
 ) : ToPhone
 
-/** owner/recipient -> daemon: list the requests this caller may see (the daemon filters by credential:
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner/recipient -> daemon: list the requests this caller may see (the daemon filters by credential:
  * an owner sees its outgoing rows, a collaborator only rows addressed to its own device). M1 returns
  * the bounded visible snapshot: request revisions are per-row, so [sinceRevision] cannot safely be a
  * global reconnect cursor and remains reserved for a future ledger cursor. Reply: [ReviewListing]. */
@@ -291,17 +293,17 @@ data class ListReviewRequests(
     val sinceRevision: Long = 0,
 ) : ToDaemon
 
-/** daemon -> caller: the reply to [ListReviewRequests], already credential-filtered. */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. daemon -> caller: the reply to [ListReviewRequests], already credential-filtered. */
 @Serializable
 @SerialName("pocket/review.listing")
 data class ReviewListing(val items: List<ReviewRequest> = emptyList()) : ToPhone
 
-/** owner/recipient -> daemon: fetch one request by id. Reply: [ReviewUpdated] or a `review_*` error. */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner/recipient -> daemon: fetch one request by id. Reply: [ReviewUpdated] or a `review_*` error. */
 @Serializable
 @SerialName("pocket/review.get")
 data class GetReviewRequest(val requestId: String) : ToDaemon
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * recipient -> daemon: "I have this on disk" (§8: QUEUED → DELIVERED). Sent ONLY after the recipient
  * daemon's own atomic persist, so a relay write that never reached storage can never read as delivered.
  */
@@ -313,7 +315,7 @@ data class MarkReviewDelivered(
     val idempotencyKey: String = "",
 ) : ToDaemon
 
-/** recipient -> daemon: "I'll take this" (DELIVERED → ACKNOWLEDGED). */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. recipient -> daemon: "I'll take this" (DELIVERED → ACKNOWLEDGED). */
 @Serializable
 @SerialName("pocket/review.acknowledge")
 data class AcknowledgeReviewRequest(
@@ -321,7 +323,7 @@ data class AcknowledgeReviewRequest(
     val idempotencyKey: String = "",
 ) : ToDaemon
 
-/** recipient -> daemon: "I'm reviewing now" (DELIVERED/ACKNOWLEDGED → IN_PROGRESS). */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. recipient -> daemon: "I'm reviewing now" (DELIVERED/ACKNOWLEDGED → IN_PROGRESS). */
 @Serializable
 @SerialName("pocket/review.start")
 data class StartReviewRequest(
@@ -329,7 +331,7 @@ data class StartReviewRequest(
     val idempotencyKey: String = "",
 ) : ToDaemon
 
-/** recipient -> daemon: refuse the review (→ DECLINED). [reason] is the recipient's own words. */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. recipient -> daemon: refuse the review (→ DECLINED). [reason] is the recipient's own words. */
 @Serializable
 @SerialName("pocket/review.decline")
 data class DeclineReviewRequest(
@@ -338,7 +340,7 @@ data class DeclineReviewRequest(
     val idempotencyKey: String = "",
 ) : ToDaemon
 
-/** recipient -> daemon: return the structured result (→ RESPONDED). May skip acknowledge/start for a
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. recipient -> daemon: return the structured result (→ RESPONDED). May skip acknowledge/start for a
  *  light review. The daemon stamps [ReviewResult.respondedByDeviceId]/[ReviewResult.respondedAt]. */
 @Serializable
 @SerialName("pocket/review.respond")
@@ -348,17 +350,17 @@ data class RespondReviewRequest(
     val idempotencyKey: String = "",
 ) : ToDaemon
 
-/** owner -> daemon: withdraw a request the recipient has not started (QUEUED/DELIVERED/ACKNOWLEDGED). */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: withdraw a request the recipient has not started (QUEUED/DELIVERED/ACKNOWLEDGED). */
 @Serializable
 @SerialName("pocket/review.cancel")
 data class CancelReviewRequest(val requestId: String) : ToDaemon
 
-/** owner -> daemon: acknowledge a returned result (RESPONDED → CLOSED, the terminal happy path). */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: acknowledge a returned result (RESPONDED → CLOSED, the terminal happy path). */
 @Serializable
 @SerialName("pocket/review.close")
 data class CloseReviewRequest(val requestId: String) : ToDaemon
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * daemon -> allowed clients: the authoritative row after a change — pushed on every transition and
  * returned as the reply to every recipient mutation, so the recipient's mirror is only ever written
  * from sender truth. Clients key on [ReviewRequest.id] and replace wholesale when [ReviewRequest.revision]
@@ -386,7 +388,7 @@ data class ReviewUpdated(val request: ReviewRequest) : ToPhone
 //  Nothing here may carry a ticket, credential, private key or control token.
 // ===========================================================================
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * One review contact, in the terms the owner's UI renders (§9). MERGED VIEW of two different
  * credentials: an OUTBOUND row is a [Collaborator] in this account (I can send them reviews), an
  * INBOUND row is a peer link this daemon holds in THEIR account (they can send me theirs).
@@ -410,17 +412,17 @@ data class ReviewContact(
     val canSend: Boolean = false,
 )
 
-/** owner -> daemon: list review contacts, both directions. Reply: [ReviewContactsListing]. */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: list review contacts, both directions. Reply: [ReviewContactsListing]. */
 @Serializable
 @SerialName("pocket/review.contacts")
 data object ListReviewContacts : ToDaemon
 
-/** daemon -> owner: the reply to [ListReviewContacts]. */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. daemon -> owner: the reply to [ListReviewContacts]. */
 @Serializable
 @SerialName("pocket/review.contacts_listing")
 data class ReviewContactsListing(val items: List<ReviewContact> = emptyList()) : ToPhone
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * owner -> daemon: mint a one-time invite that establishes a REVIEW peer link (§4.1).
  *
  * Deliberately a separate frame from [CreateCollaboratorTicket] rather than a flag on it: the two mint
@@ -431,7 +433,7 @@ data class ReviewContactsListing(val items: List<ReviewContact> = emptyList()) :
 @SerialName("pocket/review.contact_invite")
 data class CreateReviewInvite(val label: String? = null) : ToDaemon
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * daemon -> owner: the reply to [CreateReviewInvite]. [invite] is the single-use connect URI — the one
  * piece of establishment material this family carries, returned once for the owner to show as QR/text
  * and never logged. Absent on failure, where [code] carries the refusal machine-readably.
@@ -447,7 +449,7 @@ data class ReviewInviteCreated(
     val code: String? = null,
 ) : ToPhone
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * owner -> daemon: redeem a peer's invite on THIS machine, so this daemon starts receiving their review
  * requests. The scanning client never redeems it itself — the resulting credential belongs to the
  * always-on daemon, which is what keeps delivery working with every UI closed. Reply: [ReviewContactUpdated].
@@ -456,7 +458,7 @@ data class ReviewInviteCreated(
 @SerialName("pocket/review.contact_join")
 data class JoinReviewContact(val invite: String, val label: String? = null) : ToDaemon
 
-/** owner -> daemon: sever one contact. [direction] disambiguates the two id spaces rather than making
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: sever one contact. [direction] disambiguates the two id spaces rather than making
  *  the daemon guess which ledger `id` belongs to. Reply: [ReviewContactUpdated]. */
 @Serializable
 @SerialName("pocket/review.contact_remove")
@@ -465,7 +467,7 @@ data class RemoveReviewContact(
     val direction: CollaboratorDirection = CollaboratorDirection.UNKNOWN,
 ) : ToDaemon
 
-/** daemon -> owner: the reply to [JoinReviewContact]/[RemoveReviewContact]. */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. daemon -> owner: the reply to [JoinReviewContact]/[RemoveReviewContact]. */
 @Serializable
 @SerialName("pocket/review.contact_updated")
 data class ReviewContactUpdated(
@@ -475,7 +477,7 @@ data class ReviewContactUpdated(
     val code: String? = null,
 ) : ToPhone
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * One row of THIS machine's received inbox: the sender's authoritative [request], plus the local truth
  * around it. [pending] names the actions this daemon has queued but the sender has not confirmed — the
  * honesty that keeps "queued" from being rendered as "they saw it" (§8).
@@ -490,23 +492,23 @@ data class ReviewInboxItem(
     val pending: List<String> = emptyList(),
 )
 
-/** owner -> daemon: list the review requests THIS machine received. Reply: [ReviewInboxListing]. */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: list the review requests THIS machine received. Reply: [ReviewInboxListing]. */
 @Serializable
 @SerialName("pocket/review.inbox")
 data class ListReviewInbox(val status: ReviewStatus? = null) : ToDaemon
 
-/** daemon -> owner: the reply to [ListReviewInbox] — the bounded complete snapshot a reconnecting
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. daemon -> owner: the reply to [ListReviewInbox] — the bounded complete snapshot a reconnecting
  *  client heals from, newest first. */
 @Serializable
 @SerialName("pocket/review.inbox_listing")
 data class ReviewInboxListing(val items: List<ReviewInboxItem> = emptyList()) : ToPhone
 
-/** owner -> daemon: build the safe execution bundle for one received request. Reply: [ReviewPrepared]. */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: build the safe execution bundle for one received request. Reply: [ReviewPrepared]. */
 @Serializable
 @SerialName("pocket/review.prepare")
 data class PrepareReviewRequest(val requestId: String) : ToDaemon
 
-/** daemon -> owner: the reply to [PrepareReviewRequest]. */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. daemon -> owner: the reply to [PrepareReviewRequest]. */
 @Serializable
 @SerialName("pocket/review.prepared")
 data class ReviewPrepared(
@@ -516,7 +518,7 @@ data class ReviewPrepared(
     val code: String? = null,
 ) : ToPhone
 
-/** Which recipient-side action the owner is asking its own daemon to queue. Tolerant like every other
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. Which recipient-side action the owner is asking its own daemon to queue. Tolerant like every other
  *  enum here; [UNKNOWN] fails closed (no action is taken for a verb this build cannot read). */
 @Serializable(with = ReviewInboxActionSerializer::class)
 enum class ReviewInboxAction(internal val wire: String) {
@@ -536,7 +538,7 @@ private object ReviewInboxActionSerializer : KSerializer<ReviewInboxAction> {
     }
 }
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * owner -> daemon: queue one recipient-side action on THIS machine's inbox. The daemon owns the retry:
  * the answer says whether it was recorded, never whether the colleague has seen it. Reply: [ReviewInboxActed].
  */
@@ -551,7 +553,7 @@ data class ActOnReviewInbox(
     val result: ReviewResult? = null,
 ) : ToDaemon
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * daemon -> owner: the reply to [ActOnReviewInbox]. [queued] false with [ok] true means the request was
  * ALREADY in that state and nothing needed sending — not a failure, and not a delivery either.
  */
@@ -566,7 +568,7 @@ data class ReviewInboxActed(
     val code: String? = null,
 ) : ToPhone
 
-/** Who sent this, in the only terms a reviewer needs: a label and the fingerprint they verified when
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. Who sent this, in the only terms a reviewer needs: a label and the fingerprint they verified when
  *  the link was established. NEVER the credential, ticket or key material behind the link. */
 @Serializable
 data class PreparePeer(
@@ -575,7 +577,7 @@ data class PreparePeer(
     val fingerprint: String,
 )
 
-/**
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * The deterministic execution bundle `review prepare` returns (§4.3): everything the recipient's own
  * agent needs to start reviewing, and nothing else.
  *
@@ -605,5 +607,5 @@ data class ReviewExecutionBundle(
     val notes: List<String> = emptyList(),
 )
 
-/** Default expiry window for a fresh request (7 days) — daemon-clamped, mirrored by client forms. */
+/** RETIRED (2026-10, review requests removed) — 已下线，仅为兼容保留: kept so older peers still decode. Default expiry window for a fresh request (7 days) — daemon-clamped, mirrored by client forms. */
 const val DEFAULT_REVIEW_EXPIRES_SEC: Long = 7 * 24 * 3600

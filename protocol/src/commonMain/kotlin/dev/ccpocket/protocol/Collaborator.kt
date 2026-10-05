@@ -10,6 +10,8 @@ import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 
 // ===========================================================================
+//  RETIRED (2026-10): collaborator contacts were removed — 已下线，仅为兼容保留. Every type below is kept
+//  only so older apps and daemons still decode; this daemon answers the requests as retired.
 //  Collaborator Link (docs/design/SESSION-HANDOFF.md §4.1): a long-lived,
 //  E2E-trusted CONTACT binding established by a one-time QR/deeplink scan.
 //  It proves identity and provides a delivery address for Handoff offers —
@@ -21,7 +23,7 @@ import kotlinx.serialization.encoding.Encoder
 //  types an old peer silently drops (clients arm a reply deadline).
 // ===========================================================================
 
-/**
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * The link's direction FROM THE OWNER'S PERSPECTIVE (§4.1): permissions stay directional even when
  * the UI renders a mutual pair as one contact. OUTBOUND = "I can send them handoffs" (A→B seen by A).
  */
@@ -49,7 +51,7 @@ private object CollaboratorDirectionSerializer : KSerializer<CollaboratorDirecti
     }
 }
 
-/**
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * What a contact link was established FOR (REVIEW-REQUEST.md §13.3). The two collaboration features
  * share the Collaborator Link transport but not their recipients: Session Handoff hands over a live
  * RUNTIME context to a person's App, ReviewRequest hands a TASK to a colleague's DAEMON. Offering one's
@@ -82,7 +84,7 @@ private object CollaboratorPurposeSerializer : KSerializer<CollaboratorPurpose> 
     }
 }
 
-/**
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * One collaborator contact as the daemon knows it. [deviceId] is the collaborator's credential id in
  * the owner's account space — the handle Handoff recipient-binding, revoke and push routing all key on.
  * [removed] contacts stay listed (terminal group): past handoffs still reference them by label.
@@ -106,7 +108,7 @@ data class Collaborator(
     val purpose: CollaboratorPurpose = CollaboratorPurpose.SESSION_HANDOFF,
 )
 
-/**
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * May a Session Handoff be bound to this contact? A [CollaboratorPurpose.REVIEW] peer may not: it is a
  * colleague's daemon holding a task-context link, and a runtime handoff would hand it a drive lease it
  * was never established for. An [CollaboratorPurpose.UNKNOWN] purpose fails closed the same way.
@@ -114,7 +116,7 @@ data class Collaborator(
 val Collaborator.acceptsSessionHandoff: Boolean
     get() = !removed && purpose == CollaboratorPurpose.SESSION_HANDOFF
 
-/**
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * May a ReviewRequest be sent to this contact? ONLY a [CollaboratorPurpose.REVIEW] link, and the
  * strictness is the point: the two features are separated by what the owner chose at MINT time, in both
  * directions. A [CollaboratorPurpose.SESSION_HANDOFF] contact is a person's App, established to receive
@@ -128,7 +130,7 @@ val Collaborator.acceptsSessionHandoff: Boolean
 val Collaborator.acceptsReviewRequest: Boolean
     get() = !removed && purpose == CollaboratorPurpose.REVIEW
 
-/**
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * The one-time connect ticket the initiator's App renders as QR/link (§4.1 step 2). Carries ONLY
  * establishment material — no session, folder or handoff content. Mirrors [ShareInvite]'s transport
  * fields so the recipient App reuses the same relay redeem path with a COLLABORATOR-kind credential.
@@ -179,15 +181,15 @@ data class CollaboratorInvite(
 //  ticket was addressed to.
 // ---------------------------------------------------------------------------
 
-/** The Session Handoff door. FROZEN: released apps parse exactly this, and a QR/link already
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode. The Session Handoff door. FROZEN: released apps parse exactly this, and a QR/link already
  *  printed or pasted has to keep working. */
 const val COLLAB_INVITE_URI_PREFIX = "ccpocket://collab#"
 
-/** The ReviewRequest contact door. Deliberately a host an older build does not recognise at all,
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode. The ReviewRequest contact door. Deliberately a host an older build does not recognise at all,
  *  so it falls through as "not a link I understand" instead of redeeming the ticket. */
 const val REVIEW_CONTACT_INVITE_URI_PREFIX = "ccpocket://review-contact#"
 
-/**
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * Which door an invite for [purpose] must be published under. [CollaboratorPurpose.REVIEW] is the only
  * value that leaves the legacy door, so a purpose this build cannot read ([CollaboratorPurpose.UNKNOWN])
  * never gets published as a Review invite — the fail-closed half lives in the DECODERS, which require an
@@ -201,7 +203,7 @@ fun inviteUriPrefix(purpose: CollaboratorPurpose): String =
 //  recipient side redeems the invite out-of-band (relay redeem, not a frame).
 // ---------------------------------------------------------------------------
 
-/** owner -> daemon: mint a one-time collaborator connect ticket. Reply: [CollaboratorTicketCreated]. */
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: mint a one-time collaborator connect ticket. Reply: [CollaboratorTicketCreated]. */
 @Serializable
 @SerialName("pocket/collaborator.ticket")
 data class CreateCollaboratorTicket(
@@ -209,7 +211,7 @@ data class CreateCollaboratorTicket(
     val label: String? = null,
 ) : ToDaemon
 
-/** daemon -> owner: the reply to [CreateCollaboratorTicket]. */
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode. daemon -> owner: the reply to [CreateCollaboratorTicket]. */
 @Serializable
 @SerialName("pocket/collaborator.ticket_created")
 data class CollaboratorTicketCreated(
@@ -218,27 +220,27 @@ data class CollaboratorTicketCreated(
     val error: String? = null,
 ) : ToPhone
 
-/** owner -> daemon: list my collaborator contacts (removed ones included, flagged). Reply: [CollaboratorListing]. */
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: list my collaborator contacts (removed ones included, flagged). Reply: [CollaboratorListing]. */
 @Serializable
 @SerialName("pocket/collaborator.list")
 data object ListCollaborators : ToDaemon
 
-/** daemon -> caller: the reply to [ListCollaborators]. */
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode. daemon -> caller: the reply to [ListCollaborators]. */
 @Serializable
 @SerialName("pocket/collaborator.listing")
 data class CollaboratorListing(val items: List<Collaborator> = emptyList()) : ToPhone
 
-/** owner -> daemon: sever a link (kills the credential; the contact row turns terminal, not deleted). */
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: sever a link (kills the credential; the contact row turns terminal, not deleted). */
 @Serializable
 @SerialName("pocket/collaborator.remove")
 data class RemoveCollaborator(val deviceId: String) : ToDaemon
 
-/** daemon -> attached owner clients: a contact changed (redeemed, relabelled, removed) — replace by [Collaborator.deviceId]. */
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode. daemon -> attached owner clients: a contact changed (redeemed, relabelled, removed) — replace by [Collaborator.deviceId]. */
 @Serializable
 @SerialName("pocket/collaborator.updated")
 data class CollaboratorUpdated(val collaborator: Collaborator) : ToPhone
 
-/**
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * daemon -> owner clients: someone redeemed the pending connect ticket — the "waiting for scan…"
  * screen flips to its Connected sub-state and returns to the interrupted handoff draft.
  */
@@ -259,7 +261,7 @@ private val FP_WORDS = listOf(
     "dune", "echo", "fjord", "grove", "haven", "iris", "jade", "krill",
 )
 
-/**
+/** RETIRED (2026-10, collaborator contacts removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * "tiger-brick-mango-void · ember-delta-canvas-orbit" from a base64url public key. 8 words from a
  * 32-word list ≈ 40 bits of display entropy — a HUMAN VERIFICATION AID against a wrong-QR mixup,
  * not the cryptographic trust root (that stays the key exchange itself).

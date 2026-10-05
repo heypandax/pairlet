@@ -268,6 +268,8 @@ data class DirectoryEntry(
     /** ALL live sessions here, executing-first (a dir can host several). The single activeSessionId/Title/
      *  gitBranch above stay populated with the first one so an older app keeps working. */
     val activeSessions: List<ActiveSession> = emptyList(),
+    // ---- RETIRED (2026-10, folder sharing #115 removed) — 已下线，仅为兼容保留: a new daemon never sets the three
+    //      fields below; they stay so the shape decodes unchanged both ways. ----
     // ---- folder-share (issue #115): set ONLY on a GUEST's project rows (the daemon stamps them when it
     //      returns the shared root to a scoped guest). All trailing optionals — an old daemon omits them
     //      (a guest never sees a shared row), an old app ignores them (renders a plain local row). ----
@@ -600,9 +602,13 @@ data class WorkflowRun(
 
 // ===========================================================================
 //  folder-share (issue #115): owner grants a scoped, expiring folder credential to a guest
+//  RETIRED (2026-10) — 已下线，仅为兼容保留: [ShareInvite] and [ShareInfo] are kept only so older peers
+//  decode. [AccessTier] is NOT retired: bridges ([CreateBridge.tier]) and the daemon's tier clamp use it.
 // ===========================================================================
 
 /**
+ * Still live (bridges grant it — [CreateBridge.tier]); the folder-share wording below is historical.
+ *
  * The autonomy tier an owner grants a folder share — the OWNER-facing name for the daemon-enforced
  * permission-mode CEILING a guest session runs under (never [PermissionMode.BYPASS_PERMISSIONS]; a
  * scoped guest can't put the daemon into "approve nothing"). Ordered least→most autonomous.
@@ -647,6 +653,8 @@ private object AccessTierSerializer : KSerializer<AccessTier> {
 }
 
 /**
+ * RETIRED (2026-10, folder sharing #115 removed) — 已下线，仅为兼容保留: a new daemon never mints one.
+ *
  * A self-contained folder-share invite (issue #115). The owner's daemon mints it and returns it to the
  * owner's app inside a [dev.ccpocket.protocol.ShareCreated]; the app renders it as a QR / copyable blob
  * the owner hands to the guest OUT OF BAND (like today's pairing QR — the relay never sees it, so the
@@ -670,6 +678,8 @@ data class ShareInvite(
 )
 
 /**
+ * RETIRED (2026-10, folder sharing #115 removed) — 已下线，仅为兼容保留: a new daemon lists none.
+ *
  * One folder the owner has shared, for the owner's management page ([dev.ccpocket.protocol.ShareListing]).
  * The owner sees WHO is using it and can revoke; approvals still go to the GUEST (this is an activity view,
  * not an approval inbox). [online]/[activeSessions] give the "active now" pulse; [lastActiveAt] the "idle" state.

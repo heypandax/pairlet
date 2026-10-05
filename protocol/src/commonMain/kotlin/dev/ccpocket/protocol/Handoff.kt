@@ -10,6 +10,8 @@ import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 
 // ===========================================================================
+//  RETIRED (2026-10): session handoff was removed — 已下线，仅为兼容保留. Every type below is kept
+//  only so older apps and daemons still decode; this daemon answers the requests as retired.
 //  Session Handoff (docs/design/SESSION-HANDOFF.md): an initiator hands the
 //  CURRENT Session to a chosen colleague at a stable checkpoint; the recipient
 //  continues it EXCLUSIVELY on the owner's machine and returns control plus a
@@ -26,7 +28,7 @@ import kotlinx.serialization.encoding.Encoder
 //     clients arm a reply deadline and show their "update the daemon" state.
 // ===========================================================================
 
-/** What the initiator asks the recipient to do (§10: v1 ships REVIEW; CONTINUE is a later milestone). */
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. What the initiator asks the recipient to do (§10: v1 ships REVIEW; CONTINUE is a later milestone). */
 @Serializable(with = HandoffKindSerializer::class)
 enum class HandoffKind(internal val wire: String) {
     /** Independent code review of the session's current work — read-only by default. */
@@ -48,7 +50,7 @@ private object HandoffKindSerializer : KSerializer<HandoffKind> {
     }
 }
 
-/**
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * A Handoff's lifecycle state (§5.1). The daemon's persisted state is the ONLY authorization truth
  * (§5.3 item 8) — App display state never is. [DRAFT] is a client-side preview notion: the daemon
  * creates directly in [WAITING] (the wire CreateHandoff IS the send) and never persists a DRAFT.
@@ -95,14 +97,14 @@ private object HandoffStatusSerializer : KSerializer<HandoffStatus> {
     }
 }
 
-/** The five states after which a Handoff is history: nothing transitions out of them, the Session is
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. The five states after which a Handoff is history: nothing transitions out of them, the Session is
  *  free again. [HandoffStatus.UNKNOWN] is deliberately NOT terminal — a state this build can't read
  *  must keep the session conservatively locked, not silently release it. */
 val HandoffStatus.isTerminal: Boolean
     get() = this == HandoffStatus.COMPLETED || this == HandoffStatus.DECLINED ||
         this == HandoffStatus.CANCELLED || this == HandoffStatus.EXPIRED || this == HandoffStatus.RECALLED
 
-/** The operation ceiling granted to the recipient (§8.3/§8.4). Enforced daemon-side; never widened by
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. The operation ceiling granted to the recipient (§8.3/§8.4). Enforced daemon-side; never widened by
  *  prompt text or client fields (§5.3 item 9). */
 @Serializable(with = HandoffAccessSerializer::class)
 enum class HandoffAccess(internal val wire: String) {
@@ -126,7 +128,7 @@ private object HandoffAccessSerializer : KSerializer<HandoffAccess> {
     }
 }
 
-/**
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * One Session Handoff — an independent first-class entity hanging off its Source Session (§3), with
  * its own id, status and lifecycle. Durable binding is (provider [sourceSessionId] + [workdir] +
  * [agent]), never a process-lifetime convoId alone (§5.4) — [sourceConvoId] is only the live hint.
@@ -177,7 +179,7 @@ data class SessionHandoff(
     val recallIncomplete: Boolean = false,
 )
 
-/**
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * The structured brief the initiator's Skill drafts and the initiator confirms (§7.3) — navigation and
  * explanation for the recipient, NOT a transcript redaction mechanism and NOT an authorization surface
  * (§5.3 item 9, §8.5). Only [request] is expected to be non-blank; every other field is optional color.
@@ -197,7 +199,7 @@ data class HandoffBrief(
     val definitionOfDone: List<String> = emptyList(),
 )
 
-/**
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * The structured outcome the recipient returns (§7.5). [returnedByDeviceId]/[returnedAt] are STAMPED
  * BY THE DAEMON on the return transition (the recipient's draft may leave them blank — a client-declared
  * identity is never trusted), which is why they default rather than being required like the §6 sketch.
@@ -219,7 +221,7 @@ data class HandoffResult(
     val returnedAt: Long = 0,
 )
 
-/**
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * One review finding inside a [HandoffResult]. [severity] is a plain string (the [AuthState.apiKeySource]
  * pattern): a future level degrades to display text instead of failing the decode — the suggested values
  * are the SEVERITY_* constants, ordered most→least severe.
@@ -242,7 +244,7 @@ data class HandoffFinding(
     }
 }
 
-/**
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * The Session's exclusive input-control lease (§5.3 invariant 1): at most ONE active lease per
  * Session, stored and checked INDEPENDENTLY of [HandoffStatus] — never inferred from UI or from
  * "status looks IN_PROGRESS". No lease exists during WAITING (everyone is refused); the lease is
@@ -266,7 +268,7 @@ data class SessionControllerLease(
 //  signal to arm a deadline and show its "update the daemon" state.
 // ===========================================================================
 
-/**
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * owner -> daemon: create a Handoff on the (persistently identified) Source Session and put it in
  * WAITING. The daemon refuses when the session already has a non-terminal Handoff (§3: at most one),
  * when [kind]/[access] decode to UNKNOWN (a newer client's value this daemon can't enforce — fail
@@ -294,7 +296,7 @@ data class CreateHandoff(
     val recipientDeviceId: String? = null,
 ) : ToDaemon
 
-/** daemon -> owner: the reply to [CreateHandoff]. On failure [error] says why (busy session, an
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. daemon -> owner: the reply to [CreateHandoff]. On failure [error] says why (busy session, an
  *  existing non-terminal handoff, unknown kind/access, bad expiry) and [code] carries the same refusal
  *  machine-readably (`handoff_not_supported` for a kind/access combination this daemon defines but does
  *  not enforce yet, `unknown_kind`/`unknown_access` for a newer peer's value, …). Trailing + defaulted:
@@ -308,7 +310,7 @@ data class HandoffCreated(
     val code: String? = null,
 ) : ToPhone
 
-/** owner/recipient -> daemon: list Handoffs this caller may see (the daemon filters by credential:
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner/recipient -> daemon: list Handoffs this caller may see (the daemon filters by credential:
  *  an owner sees all, a HANDOFF credential only its own). Both filters null = everything visible.
  *  Reply: one [HandoffListing]. */
 @Serializable
@@ -318,12 +320,12 @@ data class ListHandoffs(
     val sessionId: String? = null,
 ) : ToDaemon
 
-/** daemon -> caller: the reply to [ListHandoffs]. */
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. daemon -> caller: the reply to [ListHandoffs]. */
 @Serializable
 @SerialName("pocket/handoff.listing")
 data class HandoffListing(val items: List<SessionHandoff> = emptyList()) : ToPhone
 
-/**
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode.
  * recipient -> daemon: accept a WAITING Handoff. The daemon's compare-and-set makes exactly ONE
  * accepting device win (§5.3 item 5) — the second device, an expired invite, and a cancel that landed
  * first all get a [HandoffUpdated]/[PocketError] refusal. On success the Handoff turns IN_PROGRESS and
@@ -333,17 +335,17 @@ data class HandoffListing(val items: List<SessionHandoff> = emptyList()) : ToPho
 @SerialName("pocket/handoff.accept")
 data class AcceptHandoff(val handoffId: String) : ToDaemon
 
-/** recipient -> daemon: decline a WAITING Handoff (→ DECLINED, control back to the initiator). */
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. recipient -> daemon: decline a WAITING Handoff (→ DECLINED, control back to the initiator). */
 @Serializable
 @SerialName("pocket/handoff.decline")
 data class DeclineHandoff(val handoffId: String, val reason: String? = null) : ToDaemon
 
-/** owner -> daemon: withdraw a WAITING Handoff (→ CANCELLED, the initiator may type again). */
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: withdraw a WAITING Handoff (→ CANCELLED, the initiator may type again). */
 @Serializable
 @SerialName("pocket/handoff.cancel")
 data class CancelHandoff(val handoffId: String) : ToDaemon
 
-/** owner -> daemon: take control back from an IN_PROGRESS Handoff. An IDLE session settles → RECALLED
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: take control back from an IN_PROGRESS Handoff. An IDLE session settles → RECALLED
  *  immediately (the lease dies NOW). With a turn EXECUTING the daemon first marks
  *  [SessionControllerLease.recallRequested] + [SessionHandoff.recallPending] (every input is refused
  *  from that instant), interrupts the turn, and only settles RECALLED at the stable point — so the
@@ -352,24 +354,24 @@ data class CancelHandoff(val handoffId: String) : ToDaemon
 @SerialName("pocket/handoff.recall")
 data class RecallHandoff(val handoffId: String) : ToDaemon
 
-/** recipient -> daemon: return control (IN_PROGRESS → RETURNED). [result] is the recipient's
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. recipient -> daemon: return control (IN_PROGRESS → RETURNED). [result] is the recipient's
  *  confirmed draft; the daemon stamps [HandoffResult.returnedByDeviceId]/[HandoffResult.returnedAt]
  *  itself. Null result = an empty return (still a valid give-back). */
 @Serializable
 @SerialName("pocket/handoff.return")
 data class ReturnHandoff(val handoffId: String, val result: HandoffResult? = null) : ToDaemon
 
-/** owner -> daemon: acknowledge a RETURNED Handoff's result (→ COMPLETED, the terminal happy path). */
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. owner -> daemon: acknowledge a RETURNED Handoff's result (→ COMPLETED, the terminal happy path). */
 @Serializable
 @SerialName("pocket/handoff.complete")
 data class CompleteHandoff(val handoffId: String) : ToDaemon
 
-/** daemon -> attached allowed clients: a Handoff changed state — pushed on every transition (accept,
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. daemon -> attached allowed clients: a Handoff changed state — pushed on every transition (accept,
  *  decline, cancel, recall, return, expiry, completion) so both sides' UI reconciles from daemon truth
  *  (§5.3 item 8). Clients key on [SessionHandoff.id] and replace wholesale. */
 @Serializable
 @SerialName("pocket/handoff.updated")
 data class HandoffUpdated(val handoff: SessionHandoff) : ToPhone
 
-/** Default WAITING lifetime for a fresh Handoff (24h) — daemon-clamped, mirrored by client forms. */
+/** RETIRED (2026-10, session handoff removed) — 已下线，仅为兼容保留: kept so older peers still decode. Default WAITING lifetime for a fresh Handoff (24h) — daemon-clamped, mirrored by client forms. */
 const val DEFAULT_HANDOFF_EXPIRES_SEC: Long = 24 * 3600

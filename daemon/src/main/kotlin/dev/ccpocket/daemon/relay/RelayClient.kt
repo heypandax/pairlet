@@ -122,14 +122,10 @@ class RelayClient(
     /** The headless-bridge authority (issue #91) — PairLoopback serves list/revoke/mint from it. */
     val bridges: dev.ccpocket.daemon.bridge.BridgeRegistry get() = sessions.bridges
 
-    /** The OWNER folder-share control plane (issue #115) — PairLoopback serves the `share` CLI's
-     *  mint/list/revoke from it. Null until [run] installs it (a request during the brief startup window),
-     *  and always null on the local-server path, which has no relay link to mint a ticket over. */
-    val shareControl: ShareControl? get() = sessions.shareControl
-
     /** The OWNER bridge control plane (issue #91 follow-up) — PairLoopback serves `pair --headless` /
-     *  `bridges` from it, so the CLI and the app mint through one implementation. Null on the same terms
-     *  as [shareControl]. */
+     *  `bridges` from it, so the CLI and the app mint through one implementation. Null until [run] installs
+     *  it (a request during the brief startup window), and always null on the local-server path, which has
+     *  no relay link to mint a ticket over. */
     val bridgeControl: BridgeControl? get() = sessions.bridgeControl
 
     /** Daemon-managed adapter processes (issue #91 follow-up). Owned here so their lifetime matches the
@@ -140,16 +136,9 @@ class RelayClient(
     fun interactivePairingPending(): Boolean = sessions.interactivePairingPending()
 
     /** Revoke a bridge credential: prune locally NOW (the security anchor — its handshake key dies with
-     *  the bridges.json entry) and best-effort tell the relay so its row is revoked + socket closed.
-     *  [reason] flavors the guest-facing [dev.ccpocket.protocol.ShareEnded] notice (#115 follow-up). */
-    suspend fun revokeBridge(deviceId: String, reason: String = dev.ccpocket.protocol.ShareEnded.REASON_REVOKED) {
-        val noticed = sessions.onDeviceRevoked(deviceId, reason)
-        // The guest's ShareEnded notice rides the DATA writer while RevokeDevice rides the CONTROL writer —
-        // two independent pumps with no cross-ordering guarantee. Give the sealed notice a short head start
-        // so the relay forwards it before the revoke force-closes the guest's socket. Purely a delivery
-        // courtesy: the credential is ALREADY dead locally (onDeviceRevoked above — key pruned, E2E session
-        // cut, convos force-closed), so nothing security-relevant rides on this delay.
-        if (noticed) delay(REVOKE_NOTICE_GRACE_MS)
+     *  the bridges.json entry) and best-effort tell the relay so its row is revoked + socket closed. */
+    suspend fun revokeBridge(deviceId: String) {
+        sessions.onDeviceRevoked(deviceId)
         controlOutbox.send(dev.ccpocket.protocol.RevokeDevice(deviceId))
     }
 
@@ -238,22 +227,8 @@ class RelayClient(
             push?.let { controlOutbox.send(it) }
             push != null
         }
-        // issue #115: the OWNER folder-share control plane. Installed on the relay path (minting needs the
-        // relay link; the LAN path can't mint). DeviceSessions dispatches CreateShare/ListShares/RevokeShare
-        // to it for a full-power owner device only.
-        sessions.shareControl = ShareService(
-            accountId = identity.accountId,
-            daemonPubB64 = identity.e2ePubB64,
-            relayWsBase = relayWsBase,
-            ownerLabel = hostname,
-            registry = sessions.bridges,
-            mintTicket = { headless -> mintTicket(headless) },
-            interactivePairingPending = { sessions.interactivePairingPending() },
-            revokeCredential = { deviceId -> revokeBridge(deviceId) },
-            liveSessions = { core.registry.liveByCwd().entries.flatMap { (cwd, list) -> list.map { cwd to it } } },
-        )
-        // issue #91 follow-up: the OWNER bridge control plane, on the same relay-only footing as the share
-        // plane above. PairLoopback serves `pair --headless` / `bridges` from this SAME instance, so the CLI
+        // issue #91 follow-up: the OWNER bridge control plane, installed on the relay path (minting needs the
+        // relay link; the LAN path can't mint). PairLoopback serves `pair --headless` / `bridges` from this SAME instance, so the CLI
         // and the app's "New bridge" bind an identical intent.
         sessions.bridgeControl = BridgeService(
             accountId = identity.accountId,
@@ -284,7 +259,6 @@ class RelayClient(
         // would just burn its redeem attempts against a daemon that can't yet carry its handshake.
         launchBridgeAutostart(bridgeRunners)
         launch { reaperLoop() } // reclaim sessions abandoned while the phone is offline
-        launch { guestExpiryLoop() } // cut + purge folder shares the instant they expire (issue #115 §6)
         val reconnect = ReconnectBackoff()
         while (true) {
             linkAttachedAt = 0L
@@ -337,19 +311,6 @@ class RelayClient(
         residentLoop(REAP_SCAN_MS, onFailure = { log.error("idle reaper pass failed — next pass in ${REAP_SCAN_MS}ms", it) }) {
             val n = core.registry.reapIdle(IDLE_REAP_MS, relayPeerOnline = peerOnline)
             if (n > 0) log.info("reaped $n unoccupied idle session(s) — transcripts unhidden for desktop resume")
-        }
-    }
-
-    /** Cut + purge expired folder shares (issue #115 §6). Runs regardless of phone presence — an expired
-     *  guest must drop immediately, whether or not the owner is online. [revokeBridge] prunes the guest key
-     *  locally NOW (its handshake dies) and best-effort tells the relay to force-close its socket, so the
-     *  guest is severed and its credential can't be reused. */
-    private suspend fun guestExpiryLoop() {
-        residentLoop(GUEST_EXPIRY_SCAN_MS, onFailure = { log.error("guest expiry sweep failed — next sweep in ${GUEST_EXPIRY_SCAN_MS}ms", it) }) {
-            for (id in sessions.bridges.expiredGuestIds()) {
-                log.info("folder share ${id.take(8)}… expired — revoking")
-                runCatching { revokeBridge(id, reason = dev.ccpocket.protocol.ShareEnded.REASON_EXPIRED) }
-            }
         }
     }
 
@@ -457,9 +418,9 @@ class RelayClient(
                             }
                         }
                     }
-                    // no replay barrier will come from an old relay: ask for the retired collaborators' revokes now,
-                    // once the control writer above is draining the outbox
-                    if (relayProtoV < PROTO_V_ATTACH_REPLAY_COMPLETE) revokeRetiredCollaborators()
+                    // no replay barrier will come from an old relay: retire and ask for the retired credentials'
+                    // revokes now, once the control writer above is draining the outbox
+                    if (relayProtoV < PROTO_V_ATTACH_REPLAY_COMPLETE) revokeRetiredCredentials()
                     try {
                         for (frame in incoming) when (frame) {
                             is WsFrame.Binary -> Wire.unwrapDevice(frame.data)?.let { (deviceId, payload) ->
@@ -528,8 +489,8 @@ class RelayClient(
                     // into a destructive prune.
                     sessions.reconcileReplay(authoritativeEmpty = true)
                     log.info("attach device replay complete (relay protoV=$relayProtoV)")
-                    // the relay's device set is known now: any retired collaborator it still carries is revoked
-                    revokeRetiredCollaborators()
+                    // the relay's device set is known now: any retired credential it still carries is revoked
+                    revokeRetiredCredentials()
                 } else {
                     log.warn("ignoring attach replay marker from relay protoV=$relayProtoV")
                 }
@@ -542,17 +503,30 @@ class RelayClient(
     }
 
     /**
-     * Retired Collaborator Link credentials (session handoff / review contacts, 2026-10): their keys were
-     * cleared at startup, but each one is still a live device in this account at the relay until revoked
-     * there. Ask once per attach, after the relay's device set is known; the relay confirms each with
-     * `DeviceRevoked` ([DeviceSessions.onRelayDeviceRevoked]) or leaves it out of its next authoritative
-     * replay, and either removes the tombstone. Queued on the control outbox like every other control frame,
-     * so a link that drops first simply asks again on the next attach.
+     * Retired credentials (2026-10): Collaborator Links (session handoff / review contacts), whose keys were
+     * cleared at startup, and folder-share guests (#115), retired here first ([DeviceSessions.retireLegacyGuests]:
+     * tombstone, access-ended notice to an online guest, key cleared). Each one is still a live device in this
+     * account at the relay until revoked there. Ask once per attach, after the relay's device set is known; the
+     * relay confirms each with `DeviceRevoked` ([DeviceSessions.onRelayDeviceRevoked]) or leaves it out of its next
+     * authoritative replay, and either removes the tombstone. Queued on the control outbox like every other control
+     * frame, so a link that drops first simply asks again on the next attach.
      */
-    private suspend fun revokeRetiredCollaborators() {
+    private suspend fun revokeRetiredCredentials() {
+        // The notice rides the DATA writer while RevokeDevice rides the CONTROL writer — two independent pumps.
+        // Give it a short head start so the relay forwards it before the revoke force-closes the guest's socket.
+        // Delivery courtesy only: the guest's key is already gone locally.
+        val noticed = try {
+            sessions.retireLegacyGuests()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("retiring folder-share guests failed (${e.message}) — the next attach retries")
+            false
+        }
+        if (noticed) delay(REVOKE_NOTICE_GRACE_MS)
         val revokes = sessions.pendingRetiredRevocations()
         if (revokes.isEmpty()) return
-        log.info("asking the relay to revoke ${revokes.size} retired collaborator credential(s)")
+        log.info("asking the relay to revoke ${revokes.size} retired credential(s)")
         revokes.forEach { controlOutbox.send(it) }
     }
 
@@ -565,7 +539,6 @@ class RelayClient(
         // enough to ride out brief app-backgrounding / network blips — a reaped session re-opened later
         // resumes in place on the same id (see Conversation.open), so too-short here mostly costs churn.
         const val IDLE_REAP_MS = 90 * 1000L       // 90s idle with no occupying client view -> reclaim + unhide
-        const val GUEST_EXPIRY_SCAN_MS = 30 * 1000L // how often to sweep for expired folder shares (issue #115)
         const val REVOKE_NOTICE_GRACE_MS = 250L   // head start for the guest's ShareEnded notice before RevokeDevice cuts its socket
         const val REAP_SCAN_MS = 20 * 1000L       // reaper wake cadence
         const val HEARTBEAT_INTERVAL_MS = 20_000L // app-level Ping cadence (relay echoes Pong)

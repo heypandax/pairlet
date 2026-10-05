@@ -2,8 +2,6 @@ package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.DaemonPrefs
 import dev.ccpocket.daemon.bridge.BridgeCaps
-import dev.ccpocket.daemon.bridge.GuestCaps
-import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
@@ -13,7 +11,6 @@ import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
-import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AddWorktree
 import dev.ccpocket.protocol.FetchGitStatus
 import dev.ccpocket.protocol.Frame
@@ -42,7 +39,7 @@ import kotlin.test.assertTrue
 /**
  * The Git panel's OWNER-ONLY red line (#280 §3.1, #281 §5), tested at the router — the second door.
  *
- * The first door is the ingress capability whitelist (GuestCaps / BridgeCaps), which default-denies
+ * The first door is the ingress capability whitelist (BridgeCaps), which default-denies
  * anything not explicitly listed; [git_frames_are_denied_by_every_capability_whitelist] pins that these
  * types stayed off those lists. But a whitelist is a list someone can edit, so the router re-checks the
  * restricted credential classes at dispatch and refuses with a frame the app can render rather than with
@@ -75,21 +72,15 @@ class RequestRouterGitTest {
     private fun reply(
         frame: Frame,
         origin: String? = null,
-        guestScope: GuestScope? = null,
     ): Frame = runBlocking {
         val got = CompletableDeferred<Frame>()
         router(CoroutineScope(Dispatchers.Default)).handle(
             frame,
             { f -> if (f is GitStatus || f is GitDiff || f is GitActionResult || f is WorktreeList) got.complete(f) },
-            origin = origin, guestScope = guestScope,
+            origin = origin,
         )
         withTimeout(10_000) { got.await() }
     }
-
-    private fun guest() = GuestScope(
-        roots = listOf(workdir), ownedSessions = emptySet(),
-        label = "alex", expiresAt = null, tier = AccessTier.COLLABORATE,
-    )
 
     private fun refusalOf(f: Frame): String? = when (f) {
         is GitStatus -> f.error.takeIf { !f.ok }
@@ -118,21 +109,11 @@ class RequestRouterGitTest {
     }
 
     @Test
-    fun a_scoped_guest_is_refused_on_every_git_frame_reads_included() {
-        // deliberately scoped to the very workdir it is asking about: the refusal is about the SURFACE
-        // (whole-repository state) being wider than a share, not about the path.
-        for (req in everyGitRequest()) {
-            val r = reply(req, origin = "alex", guestScope = guest())
-            assertEquals(RequestRouter.GIT_OWNER_ONLY, refusalOf(r), "${req::class.simpleName} must be refused for a guest")
-        }
-    }
-
-    @Test
     fun the_refusal_never_reveals_whether_the_path_exists() {
-        // a directory oracle would be a real leak: a guest could probe the owner's disk by watching which
-        // refusal came back. Both a real and an imaginary path must answer identically.
-        val real = reply(FetchGitStatus("c1", workdir), guestScope = guest())
-        val fake = reply(FetchGitStatus("c1", "/no/such/place/at/all"), guestScope = guest())
+        // a directory oracle would be a real leak: a restricted credential could probe the owner's disk by
+        // watching which refusal came back. Both a real and an imaginary path must answer identically.
+        val real = reply(FetchGitStatus("c1", workdir), origin = "feishu:g")
+        val fake = reply(FetchGitStatus("c1", "/no/such/place/at/all"), origin = "feishu:g")
         assertEquals(refusalOf(real), refusalOf(fake))
     }
 
@@ -151,16 +132,14 @@ class RequestRouterGitTest {
 
     @Test
     fun the_owner_test_is_every_restricted_credential_class() {
-        assertTrue(RequestRouter.gitOwnerOnly(null, null))
-        assertFalse(RequestRouter.gitOwnerOnly("feishu:g", null))
-        assertFalse(RequestRouter.gitOwnerOnly(null, guest()))
+        assertTrue(RequestRouter.gitOwnerOnly(null))
+        assertFalse(RequestRouter.gitOwnerOnly("feishu:g"))
     }
 
     @Test
     fun git_frames_are_denied_by_every_capability_whitelist() {
         val requests = everyGitRequest().map { it as ToDaemon }
         for (f in requests) {
-            assertFalse(GuestCaps.ingressAllowed(f), "guest ingress must not admit ${f::class.simpleName}")
             assertFalse(BridgeCaps.ingressAllowed(f), "bridge ingress must not admit ${f::class.simpleName}")
         }
         // and the replies never leave for a restricted credential either — a refusal frame the router
@@ -173,7 +152,6 @@ class RequestRouterGitTest {
             dev.ccpocket.protocol.GitActionPreview("c1", GIT_OP_STAGE, "tok"),
         )
         for (f in replies) {
-            assertFalse(GuestCaps.egressAllowed(f), "guest egress must not admit ${f::class.simpleName}")
             assertFalse(BridgeCaps.egressAllowed(f), "bridge egress must not admit ${f::class.simpleName}")
         }
     }

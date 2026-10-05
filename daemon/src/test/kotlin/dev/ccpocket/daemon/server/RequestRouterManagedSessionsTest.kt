@@ -2,8 +2,6 @@ package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.DaemonPrefs
 import dev.ccpocket.daemon.bridge.BridgeCaps
-import dev.ccpocket.daemon.bridge.GuestCaps
-import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.conversation.KeyedSink
 import dev.ccpocket.daemon.conversation.OutboundSink
@@ -21,7 +19,6 @@ import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.session.SessionScan
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
-import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.DiscoverSessions
@@ -173,13 +170,10 @@ class RequestRouterManagedSessionsTest {
     }
 
     @Test
-    fun guest_and_bridge_are_forbidden_before_anything_is_read() = runBlocking {
+    fun a_bridge_is_forbidden_before_anything_is_read() = runBlocking {
         val r = router(service())
-        val guest = GuestScope(roots = listOf(project), ownedSessions = emptySet(), label = "guest", expiresAt = null, tier = AccessTier.REVIEW)
         val callers: List<Pair<String, suspend (Frame, Conn) -> Unit>> = listOf(
             "bridge" to { f, c -> r.handle(f, c, origin = "feishu-bot", caps = c.caps) },
-            "guest" to { f, c -> r.handle(f, c, origin = "guest", guestScope = guest, caps = c.caps) },
-            "guest-without-origin" to { f, c -> r.handle(f, c, guestScope = guest, caps = c.caps) },
         )
         for ((who, call) in callers) {
             for (req in requests) {
@@ -201,11 +195,9 @@ class RequestRouterManagedSessionsTest {
     @Test
     fun restricted_ingress_whitelists_deny_every_managed_request_and_egress_denies_both_replies() {
         for (req in requests) {
-            assertFalse(GuestCaps.ingressAllowed(req), "guest ${req::class.simpleName}")
             assertFalse(BridgeCaps.ingressAllowed(req), "bridge ${req::class.simpleName}")
         }
         for (reply in listOf(ManagedSessionsState(workdir = workdir), DiscoveredSessions("r", workdir, AgentKind.CLAUDE))) {
-            assertFalse(GuestCaps.egressAllowed(reply))
             assertFalse(BridgeCaps.egressAllowed(reply))
         }
     }

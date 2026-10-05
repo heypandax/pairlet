@@ -2,8 +2,6 @@ package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.DaemonPrefs
 import dev.ccpocket.daemon.bridge.BridgeCaps
-import dev.ccpocket.daemon.bridge.GuestCaps
-import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.conversation.KeyedSink
 import dev.ccpocket.daemon.conversation.OutboundSink
@@ -23,7 +21,6 @@ import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
-import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ProjectPinErrors
@@ -273,10 +270,10 @@ class RequestRouterProjectPinsTest {
     @Test
     fun every_restricted_credential_class_gets_silence_and_never_mutates_or_subscribes() = runBlocking {
         val r = router(service())
-        val guest = GuestScope(roots = listOf("/tmp"), ownedSessions = emptySet(), label = "guest", expiresAt = null, tier = AccessTier.REVIEW)
         val callers = listOf<suspend (OutboundSink, RequestRouter.ClientCapsHolder, Conn) -> Unit>(
             { s, c, p -> r.handle(fetch(), s, origin = "feishu-bridge", caps = c, deviceId = "devBridge", pinConnection = p) },
-            { s, c, p -> r.handle(pinX(), s, guestScope = guest, caps = c, deviceId = "devGuest", pinConnection = p) },
+            // a restricted MUTATION too (this used to be carried by a folder-share guest)
+            { s, c, p -> r.handle(pinX(), s, origin = "feishu-bridge", caps = c, deviceId = "devBridge", pinConnection = p) },
         )
         for (call in callers) {
             val sink = Collect()
@@ -356,7 +353,6 @@ class RequestRouterProjectPinsTest {
     fun restricted_whitelists_deny_both_pin_frames_in_both_directions() {
         val request = pinX()
         val state = ProjectPinsState("s", snapshot = ProjectPinsSnapshot("i", 1))
-        assertFalse(GuestCaps.ingressAllowed(request)); assertFalse(GuestCaps.egressAllowed(state))
         assertFalse(BridgeCaps.ingressAllowed(request)); assertFalse(BridgeCaps.egressAllowed(state))
         assertNotNull(state.snapshot)
     }

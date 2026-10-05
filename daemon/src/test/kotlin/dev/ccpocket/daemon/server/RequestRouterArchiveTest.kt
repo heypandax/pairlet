@@ -5,7 +5,6 @@ import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentBackendFactory
 import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentSpec
-import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
@@ -36,14 +35,13 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
  * Issue #202 at the router: archiving hides a row from the REGULAR listing (filtered daemon-side, so even a
  * client that knows nothing about archives gets the tidied list), restoring brings it back, and the
  * cross-project view enumerates only the projects the store actually names. Also pins the two decisions a
- * later change could silently undo: a guest can't mutate the archive, and acting `fromArchiveView` answers
+ * later change could silently undo: a non-owner can't mutate the archive, and acting `fromArchiveView` answers
  * with the archive list so the client's listed directory is never repointed.
  */
 class RequestRouterArchiveTest {
@@ -169,23 +167,19 @@ class RequestRouterArchiveTest {
     }
 
     @Test
-    fun a_guest_cannot_mutate_the_archive_and_sees_no_capability() = runBlocking {
+    fun a_restricted_origin_cannot_mutate_the_archive() = runBlocking {
+        // the owner gate ([isOwner]) carried by a bridge origin — the restricted credential that remains
         val scope = CoroutineScope(Dispatchers.Default)
         val r = router(scope, mapOf(dirA to listOf(summary("s1", dirA))))
-        val guest = GuestScope(
-            roots = listOf(dirA), ownedSessions = setOf("s1"), label = "shared",
-            expiresAt = null, tier = dev.ccpocket.protocol.AccessTier.REVIEW,
-        )
 
         val emitted = mutableListOf<Frame>()
         r.handle(
             SetSessionArchived(dirA, "s1", archived = true),
             { synchronized(emitted) { emitted += it } },
-            guestScope = guest,
+            origin = "feishu:g",
         )
         val sessions = awaitFrame(emitted).single() as Sessions
 
-        assertFalse(sessions.archiveSupported, "a guest client must not render archive affordances")
         assertEquals(listOf("s1"), sessions.items.map { it.sessionId }, "the mutation was a no-op")
         assertTrue(
             !archiveFile.exists() || archiveFile.readText().trim().let { it.isEmpty() || it == "{}" },
@@ -213,26 +207,22 @@ class RequestRouterArchiveTest {
     }
 
     @Test
-    fun a_guest_cannot_reach_the_cross_project_scan_through_the_archive_view_branch() = runBlocking {
-        // emitArchivedSessions is a WHOLE-MACHINE enumeration and takes no guest scope, so the branch that
-        // reaches it has to be gated on ownership too — not just the mutation above it. Without this a
-        // non-owner would get a full cross-project scan computed on every frame, outside its shared root.
+    fun a_restricted_origin_cannot_reach_the_cross_project_scan_through_the_archive_view_branch() = runBlocking {
+        // emitArchivedSessions is a WHOLE-MACHINE enumeration, so the branch that reaches it has to be gated on
+        // ownership too — not just the mutation above it. Without this a non-owner would get a full
+        // cross-project scan computed on every frame. Carried by a bridge origin.
         val scope = CoroutineScope(Dispatchers.Default)
         val r = router(scope, mapOf(dirA to listOf(summary("s1", dirA))))
-        val guest = GuestScope(
-            roots = listOf(dirA), ownedSessions = setOf("s1"), label = "shared",
-            expiresAt = null, tier = dev.ccpocket.protocol.AccessTier.REVIEW,
-        )
 
         val emitted = mutableListOf<Frame>()
         r.handle(
             SetSessionArchived(dirA, "s1", archived = true, fromArchiveView = true),
             { synchronized(emitted) { emitted += it } },
-            guestScope = guest,
+            origin = "feishu:g",
         )
         val reply = awaitFrame(emitted).single()
 
-        assertTrue(reply is Sessions, "a guest must fall through to its scoped list, got ${reply::class.simpleName}")
+        assertTrue(reply is Sessions, "a non-owner must fall through to the per-directory list, got ${reply::class.simpleName}")
         assertTrue(emitted.none { it is ArchivedSessions }, "no cross-project enumeration for a non-owner")
     }
 

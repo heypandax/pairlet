@@ -1,7 +1,6 @@
 package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.DaemonPrefs
-import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.claude.ClaudeQuotaService
 import dev.ccpocket.daemon.codex.CodexQuotaService
@@ -13,7 +12,6 @@ import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
-import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_QUOTA_NO_TOKEN
 import dev.ccpocket.protocol.CLAUDE_QUOTA_OK
@@ -92,13 +90,12 @@ class RequestRouterQuotaAgentTest {
     private fun reply(
         frame: ClaudeQuotaGet,
         origin: String? = null,
-        guestScope: GuestScope? = null,
     ): ClaudeQuota? = runBlocking {
         val got = CompletableDeferred<ClaudeQuota>()
         router(CoroutineScope(Dispatchers.Default)).handle(
             frame,
             { f -> if (f is ClaudeQuota) got.complete(f) },
-            origin = origin, guestScope = guestScope,
+            origin = origin,
         )
         // a refusal is SILENCE, so the negative cases must be asserted by waiting and getting nothing
         withTimeoutOrNull(2_000) { got.await() }
@@ -157,16 +154,10 @@ class RequestRouterQuotaAgentTest {
 
     // -- owner-only, unchanged ----------------------------------------------------------------------
 
-    private fun guest() = GuestScope(
-        roots = listOf(Files.createTempDirectory("ccp-quota-wd").toRealPath().toString()),
-        ownedSessions = emptySet(), label = "alex", expiresAt = null, tier = AccessTier.COLLABORATE,
-    )
-
     @Test
-    fun a_bridge_and_a_guest_both_get_SILENCE_on_every_agent() {
+    fun a_bridge_gets_SILENCE_on_every_agent() {
         for (agent in listOf(AgentKind.CLAUDE, AgentKind.CODEX)) {
             assertNull(reply(ClaudeQuotaGet(agent = agent), origin = "feishu:group-1"), "bridge/$agent")
-            assertNull(reply(ClaudeQuotaGet(agent = agent), origin = "alex", guestScope = guest()), "guest/$agent")
         }
     }
 
