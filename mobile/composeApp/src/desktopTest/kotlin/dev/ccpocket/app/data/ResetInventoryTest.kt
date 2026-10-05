@@ -330,7 +330,7 @@ class ResetInventoryTest {
             listOf("scope", "pinnedTo", "projectPinRegistry", "direct", "relay", "directE2E")
                 .forEach { put(it, "constructor dependency / transport instance") }
             listOf("directLinkUp", "pushDial", "registrarOverride", "linkHealthOverride", "onSendForTest", "pinWriterForTest",
-                "memoWriterForTest", "memoStoreForTest")
+                "memoWriterForTest", "memoStoreForTest", "redeemForTest", "dialForTest")
                 .forEach { put(it, "test seam / injected function") }
             listOf("onBeforeSwitch", "onTurnFinished", "onApprovalArrived", "onClaudeQuotaReply", "onCollaboratorLinkAdded",
                 "onNotificationsChanged")

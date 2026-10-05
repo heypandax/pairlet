@@ -2000,6 +2000,9 @@ class PocketRepository(
      *  and a loser that reports its timeout afterwards would arm a failure card over a completed pairing. */
     private var pairAttempt = 0
 
+    /** Test seam: stands in for the relay round-trip of [Pairing.redeem] (the store upsert + active pin still run). */
+    internal var redeemForTest: (suspend (dev.ccpocket.app.pairing.PairingInfo) -> PairedDaemon)? = null
+
     private fun setPairFailure(kind: PairFailure?) {
         pairFailure.value = kind
         pairFailureSeq.value++
@@ -2023,15 +2026,32 @@ class PocketRepository(
             val info = getInfo(client)
             pairTrace?.stage(DiagnosticStage.REQUEST)
             val keys = Pairing.deviceKeys()
-            paired.value = Pairing.redeem(info, keys, client!!) // upserts the list + pins this as the active account
+            // upserts the list + pins this as the active account
+            val bound = redeemForTest?.let { fake -> fake(info).also { Pairing.upsert(it); Pairing.setActive(it.accountId) } }
+                ?: Pairing.redeem(info, keys, client!!)
             projectPinRegistry.refreshAfterPairingChange { Pairing.loadAll() } // #362: a replaced credential retires old pin leases now
             // a FRESH pairing (e.g. a guest redeeming a new invite for the same daemon/accountId) supersedes
-            // any recorded "share ended" terminal state — else the new binding would open on the dead card
-            paired.value?.let { SecureStore.remove(K_SHARE_ENDED_PREFIX + it.accountId) }
-            shareEnded.value = null
+            // any recorded "share ended" terminal state — else the new binding would open on the dead card.
+            // Removed BEFORE a switch below, which re-reads it for the target account.
+            SecureStore.remove(K_SHARE_ENDED_PREFIX + bound.accountId)
+            // A pair link opened (system camera, tapped URL) while a link to ANOTHER computer is live — or while
+            // the demo / a LAN-direct link holds the session. startRelay() below would no-op on that live link:
+            // the title would say B while A's socket, chat and pending approvals stayed up, the fleet would then
+            // dial A a second time as a satellite (same deviceId, two sockets kicking each other), and the next
+            // reconnect would dial B and replay A's OpenSession/ListSessions at it. Leaving a computer has ONE
+            // path — the user's own switch — so take it, carrying this pairing's first-connect ticket along.
+            val leavesAnotherLink = sessionActive.value && (demoMode.value || paired.value?.accountId != bound.accountId)
             replace(pairedList, Pairing.loadAll())
-            bindProjectPins() // #362: the new binding's own pins (and, once, where the legacy list belongs)
             addingDevice.value = false
+            if (leavesAnotherLink) {
+                switchDaemon(bound, firstPairTicket = info.ticket)
+                Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to source, TelKey.Attempt to attempt) + productDimensions())
+                pairTrace?.finish(Outcome.SUCCESS, DiagnosticStage.COMMIT)
+                return
+            }
+            paired.value = bound
+            shareEnded.value = null
+            bindProjectPins() // #362: the new binding's own pins (and, once, where the legacy list belongs)
             firstTicket = info.ticket
             Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to source, TelKey.Attempt to attempt) + productDimensions())
             pairTrace?.finish(Outcome.SUCCESS, DiagnosticStage.COMMIT)
@@ -2581,6 +2601,10 @@ class PocketRepository(
     /** (Re)open the active transport's socket. Both transports re-handshake on every connect() call.
      *  [force] bypasses the #143 coalescing — for triggers that deliberately tear down a LIVE socket
      *  (the deaf-link retry, the presence probe's escalation, the user's manual "Try again"). */
+    /** Test seam: replaces the relay/direct dial of one transport launch — gets the binding it would dial and the
+     *  first-pair ticket it would present, and holds the "socket" for as long as it suspends. */
+    internal var dialForTest: (suspend (PairedDaemon, String?) -> Unit)? = null
+
     private fun launchTransport(reconnect: Boolean, force: Boolean = false) {
         if (demoMode.value) return // demo mode never touches the network
         // #143: five triggers fire this independently (presence edge, foreground return, retry timer,
@@ -2639,6 +2663,7 @@ class PocketRepository(
             val result = runCatching {
                 if (useRelay) {
                     val p = paired.value ?: error("not paired")
+                    dialForTest?.let { dial -> dial(p, firstTicket.also { firstTicket = null }); return@runCatching }
                     // direct-first: the daemon-advertised LAN/loopback address skips the relay AND the
                     // proxy leg entirely. Unreachable/refused/bad handshake → silent same-attempt relay
                     // fallback + cooldown. A drop AFTER it was live exits normally into the reconnect path.
@@ -3035,8 +3060,10 @@ class PocketRepository(
 
     /** Switch the active computer: tear down the current link, pin [target], reconnect to it.
      *  This is the COLD path — [FleetCoordinator.switchTo] promotes a hot satellite instead when it can
-     *  (issue #103) and only falls back here when no live link to [target] exists yet. */
-    fun switchDaemon(target: PairedDaemon) {
+     *  (issue #103) and only falls back here when no live link to [target] exists yet.
+     *  [firstPairTicket] is set only by a pairing that lands while another computer's link is live
+     *  ([doPair]): the freshly redeemed binding still needs its ticket as the PSK of its first connect. */
+    fun switchDaemon(target: PairedDaemon, firstPairTicket: String? = null) {
         sidePanes.clear() // #311: panes name sessions on the machine we are leaving
         if (paired.value?.accountId == target.accountId && sessionActive.value) return
         onBeforeSwitch?.invoke(target.accountId)
@@ -3046,7 +3073,7 @@ class PocketRepository(
         loadWorkingSet(target.accountId) // #165: and so does the switcher's memory — see [workingSetMru]
         bindProjectPins() // #362: and so do its pins — the target computer's own scope, never the outgoing list
         Pairing.setActive(target.accountId)
-        firstTicket = null // an already-paired daemon authenticates by static key — the PSK is only for first pair
+        firstTicket = firstPairTicket // an already-paired daemon authenticates by static key — the PSK is only for first pair
         startRelay()
     }
 
