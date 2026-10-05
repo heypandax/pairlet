@@ -66,6 +66,9 @@ class DeviceSessions(
     /** The restricted-credential authority (issue #91 bridges, #367 execution links, the retired kinds): classification, constraints,
      *  capability gates. */
     val bridges: BridgeRegistry = BridgeRegistry(),
+    /** Wall clock for the armed interactive tickets' local expiry ([onMintedTicket]); a parameter only so
+     *  tests can step past it without sleeping. */
+    private val clock: () -> Long = System::currentTimeMillis,
     private val send: suspend (deviceId: String, payload: ByteArray) -> Unit,
 ) {
     private val log = logger("DeviceSessions")
@@ -81,7 +84,7 @@ class DeviceSessions(
         set(v) { core.executionControl = v }
     private val mutex = Mutex()
     private val devicePubs = HashMap<String, ByteArray>(loadPersisted())
-    private val psks = ArrayDeque<ByteArray>()              // minted tickets, oldest first
+    private val psks = ArrayDeque<ArmedPsk>()               // minted tickets, oldest first
     private val pskFor = HashMap<String, ByteArray>()       // deviceId -> first-handshake PSK
     private val sessions = HashMap<String, DeviceLink>()    // deviceId -> its live E2E session(s); see DeviceLink (#146)
     private val owned = HashMap<String, MutableList<String>>()
@@ -94,24 +97,103 @@ class DeviceSessions(
     @Volatile
     private var lastInteractiveMintAt = 0L // serializes interactive vs headless pairing (issue #91)
 
+    /**
+     * One armed first-contact PSK. [expiresAt] is set for INTERACTIVE (owner) tickets only: past it the entry
+     * can neither anchor an announced device into the full-power allow-list nor be bound as its first-contact
+     * PSK. Restricted mints (bridge #91, execution #367) keep their existing lifetime rules — their intents
+     * carry their own TTL (see [BridgeRegistry.recordIntent]) — so they stay null here.
+     */
+    private class ArmedPsk(val bytes: ByteArray, val expiresAt: Long?, val pairingId: String? = null)
+
+    /** Outcomes of interactive pairings, for `pairlet pair` to wait on ([awaitOwnerPairing]). */
+    private val ownerPairings = OwnerPairingWatch(clock)
+
+    // In-memory, since this process started: when each full-power device was anchored here, and its last
+    // relay handshake. Display only (`pairlet devices`); never consulted for authority.
+    private val anchoredAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    // Full-power devices the OWNER revoked in this process (`pairlet devices revoke`). Until the relay has
+    // processed the revoke — which may be queued behind a reconnect — an attach replay can still announce the
+    // id; it must not be re-anchored on whatever ticket happens to be armed. Ids are random and never reused.
+    private val revokedHere: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
     /** A freshly minted pairing ticket becomes a candidate PSK for the next device that pairs.
-     *  Only INTERACTIVE mints stamp the exclusion clock — see [interactivePairingPending]. */
-    fun onMintedTicket(ticket: String, headless: Boolean = false) {
-        if (!headless) lastInteractiveMintAt = System.currentTimeMillis()
-        synchronized(psks) { psks.addLast(ticket.encodeToByteArray()); while (psks.size > 8) psks.removeFirst() }
+     *  Only INTERACTIVE mints stamp the exclusion clock — see [interactivePairingPending] — and only they
+     *  expire locally, [armedTicketLifetimeMs] after arming ([ttlSec] = the relay's own ticket TTL).
+     *  Returns the pairing id an interactive mint's outcome can be awaited under ([awaitOwnerPairing]). */
+    fun onMintedTicket(ticket: String, headless: Boolean = false, ttlSec: Int = RELAY_TICKET_TTL_SEC): String? {
+        val now = clock()
+        if (!headless) lastInteractiveMintAt = now
+        val expiresAt = if (headless) null else now + armedTicketLifetimeMs(ttlSec)
+        val pairingId = if (headless) null else newPairingId()
+        if (pairingId != null && expiresAt != null) ownerPairings.open(pairingId, expiresAt)
+        val evicted = ArrayList<ArmedPsk>()
+        synchronized(psks) {
+            evicted += dropExpiredArmed(now)
+            psks.addLast(ArmedPsk(ticket.encodeToByteArray(), expiresAt, pairingId))
+            while (psks.size > 8) evicted += psks.removeFirst()
+        }
+        evicted.forEach { e -> e.pairingId?.let { ownerPairings.resolve(it, OwnerPairingWatch.Outcome.Expired) } }
+        return pairingId
     }
+
+    /** Under `synchronized(psks)`: forget every interactive ticket whose local lifetime is over. An expired
+     *  owner ticket must not linger as the LIFO candidate a late (or relay-forged) announce could pop. */
+    private fun dropExpiredArmed(now: Long): List<ArmedPsk> {
+        val gone = psks.filter { it.expiresAt != null && it.expiresAt <= now }
+        if (gone.isNotEmpty()) psks.removeAll(gone.toSet())
+        return gone
+    }
+
+    /** `pairlet pair` waiting on its pairing: see [OwnerPairingWatch.await]. */
+    suspend fun awaitOwnerPairing(pairingId: String, waitMs: Long): OwnerPairingWatch.Outcome =
+        ownerPairings.await(pairingId, waitMs)
+
+    fun ownerPairingRemainingMs(pairingId: String): Long = ownerPairings.remainingMs(pairingId)
+
+    /** One full-power device as `pairlet devices` lists it. */
+    class OwnerDevice(
+        val deviceId: String,
+        val pub: ByteArray,
+        /** When it was anchored here — known only for devices paired since this daemon started. */
+        val pairedAt: Long?,
+        /** Its first post-pairing contact over the relay has not completed yet. */
+        val firstContactPending: Boolean,
+    )
+
+    /** Every device in the FULL-POWER allow-list (devices.json) — never a bridge, execution link or guest. */
+    suspend fun ownerDevices(): List<OwnerDevice> = mutex.withLock {
+        devicePubs.map { (id, pub) -> OwnerDevice(id, pub.copyOf(), anchoredAt[id], pskFor.containsKey(id)) }
+    }
+
+    /**
+     * The owner revokes a FULL-POWER device (`pairlet devices revoke`): the local half — key out of
+     * devices.json (which also cuts a live direct-LAN socket via the allow-list epoch), its relay session and
+     * its first-contact PSK — happens here, at once; the caller sends the relay's `RevokeDevice`. False when
+     * [deviceId] is not a full-power device (restricted credentials have their own commands).
+     */
+    suspend fun revokeOwnerDevice(deviceId: String): Boolean {
+        if (bridges.isRestricted(deviceId) || !mutex.withLock { devicePubs.containsKey(deviceId) }) return false
+        revokedHere += deviceId
+        onDeviceRevoked(deviceId)
+        anchoredAt.remove(deviceId)
+        return true
+    }
+
+    private fun newPairingId(): String =
+        B64enc.encodeToString(ByteArray(12).also { java.security.SecureRandom().nextBytes(it) })
 
     /** True while an interactive pairing ticket could still be redeemed — a headless mint must wait.
      *  Mint serialization (issue #91): with both ticket classes outstanding, the LIFO PSK-arming in
      *  [onDevicePaired] could cross-bind them. Classification itself stays exact regardless (it hashes
      *  the CONFIRMED handshake PSK — [BridgeRegistry.finalize]), but a cross-armed PSK fails BOTH
      *  devices' first handshakes, a pointless outage; refusing the overlap removes the window. */
-    fun interactivePairingPending(now: Long = System.currentTimeMillis()): Boolean =
+    fun interactivePairingPending(now: Long = clock()): Boolean =
         interactivePairingRemainingMs(now) > 0
 
     /** How much longer an interactive pairing blocks a headless mint (0 = not blocking). Lets a refused
      *  caller be told when to retry rather than made to poll (#367). */
-    fun interactivePairingRemainingMs(now: Long = System.currentTimeMillis()): Long =
+    fun interactivePairingRemainingMs(now: Long = clock()): Long =
         (lastInteractiveMintAt + TICKET_EXCLUSION_MS - now).coerceAtLeast(0)
 
     /** The relay forwarded a newly-redeemed device's static key; allow-list + bind its PSK.
@@ -141,8 +223,14 @@ class DeviceSessions(
             mutex.withLock { seenThisAttach.add(deviceId) }
             return
         }
+        // revoked by the owner here; the relay just hasn't processed that yet — never re-admit it
+        if (deviceId in revokedHere) {
+            log.info("announce for owner-revoked device ${deviceId.take(8)}… ignored")
+            return
+        }
         var provisionalBridge = false
         var unanchored = false
+        var pairingId: String? = null
         val known = mutex.withLock {
             seenThisAttach.add(deviceId)
             val already = devicePubs[deviceId]?.contentEquals(pub) == true ||
@@ -152,7 +240,15 @@ class DeviceSessions(
                 // already-known key must NOT re-arm a PSK (that would lock its next LAN connect out).
                 // `armed` is the ARMING FACT and is what decides authority below; the empty fallback is
                 // only the byte value the responder handshake needs.
-                val armed = synchronized(psks) { psks.removeLastOrNull() }?.takeIf { it.isNotEmpty() }
+                // An interactive ticket past its local lifetime is gone before the pop: a late announce —
+                // or one the relay forges long after the owner ran `pairlet pair` — finds nothing to anchor on.
+                val popped = synchronized(psks) { dropExpiredArmed(clock()); psks.removeLastOrNull() }
+                // …and an owner ticket at the very edge must also claim its pairing: the watch decides expiry
+                // for this announce and for a waiting `pairlet pair` under one lock, so the CLI can never report
+                // "expired" for a ticket that went on to anchor a key. A failed claim = the ticket is gone.
+                val usable = popped != null && (popped.pairingId == null || ownerPairings.tryClaim(popped.pairingId))
+                pairingId = popped?.pairingId?.takeIf { usable }
+                val armed = popped?.takeIf { usable }?.bytes?.takeIf { it.isNotEmpty() }
                 pskFor[deviceId] = armed ?: ByteArray(0)
                 provisionalBridge = armed != null && bridges.looksHeadless(armed)
                 // issue #207: an armed ticket that is NOT itself a pending restricted intent, while such
@@ -167,7 +263,15 @@ class DeviceSessions(
             already
         }
         if (!known) {
-            if (!provisionalBridge && !unanchored) persist() // nothing provisional ever touches devices.json
+            val owner = !provisionalBridge && !unanchored
+            if (owner) {
+                persist() // nothing provisional ever touches devices.json
+                anchoredAt[deviceId] = clock()
+            }
+            // the `pairlet pair` that minted this ticket learns who joined on it (or that it was refused)
+            pairingId?.let {
+                ownerPairings.resolve(it, if (owner) OwnerPairingWatch.Outcome.Paired(deviceId, pub.copyOf()) else OwnerPairingWatch.Outcome.Refused)
+            }
             val how = when {
                 unanchored -> ", unanchored — no anchoring ticket armed here (or a restricted intent pends, #207), its first frame is refused"
                 provisionalBridge -> ", provisional bridge"
@@ -423,6 +527,7 @@ class DeviceSessions(
         }
         preHandshakeWarnAt.remove(deviceId) // #298 hygiene: the zombie healed, drop its rate-limit slot
         log.info("handshake from ${deviceId.take(8)}… (psk ${psk.size}B${if (twinned) " + empty-PSK twin" else ""}) → session established")
+        dev.ccpocket.daemon.identity.DeviceActivity.noteHandshake(deviceId, dev.ccpocket.daemon.identity.DeviceActivity.VIA_RELAY, clock())
         send(deviceId, Wire.payload(Wire.HANDSHAKE, responderEph))
         // teach the device where this daemon lives on the LAN so its next connect can skip the relay;
         // null actively clears a stale stored address (listener since disabled / no usable interface).
@@ -1051,6 +1156,24 @@ class DeviceSessions(
         // ticket TTL (120s at the relay) + slack: how long after an interactive mint a headless mint
         // is refused (and PairLoopback refuses the reverse via BridgeRegistry.intentPending)
         const val TICKET_EXCLUSION_MS = 130_000L
+
+        /** The relay's ticket TTL (relay `PairingService.TTL_MS`, and the 6-digit code's in `CodeStore`), the
+         *  default when a caller has no [dev.ccpocket.protocol.PairTicket.expiresInSec] at hand. */
+        const val RELAY_TICKET_TTL_SEC = 120
+
+        /** Local ceiling on the relay-announced TTL: a relay must not be able to stretch an armed owner
+         *  ticket's life by announcing a huge `expiresInSec` (same cap #367 applies to its own tickets). */
+        const val MAX_ARMED_TICKET_TTL_SEC = 120
+
+        /** Slack beyond the relay TTL. The relay refuses a redeem once its ticket expired and announces the
+         *  device inside that same redeem request, and this daemon starts its clock only when the ticket
+         *  REACHES it — after the relay started its own — so 10s covers delivery of the announce. Same
+         *  130s total as [TICKET_EXCLUSION_MS]. */
+        const val ARMED_TICKET_GRACE_MS = 10_000L
+
+        /** How long an INTERACTIVE ticket stays armed here after it arrived: min(relay TTL, 120s) + 10s. */
+        fun armedTicketLifetimeMs(ttlSec: Int): Long =
+            ttlSec.coerceIn(1, MAX_ARMED_TICKET_TTL_SEC) * 1000L + ARMED_TICKET_GRACE_MS
 
         /** #298: hard ceiling on the pre-handshake WARN rate-limit map. Known devices number in the tens;
          *  hitting this means something is minting identities and the honest answer is to start over. */

@@ -1064,6 +1064,12 @@ interface DesktopModel {
     val appVersion: String
     val relayUrl: String
 
+    /** Pairing security phase 0 (Settings ▸ About): this App's device-key fingerprint and the connected
+     *  computer's, both [dev.ccpocket.protocol.e2e.PairingFingerprint], for comparing with `pairlet devices`.
+     *  Null when unpaired; seed/preview models show none. */
+    val deviceFingerprint: String? get() = null
+    val computerFingerprint: String? get() = null
+
     // self-update (Settings ▸ About "Check for updates", issue #87). Reuses the daemon's shared release-check
     // (version compare + SHA256 verify). Button-triggered so seed/preview + UI tests never hit the network;
     // the defaults keep those models inert. The live model branches on install source: a standalone dmg/msi

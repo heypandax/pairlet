@@ -336,13 +336,43 @@ class RelayClient(
      *   the raw ticket as well would put a value the RELAY knows back on the armed stack, which is exactly
      *   the capability the invite secret exists to deny it.
      */
-    suspend fun mintTicket(headless: Boolean = false, collaborator: Boolean = false, arm: Boolean = true): PairTicket? {
+    suspend fun mintTicket(headless: Boolean = false, collaborator: Boolean = false, arm: Boolean = true): PairTicket? =
+        mintArmed(headless, collaborator, arm)?.first
+
+    /** An interactive owner pairing (`pairlet pair`): the ticket plus the id its outcome is awaited under
+     *  ([awaitOwnerPairing]). Null when the relay link could not mint one. */
+    suspend fun mintOwnerPairing(): Pair<PairTicket, String>? =
+        mintArmed(headless = false, collaborator = false, arm = true)?.let { (ticket, id) -> id?.let { ticket to it } }
+
+    private suspend fun mintArmed(headless: Boolean, collaborator: Boolean, arm: Boolean): Pair<PairTicket, String?>? {
         // relay needs our E2E pub to serve the code path; headless/collaborator are the authoritative markers
         // the relay stamps onto the ticket (issue #91, §3.4) so a lying redeem can't dodge presence/push/replay
         controlOutbox.send(PairBegin(identity.e2ePubB64, headless = headless, collaborator = collaborator))
-        return withTimeoutOrNull(10_000) { inboundControl.filterIsInstance<PairTicket>().first() }
-            ?.also { if (arm) sessions.onMintedTicket(it.ticket, headless) }
+        val ticket = withTimeoutOrNull(10_000) { inboundControl.filterIsInstance<PairTicket>().first() } ?: return null
+        val pairingId = if (arm) sessions.onMintedTicket(ticket.ticket, headless, ticket.expiresInSec) else null
+        return ticket to pairingId
     }
+
+    // ---- owner devices (pairing security phase 0): `pairlet pair` waits, `pairlet devices` lists / revokes ----
+
+    suspend fun awaitOwnerPairing(pairingId: String, waitMs: Long) = sessions.awaitOwnerPairing(pairingId, waitMs)
+
+    fun ownerPairingRemainingMs(pairingId: String) = sessions.ownerPairingRemainingMs(pairingId)
+
+    suspend fun ownerDevices() = sessions.ownerDevices()
+
+    /** Revoke a FULL-POWER device: pruned locally NOW (devices.json, live relay session, and — through the
+     *  allow-list epoch — a live direct-LAN socket), then the relay is told so the device's credential dies there
+     *  too (queued across a reconnect, like every control frame). The same two halves as [revokeBridge].
+     *  False when [deviceId] is not a full-power device. */
+    suspend fun revokeOwnerDevice(deviceId: String): Boolean {
+        if (!sessions.revokeOwnerDevice(deviceId)) return false
+        controlOutbox.send(dev.ccpocket.protocol.RevokeDevice(deviceId))
+        return true
+    }
+
+    /** This daemon's own static E2E key — the "computer" whose fingerprint `pairlet devices` shows. */
+    val e2ePubRaw: ByteArray get() = identity.e2ePubRaw.copyOf()
 
     private suspend fun connectOnce() {
         newClient().use { client ->

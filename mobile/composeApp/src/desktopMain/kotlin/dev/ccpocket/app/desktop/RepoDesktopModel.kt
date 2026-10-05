@@ -1599,6 +1599,14 @@ class RepoDesktopModel(
     override val appVersion: String get() = APP_VERSION
     override val relayUrl: String get() = repo.paired.value?.relay ?: ""
 
+    // pairing security phase 0: read once — the device key never changes; only shown once this App paired
+    private val ownDeviceFingerprint by lazy {
+        runCatching { dev.ccpocket.protocol.e2e.PairingFingerprint.of(dev.ccpocket.app.pairing.Pairing.deviceKeys().publicRaw) }.getOrNull()
+    }
+    override val deviceFingerprint: String? get() = repo.paired.value?.let { ownDeviceFingerprint }
+    override val computerFingerprint: String?
+        get() = repo.paired.value?.daemonPub?.let { dev.ccpocket.app.ui.pairingFingerprintOf(it) }
+
     // ── self-update (Settings ▸ About, issue #87) ─────────────────────────────────────────────────
     // Its own IO scope: the check is a GitHub round-trip and applyUpdate() runs a download that ends by
     // exiting the process, neither of which should ride a UI/composition scope. Snapshot-state writes from a

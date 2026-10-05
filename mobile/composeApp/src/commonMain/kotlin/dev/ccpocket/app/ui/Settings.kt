@@ -78,6 +78,8 @@ import dev.ccpocket.app.lock.AppLockController
 import dev.ccpocket.app.lock.AutoLockDelay
 import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.pairing.displayName
+import dev.ccpocket.app.pairing.Pairing
+import dev.ccpocket.protocol.e2e.PairingFingerprint
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
@@ -769,8 +771,13 @@ private fun SupportPage(repo: PocketRepository, onHelp: () -> Unit, onExit: () -
         repo.paired.value?.let { paired ->
             Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
             AboutRow(stringResource(Res.string.about_connection), paired.displayName())
+            // pairing security phase 0: this device's and the connected computer's key fingerprints, for the
+            // owner to compare with `pairlet devices` (the device key exists by now — this app paired with it)
+            val deviceFp = remember { runCatching { PairingFingerprint.of(Pairing.deviceKeys().publicRaw) }.getOrNull() }
+            PairingFingerprintRows(deviceFp, pairingFingerprintOf(paired.daemonPub))
         }
     }
+    if (repo.paired.value != null) PairingFingerprintHint()
 
     Row(
         Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp))
@@ -1341,11 +1348,14 @@ private fun PushStatusRow(repo: PocketRepository) {
     }
 }
 
-/** A label/value row used by the settings + session-info sheets (label left, mono value right). */
+/** A label/value row used by the settings + session-info sheets (label left, mono value right).
+ *  [onClick] makes the whole row tappable (the pairing fingerprints copy their value). */
 @Composable
-fun AboutRow(label: String, value: String) {
+fun AboutRow(label: String, value: String, onClick: (() -> Unit)? = null, onClickLabel: String? = null) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClickLabel = onClickLabel, onClick = onClick) else Modifier)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = Tok.tx2, fontSize = 13.5.sp, style = tightCenter(13.5.sp), modifier = Modifier.weight(1f))
