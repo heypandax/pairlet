@@ -765,11 +765,11 @@
     <!-- owner: invite composer -->
     <string name="share_composer_title">分享文件夹</string>
     <string name="share_access_level">访问级别</string>
-    <string name="share_tier_review">审阅</string>
+    <string name="access_tier_review">审阅</string>
     <string name="share_tier_review_desc">每步操作都需批准</string>
-    <string name="share_tier_collaborate">协作</string>
+    <string name="access_tier_collaborate">协作</string>
     <string name="share_tier_collaborate_desc">此处的编辑自动应用；命令仍会询问</string>
-    <string name="share_tier_autonomous">自主</string>
+    <string name="access_tier_autonomous">自主</string>
     <string name="share_tier_autonomous_desc">最少询问——命令仍会询问</string>
     <string name="share_tier_review_help">最谨慎：每次编辑和命令都要等对方批准。</string>
     <string name="share_tier_collaborate_help">此文件夹内的编辑自动应用；命令、联网等仍会询问。</string>
@@ -807,7 +807,7 @@
     <string name="shared_folders_empty_hint">长按一个项目，然后选择“分享这个文件夹”。</string>
     <string name="share_guest_someone">某人</string>
     <string name="share_active_now">正在使用</string>
-    <string name="share_sessions_live">%1$d 个进行中</string>
+    <string name="bridge_sessions_live">%1$d 个进行中</string>
     <string name="share_revoke">撤销</string>
     <string name="share_revoked_label">已撤销</string>
     <string name="share_revoke_title">撤销访问权限？</string>

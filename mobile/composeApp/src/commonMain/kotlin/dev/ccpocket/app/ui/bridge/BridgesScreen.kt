@@ -209,7 +209,7 @@ private fun BridgeCard(b: BridgeInfo, repo: PocketRepository, onRevoke: () -> Un
                 Text(stringResource(Res.string.bridge_no_approval_tag), color = Tok.warn, fontSize = 11.sp)
             }
             if (b.activeSessions > 0) {
-                Text(stringResource(Res.string.share_sessions_live, b.activeSessions), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                Text(stringResource(Res.string.bridge_sessions_live, b.activeSessions), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
             }
         }
 

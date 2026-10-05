@@ -765,11 +765,11 @@
     <!-- owner: invite composer -->
     <string name="share_composer_title">Share folder</string>
     <string name="share_access_level">Access level</string>
-    <string name="share_tier_review">Review</string>
+    <string name="access_tier_review">Review</string>
     <string name="share_tier_review_desc">Approve every action</string>
-    <string name="share_tier_collaborate">Collaborate</string>
+    <string name="access_tier_collaborate">Collaborate</string>
     <string name="share_tier_collaborate_desc">Edits here apply; shell still asks</string>
-    <string name="share_tier_autonomous">Autonomous</string>
+    <string name="access_tier_autonomous">Autonomous</string>
     <string name="share_tier_autonomous_desc">Fewest prompts — shell still asks</string>
     <string name="share_tier_review_help">Most cautious: every edit and command waits for their approval.</string>
     <string name="share_tier_collaborate_help">Edits inside this folder apply automatically; shell and network still ask.</string>
@@ -807,7 +807,7 @@
     <string name="shared_folders_empty_hint">Long-press a project, then “Share this folder”.</string>
     <string name="share_guest_someone">someone</string>
     <string name="share_active_now">active now</string>
-    <string name="share_sessions_live">%1$d live</string>
+    <string name="bridge_sessions_live">%1$d live</string>
     <string name="share_revoke">Revoke</string>
     <string name="share_revoked_label">Revoked</string>
     <string name="share_revoke_title">Revoke access?</string>

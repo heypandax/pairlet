@@ -26,10 +26,10 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun accessTierLabel(t: AccessTier): String = stringResource(
     when (t) {
-        AccessTier.REVIEW -> Res.string.share_tier_review
-        AccessTier.COLLABORATE -> Res.string.share_tier_collaborate
-        AccessTier.AUTONOMOUS -> Res.string.share_tier_autonomous
-        AccessTier.UNKNOWN -> Res.string.share_tier_review
+        AccessTier.REVIEW -> Res.string.access_tier_review
+        AccessTier.COLLABORATE -> Res.string.access_tier_collaborate
+        AccessTier.AUTONOMOUS -> Res.string.access_tier_autonomous
+        AccessTier.UNKNOWN -> Res.string.access_tier_review
     },
 )
 

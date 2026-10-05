@@ -40,9 +40,9 @@ import dev.ccpocket.app.resources.bridge_waiting_adapter
 import dev.ccpocket.app.resources.bridges_title
 import dev.ccpocket.app.resources.settings_connected_to
 import dev.ccpocket.app.resources.share_revoke
-import dev.ccpocket.app.resources.share_sessions_live
-import dev.ccpocket.app.resources.share_tier_collaborate
-import dev.ccpocket.app.resources.share_tier_review
+import dev.ccpocket.app.resources.bridge_sessions_live
+import dev.ccpocket.app.resources.access_tier_collaborate
+import dev.ccpocket.app.resources.access_tier_review
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.protocol.AccessTier
@@ -321,8 +321,8 @@ class BridgesUiTest {
     @Test
     fun everyCardCarriesItsAccessTier() =
         scene(390, items = listOf(runningBridge(), stoppedBridge())) {
-            assertPresent(str(Res.string.share_tier_collaborate))
-            assertPresent(str(Res.string.share_tier_review))
+            assertPresent(str(Res.string.access_tier_collaborate))
+            assertPresent(str(Res.string.access_tier_review))
         }
 
     /** A running managed adapter offers Restart · Stop · Edit — never Start — plus the unbind footer. */
@@ -336,7 +336,7 @@ class BridgesUiTest {
         // the facts that share the card with them, and the tag's REAL wording
         assertPresent(str(Res.string.bridge_online))
         assertPresent(str(Res.string.bridge_no_approval_tag))
-        assertPresent(str(Res.string.share_sessions_live, 2))
+        assertPresent(str(Res.string.bridge_sessions_live, 2))
     }
 
     /** A stopped managed adapter offers Start · Edit · unbind, and nothing that would fail. */
@@ -349,7 +349,7 @@ class BridgesUiTest {
         assertFalse(present(str(Res.string.bridge_runner_restart)), "…nor restarted")
         // no trust tag was configured on this one, so none is claimed
         assertFalse(present(str(Res.string.bridge_no_approval_tag)))
-        assertFalse(present(str(Res.string.share_sessions_live, 0)), "zero live sessions is not a fact worth a line")
+        assertFalse(present(str(Res.string.bridge_sessions_live, 0)), "zero live sessions is not a fact worth a line")
     }
 
     /**

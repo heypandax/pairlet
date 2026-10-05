@@ -137,7 +137,7 @@ private fun StatusLine(status: ShareStatus, s: ShareInfo) {
         Box(Modifier.size(8.dp).clip(CircleShape).background(dotColor))
         if (status == ShareStatus.ACTIVE_NOW) {
             Text(stringResource(Res.string.share_active_now).replaceFirstChar { it.uppercase() }, color = Tok.ok, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
-            if (s.activeSessions > 0) Text("· " + stringResource(Res.string.share_sessions_live, s.activeSessions), color = Tok.muted, fontSize = 12.sp)
+            if (s.activeSessions > 0) Text("· " + stringResource(Res.string.bridge_sessions_live, s.activeSessions), color = Tok.muted, fontSize = 12.sp)
         } else {
             Text(stringResource(Res.string.share_status_idle), color = Tok.tx2, fontSize = 12.5.sp)
         }
