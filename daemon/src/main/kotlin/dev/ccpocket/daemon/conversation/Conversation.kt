@@ -1024,9 +1024,8 @@ class Conversation(
             // eager launch below is still a no-op for OpenCode (argv needs a prompt; the guard in
             // launchProcess defers to the first sendPrompt, which anchors on sessionId ?: openedResumeId).
             launchProcess(
-                AgentSpec(
-                    workdir, resumeId, model, launchMode(), effort = this.effort, thinking = this.thinking, agentPreset = this.agentPreset,
-                    permissionMode = launchPermissionMode(), serviceTier = this.serviceTier, forkSession = fork,
+                launchSpec(
+                    resumeId = resumeId, forkSession = fork,
                     // ONLY here: this is the one launch the user asked for by tapping "Continue here".
                     // Codex names the branch it forks for this take-over after it (issue #347); a later
                     // relaunch resumes the branch in place and must not rename anything again.
@@ -1432,11 +1431,7 @@ class Conversation(
         stopProcess(preservePendingBridgeGrantToken = initialSend?.bridgeGrantToken)
         val fork = if (sessionId == null) openedWithFork else resumeId != sessionId
         launchProcess(
-            AgentSpec(
-                workdir, resumeId = resumeId, model = model, mode = launchMode(), effort = effort, thinking = thinking, agentPreset = agentPreset,
-                permissionMode = launchPermissionMode(), serviceTier = serviceTier,
-                forkSession = fork, initialPrompt = initialSend?.text,
-            ),
+            launchSpec(resumeId = resumeId, forkSession = fork, initialPrompt = initialSend?.text),
             armExecuting = armExecuting,
             initialSend = initialSend,
         )
@@ -1695,6 +1690,32 @@ class Conversation(
 
     /** The raw `--permission-mode` string overrides [launchMode], so a remote run never carries one. */
     private fun launchPermissionMode(): String? = if (remoteExecution) null else permissionMode
+
+    /**
+     * The ONE place a launch's [AgentSpec] is assembled from the conversation's live knobs (lifecycle design S1).
+     * Every launch point used to build its own, and they drifted (design §4.1 / audit H1, L2). The defaults are
+     * the common case: resume the live id, else the opened one; fork only pre-first-turn and only if open()
+     * decided to. Each call site passes just what differs. Mode is always [launchMode]: launchProcess
+     * re-applies the remote-execution downgrade at its choke point anyway (idempotent), plus the bridge
+     * preamble, clean room and rewind truncation, which stay there.
+     *
+     * The [model] / [thinking] / [agentPreset] overrides exist only to keep two sites byte-for-byte as they
+     * were (the control-plane cold start, switchDirectory) until those differences are ruled on.
+     * Build it immediately before [launchProcess]: it snapshots the knobs at call time.
+     */
+    private fun launchSpec(
+        resumeId: String? = sessionId ?: openedResumeId,
+        forkSession: Boolean = if (sessionId == null) openedWithFork else false,
+        initialPrompt: String? = null,
+        takeOver: Boolean = false,
+        model: String? = this.model,
+        thinking: Boolean? = this.thinking,
+        agentPreset: String? = this.agentPreset,
+    ): AgentSpec = AgentSpec(
+        workdir, resumeId = resumeId, model = model, mode = launchMode(), effort = effort, thinking = thinking,
+        agentPreset = agentPreset, permissionMode = launchPermissionMode(), serviceTier = serviceTier,
+        forkSession = forkSession, takeOver = takeOver, initialPrompt = initialPrompt,
+    )
 
     private suspend fun launchProcess(rawSpec: AgentSpec, armExecuting: Boolean = false, initialSend: InitialSend? = null) {
         // OpenCode requires a message argument — can't launch without one (opencode run exits with error).
@@ -2501,10 +2522,9 @@ class Conversation(
                         log.info("$convoId one-shot queue: relaunching with queued prompt ${next.key.take(8)}…")
                         runCatching {
                             launchProcess(
-                                AgentSpec(
-                                    workdir, sessionId ?: openedResumeId, model, mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                                    permissionMode = permissionMode, serviceTier = serviceTier, initialPrompt = next.text,
-                                ),
+                                // never forks, even pre-first-turn on a fork-opened session (design §4.2: kept
+                                // as today pending a ruling)
+                                launchSpec(forkSession = false, initialPrompt = next.text),
                                 armExecuting = true,
                                 initialSend = InitialSend(next.key, next.text, next.images, next.bridgeGrantToken),
                             )
@@ -2524,10 +2544,7 @@ class Conversation(
                     log.info("$convoId stdin one-shot queue: relaunching with unconsumed prompt(s)")
                     runCatching {
                         launchProcess(
-                            AgentSpec(
-                                workdir, sessionId ?: openedResumeId, model, mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                                permissionMode = permissionMode, serviceTier = serviceTier,
-                            ),
+                            launchSpec(forkSession = false), // same fork rule as the argv drain above
                             armExecuting = true,
                         )
                     }.onFailure { e ->
@@ -2631,12 +2648,7 @@ class Conversation(
             // the refused process took the prompt with it — it's still in the unconsumed ledger (no
             // replay ever came), so launchProcess re-injects it into the forked process (issue #122)
             if (hasUnconsumedPrompts()) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FORK_NOTICE)))
-            launchProcess(
-                AgentSpec(
-                    workdir, resumeId = anchor, model = model, mode = mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                    permissionMode = permissionMode, serviceTier = serviceTier, forkSession = true,
-                ),
-            )
+            launchProcess(launchSpec(resumeId = anchor, forkSession = true))
         }
         if (healed.isFailure) {
             sink.emit(
@@ -2895,13 +2907,7 @@ class Conversation(
             // openedResumeId from the SQLite scanner — a cold resume (daemon restart, tap an old session)
             // MUST fall back to openedResumeId or the first prompt silently forks a brand-new session.
             // A truly stale id is recovered at process death (SESSION_NOT_FOUND clears the lineage).
-            val anchor = sessionId ?: openedResumeId
-            val fork = if (sessionId == null) openedWithFork else false
-            val lazySpec = AgentSpec(
-                workdir, anchor, model, mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                permissionMode = permissionMode, serviceTier = serviceTier,
-                forkSession = fork, initialPrompt = outgoing,
-            )
+            val lazySpec = launchSpec(initialPrompt = outgoing) // anchor + fork decision: launchSpec's defaults
             lifecycleProbe?.invoke(LifecyclePoint.AFTER_SPAWN_DECISION)
             val launched = runCatching {
                 launchProcess(
@@ -2987,15 +2993,10 @@ class Conversation(
             return false
         }
         if (proc == null) {
-            val anchor = sessionId ?: openedResumeId
-            val fork = if (sessionId == null) openedWithFork else false
             val launched = runCatching {
-                launchProcess(
-                    AgentSpec(
-                        workdir, anchor, model, mode, effort = effort,
-                        permissionMode = permissionMode, serviceTier = serviceTier, forkSession = fork,
-                    ),
-                )
+                // no thinking / agentPreset on this launch: today's behaviour, kept pending a ruling (design
+                // §4.2 #7; only Codex has native control ops, and it reads neither)
+                launchProcess(launchSpec(thinking = null, agentPreset = null))
             }
             if (launched.isFailure) {
                 reply("Could not start the agent for $opLabel: ${launched.exceptionOrNull()?.message ?: "unknown error"}")
@@ -3118,12 +3119,7 @@ class Conversation(
         runtimeEffort = null
         runtimeContextWindow = null
         runtimeAgentPreset = null
-        launchProcess(
-            AgentSpec(
-                workdir, resumeId = null, model = model, mode = mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                permissionMode = permissionMode, serviceTier = serviceTier,
-            ),
-        )
+        launchProcess(launchSpec(resumeId = null, forkSession = false))
         sink.emit(ConvoHistory(convoId, emptyList())) // wipe the phone's transcript
         sink.emit(live(null))                          // sessionId backfills on the next init
     }
@@ -3210,12 +3206,9 @@ class Conversation(
         failedTurnStreak = 0 // fresh session in a new cwd — degraded state died with the old transcript
         sawSyntheticThisTurn = false
         lastSyntheticText = null
-        launchProcess(
-            AgentSpec(
-                workdir, resumeId = null, model = null, mode = mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                permissionMode = permissionMode, serviceTier = serviceTier,
-            ),
-        )
+        // model = null: today's behaviour, kept pending a ruling (design §4.2 #9 / audit L2: the header keeps
+        // showing the user's pick while the process runs the default)
+        launchProcess(launchSpec(resumeId = null, forkSession = false, model = null))
         emitCommands() // project commands differ per workdir
     }
 
