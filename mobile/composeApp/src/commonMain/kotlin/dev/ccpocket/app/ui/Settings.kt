@@ -421,10 +421,11 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
 
     SectionLabel(stringResource(Res.string.default_mode_section))
     Column(Modifier.settingsChoiceContainer()) {
-        val modeOptions = MODES + if (
-            defaultAgent == AgentKind.CLAUDE &&
-            repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO)
-        ) listOf(AUTO_MODE) else emptyList()
+        val modeOptions = MODES + if (repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO, defaultAgent)) {
+            listOf(AUTO_MODE)
+        } else {
+            emptyList()
+        }
         modeOptions.forEachIndexed { index, m ->
             if (index > 0) Hairline(Modifier.padding(horizontal = 12.dp))
             val sel = repo.defaultMode.value == m.key && effectivePermissionMode == m.nativeMode
@@ -622,7 +623,7 @@ private fun AgentDefaultsSummary(repo: PocketRepository, agent: AgentKind) {
     // the mode group's own option list AND its own selection rule, unchanged: Auto only where it is
     // advertised, and key + native mode must BOTH match — so a stored `auto` is never reported for a
     // backend whose rows cannot offer it, and no row reads selected while the summary claims another
-    val mode = (MODES + if (agent == AgentKind.CLAUDE && repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO)) {
+    val mode = (MODES + if (repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO, agent)) {
         listOf(AUTO_MODE)
     } else {
         emptyList()

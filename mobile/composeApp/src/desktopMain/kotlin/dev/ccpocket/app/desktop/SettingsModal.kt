@@ -425,8 +425,7 @@ private fun GeneralPane(model: DesktopModel) {
         Group(stringResource(Res.string.settings_default_mode), stringResource(Res.string.settings_default_mode_sub)) {
             val modes = desktopModeChoices(
                 defaultAgent,
-                defaultAgent == AgentKind.CLAUDE &&
-                    model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+                model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO, defaultAgent),
             )
             modes.forEach { m ->
                 ModeRow(

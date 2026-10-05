@@ -1554,7 +1554,7 @@ class RepoDesktopModel(
     override fun serviceTierOptions() = repo.serviceTierOptions()
     override fun effortOptionsFor(agent: AgentKind, model: String?): List<String> = repo.effortOptions(agent, model)
     override fun serviceTierOptionsFor(agent: AgentKind, model: String?) = repo.serviceTierOptions(agent, model)
-    override fun permissionModeAvailable(id: String): Boolean = repo.supportsPermissionMode(id)
+    override fun permissionModeAvailable(id: String, agent: AgentKind): Boolean = repo.supportsPermissionMode(id, agent)
     override fun compactConversation() { repo.sendPrompt("/compact") }
     override fun modelsForAgent(agent: AgentKind): List<String> = repo.agentModels[agent]?.models ?: emptyList()
     override fun modelsNoteForAgent(agent: AgentKind): String? = codexCatalogNote(agent, repo.agentModels[agent])

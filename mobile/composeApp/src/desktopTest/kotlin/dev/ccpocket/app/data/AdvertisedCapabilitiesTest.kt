@@ -16,6 +16,33 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+/** What the current daemon's per-backend ModelService puts on the wire (only the capability fields). */
+internal fun currentDaemonModels(agent: AgentKind): ModelsList = when (agent) {
+    AgentKind.CLAUDE -> ModelsList(
+        agent = agent,
+        models = listOf("opus"),
+        permissionModes = listOf(CLAUDE_PERMISSION_MODE_AUTO),
+        supportsThinkingToggle = true,
+    )
+    AgentKind.CODEX -> ModelsList(
+        agent = agent,
+        models = listOf("gpt-5.5"),
+        modelCapabilities = listOf(
+            ModelCapabilities("gpt-5.5", serviceTiers = listOf(ModelServiceTier("priority", "Fast"))),
+        ),
+    )
+    AgentKind.DSH -> ModelsList(
+        agent = agent,
+        models = listOf("deepseek-v4"),
+        modelCapabilities = listOf(ModelCapabilities("deepseek-v4", reasoningEfforts = listOf("high"))),
+    )
+    AgentKind.KIMI, AgentKind.OPENCODE, AgentKind.ZCODE -> ModelsList(agent = agent, models = listOf("m"))
+}
+
+/** An older daemon: the same list with every capability field absent (decoded to its default). */
+internal fun oldDaemonModels(agent: AgentKind): ModelsList =
+    ModelsList(agent = agent, models = currentDaemonModels(agent).models)
+
 /**
  * The client gates that moved from "is this Claude / Codex" to "what did the daemon advertise".
  *
@@ -24,34 +51,8 @@ import kotlin.test.assertTrue
  * must equal the legacy name-based answer — the move is an equivalence, not a behaviour change.
  */
 class AdvertisedCapabilitiesTest {
-
-    /** What the current daemon's per-backend ModelService puts on the wire (only the fields that matter). */
-    private fun currentDaemon(agent: AgentKind): ModelsList = when (agent) {
-        AgentKind.CLAUDE -> ModelsList(
-            agent = agent,
-            models = listOf("opus"),
-            permissionModes = listOf(CLAUDE_PERMISSION_MODE_AUTO),
-            supportsThinkingToggle = true,
-        )
-        AgentKind.CODEX -> ModelsList(
-            agent = agent,
-            models = listOf("gpt-5.5"),
-            modelCapabilities = listOf(
-                ModelCapabilities("gpt-5.5", serviceTiers = listOf(ModelServiceTier("priority", "Fast"))),
-            ),
-        )
-        AgentKind.DSH -> ModelsList(
-            agent = agent,
-            models = listOf("deepseek-v4"),
-            modelCapabilities = listOf(ModelCapabilities("deepseek-v4", reasoningEfforts = listOf("high"))),
-        )
-        AgentKind.KIMI, AgentKind.OPENCODE, AgentKind.ZCODE -> ModelsList(agent = agent, models = listOf("m"))
-    }
-
-    /** An older daemon: the same list with every capability field absent (decoded to its default). */
-    private fun oldDaemon(agent: AgentKind): ModelsList = ModelsList(agent = agent, models = currentDaemon(agent).models)
-
-    private fun modelOf(agent: AgentKind) = currentDaemon(agent).models.first()
+    private fun currentDaemon(agent: AgentKind) = currentDaemonModels(agent)
+    private fun oldDaemon(agent: AgentKind) = oldDaemonModels(agent)
 
     // ── thinking toggle ──────────────────────────────────────────────────────────────────────────────
 
@@ -94,6 +95,40 @@ class AdvertisedCapabilitiesTest {
                 } finally {
                     scope.cancel()
                 }
+            }
+        }
+    }
+
+    // ── permission modes ─────────────────────────────────────────────────────────────────────────────
+
+    /** Receive every backend's list from one daemon, as a connected App does. */
+    private fun repoWithLists(scope: CoroutineScope, lists: (AgentKind) -> ModelsList) =
+        PocketRepository(scope).apply {
+            onSendForTest = {}
+            AgentKind.entries.forEach { receiveForTest(lists(it)) }
+        }
+
+    private fun daemons(): List<Pair<String, (AgentKind) -> ModelsList>> =
+        listOf("current daemon" to ::currentDaemon, "old daemon" to ::oldDaemon)
+
+    @Test
+    fun auto_permission_mode_is_offered_exactly_where_the_name_check_offered_it() {
+        for ((label, lists) in daemons()) {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            val repo = repoWithLists(scope, lists)
+            try {
+                for (agent in AgentKind.entries) {
+                    // pre-move Settings.kt: `agent == CLAUDE && repo.supportsPermissionMode(AUTO)` (Claude's list)
+                    val legacy = agent == AgentKind.CLAUDE && repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO)
+                    assertEquals(legacy, repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO, agent), "$agent / $label")
+                }
+                assertEquals(
+                    label == "current daemon",
+                    repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO, AgentKind.CLAUDE),
+                    "Claude Auto: offered by today's daemon, hidden by an old one",
+                )
+            } finally {
+                scope.cancel()
             }
         }
     }

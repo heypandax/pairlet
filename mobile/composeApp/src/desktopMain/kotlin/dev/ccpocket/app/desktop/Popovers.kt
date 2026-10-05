@@ -529,7 +529,7 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 }
                 val modeChoices = desktopModeChoices(
                     model.chatAgent,
-                    model.chatAgent == AgentKind.CLAUDE && model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO),
+                    model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO, model.chatAgent),
                 )
                 val activeMode = modeChoices.firstOrNull {
                     it.mode == model.chatMode && it.nativeMode == model.chatPermissionMode
@@ -571,7 +571,7 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 QaBack(stringResource(Res.string.label_mode)) { page = QaPage.MAIN }
                 val choices = desktopModeChoices(
                     model.chatAgent,
-                    model.chatAgent == AgentKind.CLAUDE && model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO),
+                    model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO, model.chatAgent),
                 )
                 choices.forEach { m ->
                     QaOption(
