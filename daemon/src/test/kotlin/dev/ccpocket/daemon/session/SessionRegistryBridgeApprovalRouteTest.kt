@@ -602,22 +602,20 @@ class SessionRegistryBridgeApprovalRouteTest {
             assertEquals(2, backend.launches)
 
             backend.releaseOldControl.complete(Unit)
-            val ask = withTimeout(5_000) {
-                while (true) {
-                    frames.filterIsInstance<PermissionAsk>()
-                        .lastOrNull { it.askId == "old-control" }
-                        ?.let { return@withTimeout it }
-                    delay(10)
-                }
-                error("unreachable")
-            }
+            // Lifecycle S5 (architecture ruling 3): the relaunch's stop RETIRED generation 1 before it shut the
+            // process down, so its late control request — parsed only now — is dropped by generation: it never
+            // surfaces as a card, and nothing is ever answered for it. (Before S5 it surfaced and the owner's
+            // verdict was written through the backend's CURRENT io, i.e. into generation 2's process — D8.)
+            delay(500)
             assertTrue(
-                backend.responses.none { it.first == ask.askId && it.second },
-                "generation 1 must not observe generation 2's active full grant",
+                frames.filterIsInstance<PermissionAsk>().none { it.askId == "old-control" },
+                "a superseded generation's late ask must not surface: $frames",
             )
-            approvals.onVerdict(PermissionVerdict(convoId, ask.askId, Decision.DENY))
-            withTimeout(5_000) { while (backend.responses.none { it.first == ask.askId }) delay(10) }
-            assertEquals(ask.askId to false, backend.responses.last())
+            assertTrue(
+                backend.responses.none { it.first == "old-control" },
+                "generation 1 must not observe generation 2's active full grant (nor be answered at all): ${backend.responses}",
+            )
+            assertEquals("new-control" to true, backend.responses.last())
         } finally {
             registry.closeAll()
             scope.cancel()

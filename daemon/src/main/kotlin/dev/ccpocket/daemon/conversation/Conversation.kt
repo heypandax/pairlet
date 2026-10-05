@@ -49,6 +49,7 @@ import dev.ccpocket.protocol.TurnDone
 import dev.ccpocket.protocol.WorkflowAgentDetail
 import dev.ccpocket.protocol.WorkflowUpdate
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -61,6 +62,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.isSubagentTool
 import dev.ccpocket.protocol.isWorkflowTool
@@ -552,8 +554,29 @@ class Conversation(
     @Volatile
     private var turnWork = TurnWorkState()
 
+    /**
+     * One process GENERATION (lifecycle design S5): the identity every late event of a process is checked
+     * against. The backend stays ONE instance across launches (design §3 (i), ruling 2), so isolation is by
+     * generation inside it: a stop marks the slot [retired] BEFORE it shuts the process down, and from then on
+     * the slot's pump drops every buffered line UNPARSED (no backend protocol state, no turn, no ask, no init of
+     * the old process can reach the new one — D4/D8), its permission answers are discarded instead of being
+     * written to whatever io is current, its direct emits are dropped, and its end is not a death transition
+     * (the stop settled it). [drained] completes once the pump has left its read loop (or never ran); a stop
+     * waits for it — bounded — before the next launch attaches, so two generations never feed the backend at
+     * once ("drain before attach").
+     *
+     * Replaces the old cross-generation `intentionalStop` flag, which every launch cleared: a late pump of a
+     * stopped process then read "not intentional" and could only rely on the handle-identity check.
+     */
+    private class ProcSlot(val proc: AgentProcess) {
+        @Volatile var retired = false
+        val drained = CompletableDeferred<Unit>()
+    }
+
+    /** The slot of [proc], published together with it under [lifecycle]. Readers identity-check it against
+     *  [proc] (a death transition drops `proc` and leaves this behind, inert). */
     @Volatile
-    private var intentionalStop = false
+    private var slot: ProcSlot? = null
 
     /** Set first thing in [close] and never cleared (lifecycle design S3(b) / D5). close() cancels [scope], so
      *  any process started after it gets no IO pumps and no stdout pump — a leaked CLI nobody reads or stops —
@@ -1886,7 +1909,6 @@ class Conversation(
             ?.takeIf { sessionId == null && cleanSpec.resumeId != null }
             ?.let { cleanSpec.copy(resumeSessionAt = it.anchorUuid, resumeDropsTurn = it.dropsTurnUuid, forkSession = true) }
             ?: cleanSpec
-        intentionalStop = false
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
         modelPickPending = false // …including a model pick: this process's own init may now report the resolved id
         resetTurnScratch()
@@ -1904,18 +1926,22 @@ class Conversation(
         // so a new backend gets it without a per-launcher edit.
         if (remoteExecution) dev.ccpocket.daemon.execution.ExecutionSandbox.stripChildEnv(builder.environment())
         val p = AgentProcess.start(builder, scope)
+        val s = ProcSlot(p)
         // From here on an OS process exists. ANY failure before its pump runs — attach throwing, the
         // conversation closing mid-launch, a redelivery write failing, the caller being cancelled — used to
         // leave `proc` pointing at a live process nobody reads: the next prompt was queued into it and never
         // ran, `executing` stuck true (lifecycle design D5 / S3(c)). Roll the handle back and stop the process.
         try {
-            launchStarted(p, spec, launchGeneration, backendLabel, armExecuting, initialSend)
+            launchStarted(p, s, spec, launchGeneration, backendLabel, armExecuting, initialSend)
         } catch (error: Throwable) {
+            s.retired = true // the generation never went live: anything it still answers or emits is dropped (S5)
             if (proc === p) {
                 proc = null
                 bridge = null // published together with `proc`; its pump never ran, so it holds no ask
+                slot = null
             }
             withContext(NonCancellable) { runCatching { p.shutdown() } }
+            s.drained.complete(Unit) // no pump ran for it (the pump is the launch's last step)
             throw error
         }
     }
@@ -1924,6 +1950,7 @@ class Conversation(
      *  record the launch's own prompt and start the pump. Throwing here rolls [p] back (see the caller). */
     private suspend fun launchStarted(
         p: AgentProcess,
+        s: ProcSlot,
         spec: AgentSpec,
         launchGeneration: Long,
         backendLabel: AgentBackendLabel,
@@ -1933,7 +1960,8 @@ class Conversation(
         lifecycleProbe?.invoke(LifecyclePoint.LAUNCH_AFTER_START)
         val io = AgentIo(
             writeLine = p::writeLine,
-            emit = { sink.emit(it) }, // read sink dynamically (reattach)
+            // read sink dynamically (reattach); a retired generation's direct emits are dropped (S5)
+            emit = { if (!s.retired) sink.emit(it) },
             // issue #255: dsh's events arrive on a WebSocket, not on stdout. Route them into the SAME
             // channel the pump below drains, so there is still exactly one ordering domain and one seq
             // assigner. Sends after the process exits fail on the closed channel and are dropped.
@@ -1966,7 +1994,18 @@ class Conversation(
                 if (f is dev.ccpocket.protocol.PermissionAsk) maybePushAsk(f)
             }
         val b = PermissionBridge(
-            convoId, mode, approvals, emitWithAskPush, allowRules, respond = backend::respondPermission,
+            convoId, mode, approvals, emitWithAskPush, allowRules,
+            // S5 / D8: the backend is one instance across generations and answers through its CURRENT io. A
+            // verdict for this generation's ask that lands after the process was stopped or replaced must never
+            // be written into the next process. Only the DESTINATION is gated — what was decided, and every
+            // lease rule behind it (useBridgeGrant below), is unchanged.
+            respond = { askId, allow, remember, originalInput, updatedInput, denyMessage ->
+                if (!s.retired && proc === p) {
+                    backend.respondPermission(askId, allow, remember, originalInput, updatedInput, denyMessage)
+                } else {
+                    log.info("$convoId dropped a permission answer for ask $askId: its process generation $launchGeneration is gone")
+                }
+            },
             // approval design M2: the shared task-grant engine + the conversation's live task pointer
             grants = grants, taskId = { currentTaskId() },
             risk = riskEngine, // M3 advisory badges
@@ -2052,6 +2091,7 @@ class Conversation(
         )
         proc = p
         bridge = b
+        slot = s
         // Bind IO + kick off any handshake (Codex initialize → thread/start) SYNCHRONOUSLY, before returning. The
         // lazy first prompt (issue #61) calls backend.sendPrompt right after this: sendPrompt reads the io attach
         // installs (Claude) and the thread state attach resets (Codex). Running attach inside the pump coroutine
@@ -2119,10 +2159,11 @@ class Conversation(
                     val killed = lifecycleLocked {
                         if (proc !== p || !p.isAlive() || p.sawStdout) return@lifecycleLocked false
                         log.warn("$convoId OpenCode watchdog: no stdout in ${windowMs}ms, killing process ${p.pid}")
-                        intentionalStop = true
+                        s.retired = true // a deliberate kill: its pump's end is not a death transition
                         revokeAllBridgeGrants()
                         p.shutdown(eofGraceMs = 1_000, termGraceMs = 1_000, forceGraceMs = 1_000)
                         p.awaitExit()
+                        awaitDrained(s) // drain before the next launch attaches (S5)
                         true
                     }
                     if (!killed) return@launch
@@ -2157,12 +2198,26 @@ class Conversation(
         }
         scope.launch(CoroutineName("pump-$convoId")) {
             try {
-                pump(p, b, launchGeneration)
+                pump(p, b, launchGeneration, s)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                pumpCrashed(p, b, e)
+                pumpCrashed(p, b, s, e)
             }
+        }.invokeOnCompletion {
+            // backstop: a pump cancelled before it ever ran (the scope cancelled by a close racing this launch)
+            // never reaches its own drained signal — a stop must not spend its drain bound waiting for it
+            s.drained.complete(Unit)
+        }
+    }
+
+    /** Caller holds [lifecycle]: wait (bounded) until [s]'s pump has left its read loop. The pump completes
+     *  [ProcSlot.drained] BEFORE it ever asks for the lifecycle lock, so this cannot deadlock against it; a
+     *  pump stuck inside one event (a wedged transport emit) is abandoned after the bound — the retired check
+     *  still drops everything after that event. */
+    private suspend fun awaitDrained(s: ProcSlot) {
+        if (withTimeoutOrNull(STOP_DRAIN_TIMEOUT_MS) { s.drained.await() } == null) {
+            log.warn("$convoId the pump of stopped process ${s.proc.pid} did not drain within ${STOP_DRAIN_TIMEOUT_MS}ms — continuing; its remaining output is dropped")
         }
     }
 
@@ -2185,7 +2240,7 @@ class Conversation(
      * conversation, or a deliberate stop, is left alone — including one that appears WHILE this process is
      * being shut down (see below). [b] is this process's own permission bridge.
      */
-    private suspend fun pumpCrashed(p: AgentProcess, b: PermissionBridge, e: Exception) {
+    private suspend fun pumpCrashed(p: AgentProcess, b: PermissionBridge, s: ProcSlot, e: Exception) {
         log.error("$convoId pump crashed — stopping its process and settling the session", e)
         Diagnostics.report(ErrorPath.TURN, Stage.EXIT, ErrorCode.UNEXPECTED, e,
             SafeMetrics(backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }), isError = true)
@@ -2193,7 +2248,8 @@ class Conversation(
         // while this one is still exiting.
         val stopped = lifecycleLocked {
             val owned = proc === p
-            if (!owned && (proc != null || intentionalStop)) return@lifecycleLocked false
+            // a retired generation was settled by the stop / kill that retired it
+            if (!owned && (proc != null || s.retired)) return@lifecycleLocked false
             if (owned) proc = null
             runCatching { p.shutdown() }
             true
@@ -2262,7 +2318,11 @@ class Conversation(
         }
     }
 
-    private suspend fun pump(p: AgentProcess, b: PermissionBridge, generation: Long) {
+    /** Read [p]'s stdout until it closes, handling every event; true when a turn completed. A RETIRED
+     *  generation's lines are dropped unparsed (S5): a stop marks the slot before it shuts the process down,
+     *  so anything still buffered — or still being produced while the CLI flushes on its way out — reaches
+     *  neither the backend's per-process protocol state nor the conversation. */
+    private suspend fun readStdout(p: AgentProcess, b: PermissionBridge, generation: Long, s: ProcSlot): Boolean {
         var turnCompleted = false
         // has THIS process echoed a top-level user message yet? Until it has, no `result` it emits can be the
         // answer to a prompt of ours — see the leftover-task settlement rule in the TurnResult branch.
@@ -2271,6 +2331,7 @@ class Conversation(
         // settlement's empty `result` closes; without it an early empty result is not one we recognise.
         var leftoverTasksSettling = false
         for (line in p.stdout) {
+            if (s.retired) continue // drain without parsing: this generation is history
             lastActivityMs = System.currentTimeMillis()
             // PER-EVENT ISOLATION (audit 2026-10-04): one exception while parsing or handling one line used to
             // fail this coroutine silently — no death branch, stdout no longer read, the turn "executing"
@@ -2284,6 +2345,8 @@ class Conversation(
                 emptyList()
             }
             for (ev in events) try {
+                // retired while this line was being parsed (parse can suspend): drop the rest of it
+                if (s.retired) break
                 when (ev) {
                     is AgentEvent.SessionInit -> {
                         if (ev.sessionId != null && ev.sessionId != sessionId) sessionNotice = ev.notice
@@ -2696,8 +2759,15 @@ class Conversation(
                 }
             }
         }
-        log.info("$convoId pump ended (intentionalStop=$intentionalStop)")
-        if (intentionalStop) return
+        return turnCompleted
+    }
+
+    private suspend fun pump(p: AgentProcess, b: PermissionBridge, generation: Long, s: ProcSlot) {
+        // [ProcSlot.drained] completes the moment the read loop is left — BEFORE anything below takes the
+        // lifecycle lock — so a stop waiting for it under that lock can never deadlock against this pump
+        val turnCompleted = try { readStdout(p, b, generation, s) } finally { s.drained.complete(Unit) }
+        log.info("$convoId pump ended (retired=${s.retired})")
+        if (s.retired) return // a deliberate stop / kill settled this process
         // superseded: a newer launch already owns this conversation (a relaunch raced this pump's tail) — the
         // old process's death is history, not an error, and must not touch shared state
         if (proc !== p) return
@@ -3562,7 +3632,10 @@ class Conversation(
     /** Caller holds [lifecycle] (S4): the next launch can only start once this stop has returned. */
     private suspend fun stopProcess(preservePendingBridgeGrantToken: String? = null) {
         check(lifecycle.isLocked) { "stopProcess outside the lifecycle lock" }
-        intentionalStop = true
+        // S5: retire the generation FIRST — from here its pump drops every line unparsed and its permission
+        // answers go nowhere, so nothing it still prints can re-arm the turn or reach the next process (D4/D8)
+        val s = slot?.takeIf { it.proc === proc }
+        s?.retired = true
         clearTurnWork() // any in-flight turn and continuation grace die with the process
         heldTurnPush.set(null) // a deliberate stop/relaunch — the owner is acting on this session right now
         revokeAllBridgeGrants(preservePendingToken = preservePendingBridgeGrantToken)
@@ -3570,8 +3643,15 @@ class Conversation(
         bridge?.cancelAll()
         proc?.shutdown() // waits for real exit (force-kill fallback) — file is quiet after this
         lifecycleProbe?.invoke(LifecyclePoint.STOP_AFTER_SHUTDOWN)
+        // DRAIN BEFORE ATTACH (S5): the stdout channel is closed now; wait (bounded) until the old pump has left
+        // its read loop, so the next launch never attaches the shared backend while the old generation still
+        // feeds it, and the pump-only state below (jobs, sub-agents, workflows) has a single writer again.
+        s?.let { awaitDrained(it) }
         proc = null
         bridge = null
+        slot = null
+        // second pass: an event the old pump was already handling when the slot retired may have re-armed it
+        clearTurnWork()
         settleSubagents(includeBackground = true) // sub-agents died with the tree — stop their cards spinning
         // workflows run INSIDE the CLI process — settle any still-running run as KILLED, not a forever-pulse (#106)
         for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId)
@@ -3839,6 +3919,11 @@ class Conversation(
         // arrived (sawStdout) the watchdog stands down — turn LENGTH is unbounded by design. Overridable
         // (system property) so tests can exercise the window without a 45s wait.
         const val OPENCODE_STARTUP_TIMEOUT_MS = 45_000L
+
+        /** How long a stop waits for the stopped process's pump to leave its read loop (S5 drain-before-attach).
+         *  After the shutdown the stdout channel is closed and a retired pump skips lines unparsed, so the bound
+         *  is only ever spent on a pump stuck inside one event (a wedged transport emit). */
+        const val STOP_DRAIN_TIMEOUT_MS = 2_000L
         const val OPENCODE_WATCHDOG_PROP = "ccpocket.opencode.watchdogMs"
 
         // a process death this soon after a TurnResult is the SAME failure the turn's push already

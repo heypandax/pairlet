@@ -17,7 +17,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
-import org.junit.jupiter.api.Disabled
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -140,7 +139,6 @@ class ConversationLifecycleRaceTest {
      *  still handled after /clear cleared the turn, re-arming `executing` and painting a stale chunk after
      *  the wiped transcript. */
     @Test
-    @Disabled("待 S5：旧世代逐事件丢弃 + stop 等旧泵排空后二次清理（D4）")
     fun old_pump_output_after_clear_does_not_resurrect_the_turn() = runBlocking {
         if (LifecycleHarness.isWindows()) return@runBlocking
         val backend = LifecycleBackend { index, _ ->
@@ -182,7 +180,6 @@ class ConversationLifecycleRaceTest {
      *  process (buffered output handled after a settings relaunch) is answered through
      *  `backend::respondPermission`, which writes to whatever io is CURRENT — the new process. */
     @Test
-    @Disabled("待 S5：respond 按世代设闸 / 旧世代输出丢弃（D8）")
     fun an_old_generation_ask_is_never_answered_into_the_new_process() = withGrace("0") {
         runBlocking {
             if (LifecycleHarness.isWindows()) return@runBlocking
