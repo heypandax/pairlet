@@ -115,7 +115,7 @@ class KimiBackend(
                 "no answer to `initialize` within ${handshakeTimeoutMs / 1000}s — check that `kimi` is the Kimi Code " +
                     "CLI (`kimi acp`), not the legacy Python kimi-cli"
             },
-            describeError = { error -> error?.str("message") ?: "kimi error" },
+            describeError = ::describeError,
         ),
         log,
         object : AcpClient.Host {
@@ -477,6 +477,23 @@ class KimiBackend(
             PermissionMode.DEFAULT -> MODE_DEFAULT
             PermissionMode.PLAN -> "plan"
             PermissionMode.ACCEPT_EDITS, PermissionMode.BYPASS_PERMISSIONS -> null
+        }
+
+        /** `error.data.details` is summarized, not quoted whole: it lands in a log line and, for a refused user
+         *  switch, in the chat. */
+        private const val MAX_ERROR_DETAIL_CHARS = 300
+
+        /**
+         * A JSON-RPC error object → one line. kimi answers a failure with `-32603 "Internal error"` and puts the
+         * real reason in `data.details` (probe 2.1.1: `Model "nope" is not configured in config.toml.`), so the
+         * reason rides along when present — otherwise every refusal logged as a bare "Internal error".
+         */
+        internal fun describeError(error: JsonObject?): String {
+            val message = error?.str("message")?.takeIf { it.isNotBlank() } ?: "kimi error"
+            val data = error?.get("data")
+            val details = ((data as? JsonObject)?.str("details") ?: (data as? JsonPrimitive)?.takeIf { it.isString }?.content)
+                ?.replace(Regex("\\s+"), " ")?.trim()?.takeIf { it.isNotBlank() && it != message }
+            return if (details == null) message else "$message: ${details.take(MAX_ERROR_DETAIL_CHARS)}"
         }
 
         /** The kimi mode a MID-SESSION switch moves to: the same mapping, with the daemon-enforced modes back on

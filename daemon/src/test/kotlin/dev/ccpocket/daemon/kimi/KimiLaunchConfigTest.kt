@@ -222,6 +222,32 @@ class KimiLaunchConfigTest {
         b.onProcessEnded("s1")
     }
 
+    /** kimi's real refusal shape: `-32603 Internal error` with the reason in `data.details` (probe 2.1.1). */
+    private val refusal = """{"code":-32603,"message":"Internal error","data":{"details":"Model \"nope\" is not configured in config.toml."}}"""
+
+    @Test
+    fun `an error's data details ride along with its message`() {
+        assertEquals(
+            "Internal error: Model \"nope\" is not configured in config.toml.",
+            KimiBackend.describeError(Json.parseToJsonElement(refusal).jsonObject),
+        )
+        assertEquals("auth required", KimiBackend.describeError(Json.parseToJsonElement("""{"code":-32001,"message":"auth required"}""").jsonObject))
+    }
+
+    @Test
+    fun `a refused mid-session switch tells the user why and the session keeps working`() = runBlocking {
+        val (b, _) = open()
+        b.applySettings(mode = PermissionMode.PLAN, model = null, effort = null)
+        awaitWrites(1)
+        val events = b.parse("""{"jsonrpc":"2.0","id":${idOf(writes().single())},"error":$refusal}""")
+        assertTrue(events.none { it is AgentEvent.TurnResult }, "$events")
+        val notice = AgentEvent.AssistantText::class.java.cast(b.parse(injected.single()).single()).text
+        assertTrue("could not switch the permission mode" in notice && "is not configured in config.toml" in notice, notice)
+        b.sendPrompt("still here?", emptyList())
+        assertTrue(prompts().single().contains("still here?"))
+        b.onProcessEnded("s1")
+    }
+
     @Test
     fun `a switch before the session opens is only recorded and the launch writes carry it once`() = runBlocking {
         val b = KimiBackend(null)
