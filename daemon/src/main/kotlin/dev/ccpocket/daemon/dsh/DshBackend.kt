@@ -99,6 +99,7 @@ class DshBackend(
     private val sessionsRoot: () -> Path = DshPaths::sessionsRoot,
     /** How long one `session/set_config_option` may go unanswered — see [watchConfig]. Injectable for tests. */
     private val configTimeoutMs: Long = CONFIG_TIMEOUT_MS,
+    private val handshakeTimeoutMs: Long = HANDSHAKE_TIMEOUT_MS,
 ) : AgentBackend {
     private val log = logger("DshBackend")
 
@@ -133,13 +134,11 @@ class DshBackend(
             stageHandshake = STAGE_HANDSHAKE,
             stageNew = STAGE_NEW,
             stageResume = STAGE_RESUME,
-            handshakeTimeoutMs = HANDSHAKE_TIMEOUT_MS,
+            handshakeTimeoutMs = handshakeTimeoutMs,
             // A handshake that never answers is exactly what a pre-0.1.2 dsh does: `--profile acp` composes a
             // profile with no app in it, so nothing ever claims stdio. The message names the version to install.
             handshakeHint = DshLauncher::outdatedHint,
             describeError = ::describeError,
-            filterForeignUpdates = true,
-            keepSessionOpenIdAcrossRelaunch = true,
         ),
         log,
         object : AcpClient.Host {

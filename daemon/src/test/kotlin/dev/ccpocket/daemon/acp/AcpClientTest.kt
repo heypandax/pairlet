@@ -28,7 +28,6 @@ class AcpClientTest {
 
     private fun client(
         resume: AcpClient.Resume = AcpClient.Resume.RESUME,
-        filter: Boolean = true,
         timeoutMs: Long = 30_000,
     ): AcpClient {
         lateinit var c: AcpClient
@@ -43,7 +42,6 @@ class AcpClientTest {
                 handshakeTimeoutMs = timeoutMs,
                 handshakeHint = { "no answer" },
                 describeError = { it?.get("message")?.jsonPrimitive?.content ?: "error" },
-                filterForeignUpdates = filter,
             ),
             LoggerFactory.getLogger("AcpClientTest"),
             object : AcpClient.Host {
@@ -156,6 +154,49 @@ class AcpClientTest {
         assertTrue(injected.isEmpty(), "no failure: $injected")
     }
 
+    private suspend fun awaitInjected(): String {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (injected.isEmpty() && System.currentTimeMillis() < deadline) delay(20)
+        return injected.single()
+    }
+
+    @Test
+    fun `a session open that never answers settles the waiting prompt after the watchdog`() = runBlocking {
+        val c = client(timeoutMs = 100)
+        c.start()
+        c.sendPrompt("hello?", emptyList())
+        c.parse("""{"jsonrpc":"2.0","id":1,"result":{}}""") // → session/new, never answered
+        val events = c.parse(awaitInjected())
+        assertEquals("hello?", assertIs<AgentEvent.UserReplay>(events[0]).text)
+        assertEquals("⚠️ NEW: no answer to `session/new` within 0s", assertIs<AgentEvent.AssistantText>(events[1]).text)
+        assertTrue(assertIs<AgentEvent.TurnResult>(events[2]).isError)
+        assertTrue(prompts().isEmpty())
+    }
+
+    @Test
+    fun `a resume that keeps streaming is not accused, and silence is`() = runBlocking {
+        val c = client(resume = AcpClient.Resume.LOAD, timeoutMs = 400)
+        c.start(resumeId = "old")
+        c.parse("""{"jsonrpc":"2.0","id":1,"result":{}}""") // → session/load
+        val replay = """{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"old","update":{"sessionUpdate":"x"}}}"""
+        repeat(20) { c.parse(replay); delay(50) } // 1s of history replay, never 400ms of silence
+        assertTrue(injected.isEmpty(), "a talking agent is not hung: $injected")
+        val events = c.parse(awaitInjected())
+        assertTrue(assertIs<AgentEvent.AssistantText>(events[0]).text.startsWith("⚠️ RESUME: no answer to `session/load`"))
+    }
+
+    @Test
+    fun `a session open answering after the watchdog gave up is taken after all`() = runBlocking {
+        val c = client(timeoutMs = 100)
+        c.start()
+        c.parse("""{"jsonrpc":"2.0","id":1,"result":{}}""")
+        c.parse(awaitInjected()) // the watchdog's error turn
+        val opened = c.parse("""{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s1"}}""")
+        assertEquals("s1", assertIs<AgentEvent.SessionInit>(opened.single()).sessionId)
+        c.sendPrompt("now?", emptyList())
+        assertTrue("now?" in prompts().single(), "the late session takes prompts normally")
+    }
+
     @Test
     fun `prompts before the session open are buffered and released in order, one at a time`() = runBlocking {
         val c = client()
@@ -234,16 +275,15 @@ class AcpClientTest {
     }
 
     @Test
-    fun `foreign session updates are dropped only when filtering is configured`() = runBlocking {
-        val foreign = """{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"other","update":{"sessionUpdate":"x"}}}"""
-        val filtering = client(filter = true)
-        filtering.start()
-        filtering.open()
-        assertTrue(filtering.parse(foreign).isEmpty())
-        val open = client(filter = false)
-        open.start()
-        open.open()
-        assertEquals(1, open.parse(foreign).size)
+    fun `another session's updates are dropped, unstamped and own ones flow`() = runBlocking {
+        fun update(session: String?) = """{"jsonrpc":"2.0","method":"session/update","params":{""" +
+            (session?.let { """"sessionId":"$it",""" } ?: "") + """"update":{"sessionUpdate":"x"}}}"""
+        val c = client()
+        c.start()
+        c.open()
+        assertTrue(c.parse(update("other")).isEmpty())
+        assertEquals(1, c.parse(update("s1")).size)
+        assertEquals(1, c.parse(update(null)).size, "an unstamped update is not judged")
     }
 
     @Test

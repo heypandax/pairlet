@@ -83,7 +83,6 @@ class KimiBackend(
                     "CLI (`kimi acp`), not the legacy Python kimi-cli"
             },
             describeError = { error -> error?.str("message") ?: "kimi error" },
-            filterForeignUpdates = false,
         ),
         log,
         object : AcpClient.Host {
