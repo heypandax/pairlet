@@ -510,7 +510,6 @@ class RepoDesktopModel(
         repo.requestOpenSession(wd, sid)
     }
 
-    override val watch: DkWatch? get() = null // needs a second live stream — multi-connection repo work
 
     // ── split panes (issue #311) ──────────────────────────────────────────────────────────────────
     // The repository keeps the extra conversations (SidePanes); this maps them onto the shell's verbs.

@@ -1231,8 +1231,6 @@
     <string name="attention_empty">一切正常——任何电脑的审批都会排到这里。</string>
     <string name="attention_footer">只有预览能看全时才在这里批准——要看改动请点进会话。</string>
     <string name="attention_open_session">打开会话 ↗</string>
-    <string name="watch_waiting">⏸ 等待批准——</string>
-    <string name="watch_review">查看</string>
     <string name="tray_all_clear">没有需要你处理的事</string>
     <string name="tray_no_running">没有运行中的会话</string>
     <string name="tray_more_sessions">还有 %1$d 个会话</string>

@@ -35,7 +35,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * and keeps the cold path.
  *
  * Deliberately NOT here yet: per-machine push (the platform singleton stays with the primary — moot on
- * desktop, where push is a no-op), satellite session-opening (watch pane), and the always-on/on-demand
+ * desktop, where push is a no-op), satellite session-opening, and the always-on/on-demand
  * connection policy — those follow the "真并发交互缺口" design round.
  */
 class FleetCoordinator(private val scope: CoroutineScope, initialPrimary: PocketRepository) {

@@ -171,27 +171,6 @@ open class SeedDesktopModel : DesktopModel {
             DkMachine(computers[3], active = activeComputer == computers[3]),
         )
 
-    override val watch: DkWatch?
-        get() = DkWatch(
-            machine = "devbox-linux", os = DkOs.LINUX, title = "Run integration tests", mode = "acceptEdits",
-            output = """
-                $ pytest -x tests/integration
-                ============ test session starts ============
-                platform linux · python 3.12.1
-                collected 48 items
-
-                tests/integration/test_relay.py ......   [ 12%]
-                tests/integration/test_ws.py ........    [ 29%]
-                tests/integration/test_pairing.py ....   [ 37%]
-                tests/integration/test_e2e.py ....F
-
-                FAILED test_e2e.py::test_reconnect_backoff
-                  socket closed before backoff timer fired
-                  retrying with --lf
-            """.trimIndent(),
-            waiting = attention.firstOrNull { it.id == "ask-2" },
-        )
-
     private var selectedIndex by mutableStateOf(0)
     private var askResolved by mutableStateOf(false)
     override val selectedSessionId: String get() = sessions[selectedIndex].sessionId

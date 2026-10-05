@@ -1234,8 +1234,6 @@
     <string name="attention_empty">All clear — approvals from any machine queue here.</string>
     <string name="attention_footer">Approve here only for previews you can fully read — click through for diffs.</string>
     <string name="attention_open_session">Open session ↗</string>
-    <string name="watch_waiting">⏸ waiting approval —</string>
-    <string name="watch_review">Review</string>
     <string name="tray_all_clear">Nothing needs you</string>
     <string name="tray_no_running">No running sessions</string>
     <string name="tray_more_sessions">+%1$d more sessions</string>

@@ -1817,7 +1817,7 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                 var diaStatus by remember { mutableStateOf<String?>(null) } // last launch result → transient line under the hints
                 // Land ready-to-type: focus the composer whenever a session becomes current — a brand-new
                 // session (#72) or a pin-jump / palette / sidebar switch (#46). Only the keyboard-owning pane
-                // renders a Composer (the read-only WatchPane has none), so there's no split gate here —
+                // renders a Composer, so there's no split gate here —
                 // `focused` stays purely the accent-bar cue at the top of ChatPane. openSession clears convoId
                 // before every open, so hasChat cycles false→true on each land and this fires once per session.
                 // Retry until the field REPORTS focus (onFocusChanged), not merely until requestFocus() stops

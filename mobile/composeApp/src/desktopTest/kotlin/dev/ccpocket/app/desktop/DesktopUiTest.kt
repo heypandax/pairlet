@@ -479,14 +479,6 @@ class DesktopUiTest {
     }
 
     @Test
-    fun watchPaneRidesBesideTheChat() = runComposeUiTest {
-        setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
-        assertPresent("Run integration tests")                          // watch pane header
-        assertPresent("pytest -x tests/integration", substring = true)  // its read-only stream
-        assertPresent(str(Res.string.watch_waiting), substring = true)  // the ⏸ strip
-    }
-
-    @Test
     fun attentionPopoverListsAndResolvesCrossMachineApprovals() = runComposeUiTest {
         val model = SeedDesktopModel().apply { showAttention = true }
         setContent { PocketTheme { DesktopApp(model) } }

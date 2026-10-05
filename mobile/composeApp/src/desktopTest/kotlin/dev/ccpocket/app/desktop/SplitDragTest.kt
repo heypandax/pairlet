@@ -126,7 +126,6 @@ class SplitDragTest {
     /** A seed that can accept splits and records where the drop said to put them. */
     private class DragSeed : SeedDesktopModel() {
         val opened = mutableListOf<Pair<String, Int>>()
-        override val watch: DkWatch? get() = null // the live model's split renders under this state
         override val canSplit: Boolean get() = true
         override fun openInSplit(s: DkSession, at: Int) { opened += s.sessionId to at }
     }

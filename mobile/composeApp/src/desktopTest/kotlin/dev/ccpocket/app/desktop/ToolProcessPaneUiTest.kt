@@ -59,7 +59,6 @@ class ToolProcessPaneUiTest {
     ) : SeedDesktopModel() {
         override val toolProcessScope: ToolProcessScope? get() = scope
         override val ask: PermissionAsk? get() = pendingAsk
-        override val watch: DkWatch? get() = null
         override val sidePanes: List<SidePane> get() = columns
         override val streaming: Boolean get() = false
     }

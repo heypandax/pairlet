@@ -188,7 +188,7 @@ data class DkProjectListReveal(
     val accountId: String? = null,
 )
 
-// ── fleet ("Fleet Desktop" board): machine-grouped sidebar · cross-machine attention · watch pane ──
+// ── fleet ("Fleet Desktop" board): machine-grouped sidebar · cross-machine attention ──
 
 /**
  * A machine group in the sidebar. The ACTIVE machine renders the live projects+sessions panes inside its
@@ -241,16 +241,6 @@ data class DkAttention(
  *  second panel — a separate window would fork "find a session" into two places, which is the very
  *  fragmentation archiving exists to remove. */
 enum class PaletteScope { ALL, PROJECTS, ARCHIVED }
-
-/** A second session watched read-only beside the open chat (split pane). */
-data class DkWatch(
-    val machine: String,
-    val os: DkOs,
-    val title: String,
-    val mode: String,
-    val output: String,
-    val waiting: DkAttention?,
-)
 
 /**
  * The desktop shell reads everything through this — so the UI is agnostic to whether it is driven by a live
@@ -480,10 +470,9 @@ interface DesktopModel {
     /** Close the column this model views. Meaningless unless [paneScoped]. */
     fun closeThisPane() {}
 
-    // fleet: the sidebar's machine groups, the attention queue, and the read-only watch pane
+    // fleet: the sidebar's machine groups and the attention queue
     val machines: List<DkMachine>
     val attention: List<DkAttention>
-    val watch: DkWatch?
     fun resolveAttention(a: DkAttention, allow: Boolean)
     /** Take the user to the request behind an attention row (bell, tray, Windows flyout, a clicked banner).
      *  Default: switch to the machine that asks — all a row without a session id can honestly promise. */

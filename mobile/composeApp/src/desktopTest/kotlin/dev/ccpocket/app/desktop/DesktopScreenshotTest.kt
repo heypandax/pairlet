@@ -78,7 +78,7 @@ class DesktopScreenshotTest {
     @Test
     fun generate() {
         val W = 1180; val H = 798
-        shot("01-shell.png", W, H) { WindowFrame(seed()) } // fleet: machine-grouped sidebar + split watch pane
+        shot("01-shell.png", W, H) { WindowFrame(seed()) } // fleet: machine-grouped sidebar + chat
         shot("02-codex-diff-approval.png", W, H) { WindowFrame(seed { selectSession(sessions[2]) }) }
         shot("03-attention-popover.png", W, H) { WindowFrame(seed { showAttention = true }) }
         shot("04-new-session.png", W, H) { WindowFrame(seed { showNewSession = true }) }
