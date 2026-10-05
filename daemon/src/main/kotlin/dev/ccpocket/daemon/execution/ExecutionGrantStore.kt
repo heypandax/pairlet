@@ -2,7 +2,7 @@ package dev.ccpocket.daemon.execution
 
 import dev.ccpocket.daemon.diagnostics.storageReadFailed
 import dev.ccpocket.daemon.diagnostics.storageWriteFailed
-import dev.ccpocket.daemon.review.ReviewFiles
+import dev.ccpocket.daemon.peer.AtomicStoreFiles
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.PocketJson
 import kotlinx.serialization.Serializable
@@ -13,7 +13,7 @@ import java.nio.file.attribute.PosixFilePermissions
 
 /**
  * Target-side persistence for [ExecutionGrant]s: `~/.cc-pocket/execution-grants.json` (0600, atomic via
- * [ReviewFiles.write]) plus an APPEND-ONLY revocation tombstone log beside it (`…json.revoked`, 0600, one
+ * [AtomicStoreFiles.write]) plus an APPEND-ONLY revocation tombstone log beside it (`…json.revoked`, 0600, one
  * JSON object per line, fsync'd per append). Its own files, so an older daemon never loads them.
  *
  * Bound to ONE target identity ([targetDaemonPub]): a row naming any other key is not this daemon's grant.
@@ -158,7 +158,7 @@ class ExecutionGrantStore private constructor(
 
     private fun persist(next: List<ExecutionGrant>): Boolean {
         val f = file ?: return true
-        val ok = ReviewFiles.write(f, PocketJson.encodeToString(Stored.serializer(), Stored(clockHighWater = highWater, grants = next)))
+        val ok = AtomicStoreFiles.write(f, PocketJson.encodeToString(Stored.serializer(), Stored(clockHighWater = highWater, grants = next)))
         if (ok) ensureTombstoneFile()
         return ok
     }
@@ -196,7 +196,7 @@ class ExecutionGrantStore private constructor(
         private val GRANT_ID = Regex("^xg_[A-Za-z0-9_-]{8,64}$")
         private val log = logger("ExecutionGrantStore")
 
-        fun defaultPath(): File = ReviewFiles.path("execution-grants.json")
+        fun defaultPath(): File = AtomicStoreFiles.path("execution-grants.json")
 
         fun tombstonePathFor(file: File): File = File(file.absoluteFile.parentFile, file.name + ".revoked")
 

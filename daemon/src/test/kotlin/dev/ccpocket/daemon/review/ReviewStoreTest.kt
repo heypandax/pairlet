@@ -12,7 +12,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * [ReviewStore] + [ReviewFiles]: crash-safe roundtrip, owner-only permissions, corruption that fails
+ * [ReviewStore] + [AtomicStoreFiles]: crash-safe roundtrip, owner-only permissions, corruption that fails
  * closed WITHOUT destroying evidence, and the two deliberately different bounds (terminal history is
  * pruned; the active set refuses instead).
  */

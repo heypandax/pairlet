@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.review
 
+import dev.ccpocket.daemon.peer.AtomicStoreFiles
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.ReviewRequest
 import dev.ccpocket.protocol.ReviewStatus
@@ -161,13 +162,13 @@ class PeerInboxStore private constructor(private val path: File?) {
     }
 
     private fun commit(next: Stored): Boolean {
-        val durable = path?.let { ReviewFiles.write(it, PocketJson.encodeToString(Stored.serializer(), next)) } ?: true
+        val durable = path?.let { AtomicStoreFiles.write(it, PocketJson.encodeToString(Stored.serializer(), next)) } ?: true
         if (durable) state = next
         return durable
     }
 
     companion object {
-        fun defaultPath(): File = ReviewFiles.path("review-inbox.json")
+        fun defaultPath(): File = AtomicStoreFiles.path("review-inbox.json")
 
         const val MAX_MIRRORED_HISTORY = 200
 
@@ -206,7 +207,7 @@ class PeerInboxStore private constructor(private val path: File?) {
         }
 
         fun load(path: File = defaultPath()): PeerInboxStore = PeerInboxStore(path).apply {
-            ReviewFiles.read(path) { PocketJson.decodeFromString(Stored.serializer(), it) }?.let { state = it }
+            AtomicStoreFiles.read(path) { PocketJson.decodeFromString(Stored.serializer(), it) }?.let { state = it }
         }
 
         fun inMemory(): PeerInboxStore = PeerInboxStore(null)

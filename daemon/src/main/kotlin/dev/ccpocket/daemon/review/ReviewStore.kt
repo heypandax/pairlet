@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.review
 
+import dev.ccpocket.daemon.peer.AtomicStoreFiles
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.ReviewRequest
 import dev.ccpocket.protocol.isTerminal
@@ -80,13 +81,13 @@ class ReviewStore private constructor(private val path: File?) {
 
     /** Persist the prospective snapshot first and publish it to readers only after that succeeds. */
     private fun commit(next: Stored): Boolean {
-        val durable = path?.let { ReviewFiles.write(it, PocketJson.encodeToString(Stored.serializer(), next)) } ?: true
+        val durable = path?.let { AtomicStoreFiles.write(it, PocketJson.encodeToString(Stored.serializer(), next)) } ?: true
         if (durable) state = next
         return durable
     }
 
     companion object {
-        fun defaultPath(): File = ReviewFiles.path("reviews.json")
+        fun defaultPath(): File = AtomicStoreFiles.path("reviews.json")
 
         /** Terminal-history cap: enough for a "past requests" list, bounded forever. */
         const val MAX_HISTORY = 200
@@ -99,9 +100,9 @@ class ReviewStore private constructor(private val path: File?) {
         const val MAX_KEYS_PER_REQUEST = 32
 
         /** Load from [path]; a missing file yields an empty store, a corrupt one is quarantined by
-         *  [ReviewFiles.read] and also yields an empty store (never a crash at boot). */
+         *  [AtomicStoreFiles.read] and also yields an empty store (never a crash at boot). */
         fun load(path: File = defaultPath()): ReviewStore = ReviewStore(path).apply {
-            ReviewFiles.read(path) { PocketJson.decodeFromString(Stored.serializer(), it) }?.let { state = it }
+            AtomicStoreFiles.read(path) { PocketJson.decodeFromString(Stored.serializer(), it) }?.let { state = it }
         }
 
         /** Non-persistent store for unit tests and embedded cores that did not opt into production IO. */

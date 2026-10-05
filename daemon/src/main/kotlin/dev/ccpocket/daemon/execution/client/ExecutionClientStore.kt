@@ -1,6 +1,6 @@
 package dev.ccpocket.daemon.execution.client
 
-import dev.ccpocket.daemon.review.ReviewFiles
+import dev.ccpocket.daemon.peer.AtomicStoreFiles
 import dev.ccpocket.protocol.PocketJson
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -52,17 +52,17 @@ class ExecutionClientStore private constructor(private val file: File?) {
 
     private fun persist(next: List<ClientRun>): Boolean {
         val f = file ?: return true
-        return ReviewFiles.write(f, PocketJson.encodeToString(Stored.serializer(), Stored(runs = next)))
+        return AtomicStoreFiles.write(f, PocketJson.encodeToString(Stored.serializer(), Stored(runs = next)))
     }
 
     companion object {
         const val VERSION = 1
         private const val MAX_ROWS = 500
 
-        fun defaultPath(): File = ReviewFiles.path("execution-client-runs.json")
+        fun defaultPath(): File = AtomicStoreFiles.path("execution-client-runs.json")
 
         fun load(file: File): ExecutionClientStore = ExecutionClientStore(file).apply {
-            val stored = ReviewFiles.read(file) { PocketJson.decodeFromString(Stored.serializer(), it) }
+            val stored = AtomicStoreFiles.read(file) { PocketJson.decodeFromString(Stored.serializer(), it) }
             runs = stored?.takeIf { it.v == VERSION }?.runs ?: emptyList()
         }
 

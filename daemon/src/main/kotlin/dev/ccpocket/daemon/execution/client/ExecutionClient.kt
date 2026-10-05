@@ -328,8 +328,8 @@ class ExecutionClient(
         private val RNG = SecureRandom()
 
         fun defaultLinkPaths(): Pair<java.io.File, java.io.File> =
-            dev.ccpocket.daemon.review.ReviewFiles.path("execution-links.json") to
-                dev.ccpocket.daemon.review.ReviewFiles.path("execution-link-secrets.json")
+            dev.ccpocket.daemon.peer.AtomicStoreFiles.path("execution-links.json") to
+                dev.ccpocket.daemon.peer.AtomicStoreFiles.path("execution-link-secrets.json")
 
         /** A caller that supplies no requestId gets a fresh one; retrying then means REUSING it. */
         fun newRequestId(): String = "rq_" + dev.ccpocket.daemon.review.b64(ByteArray(12).also { RNG.nextBytes(it) })
