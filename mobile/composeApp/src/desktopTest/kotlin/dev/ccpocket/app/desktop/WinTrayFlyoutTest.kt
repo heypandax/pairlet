@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.ccpocket.app.assertPresent
+import dev.ccpocket.app.passArrivalGuard
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.allow
@@ -144,6 +145,7 @@ class WinTrayFlyoutTest {
         val model = SeedDesktopModel()
         setContent { PocketTheme { WinTrayFlyout(model) } }
         assertEquals(2, model.attention.size)
+        passArrivalGuard() // the double-tap guard: a card that just appeared takes no decision yet
         onAllNodes(hasText(str(Res.string.allow))).onFirst().performClick()
         waitForIdle()
         assertEquals(1, model.attention.size, "允许走 model.resolveAttention，和手机/内联审批卡同一条裁决")

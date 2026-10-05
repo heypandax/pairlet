@@ -12,6 +12,7 @@ import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.allow
 import dev.ccpocket.app.resources.allow_for_task
 import dev.ccpocket.app.resources.deny
+import dev.ccpocket.app.passArrivalGuard
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.protocol.PermissionAsk
@@ -60,6 +61,7 @@ class ApprovalDoubleClickUiTest {
         val model = QueueModel(ask("ask-1", "git status"), ask("ask-2", "rm -rf ~/work"))
         setContent { PocketTheme { ChatPane(model) } }
         waitForIdle()
+        passArrivalGuard() // the double-tap guard: a card that just appeared takes no decision yet
 
         doubleClick(str(Res.string.allow))
 
@@ -72,6 +74,7 @@ class ApprovalDoubleClickUiTest {
         val model = QueueModel(ask("ask-1", "git status"), ask("ask-2", "git push"))
         setContent { PocketTheme { ChatPane(model) } }
         waitForIdle()
+        passArrivalGuard() // the double-tap guard: a card that just appeared takes no decision yet
 
         doubleClick(str(Res.string.deny))
 
@@ -84,6 +87,7 @@ class ApprovalDoubleClickUiTest {
         val model = QueueModel(ask("ask-1", "pnpm test", grants), ask("ask-2", "pnpm publish", grants))
         setContent { PocketTheme { ChatPane(model) } }
         waitForIdle()
+        passArrivalGuard() // the double-tap guard: a card that just appeared takes no decision yet
 
         doubleClick(str(Res.string.allow_for_task))
 
@@ -95,9 +99,11 @@ class ApprovalDoubleClickUiTest {
         val model = QueueModel(ask("ask-1", "git status"), ask("ask-2", "git diff"))
         setContent { PocketTheme { ChatPane(model) } }
         waitForIdle()
+        passArrivalGuard() // the double-tap guard: a card that just appeared takes no decision yet
 
         onAllNodes(hasText(str(Res.string.allow))).onFirst().performClick()
         waitForIdle()
+        passArrivalGuard() // the double-tap guard: a card that just appeared takes no decision yet
         onAllNodes(hasText(str(Res.string.allow))).onFirst().performClick()
         waitForIdle()
 
