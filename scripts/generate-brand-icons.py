@@ -2,15 +2,18 @@
 """Convert the Pairlet icon master to platform containers; preserve the existing miniature icons.
 
 Run on macOS (sips/iconutil). This performs size/format conversion, not artwork generation.
+The desktop app icon is a byte-for-byte copy of the text-free mark `assets/brand/symbol.png`, not a resize.
 """
 from pathlib import Path
 import re
+import shutil
 import struct
 import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "assets/brand/pairlet-icon-1024.png"
+SYMBOL = ROOT / "assets/brand/symbol.png"
 
 
 def resize(size, destination):
@@ -21,7 +24,6 @@ def resize(size, destination):
 def main():
     targets = {
         "iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/icon-1024.png": 1024,
-        "mobile/composeApp/src/desktopMain/resources/app-icon.png": 256,
         "harmony/AppScope/resources/base/media/app_icon.png": 1024,
         "harmony/entry/src/main/resources/base/media/icon.png": 1024,
         "site/apple-touch-icon.png": 180,
@@ -30,6 +32,8 @@ def main():
     # foreground already sits inside the safe zone), restored from history when the Pocket label was dropped.
     for path, size in targets.items():
         resize(size, ROOT / path)
+    # The desktop app-icon.png is the text-free mark itself (512 px), kept byte-identical to symbol.png.
+    shutil.copyfile(SYMBOL, ROOT / "mobile/composeApp/src/desktopMain/resources/app-icon.png")
     with tempfile.TemporaryDirectory(prefix="pairlet-icon-") as directory:
         work = Path(directory)
         icns = ROOT / "mobile/composeApp/desktop-icons/cc-pocket.icns"
@@ -63,7 +67,8 @@ def main():
             payloads.append(payload)
             offset += len(payload)
         ico.write_bytes(struct.pack("<HHH", 0, 1, len(entries)) + b"".join(headers + payloads))
-    print(f"Pairlet platform icon resources generated from {SOURCE.name}; miniatures retained")
+    print(f"Pairlet platform icon resources generated from {SOURCE.name} (desktop app-icon copied from "
+          f"{SYMBOL.name}); miniatures retained")
 
 
 if __name__ == "__main__":
