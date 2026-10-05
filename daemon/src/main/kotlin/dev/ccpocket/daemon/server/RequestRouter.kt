@@ -381,8 +381,8 @@ class RequestRouter(
     }
 
     companion object {
-        /** The device identity for callers with no transport-authenticated id: the plaintext `--local`
-         *  dev socket and trusted in-process callers. One machine-local pseudo-device, so the handoff
+        /** The device identity for callers with no transport-authenticated id: trusted in-process
+         *  callers. One machine-local pseudo-device, so the handoff
          *  gate still arbitrates it (it is never a lease holder unless it accepted a handoff itself). */
         const val LOCAL_DEVICE_ID = "local"
 
@@ -543,8 +543,8 @@ class RequestRouter(
     // Ignored for non-OpenSession frames.
     // [deviceId] (SESSION-HANDOFF.md §5.3): the TRANSPORT-authenticated identity of the sender — the relay
     // ingress passes the Noise-proven deviceId, the gated LAN path its hello'd device — NEVER a frame field.
-    // It drives the handoff controller gate and stamps handoff mutations; null (plaintext --local dev mode /
-    // in-process callers) falls back to [LOCAL_DEVICE_ID].
+    // It drives the handoff controller gate and stamps handoff mutations; null (in-process callers) falls
+    // back to [LOCAL_DEVICE_ID].
     // [collabScope] (SESSION-HANDOFF.md §4.1) is non-null ONLY for a COLLABORATOR link credential, whose
     // frame was already vetted by CollaboratorGuard at the ingress: it restricts the handoff plane to the
     // device's OWN offers (accept/decline/return + a filtered listing), denies every owner-side handoff
@@ -1387,8 +1387,7 @@ class RequestRouter(
      * of these hold, and is dropped in silence otherwise — a refusal frame would itself be a `pocket/memo.state`,
      * which an undeclared or restricted peer must never receive:
      *  1. the three-way owner test (no bridge origin, no guest scope, no collaborator scope);
-     *  2. a TRANSPORT-authenticated device id — the plaintext `--local` socket and in-process callers have
-     *     none, and the [LOCAL_DEVICE_ID] fallback is not an identity a recording may be filed under;
+     *  2. a TRANSPORT-authenticated device id — in-process callers have none, and the [LOCAL_DEVICE_ID] fallback is not an identity a recording may be filed under;
      *  3. the connection declared [ClientCapsHolder.supportsVoiceMemo];
      *  4. the service is wired.
      * The job's owner is the authenticated id, never a frame field. Snapshots go back through THIS connection's
@@ -1417,8 +1416,8 @@ class RequestRouter(
      * One project-pin request (issue #362). Every authority fact comes from the transport, never the frame: the
      * owner test is the three-way one, the cursor partition is the Noise-authenticated [deviceId], and the
      * connection facts — is it still current, which subscription did its accepted fetch register — come from
-     * [pin], the transport's context for the connection the request arrived on. A caller without both — the
-     * plaintext `--local` socket or an in-process caller — can neither subscribe nor mutate. A restricted caller
+     * [pin], the transport's context for the connection the request arrived on. A caller without both — an
+     * in-process caller — can neither subscribe nor mutate. A restricted caller
      * gets SILENCE (its egress caps would drop any pin frame anyway), and so does a connection that never declared
      * the capability: no reply could reach it, and it must not become a subscription.
      *

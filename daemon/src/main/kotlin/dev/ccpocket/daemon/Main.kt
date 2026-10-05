@@ -305,7 +305,7 @@ internal class RunCmd(
             // after --takeover the old daemon frees its ports from parallel shutdown hooks, so the
             // direct port can lag the pair port the check waited on: retry briefly instead of
             // settling for relay-only for this instance's whole life
-            val bindDirect = { DaemonServer(core, directBind, port, gate).run(wait = false) }
+            val bindDirect = { DaemonServer(core, directBind, port, gate).start() }
             runCatching { if (tookOver) SingleInstance.retryBind(bind = bindDirect) else bindDirect() }
                 .onSuccess { echo("direct listener on ws://$directBind:$port/v1/ws (E2E, paired devices only)") }
                 .onFailure {
