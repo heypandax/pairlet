@@ -146,7 +146,10 @@ class DeviceSessions(
      *  fail-closed `recognized` check in [transport] and the owner mints a fresh invite. */
     suspend fun onDevicePaired(deviceId: String, devicePubB64: String) {
         val pub = runCatching { B64dec.decode(devicePubB64) }.getOrNull() ?: return
-        if (bridges.isRestricted(deviceId)) { // confirmed bridge/guest: replay must not leak the key into devices.json
+        // confirmed bridge/guest: replay must not leak the key into devices.json. A retired collaborator's id
+        // (tombstoned until the relay confirms its revoke) is held off the same way: its key is gone, so
+        // without this it would look like a brand-new device and could be armed with someone's pairing ticket.
+        if (bridges.isRestricted(deviceId) || bridges.isRetiredCollaborator(deviceId)) {
             mutex.withLock { seenThisAttach.add(deviceId) }
             return
         }
@@ -198,7 +201,7 @@ class DeviceSessions(
      * it may simply be an older/foreign relay that doesn't re-announce, so retain every local binding.
      */
     suspend fun reconcileReplay(authoritativeEmpty: Boolean = false) {
-        val (stale, staleBridges) = mutex.withLock {
+        val (stale, staleBridges, goneRetired) = mutex.withLock {
             if (seenThisAttach.isEmpty() && !authoritativeEmpty) return
             val s = (devicePubs.keys - seenThisAttach).toList().onEach {
                 devicePubs.remove(it); sessions.remove(it)?.let { link -> retirePins(link) }; pskFor.remove(it)
@@ -208,8 +211,11 @@ class DeviceSessions(
             // relay has no headless column and replays them as ordinary devices — either way a live
             // bridge is in the set and survives.
             val sb = bridges.ids().filter { it !in seenThisAttach }.onEach { sessions.remove(it); pskFor.remove(it) }
-            s to sb
+            // a retired collaborator the replay no longer carries is already revoked at the relay
+            val gr = bridges.retiredCollaboratorIds().filter { it !in seenThisAttach }
+            Triple(s, sb, gr)
         }
+        goneRetired.forEach { bridges.confirmRetired(it) }
         staleBridges.forEach { bridges.remove(it) }
         // #362: a device the replay no longer announces loses its pin push slot with its session
         (stale + staleBridges).forEach { core.projectPins.detach("${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$it") }
@@ -270,20 +276,39 @@ class DeviceSessions(
     }
 
     /**
+     * The relay's `DeviceRevoked` control. For a retired collaborator's tombstoned id this is the
+     * confirmation that its credential is dead at the relay: the tombstone goes, and — since this daemon holds
+     * nothing else for that id — that is all (no allow-list rewrite, so no live LAN socket is cut for it).
+     * Every other id takes [onDeviceRevoked], exactly as before.
+     */
+    suspend fun onRelayDeviceRevoked(deviceId: String) {
+        val retired = bridges.confirmRetired(deviceId)
+        if (retired && !mutex.withLock { devicePubs.containsKey(deviceId) } && bridges.pubOf(deviceId) == null) return
+        onDeviceRevoked(deviceId)
+    }
+
+    /** One relay revoke per retired collaborator still tombstoned — what the relay client sends once the
+     *  relay's device set is known (after the replay barrier, or right after attach on a relay without one).
+     *  Repeats on every attach until each is confirmed; a revoke the relay has already applied is a no-op. */
+    fun pendingRetiredRevocations(): List<dev.ccpocket.protocol.RevokeDevice> =
+        bridges.retiredCollaboratorIds().map { dev.ccpocket.protocol.RevokeDevice(it) }
+
+    /**
      * #367: does this daemon already know [deviceId] under an identity OTHER than a just-confirmed
      * execution credential? The union the execution bind hook must never collide with:
      *
      *  - the FULL-POWER allow-list ([devicePubs] / devices.json);
      *  - a confirmed restricted credential of any other kind ([BridgeRegistry.ids] minus the execution row);
-     *  - a key still held PROVISIONAL (announced, not yet classified).
+     *  - a key still held PROVISIONAL (announced, not yet classified);
+     *  - a retired collaborator's tombstoned id (the relay may still honour it until its revoke is confirmed).
      *
      * The credential being bound right now is excluded by construction, not by a special case:
      * [BridgeRegistry.finalize] has already moved it out of `provisionalPub` into `bridgePubs` with an
-     * EXECUTION spec, so it matches none of the three clauses — while every other collision does.
+     * EXECUTION spec, so it matches none of the clauses — while every other collision does.
      */
     suspend fun isKnownDevice(deviceId: String): Boolean =
         mutex.withLock { devicePubs.containsKey(deviceId) } ||
-            bridges.isBridge(deviceId) || bridges.isGuest(deviceId) || bridges.isCollaborator(deviceId) ||
+            bridges.isBridge(deviceId) || bridges.isGuest(deviceId) || bridges.isRetiredCollaborator(deviceId) ||
             (bridges.pubOf(deviceId) != null && !bridges.isRestricted(deviceId))
 
     /** True while this device's FIRST post-pairing contact hasn't completed over the relay. The LAN gate
@@ -513,13 +538,6 @@ class DeviceSessions(
             } else {
                 bridges.finalize(deviceId, confirmedPsk)?.let { spec ->
                     log.info("${spec.kind.name.lowercase()} \"${spec.name}\" confirmed on ${deviceId.take(8)}…")
-                    // Collaborator Link (SESSION-HANDOFF.md §4.1 step 5): the redeem just proved the connect
-                    // ticket — record the contact (label + word-group fingerprint of the peer's static key)
-                    // and tell attached OWNER clients (CollaboratorConnected flips the waiting-for-scan UI).
-                    if (spec.kind == CredentialKind.COLLABORATOR) {
-                        val pubB64 = bridges.pubOf(deviceId)?.let { B64enc.encodeToString(it) } ?: ""
-                        runCatching { collaboratorControl?.onRedeemed(deviceId, pubB64) }
-                    }
                     // #367 execution link: the redeem proved the DERIVED first-contact PSK
                     // (HKDF(ticket ‖ inviteSecret)) — something the relay, which only ever saw the raw
                     // ticket, cannot compute. Bind the proven deviceId + static key into the grant row NOW.
@@ -583,7 +601,6 @@ class DeviceSessions(
         var toRoute: Frame = env.body
         var origin: String? = null
         var guestScope: GuestScope? = null
-        var collabScope: dev.ccpocket.daemon.handoff.CollaboratorScope? = null
         when {
             bridges.isBridge(deviceId) -> {
                 val guard = bridges.startGuard(deviceId)
@@ -634,42 +651,6 @@ class DeviceSessions(
                     }
                 }
             }
-            bridges.isCollaborator(deviceId) -> {
-                // COLLABORATOR link (SESSION-HANDOFF.md §4.1): ZERO-baseline credential. The type
-                // whitelist admits only the handoff plane + the granted-session frames; the guard then
-                // requires an IN_PROGRESS handoff bound to THIS device for every session-shaped frame.
-                val svc = core.registry.handoffs
-                val guard = svc?.collaboratorGuard(deviceId)
-                // what the OWNER minted this link for (REVIEW-REQUEST.md §13.3). Read from the credential's
-                // own spec, never from anything the peer sends; a spec we cannot read leaves the purpose
-                // UNKNOWN, which admits neither plane.
-                val purpose = bridges.specOf(deviceId)?.purpose ?: dev.ccpocket.protocol.CollaboratorPurpose.UNKNOWN
-                if (guard == null || !dev.ccpocket.daemon.handoff.CollaboratorCaps.ingressAllowed(env.body, purpose)) {
-                    log.warn("collaborator ${deviceId.take(8)}… sent forbidden ${env.body::class.simpleName} — refused")
-                    runCatching { sink.emit(PocketError("collaborator_forbidden", "not permitted for a collaborator link: ${env.body::class.simpleName}", convoIdOf(env.body))) }
-                    return
-                }
-                // fan-out target for ITS OWN offers only (§4.2 offer delivery): keyed per device like the
-                // owner attach; the recipient filter — not just the egress whitelist — keeps every other
-                // handoff's updates away from this sink.
-                svc.attach(sink, recipientDeviceId = deviceId)
-                when (val v = guard.vet(env.body)) {
-                    is dev.ccpocket.daemon.handoff.CollaboratorGuard.Verdict.Deny -> {
-                        log.warn("collaborator ${deviceId.take(8)}… ${env.body::class.simpleName} denied: ${v.code}")
-                        runCatching { sink.emit(PocketError(v.code, v.message, convoIdOf(env.body))) }
-                        return
-                    }
-                    is dev.ccpocket.daemon.handoff.CollaboratorGuard.Verdict.Allow -> {
-                        toRoute = v.frame // workdir forced to the grant's, mode clamped, takeOver stripped
-                        collabScope = dev.ccpocket.daemon.handoff.CollaboratorScope(
-                            deviceId, v.pathScope,
-                            // the grant's ceiling for the PermissionBridge write wall (§8.3);
-                            // absent (non-open frames) defaults fail-closed to read-only
-                            access = v.access ?: dev.ccpocket.protocol.HandoffAccess.REVIEW_READ_ONLY,
-                        )
-                    }
-                }
-            }
             bridges.isExecution(deviceId) -> {
                 // #367 EXECUTION link: a PEER DAEMON's run link. ZERO-baseline like a collaborator, but it
                 // does not reach the router AT ALL — the whitelist admits only the execution frames, the
@@ -714,6 +695,13 @@ class DeviceSessions(
                         return
                     }
                 }
+            }
+            bridges.kindOf(deviceId) == CredentialKind.COLLABORATOR -> {
+                // A Collaborator Link (session handoff / review contacts, retired 2026-10). Its keys are no longer
+                // loaded from disk, so this only ever catches one bound in this process. Refused outright and
+                // answered with nothing — [sealAndSend] drops every frame toward this kind.
+                log.warn("retired collaborator credential ${deviceId.take(8)}… sent ${env.body::class.simpleName} — refused")
+                return
             }
             bridges.isRestricted(deviceId) -> {
                 // A CONFIRMED restricted credential whose kind none of the branches above claims — i.e. a
@@ -767,7 +755,7 @@ class DeviceSessions(
                             else sink.emit(frame)
                         },
                     )
-                    route(env.body, pinSink, origin, guestScope, collabScope, deviceId, { inboundCaps }, RelayPinConnection(deviceId, link, inboundCaps))
+                    route(env.body, pinSink, origin, guestScope, deviceId, { inboundCaps }, RelayPinConnection(deviceId, link, inboundCaps))
                     return
                 }
                 if (isOwnerControlFrame(env.body)) {
@@ -786,7 +774,7 @@ class DeviceSessions(
                 }
             }
         }
-        route(toRoute, sink, origin, guestScope, collabScope, deviceId, capsNow)
+        route(toRoute, sink, origin, guestScope, deviceId, capsNow)
     }
 
     /** The router hand-off, extracted so a frame can take it either inline or off the reader loop.
@@ -797,7 +785,6 @@ class DeviceSessions(
         sink: OutboundSink,
         origin: String?,
         guestScope: GuestScope?,
-        collabScope: dev.ccpocket.daemon.handoff.CollaboratorScope?,
         deviceId: String,
         caps: () -> RequestRouter.ClientCapsHolder,
         /** #362: the pin context of the connection that sent a project-pin request; null for every other frame. */
@@ -808,11 +795,10 @@ class DeviceSessions(
             // "who is driving" (SESSION-HANDOFF.md §5.3: never a frame field)
             // listingLane: this reader serves EVERY device, so a session-list reply (a transcript scan) is produced on
             // the device's own lane instead of here — in order with that device's other listings, behind nobody else's
-            core.router.handle(frame, sink, origin, guestScope, caps = caps(), deviceId = deviceId, collabScope = collabScope, pinConnection = pin, listingLane = deviceId) { convoId ->
+            core.router.handle(frame, sink, origin, guestScope, caps = caps(), deviceId = deviceId, pinConnection = pin, listingLane = deviceId) { convoId ->
                 mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }
                 bridges.guardOf(deviceId)?.noteOpened(convoId)     // bridge (#91)
                 bridges.guestGuardOf(deviceId)?.noteOpened(convoId) // guest (#115)
-                if (collabScope != null) core.registry.handoffs?.collaboratorGuard(deviceId)?.noteOpened(convoId) // collaborator grant
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -979,11 +965,8 @@ class DeviceSessions(
                 // sealed toward a relay device, so an execution credential is filtered here too — that is
                 // what keeps a resurfaced ask, a router error or any future fan-out from reaching it.
                 CredentialKind.EXECUTION -> dev.ccpocket.daemon.execution.ExecutionCaps.egressAllowed(frame)
-                CredentialKind.COLLABORATOR -> dev.ccpocket.daemon.handoff.CollaboratorCaps.egressAllowed(
-                    frame,
-                    // same source of truth as ingress: the credential's own spec, fail-closed when absent
-                    bridges.specOf(deviceId)?.purpose ?: dev.ccpocket.protocol.CollaboratorPurpose.UNKNOWN,
-                )
+                // a retired Collaborator Link (2026-10) is sent nothing at all
+                CredentialKind.COLLABORATOR -> false
                 else -> BridgeCaps.egressAllowed(frame)
             }
             if (!allowed) return

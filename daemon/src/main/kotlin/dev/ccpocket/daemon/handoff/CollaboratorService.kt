@@ -178,7 +178,7 @@ class CollaboratorService(
      *  relay's attach replay while we were offline) lazily settled to removed — display truth follows the
      *  key truth, never the other way around. */
     private fun reconciled(): List<Collaborator> = store.all().map { row ->
-        if (!row.removed && !registry.isCollaborator(row.deviceId)) {
+        if (!row.removed && !(registry.kindOf(row.deviceId) == dev.ccpocket.daemon.bridge.CredentialKind.COLLABORATOR && registry.isRestricted(row.deviceId))) {
             row.copy(removed = true).also { store.upsert(it) }
         } else row
     }
@@ -258,7 +258,7 @@ class CollaboratorService(
         store.byId(deviceId)?.takeUnless { it.removed }?.label
 
     override fun isActive(deviceId: String): Boolean =
-        store.byId(deviceId)?.removed == false && registry.isCollaborator(deviceId)
+        store.byId(deviceId)?.removed == false && (registry.kindOf(deviceId) == dev.ccpocket.daemon.bridge.CredentialKind.COLLABORATOR && registry.isRestricted(deviceId))
 
     override fun acceptsHandoff(deviceId: String): Boolean =
         isActive(deviceId) && store.byId(deviceId)?.acceptsSessionHandoff == true

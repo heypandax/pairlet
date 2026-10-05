@@ -269,14 +269,10 @@ object GuestStore {
 }
 
 /**
- * The persisted registry of COLLABORATOR link credentials (SESSION-HANDOFF.md §4.1): deviceId ->
- * [BridgeEntry] (kind = COLLABORATOR), in `~/.cc-pocket/collaborator-keys.json`. A THIRD separate file
- * for the same downgrade-safety chain as guests.json: a daemon that predates Collaborator Links never
- * loads it, so the key is an unknown device → handshake refused, fail closed — and a collaborator key
- * can never be mis-read as a full device (devices.json), a bridge (bridges.json) or a folder-share
- * guest (guests.json). Contact METADATA (label/fingerprint/stats — the wire [dev.ccpocket.protocol.Collaborator]
- * rows, removed ones included) lives separately in `collaborators.json`
- * ([dev.ccpocket.daemon.handoff.CollaboratorStore]); this file holds only the E2E key + spec.
+ * The file the RETIRED Collaborator Link credentials (session handoff / review contacts, retired 2026-10)
+ * were kept in: deviceId -> [BridgeEntry] (kind = COLLABORATOR), `~/.cc-pocket/collaborator-keys.json`.
+ * Nothing loads these keys any more. [BridgeRegistry] reads the file once at startup, moves every row's
+ * deviceId into [RetiredCollaboratorStore] and empties the file — see [BridgeRegistry] for the order.
  */
 object CollaboratorKeyStore {
     fun file(): File = credentialFile("collaborator-keys.json")
@@ -284,6 +280,35 @@ object CollaboratorKeyStore {
     fun load(store: File = file()): Map<String, BridgeEntry> = loadCredentials(store)
 
     fun save(map: Map<String, BridgeEntry>, store: File = file()) = saveCredentials(map, store)
+}
+
+/**
+ * Tombstones of retired Collaborator Link credentials: `~/.cc-pocket/retired-collaborators.json`, device
+ * ids ONLY — no key, no spec. An id stays here from the moment its key is cleared until the relay has
+ * confirmed the credential is revoked, and for that whole time the daemon treats the id as KNOWN: a relay
+ * announce for it is never armed with a pairing ticket, so it can never be written into the full-power
+ * devices.json during someone's pairing window. Written atomically, owner-only.
+ */
+object RetiredCollaboratorStore {
+    fun file(): File = credentialFile(FILE_NAME)
+
+    const val FILE_NAME = "retired-collaborators.json"
+
+    @Serializable
+    private data class Stored(val v: Int = 1, val ids: List<String> = emptyList())
+
+    /** The stored ids; empty when the file is absent. Throws when the file exists but can neither be read
+     *  nor quarantined — the caller must then not overwrite it. */
+    fun load(store: File = file()): Set<String> =
+        dev.ccpocket.daemon.peer.AtomicStoreFiles.read(store) {
+            PocketJson.decodeFromString(Stored.serializer(), it)
+        }?.ids?.toSet().orEmpty()
+
+    /** Replace the stored ids atomically; false when the write failed (nothing was half-written). */
+    fun save(ids: Collection<String>, store: File = file()): Boolean =
+        dev.ccpocket.daemon.peer.AtomicStoreFiles.write(
+            store, PocketJson.encodeToString(Stored.serializer(), Stored(ids = ids.sorted())),
+        )
 }
 
 /**

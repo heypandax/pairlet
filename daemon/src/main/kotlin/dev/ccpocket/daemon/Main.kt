@@ -286,6 +286,9 @@ internal class RunCmd(
                 )
             }.getOrNull()
         }
+        // Retired 2026-10: the review peer links' key material goes (RetiredPeerLinks); the collaborator
+        // credentials are cleared by the credential registry the relay client builds next (BridgeRegistry).
+        RetiredPeerLinks.clear(Identity.defaultPath().parentFile)
         val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl, hostname = hostName, gatewayBaseUrl = gatewayUrl)
         echo("Pairlet daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"} — relay=$relay")
         echo("account id: ${identity.accountId}")
