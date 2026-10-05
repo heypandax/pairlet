@@ -311,10 +311,6 @@ fun App(scope: CoroutineScope) {
     ConsentGatedLaunchEffects(repo)
     // issue #382: publish the open chat's session so a foreground turn push about it can skip the banner
     LaunchedEffect(repo) { androidx.compose.runtime.snapshotFlow { dev.ccpocket.app.push.foregroundSessionOf(repo.sessionKey.value, repo.convoId.value, repo.connected.value) }.collect { dev.ccpocket.app.push.ForegroundSession.update(it) } }
-    // a tapped OFFER push (§3.4) names only the handoff — it selects that offer in the doorway below, which
-    // still runs the ordinary confirm → accept flow
-    val offerOpen by dev.ccpocket.app.PushRoute.pendingHandoff.collectAsState()
-    LaunchedEffect(offerOpen) { offerOpen?.let { repo.pendingOfferId.value = it; dev.ccpocket.app.PushRoute.pendingHandoff.value = null } }
     // the notifications toggle lives on the primary link but governs the whole device: fan it out so a
     // Collaborator Link inbox de-registers (and re-registers) its own token with it (§3.4)
     remember { repo.onNotificationsChanged = { on -> collabInbox.onNotificationsChanged(on) } }

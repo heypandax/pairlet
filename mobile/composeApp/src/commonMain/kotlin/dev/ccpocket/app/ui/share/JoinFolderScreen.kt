@@ -20,7 +20,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,24 +57,6 @@ import qrscanner.QrScanner
 fun JoinFolderScreen(repo: PocketRepository, onBack: () -> Unit, onJoined: () -> Unit) {
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     var preview by remember { mutableStateOf<ShareInvite?>(null) }
-
-    // collaborator connect tickets (SESSION-HANDOFF.md §4.1) ride the same scan/paste entry: the
-    // blob decides which trust screen opens — folder accept-preview vs fingerprint confirm
-    var collabPreview by remember { mutableStateOf<dev.ccpocket.protocol.CollaboratorInvite?>(null) }
-    val collab = collabPreview
-    if (collab != null) {
-        // the redeem is asynchronous now (it mints an inbox link, not a computer) — hold the waiting state
-        // and leave only once the link is actually stored, so a failure isn't reported as a join
-        dev.ccpocket.app.ui.handoff.ConfirmConnectionScreen(
-            collab,
-            confirming = repo.collabRedeeming.value,
-            onConfirm = { repo.redeemCollaboratorInvite(collab) },
-            onCancel = { collabPreview = null },
-        )
-        val links = repo.collaboratorLinks.toList()
-        LaunchedEffect(links.size) { if (links.any { it.accountId == collab.accountId }) onJoined() }
-        return
-    }
     val invite = preview
     if (invite != null) {
         AcceptPreview(
@@ -88,7 +69,6 @@ fun JoinFolderScreen(repo: PocketRepository, onBack: () -> Unit, onJoined: () ->
     RedeemScreen(
         onBack = onBack,
         onInvite = { preview = it },
-        onCollabInvite = { collabPreview = it },
     )
 }
 
@@ -98,7 +78,6 @@ fun JoinFolderScreen(repo: PocketRepository, onBack: () -> Unit, onJoined: () ->
 private fun RedeemScreen(
     onBack: () -> Unit,
     onInvite: (ShareInvite) -> Unit,
-    onCollabInvite: (dev.ccpocket.protocol.CollaboratorInvite) -> Unit = {},
 ) {
     var pasted by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
@@ -107,7 +86,6 @@ private fun RedeemScreen(
     fun tryDecode(raw: String) {
         when (val link = dev.ccpocket.app.pairing.parseIncomingLink(dev.ccpocket.app.pairing.canonicalLinkScheme(raw), allowBareBlob = true)) {
             is dev.ccpocket.app.pairing.IncomingLink.Share -> onInvite(link.invite)
-            is dev.ccpocket.app.pairing.IncomingLink.Collab -> onCollabInvite(link.invite)
             else -> error = true
         }
     }

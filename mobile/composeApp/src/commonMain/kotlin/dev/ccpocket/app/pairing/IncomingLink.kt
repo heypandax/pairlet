@@ -1,6 +1,5 @@
 package dev.ccpocket.app.pairing
 
-import dev.ccpocket.protocol.CollaboratorInvite
 import dev.ccpocket.protocol.ShareInvite
 
 /**
@@ -9,20 +8,19 @@ import dev.ccpocket.protocol.ShareInvite
  *
  * Before this existed each entry point had its own idea of what a link was: the iOS `onOpenURL` bridge and
  * the pairing scanner both called `handlePairUrl()`, which only understands `ccpocket://pair`, so a scanned
- * `ccpocket://collab#…` fell through as "invalid link" — the collaborator invite only worked from the one
- * paste field inside Join Folder. Android declared the scheme in its manifest and then never read
- * `intent.data` at all.
+ * invite of any other kind fell through as "invalid link". Android declared the scheme in its manifest and
+ * then never read `intent.data` at all.
  *
  * The dispatch is by SCHEME + HOST, decided before any base64 is touched:
  *
  * ```text
  * ccpocket://pair?relay=…&acct=…&dpk=…&ticket=…   → Pair      (full pairing link)
  * ccpocket://pair?code=123456                     → Code      (relay-assisted short code)
- * ccpocket://collab#<b64url>                      → Collab    (Collaborator Link — CONFIRM, never redeem)
+ * ccpocket://collab#<anything>                    → Retired   (Collaborator Link — feature retired 2026-10)
  * ccpocket://review-contact#<anything>            → Retired   (ReviewRequest contact — feature retired 2026-10)
  * ccpocket://share#<b64url>                       → Share     (folder-share invite)
- * ccpocket://session?wd=…&sid=…                   → Session   (a push/handoff tap routing into a session)
- * ccpocket://handoff?id=…                         → Handoff   (a push tap routing into the offer inbox)
+ * ccpocket://session?wd=…&sid=…                   → Session   (a push tap routing into a session)
+ * ccpocket://handoff?<anything>                   → Retired   (Session Handoff offer — feature retired 2026-10)
  * ```
  *
  * A BARE base64url blob (no scheme at all) is only decoded when [allowBareBlob] is set, i.e. from an
@@ -35,9 +33,6 @@ sealed interface IncomingLink {
 
     /** The 6-digit code form of a pairing link. */
     data class Code(val code: String) : IncomingLink
-
-    /** A Collaborator Link ticket. MUST go through the fingerprint confirm screen before redeeming. */
-    data class Collab(val invite: CollaboratorInvite) : IncomingLink
 
     /**
      * A link for a feature this build no longer has. Recognised by its HOST alone — the payload is never
@@ -53,9 +48,6 @@ sealed interface IncomingLink {
     /** "Open this session" — the shape a task-complete push tap resolves to. */
     data class Session(val workdir: String, val sessionId: String) : IncomingLink
 
-    /** "Open this handoff offer" — the routable, content-free id an offer push carries (§3.4). */
-    data class Handoff(val handoffId: String) : IncomingLink
-
     /** Not a link this build understands. Callers show their own "invalid link" state. */
     data object Unknown : IncomingLink
 }
@@ -64,6 +56,12 @@ sealed interface IncomingLink {
 enum class RetiredFeature {
     /** ReviewRequest contact links (`ccpocket://review-contact#…`). */
     REVIEW,
+
+    /** Collaborator Link connect tickets (`ccpocket://collab#…`). */
+    COLLABORATOR,
+
+    /** Session Handoff offers (`ccpocket://handoff?id=…`, and the `hid` an older daemon's offer push carries). */
+    HANDOFF,
 }
 
 private const val SCHEME = "ccpocket://"
@@ -93,11 +91,12 @@ fun parseIncomingLink(raw: String, allowBareBlob: Boolean = false): IncomingLink
     if (t.isEmpty()) return IncomingLink.Unknown
     val host = hostOf(t)
     return when (host) {
-        // a collaborator/share blob is invalid rather than "maybe a pair link": we KNOW what it claimed
-        // to be, so a truncated fragment or corrupt base64 must fail loudly instead of falling through
-        "collab" -> decodeCollaboratorInvite(t)?.let(IncomingLink::Collab) ?: IncomingLink.Unknown
-        // ReviewRequest is retired: the host alone decides, whatever the fragment holds
+        // retired features: the host alone decides, whatever the fragment or query holds
+        "collab" -> IncomingLink.Retired(RetiredFeature.COLLABORATOR)
         "review-contact" -> IncomingLink.Retired(RetiredFeature.REVIEW)
+        "handoff" -> IncomingLink.Retired(RetiredFeature.HANDOFF)
+        // a share blob is invalid rather than "maybe a pair link": we KNOW what it claimed to be, so a
+        // truncated fragment or corrupt base64 must fail loudly instead of falling through
         "share" -> decodeShareInvite(t)?.let(IncomingLink::Share) ?: IncomingLink.Unknown
         "pair" -> {
             val q = queryOf(t)
@@ -114,15 +113,11 @@ fun parseIncomingLink(raw: String, allowBareBlob: Boolean = false): IncomingLink
             val sid = q["sid"]?.let(::pctDecode)?.takeIf { it.isNotBlank() }
             if (wd != null && sid != null) IncomingLink.Session(wd, sid) else IncomingLink.Unknown
         }
-        "handoff" -> queryOf(t)["id"]?.let(::pctDecode)?.takeIf { it.isNotBlank() }
-            ?.let(IncomingLink::Handoff) ?: IncomingLink.Unknown
-        // no scheme: only an EXPLICIT paste entry may guess at a bare blob (share first — its codec is the
-        // stricter of the two, and a collaborator blob never satisfies it). The collaborator codec only
-        // accepts its own `purpose`, so a bare blob of any other purpose falls through to the pair forms.
+        // no scheme: only an EXPLICIT paste entry may guess at a bare blob (a share invite); anything else
+        // falls through to the pair forms
         "" -> when {
             !allowBareBlob -> legacyPairUrl(t)
             else -> decodeShareInvite(t)?.let(IncomingLink::Share)
-                ?: decodeCollaboratorInvite(t)?.let(IncomingLink::Collab)
                 ?: legacyPairUrl(t)
         }
         else -> IncomingLink.Unknown

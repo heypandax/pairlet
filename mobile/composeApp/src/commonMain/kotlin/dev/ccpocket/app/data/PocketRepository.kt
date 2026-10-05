@@ -5728,8 +5728,8 @@ class PocketRepository(
 
     /**
      * THE deep-link front door (§7). iOS `onOpenURL`, the Android VIEW intent, the pairing scanner and the
-     * Join Folder paste field all come through here, so the routing table lives in exactly one place and a
-     * collaborator QR can't be redeemed by whichever entry point happens to see it first.
+     * Join Folder paste field all come through here, so the routing table lives in exactly one place and an
+     * invite QR can't be redeemed by whichever entry point happens to see it first.
      *
      * [allowBareBlob] is the explicit-paste opt-in: a naked base64 string is only treated as an invite when
      * a human deliberately pasted it into a field that asks for one.
@@ -5742,11 +5742,9 @@ class PocketRepository(
         when (link) {
             is IncomingLink.Code -> pairWithCode(link.code, fromScan = fromScan)
             is IncomingLink.Pair -> pair(link.url, fromScan = fromScan)
-            // every invite kind parks in a trust screen; none of them redeems here
-            is IncomingLink.Collab -> pendingCollabInvite.value = link.invite
+            // an invite parks in its trust screen; it never redeems here
             is IncomingLink.Share -> pendingShareInvite.value = link.invite
             is IncomingLink.Session -> requestOpenSession(link.workdir, link.sessionId)
-            is IncomingLink.Handoff -> pendingOfferId.value = link.handoffId
             // a link for a feature this build no longer has: say so and do nothing else. It is a known
             // link, not a failed pairing — so no setPairFailure and no pair_failed, unlike Unknown below.
             is IncomingLink.Retired -> status.value = StatusMsg(Res.string.status_feature_retired)
