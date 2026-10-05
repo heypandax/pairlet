@@ -809,8 +809,8 @@ class PocketRepository(
     val appLock: AppLockController by lazy { AppLockController(scope, createBiometrics()) }
 
     /** Projects the user pinned to the top, newest pin first: the pins of the computer this repository speaks for
-     *  (issue #362). An owner computer's list is owned by its daemon and shared by every paired client; a guest
-     *  binding, no binding, and the demo keep theirs on this device. Always a mirror of [pinLink]'s visible list. */
+     *  (issue #362). An owner computer's list is owned by its daemon and shared by every paired client; no
+     *  binding and the demo keep theirs on this device. Always a mirror of [pinLink]'s visible list. */
     val pinnedPaths = mutableStateListOf<String>()
 
     /** By the daemon's identity where it is known: a spelling the computer resolved to a pinned project is that pin. */
@@ -1120,14 +1120,14 @@ class PocketRepository(
     /** True when THIS connection may manage groups (issue #119): the daemon sent a groups array (owner on a
      *  group-aware daemon). Distinguishes it from the two "no groups" cases that both leave [sessionGroups]
      *  empty — a group-aware daemon with zero groups yet (show "+ New group" so the FIRST one is creatable)
-     *  vs an older daemon / a guest connection that omits groups entirely (hide the affordance). */
+     *  vs an older daemon that omits groups entirely (hide the affordance). */
     val groupsSupported = mutableStateOf(false)
     /** True when THIS connection may rename sessions (issue #158): the daemon stamped
-     *  [Sessions.renameSupported] (owner on a rename-aware daemon). False — an older daemon or a guest —
+     *  [Sessions.renameSupported] (owner on a rename-aware daemon). False — an older daemon —
      *  hides the rename entry instead of sending a frame the daemon would silently drop. */
     val renameSupported = mutableStateOf(false)
     /** True when THIS connection may archive sessions (issue #202): the daemon stamped
-     *  [Sessions.archiveSupported] (owner on an archive-aware daemon). False — an older daemon or a guest —
+     *  [Sessions.archiveSupported] (owner on an archive-aware daemon). False — an older daemon —
      *  hides every archive affordance instead of firing frames the daemon would silently drop. */
     val archiveSupported = mutableStateOf(false)
 
@@ -1307,7 +1307,7 @@ class PocketRepository(
     // 放在这里跟着会话走：查看器来回一趟原地不动，换会话则复位。
     val filesAllView = mutableStateOf(false)                 // true = 全部视角（默认 false = 变更）
     val fileTreeSubPath = mutableStateOf("")                 // 全部视角当前所在层（'/'-keyed）
-    val browseRoots = mutableStateOf<List<String>>(emptyList()) // #176: fs roots latched from the "~" home-anchor reply (owner-only; empty on old daemon / guest → root switcher hidden)
+    val browseRoots = mutableStateOf<List<String>>(emptyList()) // #176: fs roots latched from the "~" home-anchor reply (empty on an old daemon → root switcher hidden)
     private var lastBrowseAnchor: String = BROWSE_HOME       // #176: anchor of the LATEST browseDirs request — a real fs root ("/", "C:\") routes its reply by matching this
     private var lastBrowseSub: String? = null                // subPath of the LATEST browseDirs request — only its reply may land in browseListing (#152 复核: stale out-of-order replies dropped)
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
@@ -3618,7 +3618,7 @@ class PocketRepository(
                     if (managedCapable()) refreshManagedList(f.workdir)
                     replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
                     groupsSupported.value = f.groups != null // groups=[] (owner, none yet) still enables management
-                    renameSupported.value = f.renameSupported // #158: false from an older daemon / a guest
+                    renameSupported.value = f.renameSupported // #158: false from an older daemon
                     archiveSupported.value = f.archiveSupported // #202: same contract as renameSupported
                 }
                 if (f.workdir == sessionsOpening.value?.dir) clearSessionsOpening()
@@ -5267,7 +5267,7 @@ class PocketRepository(
     fun managedImportAvailable(): Boolean =
         managedCapable() && daemonManagedAgents.value.any { it in dev.ccpocket.app.ui.session.IMPORTABLE_AGENTS }
 
-    /** The managed surface is owner-only: a guest or collaborator binding sends no managed frame and never waits for one. */
+    /** The managed surface is owner-only: any other binding sends no managed frame and never waits for one. */
     private fun managedCapable(): Boolean =
         daemonManagedSessions.value && daemonManagedAgents.value.isNotEmpty() && paired.value?.role == BindingRole.OWNER
 
@@ -5617,7 +5617,7 @@ class PocketRepository(
 
     // Session groups (issue #119). Every mutation targets the currently-listed project ([sessionsDir]); the
     // daemon answers each by re-pushing that dir's Sessions frame, so [sessions]/[sessionGroups] refresh
-    // themselves — no optimistic local edit. Guest connections are owner-gated at the daemon (no-op there).
+    // themselves — no optimistic local edit.
     fun createGroup(name: String, wd: String? = null) {
         val dir = wd ?: sessionsDir.value ?: return
         if (name.isBlank()) return
@@ -6712,9 +6712,7 @@ class PocketRepository(
      *  filesystem root ("/", "C:\") the daemon reported; its NIO resolve accepts '/'-keyed subPaths on
      *  Windows too. The reply lands in [browseListing] only while it answers the LATEST request — a stale
      *  reply from a drilled-past level is dropped at fold time (#152 复核), and the picker additionally
-     *  keys rendering on its own (anchor, subPath). A guest credential gets a PocketError instead
-     *  (GuestGuard denies the "~" anchor and any out-of-scope root), which the picker never sees — the
-     *  entry is owner-only client-side and the daemon stays the authority. */
+     *  keys rendering on its own (anchor, subPath). */
     fun browseDirs(anchor: String, subPath: String) {
         lastBrowseAnchor = anchor
         lastBrowseSub = subPath
@@ -7704,7 +7702,7 @@ class PocketRepository(
         private const val ERROR_INTERNAL = "internal"
 
         /** The daemon's refusals that name the refused frame by its class name: the unhandled-frame fall-through,
-         *  the control plane not being wired yet, and the bridge / guest / collaborator ingress guards. */
+         *  the control plane not being wired yet, and the restricted-credential ingress guards. */
         private val REFUSED_FRAME_PATTERNS = listOf(
             Regex("""^frame not handled by daemon: ([A-Z][A-Za-z0-9]*)$"""),
             Regex("""^the daemon isn't ready for ([A-Z][A-Za-z0-9]*)$"""),
