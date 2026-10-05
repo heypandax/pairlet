@@ -19,7 +19,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import org.junit.jupiter.api.Disabled
 import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
@@ -39,7 +38,6 @@ class SessionRegistryLifecycleRaceTest {
 
     /** T10 / D10 — two opens of the same cold resume id both miss the live lookup and both create. */
     @Test
-    @Disabled("待 S8：同一持久身份的打开合并为一次（opening 表）")
     fun two_concurrent_opens_of_one_session_create_one_conversation() = runBlocking {
         if (LifecycleHarness.isWindows()) return@runBlocking
         val backend = LifecycleBackend { _, _ -> LifecycleBackend.ECHO_TURNS }
@@ -71,7 +69,6 @@ class SessionRegistryLifecycleRaceTest {
     /** T11 / D10 — the reaper has removed a conversation but not yet closed it (its process still runs).
      *  A re-open in that window finds no live match and spawns a second writer on the same session. */
     @Test
-    @Disabled("待 S8：回收/关闭登记墓碑，重开等旧进程真正退出")
     fun a_reopen_during_reap_waits_for_the_old_process() = runBlocking {
         if (LifecycleHarness.isWindows()) return@runBlocking
         val script = "while IFS= read -r line; do printf 'init:K-t11\\nuser:%s\\nresult\\n' \"\$line\"; done; sleep 30"

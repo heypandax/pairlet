@@ -34,10 +34,12 @@ import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.SwitchServiceTier
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -47,6 +49,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Path
 import java.util.UUID
 import kotlin.io.path.exists
@@ -105,6 +108,115 @@ class SessionRegistry(
      *  after a flaky link — can both clear the admission gate before either has closed anything, and
      *  would then branch the same session twice. The claim is what makes the swap happen at most once. */
     private val rewinding = mutableSetOf<String>()
+
+    /**
+     * SINGLE-FLIGHT OPEN (lifecycle design S8 / D10), guarded by [mutex]: a cold open of one persistent
+     * identity (the resume id) in progress. The live lookup and the slow create (the external-writer probe may
+     * run lsof, [Conversation.open] reads disk) used to be two critical sections apart, so two opens of one id
+     * could both miss and both create — two conversations, two writers. The first open registers here in the
+     * SAME critical section as its live miss; a concurrent open waits for it and then reattaches to what it
+     * created (or repeats the observe decision when it created none). A brand-new session (no resume id)
+     * needs no de-duplication.
+     */
+    private val opening = mutableMapOf<String, CompletableDeferred<Unit>>()
+
+    /**
+     * CLOSE TOMBSTONES (S8), guarded by [mutex]: a conversation removed from [convos] whose [Conversation.close]
+     * has not returned yet, keyed by its persistent identity (sessionId and resume anchor). Removal and close
+     * are separate steps — the close runs off the lock and spends the process's shutdown ladder — so a re-open
+     * in between used to find no live match and spawn a second process while the first still held the session
+     * (Claude then refuses the resume and the open forks). A re-open now waits for the tombstone, bounded by
+     * [TOMBSTONE_WAIT_MS], then opens cold as before.
+     */
+    private val closing = mutableMapOf<String, CompletableDeferred<Unit>>()
+
+    /** One removed conversation's tombstone: the keys it was filed under and the signal its close sets. */
+    private class Tombstone(val keys: List<String>) {
+        val done = CompletableDeferred<Unit>()
+    }
+
+    /** Caller holds [mutex] and has just removed [c] from [convos]: file its tombstone. Null when [c] has no
+     *  persistent identity yet (a new session before its first turn — nothing can re-open it by id). */
+    private fun tombstoneLocked(c: Conversation): Tombstone? {
+        val keys = listOfNotNull(c.sessionId, c.resumeAnchor).distinct()
+        if (keys.isEmpty()) return null
+        return Tombstone(keys).also { t -> keys.forEach { closing[it] = t.done } }
+    }
+
+    /** The close behind [t] has returned: lift the tombstone (a newer one filed under the same key stays). */
+    private suspend fun finishClose(t: Tombstone?) {
+        if (t == null) return
+        withContext(NonCancellable) {
+            mutex.withLock { t.keys.forEach { if (closing[it] === t.done) closing.remove(it) } }
+            t.done.complete(Unit)
+        }
+    }
+
+    /** Close conversations already removed (with their tombstones) from [convos]: close, then record the
+     *  self-close, and only then lift the tombstone — a waiting re-open's external-writer probe must already
+     *  see our own close tail as ours. Lifted even when the close throws. */
+    private suspend fun closeRemoved(c: Conversation, t: Tombstone?) {
+        try {
+            c.close()
+            noteSelfClosed(c)
+        } finally {
+            finishClose(t)
+        }
+    }
+
+    /** The live conversation [resume] reattaches to — matched on convoId, the agent-reported id, or (pre-first-
+     *  turn) the resume anchor. Caller holds [mutex]. */
+    private fun liveMatchLocked(resume: String): Conversation? =
+        convos.values.firstOrNull {
+            it.convoId == resume || it.sessionId == resume || (it.sessionId == null && it.resumeAnchor == resume)
+        }
+
+    private sealed interface OpenStep {
+        /** A live conversation already serves the id: reattach. */
+        class Live(val convo: Conversation) : OpenStep
+        /** This open owns the id's cold open; it MUST be released (see [releaseOpen]). */
+        class Claimed(val done: CompletableDeferred<Unit>) : OpenStep
+    }
+
+    /**
+     * Decide, in ONE critical section, between "reattach to the live conversation" and "own the cold open" of
+     * [resume] — waiting first for an open of the same id already in flight (unbounded: it always settles, see
+     * [releaseOpen]) and for a close still in progress (bounded; past the bound the open proceeds as before and
+     * says so in the log, so a wedged close can never wedge every later open of the session).
+     */
+    private suspend fun liveOrClaim(resume: String): OpenStep {
+        var ignoredTombstone: CompletableDeferred<Unit>? = null
+        while (true) {
+            var waitOpen: CompletableDeferred<Unit>? = null
+            var waitClose: CompletableDeferred<Unit>? = null
+            val step = mutex.withLock {
+                opening[resume]?.let { waitOpen = it; return@withLock null }
+                liveMatchLocked(resume)?.let { return@withLock OpenStep.Live(it) }
+                closing[resume]?.takeIf { it !== ignoredTombstone }?.let { waitClose = it; return@withLock null }
+                OpenStep.Claimed(CompletableDeferred<Unit>().also { opening[resume] = it })
+            }
+            if (step != null) return step
+            waitOpen?.let {
+                log.info("open ${resume.take(8)}… → waiting for a concurrent open of the same session")
+                it.await()
+            }
+            waitClose?.let {
+                log.info("open ${resume.take(8)}… → waiting for the previous conversation of this session to finish closing")
+                if (withTimeoutOrNull(TOMBSTONE_WAIT_MS) { it.await() } == null) {
+                    log.warn("open ${resume.take(8)}… → the previous conversation did not finish closing within ${TOMBSTONE_WAIT_MS}ms — opening anyway")
+                    ignoredTombstone = it
+                }
+            }
+        }
+    }
+
+    /** Release a [OpenStep.Claimed] open of [resume] — always, even when the open failed or was cancelled. */
+    private suspend fun releaseOpen(resume: String, done: CompletableDeferred<Unit>) {
+        withContext(NonCancellable) {
+            mutex.withLock { if (opening[resume] === done) opening.remove(resume) }
+            done.complete(Unit)
+        }
+    }
 
     /** Test-only race seam: invoked after a grace delay but before that timer claims the mutex. A
      *  replacement can supersede the awakened timer here, pinning the cancellation boundary. */
@@ -376,6 +488,44 @@ class SessionRegistry(
         // [dev.ccpocket.daemon.conversation.Conversation.askOriginLabel]). Only a remote run sets it.
         askOriginLabel: String? = null,
     ): String {
+        // S8: whatever this open claims (the resume id's cold open) is released however it ends
+        val openClaim = OpenClaim()
+        try {
+            return openClaimed(
+                openClaim, open, sink, origin, pathScope, peerSupportsOpencode, peerSupportsKimi, peerSupportsZcode,
+                peerSupportsDsh, bridgeAllowedCommands, bridgeContextPreamble, ownerBypass, handoffAccess, headless,
+                announcedWorkdir, askOriginLabel,
+            )
+        } finally {
+            val resume = open.resumeId
+            openClaim.done?.let { if (resume != null) releaseOpen(resume, it) }
+        }
+    }
+
+    /** What [open] holds while it owns a resume id's cold open ([OpenStep.Claimed]). */
+    private class OpenClaim {
+        var done: CompletableDeferred<Unit>? = null
+    }
+
+    /** The body of [open]; any claim it takes on the cold open is recorded in [claim] for [open] to release. */
+    private suspend fun openClaimed(
+        openClaim: OpenClaim,
+        open: OpenSession,
+        sink: OutboundSink,
+        origin: String?,
+        pathScope: List<String>?,
+        peerSupportsOpencode: Boolean,
+        peerSupportsKimi: Boolean,
+        peerSupportsZcode: Boolean,
+        peerSupportsDsh: Boolean,
+        bridgeAllowedCommands: List<String>,
+        bridgeContextPreamble: String?,
+        ownerBypass: Boolean,
+        handoffAccess: dev.ccpocket.protocol.HandoffAccess?,
+        headless: Boolean,
+        announcedWorkdir: String?,
+        askOriginLabel: String?,
+    ): String {
         val resume = open.resumeId
         // A resume id is the durable backend identity. Older Apps did not send `agent`, and a newer App
         // can still carry a stale per-session guess persisted before Codex support. Trust the transcript
@@ -393,10 +543,10 @@ class SessionRegistry(
             // re-attach to a session the daemon is already running (a cc-pocket background session).
             // Pre-first-turn the agent hasn't reported a sessionId yet — match the resume anchor too,
             // else a reconnect re-open spawns a second Conversation onto the same transcript.
-            var live = mutex.withLock {
-                convos.values.firstOrNull {
-                    it.convoId == resume || it.sessionId == resume || (it.sessionId == null && it.resumeAnchor == resume)
-                }
+            // S8: the live miss and the claim on the cold open are ONE step (see [liveOrClaim]).
+            var live = when (val step = liveOrClaim(resume)) {
+                is OpenStep.Live -> step.convo
+                is OpenStep.Claimed -> { openClaim.done = step.done; null }
             }
             // HANDOFF HOT→COLD REBUILD (crypto review MUST-FIX, SESSION-HANDOFF §8.3): a collaborator's
             // vetted open carries the grant's pathScope + access ceiling + clamped mode, but a plain
@@ -495,6 +645,18 @@ class SessionRegistry(
                 }
                 log.info("open ${resume.take(8)}… → live candidate ${attach.convoId.take(8)}… expired before reattach claim; resuming cold")
                 live = null
+                // S8: the cold resume goes through the single-flight too — it waits out the expired
+                // conversation's close (its tombstone) and any concurrent open; should a live conversation
+                // have appeared meanwhile, start over and reattach to it instead.
+                when (val step = liveOrClaim(resume)) {
+                    // (holds no claim here: this branch only runs after a Live step)
+                    is OpenStep.Live -> return openClaimed(
+                        openClaim, open, sink, origin, pathScope, peerSupportsOpencode, peerSupportsKimi, peerSupportsZcode,
+                        peerSupportsDsh, bridgeAllowedCommands, bridgeContextPreamble, ownerBypass, handoffAccess,
+                        headless, announcedWorkdir, askOriginLabel,
+                    )
+                    is OpenStep.Claimed -> openClaim.done = step.done
+                }
             }
             // Observe a session running OUTSIDE the daemon (e.g. a terminal) — read-only, no second
             // writer. Admission is the transcript capability itself (issue #301): a backend that resolves
@@ -560,6 +722,10 @@ class SessionRegistry(
         // issue #360 security review M1: the three-way owner fact, fixed at open — a bridge (origin), a guest (its path
         // scope) or a collaborator (its handoff grant) never registers into the owner's managed list
         c.ownerCreated = origin == null && pathScope == null && handoffAccess == null
+        // S8: the persistent identity is in place BEFORE the conversation becomes visible — the transcript
+        // sweep's isLiveSession, renameSession and the handoff drive gate all match on it, and used to miss a
+        // conversation between this insert and the first line of c.open
+        c.presetResumeAnchor(resume)
         beforeColdInsert?.invoke()
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`
@@ -602,8 +768,8 @@ class SessionRegistry(
         }
         if (started.isFailure) {
             Diagnostics.report(ErrorPath.SESSION_OPEN, Stage.INITIALIZE, ErrorCode.UNAVAILABLE, started.exceptionOrNull())
-            mutex.withLock { convos.remove(convoId) }
-            runCatching { c.close() }
+            val tomb = mutex.withLock { convos.remove(convoId); tombstoneLocked(c) }
+            try { runCatching { c.close() } } finally { finishClose(tomb) }
             sink.emit(PocketError("agent_unavailable", "$effectiveAgent CLI not found — is it installed? (${started.exceptionOrNull()?.message})"))
             return ""
         }
@@ -720,7 +886,6 @@ class SessionRegistry(
         factory: AgentBackendFactory,
         refuse: suspend (String) -> Unit,
     ) {
-        val R = dev.ccpocket.protocol.RewindRefusal
         val knobs = convo.launchKnobs()
         // Everyone else watching this conversation moves onto the branch (the §3.3 auto-spectate shape):
         // the alternative is leaving them attached to a conversation that is about to stop existing.
@@ -728,12 +893,33 @@ class SessionRegistry(
         // POINT OF NO RETURN. Stop the old conversation first and let its process flush: the branch is
         // launched with --fork-session so two writers could not actually collide, but the daemon's own
         // "one writer per session" discipline does not get relaxed just because the CLI would survive it.
-        mutex.withLock { convos.remove(convo.convoId) }
-        cancelPendingCloses(convo.convoId)
-        approvals.withdrawAllForConvo(convo.convoId)
-        runCatching { convo.close() }
-        noteSelfClosed(convo)
+        // S8: the old conversation's tombstone stands until the branch is in place (see rewindBranch), so a
+        // re-open of the session in between neither spawns next to the dying process nor beats the branch in
+        val tomb = mutex.withLock { convos.remove(convo.convoId); tombstoneLocked(convo) }
+        try {
+            cancelPendingCloses(convo.convoId)
+            approvals.withdrawAllForConvo(convo.convoId)
+            runCatching { convo.close() }
+            noteSelfClosed(convo)
+            rewindBranch(req, sink, convo, sid, plan, factory, refuse, knobs, spectators)
+        } finally {
+            finishClose(tomb)
+        }
+    }
 
+    /** The branch half of [rewindLocked], once the old conversation is closed. */
+    private suspend fun rewindBranch(
+        req: dev.ccpocket.protocol.RewindSession,
+        sink: OutboundSink,
+        convo: Conversation,
+        sid: String,
+        plan: dev.ccpocket.daemon.disk.RewindPlanner.Plan,
+        factory: AgentBackendFactory,
+        refuse: suspend (String) -> Unit,
+        knobs: Conversation.LaunchKnobs,
+        spectators: List<OutboundSink>,
+    ) {
+        val R = dev.ccpocket.protocol.RewindRefusal
         val newConvoId = UUID.randomUUID().toString()
         val branch = Conversation(
             newConvoId, convo.workdir, knobs.mode, sink, scope, factory.create(),
@@ -862,13 +1048,14 @@ class SessionRegistry(
                     !clientOccupied(it, relayPeerOnline, lanClientPresent)
             }
             convos.keys.removeAll(s.keys)
-            s.values.toList()
+            // S8: each removal files its tombstone in the same critical section — a re-open waits for the close
+            s.values.map { it to tombstoneLocked(it) }
         }
         // Every one of these is already OUT of the registry, so nothing else will ever close it: one close that
         // throws must not skip the rest (their processes would be orphaned), and a reaper cancelled mid-loop
         // must still finish the job.
         kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-            stale.forEach {
+            stale.forEach { (it, tomb) ->
                 // name each casualty: "which session died, when, how stale" is exactly what a field report
                 // of a vanished background task needs from the daemon log (issue #105 was undiagnosable
                 // from the RelayClient's bare reap count)
@@ -878,6 +1065,8 @@ class SessionRegistry(
                     it.close(); noteSelfClosed(it)
                 } catch (e: Exception) {
                     log.warn("reapIdle: closing ${it.convoId.take(8)}… failed — continuing with the rest", e)
+                } finally {
+                    finishClose(tomb)
                 }
             }
         }
@@ -948,9 +1137,9 @@ class SessionRegistry(
         val busy = mutex.withLock {
             val s = convos.filterValues { it.isExecuting() || it.hasBackgroundWork() }
             convos.keys.removeAll(s.keys)
-            s.values.toList()
+            s.values.map { it to tombstoneLocked(it) } // S8
         }
-        busy.forEach { it.close(); noteSelfClosed(it) }
+        busy.forEach { (c, tomb) -> closeRemoved(c, tomb) }
         return busy.size
     }
 
@@ -960,9 +1149,9 @@ class SessionRegistry(
         val idle = mutex.withLock {
             val s = convos.filterValues { !it.isExecuting() && !it.hasBackgroundWork() }
             convos.keys.removeAll(s.keys)
-            s.values.toList()
+            s.values.map { it to tombstoneLocked(it) } // S8
         }
-        idle.forEach { it.close(); noteSelfClosed(it) }
+        idle.forEach { (c, tomb) -> closeRemoved(c, tomb) }
         return idle.size
     }
 
@@ -975,9 +1164,9 @@ class SessionRegistry(
         val hits = mutex.withLock {
             val s = convos.filterValues { it.origin == origin }
             convos.keys.removeAll(s.keys)
-            s.values.toList()
+            s.values.map { it to tombstoneLocked(it) } // S8
         }
-        hits.forEach { it.close(); noteSelfClosed(it) }
+        hits.forEach { (c, tomb) -> closeRemoved(c, tomb) }
         return hits.size
     }
 
@@ -1048,14 +1237,15 @@ class SessionRegistry(
      * gone"; callers that retry can distinguish those with [liveCountOf].
      */
     suspend fun closeIfIdle(convoId: String): Boolean {
+        var tomb: Tombstone? = null
         val removed = mutex.withLock {
             val convo = convos[convoId] ?: return@withLock null
             if (convo.isBusy()) return@withLock null
-            removePendingCloseJobsLocked(convoId) to (convos.remove(convoId) ?: return@withLock null)
+            (removePendingCloseJobsLocked(convoId) to (convos.remove(convoId) ?: return@withLock null))
+                .also { tomb = tombstoneLocked(it.second) } // S8
         } ?: return false
         removed.first.forEach { it.cancel() }
-        removed.second.close()
-        noteSelfClosed(removed.second)
+        closeRemoved(removed.second, tomb)
         log.info("closeIfIdle: released ${convoId.take(8)}… (sid=${removed.second.sessionId?.take(8) ?: "-"})")
         return true
     }
@@ -1209,17 +1399,23 @@ class SessionRegistry(
                 return false
             }
         }
+        var tomb: Tombstone? = null
         val (jobs, convo, obs) = mutex.withLock {
             Triple(removePendingCloseJobsLocked(convoId), convos.remove(convoId), observes.remove(convoId))
+                .also { removed -> tomb = removed.second?.let { tombstoneLocked(it) } } // S8
         }
-        // §18.1 P1-5: a REAL close sweeps every pending approval of this conversation across ALL sources
-        // (agent asks die with the conversation anyway; shell/export pending live in daemon-global
-        // services and would otherwise stay approvable from the account inbox after the session is gone).
-        // BEFORE convo.close() so the withdraw frames still ride the fan-out sinks.
-        if (convo != null || obs != null) approvals.withdrawAllForConvo(convoId)
-        jobs.forEach { it.cancel() }; convo?.close(); obs?.close()
-        if (convo != null || obs != null) log.info("close ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
-        convo?.let { noteSelfClosed(it) }
+        try {
+            // §18.1 P1-5: a REAL close sweeps every pending approval of this conversation across ALL sources
+            // (agent asks die with the conversation anyway; shell/export pending live in daemon-global
+            // services and would otherwise stay approvable from the account inbox after the session is gone).
+            // BEFORE convo.close() so the withdraw frames still ride the fan-out sinks.
+            if (convo != null || obs != null) approvals.withdrawAllForConvo(convoId)
+            jobs.forEach { it.cancel() }; convo?.close(); obs?.close()
+            if (convo != null || obs != null) log.info("close ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
+            convo?.let { noteSelfClosed(it) }
+        } finally {
+            finishClose(tomb)
+        }
         return convo != null || obs != null
     }
 
@@ -1259,6 +1455,7 @@ class SessionRegistry(
                 var retry = false
                 var convo: Conversation? = null
                 var obs: ObserveSession? = null
+                var tomb: Tombstone? = null
                 val ownsCurrentTimer = mutex.withLock {
                     // Ownership check and detach/removal share one critical section with open()'s claim.
                     // Never expose a window where this job has dropped its map identity but can still
@@ -1276,6 +1473,7 @@ class SessionRegistry(
                             if (currentConvo.detach(owner)) {
                                 convos.remove(convoId)
                                 convo = currentConvo
+                                tomb = tombstoneLocked(currentConvo) // S8
                             }
                         }
                         currentObs != null && currentObs.isAttachedTo(owner) -> {
@@ -1295,8 +1493,12 @@ class SessionRegistry(
                 if (convo != null || obs != null) {
                     log.info("grace expiry closed ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
                 }
-                convo?.close(); obs?.close()
-                convo?.let { noteSelfClosed(it) }
+                try {
+                    convo?.close(); obs?.close()
+                    convo?.let { noteSelfClosed(it) }
+                } finally {
+                    finishClose(tomb)
+                }
                 return@launch
             }
         }
@@ -1352,5 +1554,10 @@ class SessionRegistry(
         // transcript writes no later than this past our own close are still "our" writes (FS timestamp
         // granularity + the post-exit unhide); anything newer means a real external claude took over.
         const val SELF_CLOSE_SLACK_MS = 1_500L
+
+        // S8: how long a re-open waits for the previous conversation of the same session to finish closing.
+        // A close spends at most one process shutdown ladder (EOF 3 s + TERM 2 s + KILL 2 s) plus the S5 drain
+        // bound; past this the open proceeds as before rather than wedging every later open of the session.
+        const val TOMBSTONE_WAIT_MS = 15_000L
     }
 }

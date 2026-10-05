@@ -148,7 +148,7 @@ class AgentProcess private constructor(
                     w.write(msg); w.write("\n"); w.flush()
                 }
             } catch (t: Throwable) {
-                if (!shuttingDown) Diagnostics.report(ErrorPath.AGENT_PROTOCOL, Stage.WRITE, ErrorCode.WRITE_FAILED, t)
+                if (!shuttingDown && !inputClosed) Diagnostics.report(ErrorPath.AGENT_PROTOCOL, Stage.WRITE, ErrorCode.WRITE_FAILED, t)
                 // broken pipe: the process died under us — say so instead of dying silently (issue #122)
                 log.warn("agent $pid stdin writer ended: ${t.message}")
             } finally {
@@ -160,6 +160,19 @@ class AgentProcess private constructor(
             }
         }
     }
+
+    /**
+     * Abort every queued and suspended stdin write and hand the CLI its EOF — the first rung of [shutdown],
+     * without waiting for anything (lifecycle design S4). A conversation closing calls this before it waits
+     * for its lifecycle lock: a write wedged on a full pipe (a CLI that stopped reading stdin) would otherwise
+     * hold that lock indefinitely. Later writes are dropped like any write after the pipe closed.
+     */
+    fun closeInput() {
+        inputClosed = true
+        stdin.cancel()
+    }
+
+    @Volatile private var inputClosed = false
 
     /** Queue one line for the agent's stdin. A write after the process/pipe died is DROPPED, loudly —
      *  never silently buffered or suspended forever; the caller's unconsumed-prompt ledger (issue #122)
