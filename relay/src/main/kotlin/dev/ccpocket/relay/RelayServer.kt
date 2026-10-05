@@ -107,6 +107,8 @@ class RelayServer(
     ga4Forwarder: Ga4Forwarder = HttpGa4Forwarder(),
     // pre-auth deadline per handshake frame; matches the daemon's and the phone's own 15 s handshake timeout
     private val handshakeTimeoutMs: Long = 15_000,
+    // relay-wide ceiling on bytes owed to peers (see MAX_RELAY_OUTBOUND_BYTES); injectable for tests
+    outboundBudgetBytes: Long = MAX_RELAY_OUTBOUND_BYTES,
 ) {
     // internal: control-plane tests attach their socket first, exactly as handleDevice does
     internal val broker = Broker()
@@ -123,6 +125,8 @@ class RelayServer(
     private val deviceAuth = DeviceAuthenticator(store, clock)
     private val pairing = PairingService(store, clock)
     private val codeStore = CodeStore(clock)
+    // shared by every socket's OutboundQueue: the per-socket cap bounds one stalled reader, this bounds them all
+    internal val outboundBudget = OutboundBudget(outboundBudgetBytes)
 
     fun run() { server().start(wait = true) }
 
@@ -569,11 +573,16 @@ class RelayServer(
         val out = OutboundQueue(
             MAX_OUTBOUND_BYTES,
             write = { outgoing.send(it); flush() },
-            onOverflow = { queued ->
+            onOverflow = { queued, relayWide ->
                 logConn("slow_consumer", ip, account = account, deviceId = deviceId, headless = if (role == Role.DEVICE) headless else null)
-                println("[conn] slow_consumer queued_bytes=$queued limit=$MAX_OUTBOUND_BYTES")
+                if (relayWide) {
+                    println("[conn] slow_consumer scope=relay queued_bytes=$queued relay_limit=${outboundBudget.limitBytes}")
+                } else {
+                    println("[conn] slow_consumer queued_bytes=$queued limit=$MAX_OUTBOUND_BYTES")
+                }
                 closeSoon(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER, "slow_consumer"))
             },
+            budget = outboundBudget,
         )
         launch { out.pump() }
         val conn = Conn(
@@ -707,8 +716,17 @@ class RelayServer(
         const val CLOSE_GRACE_MS = 3_000L
         // audit H1: bytes one socket may owe before it is cut as a slow consumer. Four full-size (4 MiB) frames:
         // a healthy link drains as the daemon produces, so this only fills when the peer has stopped reading
-        // or is minutes behind. Per socket, not global — ExitOnOutOfMemoryError in the unit is the backstop.
+        // or is minutes behind. Per socket; MAX_RELAY_OUTBOUND_BYTES below bounds the sum.
         const val MAX_OUTBOUND_BYTES = 16L * 1024 * 1024
+        // Relay-wide sum of every socket's backlog. Sized from the unit's -Xmx256m (deploy/cc-pocket-relay.service):
+        // 96 MiB is 3/8 of the heap, leaving 160 MiB for the JVM/Ktor/SQLite/push baseline, the frames being READ
+        // (up to MAX_FRAME each, not yet in any queue) and GC headroom. Normal use stays far below it: a healthy
+        // socket owes a frame or two while it drains, so it takes 24 full-size (4 MiB) history frames queued at
+        // the same instant — e.g. a dozen devices each two windows behind — to reach it, whereas six readers
+        // stalled at the per-socket cap already would. Over it, the largest backlogs are cut first (a stalled
+        // reader, almost always), so a healthy device is reached only after every bigger one is gone.
+        // ExitOnOutOfMemoryError in the unit stays the last resort.
+        const val MAX_RELAY_OUTBOUND_BYTES = 96L * 1024 * 1024
         // an APNs token is 64 hex chars and an FCM one a few hundred; 4096 is far above any real vendor
         // token and exists so a malformed/hostile registration is refused ("bad_request") instead of
         // being written into the devices row

@@ -43,7 +43,7 @@ class SlowConsumerTest {
     @Test fun overflow_fires_once_drops_the_backlog_and_refuses_further_frames(): Unit = runBlocking {
         val stall = CompletableDeferred<Unit>()
         var overflows = 0
-        val q = OutboundQueue(10 * 1024, write = { stall.await() }, onOverflow = { overflows++ })
+        val q = OutboundQueue(10 * 1024, write = { stall.await() }, onOverflow = { _, _ -> overflows++ })
         val pump = launch { q.pump() }
         repeat(10) { q.offer(Frame.Binary(true, ByteArray(1024))) } // exactly at the cap: still accepted
         assertFailsWith<ClosedSendChannelException> { q.offer(Frame.Binary(true, ByteArray(1))) }
