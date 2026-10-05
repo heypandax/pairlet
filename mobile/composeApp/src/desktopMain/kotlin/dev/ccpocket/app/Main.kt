@@ -351,11 +351,6 @@ private fun ApplicationScope.PocketShell() {
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.Backslash -> {
                     model.setSidebarCollapsed(!model.sidebarCollapsed); true
                 }
-                // ⌘⇧R (the Review Center) must be tested BEFORE plain ⌘R: the refresh branch below
-                // matches Key.R whatever the modifiers, so the shifted case has to claim it first.
-                e.type == KeyEventType.KeyDown && mod && e.isShiftPressed && e.key == Key.R && connected -> {
-                    model.openReviewCenter(); true
-                }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.R && connected -> { model.refresh(); true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.Zero && connected -> { model.switcherOpen = !model.switcherOpen; true }
                 e.type == KeyEventType.KeyDown && digit >= 0 && connected && model.switcherOpen -> {

@@ -41,7 +41,6 @@ import dev.ccpocket.app.resources.mode_default_label
 import dev.ccpocket.app.resources.mode_auto_label
 import dev.ccpocket.app.resources.notifications_section
 import dev.ccpocket.app.resources.per_model_section
-import dev.ccpocket.app.resources.rv_settings_row
 import dev.ccpocket.app.resources.schedule_tasks_title
 import dev.ccpocket.app.resources.security_section
 import dev.ccpocket.app.resources.settings_bridges
@@ -281,7 +280,6 @@ class SettingsIaTest {
             assertPresent(str(Res.string.settings_shared_folders))
             assertPresent(str(Res.string.join_title))       // the row most at risk of being dropped
             assertPresent(str(Res.string.co_screen_title))
-            assertPresent(str(Res.string.rv_settings_row))
             assertPresent(str(Res.string.settings_bridges))
         }
         openCategory(str(Res.string.settings_cat_security)) {

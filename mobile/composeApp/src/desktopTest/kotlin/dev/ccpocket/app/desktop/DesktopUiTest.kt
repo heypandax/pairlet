@@ -945,28 +945,4 @@ class DesktopUiTest {
         waitForIdle()
         assertEquals("a1", unarchived, "the row's second verb restores that exact session")
     }
-
-    // ── Review Center (REVIEW-REQUEST.md §12) ─────────────────────────────────────────────────────
-
-    @Test
-    fun reviewCenterOverlayRendersOnTheModelFlag() = runComposeUiTest {
-        val model = SeedDesktopModel().apply { showReviewCenter = true }
-        setContent { PocketTheme { DesktopApp(model) } }
-        waitForIdle()
-        assertPresent(str(Res.string.rv_title))
-        // the seed has no daemon behind it, and a canned ledger would be the one place this feature is
-        // allowed to show rows nobody's machine holds — so it states the absence instead
-        assertPresent(str(Res.string.rv_offline))
-    }
-
-    @Test
-    fun sidebarCarriesNoReviewsRow() = runComposeUiTest {
-        val model = SeedDesktopModel()
-        setContent { PocketTheme { DesktopApp(model) } }
-        waitForIdle()
-        // Demoted 08-16: the P2P review flow saw no real use, so its sidebar row came off — the Center
-        // stays reachable via ⌘⇧R only. This pins the demotion so the row cannot quietly creep back.
-        assertTrue(!model.showReviewCenter, "the Center is closed until asked for")
-        assertTrue(!present(str(Res.string.rv_title)), "no sidebar row advertises the Review Center")
-    }
 }

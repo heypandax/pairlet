@@ -5,7 +5,6 @@ import dev.ccpocket.protocol.COLLAB_INVITE_URI_PREFIX
 import dev.ccpocket.protocol.CollaboratorInvite
 import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.PocketJson
-import dev.ccpocket.protocol.REVIEW_CONTACT_INVITE_URI_PREFIX
 import dev.ccpocket.protocol.e2e.E2ECrypto
 import dev.ccpocket.protocol.inviteUriPrefix
 
@@ -15,18 +14,14 @@ import dev.ccpocket.protocol.inviteUriPrefix
  * session, folder or handoff content; the recipient decodes it, confirms the safety fingerprint,
  * then redeems the ticket through the ordinary pairing path with a COLLABORATOR-kind credential.
  *
- * TWO DOORS, one codec (REVIEW-REQUEST.md §13.3). A Session Handoff invite is addressed to a person's
- * APP; a Review contact invite is addressed to a colleague's DAEMON. They are byte-identical apart from
- * [CollaboratorInvite.purpose], and the ticket inside either is single-use — so redeeming one at the
- * other's door does not merely go to the wrong screen, it BURNS the ticket the other side was waiting
- * for. Hence [decodeCollaboratorInvite] and [decodeReviewContactInvite]: each accepts only its own URI
- * host, and each re-checks the embedded purpose so a hand-stripped bare blob cannot cross either.
+ * ONE door per purpose (REVIEW-REQUEST.md §13.3). A Session Handoff invite is addressed to a person's
+ * APP; a Review contact invite (minted only by older daemons — ReviewRequest is retired) was addressed
+ * to a colleague's DAEMON. They are byte-identical apart from [CollaboratorInvite.purpose], and the
+ * ticket inside either is single-use — so redeeming one at the other's door would BURN it. Hence
+ * [decodeCollaboratorInvite] accepts only its own URI host and re-checks the embedded purpose, so a
+ * hand-stripped bare blob of another purpose cannot cross into it.
  */
 const val COLLAB_URI_PREFIX = COLLAB_INVITE_URI_PREFIX
-
-/** The Review contact door. An older app does not know this host and treats it as an unknown link —
- *  which is the point: it cannot redeem what it cannot recognise. */
-const val REVIEW_CONTACT_URI_PREFIX = REVIEW_CONTACT_INVITE_URI_PREFIX
 
 /** Publish under the door this invite's [CollaboratorInvite.purpose] names — never under a fixed one. */
 fun CollaboratorInvite.encode(): String =
@@ -41,14 +36,6 @@ fun CollaboratorInvite.encode(): String =
  */
 fun decodeCollaboratorInvite(raw: String): CollaboratorInvite? =
     decodeInviteAtDoor(raw, COLLAB_URI_PREFIX, "ccpocket://collab", CollaboratorPurpose.SESSION_HANDOFF)
-
-/**
- * Tolerant decode of the REVIEW CONTACT door, same shape. Requires [CollaboratorPurpose.REVIEW]: a
- * Session Handoff ticket redeemed here would hand a colleague's daemon a contact its owner minted for a
- * runtime lease, which is the same re-scoping in the other direction.
- */
-fun decodeReviewContactInvite(raw: String): CollaboratorInvite? =
-    decodeInviteAtDoor(raw, REVIEW_CONTACT_URI_PREFIX, "ccpocket://review-contact", CollaboratorPurpose.REVIEW)
 
 private fun decodeInviteAtDoor(
     raw: String,

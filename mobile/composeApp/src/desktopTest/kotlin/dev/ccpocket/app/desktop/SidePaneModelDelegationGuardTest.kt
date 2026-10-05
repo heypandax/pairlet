@@ -133,15 +133,15 @@ class SidePaneModelDelegationGuardTest {
         // window-level overlay flags
         "switcherOpen", "showNewSession", "showTray", "palette", "showSettings", "showAddComputer",
         "showAttention", "showWorktrees", "showSkills", "showHandoff",
-        "showReviewCenter", "showFolderPicker", "showQuotaPopover",
+        "showFolderPicker", "showQuotaPopover",
         "anyOverlayOpen", "dismissOverlays",
         // session handoff + collaborator links (raised from window chrome; the pane's banner is inert)
         "handoffInvite", "handoffCreating", "handoffError", "handoffIsInitiator", "handoffCreate",
         "handoffCancel", "handoffRecall", "handoffComplete", "handoffReturn", "dismissHandoffInvite",
         "collaborators", "collaboratorTicket", "lastCollaboratorConnected", "collaboratorError",
         "listCollaborators", "createCollaboratorTicket", "removeCollaborator",
-        // Review Center + usage dashboard (the live repository, handed over whole)
-        "reviewRepo", "usageRepo", "reviewPending", "openReviewCenter", "refreshReviews",
+        // usage dashboard (the live repository, handed over whole)
+        "usageRepo",
         // sidebar: pins, projects, sessions, groups, archive, rename, RECENT
         "pins", "pin", "unpin", "movePin", "openPin", "jumpPin", "isPinned", "pinsFull",
         "projectPins", "pinProject", "unpinProject", "isProjectPinned", "projectListReveal",

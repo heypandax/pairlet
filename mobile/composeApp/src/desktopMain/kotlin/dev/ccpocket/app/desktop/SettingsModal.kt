@@ -197,8 +197,8 @@ fun SettingsModal(model: DesktopModel, initialTab: SettingsTab = SettingsTab.GEN
 
 /**
  * Token usage + the Claude subscription allowance — the mobile [UsageScreen] rendered verbatim as a
- * settings pane, in the [ReviewCenterOverlay] idiom (hand the live repository over whole rather than
- * re-projecting a dozen fields through [DesktopModel]). Until now this page had NO desktop entry point at
+ * settings pane, with the live repository handed over whole ([DesktopModel.usageRepo]) rather than
+ * re-projecting a dozen fields through [DesktopModel]. Until now this page had NO desktop entry point at
  * all: the desktop replaces mobile's Settings.kt with this modal, and the modal never mounted it.
  *
  * `embedded = true` drops the page's own back arrow and title, which the modal's header already provides;

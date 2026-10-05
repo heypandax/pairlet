@@ -273,7 +273,6 @@ interface DesktopModel {
     var showWorktrees: Boolean // every checkout of the open repository (issue #281; raised from the Git overlay)
     var showSkills: Boolean // the installed skills/plugins browser (issue #132; sidebar row / palette verb)
     var showHandoff: Boolean // session-handoff draft modal (design session-handoff/ Frame 11)
-    var showReviewCenter: Boolean // the ReviewRequest centre (REVIEW-REQUEST.md §12; sidebar row / ⌘⇧R)
     var showFolderPicker: Boolean // remote "Open Folder" browser (issues #218/#214): the daemon-machine dir picker
     var showQuotaPopover: Boolean // the sidebar footer allowance strip's anchored detail popover
 
@@ -300,42 +299,24 @@ interface DesktopModel {
     fun handoffReturn(verdict: String?) {}
     fun dismissHandoffInvite() {}
 
-    // ── ReviewRequest (REVIEW-REQUEST.md §12) ──
-    //
-    // The Review Center is the ONE surface that gets the live repository handed to it whole, rather than
-    // a per-field pass-through like everything above. Two reasons: its UI is shared verbatim with mobile
-    // (ui/review/ReviewCenterFlow), so re-projecting a dozen fields through this interface would be a
-    // second copy of the same binding; and a seed/preview model has nothing meaningful to fake here —
-    // an inert Center is the honest preview, which is exactly what a null gives.
-    val reviewRepo: dev.ccpocket.app.data.PocketRepository? get() = null
-
-    /** The SECOND surface whose UI is shared verbatim with mobile and therefore gets the live repository
-     *  handed over whole for the same two reasons as [reviewRepo]: the Token-usage dashboard
-     *  ([dev.ccpocket.app.ui.UsageScreen]). It aliases [reviewRepo] by default — there is only ever one
-     *  live repository — but keeps its own name so a preview model can inert one surface without the
-     *  other, and so a reader of the usage pane is not sent looking through review code. Null in
-     *  seed/preview models: the pane then shows its own "can't reach your computer" state, which is the
-     *  honest preview for a dashboard nobody's daemon is backing. */
-    val usageRepo: dev.ccpocket.app.data.PocketRepository? get() = reviewRepo
-
-    /** Received reviews still waiting on this machine — the sidebar count. 0 in seed/preview models. */
-    val reviewPending: Int get() = 0
-
-    /** Open the Center and re-pull, in the [openSkills] idiom: an overlay showing yesterday's ledger is
-     *  worse than one that is briefly loading. */
-    fun openReviewCenter() { showReviewCenter = true; refreshReviews() }
-    fun refreshReviews() {}
+    /** The live repository, handed over whole to the Token-usage dashboard ([dev.ccpocket.app.ui.UsageScreen])
+     *  and the sidebar allowance strip rather than re-projected field by field like everything above. Two
+     *  reasons: that UI is shared verbatim with mobile, so re-projecting a dozen fields through this
+     *  interface would be a second copy of the same binding; and a seed/preview model has nothing
+     *  meaningful to fake here. Null in seed/preview models: the pane then shows its own "can't reach
+     *  your computer" state, which is the honest preview for a dashboard nobody's daemon is backing. */
+    val usageRepo: dev.ccpocket.app.data.PocketRepository? get() = null
 
     /** Open the ⌘K palette scoped to projects — the sidebar's browse affordance for the full list. */
     fun browseProjects() { palette = PaletteScope.PROJECTS }
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showGit || showWorktrees || showSkills || showHandoff || showReviewCenter || showFolderPicker || showQuotaPopover || handoffInvite != null
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showGit || showWorktrees || showSkills || showHandoff || showFolderPicker || showQuotaPopover || handoffInvite != null
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showGit = false; showWorktrees = false; showSkills = false; showHandoff = false; showReviewCenter = false; showFolderPicker = false; showQuotaPopover = false; dismissHandoffInvite()
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showGit = false; showWorktrees = false; showSkills = false; showHandoff = false; showFolderPicker = false; showQuotaPopover = false; dismissHandoffInvite()
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts

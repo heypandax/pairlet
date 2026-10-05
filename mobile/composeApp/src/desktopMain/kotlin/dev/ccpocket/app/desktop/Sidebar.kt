@@ -206,8 +206,6 @@ fun Sidebar(model: DesktopModel, width: Dp = Dk.sidebarWidth, modifier: Modifier
         AllProjectsRow { model.browseProjects() }
         model.managedImport?.let { ManagedImportPopup(model, it) } // #360: raised from a RECENT project's menu
         if (model.canArchiveSessions) ArchivedRow(model.archivedSessions.size) { model.browseArchived() }
-        // The Review Center row came off (demoted 08-16, with the mobile header entry): the P2P review
-        // flow saw no real use. The centre itself still opens via ⌘⇧R while its future form is decided.
         FooterActions(
             model = model,
             updateAvailable = model.updateState is DkUpdateState.Available,
