@@ -21,7 +21,7 @@ import dev.ccpocket.protocol.PermissionMode
 open class SeedDesktopModel : DesktopModel {
     override val connected = true
     override val computers = listOf(
-        DkComputer("acct-mbp", "Lidapeng-MacBook", DkOs.MAC, online = true, meta = "online · active now"),
+        DkComputer("acct-mbp", "Studio-MacBook", DkOs.MAC, online = true, meta = "online · active now"),
         DkComputer("acct-studio", "mac-studio", DkOs.MAC, online = true, meta = "online · 2m ago"),
         DkComputer("acct-linux", "devbox-linux", DkOs.LINUX, online = true, meta = "online · just now"),
         DkComputer("acct-win", "win-desktop", DkOs.WIN, online = false, meta = "offline · 2d ago"),

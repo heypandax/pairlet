@@ -125,7 +125,7 @@ class FleetUiTest {
         }
         waitForIdle()
         assertPresent(str(Res.string.computers_title))
-        assertPresent("Lidapeng-MacBook")
+        assertPresent("Studio-MacBook")
         assertPresent("mac-studio")
         assertPresent("devbox-linux")
         assertPresent("win-desktop")
@@ -139,7 +139,7 @@ class FleetUiTest {
         // the current binding says so in words too
         assertPresent(str(Res.string.fl_current))
         // real paths and tools stay literal
-        assertPresent("~/proj/app/cc-pocket", substring = true)
+        assertPresent("~/proj/app/pairlet", substring = true)
         assertPresent(str(Res.string.fl_pair_new))
     }
 
@@ -262,7 +262,7 @@ class FleetUiTest {
             }
         }
         waitForIdle()
-        listOf(str(Res.string.computers_title), str(Res.string.fl_current), "Lidapeng-MacBook").forEach { text ->
+        listOf(str(Res.string.computers_title), str(Res.string.fl_current), "Studio-MacBook").forEach { text ->
             val b = onAllNodes(hasText(text, substring = true)).onFirst().getUnclippedBoundsInRoot()
             assertTrue(b.left.value >= -0.5f, "\"$text\" starts off-screen at ${b.left}")
             assertTrue(b.right.value <= 402.5f, "\"$text\" overflows the 402pt viewport, ending at ${b.right}")

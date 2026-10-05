@@ -67,7 +67,7 @@ internal object ShowcaseSeeds {
      */
     val ACCOUNT = dev.ccpocket.app.pairing.PairedDaemon(
         relay = "wss://showcase.invalid", accountId = "showcase", daemonPub = "pub",
-        deviceId = "dev", credential = "cred", hostName = "alex-macbook",
+        deviceId = "dev", credential = "cred", hostName = "macbook",
     )
 
     /** The attached session announce: what the daemon says this conversation IS. */

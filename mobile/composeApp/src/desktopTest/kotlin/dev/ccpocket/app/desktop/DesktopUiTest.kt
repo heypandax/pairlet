@@ -55,7 +55,7 @@ class DesktopUiTest {
         assertPresent(str(Res.string.new_session_title))           // the single entry point under the header
         assertPresent(str(Res.string.switcher_all_projects) + "…") // the browse escape hatch docked above Settings
         assertPresent(str(Res.string.support_title))               // customer support stays one click from the sidebar
-        assertPresent("Lidapeng-MacBook")      // machine switcher header
+        assertPresent("Studio-MacBook")      // machine switcher header
         assertPresent("Refactor auth module")  // selected session (sidebar + chat header)
         assertPresent("Tidy CI workflow")      // a Codex session in the list
         // the docked rows above Settings (Archived, Reviews) each take a row off the RECENT viewport, so
@@ -566,7 +566,7 @@ class DesktopUiTest {
         waitForIdle()
         assertPresent(str(Res.string.palette_switch_to, "mac-studio"))         // machine verb + ⌘n hint
         assertPresent("⌘0 2") // switcher chord: ⌘0 opens it, the digit picks the machine
-        assertPresent(str(Res.string.palette_new_on, "Lidapeng-MacBook"))      // machine-scoped action
+        assertPresent(str(Res.string.palette_new_on, "Studio-MacBook"))      // machine-scoped action
         assertPresent(str(Res.string.palette_approve_on, "mac-studio"))        // the "needs you" verb from the attention queue
         assertPresent(str(Res.string.this_machine))                            // local machine detail
     }
