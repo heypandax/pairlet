@@ -254,6 +254,7 @@ class BridgeRegistry(
      *  but the relay may still announce the id, so it must be treated as known (never armed, never
      *  allow-listed, never bound to another credential). */
     @Synchronized
+    @Synchronized
     fun isRetiredCollaborator(deviceId: String): Boolean = deviceId in retired
 
     /** Every tombstoned id the relay still has to be asked to revoke. */
