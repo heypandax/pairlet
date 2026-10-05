@@ -803,8 +803,8 @@ private fun RecoverySurface(repo: PocketRepository, recovery: dev.ccpocket.app.u
  * Row 1 is the screen's name plus exactly two 48 dp controls: the computer doorway (an outlined display,
  * not a plus — it SWITCHES machines rather than creating anything) carrying the fleet's real waiting count,
  * and the overflow carrying the version-update dot. Row 2 keeps the state MARK beside the state WORD, so
- * the connection is legible in greyscale. (The review queue used to ride row 2's trailing edge; demoted
- * 08-16 with the whole P2P review surface — the Review Center now lives behind Settings only.)
+ * the connection is legible in greyscale. (The review queue used to ride row 2's trailing edge; it left
+ * with the P2P review surface, demoted 08-16 and retired 2026-10.)
  *
  * Help and Settings moved into the overflow: they are doorways to specialist surfaces, and as a leading
  * text band they competed with the machine state and the work below it.

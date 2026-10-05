@@ -102,8 +102,8 @@ private val BackChevronStroke = 1.8.dp
  * Back, then the screen's own name, then at most ONE line of facts about it.
  *
  * [summary] is nullable on purpose: a surface that cannot state something true (loading, offline, a state
- * whose counts are not yet real) passes null rather than a placeholder — see the Review Center, where a
- * non-ready state must never inherit the ready state's pending count.
+ * whose counts are not yet real) passes null rather than a placeholder: a non-ready state must never
+ * inherit the ready state's counts.
  */
 @Composable
 fun FirstHopHeader(
