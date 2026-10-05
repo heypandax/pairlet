@@ -482,6 +482,11 @@ class Conversation(
     @Volatile
     private var intentionalStop = false
 
+    /** Set first thing in [close] and never cleared (lifecycle design S3(b) / D5). close() cancels [scope], so
+     *  any process started after it gets no IO pumps and no stdout pump — a leaked CLI nobody reads or stops —
+     *  while the caller would ack a prompt nobody runs. [launchProcess] refuses once this is set. */
+    private val closed = AtomicBoolean(false)
+
     // last time an approval push fired for this conversation (bridge #91 / owner session #138) —
     // coalesces a burst of asks into one alert. Stamped on the single permission-bridge emit path;
     // rolled back from the hook coroutine when no push actually went out (see [maybePushAsk]).
@@ -1718,6 +1723,10 @@ class Conversation(
     )
 
     private suspend fun launchProcess(rawSpec: AgentSpec, armExecuting: Boolean = false, initialSend: InitialSend? = null) {
+        // A closed conversation never spawns again (D5): a sender that still held this conversation when the
+        // reaper / closeIfIdle closed it lands here. Failing the launch routes every caller through its existing
+        // "agent failed to start" path (lazy start / relaunch: PocketError, no ack, promptId forgotten).
+        if (closed.get()) throw IllegalStateException("conversation $convoId is closed")
         // OpenCode requires a message argument — can't launch without one (opencode run exits with error).
         // Defer to sendPrompt() which always provides initialPrompt.
         if (backend.kind == AgentKind.OPENCODE && rawSpec.initialPrompt == null) {
@@ -3429,6 +3438,7 @@ class Conversation(
     }
 
     suspend fun close() {
+        closed.set(true) // before anything suspends: no launch may start from here on (see [closed])
         bridgeRequestGate.cancelAll()
         grants.endSession(convoId) // approval design M2: no task grant survives its session
         riskEngine?.forget(convoId) // M3: the sequence ledger dies with the conversation

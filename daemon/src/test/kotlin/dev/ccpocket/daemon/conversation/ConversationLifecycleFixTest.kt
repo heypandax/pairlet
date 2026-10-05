@@ -7,6 +7,9 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.StreamPiece
+import dev.ccpocket.protocol.PromptAck
+import kotlin.test.assertFalse
+import dev.ccpocket.protocol.TurnDone
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -124,6 +127,29 @@ class ConversationLifecycleFixTest {
             h.close()
         }
     }
+
+    // ── S3(b): a closed conversation never spawns again ───────────────────────────────────────────────
+
+
+    /** T5 / D5 — a sender still holding the conversation after close() (reaper / closeIfIdle raced it) used
+     *  to lazily start a process on the cancelled scope (no IO pumps: a leaked, never-read CLI) and ack the
+     *  prompt. Now the launch is refused through the ordinary "agent failed to start" path. */
+    @Test
+    fun a_prompt_after_close_spawns_nothing_and_is_not_acked() = runBlocking {
+        if (LifecycleHarness.isWindows()) return@runBlocking
+        val backend = LifecycleBackend { _, _ -> LifecycleBackend.ECHO_TURNS }
+        val h = LifecycleHarness(backend, "cS3b")
+        try {
+            h.convo.open(resumeId = null, model = null)
+            h.convo.close()
+            h.convo.sendPrompt("late", promptId = "late")
+            assertEquals(0, backend.specs.size, "no process for a closed conversation")
+            assertTrue(h.framesOf<PromptAck>().none { it.promptId == "late" }, "no receipt for a prompt nobody runs")
+        } finally {
+            h.close()
+        }
+    }
+
 
     private companion object {
         /** Keep a one-shot child alive (no further output) until its stdin closes. */
