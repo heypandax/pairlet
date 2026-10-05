@@ -47,6 +47,11 @@ gh workflow run release.yml --ref v<ver> -f version=<ver> -f include_harmony=tru
 
 # Harmony 发版契约静态检查（无需 DevEco / 签名材料）
 bash scripts/check-harmony-release.sh
+
+# 更新包签名清单：发布后自检（公钥 = ReleaseTrustedKeys.kt 中的一项；流程见 docs/RELEASE.md「更新包签名」）
+gh release download v<ver> --dir /tmp/v<ver>
+python3 scripts/release-manifest.py verify --manifest /tmp/v<ver>/release-manifest.json \
+  --public-key <base64 公钥> --version <ver> --asset-dir /tmp/v<ver>
 ```
 
 Harmony environment 审批、ephemeral/JIT runner、标签、DevEco 路径和 secrets 清单见

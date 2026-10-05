@@ -23,7 +23,8 @@ class ReleaseTrustedKeysTest {
               1. the matching private key is stored by the owner and configured as the RELEASE_SIGNING_KEY Actions secret;
               2. the latest published release already carries a valid release-manifest.json + .sig
                  (python3 scripts/release-manifest.py verify …), so the first enforced clients can still update;
-              3. the mirror runs with MIRROR_REQUIRE_SIGNATURE=1 and re-synced that release (manifest + .sig on /dl);
+              3. the mirror runs the new deploy/mirror-sync.sh (scripts/provision-relay-mirror.sh) and serves that
+                 release's manifest + .sig on /dl; set MIRROR_REQUIRE_SIGNATURE=1 once this release is out;
               4. every later release, re-run and daemon hotfix will be signed — an unsigned one strands these clients.
             Then replace this assertion with one that pins the new key list (and keep the RFC 8032 check below).
             """.trimIndent(),
