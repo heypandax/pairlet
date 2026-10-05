@@ -216,6 +216,7 @@ class WsConnection(
                         ),
                     )
                     log.info("direct E2E session established with ${id.take(8)}…")
+                    dev.ccpocket.daemon.identity.DeviceActivity.noteHandshake(id, dev.ccpocket.daemon.identity.DeviceActivity.VIA_DIRECT)
                     return crypto
                 }
                 else -> {}

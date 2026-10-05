@@ -31,6 +31,9 @@ class LocalControlClient(
     private val startHint: String,
     private val jsonErrors: Boolean = false,
     private val tokenPath: File = LocalControlToken.defaultPath(),
+    /** What to say when the daemon has no such route at all (a bare 404, i.e. it predates the command).
+     *  Null keeps the generic refusal — what `pairlet agent` has always printed. */
+    private val routeMissingHint: String? = null,
 ) {
 
     /** GET [path] with optional query params; returns the decoded [serializer] body. */
@@ -72,6 +75,7 @@ class LocalControlClient(
                     fail("token_rejected", "the daemon rejected this CLI's local control token — update the daemon and the CLI to the same version")
                 }
                 if (err != null) fail(err.code, err.message)
+                if (res.status == HttpStatusCode.NotFound && routeMissingHint != null) fail("daemon_outdated", routeMissingHint)
                 fail("daemon_refused", "the daemon refused the request (${res.status})")
             }
             return runCatching { PocketJson.decodeFromString(serializer, text) }

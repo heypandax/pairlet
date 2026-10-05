@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -63,7 +64,10 @@ import dev.ccpocket.app.resources.auto_denied_no_response
 import dev.ccpocket.app.resources.deny
 import dev.ccpocket.app.resources.dismiss
 import dev.ccpocket.app.resources.perm_remember_session
+import dev.ccpocket.app.data.ApprovalKey
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.approval.FOCUSED_ASK_SURFACE
+import dev.ccpocket.app.ui.approval.rememberApprovalArmed
 import dev.ccpocket.app.ui.AgentBadge
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.agentColor
@@ -139,61 +143,71 @@ private fun RememberCheck(label: String, checked: Boolean, onToggle: () -> Unit)
 internal fun DesktopModel.isStillAsking(shown: PermissionAsk): Boolean =
     ask?.let { it.convoId == shown.convoId && it.askId == shown.askId } == true
 
+/** A fresh double-tap-guard surface id for one chat pane's ask card (UI thread only, like every composition). */
+private var chatAskSurfaceSeq = 0
+internal fun newChatAskSurface(): String = "chat:${++chatAskSurfaceSeq}"
+
 /** Whether "remember" is offered at all: needs a rule to remember, and one-off decisions (plan
  *  approval, questions) never offer it — [oneOff] carries the daemon's ToolMeta policy. */
 private fun canRemember(ask: PermissionAsk): Boolean = ask.rule != null && !ask.oneOff
 
+// The verdict buttons take `enabled = false` while their card is inside the arrival guard window
+// ([dev.ccpocket.app.ui.approval.APPROVAL_ARRIVAL_GUARD_MS]) and wear the desktop's existing disabled look:
+// a filled button goes surface + muted ink (Retry safer's Send below, ConnectPanel), an outline one muted ink on
+// a hairline (SettingsModal). Only colours move — no text style parameter changes with the state.
 @Composable
-private fun DenyButton(big: Boolean = false, onClick: () -> Unit) {
+private fun DenyButton(big: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
     Text(
-        stringResource(Res.string.deny), color = Tok.danger, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.SemiBold,
+        stringResource(Res.string.deny), color = if (enabled) Tok.danger else Tok.muted, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.SemiBold,
         style = tightCenter(if (big) 13.5.sp else 13.sp),
         modifier = Modifier.clip(RoundedCornerShape(if (big) 10.dp else 9.dp))
-            .border(1.dp, Tok.danger.copy(alpha = 0.4f), RoundedCornerShape(if (big) 10.dp else 9.dp))
-            .clickable(onClick = onClick).padding(horizontal = if (big) 18.dp else 16.dp, vertical = if (big) 10.dp else 8.dp),
+            .border(1.dp, if (enabled) Tok.danger.copy(alpha = 0.4f) else Tok.hair, RoundedCornerShape(if (big) 10.dp else 9.dp))
+            .clickable(enabled = enabled) { if (enabled) onClick() }.padding(horizontal = if (big) 18.dp else 16.dp, vertical = if (big) 10.dp else 8.dp),
     )
 }
 
 // No ⌘⏎ keycap on Allow / Allow for task (audit 2026-10-04 M1): nothing binds that key to an approval — the
 // composer keeps focus while a card is up and sends its draft on ⌘⏎. A keycap appears only where it is wired.
 @Composable
-private fun AllowButton(big: Boolean = false, onClick: () -> Unit) {
+private fun AllowButton(big: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
     Row(
-        Modifier.clip(RoundedCornerShape(if (big) 10.dp else 9.dp)).background(Tok.accent).clickable(onClick = onClick)
+        Modifier.clip(RoundedCornerShape(if (big) 10.dp else 9.dp)).background(if (enabled) Tok.accent else Tok.surface)
+            .clickable(enabled = enabled) { if (enabled) onClick() }
             .padding(horizontal = if (big) 18.dp else 16.dp, vertical = if (big) 10.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Text(stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.Bold, style = tightCenter(if (big) 13.5.sp else 13.sp))
+        Text(stringResource(Res.string.allow), color = if (enabled) Tok.base else Tok.muted, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.Bold, style = tightCenter(if (big) 13.5.sp else 13.sp))
     }
 }
 
 /** M2 "允许本次" (outline) — the V2 row splits the legacy Allow into once vs task scopes. */
 @Composable
-private fun OnceButton(onClick: () -> Unit) {
+private fun OnceButton(enabled: Boolean = true, onClick: () -> Unit) {
     Text(
-        stringResource(Res.string.allow_once), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+        stringResource(Res.string.allow_once), color = if (enabled) Tok.tx else Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
         style = tightCenter(13.sp),
         modifier = Modifier.clip(RoundedCornerShape(9.dp)).border(1.dp, Tok.hair, RoundedCornerShape(9.dp))
-            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+            .clickable(enabled = enabled) { if (enabled) onClick() }.padding(horizontal = 14.dp, vertical = 8.dp),
     )
 }
 
 /** M2 "允许本任务" — the recommended action (design `.btn.rec`): accent fill. */
 @Composable
-private fun TaskAllowButton(onClick: () -> Unit) {
+private fun TaskAllowButton(enabled: Boolean = true, onClick: () -> Unit) {
     Row(
-        Modifier.clip(RoundedCornerShape(9.dp)).background(Tok.accent).clickable(onClick = onClick)
+        Modifier.clip(RoundedCornerShape(9.dp)).background(if (enabled) Tok.accent else Tok.surface)
+            .clickable(enabled = enabled) { if (enabled) onClick() }
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Text(stringResource(Res.string.allow_for_task), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold, style = tightCenter(13.sp))
+        Text(stringResource(Res.string.allow_for_task), color = if (enabled) Tok.base else Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold, style = tightCenter(13.sp))
     }
 }
 
 /** M2 "换种安全方式" constraint picker (design frame 2): preset chips + free text → structured
  *  RETRY_SAFER deny the agent re-plans under. */
 @Composable
-private fun DesktopSaferPanel(onBack: () -> Unit, onSend: (List<String>) -> Unit) {
+private fun DesktopSaferPanel(armed: Boolean = true, onBack: () -> Unit, onSend: (List<String>) -> Unit) {
     val presets = listOf(
         stringResource(Res.string.rs_no_network),
         stringResource(Res.string.rs_read_only),
@@ -232,12 +246,13 @@ private fun DesktopSaferPanel(onBack: () -> Unit, onSend: (List<String>) -> Unit
                 style = tightCenter(12.5.sp),
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onBack).padding(horizontal = 10.dp, vertical = 6.dp),
             )
-            val enabled = picked.isNotEmpty() || custom.isNotBlank()
+            // Send is a verdict (a structured deny), so the arrival guard holds it too
+            val enabled = armed && (picked.isNotEmpty() || custom.isNotBlank())
             Text(
                 stringResource(Res.string.retry_safer_send), color = if (enabled) Tok.base else Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
                 style = tightCenter(12.5.sp),
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (enabled) Tok.accent else Tok.surface)
-                    .clickable(enabled = enabled) { onSend(picked + listOfNotNull(custom.trim().takeIf { it.isNotBlank() })) }
+                    .clickable(enabled = enabled) { if (enabled) onSend(picked + listOfNotNull(custom.trim().takeIf { it.isNotBlank() })) }
                     .padding(horizontal = 14.dp, vertical = 7.dp),
             )
         }
@@ -317,7 +332,11 @@ fun InlinePermCard(
     risk: String? = null,
     onAllowTask: (() -> Unit)? = null,
     onRetrySafer: ((List<String>) -> Unit)? = null,
+    // where the card sits, for the double-tap guard — a chat pane passes its own so two panes never share
+    arrivalSurface: String = FOCUSED_ASK_SURFACE,
 ) {
+    // the next card of a burst lands exactly here; its verdicts refuse input for the guard window
+    val armed = rememberApprovalArmed(arrivalSurface, ApprovalKey(ask.convoId, ask.askId))
     val color = agentColor(agent)
     val isDiff = ask.diff != null
     var rememberRule by remember(ask.askId) { mutableStateOf(false) }
@@ -362,11 +381,17 @@ fun InlinePermCard(
                     }
                 }
                 Spacer(Modifier.size(12.dp))
+                // The decisions sit inside the chat stream's SelectionContainer. While the arrival guard holds them
+                // (enabled = false) their clicks are not consumed, so the container read them as text clicks and
+                // counted the user's next, deliberate click as a double/triple click — swallowing it. The actions
+                // are controls, not transcript: carve them out of selection, as ChatPane does for the question card.
+                DisableSelection {
                 when {
                     timedOut -> TimedOutBlock(onDismiss)
                     // M2 four-action row (design frame 3 `.actrow`): Safer way (link) · session under ⋯ ·
                     // Deny / Allow once / Allow for task (recommended). The safer panel replaces the row.
                     v2 && safer -> DesktopSaferPanel(
+                        armed = armed,
                         onBack = { safer = false },
                         onSend = { onRetrySafer!!(it) },
                     )
@@ -388,9 +413,9 @@ fun InlinePermCard(
                                 }
                                 Spacer(Modifier.weight(1f))
                                 WaitDial(ask, 26.dp, 2.2.dp, color)
-                                DenyButton(onClick = onDeny)
-                                OnceButton(onClick = { onAllow(false) })
-                                TaskAllowButton(onClick = onAllowTask!!)
+                                DenyButton(enabled = armed, onClick = onDeny)
+                                OnceButton(enabled = armed, onClick = { onAllow(false) })
+                                TaskAllowButton(enabled = armed, onClick = onAllowTask!!)
                             }
                             if (moreOpen) {
                                 Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -398,9 +423,9 @@ fun InlinePermCard(
                                     Spacer(Modifier.weight(1f))
                                     if (rememberRule) {
                                         Text(
-                                            stringResource(Res.string.allow_session_option), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                            stringResource(Res.string.allow_session_option), color = if (armed) Tok.accent else Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                                             style = tightCenter(12.sp),
-                                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onAllow(true) }.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = armed) { if (armed) onAllow(true) }.padding(horizontal = 8.dp, vertical = 4.dp),
                                         )
                                     }
                                 }
@@ -411,10 +436,11 @@ fun InlinePermCard(
                         if (canRemember(ask)) RememberCheck(stringResource(Res.string.perm_remember_session), rememberRule) { rememberRule = !rememberRule }
                         Spacer(Modifier.weight(1f))
                         WaitDial(ask, 26.dp, 2.2.dp, color)
-                        DenyButton(onClick = onDeny)
-                        AllowButton(onClick = { onAllow(rememberRule) })
+                        DenyButton(enabled = armed, onClick = onDeny)
+                        AllowButton(enabled = armed, onClick = { onAllow(rememberRule) })
                     }
                 }
+                } // DisableSelection
             }
         }
     }

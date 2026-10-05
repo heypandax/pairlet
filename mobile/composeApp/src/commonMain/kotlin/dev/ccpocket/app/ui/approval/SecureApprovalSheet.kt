@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.SystemBackHandler
+import dev.ccpocket.app.data.ApprovalKey
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.ap_assessed
 import dev.ccpocket.app.resources.ap_authority_wait_sub
@@ -101,6 +102,9 @@ fun SecureApprovalSheet(
     // keyed by the COMPOSITE identity: askId alone is only unique per agent connection, so two sessions
     // both asking as "1" must not share a countdown, a Retry-safer draft or a More-options disclosure
     val askKey = ui.ask.convoId to ui.ask.askId
+    // the double-tap guard: a card that just took this place (the next one of a burst, a fresh arrival)
+    // refuses decisions for APPROVAL_ARRIVAL_GUARD_MS, timed by the request — never by this composition
+    val armed = rememberApprovalArmed(FOCUSED_ASK_SURFACE, ApprovalKey(ui.ask.convoId, ui.ask.askId))
     // a decision needs no typing: drop the keyboard the composer may still hold, or its inset and the
     // sheet's imePadding fight over the bottom and wedge the pinned decisions out of reach
     val focus = LocalFocusManager.current
@@ -154,12 +158,13 @@ fun SecureApprovalSheet(
                 when {
                     terminal -> ApprovalTimeoutTerminal(onDismiss)
                     safer -> RetrySaferDecisions(
-                        enabled = constraints.isNotEmpty() || custom.isNotBlank(),
+                        enabled = armed && (constraints.isNotEmpty() || custom.isNotBlank()),
                         onBack = { safer = false },
                         onSend = { onRetrySafer(constraints.toList() + listOfNotNull(custom.trim().takeIf { it.isNotBlank() })) },
                     )
                     else -> ApprovalDecisions(
                         ui,
+                        armed = armed,
                         onAction = {
                             when (it) {
                                 ApprovalActionId.DENY -> onDeny()

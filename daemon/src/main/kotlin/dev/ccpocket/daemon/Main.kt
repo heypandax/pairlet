@@ -16,6 +16,7 @@ import dev.ccpocket.daemon.claude.ClaudeBackend
 import dev.ccpocket.daemon.claude.ClaudeLauncher
 import dev.ccpocket.daemon.codex.CodexBackend
 import dev.ccpocket.daemon.codex.CodexLauncher
+import dev.ccpocket.daemon.LoopbackCli.withToken
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AgentKind
@@ -359,7 +360,7 @@ private fun daemonStartHint(): String {
     }
 }
 
-private class PairCmd : CliktCommand(name = "pair") {
+internal class PairCmd : CliktCommand(name = "pair") {
     private val pairPort by option("--pair-port", help = "loopback port of the running daemon").int().default(8799)
 
     // ---- headless bridge issuance (issue #91) ----
@@ -378,10 +379,14 @@ private class PairCmd : CliktCommand(name = "pair") {
     override fun run() = runBlocking {
         val client = HttpClient(CIO)
         try {
+            // pairing security phase 0: every loopback route needs the local control token (see LoopbackCli)
+            val token = LoopbackCli.token()
             if (headless) {
-                pairHeadless(client)
+                if (token == null) { echo("✗ ${LoopbackCli.missingTokenMessage()}"); return@runBlocking }
+                pairHeadless(client, token)
                 return@runBlocking
             }
+            if (token == null) fail(LoopbackCli.missingTokenMessage())
             // The daemon's relay link may legitimately be mid-reconnect (backoff reaches 30s) while the mint
             // window is only 10s — a one-shot pair failed spuriously on a HEALTHY daemon. Ride it out: retry
             // until the link comes back or the window closes, and only then diagnose.
@@ -389,10 +394,11 @@ private class PairCmd : CliktCommand(name = "pair") {
             var lastBody = ""
             var waiting = false
             while (true) {
-                val body = runCatching { client.post("http://127.0.0.1:$pairPort/pair").bodyAsText() }.getOrElse {
-                    echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}")
-                    return@runBlocking
-                }
+                val reply = runCatching {
+                    LoopbackCli.reply(client.post("http://127.0.0.1:$pairPort/pair") { withToken(token) })
+                }.getOrElse { fail("no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}") }
+                LoopbackCli.refusal(reply)?.let { fail(it) }
+                val body = reply.body
                 val info = runCatching { PocketJson.decodeFromString<LoopbackPair>(body) }.getOrNull()
                 if (info != null) {
                     echo("")
@@ -401,6 +407,7 @@ private class PairCmd : CliktCommand(name = "pair") {
                     echo(QrTerminal.render("ccpocket://pair?code=${info.code}"))
                     echo("        code:  ${info.code.chunked(3).joinToString(" ")}")
                     echo("")
+                    awaitPairing(info)
                     return@runBlocking
                 }
                 lastBody = body
@@ -414,13 +421,67 @@ private class PairCmd : CliktCommand(name = "pair") {
             echo("✗ pairing failed — the daemon can't reach the relay ($lastBody)")
             echo("  likely: no internet, or a proxy/firewall blocking $DEFAULT_RELAY, or the relay is down.")
             echo("  inspect: pairlet status")
+            throw com.github.ajalt.clikt.core.ProgramResult(1)
         } finally {
             client.close()
         }
     }
 
+    /**
+     * Pairing security phase 0: stay until THIS pairing has an outcome and show who joined. Success prints
+     * the new device's fingerprint for the owner to compare with the phone; an expired code or a refused
+     * device exits non-zero. Ctrl-C only stops this wait — the daemon is untouched and the code stays valid
+     * until it expires. An older daemon hands out no pairing id: say so instead of guessing.
+     */
+    private suspend fun awaitPairing(info: LoopbackPair) {
+        val pairingId = info.pairingId
+        if (pairingId == null) {
+            echo("  (the running daemon is older than this CLI, so it can't report which device pairs —")
+            echo("   restart the daemon, then check what paired with: pairlet devices)")
+            return
+        }
+        echo("  Waiting for a device to pair… (Ctrl-C stops waiting; the code stays valid until it expires)")
+        val control = dev.ccpocket.daemon.control.LocalControlClient(
+            pairPort, daemonStartHintText(),
+            routeMissingHint = "the running daemon is older than this CLI and can't report pairing results — restart it",
+        )
+        // the daemon bounds the pairing itself; this only guards against a reply that never says so
+        val deadline = System.currentTimeMillis() + info.ttlSec * 1000L + 60_000L
+        while (System.currentTimeMillis() < deadline) {
+            val res = control.get(
+                "/pairing/$pairingId", dev.ccpocket.daemon.control.LocalPairingRes.serializer(),
+                mapOf("waitMs" to dev.ccpocket.daemon.control.MAX_PAIRING_WAIT_MS.toString()),
+            )
+            when (res.state) {
+                "pending" -> continue
+                "paired" -> {
+                    val id = res.deviceId.orEmpty()
+                    echo("")
+                    echo("  ✓ Paired: device ${id.take(8)}…")
+                    echo("      device fingerprint:    ${res.fingerprint}")
+                    res.computerFingerprint?.let { echo("      computer fingerprint:  $it") }
+                    echo("    In the app (Settings → Support & about → About; desktop App: Settings → About) check that")
+                    echo("    \"This device's fingerprint\" and \"Computer fingerprint\" show these SAME values — all five groups.")
+                    echo("    Device value differs: that is not your device — pairlet devices revoke ${id.take(8)}")
+                    echo("    Computer value differs: the app is not talking to this computer — delete it in the app and pair again.")
+                    return
+                }
+                "expired" -> fail("no device paired before the code expired — run `pairlet pair` again")
+                "refused" -> fail("a device redeemed this code but was refused (another pairing or bridge was in progress) — run `pairlet pair` again")
+                else -> fail("the daemon no longer knows this pairing (was it restarted?) — run `pairlet pair` again; `pairlet devices` shows what is paired")
+            }
+        }
+        fail("no answer from the daemon about this pairing — check with: pairlet devices")
+    }
+
+    /** Print a `✗` line and exit non-zero — the interactive pair's failures (headless keeps its own style). */
+    private fun fail(message: String): Nothing {
+        echo("✗ $message")
+        throw com.github.ajalt.clikt.core.ProgramResult(1)
+    }
+
     /** Mint a headless bridge credential and hand it to the adapter — written to [out] (0600) or printed. */
-    private suspend fun pairHeadless(client: HttpClient) {
+    private suspend fun pairHeadless(client: HttpClient, token: String) {
         val n = name?.trim().orEmpty()
         if (n.isEmpty()) { echo("✗ --headless requires --name <bridge-name> (e.g. --name feishu-bot)"); return }
         if (workdir.isEmpty()) {
@@ -435,12 +496,16 @@ private class PairCmd : CliktCommand(name = "pair") {
             else -> AccessTier.REVIEW
         }
         val req = LoopbackHeadlessReq(n, workdir.toList(), maxSessions, opensPerMin, promptsPerMin, grantedTier)
-        val body = runCatching {
-            client.post("http://127.0.0.1:$pairPort/pair/headless") { setBody(PocketJson.encodeToString(req)) }.bodyAsText()
+        val reply = runCatching {
+            LoopbackCli.reply(
+                client.post("http://127.0.0.1:$pairPort/pair/headless") { withToken(token); setBody(PocketJson.encodeToString(req)) },
+            )
         }.getOrElse {
             echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}")
             return
         }
+        LoopbackCli.refusal(reply)?.let { echo("✗ headless pairing failed: $it"); return }
+        val body = reply.body
         val cred = runCatching { PocketJson.decodeFromString<LoopbackHeadlessCred>(body) }.getOrNull()
         if (cred == null) {
             echo("✗ headless pairing failed: $body")
@@ -503,16 +568,22 @@ private class BridgesCmd : CliktCommand(name = "bridges") {
     override fun run() = runBlocking {
         val client = HttpClient(CIO)
         try {
+            val token = LoopbackCli.token()
+                ?: run { echo("✗ ${LoopbackCli.missingTokenMessage()}"); return@runBlocking }
             val toRevoke = revoke
             if (toRevoke != null) {
-                val body = runCatching {
-                    client.post("http://127.0.0.1:$pairPort/bridge/revoke") { setBody("""{"idOrName":"$toRevoke"}""") }.bodyAsText()
+                val reply = runCatching {
+                    LoopbackCli.reply(client.post("http://127.0.0.1:$pairPort/bridge/revoke") { withToken(token); setBody("""{"idOrName":"$toRevoke"}""") })
                 }.getOrElse { echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}"); return@runBlocking }
+                LoopbackCli.refusal(reply)?.let { echo("✗ revoke failed: $it"); return@runBlocking }
+                val body = reply.body
                 if ("\"revoked\"" in body) echo("✓ revoked: $body") else echo("✗ revoke failed: $body")
                 return@runBlocking
             }
-            val body = runCatching { client.get("http://127.0.0.1:$pairPort/bridges").bodyAsText() }
+            val reply = runCatching { LoopbackCli.reply(client.get("http://127.0.0.1:$pairPort/bridges") { withToken(token) }) }
                 .getOrElse { echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}"); return@runBlocking }
+            LoopbackCli.refusal(reply)?.let { echo("✗ $it"); return@runBlocking }
+            val body = reply.body
             val rows = runCatching { PocketJson.decodeFromString<List<LoopbackBridge>>(body) }.getOrNull()
             when {
                 rows == null -> echo("✗ unexpected reply: $body")
@@ -577,10 +648,18 @@ private class StatusCmd : CliktCommand(name = "status") {
         echo("  version:  ${dev.ccpocket.daemon.update.UpdateState.current} (${installLabel(installKind)})")
         echo("  update:   ${dev.ccpocket.daemon.update.UpdateService.updateCommand(installKind)}")
         try {
-            // 1. daemon process + relay link (via the loopback /status the running daemon serves)
-            val body = runCatching { client.get("http://127.0.0.1:$pairPort/status").bodyAsText() }.getOrNull()
-            val st = body?.let { runCatching { PocketJson.decodeFromString<LoopbackStatus>(it) }.getOrNull() }
-            if (st == null) {
+            // 1. daemon process + relay link (via the loopback /status the running daemon serves; it needs the
+            // local control token — sent when this user has one, and a refusal is reported as such)
+            val token = LoopbackCli.token()
+            val reply = runCatching {
+                LoopbackCli.reply(client.get("http://127.0.0.1:$pairPort/status") { token?.let { withToken(it) } })
+            }.getOrNull()
+            val st = reply?.body?.let { runCatching { PocketJson.decodeFromString<LoopbackStatus>(it) }.getOrNull() }
+            val refused = reply?.let { LoopbackCli.refusal(it) }
+            if (st == null && refused != null) {
+                healthy = false
+                echo("  daemon:   ✓ running, but it refused this CLI — $refused")
+            } else if (st == null) {
                 healthy = false
                 echo("  daemon:   ✗ not reachable on 127.0.0.1:$pairPort — ${daemonStartHint()}")
             } else {
@@ -742,5 +821,7 @@ fun main(args: Array<String>) {
         // #367: drive an already-authorised OTHER computer's agent, and manage those authorisations here.
         // It only ever talks to the running daemon's token-authenticated loopback control API.
         agentCommand(),
+        // pairing security phase 0: list / fingerprint / revoke the full-access devices, over the same API
+        devicesCommand(),
     ).main(args)
 }

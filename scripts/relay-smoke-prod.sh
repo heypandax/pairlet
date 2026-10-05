@@ -34,7 +34,8 @@ grep -q "attached to relay" "$WORK/daemon.log" || { echo "FAIL: daemon not attac
 echo "  $(grep 'account id:' "$WORK/daemon.log")  attached ✓"
 
 echo "── mint ticket + device E2E 'dirs' through the cloud ──"
-PAIR=$(curl -s -X POST "http://127.0.0.1:$PAIRPORT/pair")
+# the loopback API needs the local control token; with CC_POCKET_IDENTITY set the daemon writes it beside the identity
+PAIR=$(curl -s -X POST -H "X-CC-Pocket-Local: $(cat "$WORK/local-control-token")" "http://127.0.0.1:$PAIRPORT/pair")
 TICKET=$(echo "$PAIR" | sed -E 's/.*"ticket":"([^"]+)".*/\1/')
 DPUB=$(echo "$PAIR" | sed -E 's/.*"daemonPub":"([^"]+)".*/\1/')
 [ -n "$TICKET" ] && [ "$TICKET" != "$PAIR" ] || { echo "FAIL: mint: $PAIR"; exit 1; }

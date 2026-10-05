@@ -2414,7 +2414,8 @@ data class AuthError(val code: String, val message: String? = null) : ToRelay
 // ---- pairing (only an authenticated daemon may mint) ----
 
 /** daemon -> relay: mint a short-lived, single-use pairing ticket. Carries the daemon's E2E public
- *  key so the relay can serve it to a phone that pairs by short code (the QR path keeps it out-of-band).
+ *  key so the relay can serve it to a phone that pairs by short code — which is every interactive pairing
+ *  today: the daemon's QR encodes only that code, so the phone pins the key this relay hands it.
  *  [headless] (issue #91) is the AUTHORITATIVE bridge marker: the MINTING daemon knows whether it is
  *  issuing a bridge ticket, so the relay stamps the flag onto the ticket and later onto the redeemed
  *  device — never trusting the redeeming client's self-declared [PairRedeem.headless]. Old daemons omit
@@ -2440,13 +2441,18 @@ data class PairBegin(
     val collaborator: Boolean = false,
 ) : ToRelay
 
-/** relay -> daemon: the raw ticket (for the QR) plus a short 6-digit code to type on the phone. */
+/** relay -> daemon: the raw ticket plus a short 6-digit code to scan or type on the phone. A current relay
+ *  issues the code only for an interactive pairing (no [PairBegin.headless] / [PairBegin.collaborator]
+ *  marker) and sends an empty [code] otherwise; restricted mints never read it. */
 @Serializable
 @SerialName("pocket/pair.ticket")
 data class PairTicket(val ticket: String, val expiresInSec: Int, val code: String) : ToRelay
 
-/** relay -> daemon: a device redeemed a ticket. devicePubKey is an advisory hint; the
- *  daemon allow-lists it only after the first ticket-PSK Noise handshake succeeds. */
+/** relay -> daemon: a device redeemed a ticket. [devicePubKey] is the daemon's only source for that key:
+ *  it allow-lists the key on this announce when one of its own (unexpired) interactive tickets is still
+ *  armed (the first handshake also tries that ticket as a PSK, though an owner device may complete it
+ *  without, #161). The relay minted the ticket and supplies the key, so this trusts the relay; owners
+ *  verify afterwards by comparing pairing fingerprints. */
 @Serializable
 @SerialName("pocket/device.paired")
 data class DevicePaired(val deviceId: String, val devicePubKey: String) : ToRelay

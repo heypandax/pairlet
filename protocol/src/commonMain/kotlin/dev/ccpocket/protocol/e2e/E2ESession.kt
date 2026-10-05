@@ -5,10 +5,14 @@ package dev.ccpocket.protocol.e2e
  * over the relay's opaque binary data plane. The relay only ever sees ciphertext.
  *
  * Handshake: an X3DH / Noise-KK-style 4-DH agreement. Both ends already know each other's STATIC
- * public key from pairing (the device scanned the daemon's; the daemon allow-listed the device's),
- * and each contributes a fresh EPHEMERAL key. Mixing static×static + static×ephemeral both ways gives
- * mutual authentication; the ephemerals give forward secrecy. The pairing ticket is folded in as a PSK
- * on the first handshake, so a relay that swapped a forwarded static key cannot complete it.
+ * public key from pairing (the device got the daemon's, the daemon allow-listed the device's), and each
+ * contributes a fresh EPHEMERAL key. Mixing static×static + static×ephemeral both ways authenticates the
+ * two keys each end pinned; the ephemerals give forward secrecy. The pairing ticket is folded in as a PSK
+ * on the first handshake. For a restricted credential (bridge, execution link) that makes holding the ticket
+ * a condition of first contact; an owner device may also complete first contact without it (the daemon's
+ * empty-PSK twin, #161). Either way it does not keep out the relay: today the relay mints the ticket and
+ * hands both static keys over during pairing, so it could substitute one then. The handshake cannot detect
+ * that; comparing the pairing fingerprints ([PairingFingerprint]) can.
  *
  *   device(initiator)                         daemon(responder)
  *     -- e_i.pub ----------------------------->            (msg1)

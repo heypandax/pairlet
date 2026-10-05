@@ -242,6 +242,7 @@ import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.Decision
+import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.isQuestion
 import dev.ccpocket.protocol.isSubagentTool
@@ -349,6 +350,8 @@ fun App(scope: CoroutineScope) {
             return@WideLayoutScope
         }
         val approvalAsk = repo.pendingAsk.value?.takeIf { !it.isQuestion }
+        // the double-tap guard (arrival times + card windows); the sheet and the question card share it
+        dev.ccpocket.app.ui.approval.ProvideApprovalArrivalGuard(repo) {
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
             // Secure Approval is pointer-modal by itself. Clearing the covered tree here also makes it
             // modal to TalkBack/VoiceOver: focus cannot traverse into chat/navigation under the scrim.
@@ -476,31 +479,10 @@ fun App(scope: CoroutineScope) {
                         }
                     }
                 }
-                // route adapter: the repository is read HERE and collapsed into one immutable value, so the
-                // Secure Approval renderer stays a pure function of what the daemon actually said
-                val approvalUi = dev.ccpocket.app.ui.approval.approvalUi(
-                    ask = ask,
-                    workdir = repo.workdir.value,
-                    risk = repo.riskDetailFor(ask), // M3: the FULL event (level + reason + codes + assessed)
-                    queueProgress = repo.askQueueProgress.value, // "n of m" while a burst is queued (design M1)
-                    timedOutSignal = repo.askTimedOut(ask), // issue #100 (composite-matched, P1-3)
-                )
-                // every verdict names the ask THIS sheet was composed with: in a burst the next card appears
-                // in the same place, and a second tap must not approve a command nobody read (audit H1)
-                dev.ccpocket.app.ui.approval.SecureApprovalSheet(
-                    approvalUi,
-                    onDeny = { repo.resolve(Decision.DENY, ask = ask) },
-                    onAllowOnce = { repo.resolve(Decision.ALLOW, ask = ask) },
-                    onAllowTask = { repo.resolve(Decision.ALLOW, grantScope = "task", ask = ask) },
-                    // legacy "Always allow" and the V2 session scope are the same effect: remember for old
-                    // daemons, the M2 session grant for new ones
-                    onAllowSession = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session", ask = ask) },
-                    onAlwaysAllow = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session", ask = ask) },
-                    onRetrySafer = { constraints -> repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints, ask = ask) },
-                    onDismiss = { repo.dismissAsk(ask) },
-                )
+                RepoSecureApprovalSheet(repo, ask)
             }
         }
+        } // ProvideApprovalArrivalGuard
         // App Lock (issue #109): the gate blocks ALL content (incl. the permission sheet) until biometrics
         // pass; the cover masks the app-switcher snapshot while briefly backgrounded. Both reuse the same
         // branded lockup. Desktop never reaches App(), so this overlay is Android/iOS-only by construction.
@@ -508,6 +490,37 @@ fun App(scope: CoroutineScope) {
         else if (appLock.covered.value) AppLockCover()
       }
     }
+}
+
+/**
+ * The Secure Approval sheet for the focused [ask], wired to the repository's verdict funnel. Kept apart from
+ * [App] only so a test can drive the real wiring (verdict frames, standing rules) without the whole shell.
+ */
+@Composable
+internal fun RepoSecureApprovalSheet(repo: PocketRepository, ask: PermissionAsk) {
+    // route adapter: the repository is read HERE and collapsed into one immutable value, so the
+    // Secure Approval renderer stays a pure function of what the daemon actually said
+    val approvalUi = dev.ccpocket.app.ui.approval.approvalUi(
+        ask = ask,
+        workdir = repo.workdir.value,
+        risk = repo.riskDetailFor(ask), // M3: the FULL event (level + reason + codes + assessed)
+        queueProgress = repo.askQueueProgress.value, // "n of m" while a burst is queued (design M1)
+        timedOutSignal = repo.askTimedOut(ask), // issue #100 (composite-matched, P1-3)
+    )
+    // every verdict names the ask THIS sheet was composed with: in a burst the next card appears
+    // in the same place, and a second tap must not approve a command nobody read (audit H1)
+    dev.ccpocket.app.ui.approval.SecureApprovalSheet(
+        approvalUi,
+        onDeny = { repo.resolve(Decision.DENY, ask = ask) },
+        onAllowOnce = { repo.resolve(Decision.ALLOW, ask = ask) },
+        onAllowTask = { repo.resolve(Decision.ALLOW, grantScope = "task", ask = ask) },
+        // legacy "Always allow" and the V2 session scope are the same effect: remember for old
+        // daemons, the M2 session grant for new ones
+        onAllowSession = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session", ask = ask) },
+        onAlwaysAllow = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session", ask = ask) },
+        onRetrySafer = { constraints -> repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints, ask = ask) },
+        onDismiss = { repo.dismissAsk(ask) },
+    )
 }
 
 /**

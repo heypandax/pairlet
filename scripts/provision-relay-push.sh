@@ -5,7 +5,7 @@
 # Run once, and again whenever a credential rotates. Does NOT restart the relay — run
 # scripts/redeploy-relay.sh afterwards, which ships the push-enabled binary and restarts with the env.
 #
-#   RELAY_HOST=<ip> SSHPASS='<root pw>'   # from .env
+#   RELAY_HOST_HK=<origin IP> SSHPASS_HK='<root pw>'   # from .env — the SAME pair scripts/redeploy-relay.sh uses
 #   APNS_P8=iosApp/AuthKey_XXXX.p8 APNS_KEY_ID=XXXX APNS_TEAM_ID=YYYY APNS_TOPIC=com.panda.ccpocket \
 #   FCM_JSON=firebase/<service-account>.json \
 #   bash scripts/provision-relay-push.sh
@@ -13,8 +13,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 [ -f .env ] && { set -a; . ./.env; set +a; }
 
-: "${RELAY_HOST:?set RELAY_HOST in .env}"
-: "${SSHPASS:?set SSHPASS in .env}"
+# Production relay moved to the HK box on 07-08 — the legacy RELAY_HOST/SSHPASS pair in .env points at a
+# decommissioned machine. This script ships the APNs key, the FCM service account and the systemd unit, so
+# it must never fall back to that pair: it takes the HK variables only, exactly like redeploy-relay.sh.
+: "${RELAY_HOST_HK:?set RELAY_HOST_HK in .env (HK origin IP)}"
+: "${SSHPASS_HK:?set SSHPASS_HK in .env (HK server root password)}"
+RELAY_HOST="$RELAY_HOST_HK"
+export SSHPASS="$SSHPASS_HK"   # sshpass -e reads SSHPASS
 APNS_P8="${APNS_P8:?path to the APNs .p8}"
 APNS_KEY_ID="${APNS_KEY_ID:?APNs Key ID (the 10-char id in the .p8 filename)}"
 APNS_TEAM_ID="${APNS_TEAM_ID:?Apple Team ID}"
@@ -23,8 +28,9 @@ FCM_JSON="${FCM_JSON:?path to the FCM service-account JSON}"
 [ -f "$APNS_P8" ] || { echo "missing $APNS_P8"; exit 1; }
 [ -f "$FCM_JSON" ] || { echo "missing $FCM_JSON"; exit 1; }
 
-SSH=(sshpass -e ssh -o StrictHostKeyChecking=accept-new "root@$RELAY_HOST")
-SCP=(sshpass -e scp -o StrictHostKeyChecking=accept-new)
+# same transport options as redeploy-relay.sh (password-only, so a multi-step run never trips fail2ban)
+SSH=(sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=accept-new "root@$RELAY_HOST")
+SCP=(sshpass -e scp -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=accept-new)
 DIR=/etc/cc-pocket-relay
 
 echo "── 1/4 create secrets dir ──"

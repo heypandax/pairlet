@@ -61,6 +61,7 @@ import dev.ccpocket.app.resources.win_tray_more_waiting
 import dev.ccpocket.app.resources.win_tray_notification_settings
 import dev.ccpocket.app.resources.win_tray_running
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.approval.rememberApprovalArmed
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -156,9 +157,11 @@ fun WinTrayFlyout(
                     WinFlyoutDivider()
                     WinSectionLabel(stringResource(Res.string.tray_needs_you), count = approvals.size, accent = true)
                     val (shown, hidden) = trayVisible(approvals, TRAY_MAX_APPROVALS)
-                    shown.forEach { a ->
+                    shown.forEachIndexed { i, a ->
                         WinApprovalRow(
                             a,
+                            // deciding a row slides the next one into its place: guarded per row slot
+                            armed = rememberApprovalArmed("winflyout:$i", a.arrivalKey()),
                             onDeny = { model.resolveAttention(a, allow = false) },
                             onAllow = { model.resolveAttention(a, allow = true) },
                             onOpen = { openMain(); model.openAttention(a) },
@@ -359,7 +362,7 @@ private fun WinChip(name: String, bright: Boolean) {
  * 允许钮同时暖一阶并罩上柔和 halo——指针路径和键盘焦点（焦点走按钮自身的 outline）视觉分得开。
  */
 @Composable
-private fun WinApprovalRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> Unit, onOpen: () -> Unit) {
+private fun WinApprovalRow(a: DkAttention, armed: Boolean, onDeny: () -> Unit, onAllow: () -> Unit, onOpen: () -> Unit) {
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     Box(Modifier.fillMaxWidth().height(48.dp).hoverable(src).clickable(onClick = onOpen)) {
@@ -391,16 +394,23 @@ private fun WinApprovalRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> Un
                 WinGhostButton(stringResource(Res.string.tray_answer_in_session), hovered, onOpen)
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    WinGhostButton(stringResource(Res.string.deny), hovered, onDeny)
+                    // guard window: muted ink, no hover lift (outline), and SettingsModal's surface + hairline (fill)
+                    WinGhostButton(stringResource(Res.string.deny), hovered, onDeny, enabled = armed)
                     Text(
-                        stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = 12.sp,
+                        stringResource(Res.string.allow), color = if (armed) Tok.base else Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold, style = tightCenter(12.sp), maxLines = 1,
                         modifier = Modifier.height(30.dp).clip(RoundedCornerShape(WIN_CTRL_RADIUS))
                             // halo：稿子的 0 0 0 3px rgba(accent,.18)。Compose 没有外发光，用一圈
                             // 3dp 的半透明描边做等效的「暖气圈」，视觉重量与稿子一致
-                            .then(if (hovered) Modifier.border(3.dp, Tok.accent.copy(alpha = 0.18f), RoundedCornerShape(WIN_CTRL_RADIUS + 3.dp)) else Modifier)
-                            .background(if (hovered) accentHot else Tok.accent)
-                            .clickable(onClick = onAllow).padding(horizontal = 13.dp)
+                            .then(
+                                when {
+                                    !armed -> Modifier.border(1.dp, Tok.hair, RoundedCornerShape(WIN_CTRL_RADIUS))
+                                    hovered -> Modifier.border(3.dp, Tok.accent.copy(alpha = 0.18f), RoundedCornerShape(WIN_CTRL_RADIUS + 3.dp))
+                                    else -> Modifier
+                                },
+                            )
+                            .background(if (!armed) Tok.surface else if (hovered) accentHot else Tok.accent)
+                            .clickable(enabled = armed) { if (armed) onAllow() }.padding(horizontal = 13.dp)
                             .wrapContentHeightCentered(),
                     )
                 }
@@ -411,14 +421,15 @@ private fun WinApprovalRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> Un
 
 /** 拒绝 / 到会话里回答：30dp 高的 ghost 钮。 */
 @Composable
-private fun WinGhostButton(text: String, hovered: Boolean, onClick: () -> Unit) {
+private fun WinGhostButton(text: String, hovered: Boolean, onClick: () -> Unit, enabled: Boolean = true) {
+    val lift = hovered && enabled
     Text(
-        text, color = if (hovered) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
+        text, color = if (!enabled) Tok.muted else if (lift) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
         fontWeight = FontWeight.Medium, style = tightCenter(12.sp), maxLines = 1,
         modifier = Modifier.height(30.dp).clip(RoundedCornerShape(WIN_CTRL_RADIUS))
-            .background(Tok.tx.copy(alpha = if (hovered) 0.1f else 0.055f))
-            .border(1.dp, Tok.tx.copy(alpha = if (hovered) 0.22f else 0.11f), RoundedCornerShape(WIN_CTRL_RADIUS))
-            .clickable(onClick = onClick).padding(horizontal = 11.dp)
+            .background(Tok.tx.copy(alpha = if (lift) 0.1f else 0.055f))
+            .border(1.dp, Tok.tx.copy(alpha = if (lift) 0.22f else 0.11f), RoundedCornerShape(WIN_CTRL_RADIUS))
+            .clickable(enabled = enabled) { if (enabled) onClick() }.padding(horizontal = 11.dp)
             .wrapContentHeightCentered(),
     )
 }

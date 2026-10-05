@@ -1737,6 +1737,24 @@ private fun AboutPane(model: DesktopModel) {
             InfoRow(row.first, row.second)
             if (i < info.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         }
+        // pairing security phase 0: this App's and the connected computer's key fingerprints, to compare with
+        // `pairlet devices` on the computer; a click copies the value
+        val clipboard = LocalClipboardManager.current
+        val copyLabel = stringResource(Res.string.about_fingerprint_copy)
+        val fingerprints = listOfNotNull(
+            model.deviceFingerprint?.let { stringResource(Res.string.about_device_fingerprint) to it },
+            model.computerFingerprint?.let { stringResource(Res.string.about_computer_fingerprint) to it },
+        )
+        fingerprints.forEach { (label, value) ->
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+            InfoRow(label, value, onClick = { clipboard.setText(AnnotatedString(value)) }, onClickLabel = copyLabel)
+        }
+        if (fingerprints.isNotEmpty()) {
+            Text(
+                stringResource(Res.string.about_fingerprint_hint), color = Tok.muted,
+                fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 6.dp),
+            )
+        }
         DaemonUpdateHint(model)
         UpdatesSection(model)
         Spacer(Modifier.height(18.dp))
@@ -1855,8 +1873,13 @@ private fun CommandBox(cmd: String, clipboard: androidx.compose.ui.platform.Clip
 }
 
 @Composable
-private fun InfoRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun InfoRow(label: String, value: String, onClick: (() -> Unit)? = null, onClickLabel: String? = null) {
+    Row(
+        Modifier.fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClickLabel = onClickLabel, onClick = onClick) else Modifier)
+            .padding(vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(label, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp), modifier = Modifier.weight(1f))
         Text(value, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(12.sp))
     }
