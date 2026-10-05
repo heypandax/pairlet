@@ -151,6 +151,64 @@ class ConversationLifecycleFixTest {
     }
 
 
+    // ── S3(c): a launch that fails after the process started rolls it back ──────────────────────────────
+
+
+    /** T6 / D5 — `attach` throwing used to leave `proc` pointing at a live, pump-less process: the next
+     *  prompt was queued into it and never ran. Now the process is stopped and the next prompt respawns. */
+    @Test
+    fun a_failed_attach_rolls_the_process_back() = runBlocking {
+        if (LifecycleHarness.isWindows()) return@runBlocking
+        val pidFile = Files.createTempDirectory("ccp-s3c").resolve("pid")
+        val backend = LifecycleBackend(attachThrowsAt = setOf(0)) { index, _ ->
+            if (index == 0) "echo \$\$ > '$pidFile'; $SILENT_TAIL" else LifecycleBackend.ECHO_TURNS
+        }
+        val h = LifecycleHarness(backend, "cS3c1")
+        try {
+            h.convo.open(resumeId = null, model = null)
+            h.convo.sendPrompt("one", promptId = "one")
+            assertTrue(h.framesOf<PocketError>().any { it.code == "agent_unavailable" }, h.frames.toString())
+            assertFalse(h.convo.hasLiveProcess(), "the failed launch must not stay the conversation's process")
+            h.await(what = "pid file") { Files.exists(pidFile) && Files.readString(pidFile).isNotBlank() }
+            val pid = Files.readString(pidFile).trim().toLong()
+            h.await(what = "the orphan to exit") { ProcessHandle.of(pid).map { it.isAlive }.orElse(false) == false }
+            h.convo.sendPrompt("two", promptId = "two")
+            h.await(what = "the retry to run") { backend.sends.any { it == 1 to "two" } }
+            assertEquals(2, backend.specs.size)
+        } finally {
+            h.close()
+        }
+    }
+
+
+    /** T5 (in-flight) — close() lands while a launch is between "process started" and "handle published":
+     *  the close finds nothing to stop. The launch itself must notice, fail (no hollow receipt for a prompt
+     *  nobody will run) and stop what it started rather than publish it on a closed conversation. */
+    @Test
+    fun a_close_during_launch_fails_the_launch_and_stops_its_process() = runBlocking {
+        if (LifecycleHarness.isWindows()) return@runBlocking
+        val pidFile = Files.createTempDirectory("ccp-s3c").resolve("pid")
+        val backend = LifecycleBackend { _, _ -> "echo \$\$ > '$pidFile'; $SILENT_TAIL" }
+        val h = LifecycleHarness(backend, "cS3c2")
+        val gate = ProbeGate(LifecyclePoint.LAUNCH_AFTER_START)
+        h.convo.lifecycleProbe = gate::onProbe
+        try {
+            h.convo.open(resumeId = null, model = null)
+            val sending = launch { h.convo.sendPrompt("one", promptId = "one") }
+            withTimeoutOrNull(10_000) { gate.reached.await() } ?: error("launch never reached")
+            h.convo.close()
+            gate.release.complete(Unit)
+            sending.join()
+            h.await(what = "pid file") { Files.exists(pidFile) && Files.readString(pidFile).isNotBlank() }
+            val pid = Files.readString(pidFile).trim().toLong()
+            h.await(what = "the raced process to exit") { ProcessHandle.of(pid).map { it.isAlive }.orElse(false) == false }
+            assertTrue(h.framesOf<PromptAck>().none { it.promptId == "one" }, "no receipt for a prompt nobody runs")
+        } finally {
+            gate.release.complete(Unit)
+            h.close()
+        }
+    }
+
     private companion object {
         /** Keep a one-shot child alive (no further output) until its stdin closes. */
         const val SILENT_TAIL = "while IFS= read -r x; do :; done"

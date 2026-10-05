@@ -53,12 +53,14 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.isSubagentTool
 import dev.ccpocket.protocol.isWorkflowTool
@@ -1785,6 +1787,32 @@ class Conversation(
         // so a new backend gets it without a per-launcher edit.
         if (remoteExecution) dev.ccpocket.daemon.execution.ExecutionSandbox.stripChildEnv(builder.environment())
         val p = AgentProcess.start(builder, scope)
+        // From here on an OS process exists. ANY failure before its pump runs — attach throwing, the
+        // conversation closing mid-launch, a redelivery write failing, the caller being cancelled — used to
+        // leave `proc` pointing at a live process nobody reads: the next prompt was queued into it and never
+        // ran, `executing` stuck true (lifecycle design D5 / S3(c)). Roll the handle back and stop the process.
+        try {
+            launchStarted(p, spec, launchGeneration, backendLabel, armExecuting, initialSend)
+        } catch (error: Throwable) {
+            if (proc === p) {
+                proc = null
+                bridge = null // published together with `proc`; its pump never ran, so it holds no ask
+            }
+            withContext(NonCancellable) { runCatching { p.shutdown() } }
+            throw error
+        }
+    }
+
+    /** [launchProcess] once its OS process [p] exists: publish it, attach the backend, re-inject the ledger,
+     *  record the launch's own prompt and start the pump. Throwing here rolls [p] back (see the caller). */
+    private suspend fun launchStarted(
+        p: AgentProcess,
+        spec: AgentSpec,
+        launchGeneration: Long,
+        backendLabel: AgentBackendLabel,
+        armExecuting: Boolean,
+        initialSend: InitialSend?,
+    ) {
         lifecycleProbe?.invoke(LifecyclePoint.LAUNCH_AFTER_START)
         val io = AgentIo(
             writeLine = p::writeLine,
@@ -1918,6 +1946,10 @@ class Conversation(
                 SafeMetrics(backend = backendLabel))
             throw error
         }
+        // close() may have landed while this launch was in flight: it found no handle to stop (or stopped one
+        // this launch then replaced), and cancelled the scope this process's pumps run on. Do not hand it a
+        // prompt — fail, and let the rollback stop it (D5).
+        failIfClosedDuringLaunch()
         // RE-INJECTION (issue #122 ③): whatever the LAST process took to its grave — prompts written to
         // its stdin (or its internal mid-turn queue) that never produced a consumption replay — is
         // re-handed to this fresh process, oldest first, before anything else rides it. This is the old
@@ -1955,6 +1987,7 @@ class Conversation(
         // with zero stdout for OPENCODE_STARTUP_TIMEOUT_MS, kill it and surface an error — the pump
         // would otherwise block on `for (line in p.stdout)` forever (issue: opencode run with an
         // invalid --model on a resumed session exits neither stdout nor stderr, just hangs).
+        failIfClosedDuringLaunch() // the redelivery writes above suspend — re-check before anything goes live
         if (backend.kind == AgentKind.OPENCODE) {
             scope.launch(CoroutineName("opencode-watchdog-$convoId")) {
                 val windowMs = System.getProperty(OPENCODE_WATCHDOG_PROP)?.toLongOrNull() ?: OPENCODE_STARTUP_TIMEOUT_MS
@@ -2003,6 +2036,10 @@ class Conversation(
                 pumpCrashed(p, b, e)
             }
         }
+    }
+
+    private fun failIfClosedDuringLaunch() {
+        if (closed.get()) throw IllegalStateException("conversation $convoId was closed during the launch")
     }
 
     /** One line or event the pump could not handle — logged and reported, then skipped (see [pump]). */
